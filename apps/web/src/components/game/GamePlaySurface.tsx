@@ -11,6 +11,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import type { GameViewport } from "@kurambit/contracts";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
@@ -129,7 +130,7 @@ export function GamePlaySurface({
   return (
     <div
       data-game-play-surface="true"
-      className="relative flex min-h-0 flex-1 items-center justify-center [container-type:size]"
+      className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
     >
       <GameFrameBox viewport={viewport} gameName={gameName} playing={playing}>
         {playing ? (
@@ -171,15 +172,20 @@ export function GamePlaySurface({
           </div>
         ) : null}
       </GameFrameBox>
+      {/* The well's edge drawn above the game, so its rounded corners read the same all round. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-30 rounded-xl ring-1 ring-white/6 ring-inset"
+      />
     </div>
   );
 }
 
 /**
- * The game's frame in its own shape, a screen on the pane: the pane itself is
- * the letterbox, so the game never sits inside black bars.
- * Before there is a game to show, it is the game's poster across the whole
- * Stage. Its parent must be a size container.
+ * The game's frame in its own shape, letterboxed in the Stage's black well
+ * like an engine's viewport, so the Stage keeps the column's edges at any
+ * window size. Before there is a game to show, it is the game's poster
+ * across the whole Stage. Its parent must be a size container.
  */
 export function GameFrameBox({
   viewport,
@@ -196,9 +202,7 @@ export function GameFrameBox({
   return (
     <div
       className={
-        playing
-          ? "relative overflow-hidden rounded-xl bg-stage shadow-print"
-          : "relative size-full overflow-hidden rounded-xl"
+        playing ? "relative overflow-hidden bg-stage" : "relative size-full overflow-hidden"
       }
       style={
         playing
@@ -327,13 +331,20 @@ export function GameFrame({
         onFocus={() => setFrameFocused(true)}
         onBlur={() => setFrameFocused(false)}
       />
-      {/* One quiet line in a corner that lets every click through: the game's own buttons stay pressable. */}
+      {/* One quiet line in a corner that lets every click through. The frame belongs to the
+          game, so the click hint shows only while the pointer is over it; a warning or a
+          freeze always shows. */}
       {unacknowledged || frozen || !frameFocused ? (
         <Text
           variant="caption"
           tone="inherit"
           render={
-            <span className="pointer-events-none absolute bottom-3 left-3 z-20 flex h-6 items-center gap-2 rounded-md bg-black/55 px-2 text-stage-foreground/85 backdrop-blur-sm" />
+            <span
+              className={cn(
+                "pointer-events-none absolute bottom-3 left-3 z-20 flex h-6 items-center gap-2 rounded-md bg-black/60 px-2 text-stage-foreground/85 backdrop-blur-sm transition-opacity",
+                !unacknowledged && !frozen && "opacity-0 group-hover/stage:opacity-100",
+              )}
+            />
           }
         >
           {unacknowledged ? (

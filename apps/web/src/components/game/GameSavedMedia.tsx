@@ -78,12 +78,15 @@ export function SaveMediaButton({
   threadRef,
   source,
   label,
+  text = "Save",
 }: {
   threadRef: ScopedThreadRef;
   /** Game-relative path of the generated file. */
   source: string;
   /** The words after the date in the saved name. */
   label: string;
+  /** The button's words, when several files share a row. */
+  text?: string;
 }) {
   const canSave = useAtomValue(gameEnvironment.saveMedia.permissionAtom(threadRef.environmentId));
   const save = useAtomCommand(gameEnvironment.saveMedia, { reportFailure: false });
@@ -125,11 +128,13 @@ export function SaveMediaButton({
       {saved === null ? (
         <Button size="xs" variant="ghost" disabled={!canSave || saving} onClick={() => void run()}>
           <BookmarkIcon aria-hidden="true" />
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : text}
         </Button>
       ) : (
         <>
-          <span className="text-2xs text-muted-foreground">Saved</span>
+          <span className="text-2xs text-muted-foreground">
+            {text === "Save" ? "Saved" : `${text} saved`}
+          </span>
           <SavedFileActions threadRef={threadRef} media={saved} />
         </>
       )}

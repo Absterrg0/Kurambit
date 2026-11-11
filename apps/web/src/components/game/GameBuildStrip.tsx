@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
-import { FastForwardIcon, GitCompareIcon, XIcon } from "lucide-react";
+import { FastForwardIcon, GitCompareIcon } from "lucide-react";
 import type {
   GameBuild,
   GameBuildId,
@@ -16,6 +16,7 @@ import { gameEnvironment, olderBuildPages } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { Button } from "../ui/button";
+import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
@@ -200,19 +201,24 @@ export function GameBuildStrip({
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = playing ?? (list?.folderEdited === true ? null : (list?.current ?? null));
-  const card = (build: GameBuild) => (
-    <BuildCard
-      key={build.id}
-      threadRef={threadRef}
-      gameName={gameName}
-      build={build}
-      label={labels.get(build.id) ?? ""}
-      onStage={onStage === build.id}
-      undone={list !== null && isUndone(build, list)}
-      picking={picking !== null}
-      onClick={() => (picking !== null ? pick(build) : play(build))}
-    />
-  );
+  const card = (build: GameBuild) => {
+    const index = marks.indexOf(build);
+    return (
+      <BuildCard
+        key={build.id}
+        threadRef={threadRef}
+        gameName={gameName}
+        build={build}
+        previous={index > 0 ? (marks[index - 1] ?? null) : null}
+        label={labels.get(build.id) ?? ""}
+        onStage={onStage === build.id}
+        undone={list !== null && isUndone(build, list)}
+        picking={picking !== null}
+        picked={picking !== null && picking !== "any" && sameRef(picking, build)}
+        onClick={() => (picking !== null ? pick(build) : play(build))}
+      />
+    );
+  };
   // Consecutive keep-going steps share one bracket; the slot joins it while the run makes it.
   const groups: Array<{ readonly steps: boolean; readonly builds: GameBuild[] }> = [];
   for (const build of marks) {
@@ -224,7 +230,13 @@ export function GameBuildStrip({
   const slotInBracket = slot?.keepGoing === true && groups.at(-1)?.steps === true;
   const nowCard =
     slot === null && list !== null && (list.folderEdited === true || playing !== null) ? (
-      <NowCard list={list} active={onStage === null} onClick={onLive} />
+      <NowCard
+        threadRef={threadRef}
+        gameName={gameName}
+        list={list}
+        active={onStage === null}
+        onClick={onLive}
+      />
     ) : null;
   return (
     <section
@@ -240,46 +252,42 @@ export function GameBuildStrip({
           onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
         />
       ) : null}
-      <div className="flex h-6 min-w-0 items-center gap-2">
-        <Text variant="meta" tone="dim">
-          Builds
-        </Text>
-        {olderNext !== null ? (
-          <Button size="xs" variant="ghost" onClick={() => setOlderCount(olderCount + 1)}>
-            Older
+      {picking !== null ? (
+        // Picking turns the header into one clear instruction, so the strip reads as a picker.
+        <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-accent ps-2.5 pe-1">
+          <GitCompareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <Text variant="meta" tone="strong" render={<span className="min-w-0 flex-1" />}>
+            {picking === "any" ? "Pick the first build to compare" : "Pick a build to compare with"}
+          </Text>
+          <Button size="xs" variant="ghost" onClick={() => setPicking(null)}>
+            Cancel
           </Button>
-        ) : null}
-        <span className="min-w-0 flex-1">
-          {sought !== null ? (
-            <Text variant="caption" tone="muted">
-              Finding that build…
-            </Text>
-          ) : notFound ? (
-            <Text variant="caption" tone="muted">
-              That build is older than the strip reads; Older pages back to it.
-            </Text>
-          ) : null}
-        </span>
-        {picking !== null ? (
-          <span className="flex shrink-0 items-center gap-1">
-            <Text variant="caption" tone="muted">
-              {picking === "any" ? "Pick the first build" : "Pick the build to compare with"}
-            </Text>
-            <Button
-              size="icon-micro"
-              variant="ghost"
-              aria-label="Stop picking"
-              onClick={() => setPicking(null)}
-            >
-              <XIcon className="size-3" aria-hidden="true" />
+        </div>
+      ) : (
+        <div className="flex h-7 min-w-0 items-center gap-2">
+          <Text variant="meta" tone="muted">
+            Builds
+          </Text>
+          {olderNext !== null ? (
+            <Button size="xs" variant="ghost" onClick={() => setOlderCount(olderCount + 1)}>
+              Older
             </Button>
+          ) : null}
+          <span className="min-w-0 flex-1">
+            {sought !== null ? (
+              <Text variant="caption" tone="muted">
+                Finding that build…
+              </Text>
+            ) : notFound ? (
+              <Text variant="caption" tone="muted">
+                That build is older than the strip reads; Older pages back to it.
+              </Text>
+            ) : null}
           </span>
-        ) : (
-          <>
+          {marks.length < 2 ? null : (
             <Button
               size="xs"
               variant="ghost"
-              disabled={marks.length < 2}
               onClick={() =>
                 setPicking(onStage === null ? "any" : { _tag: "build", build: onStage })
               }
@@ -287,19 +295,27 @@ export function GameBuildStrip({
               <GitCompareIcon aria-hidden="true" />
               Compare
             </Button>
-            {actions}
-          </>
-        )}
-      </div>
-      <div ref={cardsRef} className="flex min-w-0 items-end gap-2 overflow-x-auto pb-1">
+          )}
+          {actions}
+        </div>
+      )}
+      <div ref={cardsRef} className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1">
         {list === null ? (
-          <Text variant="caption" tone="muted" render={<p className="py-6" />}>
-            {first.error ?? "Reading the builds…"}
-          </Text>
+          first.error !== null ? (
+            <Text variant="caption" tone="muted" render={<p className="py-6" />}>
+              {first.error}
+            </Text>
+          ) : (
+            // Cards at their final size, so the strip does not jump when the builds arrive.
+            [0, 1, 2].map((n) => (
+              <div key={n} className="flex w-40 shrink-0 flex-col gap-1.5">
+                <Skeleton shape="card" className="aspect-video w-full" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            ))
+          )
         ) : marks.length === 0 && slot === null ? (
-          <Text variant="caption" tone="muted" render={<p className="py-6" />}>
-            No builds yet. Each change your agent makes to the game becomes one.
-          </Text>
+          <FirstBuildSlot />
         ) : null}
         {groups.map((group, index) =>
           group.steps ? (
@@ -316,7 +332,7 @@ export function GameBuildStrip({
         ) : (
           slotCard
         )}
-        {nowCard}
+        {marks.length === 0 ? null : nowCard}
       </div>
     </section>
   );
@@ -348,24 +364,38 @@ function BuildCard({
   threadRef,
   gameName,
   build,
+  previous,
   label,
   onStage,
   undone,
   picking,
+  picked,
   onClick,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
   build: GameBuild;
+  /** The build before it on the strip, which its checks are read against. */
+  previous: GameBuild | null;
   label: string;
   onStage: boolean;
   undone: boolean;
   picking: boolean;
+  /** The first side of a compare. */
+  picked: boolean;
   onClick: () => void;
 }) {
   const step = build.source._tag === "turn" ? build.source.step : null;
   const caption = buildCaption(build);
-  const { good, bad } = build.facts;
+  // A saved build's caption already starts with its name.
+  const name =
+    build.source._tag === "saved"
+      ? caption.toLowerCase().startsWith(label.toLowerCase())
+        ? null
+        : label
+      : step !== null
+        ? `Step ${label}`
+        : `Build ${label}`;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -379,7 +409,7 @@ function BuildCard({
             disabled={!build.available && !picking}
             onClick={onClick}
             className={cn(
-              "group/card flex w-32 shrink-0 flex-col gap-1 rounded-lg text-left outline-none disabled:cursor-default",
+              "group/card flex w-40 shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
               (undone || !build.available) && "opacity-40",
             )}
           />
@@ -389,47 +419,31 @@ function BuildCard({
           threadRef={threadRef}
           gameName={gameName}
           build={build}
-          className="h-18 w-full rounded-md"
+          className="aspect-video w-full rounded-md"
         >
-          {/* Over the picture, so the frame never covers the outline. */}
-          <span
-            aria-hidden="true"
-            className={cn(
-              "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
-              onStage
-                ? "ring-2 ring-primary"
-                : "ring-1 ring-border group-hover/card:ring-foreground/25 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring group-focus-visible/card:ring-inset",
-            )}
-          />
-          {/* A saved build's caption already starts with its name. */}
-          {caption.toLowerCase().startsWith(label.toLowerCase()) ? null : (
-            <Text
-              variant="micro"
-              tone="inherit"
-              numeric
-              render={
-                <span className="absolute top-1.5 left-1.5 z-10 flex items-center gap-0.5 rounded bg-black/60 px-1 py-0.5 text-stage-foreground" />
-              }
-            >
-              {step === null ? null : <FastForwardIcon className="size-2.5" aria-hidden="true" />}
-              {label}
-            </Text>
-          )}
-          {good > 0 || bad > 0 ? (
-            <span className="absolute right-1.5 bottom-1.5 z-10 flex gap-1">
-              {good > 0 ? <CheckMark tone="good" count={good} /> : null}
-              {bad > 0 ? <CheckMark tone="bad" count={bad} /> : null}
-            </span>
-          ) : null}
+          <CardRing on={onStage || picked} />
+          {picked ? <PickBadge /> : null}
         </GameBuildStill>
-        <Text
-          variant="caption"
-          tone={onStage ? "strong" : "default"}
-          truncate
-          render={<span className={cn("block", undone && "line-through")} />}
-        >
-          {caption}
-        </Text>
+        <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
+          <Text
+            variant="caption"
+            tone={onStage ? "strong" : "default"}
+            render={<span className={cn("line-clamp-2", undone && "line-through")} />}
+          >
+            {caption}
+          </Text>
+          <span className="flex min-w-0 items-center gap-1.5">
+            {name === null ? null : (
+              <Text variant="micro" tone="muted" numeric>
+                {step === null ? null : (
+                  <FastForwardIcon className="me-0.5 inline size-2.5" aria-hidden="true" />
+                )}
+                {name}
+              </Text>
+            )}
+            <CheckDelta build={build} previous={previous} />
+          </span>
+        </span>
       </TooltipTrigger>
       <TooltipPopup side="top" className="max-w-xs">
         {buildName(build)} · {formatBuildTime(build.at)}
@@ -441,53 +455,119 @@ function BuildCard({
   );
 }
 
-function CheckMark({ tone, count }: { tone: "good" | "bad"; count: number }) {
+/** The outline of the card on the Stage, drawn over the picture so it is never covered. */
+function CardRing({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
+        on
+          ? "ring-2 ring-strong-foreground/80"
+          : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
+      )}
+    />
+  );
+}
+
+function PickBadge() {
   return (
     <Text
       variant="micro"
       tone="inherit"
       numeric
-      aria-label={tone === "good" ? `${count} checks pass` : `${count} to look at`}
       render={
-        <span className="flex items-center gap-0.5 rounded bg-black/60 px-1 py-0.5 text-stage-foreground" />
+        <span className="absolute top-1.5 left-1.5 z-20 flex size-5 items-center justify-center rounded-full bg-strong-foreground text-background" />
       }
     >
-      <span
-        aria-hidden="true"
-        className={cn("size-1.5 rounded-full", tone === "good" ? "bg-success" : "bg-warning")}
-      />
-      {count}
+      1
     </Text>
+  );
+}
+
+/**
+ * What changed in the checks since the build before: the thing keep going
+ * decides on. A build with something to look at says so; one that only
+ * repeats the count before it says nothing.
+ */
+function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild | null }) {
+  const { good, bad } = build.facts;
+  const gained = previous === null ? 0 : good - previous.facts.good;
+  if (bad === 0 && gained === 0) return null;
+  return (
+    <Text
+      variant="micro"
+      tone="muted"
+      numeric
+      render={<span className="flex items-center gap-1.5" />}
+    >
+      {bad > 0 ? (
+        <span
+          className="flex items-center gap-1 text-warning-foreground"
+          aria-label={`${bad} to look at`}
+        >
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-warning" />
+          {bad}
+        </span>
+      ) : null}
+      {gained !== 0 ? (
+        <span
+          className={gained > 0 ? "text-success-foreground" : "text-warning-foreground"}
+          aria-label={`${Math.abs(gained)} ${gained > 0 ? "more" : "fewer"} checks pass`}
+        >
+          {gained > 0 ? `+${gained}` : `−${Math.abs(gained)}`} pass
+        </span>
+      ) : null}
+    </Text>
+  );
+}
+
+/** Before the first build: the shape it will take, said once. */
+function FirstBuildSlot() {
+  return (
+    <div className="flex w-40 shrink-0 flex-col gap-1.5">
+      <div className="aspect-video w-full rounded-md border border-dashed border-border" />
+      <Text variant="caption" tone="muted" render={<span className="px-0.5" />}>
+        The first build lands here
+      </Text>
+    </div>
   );
 }
 
 /** The build being made: a dashed slot with its elapsed time. */
 function SlotCard({ slot }: { slot: GameBuildSlot }) {
   return (
-    <div data-game-build-slot="" className="flex w-32 shrink-0 flex-col gap-1">
-      <div className="flex h-18 w-full items-center justify-center rounded-md border border-dashed border-live/60 bg-live/8">
+    <div data-game-build-slot="" className="flex w-40 shrink-0 flex-col gap-1.5">
+      <div className="flex aspect-video w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
         <Text variant="caption" tone="default">
           {slot.label}
         </Text>
       </div>
-      <Text variant="caption" tone="default" truncate render={<span className="block" />}>
-        {slot.caption ?? "\u00a0"}
-      </Text>
-      {slot.since === null ? null : (
-        <Text variant="micro" tone="dim">
-          <GameElapsed since={slot.since} />
+      <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
+        <Text variant="caption" tone="default" render={<span className="line-clamp-2" />}>
+          {slot.caption ?? "\u00a0"}
         </Text>
-      )}
+        {slot.since === null ? null : (
+          <Text variant="micro" tone="muted">
+            <GameElapsed since={slot.since} />
+          </Text>
+        )}
+      </span>
     </div>
   );
 }
 
 /** The game folder when it is no build: edited since, or another build plays from a copy. */
 function NowCard({
+  threadRef,
+  gameName,
   list,
   active,
   onClick,
 }: {
+  threadRef: ScopedThreadRef;
+  gameName: string;
   list: GameBuildsResult;
   active: boolean;
   onClick: () => void;
@@ -495,29 +575,39 @@ function NowCard({
   const current = list.builds.find((build) => build.id === list.current);
   const since =
     list.folderEdited === true
-      ? `changed since ${current === undefined ? "an earlier build" : buildName(current)}`
-      : "back to the current game";
+      ? `Changed since ${current === undefined ? "an earlier build" : buildName(current)}`
+      : "Back to the current game";
   return (
     <button
       type="button"
       data-game-build-card="now"
       aria-current={active ? "true" : undefined}
       onClick={onClick}
-      className="group/card flex w-32 shrink-0 flex-col gap-1 rounded-lg text-left outline-none"
+      className="group/card flex w-40 shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none"
     >
-      <span
-        className={cn(
-          "flex h-18 w-full items-center justify-center rounded-md bg-muted ring-inset",
-          active
-            ? "ring-2 ring-primary"
-            : "ring-1 ring-border group-hover/card:ring-foreground/25 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring group-focus-visible/card:ring-inset",
-        )}
+      {/* The folder's game, pictured by the build it grew from. */}
+      <GameBuildStill
+        threadRef={threadRef}
+        gameName={gameName}
+        build={{ still: current?.still ?? null }}
+        className="aspect-video w-full rounded-md"
       >
-        <Text variant="caption" tone="muted">
+        <CardRing on={active} />
+        <Text
+          variant="micro"
+          tone="inherit"
+          render={
+            <span className="absolute bottom-1.5 left-1.5 z-20 flex items-center gap-1 rounded bg-black/65 px-1.5 py-0.5 text-stage-foreground" />
+          }
+        >
           Now
         </Text>
-      </span>
-      <Text variant="caption" tone="muted" truncate render={<span className="block" />}>
+      </GameBuildStill>
+      <Text
+        variant="caption"
+        tone={active ? "strong" : "default"}
+        render={<span className="line-clamp-2 px-0.5" />}
+      >
         {since}
       </Text>
     </button>

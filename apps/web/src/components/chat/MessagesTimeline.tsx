@@ -1427,6 +1427,19 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (hideEmptyPlaceholder) {
       return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
     }
+    // A game's Log sits beside its Stage and builds, so it says what it will hold,
+    // top-aligned like the Inspector's other tabs.
+    if (gameThread) {
+      return (
+        <div className="flex h-full flex-col gap-1 p-4">
+          <p className="text-sm text-foreground">Nothing in the Log yet</p>
+          <p className="text-xs text-muted-foreground">
+            Your agent's work on this game shows here, turn by turn. Tell it what to change below
+            the game.
+          </p>
+        </div>
+      );
+    }
     return (
       <div
         className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"

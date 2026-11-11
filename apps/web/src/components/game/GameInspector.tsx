@@ -12,6 +12,7 @@ import {
   FileVideoIcon,
   ImageIcon,
   MinusIcon,
+  PlayIcon,
   RefreshCwIcon,
   ScrollTextIcon,
   TriangleAlertIcon,
@@ -49,11 +50,16 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Kbd } from "../ui/kbd";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
-import { characterRouteLabel, useCharacterRoute } from "./GameCharacterRoute";
+import {
+  characterRouteLabel,
+  GameCharacterRoutePicker,
+  useCharacterRoute,
+} from "./GameCharacterRoute";
 import { useGameName } from "./GameName";
 import { GameGeneratedArt } from "./GameGeneratedArt";
 import {
@@ -311,6 +317,12 @@ function BuildDetail({
           </Text>
         </div>
       </header>
+      <BuildActions
+        threadRef={threadRef}
+        build={build}
+        list={list}
+        onCompare={(other) => requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })}
+      />
       {asked === null ? null : (
         <Section title={asked.title}>
           <Text
@@ -334,10 +346,23 @@ function BuildDetail({
           factsData !== null &&
           factsData.state !== "measuring" &&
           factsData.state !== "queued" ? (
-            <Button size="xs" variant="ghost" onClick={() => void measure.send(build.id, true)}>
-              <RefreshCwIcon aria-hidden="true" />
-              {factsData.state === "never" ? "Measure" : "Measure again"}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={factsData.state === "never" ? "Measure" : "Measure again"}
+                    onClick={() => void measure.send(build.id, true)}
+                  />
+                }
+              >
+                <RefreshCwIcon aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {factsData.state === "never" ? "Measure" : "Measure again"}
+              </TooltipPopup>
+            </Tooltip>
           ) : undefined
         }
       >
@@ -370,12 +395,6 @@ function BuildDetail({
       {factsData !== null && factsData.state !== "never" ? (
         <Recordings threadRef={threadRef} build={build} facts={factsData} />
       ) : null}
-      <BuildActions
-        threadRef={threadRef}
-        build={build}
-        list={list}
-        onCompare={(other) => requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })}
-      />
     </div>
   );
 }
@@ -402,45 +421,52 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
           ...(characters === null
             ? []
             : [
-                `This game makes characters with ${characterRouteLabel(characters)}; change it in the ⋯ menu above the game.`,
+                `This game makes characters with ${characterRouteLabel(characters)}; change it in the Scene tab.`,
               ]),
         ]
       : fact.id === "use" && facts.use.status === "measured"
         ? assetUseLines(facts.use.value)
         : [];
+  const shownPass = measured.filter(
+    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
+  ).length;
+  const morePass = moreMeasured.filter(
+    (fact) => fact.reading._tag === "measured" && fact.reading.tone === "good",
+  ).length;
   return (
     <div className="flex flex-col gap-2">
       <Text variant="meta" tone="muted" render={<p />}>
         {[
-          // Before any reading lands, "0 pass" would read as a verdict.
-          ...(view.pass > 0 || view.toLook > 0 || !busy ? [`${view.pass} pass`] : []),
+          // Before any reading lands, "0 pass" would read as a verdict. The count is of the
+          // rows below, so it never disagrees with what the person sees.
+          ...(shownPass > 0 || view.toLook > 0 || !busy
+            ? [`${shownPass} of ${view.checks.length} pass`]
+            : []),
           ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
           ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
         ].join(" · ")}
       </Text>
-      {measured.length > 0 ? (
-        <Rows>
-          {measured.map((check) => (
-            <CheckRow
-              key={check.id}
-              threadRef={threadRef}
-              fact={check}
-              text={check.sentence}
-              value={check.value}
-              detail={[]}
-            />
-          ))}
-        </Rows>
-      ) : null}
-      {pending > 0 ? <PendingRow count={pending} /> : null}
-      <NotMeasured facts={view.checks} />
+      <Rows>
+        {measured.map((check) => (
+          <CheckRow
+            key={check.id}
+            threadRef={threadRef}
+            fact={check}
+            text={check.sentence}
+            value={check.value}
+            detail={[]}
+          />
+        ))}
+        {pending > 0 ? <PendingRow count={pending} /> : null}
+        <NotMeasured facts={view.checks} />
+      </Rows>
       {view.more.length > 0 ? (
         <Rows>
           <button
             type="button"
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(!moreOpen)}
-            className="flex items-center gap-2.5 px-3 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+            className="flex min-h-9 items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent"
           >
             <ChevronRightIcon
               className={cn(
@@ -449,8 +475,12 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
               )}
               aria-hidden="true"
             />
-            <Text variant="meta" tone="default">
-              More measurements ({view.more.length})
+            <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+              More measurements
+            </Text>
+            <Text variant="caption" tone="muted" numeric>
+              {morePass > 0 ? `${morePass} pass · ` : ""}
+              {view.more.length}
             </Text>
           </button>
           {moreOpen
@@ -465,22 +495,18 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
                 />
               ))
             : null}
-        </Rows>
-      ) : null}
-      {moreOpen ? (
-        <>
-          {view.more.some((fact) => fact.reading._tag === "pending") ? (
+          {moreOpen && view.more.some((fact) => fact.reading._tag === "pending") ? (
             <PendingRow
               count={view.more.filter((fact) => fact.reading._tag === "pending").length}
             />
           ) : null}
-          <NotMeasured facts={view.more} />
-          {facts.renderer ? (
-            <Text variant="caption" tone="dim" render={<p />}>
-              Played with {facts.renderer}.
-            </Text>
-          ) : null}
-        </>
+          {moreOpen ? <NotMeasured facts={view.more} /> : null}
+        </Rows>
+      ) : null}
+      {moreOpen && facts.renderer ? (
+        <Text variant="caption" tone="dim" render={<p />}>
+          Played with {facts.renderer}.
+        </Text>
       ) : null}
     </div>
   );
@@ -488,7 +514,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
 
 function PendingRow({ count }: { count: number }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-lg bg-card px-3 py-2">
+    <div className="flex min-h-9 items-center gap-2.5 px-3">
       <ClockIcon className="size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
       <Text variant="meta" tone="muted">
         {count === 1 ? "1 check" : `${count} checks`} still to measure
@@ -507,13 +533,13 @@ function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck>
         "sentence" in fact ? fact.sentence : fact.label,
       ]);
   return [...folded].map(([why, names]) => (
-    <div key={why} className="flex items-start gap-2.5 rounded-lg bg-card px-3 py-2">
+    <div key={why} className="flex items-start gap-2.5 px-3 py-2">
       <MinusIcon className="mt-0.5 size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <Text variant="meta" tone="default">
-          Not measured: {names.join(", ")}
+        <Text variant="meta" tone="muted">
+          {names.join(", ")} · not measured
         </Text>
-        <Text variant="meta" tone="muted" render={<p className="break-words" />}>
+        <Text variant="caption" tone="dim" render={<p className="break-words" />}>
           {why.charAt(0).toUpperCase() + why.slice(1)}
         </Text>
       </div>
@@ -537,8 +563,8 @@ function CheckRow({
   const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
   const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : CircleIcon;
   return (
-    <div className="flex flex-col gap-1 px-3 py-2">
-      <div className="flex items-center gap-2.5">
+    <div className="flex flex-col gap-1 px-3 py-1.5">
+      <div className="flex min-h-6 items-center gap-2.5">
         <span className="flex size-4 shrink-0 items-center justify-center">
           <Icon
             className={cn(
@@ -560,34 +586,33 @@ function CheckRow({
           </Tooltip>
         </Text>
         {value === null ? null : (
-          <Text variant="caption" tone="muted" numeric>
+          <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
             {value}
           </Text>
         )}
-        {fact.evidence.length > 0 ? (
-          <span className="flex shrink-0 items-center">
-            {fact.evidence.map((item) => {
-              const EvidenceIcon = EVIDENCE_ICON[item.kind];
-              return (
-                <Tooltip key={item.path}>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={item.label}
-                        onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
-                      />
-                    }
-                  >
-                    <EvidenceIcon aria-hidden="true" />
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">{item.label}</TooltipPopup>
-                </Tooltip>
-              );
-            })}
-          </span>
-        ) : null}
+        {/* A fixed gutter, so values right-align in one column whether a row has evidence or not. */}
+        <span className="flex w-18 shrink-0 items-center justify-end">
+          {fact.evidence.map((item) => {
+            const EvidenceIcon = EVIDENCE_ICON[item.kind];
+            return (
+              <Tooltip key={item.path}>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={item.label}
+                      onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
+                    />
+                  }
+                >
+                  <EvidenceIcon aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">{item.label}</TooltipPopup>
+              </Tooltip>
+            );
+          })}
+        </span>
       </div>
       {detail.length > 0 ? (
         <ul className="flex flex-col gap-0.5 ps-6.5">
@@ -670,9 +695,12 @@ function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: Game
   );
 }
 
+type RunEvidence = GameFactView["evidence"][number];
+
 /**
- * The bot runs' videos and frames, each with Save: the person keeps evidence
- * past the log cleanup in the game's saved/, the same save the agent has.
+ * The bot runs as pictures: each run's last frame, which opens its video, and
+ * Save for both, so the person keeps evidence past the log cleanup in the
+ * game's saved/, the same save the agent has.
  */
 function Recordings({
   threadRef,
@@ -686,33 +714,77 @@ function Recordings({
   const name = buildName(build)
     .replace(/'s build$/, "")
     .toLowerCase();
-  const seen = new Set<string>();
-  const media = gameFactsView(facts).flatMap((view) =>
-    view.evidence.flatMap((item) => {
-      if (item.kind === "log" || seen.has(item.path)) return [];
-      seen.add(item.path);
-      return [{ path: item.path, fact: view.label, what: item.label }];
-    }),
+  const gameName = useGameName(
+    threadRef.environmentId,
+    useQuietThreadShell(threadRef)?.projectId ?? null,
+    "",
   );
-  if (media.length === 0) return null;
+  const runs = new Map<string, { video: RunEvidence | null; frame: RunEvidence | null }>();
+  const seen = new Set<string>();
+  for (const view of gameFactsView(facts))
+    for (const item of view.evidence) {
+      if (item.kind === "log" || seen.has(item.path)) continue;
+      seen.add(item.path);
+      const run = runs.get(view.label) ?? { video: null, frame: null };
+      runs.set(view.label, { ...run, [item.kind]: item });
+    }
+  if (runs.size === 0) return null;
   return (
     <Section title="Recordings">
-      <Rows>
-        {media.map((item) => (
-          <div key={item.path} className="flex items-center gap-2 px-3 py-1.5">
-            <Text variant="meta" tone="muted" truncate>
-              {item.fact} · {item.what}
-            </Text>
-            <span className="ml-auto shrink-0">
-              <SaveMediaButton
+      <ul role="list" className="grid grid-cols-2 gap-x-3 gap-y-4">
+        {[...runs].map(([fact, run]) => (
+          <li key={fact} className="flex min-w-0 flex-col gap-1.5">
+            <button
+              type="button"
+              aria-label={`${fact}: open the ${run.video === null ? "frame" : "video"}`}
+              onClick={() => {
+                const open = run.video ?? run.frame;
+                if (open !== null) useRightPanelStore.getState().openFile(threadRef, open.path);
+              }}
+              className="group/run relative outline-none"
+            >
+              <GameBuildStill
                 threadRef={threadRef}
-                source={item.path}
-                label={`${name} ${item.fact} ${item.what}`.toLowerCase()}
-              />
+                gameName={gameName}
+                build={{ still: run.frame?.path ?? null }}
+                className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30 group-focus-visible/run:ring-2 group-focus-visible/run:ring-ring"
+              >
+                {run.video === null ? null : (
+                  <span className="absolute inset-0 z-10 grid place-items-center">
+                    <span className="grid size-7 place-items-center rounded-full bg-black/60 text-stage-foreground backdrop-blur-sm transition-transform group-hover/run:scale-105">
+                      <PlayIcon
+                        className="size-3.5 translate-x-px fill-current"
+                        aria-hidden="true"
+                      />
+                    </span>
+                  </span>
+                )}
+              </GameBuildStill>
+            </button>
+            <Text variant="caption" tone="default" truncate render={<span className="px-0.5" />}>
+              {fact}
+            </Text>
+            <span className="-ms-1.5 flex flex-wrap items-center">
+              {run.video === null ? null : (
+                <SaveMediaButton
+                  threadRef={threadRef}
+                  source={run.video.path}
+                  label={`${name} ${fact} ${run.video.label}`.toLowerCase()}
+                  text="Video"
+                />
+              )}
+              {run.frame === null ? null : (
+                <SaveMediaButton
+                  threadRef={threadRef}
+                  source={run.frame.path}
+                  label={`${name} ${fact} ${run.frame.label}`.toLowerCase()}
+                  text="Frame"
+                />
+              )}
             </span>
-          </div>
+          </li>
         ))}
-      </Rows>
+      </ul>
     </Section>
   );
 }
@@ -770,7 +842,7 @@ function BuildActions({
           <Tooltip>
             <TooltipTrigger render={<span />}>
               <Button
-                size="sm"
+                size="xs"
                 variant="secondary"
                 disabled={action.blocked !== null || !restores.canRestore || restores.pending}
                 onClick={() =>
@@ -789,7 +861,7 @@ function BuildActions({
           </Tooltip>
         ) : null}
         {previous !== undefined && build.available && previous.available ? (
-          <Button size="sm" variant="ghost" onClick={() => onCompare(previous)}>
+          <Button size="xs" variant="ghost" onClick={() => onCompare(previous)}>
             <ColumnsIcon aria-hidden="true" />
             Compare with {buildName(previous).replace(/^Build /, "")}
           </Button>
@@ -864,53 +936,82 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const style = file.data === null ? null : Option.getOrNull(decodeStyle(file.data.contents));
   const swatches = style !== null && Array.isArray(style.palette) ? style.palette : [];
   const [artOpen, setArtOpen] = useState(false);
+  const choosing = useChoosingCount(threadRef);
   return (
-    <Section
-      title="Look"
-      aside={
-        <Text variant="caption" tone="dim">
-          {GAME_STYLE_FILE}
-        </Text>
-      }
-    >
-      {style === null ? (
-        <Text variant="meta" tone="muted" render={<p />}>
-          No look is locked yet. The agent writes {GAME_STYLE_FILE} when it picks one.
-        </Text>
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          {swatches.length > 0 ? (
-            <span className="flex gap-1">
-              {swatches.slice(0, 8).map((hex) => (
-                <span
-                  key={hex}
-                  aria-label={hex}
-                  className="size-5 rounded ring-1 ring-border ring-inset"
-                  style={{ background: hex }}
-                />
-              ))}
-            </span>
-          ) : null}
-          <Text variant="meta" tone="muted">
-            {[
-              style.family ?? null,
-              style.mode === "pixel" ? "Pixel art" : "Smooth",
-              typeof style.palette === "string" ? `palette ${style.palette}` : null,
-            ]
-              .filter((part) => part !== null)
-              .join(" · ")}
+    <Section title="Look">
+      <Rows>
+        <div className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
+          <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+            Style
           </Text>
+          {style === null ? (
+            <Text variant="caption" tone="muted">
+              Not chosen yet
+            </Text>
+          ) : (
+            <>
+              {swatches.length > 0 ? (
+                <span className="flex gap-0.5">
+                  {swatches.slice(0, 6).map((hex) => (
+                    <span
+                      key={hex}
+                      aria-label={hex}
+                      className="size-3.5 rounded-sm ring-1 ring-border ring-inset"
+                      style={{ background: hex }}
+                    />
+                  ))}
+                </span>
+              ) : null}
+              <Text variant="caption" tone="muted" truncate>
+                {[
+                  style.family ?? null,
+                  style.mode === "pixel" ? "Pixel art" : "Smooth",
+                  typeof style.palette === "string" ? style.palette : null,
+                ]
+                  .filter((part) => part !== null)
+                  .join(" · ")}
+              </Text>
+            </>
+          )}
         </div>
-      )}
-      <Button
-        size="xs"
-        variant="ghost"
-        aria-expanded={artOpen}
-        onClick={() => setArtOpen(!artOpen)}
-        className="self-start"
-      >
-        {artOpen ? "Hide generated art" : "Generated art"}
-      </Button>
+        <div className="flex min-h-9 items-center gap-2.5 ps-3 pe-1.5">
+          <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+            Characters
+          </Text>
+          <GameCharacterRoutePicker threadRef={threadRef} />
+        </div>
+        <button
+          type="button"
+          aria-expanded={artOpen}
+          onClick={() => setArtOpen(!artOpen)}
+          className="flex min-h-9 items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+        >
+          <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+            Generated art
+          </Text>
+          {choosing > 0 ? (
+            <Text
+              variant="caption"
+              tone="inherit"
+              render={<span className="text-warning-foreground" />}
+            >
+              {choosing} to pick
+            </Text>
+          ) : null}
+          <ChevronRightIcon
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform",
+              artOpen && "rotate-90",
+            )}
+            aria-hidden="true"
+          />
+        </button>
+      </Rows>
+      {style === null ? (
+        <Text variant="caption" tone="dim" render={<p />}>
+          The agent writes {GAME_STYLE_FILE} when it picks a look.
+        </Text>
+      ) : null}
       {artOpen ? <GameGeneratedArt threadRef={threadRef} /> : null}
     </Section>
   );
@@ -968,9 +1069,15 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         />
       ) : null}
       {things.length === 0 ? (
-        <Text variant="meta" tone="muted" render={<p />}>
-          Nothing named yet. The game's things show here while it plays, once your agent names them.
-        </Text>
+        <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-border px-3 py-3">
+          <Text variant="meta" tone="default" render={<p />}>
+            Nothing named yet
+          </Text>
+          <Text variant="caption" tone="muted" render={<p />}>
+            The game's characters, props and rules show here while it plays, once your agent names
+            them. Then <Kbd>Tab</Kbd> on the Stage freezes it so you can point at one.
+          </Text>
+        </div>
       ) : null}
       {KIND_GROUPS.map((group) => {
         const rows = shownThings.filter((thing) => thing.kind === group.kind);

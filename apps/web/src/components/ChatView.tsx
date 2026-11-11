@@ -7503,6 +7503,9 @@ export default function ChatView(props: ChatViewProps) {
       {...panelToggleControlProps}
       showThreadPanelControl={!inlineRightPanelOwnsTitleBar && !isGameThread}
       showTerminalControl={!isGameThread}
+      // A game opens its files and diffs from the Inspector; at rest a second
+      // panel glyph beside the Inspector's own toggle only reads as a duplicate.
+      showRightPanelControl={!isGameThread || rightPanelOpen}
     />
   );
   const threadPanelHeaderControl = (

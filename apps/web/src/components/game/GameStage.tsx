@@ -3,6 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  CircleStopIcon,
+  CrosshairIcon,
   ChevronDownIcon,
   DownloadIcon,
   FastForwardIcon,
@@ -17,9 +19,6 @@ import {
   PlayIcon,
   Redo2Icon,
   RefreshCwIcon,
-  ScanIcon,
-  SparklesIcon,
-  SquareIcon,
   TriangleAlertIcon,
   Undo2Icon,
   WrenchIcon,
@@ -69,14 +68,12 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Kbd } from "../ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
-import { GameCharacterRouteMenu } from "./GameCharacterRoute";
 import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
 import { GameExports } from "./GameExports";
-import { useChoosingCount } from "./GameGenerationCard";
 import { GameKeepGoingMenuContent } from "./GameKeepGoingControl";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
@@ -299,7 +296,6 @@ function ThreadGameStage({
     sending: keepGoing.sending,
     chosenBudget: keepGoing.chosenBudget,
   });
-  const choosing = useChoosingCount(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{
     readonly n: number;
@@ -795,7 +791,7 @@ function ThreadGameStage({
                 render={
                   <Button
                     size="xs"
-                    variant="ghost"
+                    variant="secondary"
                     aria-label="Keep going"
                     aria-pressed={keepGoingView.pressed}
                     data-game-keep-going=""
@@ -941,7 +937,7 @@ function ThreadGameStage({
                 />
               }
             >
-              <MoreHorizontalIcon className="size-4" aria-hidden="true" />
+              <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
             <MenuPopup align="end">
               {engine.stageBridge && stageKind === "live" ? (
@@ -953,7 +949,7 @@ function ThreadGameStage({
                     stageRef.current?.focus({ preventScroll: true });
                   }}
                 >
-                  <ScanIcon />
+                  <CrosshairIcon />
                   {frozen ? "Play on" : "Freeze to point at things"}
                   <MenuShortcut>Tab</MenuShortcut>
                 </MenuItem>
@@ -991,19 +987,13 @@ function ThreadGameStage({
                   {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
                 </MenuItem>
               ) : null}
-              <MenuItem onClick={() => showInspectorTab("scene")}>
-                <SparklesIcon />
-                {choosing > 0 ? `Generated art (${choosing} to pick)` : "Generated art"}
-              </MenuItem>
               <MenuItem
                 disabled={!canAct || !runningSomething}
                 onClick={() => void perform("stop")}
               >
-                <SquareIcon />
+                <CircleStopIcon />
                 Stop the game
               </MenuItem>
-              <MenuSeparator />
-              <GameCharacterRouteMenu threadRef={threadRef} />
             </MenuPopup>
           </Menu>
           <Tooltip>
@@ -1068,7 +1058,7 @@ function ThreadGameStage({
           data-game-play-surface="build"
           className={
             compare === null
-              ? "relative mx-3 flex min-h-0 flex-1 items-center justify-center [container-type:size]"
+              ? "group/stage relative mx-3 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
               : "hidden"
           }
         >
