@@ -2446,4 +2446,8 @@ code {
   [data-game-direction-bar] .chat-composer-lane {
     padding-inline: 0.75rem;
   }
+  /* The Log is a narrow Inspector tab, not a page: the chat's wide gutters would starve it. */
+  [data-game-inspector-docked="true"] [data-chat-canvas] .messages-timeline-scroll {
+    padding-inline: 1rem;
+  }
 }

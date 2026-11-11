@@ -63,6 +63,7 @@ import { GameFileActions, SaveMediaButton } from "./GameSavedMedia";
 import {
   assetLines,
   assetUseLines,
+  buildCaption,
   buildName,
   factLine,
   formatBuildTime,
@@ -133,7 +134,7 @@ export function GameInspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }
     <div
       role="tabpanel"
       aria-label={TABS.find((entry) => entry.tab === tab)?.label}
-      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-30 flex min-h-0 flex-col overflow-y-auto bg-background"
+      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-50 flex min-h-0 flex-col overflow-y-auto bg-background"
     >
       {tab === "build" ? (
         <BuildPanel threadRef={threadRef} />
@@ -199,6 +200,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
   const asked = useAtomValue(stagePlayTarget(threadRef));
   const gameName = useIsGameThreadStatus(threadRef).data?.manifest.name ?? "";
+  const working = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
   const data = list.data;
   if (data === null) return <Notice>{list.error ?? "Reading the builds…"}</Notice>;
   const onStageId = asked?.build ?? data.current;
@@ -211,7 +213,16 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     data.builds[0] ??
     null;
   if (build === null)
-    return (
+    return working ? (
+      <div className="flex flex-col gap-1 p-4">
+        <Text variant="label" tone="strong" render={<h2 />}>
+          Build 1
+        </Text>
+        <Text variant="meta" tone="muted" render={<p />}>
+          Being made. Its checks are measured after its first play.
+        </Text>
+      </div>
+    ) : (
       <Notice>
         No builds yet. Each change your agent makes to the game becomes one, with its checks
         measured here.
@@ -265,7 +276,7 @@ function BuildDetail({
     source._tag === "saved"
       ? null
       : step !== null
-        ? { title: "Why", text: step.reason }
+        ? { title: "Why", text: buildCaption(build) }
         : source.request.trim() === ""
           ? null
           : { title: "You asked", text: source.request };
@@ -281,11 +292,13 @@ function BuildDetail({
         />
         <div className="flex min-w-0 flex-col gap-0.5">
           <Text variant="label" tone="strong" truncate render={<h2 />}>
-            {buildName(build)} · {build.summary}
+            {buildName(build)} · {buildCaption(build)}
           </Text>
           <Text variant="meta" tone="muted" truncate>
             {formatBuildTime(build.at)}
-            {step?.verdict != null ? ` · ${stepVerdictText(step)}` : ""}
+            {step === null
+              ? ""
+              : ` · ${step.verdict === null ? step.reason : stepVerdictText(step)}`}
             {onStage ? " · on the Stage" : ""}
           </Text>
         </div>
@@ -363,7 +376,8 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
 function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
   const characters = useCharacterRoute(threadRef).route;
   const views = gameFactsView(facts);
-  const shown = views.filter((view) => view.reading._tag !== "not-measured");
+  const shown = views.filter((view) => view.reading._tag === "measured");
+  const pending = views.filter((view) => view.reading._tag === "pending").length;
   const folded = new Map<string, Array<GameFactView>>();
   for (const view of views)
     if (view.reading._tag === "not-measured")
@@ -399,6 +413,14 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             />
           ))}
         </Rows>
+      ) : null}
+      {pending > 0 ? (
+        <div className="flex items-center gap-2.5 rounded-lg bg-card px-3 py-2">
+          <ClockIcon className="size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
+          <Text variant="meta" tone="muted">
+            {pending === 1 ? "1 check" : `${pending} checks`} still to measure
+          </Text>
+        </div>
       ) : null}
       {[...folded].map(([why, rows]) => (
         <div
@@ -735,6 +757,10 @@ function ScenePanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   return (
     <div className="flex flex-col gap-5 p-4">
       <LookSection threadRef={threadRef} />
+      {/* The thing pointed at comes before the list, which can run to a hundred props. */}
+      {notice === null && selected !== null ? (
+        <ThingInspector threadRef={threadRef} thing={selected.thing} />
+      ) : null}
       {notice !== null ? (
         <Section title="On screen">
           <Text variant="meta" tone="muted" render={<p />}>
@@ -744,9 +770,6 @@ function ScenePanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : (
         <ThingsSection threadRef={threadRef} />
       )}
-      {notice === null && selected !== null ? (
-        <ThingInspector threadRef={threadRef} thing={selected.thing} />
-      ) : null}
     </div>
   );
 }
@@ -870,7 +893,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : null}
       {things.length === 0 ? (
         <Text variant="meta" tone="muted" render={<p />}>
-          The game has named no things yet. Ask your agent to name them, and they show here.
+          Nothing named yet. The game's things show here while it plays, once your agent names them.
         </Text>
       ) : null}
       {KIND_GROUPS.map((group) => {
@@ -941,7 +964,7 @@ function ThingInspector({ threadRef, thing }: { threadRef: ScopedThreadRef; thin
         event.preventDefault();
         clearStageSelection();
       }}
-      className="flex flex-col gap-4 border-t border-border pt-4 outline-none"
+      className="flex flex-col gap-4 border-y border-border py-4 outline-none"
     >
       <header className="flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">

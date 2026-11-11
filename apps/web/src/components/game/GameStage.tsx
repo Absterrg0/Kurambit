@@ -371,6 +371,7 @@ function ThreadGameStage({
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
+  const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
   const stageRef = useRef<HTMLElement | null>(null);
   // A compact switch unmounts nothing, but focus would die with the hidden
   // pane's button. Move it to the stage when the stage comes back.
@@ -725,13 +726,22 @@ function ThreadGameStage({
         </Button>
       </div>
     ) : null;
+  // A live game's folder plays its starter shell until the first build lands;
+  // the Stage says what is being made instead of showing a game that is not yet one.
+  const shownPhase: typeof phase =
+    stageKind === "live" && buildsRead && !hasBuild && turnRunning && phase.kind === "playing"
+      ? {
+          kind: "first-build",
+          startedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
+        }
+      : phase;
   const keepGoingStatus = keepGoing.status;
   const keepGoingHere =
     keepGoingStatus !== null &&
     keepGoingStatus.mode !== "off" &&
     keepGoingStatus.chat === threadRef.threadId;
   const statusLine = gameStatusLine({
-    phase: phase.kind,
+    phase: shownPhase.kind,
     onStage: playTarget === null ? stageBuildName : buildPhrase(playTarget.label),
     frozen,
     away: away && hasBuild,
@@ -1066,7 +1076,7 @@ function ThreadGameStage({
       >
         {noWebGl ? <NoWebGlCard /> : null}
         <GamePlaySurface
-          phase={phase}
+          phase={shownPhase}
           viewport={data.viewport}
           gameName={data.manifest.name}
           // A live remount lands in play, the first load and Reload on the title.

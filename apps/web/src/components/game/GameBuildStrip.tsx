@@ -22,7 +22,7 @@ import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
-import { buildName, formatBuildTime } from "./gameBuilds.logic";
+import { buildCaption, buildName, formatBuildTime } from "./gameBuilds.logic";
 import { isUndone, markLabels, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 
 /** How many older pages an "Open build" reads to find its build before it says so. */
@@ -354,10 +354,7 @@ function BuildCard({
   onClick: () => void;
 }) {
   const step = build.source._tag === "turn" ? build.source.step : null;
-  const caption =
-    build.source._tag === "turn" && build.source.request.trim() !== ""
-      ? build.source.request
-      : build.summary;
+  const caption = buildCaption(build);
   const { good, bad } = build.facts;
   return (
     <Tooltip>
@@ -382,13 +379,18 @@ function BuildCard({
           threadRef={threadRef}
           gameName={gameName}
           build={build}
-          className={cn(
-            "h-18 w-full rounded-md ring-inset",
-            onStage
-              ? "ring-2 ring-primary"
-              : "ring-1 ring-border group-hover/card:ring-foreground/25 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring group-focus-visible/card:ring-inset",
-          )}
+          className="h-18 w-full rounded-md"
         >
+          {/* Over the picture, so the frame never covers the outline. */}
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
+              onStage
+                ? "ring-2 ring-primary"
+                : "ring-1 ring-border group-hover/card:ring-foreground/25 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring group-focus-visible/card:ring-inset",
+            )}
+          />
           <Text
             variant="micro"
             tone="inherit"

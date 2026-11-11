@@ -51,7 +51,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
     ? part(`Frozen on ${input.onStage ?? "the game"}`, { key: { key: "Tab", after: "resumes" } })
     : input.phase === "playing"
       ? input.away && input.onStage !== null
-        ? part("Paused while you're away · click the game to play on")
+        ? part(`Paused on ${input.onStage} while you're away`)
         : part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`, { dot: "ok" })
       : input.phase === "stopped"
         ? part("Stopped")

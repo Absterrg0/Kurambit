@@ -29,6 +29,23 @@ export const buildName = (build: Pick<GameBuild, "id" | "source" | "number">): s
   }
 };
 
+const STEP_PREFIX = /^Keep going · step \d+\s*[:·]?\s*/;
+
+/**
+ * What a build was asked to do, in a line: the person's request, or a
+ * keep-going step's own words without its "Keep going · step N" heading.
+ */
+export const buildCaption = (build: Pick<GameBuild, "source" | "summary">): string => {
+  const source = build.source;
+  if (source._tag === "saved") return build.summary;
+  if (source.step === null) return source.request.trim() || build.summary;
+  const own = build.summary.replace(STEP_PREFIX, "").trim();
+  const why = (own !== "" && own !== build.summary ? own : source.request.replace(STEP_PREFIX, ""))
+    .replace(/^\(([^)]*)\)/, "$1")
+    .trim();
+  return why === "" ? build.summary : `${why.charAt(0).toUpperCase()}${why.slice(1)}`;
+};
+
 /** Where a build came from: its name and the chat that made it, or a saved build's label. */
 export const buildSourceLabel = (build: Pick<GameBuild, "id" | "source" | "number">): string =>
   build.source._tag === "turn"

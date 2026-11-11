@@ -13,7 +13,9 @@ const plain = (text: string) =>
   text
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`~]+/g, "")
+    .replace(/(\*\*|__|~~|`)/g, "")
+    .replace(/(^|\s)[*_](\S)/g, "$1$2")
+    .replace(/(\S)[*_](?=\s|[.,;:!?]|$)/g, "$1")
     .replace(/^\s{0,3}(#{1,6}|>|[-+]|\d+\.)\s+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -21,7 +23,8 @@ const plain = (text: string) =>
 /** The first sentences that fit two lines, at most `max` characters. */
 export const leadSentences = (text: string, max = 220): string => {
   const words = plain(text);
-  const sentences = words.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g) ?? [words];
+  // A sentence ends at . ! or ? before a capital, so "0.8" and "e.g. this" stay whole.
+  const sentences = words.split(/(?<=[.!?])\s+(?=["'“(]?[A-Z])/);
   let lead = "";
   for (const sentence of sentences) {
     const next = `${lead}${lead === "" ? "" : " "}${sentence.trim()}`;
@@ -59,6 +62,8 @@ export const gameAgentNote = (
   working: boolean,
   since: number | null,
 ): GameAgentNote | null => {
+  // A step that names nothing ("Thinking") gives way to the agent's own last words in the turn.
+  let vague: string | null = null;
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index]!;
     if (entry.kind === "message") {
@@ -68,10 +73,11 @@ export const gameAgentNote = (
       if (message.role !== "assistant" || message.text.trim() === "") continue;
       return { text: leadSentences(message.text), live: working, since: working ? since : null };
     }
-    if (working && entry.kind === "work") {
+    if (working && vague === null && entry.kind === "work") {
       const text = activity(entry.entry);
-      if (text !== null) return { text, live: true, since };
+      if (text !== null && text.startsWith("Editing ")) return { text, live: true, since };
+      vague = text;
     }
   }
-  return working ? { text: "Working on it", live: true, since } : null;
+  return working ? { text: vague ?? "Working on it", live: true, since } : null;
 };
