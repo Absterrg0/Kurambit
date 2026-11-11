@@ -11,7 +11,7 @@ import {
   type GameEngineId,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { CornerDownLeftIcon, FolderOpenIcon, SlidersHorizontalIcon } from "lucide-react";
+import { FolderOpenIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
@@ -43,6 +43,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { SidebarInset } from "../ui/sidebar";
+import { Kbd } from "../ui/kbd";
 import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -69,8 +70,8 @@ const BRIEF_IDEAS = [
   "A paper boat racing down a storm drain",
 ] as const;
 
-// The shelf shows two rows of three before it folds the rest away.
-const SHELF_CARDS = 6;
+// Home continues the latest few; the sidebar already lists every game.
+const SHELF_CARDS = 3;
 
 type GameCover = {
   readonly game: GameLibraryEntry;
@@ -127,7 +128,7 @@ export function GamesHome() {
           <div
             className={cn(
               "mx-auto flex w-full max-w-200 flex-col px-8",
-              firstRun ? "min-h-full justify-center pb-32" : "gap-16 pt-20 pb-16 lg:pt-28",
+              firstRun ? "min-h-full justify-center pb-32" : "gap-14 pt-16 pb-16 lg:pt-24",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -264,12 +265,15 @@ function BriefBox({
 
   return (
     <section className="flex w-full flex-col gap-3">
+      <Text variant="title" tone="strong" render={<h1 className="mb-2 px-1" />}>
+        {firstRun ? "Make a game you want to play" : "What should we make next?"}
+      </Text>
       <form
         onSubmit={(event) => {
           event.preventDefault();
           void start();
         }}
-        className="flex w-full flex-col rounded-2xl border border-border bg-card transition-colors focus-within:border-foreground/20"
+        className="flex w-full flex-col rounded-3xl border border-border bg-card shadow-composer transition-colors focus-within:border-foreground/20 dark:shadow-none"
       >
         <label htmlFor="game-brief" className="sr-only">
           Describe the game you want to make
@@ -283,7 +287,7 @@ function BriefBox({
           rows={2}
           disabled={busy}
           placeholder="Describe the game you want to play…"
-          className="min-h-20 w-full resize-none bg-transparent px-5 pt-4 text-base/6 text-strong-foreground outline-none placeholder:text-placeholder"
+          className="min-h-22 w-full resize-none bg-transparent px-5 pt-4.5 text-base/6 text-strong-foreground outline-none placeholder:text-placeholder"
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
           {/* One active engine is no choice, so no picker shows. */}
@@ -321,16 +325,9 @@ function BriefBox({
             disabled={busy}
           />
           <span className="flex-1" />
-          <Text
-            variant="meta"
-            tone="dim"
-            render={<span className="me-2 hidden items-center gap-1.5 sm:inline-flex" />}
-          >
-            <CornerDownLeftIcon className="size-3" aria-hidden />
-            to start
-          </Text>
           <Button type="submit" size="sm" disabled={busy || !ready}>
             {busy ? "Starting…" : "Start building"}
+            {busy ? null : <Kbd>⏎</Kbd>}
           </Button>
         </div>
       </form>
@@ -484,14 +481,12 @@ function ContinueShelf({
   onOpen: (cover: GameCover) => void;
 }) {
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
-  const [showAll, setShowAll] = useState(false);
-  const shown = showAll ? covers : covers.slice(0, SHELF_CARDS);
-  const folded = covers.length - shown.length;
+  const shown = covers.slice(0, SHELF_CARDS);
   return (
     <section aria-labelledby="games" className="@container flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
         <Text variant="label" tone="muted" render={<h2 id="games" />}>
-          Games
+          Continue
         </Text>
         {canOpen ? <OpenGameLink /> : null}
       </div>
@@ -500,17 +495,6 @@ function ContinueShelf({
           <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
         ))}
       </ul>
-      {folded > 0 ? (
-        <button
-          type="button"
-          onClick={() => setShowAll(true)}
-          className="cursor-pointer self-start text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Text variant="meta" tone="inherit">
-            All games ({covers.length})
-          </Text>
-        </button>
-      ) : null}
     </section>
   );
 }
