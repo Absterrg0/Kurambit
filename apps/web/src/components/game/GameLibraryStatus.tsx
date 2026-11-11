@@ -84,7 +84,7 @@ export function GameLibraryStatusText({
         className={cn(
           "size-1.5 shrink-0 rounded-full",
           status.tone === "live"
-            ? "bg-primary"
+            ? "bg-live"
             : status.tone === "failed"
               ? "bg-destructive"
               : "bg-dim-foreground",

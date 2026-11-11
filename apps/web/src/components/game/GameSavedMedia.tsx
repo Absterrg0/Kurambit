@@ -123,12 +123,7 @@ export function SaveMediaButton({
   return (
     <div className="flex flex-wrap items-center gap-1">
       {saved === null ? (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={!canSave || saving}
-          onClick={() => void run()}
-        >
+        <Button size="xs" variant="ghost" disabled={!canSave || saving} onClick={() => void run()}>
           <BookmarkIcon aria-hidden="true" />
           {saving ? "Saving…" : "Save"}
         </Button>

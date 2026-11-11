@@ -28,7 +28,7 @@ export function GameDirectionNote({
     <div className="flex items-start gap-2.5 px-4 pt-2 pb-1.5" data-game-agent-note="">
       <span
         aria-hidden="true"
-        className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary data-[idle=true]:bg-dim-foreground"
+        className="mt-1.5 size-1.5 shrink-0 rounded-full bg-live data-[idle=true]:bg-dim-foreground"
         data-idle={note.live ? "false" : "true"}
       />
       <Text

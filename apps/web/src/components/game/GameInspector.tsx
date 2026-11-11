@@ -301,7 +301,9 @@ function BuildDetail({
         />
         <div className="flex min-w-0 flex-col gap-0.5">
           <Text variant="label" tone="strong" truncate render={<h2 />}>
-            {buildName(build)} · {buildCaption(build)}
+            {buildCaption(build) === buildName(build)
+              ? buildName(build)
+              : `${buildName(build)} · ${buildCaption(build)}`}
           </Text>
           <Text variant="meta" tone="muted" truncate>
             {formatBuildTime(build.at)}
@@ -505,7 +507,7 @@ function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck>
         "sentence" in fact ? fact.sentence : fact.label,
       ]);
   return [...folded].map(([why, names]) => (
-    <div key={why} className="flex items-start gap-2.5 rounded-lg bg-warning-surface px-3 py-2.5">
+    <div key={why} className="flex items-start gap-2.5 rounded-lg bg-card px-3 py-2">
       <MinusIcon className="mt-0.5 size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
       <div className="flex min-w-0 flex-col gap-0.5">
         <Text variant="meta" tone="default">

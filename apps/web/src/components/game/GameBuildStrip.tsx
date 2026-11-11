@@ -69,6 +69,7 @@ export function GameBuildStrip({
   onPlayUnlisted,
   onLive,
   onCompare,
+  actions,
   onInspect,
 }: {
   threadRef: ScopedThreadRef;
@@ -85,6 +86,8 @@ export function GameBuildStrip({
   /** Back to the folder's own game. */
   onLive: () => void;
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
+  /** What makes the next builds (keep going), at the end of the strip's header. */
+  actions?: ReactNode;
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
 }) {
@@ -272,15 +275,20 @@ export function GameBuildStrip({
             </Button>
           </span>
         ) : (
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={marks.length < 2}
-            onClick={() => setPicking(onStage === null ? "any" : { _tag: "build", build: onStage })}
-          >
-            <GitCompareIcon aria-hidden="true" />
-            Compare
-          </Button>
+          <>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={marks.length < 2}
+              onClick={() =>
+                setPicking(onStage === null ? "any" : { _tag: "build", build: onStage })
+              }
+            >
+              <GitCompareIcon aria-hidden="true" />
+              Compare
+            </Button>
+            {actions}
+          </>
         )}
       </div>
       <div ref={cardsRef} className="flex min-w-0 items-end gap-2 overflow-x-auto pb-1">
@@ -320,12 +328,14 @@ function KeepGoingBracket({ children }: { children: ReactNode }) {
     <div className="relative flex shrink-0 items-end gap-2 pt-5">
       <span
         aria-hidden="true"
-        className="absolute inset-x-0 top-2 h-3 rounded-t-md border-x-2 border-t-2 border-primary/50"
+        className="absolute inset-x-0 top-2 h-3 rounded-t-md border-x border-t border-foreground/20"
       />
       <Text
         variant="caption"
         tone="inherit"
-        render={<span className="absolute top-0 left-2 bg-background px-1.5 text-primary" />}
+        render={
+          <span className="absolute top-0 left-2 bg-background px-1.5 text-muted-foreground" />
+        }
       >
         Keep going
       </Text>
@@ -452,7 +462,7 @@ function CheckMark({ tone, count }: { tone: "good" | "bad"; count: number }) {
 function SlotCard({ slot }: { slot: GameBuildSlot }) {
   return (
     <div data-game-build-slot="" className="flex w-32 shrink-0 flex-col gap-1">
-      <div className="flex h-18 w-full items-center justify-center rounded-md border-2 border-dashed border-primary/60 bg-primary/8">
+      <div className="flex h-18 w-full items-center justify-center rounded-md border border-dashed border-live/60 bg-live/8">
         <Text variant="caption" tone="default">
           {slot.label}
         </Text>

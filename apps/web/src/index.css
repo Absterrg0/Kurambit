@@ -269,8 +269,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --tracking-eyebrow: 0.18em;
   --color-washi: #ece4d6;
   --color-sumi: #13110f;
-  /* The game viewport, like an engine's stage: always black, in both themes,
-     so a game's letterbox blends into it instead of reading as a frame. */
+  /* The game viewport, like an engine's stage: always black, in both themes. */
   --color-stage: #000000;
   --color-stage-foreground: #ecebe7;
   --color-stage-muted: #a19e97;
@@ -319,6 +318,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  /* Vermilion, only for what is live: an agent at work, a build being made. */
+  --color-live: var(--live);
   --color-popover-foreground: var(--contrast-popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--contrast-card-foreground);
@@ -1132,9 +1133,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 }
 
 /* Night is the default dark theme: a true-black canvas, neutral panes split by
-   hairlines, four text tiers (strong, foreground, muted, dim), vermilion only
-   for the one primary action and focus, and green, amber and red only for
-   checks. Light is the warm Sumi paper on the same tiers. The palette is
+   hairlines, four text tiers (strong, foreground, muted, dim), and a plain
+   light primary. The interface stays grey so the games are the colour on
+   screen: vermilion (--live) only marks what is live (an agent at work, a build
+   being made), and green, amber and red only checks. Light is the warm Sumi paper on the same tiers. The palette is
    mirrored in KURAMBIT_*_THEME_COLORS (packages/shared/src/themePalettes.ts)
    and the boot script in index.html; change all three together. */
 :root {
@@ -1156,8 +1158,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --card-foreground: #2b2926;
   --popover: #ffffff;
   --popover-foreground: #2b2926;
-  --primary: #d14b1f;
-  --primary-foreground: #ffffff;
+  --primary: #1c1b19;
+  --primary-foreground: #fdfcfa;
+  --live: #d14b1f;
   --secondary: #f2f0ec;
   --secondary-foreground: #141312;
   --muted: #f2f0ec;
@@ -1169,7 +1172,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --message-foreground: var(--foreground);
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
-  --message-action-hover: #b9411a;
+  --message-action-hover: #000000;
   --accent: #ebe8e3;
   --accent-foreground: #141312;
   --error: #c0392b;
@@ -1179,7 +1182,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --destructive: var(--error);
   --border: rgb(0 0 0 / 8%);
   --input: rgb(0 0 0 / 14%);
-  --ring: var(--primary);
+  --ring: #86817a;
   --destructive-foreground: var(--error-foreground);
   --info: #4767c9;
   --info-foreground: #3653ad;
@@ -1220,8 +1223,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --card-foreground: #d8d5cf;
     --popover: #191918;
     --popover-foreground: #d8d5cf;
-    --primary: #e2582a;
-    --primary-foreground: #ffffff;
+    --primary: #ecebe7;
+    --primary-foreground: #0f0f0e;
+    --live: #e2582a;
     --secondary: #191918;
     --secondary-foreground: #f5f3ef;
     --muted: #191918;
@@ -1229,7 +1233,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --placeholder: #5d5a55;
     --icon-muted: #77736c;
     --message-surface: #191918;
-    --message-action-hover: #ec6838;
+    --message-action-hover: #ffffff;
     --accent: #222220;
     --accent-foreground: #f5f3ef;
     --error: #e2574c;
@@ -1238,7 +1242,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
     --border: rgb(255 255 255 / 7.5%);
     --input: rgb(255 255 255 / 12%);
-    --ring: #e2582a;
+    --ring: #77736c;
     --info: #8aa2f2;
     --info-foreground: #a5b8f5;
     --success: #57b97c;
@@ -1343,6 +1347,7 @@ html[data-theme-id]:not([data-theme-id=""]) {
      a distinct action color make these identical. */
   --primary: var(--app-theme-message-action);
   --primary-foreground: var(--app-theme-message-action-foreground);
+  --live: var(--app-theme-update);
   --secondary: var(--app-theme-secondary);
   --secondary-foreground: var(--app-theme-secondary-foreground);
   --muted: var(--app-theme-muted);

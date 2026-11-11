@@ -119,13 +119,23 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           >
             <div className="flex min-w-0 flex-col gap-1 break-words ps-7">
               {tool.path === null ? null : (
-                <Text variant="meta" mono render={<p />}>
-                  {tool.path}
-                  {tool.version === null ? "" : ` · ${tool.version}`}
-                  {tool.source === null ? "" : ` · ${SOURCE_LABELS[tool.source]}`}
-                </Text>
+                <>
+                  {tool.version === null && tool.source === null ? null : (
+                    <Text variant="meta" tone="muted" render={<p />}>
+                      {[tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
+                        .filter((part) => part !== null)
+                        .join(" · ")}
+                    </Text>
+                  )}
+                  <Text variant="caption" tone="dim" mono render={<p className="break-all" />}>
+                    {tool.path}
+                  </Text>
+                </>
               )}
-              {tool.installed || tool.status === "ready" ? (
+              {/* The badge already says a ready tool is ready. */}
+              {tool.status === "ready" &&
+              /^ready\.?$/i.test(tool.message.trim()) ? null : tool.installed ||
+                tool.status === "ready" ? (
                 <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
                   {tool.message}
                 </Text>

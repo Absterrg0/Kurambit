@@ -2909,8 +2909,13 @@ export default function ChatView(props: ChatViewProps) {
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
+  // A game keeps its model controls inside the composer: under the Stage a
+  // detached drawer reads as a second, misaligned bar.
   const mountComposerModelStrip =
-    routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
+    routeKind === "server" &&
+    !mountComposerContextStrip &&
+    !showProviderSubagentBar &&
+    !isGameThread;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
   const terminalShortcutLabelOptions = {
     context: {
@@ -7733,7 +7738,7 @@ export default function ChatView(props: ChatViewProps) {
                     keybindings={keybindings}
                     terminalOpen={Boolean(terminalUiState.terminalOpen)}
                     gitCwd={gitCwd}
-                    restingControlsHost={restingComposerControlsHost}
+                    restingControlsHost={isGameThread ? null : restingComposerControlsHost}
                     restingControlsHaveLeadingContext={
                       !isGameThread &&
                       mountComposerContextStrip &&
@@ -7893,7 +7898,7 @@ export default function ChatView(props: ChatViewProps) {
           rightPanelMaximized || gameInspectorHidden
             ? "invisible w-0 flex-none"
             : gameInspectorDocked
-              ? "shrink-0 border-l border-border"
+              ? "shrink-0"
               : "flex-1",
         )}
         style={gameInspectorDocked ? { width: gameInspectorWidth } : undefined}

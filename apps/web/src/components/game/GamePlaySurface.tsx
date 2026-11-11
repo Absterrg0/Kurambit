@@ -129,7 +129,7 @@ export function GamePlaySurface({
   return (
     <div
       data-game-play-surface="true"
-      className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
+      className="relative flex min-h-0 flex-1 items-center justify-center [container-type:size]"
     >
       <GameFrameBox viewport={viewport} gameName={gameName} playing={playing}>
         {playing ? (
@@ -176,7 +176,8 @@ export function GamePlaySurface({
 }
 
 /**
- * The game's frame in its own shape, its letterbox the Stage's own black.
+ * The game's frame in its own shape, a screen on the pane: the pane itself is
+ * the letterbox, so the game never sits inside black bars.
  * Before there is a game to show, it is the game's poster across the whole
  * Stage. Its parent must be a size container.
  */
@@ -194,7 +195,11 @@ export function GameFrameBox({
   const [pigment, pigmentInk] = gamePigment(gameName);
   return (
     <div
-      className={playing ? "relative overflow-hidden" : "relative size-full overflow-hidden"}
+      className={
+        playing
+          ? "relative overflow-hidden rounded-xl bg-stage shadow-print"
+          : "relative size-full overflow-hidden rounded-xl"
+      }
       style={
         playing
           ? frameStyle(viewport)
@@ -322,44 +327,48 @@ export function GameFrame({
         onFocus={() => setFrameFocused(true)}
         onBlur={() => setFrameFocused(false)}
       />
-      {/* Hints sit in a corner and let every click through: the game's own buttons stay pressable. */}
-      <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-20 flex flex-wrap items-center gap-1.5">
-        {unacknowledged ? (
-          <StageHint>
-            <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
-            Game may still be running
-          </StageHint>
-        ) : null}
-        {frozen ? (
-          <StageHint>
-            <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
-            Frozen · click a thing to point at it
-          </StageHint>
-        ) : frameFocused ? null : (
-          <>
+      {/* One quiet line in a corner that lets every click through: the game's own buttons stay pressable. */}
+      {unacknowledged || frozen || !frameFocused ? (
+        <Text
+          variant="caption"
+          tone="inherit"
+          render={
+            <span className="pointer-events-none absolute bottom-3 left-3 z-20 flex h-6 items-center gap-2 rounded-md bg-black/55 px-2 text-stage-foreground/85 backdrop-blur-sm" />
+          }
+        >
+          {unacknowledged ? (
             <StageHint>
-              <MousePointerClickIcon className="size-3 shrink-0" aria-hidden="true" />
-              Click to play
+              <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
+              Game may still be running
             </StageHint>
-            {freezeHint ? <StageHint>Tab freezes</StageHint> : null}
-          </>
-        )}
-      </div>
+          ) : null}
+          {frozen ? (
+            <StageHint>
+              <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
+              Frozen · click a thing to point at it
+            </StageHint>
+          ) : frameFocused ? null : (
+            <>
+              <StageHint>
+                <MousePointerClickIcon className="size-3 shrink-0" aria-hidden="true" />
+                Click to play
+              </StageHint>
+              {freezeHint ? <StageHint muted>Tab freezes</StageHint> : null}
+            </>
+          )}
+        </Text>
+      ) : null}
     </>
   );
 }
 
-function StageHint({ children }: { children: ReactNode }) {
+function StageHint({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
   return (
-    <Text
-      variant="caption"
-      tone="inherit"
-      render={
-        <span className="flex h-6 items-center gap-1.5 rounded-full bg-black/60 px-2.5 text-stage-foreground ring-1 ring-white/10 backdrop-blur-sm" />
-      }
+    <span
+      className={muted ? "flex items-center gap-1.5 text-stage-muted" : "flex items-center gap-1.5"}
     >
       {children}
-    </Text>
+    </span>
   );
 }
 

@@ -69,8 +69,8 @@ const BRIEF_IDEAS = [
   "A paper boat racing down a storm drain",
 ] as const;
 
-// The ledger beside the latest game holds this many before it folds the rest away.
-const LEDGER_ROWS = 3;
+// The shelf shows two rows of three before it folds the rest away.
+const SHELF_CARDS = 6;
 
 type GameCover = {
   readonly game: GameLibraryEntry;
@@ -126,8 +126,8 @@ export function GamesHome() {
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div
             className={cn(
-              "mx-auto flex w-full max-w-266 flex-col px-8 lg:px-12",
-              firstRun ? "min-h-full justify-center pb-32" : "gap-14 pt-20 pb-16 lg:pt-28",
+              "mx-auto flex w-full max-w-200 flex-col px-8",
+              firstRun ? "min-h-full justify-center pb-32" : "gap-16 pt-20 pb-16 lg:pt-28",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -269,7 +269,7 @@ function BriefBox({
           event.preventDefault();
           void start();
         }}
-        className="flex w-full flex-col rounded-2xl border border-border bg-card shadow-sheet transition-colors focus-within:border-foreground/20"
+        className="flex w-full flex-col rounded-2xl border border-border bg-card transition-colors focus-within:border-foreground/20"
       >
         <label htmlFor="game-brief" className="sr-only">
           Describe the game you want to make
@@ -283,9 +283,9 @@ function BriefBox({
           rows={2}
           disabled={busy}
           placeholder="Describe the game you want to play…"
-          className="min-h-26 w-full resize-none bg-transparent px-6 pt-5.5 font-display text-3xl/10 tracking-tight text-strong-foreground caret-primary outline-none placeholder:text-placeholder sm:px-7"
+          className="min-h-20 w-full resize-none bg-transparent px-5 pt-4 text-base/6 text-strong-foreground outline-none placeholder:text-placeholder"
         />
-        <div className="flex items-center gap-1 px-3 pt-1 pb-3 sm:px-4">
+        <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
           {/* One active engine is no choice, so no picker shows. */}
           {ACTIVE_GAME_ENGINES.length > 1 ? (
             <ToggleGroup
@@ -324,12 +324,12 @@ function BriefBox({
           <Text
             variant="meta"
             tone="dim"
-            render={<span className="me-3 hidden items-center gap-1.5 sm:inline-flex" />}
+            render={<span className="me-2 hidden items-center gap-1.5 sm:inline-flex" />}
           >
             <CornerDownLeftIcon className="size-3" aria-hidden />
             to start
           </Text>
-          <Button type="submit" disabled={busy || !ready}>
+          <Button type="submit" size="sm" disabled={busy || !ready}>
             {busy ? "Starting…" : "Start building"}
           </Button>
         </div>
@@ -354,8 +354,7 @@ function BriefBox({
         </ul>
       ) : (
         <Text variant="meta" tone="dim" render={<p className="px-1" />}>
-          Your agent builds a playable first version in a few minutes. Then you direct it, build by
-          build. Name it, style it and change it any time.
+          A playable first version in a few minutes. Rename, restyle and change it any time.
         </Text>
       )}
 
@@ -474,7 +473,7 @@ function OpenGameLink({ className }: { className?: string }) {
   );
 }
 
-/** The latest game large, the next few in a ledger beside it, the rest one click away. */
+/** Every game as an even card, latest first: the pictures are the colour on the page. */
 function ContinueShelf({
   covers,
   environmentId,
@@ -486,118 +485,72 @@ function ContinueShelf({
 }) {
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
   const [showAll, setShowAll] = useState(false);
-  const [latest, ...others] = covers;
-  if (latest === undefined) return null;
-  const ledger = showAll ? others : others.slice(0, LEDGER_ROWS);
-  const folded = others.length - ledger.length;
+  const shown = showAll ? covers : covers.slice(0, SHELF_CARDS);
+  const folded = covers.length - shown.length;
   return (
-    <section aria-labelledby="continue" className="@container flex flex-col gap-3.5">
-      <div className="flex items-baseline justify-between px-1">
-        <Text variant="label" tone="strong" render={<h2 id="continue" />}>
-          Continue
+    <section aria-labelledby="games" className="@container flex flex-col gap-4">
+      <div className="flex items-baseline justify-between">
+        <Text variant="label" tone="muted" render={<h2 id="games" />}>
+          Games
         </Text>
         {canOpen ? <OpenGameLink /> : null}
       </div>
-      <div
-        className={cn(
-          "grid gap-x-6 gap-y-6 @4xl:gap-x-10",
-          others.length > 0 &&
-            "@2xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] @4xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]",
-        )}
-      >
-        <LatestGame cover={latest} onOpen={() => onOpen(latest)} />
-        {others.length > 0 ? (
-          <div className="flex min-w-0 flex-col">
-            <ul role="list" className="-mt-2 flex flex-col @4xl:-mt-3">
-              {ledger.map((cover) => (
-                <LedgerRow key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
-              ))}
-            </ul>
-            {folded > 0 ? (
-              <button
-                type="button"
-                onClick={() => setShowAll(true)}
-                className="mt-2 cursor-pointer self-start px-2 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <Text variant="meta" tone="inherit">
-                  All games ({others.length + 1})
-                </Text>
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      <ul role="list" className="grid grid-cols-2 gap-x-5 gap-y-6 @xl:grid-cols-3">
+        {shown.map((cover) => (
+          <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
+        ))}
+      </ul>
+      {folded > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowAll(true)}
+          className="cursor-pointer self-start text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Text variant="meta" tone="inherit">
+            All games ({covers.length})
+          </Text>
+        </button>
+      ) : null}
     </section>
   );
 }
 
-function useCoverLine(cover: GameCover) {
+function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
-  const line = useGameLibraryLine({
+  const { status, build } = useGameLibraryLine({
     game: cover.game,
     main: cover.main,
     chats: cover.chats,
     read: leaseLiveStatus,
   });
   const name = useGameName(cover.game.environmentId, cover.game.projectId, cover.game.name);
-  return { ...line, name, rowRef };
-}
-
-function LatestGame({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
-  const { status, build, name, rowRef } = useCoverLine(cover);
+  const picture = build?.still ?? cover.game.keyArt;
   return (
-    <button
-      ref={rowRef}
-      type="button"
-      onClick={onOpen}
-      className="group flex min-w-0 cursor-pointer flex-col gap-3 text-left outline-none"
-    >
-      <GamePicture
-        environmentId={cover.game.environmentId}
-        root={cover.game.root}
-        path={build?.still ?? cover.game.keyArt}
-        gameName={name}
-        className="aspect-video w-full rounded-xl shadow-print ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/20 group-focus-visible:ring-2 group-focus-visible:ring-primary"
-      >
-        {(build?.still ?? cover.game.keyArt) === null ? (
-          <Text
-            variant="meta"
-            tone="inherit"
-            render={<span className="absolute inset-0 grid place-items-center text-white/55" />}
-          >
-            {build === null ? "No build yet" : "No picture of this build yet"}
-          </Text>
-        ) : null}
-      </GamePicture>
-      <span className="flex min-w-0 flex-col gap-1 px-0.5">
-        <span className="truncate font-display text-3xl/9 text-strong-foreground">{name}</span>
-        <span className="flex min-w-0 items-center gap-2">
-          <GameLibraryStatusText status={status} className="shrink-0" />
-          <CoverSummary build={build} status={status.text} />
-        </span>
-      </span>
-    </button>
-  );
-}
-
-function LedgerRow({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
-  const { status, build, name, rowRef } = useCoverLine(cover);
-  return (
-    <li className="border-b border-border last:border-b-0">
+    <li className="min-w-0">
       <button
         ref={rowRef}
         type="button"
         onClick={onOpen}
-        className="group -mx-2 flex w-[calc(100%+1rem)] cursor-pointer items-center gap-3 rounded-xl p-2 @4xl:gap-4 @4xl:py-3 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+        className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 text-left outline-none"
       >
         <GamePicture
           environmentId={cover.game.environmentId}
           root={cover.game.root}
-          path={build?.still ?? cover.game.keyArt}
+          path={picture}
           gameName={name}
-          className="aspect-video w-24 shrink-0 rounded-lg ring-1 ring-border @4xl:w-40 @5xl:w-44"
-        />
-        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/25 group-focus-visible:ring-2 group-focus-visible:ring-ring"
+        >
+          {picture === null ? (
+            <Text
+              variant="caption"
+              tone="inherit"
+              render={<span className="absolute inset-0 grid place-items-center text-white/50" />}
+            >
+              {build === null ? "No build yet" : "No picture yet"}
+            </Text>
+          ) : null}
+        </GamePicture>
+        <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
           <Text variant="label" tone="strong" truncate>
             {name}
           </Text>

@@ -783,6 +783,38 @@ function ThreadGameStage({
           keepGoing: false,
         }
       : null;
+  // Keep going makes the next builds, so it sits with them in the strip's header.
+  // A parked engine's game builds and plays nothing, so it offers neither.
+  const keepGoingControl =
+    engine.status === "active" ? (
+      <Menu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    aria-label="Keep going"
+                    aria-pressed={keepGoingView.pressed}
+                    data-game-keep-going=""
+                    disabled={!hasBuild}
+                  />
+                }
+              />
+            }
+          >
+            <FastForwardIcon className="size-3.5" aria-hidden="true" />
+            {keepGoingView.label}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{keepGoingView.tooltip}</TooltipPopup>
+        </Tooltip>
+        <MenuPopup align="end">
+          <GameKeepGoingMenuContent threadRef={threadRef} />
+        </MenuPopup>
+      </Menu>
+    ) : null;
   return (
     <section
       ref={stageRef}
@@ -869,6 +901,10 @@ function ThreadGameStage({
                   Rename
                 </MenuItem>
                 <GameFolderMenuItem threadRef={threadRef} root={data.root} />
+                <MenuItem disabled={engine.status === "parked"} onClick={() => setExportOpen(true)}>
+                  <DownloadIcon />
+                  Export…
+                </MenuItem>
                 <MenuItem
                   onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
                 >
@@ -894,47 +930,6 @@ function ThreadGameStage({
           >
             <Redo2Icon className="size-3.5" aria-hidden="true" />
           </IconAction>
-          <span aria-hidden className="mx-1 h-4.5 w-px shrink-0 bg-border" />
-          {/* A parked engine's game builds and plays nothing, so it offers neither. */}
-          {engine.status === "active" ? (
-            <Menu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <MenuTrigger
-                      render={
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          aria-label="Keep going"
-                          aria-pressed={keepGoingView.pressed}
-                          data-game-keep-going=""
-                          disabled={!hasBuild}
-                        />
-                      }
-                    />
-                  }
-                >
-                  <FastForwardIcon className="size-3.5" aria-hidden="true" />
-                  <span className="hidden @[36rem]/stage-header:inline">{keepGoingView.label}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="bottom">{keepGoingView.tooltip}</TooltipPopup>
-              </Tooltip>
-              <MenuPopup align="end">
-                <GameKeepGoingMenuContent threadRef={threadRef} />
-              </MenuPopup>
-            </Menu>
-          ) : null}
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-label="Export"
-            disabled={engine.status === "parked"}
-            onClick={() => setExportOpen(true)}
-          >
-            <DownloadIcon className="size-3.5" aria-hidden="true" />
-            <span className="hidden @[44rem]/stage-header:inline">Export</span>
-          </Button>
           <Menu>
             <MenuTrigger
               render={
@@ -1073,7 +1068,7 @@ function ThreadGameStage({
           data-game-play-surface="build"
           className={
             compare === null
-              ? "relative mx-3 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
+              ? "relative mx-3 flex min-h-0 flex-1 items-center justify-center [container-type:size]"
               : "hidden"
           }
         >
@@ -1151,6 +1146,7 @@ function ThreadGameStage({
         onPlayUnlisted={(ref) => void playBuild(ref)}
         onLive={backToLive}
         onCompare={setCompare}
+        actions={keepGoingControl}
         onInspect={(build) => {
           inspectBuild({ threadKey, build: build.id, snapshot: build });
           if (useGameWorkspaceStore.getState().inspectorTab !== "build") showInspectorTab("build");
@@ -1254,7 +1250,7 @@ function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
               aria-hidden="true"
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
-                part.dot === "live" ? "bg-primary" : "bg-success",
+                part.dot === "live" ? "bg-live" : "bg-muted-foreground",
               )}
             />
           )}
