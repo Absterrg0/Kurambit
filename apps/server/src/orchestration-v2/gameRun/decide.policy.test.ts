@@ -365,6 +365,17 @@ describe("the proposal", () => {
     // One tier still measured judges a step.
     const oneTier = Loop.applyLook(state(), look({ facts: facts({ idle: missing }) }), NOW);
     expect(oneTier.plan).toMatchObject({ kind: "turn" });
+    // A game too slow on an idle machine is the game's own fault: a step can fix it.
+    const slow = {
+      ...missing,
+      why: "the game ran at 0.40× real time on an idle machine, so 60 s of play did not fit the run's wall budget",
+    };
+    const slowGame = Loop.applyLook(
+      state(),
+      look({ facts: facts({ idle: slow, masher: slow }) }),
+      NOW,
+    );
+    expect(slowGame.plan).toMatchObject({ kind: "turn" });
   });
 
   it("checks the budget before each turn and caps the turn at the time left", () => {

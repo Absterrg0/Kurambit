@@ -96,17 +96,22 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
     : null;
 
 const SOFTWARE_TOO_SLOW = "the harness renders in software here";
+/** How the one standing fault that is the game's own begins: a step can make it faster. */
+const SLOW_ON_IDLE = "the game ran at ";
 
 /**
- * The no-input or random-input tier this machine cannot measure until a person
- * fixes it (a missing tool such as ffmpeg, or a game it cannot play in real
- * time). The skilled tier plays the same way, so it would not be measured either.
+ * A tier this machine cannot measure until a person fixes the machine or its
+ * tools (a missing program such as ffmpeg, a browser drawing in software).
+ * The skilled tier plays the same way, so it would not be measured either.
  */
+export const machineFault = (
+  fact: TierFact,
+): fact is Extract<TierFact, { status: "not-measured" }> =>
+  fact.status === "not-measured" && isStanding(fact) && !fact.why.startsWith(SLOW_ON_IDLE);
+
+/** The no-input or random-input tier that is a machine fault, if either is. */
 export const unmeasurableTier = (facts: Pick<Facts, "idle" | "masher">) =>
-  [facts.masher, facts.idle].find(
-    (fact): fact is Extract<TierFact, { status: "not-measured" }> =>
-      fact.status === "not-measured" && isStanding(fact),
-  );
+  [facts.masher, facts.idle].find(machineFault);
 
 /**
  * A run below real time: its span of play did not fit the wall budget. In a
@@ -127,7 +132,7 @@ const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: Machine
           true,
         )
       : notMeasured(
-          `the game ran at ${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
+          `${SLOW_ON_IDLE}${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
           false,
           true,
         );
