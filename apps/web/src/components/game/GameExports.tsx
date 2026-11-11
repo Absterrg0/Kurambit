@@ -375,9 +375,9 @@ export function GameExports({
                   Build & play
                 </Button>
               ) : (
+                // The card's one action before its first export, so it reads as the primary.
                 <Button
                   size="sm"
-                  variant="outline"
                   disabled={!canOperate || operationRunning || packaging !== null}
                   onClick={() => {
                     if (target === "Web") onExportWeb();
@@ -397,11 +397,6 @@ export function GameExports({
         );
       })}
       <GameSavedList threadRef={threadRef} />
-      <p className="px-1 text-xs text-muted-foreground">
-        Exports live in <span className="font-mono">builds/</span> and are not committed to the game
-        repository. Every operation writes its output to{" "}
-        <span className="font-mono">builds/logs/</span>.
-      </p>
     </div>
   );
 }

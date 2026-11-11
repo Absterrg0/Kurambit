@@ -183,7 +183,7 @@ export function GameSavedList({ threadRef }: { threadRef: ScopedThreadRef }) {
       {saved.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {query.error ??
-            "Nothing saved yet. Open a build on the timeline and save its bot video or frame sheet to keep it after the game logs are cleaned up."}
+            "Nothing saved yet. Save a recording from a build's Recordings to keep it after the logs are cleaned up."}
         </p>
       ) : (
         <ul className="space-y-1">
