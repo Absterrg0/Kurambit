@@ -11,6 +11,7 @@ import { requestConfirmDialog } from "~/confirmDialog";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
 import { Radio, RadioGroup } from "../ui/radio-group";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { useGameLibrary } from "../game/useGameLibrary";
@@ -305,8 +306,7 @@ function DraftForm({
         placeholder="Title (optional)"
         onChange={(event) => setDraft({ ...draft, title: event.target.value })}
       />
-      <textarea
-        className="min-h-20 w-full rounded-md border bg-transparent p-2 text-sm"
+      <Textarea
         value={draft.prompt}
         placeholder="Prompt run on schedule"
         onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
