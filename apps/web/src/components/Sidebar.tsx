@@ -2168,21 +2168,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 }
               >
                 {/* At rest the row says how many chats the game has; pointed at, it opens them. */}
-                <Text
-                  variant="micro"
-                  tone="inherit"
-                  numeric
-                  render={
-                    <span
-                      className={cn(
-                        "group-hover/game-row:hidden group-focus-visible/chats:hidden",
-                        chatsOpen && "hidden",
-                      )}
-                    />
-                  }
-                >
-                  {otherChats.length + 1}
-                </Text>
+                {otherChats.length === 0 ? null : (
+                  <Text
+                    variant="micro"
+                    tone="inherit"
+                    numeric
+                    render={
+                      <span
+                        className={cn(
+                          "group-hover/game-row:hidden group-focus-visible/chats:hidden",
+                          chatsOpen && "hidden",
+                        )}
+                      />
+                    }
+                  >
+                    {otherChats.length + 1}
+                  </Text>
+                )}
                 <ChevronDownIcon
                   className={cn(
                     "hidden size-3.5 transition-transform group-hover/game-row:block group-focus-visible/chats:block",

@@ -782,7 +782,7 @@ function ThreadGameStage({
   // Keep going makes the next builds, so it sits with them in the strip's header.
   // A parked engine's game builds and plays nothing, so it offers neither.
   const keepGoingControl =
-    engine.status === "active" ? (
+    engine.status === "active" && hasBuild ? (
       <Menu>
         <Tooltip>
           <TooltipTrigger

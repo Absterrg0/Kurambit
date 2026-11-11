@@ -238,10 +238,14 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Text>
       </div>
     ) : (
-      <Notice>
-        No builds yet. Each change your agent makes to the game becomes one, with its checks
-        measured here.
-      </Notice>
+      <div className="flex flex-col gap-1 p-4">
+        <Text variant="label" tone="default" render={<h2 />}>
+          No builds yet
+        </Text>
+        <Text variant="caption" tone="muted" render={<p />}>
+          Each change your agent makes becomes a build, with its checks measured here.
+        </Text>
+      </div>
     );
   return (
     <BuildDetail
