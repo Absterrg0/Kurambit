@@ -1291,6 +1291,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --surface-rim: linear-gradient(var(--muted-foreground), var(--muted-foreground));
 }
 
+/* The design-system page shows keyboard focus without a keyboard. */
+[data-focus-preview] {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 /* Floating surfaces share one fill and rim and differ by shadow. */
 @utility surface-popover {
   --surface-shadow: var(--popover-shadow);

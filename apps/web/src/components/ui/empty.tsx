@@ -4,9 +4,9 @@ import { cn } from "~/lib/utils";
 
 const emptySizeClassName = {
   compact:
-    "min-h-64 gap-4 p-6 md:p-10 [&_[data-slot=empty-media]]:mb-0 [&_[data-slot=empty-title]]:text-[1.0625rem] [&_[data-slot=empty-title]]:leading-6 [&_[data-slot=empty-description]]:text-[0.8125rem] [&_[data-slot=empty-description]]:leading-[1.125rem]",
+    "min-h-64 gap-4 p-6 md:p-10 [&_[data-slot=empty-media]]:mb-0 [--type-title:1.0625rem] [--type-body:0.8125rem]",
   default: "gap-6 p-6 md:p-12",
-  hero: "gap-6 p-6 md:p-12 [&_[data-slot=empty-title]]:text-2xl sm:[&_[data-slot=empty-title]]:text-3xl",
+  hero: "gap-6 p-6 md:p-12 [--type-title:1.5rem] sm:[--type-title:1.875rem]",
 } as const;
 
 function Empty({
@@ -46,7 +46,7 @@ const emptyMediaVariants = cva(
     variants: {
       variant: {
         default: "bg-transparent",
-        icon: "relative flex size-9 shrink-0 items-center justify-center rounded-md border bg-card not-dark:bg-clip-padding text-foreground shadow-sm/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)] [&_svg:not([class*='size-'])]:size-4.5",
+        icon: "surface-raised relative flex size-9 shrink-0 items-center justify-center rounded-md text-foreground [&_svg:not([class*='size-'])]:size-4.5",
       },
     },
   },
