@@ -2163,15 +2163,31 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       event.stopPropagation();
                       setChatsOpen((open) => !open);
                     }}
-                    className={cn(
-                      "absolute top-2.5 right-1.5 inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:opacity-100 group-hover/game-row:opacity-100",
-                      chatsOpen ? "opacity-100" : "opacity-0",
-                    )}
+                    className="group/chats absolute top-3 right-1.5 inline-flex h-5 min-w-5 cursor-pointer items-center justify-center rounded-sm px-1 text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                   />
                 }
               >
+                {/* At rest the row says how many chats the game has; pointed at, it opens them. */}
+                <Text
+                  variant="micro"
+                  tone="inherit"
+                  numeric
+                  render={
+                    <span
+                      className={cn(
+                        "group-hover/game-row:hidden group-focus-visible/chats:hidden",
+                        chatsOpen && "hidden",
+                      )}
+                    />
+                  }
+                >
+                  {otherChats.length + 1}
+                </Text>
                 <ChevronDownIcon
-                  className={cn("size-3.5 transition-transform", chatsOpen && "rotate-180")}
+                  className={cn(
+                    "hidden size-3.5 transition-transform group-hover/game-row:block group-focus-visible/chats:block",
+                    chatsOpen && "block rotate-180",
+                  )}
                   aria-hidden
                 />
               </TooltipTrigger>

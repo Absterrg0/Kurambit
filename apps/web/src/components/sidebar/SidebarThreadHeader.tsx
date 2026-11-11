@@ -35,7 +35,7 @@ export function SidebarThreadHeader({
         muted
         onClick={onSearch}
       />
-      <Text variant="meta" tone="dim" render={<h2 className="px-2 pt-4 pb-1" />}>
+      <Text variant="meta" tone="muted" render={<h2 className="px-2 pt-4 pb-1" />}>
         Games
       </Text>
     </div>
@@ -56,12 +56,17 @@ function SidebarHeaderRow({
   onClick: () => void;
 }) {
   return (
-    <SidebarMenuButton type="button" onClick={onClick}>
+    <SidebarMenuButton type="button" onClick={onClick} className="group/header-row">
       {icon}
       <Text variant="label" tone={muted ? "muted" : "default"} truncate>
         {label}
       </Text>
-      {shortcut === null ? null : <Kbd className="ms-auto">{shortcut}</Kbd>}
+      {/* The shortcut is a reminder for the row in hand; at rest it only crowds the column. */}
+      {shortcut === null ? null : (
+        <span className="ms-auto opacity-0 transition-opacity group-hover/header-row:opacity-100 group-focus-visible/header-row:opacity-100">
+          <Kbd>{shortcut}</Kbd>
+        </span>
+      )}
     </SidebarMenuButton>
   );
 }
