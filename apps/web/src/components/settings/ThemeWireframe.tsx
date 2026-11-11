@@ -1,6 +1,13 @@
 import { cn } from "../../lib/utils";
 import type { ThemeCardPreviewColors } from "./ThemePreviewCircles";
 
+// The System preview splits light and dark on a diagonal. The half the app is not
+// showing recedes, so a light half never becomes the brightest thing on a dark page.
+const PANE_CLIP_CLASS = {
+  left: "[clip-path:polygon(0_0,62%_0,38%_100%,0_100%)] dark:opacity-55",
+  right: "[clip-path:polygon(62%_0,100%_0,100%_100%,38%_100%)] light:opacity-55",
+} as const;
+
 function ThemeWireframePane({
   colors,
   clip,
@@ -10,19 +17,7 @@ function ThemeWireframePane({
 }) {
   const line = "rgb(127 127 127 / 0.25)";
   return (
-    <span
-      className="absolute inset-0"
-      style={
-        clip === undefined
-          ? undefined
-          : {
-              clipPath:
-                clip === "left"
-                  ? "polygon(0 0, calc(50% - 1px) 0, calc(50% - 1px) 100%, 0 100%)"
-                  : "polygon(calc(50% + 1px) 0, 100% 0, 100% 100%, calc(50% + 1px) 100%)",
-            }
-      }
-    >
+    <span className={cn("absolute inset-0", clip === undefined ? null : PANE_CLIP_CLASS[clip])}>
       <span className="absolute inset-0" style={{ backgroundColor: colors.canvas }} />
       <span
         className="absolute inset-y-0 left-0 w-[22%]"
@@ -105,18 +100,25 @@ function ThemeWireframePane({
   );
 }
 
+/** `left` is the light half and `right` the dark half of a System preview. */
 export function ThemeWireframe({
   className,
   panes,
+  selected = false,
 }: {
   className?: string;
   panes: ReadonlyArray<{ colors: ThemeCardPreviewColors; clip?: "left" | "right" }>;
+  selected?: boolean;
 }) {
   return (
     <span
       aria-hidden
       className={cn(
-        "relative block w-full overflow-hidden rounded-lg border border-border/60",
+        "relative block w-full overflow-hidden rounded-lg border transition-colors",
+        // Selection is one 2px ring in place of the rim, never a rim inside a ring.
+        selected
+          ? "border-transparent ring-2 ring-ring"
+          : "border-border/60 group-hover/mode:border-border",
         className,
       )}
     >

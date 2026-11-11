@@ -662,6 +662,7 @@ export function ThemeLibrary({
   const renderWireframe = (mode: ThemeMode) => (
     <ThemeWireframe
       className="h-[8.75rem]"
+      selected={appearanceMode === mode}
       panes={
         mode === "system"
           ? [
@@ -681,14 +682,8 @@ export function ThemeLibrary({
           <button
             aria-label={mode === "system" ? "Follow the system appearance" : `Use ${mode} mode`}
             aria-pressed={isActive}
-            className={cn(
-              "flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              isActive
-                ? "border-transparent bg-accent/30"
-                : "border-border/70 bg-card/60 hover:bg-accent/10",
-            )}
+            className="group/mode flex cursor-pointer flex-col items-stretch gap-2 rounded-xl p-1 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
             key={mode}
-            style={isActive ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
             onClick={() => setMode(mode)}
             type="button"
           >
