@@ -144,8 +144,8 @@ export function ProjectDefaultsSettings({
       title="Model"
       description={
         isProjectScope
-          ? "Model for new threads in this project."
-          : "Default model for new threads. Projects can override it."
+          ? "Model for new games and chats in this project."
+          : "Default model for new games and chats. A game can override it."
       }
       status={
         unavailable || mixedModel || modelSource === "project"

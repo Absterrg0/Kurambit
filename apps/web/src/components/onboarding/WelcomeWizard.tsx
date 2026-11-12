@@ -29,7 +29,6 @@ import {
 } from "../../onboarding/providerReadiness.logic";
 import { randomUUID } from "../../lib/utils";
 import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
-import { resolveOnboardingSetup } from "../../onboarding/targetEnvironment.logic";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
@@ -46,14 +45,11 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Button } from "../ui/button";
 
 import { ScrollArea } from "../ui/scroll-area";
-import { WizardPanel, WizardSteps, WizardPopup, WizardHeader } from "../ui/wizard";
+import { WizardPanel, WizardPopup, WizardHeader } from "../ui/wizard";
 import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 
-type WizardStep = "connection" | "agents";
-
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
-const ONBOARDING_STAGES = ["Connect", "Agents"] as const;
 
 export function WelcomeWizard({
   onDone,
@@ -63,46 +59,12 @@ export function WelcomeWizard({
   readonly onDone: () => void | Promise<void>;
 }) {
   const completeOnboarding = useCompleteOnboarding();
-  const [step, setStep] = useState<WizardStep>(resumeEnvironmentId ? "agents" : "connection");
-  const { environments } = useEnvironments();
-  const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
-  // One registry for the wizard's lifetime, shared with the connect list, so a computer is
-  // auto-selected once even after the user unchecks it.
-  const [autoSelectedComputers] = useState(() => new Set<EnvironmentId>());
-  const [setupIds, setSetupIds] = useState<readonly EnvironmentId[]>(
-    resumeEnvironmentId ? [resumeEnvironmentId] : [],
-  );
+  // Kurambit runs on this computer only, so first run is one page: the agents here.
+  const primaryEnvironment = usePrimaryEnvironment();
+  const setupId = resumeEnvironmentId ?? primaryEnvironment?.environmentId ?? null;
   const [isFinishing, setIsFinishing] = useState(false);
   const finishingPromiseRef = useRef<Promise<boolean> | null>(null);
   const completionErrorToastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
-  const primaryEnvironment = usePrimaryEnvironment();
-  useEffect(() => {
-    const newComputers = environments.filter(
-      (environment) => !autoSelectedComputers.has(environment.environmentId),
-    );
-    if (newComputers.length === 0) return;
-    for (const environment of newComputers) {
-      autoSelectedComputers.add(environment.environmentId);
-    }
-    const enabledComputers = newComputers.filter((environment) => environment.entry.enabled);
-    if (enabledComputers.length === 0) return;
-    // oxlint-disable-next-line react/set-state-in-effect -- The registry marks each computer once, and only after commit; render must not mutate it.
-    setSelection(
-      (current) =>
-        new Set([
-          ...(current ?? []),
-          ...enabledComputers.map((environment) => environment.environmentId),
-        ]),
-    );
-  }, [autoSelectedComputers, environments]);
-  const selectedIds =
-    selection ?? new Set(primaryEnvironment ? [primaryEnvironment.environmentId] : []);
-  const startSetup = (ids: readonly EnvironmentId[]) => {
-    if (ids.length === 0) return;
-    setSetupIds(ids);
-    setStep("agents");
-  };
-  const stageIndex = step === "agents" ? 1 : 0;
   const finish = () => {
     if (finishingPromiseRef.current !== null) return finishingPromiseRef.current;
     if (completionErrorToastIdRef.current !== null) {
@@ -159,75 +121,18 @@ export function WelcomeWizard({
               <KurambitWordmark className="text-sm" />
             </div>
           }
-        >
-          <WizardSteps
-            steps={ONBOARDING_STAGES}
-            currentStep={stageIndex}
-            isStepDisabled={(index) => isFinishing || index >= stageIndex}
-            onStepChange={(index) => {
-              if (isFinishing || index > stageIndex) return;
-              setStep(index === 0 ? "connection" : "agents");
-            }}
-          />
-        </WizardHeader>
+        ></WizardHeader>
 
         <WizardPanel>
-          {step === "connection" ? (
-            <ConnectionStep
-              expandPairingInitially={false}
-              selectedIds={selectedIds}
-              autoSelectedComputers={autoSelectedComputers}
-              onSelectionChange={setSelection}
-              onToggleEnvironment={(environmentId, checked) =>
-                setSelection((current) => {
-                  const next = new Set(current ?? selectedIds);
-                  if (checked) next.add(environmentId);
-                  else next.delete(environmentId);
-                  return next;
-                })
-              }
-              onContinue={() =>
-                startSetup(resolveOnboardingSetup(environments, selectedIds).environmentIds)
-              }
-              onPaired={(environmentId) => {
-                setSelection(new Set([...selectedIds, environmentId]));
-              }}
-            />
-          ) : (
-            <AgentsStep
-              environmentIds={setupIds}
-              isFinishing={isFinishing}
-              onContinue={() => void finish()}
-            />
-          )}
+          <AgentsStep
+            environmentIds={setupId === null ? [] : [setupId]}
+            isFinishing={isFinishing}
+            onContinue={() => void finish()}
+          />
         </WizardPanel>
       </WizardPopup>
       <ChatGptWelcomeCoordinator />
     </Dialog>
-  );
-}
-
-function ConnectionStep({
-  onContinue,
-}: {
-  onContinue: () => void;
-  autoSelectedComputers: Set<EnvironmentId>;
-  expandPairingInitially: boolean;
-  selectedIds: ReadonlySet<EnvironmentId>;
-  onSelectionChange: (ids: ReadonlySet<EnvironmentId>) => void;
-  onToggleEnvironment: (environmentId: EnvironmentId, checked: boolean) => void;
-  onPaired: (environmentId: EnvironmentId) => void;
-}) {
-  const primary = usePrimaryEnvironment();
-  return (
-    <StepShell
-      title="Create games on this computer"
-      description="Kurambit runs your agents and game tools locally."
-    >
-      <Button disabled={!primary || primary.connection.phase !== "connected"} onClick={onContinue}>
-        Continue
-      </Button>
-    </StepShell>
   );
 }
 
@@ -253,6 +158,7 @@ function AgentsStep({
   readonly onContinue: () => void;
 }) {
   const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironment()?.environmentId ?? null;
   return (
     <StepShell
       title="Connect your agents"
@@ -266,9 +172,12 @@ function AgentsStep({
             <ConnectedAgentsStep
               key={environmentId}
               environmentId={environmentId}
+              // This computer goes without saying; only another one is named.
               machineLabel={
-                environments.find((environment) => environment.environmentId === environmentId)
-                  ?.label ?? "Computer"
+                environmentId === primaryEnvironmentId && environmentIds.length === 1
+                  ? null
+                  : (environments.find((environment) => environment.environmentId === environmentId)
+                      ?.label ?? "Computer")
               }
             />
           ))}
@@ -289,7 +198,7 @@ function ConnectedAgentsStep({
   machineLabel,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly machineLabel: string;
+  readonly machineLabel: string | null;
 }) {
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
@@ -340,7 +249,7 @@ function ConnectedAgentsStep({
   }
   return (
     <section>
-      <h2 className="mb-2 text-sm font-medium">{machineLabel}</h2>
+      {machineLabel === null ? null : <h2 className="mb-2 text-sm font-medium">{machineLabel}</h2>}
       {!canOperateTerminal ? (
         <p className="mb-2 text-sm text-muted-foreground">
           This connection cannot control terminals.

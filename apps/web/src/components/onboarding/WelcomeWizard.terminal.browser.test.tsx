@@ -203,11 +203,10 @@ async function enterRemoteAgents() {
   await act(async () =>
     root.render(
       <RegistryContext.Provider value={appAtomRegistry}>
-        <WelcomeWizard onDone={state.done} />
+        <WelcomeWizard resumeEnvironmentId={remoteId} onDone={state.done} />
       </RegistryContext.Provider>,
     ),
   );
-  await click("Continue");
   expect(pageText()).toContain("Paired computer");
 }
 
@@ -414,20 +413,5 @@ describe("welcome agent terminal setup", () => {
     await act(async () => setAccess(remoteId, false));
     await click("Close");
     expect(state.close).not.toHaveBeenCalled();
-  });
-
-  it("rechecks the original environment when cleanup runs after pending pretyping", async () => {
-    const writing = deferred<CommandResult>();
-    state.write.mockReturnValueOnce(writing.promise);
-    await enterRemoteAgents();
-    await click("Install");
-    await click("Connect, step 1");
-    expect(state.close).not.toHaveBeenCalled();
-    await act(async () => {
-      setAccess(remoteId, false);
-      writing.resolve(AsyncResult.success(undefined));
-    });
-    expect(state.close).not.toHaveBeenCalled();
-    expect(pageText()).toContain("Set up Kurambit");
   });
 });

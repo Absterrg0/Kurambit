@@ -69,7 +69,9 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   if (
     scope.kind !== "unavailable" &&
     searchTarget &&
-    !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind)
+    !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind) &&
+    // With one computer, "all" is that computer: its own settings show as they are.
+    !(searchTarget.scope === "environment" && scope.environmentIds.length === 1)
   ) {
     const target =
       searchTarget.scope === "environment" ||

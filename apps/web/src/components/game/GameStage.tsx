@@ -1148,7 +1148,7 @@ function ThreadGameStage({
           <DialogHeader>
             <DialogTitle>Export</DialogTitle>
             <DialogDescription>
-              Releases of the game folder, written to builds/ and never committed.
+              Releases of the game, written to builds/ (logs in builds/logs/), never committed.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
