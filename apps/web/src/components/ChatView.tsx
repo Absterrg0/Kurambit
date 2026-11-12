@@ -7961,6 +7961,8 @@ export default function ChatView(props: ChatViewProps) {
                 "-mx-1 flex h-full min-w-0 flex-1 items-center wco:pr-10",
                 // The fixed panel toggles only show for a game while its side panel is open.
                 rightPanelOpen && "pr-24",
+                // As a sheet the panel's column is centred, and its tabs sit over it.
+                compactInspectorVisible && "justify-center pe-16",
               )}
             >
               <GameInspectorTabs threadRef={activeThreadRef} />

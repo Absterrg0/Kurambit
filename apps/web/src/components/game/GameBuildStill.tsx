@@ -61,7 +61,7 @@ export function GameTitleMark({ gameName, mark }: { gameName: string; mark: Game
       {mark === "absent" ? (
         <span className="absolute top-1.5 left-2 text-caption text-white/75">No picture</span>
       ) : mark === "none" || name === "" ? null : mark === "name" ? (
-        <span className="line-clamp-2 font-display text-lg/tight text-balance text-white/85 @3xs:text-2xl/tight @sm:text-3xl/tight">
+        <span className="line-clamp-2 font-display text-xl/tight text-balance text-white/85 @3xs:text-2xl/tight @sm:text-3xl/tight">
           {name}
         </span>
       ) : (

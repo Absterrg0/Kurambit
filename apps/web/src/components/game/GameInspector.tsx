@@ -161,13 +161,13 @@ export function GameInspectorPanel({
       aria-label={TABS.find((entry) => entry.tab === tab)?.label}
       className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col bg-background"
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {/* In the wide sheet of a narrow window, the panel keeps a reading width. Keyed by tab,
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
+        {/* In the wide sheet of a narrow window, the panel keeps a reading width, centred. Keyed by tab,
             so a new tab fades in on the popup clock as the pill slides, like TabsPanel (the
             tabs live in the column's header, outside this panel's tree). */}
         <div
           key={tab}
-          className="w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
+          className="mx-auto w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
         >
           {tab === "build" ? (
             <BuildPanel threadRef={threadRef} />
@@ -177,8 +177,11 @@ export function GameInspectorPanel({
         </div>
       </div>
       {compact ? (
-        <div className="w-full max-w-160 shrink-0 border-t border-border px-4 pb-2">
-          <GameComposerTray threadRef={threadRef} />
+        // The rule spans the sheet; the tray keeps the content's centred column.
+        <div className="shrink-0 border-t border-border">
+          <div className="mx-auto w-full max-w-160 px-4 pb-2">
+            <GameComposerTray threadRef={threadRef} />
+          </div>
         </div>
       ) : null}
     </div>

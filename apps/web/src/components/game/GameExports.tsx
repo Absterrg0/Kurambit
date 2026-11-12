@@ -258,6 +258,10 @@ export function GameExports({
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-medium">{meta.title}</h3>
+                {/* The target's state, read after its name, before anything to press. */}
+                {build ? null : (
+                  <span className="ms-auto text-xs text-muted-foreground">Never exported</span>
+                )}
                 {stale ? (
                   <span className="flex items-center gap-1 rounded-full border border-warning/40 bg-warning-surface px-2 py-0.5 text-2xs text-warning-foreground">
                     <TriangleAlertIcon className="size-3" aria-hidden="true" />
@@ -296,9 +300,6 @@ export function GameExports({
               {/* The actions on their own row under the words, so neither squeezes the other;
                   the target's state beside what changes it. */}
               <div className="flex flex-wrap items-center gap-1.5 pt-2">
-                {build ? null : (
-                  <span className="me-1 text-2xs text-muted-foreground">Never exported</span>
-                )}
                 {build ? (
                   <>
                     {meta.play ? (
@@ -392,10 +393,13 @@ export function GameExports({
                     {target === "Web" ? "Export for web" : `Export for ${target}`}
                   </Button>
                 )}
-                <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>
-                  <ScrollTextIcon className="size-3.5" aria-hidden="true" />
-                  Export log
-                </Button>
+                {/* Only once there is an export: before one, its log has nothing to say. */}
+                {build ? (
+                  <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>
+                    <ScrollTextIcon className="size-3.5" aria-hidden="true" />
+                    Export log
+                  </Button>
+                ) : null}
               </div>
             </div>
           </section>

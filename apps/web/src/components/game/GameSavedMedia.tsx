@@ -253,6 +253,15 @@ export function GameSavedList({ threadRef }: { threadRef: ScopedThreadRef }) {
     });
     setError(result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : null);
   };
+  // Nothing kept is a line under the exports, not a card as heavy as one: it has no action.
+  if (saved.length === 0)
+    return (
+      <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+        <BookmarkIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        {query.error ??
+          "No saved recordings yet. Save one from a build's Recordings to keep it past log cleanup."}
+      </p>
+    );
   return (
     // The same card as an export target's: icon tile, then the words, so the two read as one list.
     <section className="flex items-start gap-4 rounded-lg border border-border bg-card p-4">
@@ -261,31 +270,24 @@ export function GameSavedList({ threadRef }: { threadRef: ScopedThreadRef }) {
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <h3 className="text-sm font-medium">Saved</h3>
-        {saved.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            {query.error ??
-              "Nothing saved yet. Save a recording from a build's Recordings to keep it after the logs are cleaned up."}
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {saved.map((media) => (
-              <li key={media.name} className="flex flex-wrap items-center gap-1">
-                <span className="min-w-0 flex-1 truncate text-xs">{media.name}</span>
-                <span className="text-2xs text-muted-foreground">{sizeLabel(media.bytes)}</span>
-                <SavedFileActions threadRef={threadRef} media={media} />
-                <Button
-                  size="xs"
-                  variant="ghost-destructive"
-                  disabled={!canDelete}
-                  aria-label={`Delete ${media.name}`}
-                  onClick={() => void deleteOne(media.name)}
-                >
-                  <Trash2Icon aria-hidden="true" />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <ul className="space-y-1">
+          {saved.map((media) => (
+            <li key={media.name} className="flex flex-wrap items-center gap-1">
+              <span className="min-w-0 flex-1 truncate text-xs">{media.name}</span>
+              <span className="text-2xs text-muted-foreground">{sizeLabel(media.bytes)}</span>
+              <SavedFileActions threadRef={threadRef} media={media} />
+              <Button
+                size="xs"
+                variant="ghost-destructive"
+                disabled={!canDelete}
+                aria-label={`Delete ${media.name}`}
+                onClick={() => void deleteOne(media.name)}
+              >
+                <Trash2Icon aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>
         {error ? (
           <p role="alert" className="text-xs text-destructive-foreground">
             {error}

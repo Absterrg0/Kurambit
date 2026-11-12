@@ -269,7 +269,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   /* The composer's elevation: a soft drop pulled in under the surface, shared
      by the composer, its context strip and attached banners. */
-  --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
+  --shadow-composer: 0 8px 20px -16px rgb(0 0 0 / 24%);
   --shadow-composer-dark: 0 14px 32px -18px rgb(0 0 0 / 75%);
   /* Home's brief sheet and game pictures sit on the pane like prints on a desk. */
   --shadow-sheet: 0 1px 0 rgb(255 255 255 / 3%) inset, 0 24px 48px -28px rgb(0 0 0 / 55%);

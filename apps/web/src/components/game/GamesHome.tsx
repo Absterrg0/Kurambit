@@ -142,7 +142,8 @@ export function GamesHome() {
               "mx-auto flex w-full max-w-200 flex-col px-8",
               // The stack sits in the middle of the page, so a short shelf leaves no void below.
               "min-h-full justify-center",
-              firstRun ? "pb-32" : "gap-14 py-16",
+              // A little above the middle, where a centred block reads as centred.
+              firstRun ? "pb-32" : "gap-14 pt-12 pb-24",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -340,7 +341,13 @@ function BriefBox({
             disabled={busy}
           />
           <span className="flex-1" />
-          <Button type="submit" size="sm" disabled={busy || !ready}>
+          {/* Lit only once there is a brief to build: an empty box's Enter just focuses it. */}
+          <Button
+            type="submit"
+            size="sm"
+            variant={trimmedBrief.length === 0 ? "secondary" : "default"}
+            disabled={busy || !ready}
+          >
             {busy ? "Starting…" : "Start building"}
             {busy ? null : <Kbd>⏎</Kbd>}
           </Button>
@@ -365,7 +372,7 @@ function BriefBox({
           ))}
         </ul>
       ) : (
-        <Text variant="meta" tone="dim" render={<p />}>
+        <Text variant="meta" tone="muted" render={<p />}>
           A playable first version in a few minutes. Rename, restyle and change it any time.
         </Text>
       )}
@@ -423,12 +430,13 @@ function BriefOptions({
             size="sm"
             variant="ghost-muted"
             disabled={disabled}
-            aria-label="Options for the first build"
+            aria-label={`First build options: characters from ${characterRouteLabel(characters)}`}
           />
         }
       >
         <SlidersHorizontalIcon aria-hidden />
-        {characters === "library" ? null : `${characterRouteLabel(characters)} characters`}
+        {/* The one choice it holds, named with its value, so the icon is never a riddle. */}
+        Characters: {characterRouteLabel(characters)}
       </MenuTrigger>
       <MenuPopup align="start" className="w-72">
         <MenuGroup>

@@ -69,7 +69,16 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Kbd } from "../ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuShortcut,
+  MenuTrigger,
+} from "../ui/menu";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -458,13 +467,15 @@ function ThreadGameStage({
           child !== strip
         )
           taken += child.offsetHeight;
-      // The strip less its pictures: they grow with what the Stage leaves over,
-      // so measuring them in would chase their own growth.
-      const cardWidth = Number.parseFloat(
-        strip?.style.getPropertyValue("--build-card-width") ?? "",
-      );
-      const picture = Number.isFinite(cardWidth) ? (cardWidth * 9) / 16 : BUILD_CARD_PICTURE.min;
-      const stripChrome = strip === null ? 0 : Math.max(0, strip.offsetHeight - picture);
+      // The strip less its pictures: they grow with what the Stage leaves over, so measuring
+      // them in would chase their own growth. Both sides as rendered, unrounded: a rounded
+      // picture height would move the chrome by a pixel per fit and never settle.
+      const picture =
+        strip
+          ?.querySelector("[data-game-build-card], [data-game-build-slot]")
+          ?.firstElementChild?.getBoundingClientRect().height ?? BUILD_CARD_PICTURE.min;
+      const stripChrome =
+        strip === null ? 0 : Math.max(0, strip.getBoundingClientRect().height - picture);
       // The surface's side insets (mx-3) and a breath above the strip.
       const next = fitStage(
         section.clientWidth - 24,
@@ -1036,62 +1047,67 @@ function ThreadGameStage({
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label="More game actions"
+                  aria-label="Stage actions"
                   data-game-stage-more=""
                 />
               }
             >
               <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
+            {/* The game's own things (name, folder, export, tools) live under its name; this
+                menu is only what plays on the Stage, and says so. */}
             <MenuPopup align="end">
-              {engine.stageBridge && stageKind === "live" ? (
-                <MenuItem
-                  disabled={phase.kind !== "playing" || bridgeStatus === null}
-                  onClick={() => {
-                    toggleStageFreeze();
-                    // Focus the Stage, so Tab and Esc work here for a game without the bridge's keys.
-                    stageRef.current?.focus({ preventScroll: true });
-                  }}
-                >
-                  <CrosshairIcon />
-                  {frozen ? "Play on" : "Freeze to point at things"}
-                  <MenuShortcut>Tab</MenuShortcut>
-                </MenuItem>
-              ) : null}
-              {stageKind === "live" ? (
-                <MenuItem
-                  disabled={data.previewUrl === null}
-                  onClick={() => setFrameFold(reloadFrame(frame, Date.now()))}
-                >
-                  <RefreshCwIcon />
-                  Reload the game
-                </MenuItem>
-              ) : null}
-              {stageKind === "export" && engine.status === "active" ? (
-                <>
-                  <MenuItem disabled={!playEnabled} onClick={() => void perform("preview")}>
-                    <PlayIcon />
-                    {webBuild === undefined ? "Build and play" : "Play"}
+              <MenuGroup>
+                <MenuGroupLabel>On the Stage</MenuGroupLabel>
+                {engine.stageBridge && stageKind === "live" ? (
+                  <MenuItem
+                    disabled={phase.kind !== "playing" || bridgeStatus === null}
+                    onClick={() => {
+                      toggleStageFreeze();
+                      // Focus the Stage, so Tab and Esc work here for a game without the bridge's keys.
+                      stageRef.current?.focus({ preventScroll: true });
+                    }}
+                  >
+                    <CrosshairIcon />
+                    {frozen ? "Play on" : "Freeze to point at things"}
+                    <MenuShortcut>Tab</MenuShortcut>
                   </MenuItem>
-                  <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
+                ) : null}
+                {stageKind === "live" ? (
+                  <MenuItem
+                    disabled={data.previewUrl === null}
+                    onClick={() => setFrameFold(reloadFrame(frame, Date.now()))}
+                  >
                     <RefreshCwIcon />
-                    Rebuild the web export
+                    Reload the game
                   </MenuItem>
-                </>
-              ) : null}
-              {stageKind !== "window" ? (
-                <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
-                  {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
-                  {fullscreen ? "Leave fullscreen" : "Fullscreen"}
-                  {fullscreenKey === null ? null : <MenuShortcut>{fullscreenKey}</MenuShortcut>}
-                </MenuItem>
-              ) : null}
-              {hasSteps ? (
-                <MenuItem onClick={() => setReelOpen(!reelOpen)}>
-                  <FilmIcon />
-                  {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
-                </MenuItem>
-              ) : null}
+                ) : null}
+                {stageKind === "export" && engine.status === "active" ? (
+                  <>
+                    <MenuItem disabled={!playEnabled} onClick={() => void perform("preview")}>
+                      <PlayIcon />
+                      {webBuild === undefined ? "Build and play" : "Play"}
+                    </MenuItem>
+                    <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
+                      <RefreshCwIcon />
+                      Rebuild the web export
+                    </MenuItem>
+                  </>
+                ) : null}
+                {stageKind !== "window" ? (
+                  <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
+                    {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+                    {fullscreen ? "Leave fullscreen" : "Fullscreen"}
+                    {fullscreenKey === null ? null : <MenuShortcut>{fullscreenKey}</MenuShortcut>}
+                  </MenuItem>
+                ) : null}
+                {hasSteps ? (
+                  <MenuItem onClick={() => setReelOpen(!reelOpen)}>
+                    <FilmIcon />
+                    {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
+                  </MenuItem>
+                ) : null}
+              </MenuGroup>
               <MenuSeparator />
               <MenuItem
                 disabled={!canAct || !runningSomething}
@@ -1106,7 +1122,8 @@ function ThreadGameStage({
             <TooltipTrigger
               render={
                 <Button
-                  size="icon-sm"
+                  // Compact, the Inspector is a whole other view, so its way in says its name.
+                  size={compact ? "sm" : "icon-sm"}
                   variant="ghost"
                   aria-label={
                     compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"
@@ -1120,6 +1137,7 @@ function ThreadGameStage({
               }
             >
               <PanelRightIcon className="size-3.5" aria-hidden="true" />
+              {compact ? "Inspector" : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               {compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"}
