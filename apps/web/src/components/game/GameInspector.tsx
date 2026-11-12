@@ -784,7 +784,7 @@ function CheckRow({
           </Tooltip>
         </Text>
         {value === null ? null : (
-          <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
+          <Text variant="meta" tone="muted" numeric render={<span className="shrink-0" />}>
             {value}
           </Text>
         )}
@@ -1167,7 +1167,7 @@ function BuildActions({
         ) : null}
       </header>
       {build.noPlay !== null ? (
-        <Text variant="caption" tone="muted" render={<p />}>
+        <Text variant="meta" tone="muted" render={<p />}>
           {build.noPlay}
         </Text>
       ) : null}

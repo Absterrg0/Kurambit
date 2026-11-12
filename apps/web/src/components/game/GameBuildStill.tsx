@@ -160,14 +160,19 @@ export function GameNowPicture({
       )}
     >
       {still !== null ? (
-        <img src={still} alt="" className="absolute inset-0 size-full object-cover" />
+        // The Stage's frame arriving over the stand-in fades in, never swaps in a frame.
+        <img
+          src={still}
+          alt=""
+          className="absolute inset-0 size-full object-cover transition-opacity motion-surface starting:opacity-0"
+        />
       ) : fallback !== null && threadRef !== null ? (
         <GameBuildStill
           threadRef={threadRef}
           gameName={gameName}
           build={fallback}
           mark="name"
-          className="absolute inset-0 opacity-45 saturate-50"
+          className="absolute inset-0 opacity-55 saturate-50"
         />
       ) : (
         <GameTitleMark gameName={gameName} mark="name" />

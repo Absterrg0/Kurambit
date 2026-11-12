@@ -293,13 +293,13 @@ left it. A three.js game's stage shows the folder live, so while your agent work
 the latest build.
 
 The build strip under the game has one picture per build, oldest to newest: a frame from the
-build's own play, its number, what you asked for, and two counts, the checks that pass and the ones
-to look at. The build on the stage is outlined, an undone build is dimmed and struck, a keep-going
+build's own play, what you asked for, its number and time, and what changed in its checks. The build on the stage is outlined, an undone build is dimmed and struck, a keep-going
 step carries a step sign, and the build being made waits as a dashed card with its time. **Now**
-appears when the game folder is not any build (edited since, or another build plays from a copy).
+appears when the game folder is not any build (edited since, or another build plays from a copy);
+until the Stage has shown the game, its picture is the last build's, dimmed.
 **Older** pages back. Clicking a picture plays that build (an older one from a copy; the game folder
 is never touched, and **Back to the current game** or the newest picture returns) and shows it in the Inspector's **Build**
-tab, which lists what you asked, how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won and does that take skill, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement, each in a plain sentence, under **More measurements**, the files it changed (opening the
+tab, which lists what you asked, how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won, is it won by random or no input, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement, each in a plain sentence, under **Other measurements**, the files it changed (opening the
 diff), its recordings, and in the **⋯** beside the build's name:
 
 - **Undo this build** on the latest turn, which puts back the build the turn started from. After an undo,
@@ -309,7 +309,9 @@ diff), its recordings, and in the **⋯** beside the build's name:
   stay as they are. What the folder held is saved as a build first, so going back never discards work, and
   **Redo** puts it back.
 
-Checks not measured for the same reason are said once, with the reason. **Compare with** the build
+When the game folder has changed since its last build, the tab shows **Now on the Stage** first and
+the checks under **Last measured build**, since they belong to that build, not to what plays now.
+Checks not measured for the same reason are said once; the ⓘ beside them says why. **Compare with** the build
 before it, or **Compare** on the strip (or **Compare builds…** in the command palette) to pick two
 pictures, shows them side by side in the game area, each playable, with their facts in a
 table: ↑ and ↓ show which way a fact moved, ≠ that it changed without a direction (an ending that
