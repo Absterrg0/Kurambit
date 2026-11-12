@@ -106,7 +106,7 @@ function SettingsContentLayout() {
         <SettingsSidebarNav pathname={location.pathname} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex h-13 shrink-0 items-center gap-3 ps-5 pe-3">
-            <SettingsBreadcrumb pathname={location.pathname} />
+            <SettingsBreadcrumb />
             <div className="ms-auto flex shrink-0 items-center gap-1">
               <SettingsDialogClose />
             </div>
