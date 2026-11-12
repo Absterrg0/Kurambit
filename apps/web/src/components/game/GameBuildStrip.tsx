@@ -469,7 +469,7 @@ function CardRing({ on }: { on: boolean }) {
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
         on
-          ? "ring-2 ring-foreground/55"
+          ? "ring-1 ring-foreground/70"
           : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
       )}
     />

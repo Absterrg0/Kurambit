@@ -1075,8 +1075,38 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const swatches = style !== null && Array.isArray(style.palette) ? style.palette : [];
   const [artOpen, setArtOpen] = useState(false);
   const choosing = useChoosingCount(threadRef);
+  // The look shown, not only named: the folder's latest build as its picture.
+  const builds = useEnvironmentQuery(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  ).data;
+  const lookStill = builds?.builds.find((build) => build.id === builds.current)?.still ?? null;
+  const gameName = useIsGameThreadStatus(threadRef).data?.manifest.name ?? "";
   return (
     <Section title="Look">
+      {lookStill === null ? null : (
+        <GameBuildStill
+          threadRef={threadRef}
+          gameName={gameName}
+          build={{ still: lookStill }}
+          className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset"
+        >
+          {swatches.length > 0 ? (
+            <span className="absolute right-2 bottom-2 z-10 flex gap-0.5 rounded-md bg-black/55 p-1 backdrop-blur-sm">
+              {swatches.slice(0, 6).map((hex) => (
+                <span
+                  key={hex}
+                  aria-label={hex}
+                  className="size-3 rounded-sm"
+                  style={{ background: hex }}
+                />
+              ))}
+            </span>
+          ) : null}
+        </GameBuildStill>
+      )}
       <Rows>
         <div className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
           <Text variant="meta" tone="default" render={<span className="flex-1" />}>
@@ -1215,7 +1245,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         />
       ) : null}
       {things.length === 0 ? (
-        <div className="flex flex-col gap-1.5 rounded-lg border border-dashed border-border px-3 py-3">
+        <div className="surface-well flex flex-col gap-1.5 rounded-lg px-3 py-3">
           <Text variant="meta" tone="default" render={<p />}>
             Nothing named yet
           </Text>
