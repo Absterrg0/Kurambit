@@ -41,6 +41,8 @@ import {
   timelineMarks,
 } from "./gameBuildTimeline.logic";
 
+/** About how many characters of a request a card's caption shows before it cuts the rest. */
+const CARD_CAPTION_FITS = 32;
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
 
@@ -510,9 +512,9 @@ function BuildCard({
             className={cn(
               "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
               NEW_CARD_MOTION,
-              // An undone build stays readable, its word and strike saying what it is; a pruned
-              // one has nothing to open and steps further back.
-              !build.available ? "opacity-40" : undone && "opacity-65",
+              // A pruned build has nothing to open and steps back; an undone one keeps its caption
+              // readable, its word and strike saying what it is, and only its picture recedes.
+              !build.available && "opacity-40",
             )}
           />
         }
@@ -523,9 +525,7 @@ function BuildCard({
           build={build}
           title={buildName(build)}
           mark="name"
-          // Keyboard focus is a second ring just inside the one that marks the build on the Stage,
-          // so the two never read as one and focus never crosses the caption.
-          className="aspect-video w-full rounded-md -outline-offset-4 group-focus-visible/card:outline-2 group-focus-visible/card:outline-ring group-focus-visible/card:outline-solid"
+          className={cn("aspect-video w-full rounded-md", undone && "opacity-50 saturate-50")}
         >
           <CardRing
             on={picking ? false : onStage}
@@ -571,7 +571,8 @@ function BuildCard({
           time, and how the build measured, which the card does not say. */}
       <TooltipPopup side="bottom" className="max-w-xs">
         <span className="flex flex-col gap-0.5">
-          <span>{caption}</span>
+          {/* The whole request only when the card had to cut it. */}
+          {caption.length > CARD_CAPTION_FITS ? <span>{caption}</span> : null}
           <span className="text-muted-foreground">
             {[formatBuildTime(build.at), checksLine(build.facts), undone ? "undone" : null]
               .filter((part) => part !== null)
@@ -624,6 +625,9 @@ function CardRing({
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
+        // Keyboard focus: a second, heavier ring just inside the one that marks the build on the
+        // Stage, drawn here above the picture so no picture covers it; it never crosses the caption.
+        "-outline-offset-5 group-focus-visible/card:outline-3 group-focus-visible/card:outline-solid group-focus-visible/card:outline-ring",
         pick === "picked"
           ? "ring-2 ring-strong-foreground"
           : pick === "pickable"
@@ -785,7 +789,7 @@ function NowCard({
           gameName={gameName}
           fallback={changed ? current : null}
           threadRef={threadRef}
-          className="aspect-video w-full rounded-md -outline-offset-4 group-focus-visible/card:outline-2 group-focus-visible/card:outline-ring group-focus-visible/card:outline-solid"
+          className="aspect-video w-full rounded-md"
         >
           {borrowed ? (
             // The picture is the last build's until the Stage shows the game: it says so.

@@ -834,7 +834,7 @@ export const TraitsPicker = memo(function TraitsPicker({
             </>
           )}
         </TooltipTrigger>
-        <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
+        <TooltipPopup side="top">How hard the agent thinks: {triggerLabel}</TooltipPopup>
       </Tooltip>
       <MenuPopup
         align="start"

@@ -110,12 +110,14 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
                             ? caption
                             : `${buildName(build)} · ${caption}`}
                         </Text>
+                        {/* When and how it measured: what tells builds apart, the checks on a
+                            line of their own so their count is never cut. Its files are in the
+                            build itself, one click away. */}
                         <Text variant="meta" tone="muted" numeric truncate>
-                          {/* When and how it measured: what tells builds apart. Its files are
-                              in the build itself, one click away. */}
-                          {[formatBuildTime(build.at), checksLine(build.facts)]
-                            .filter((part) => part !== null)
-                            .join(" · ")}
+                          {formatBuildTime(build.at)}
+                        </Text>
+                        <Text variant="meta" tone="muted" numeric>
+                          {checksLine(build.facts)}
                         </Text>
                       </span>
                     </button>

@@ -229,9 +229,8 @@ const runEvent = (sentence: string): string =>
           : "No ending";
 /** What a row's reading means, said under it when it differs: a scale or how much it varies. */
 const ROW_NOTES: Partial<Record<GameFactId, string>> = {
-  masher: "Random input plays differently every run, so this reading varies by itself.",
-  motion:
-    "How much the picture changes from frame to frame (temporal information, ITU-T P.910): a still picture is 0.",
+  masher: "Varies from run to run by itself.",
+  motion: "How much the picture changes from frame to frame; a still picture is 0.",
 };
 
 /** Rows that vary between runs of the same build: not counted as a difference a change made. */
@@ -398,10 +397,15 @@ export const compareRows = (
       note: line.mark === "=" ? null : (ROW_NOTES[delta.id] ?? null),
     });
   }
-  // What differs leads; readings that are the same follow, so the answer is read first.
+  // What differs leads, then what varies by itself (outside the count), then what is the same.
   const same = (row: CompareRow) => row.mark === "=";
+  const varies = (row: CompareRow) => !same(row) && VARIES_BY_ITSELF.has(row.id);
   return {
-    rows: [...rows.filter((row) => !same(row)), ...rows.filter(same)],
+    rows: [
+      ...rows.filter((row) => !same(row) && !varies(row)),
+      ...rows.filter(varies),
+      ...rows.filter(same),
+    ],
     unmeasured: [...unmeasured].map(([why, names]) => ({ names, why })),
     oneSided: [...oneSided.values()],
   };

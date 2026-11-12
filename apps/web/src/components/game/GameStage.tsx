@@ -215,7 +215,7 @@ const BUILD_CARD_GAP = 12;
  * agent's note (two lines) and one suggestion. They appear as a turn runs and lands, and the
  * Stage must not shrink and re-centre each time; only rows past this budget take its height.
  */
-const TRANSIENT_ROWS_RESERVE = 92;
+const TRANSIENT_ROWS_RESERVE = 100;
 const TRANSIENT_ROWS =
   "[data-game-agent-note], [data-game-pointed], [data-game-direction-bar] [data-composer-banner-drawer]";
 
@@ -346,12 +346,6 @@ function ThreadGameStage({
     }),
     buildPhraseOf(undoBase),
   );
-  const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
-  const undoLabel =
-    undoName === null
-      ? "Undo the last build"
-      : `Undo ${undoName}${undoBaseName == null ? "" : `, back to ${undoBaseName}`}`;
-  const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const turnUndoAllowed = (kind: "undo" | "redo") =>
     turnUndo.action?.kind === kind &&
     turnUndo.action.blocked === null &&
@@ -455,6 +449,10 @@ function ThreadGameStage({
     turnRunning: turnRunning || landing,
   });
   if (liveRevision !== liveShown) setLiveShown(liveRevision);
+  // Changes held back through a turn are its build: the remount that applies them is a new one.
+  const [heldBuild, setHeldBuild] = useState(false);
+  if ((turnRunning || landing) && liveShown !== null && live.revision !== liveShown && !heldBuild)
+    setHeldBuild(true);
   // The request that made the slot, kept past the turn's end for the slot's last moments.
   const [slotRequest, setSlotRequest] = useState(turnRequest);
   if (turnRequest !== null && turnRequest !== slotRequest) setSlotRequest(turnRequest);
@@ -476,6 +474,15 @@ function ThreadGameStage({
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
+  const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
+  // On a game changed since its build, the restore keeps those changes as a build of their own.
+  const undoLabel =
+    undoName === null
+      ? "Undo the last build"
+      : `Undo ${undoName}${undoBaseName == null ? "" : `, back to ${undoBaseName}`}${
+          changedSince == null ? "" : "; the changes since are kept on the strip"
+        }`;
+  const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
@@ -918,12 +925,16 @@ function ThreadGameStage({
       // An Undo or Redo changes the folder before its build list says so.
       newBuild:
         turnUndo.restoring ||
+        heldBuild ||
         (frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild),
     },
   );
   if (frame !== frameFold) {
     setFrameFold(frame);
-    if (frame.key !== frameFold?.key) setFrameBuild(folderBuild);
+    if (frame.key !== frameFold?.key) {
+      setFrameBuild(folderBuild);
+      setHeldBuild(false);
+    }
   } else if (frameBuild === null && folderBuild !== null) setFrameBuild(folderBuild);
   const frameKey = frame.key;
   // A reload clears what the old page threw; a later error sets it again.

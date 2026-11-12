@@ -84,8 +84,9 @@ export const useStageStills = create<Readonly<Record<string, string>>>()(() => (
  * only, like the Stage's own still.
  */
 export const useBuildFrames = create<Readonly<Record<string, string>>>()(() => ({}));
+/** The first frame kept for a build stays its picture: a picture never swaps once a build has one. */
 export const keepBuildFrame = (build: string, still: string) => {
-  if (useBuildFrames.getState()[build] !== still) useBuildFrames.setState({ [build]: still });
+  if (useBuildFrames.getState()[build] === undefined) useBuildFrames.setState({ [build]: still });
 };
 export const useBuildFrame = (build: string | null): string | null =>
   useBuildFrames((frames) => (build === null ? null : (frames[build] ?? null)));
