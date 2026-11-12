@@ -4479,6 +4479,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
     : standaloneComposerImages;
   const composerControlsCollapsed = isComposerResting || isComposerCollapsedMobile;
+  // A resting coding composer quiets its pickers; a game's are always in reach and read as
+  // available, the same size focused or not, so nothing in the game's composer looks disabled.
+  const quietRestingControls = composerControlsCollapsed && !gameThread;
   const showInlineRestingControls = composerControlsCollapsed && restingControlsHost === null;
   const composerControlsVisibleInStrip =
     composerControlsCollapsed && restingControlsHost !== null && restingControlsVisible;
@@ -4700,7 +4703,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : expandedControlsIconOnlyBlockCount;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
-    size: composerControlsCollapsed ? "xs" : "sm",
+    size: quietRestingControls ? "xs" : "sm",
     hidden: composerControlsHidden || restingHiddenBlockCount > 1,
   });
   const restingBlockDefs = [
@@ -4710,7 +4713,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             id: "traits",
             content: (
               <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
+                <ComposerControlSeparator size={quietRestingControls ? "xs" : "sm"} />
                 {restingProviderTraitsPicker}
               </>
             ),
@@ -4730,7 +4733,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 interactionMode={interactionMode}
                 runtimeMode={compatibleRuntimeMode}
                 runtimeModeOptions={compatibleRuntimeModeOptions}
-                size={composerControlsCollapsed ? "xs" : "sm"}
+                size={quietRestingControls ? "xs" : "sm"}
                 hidden={composerControlsHidden || restingHiddenBlockCount > 0}
                 onToggleInteractionMode={toggleInteractionMode}
                 onRuntimeModeChange={handleRuntimeModeChange}
@@ -4823,9 +4826,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         instanceEntries={providerInstanceEntries}
         keybindings={keybindings}
         modelOptionsByInstance={modelOptionsByInstance}
-        size={composerControlsCollapsed ? "xs" : "sm"}
+        size={quietRestingControls ? "xs" : "sm"}
         triggerClassName={
-          composerControlsCollapsed
+          quietRestingControls
             ? cn(
                 "min-w-13 shrink text-xs!",
                 !showInlineRestingControls &&
@@ -4836,15 +4839,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         terminalOpen={terminalOpen}
         open={isComposerModelPickerOpen}
         instanceIndicatorBackground={
-          composerControlsCollapsed
+          quietRestingControls
             ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
             : "var(--contrast-input)"
         }
-        {...(composerProviderState.modelPickerIconClassName || composerControlsCollapsed
+        {...(composerProviderState.modelPickerIconClassName || quietRestingControls
           ? {
               activeProviderIconClassName: cn(
                 composerProviderState.modelPickerIconClassName,
-                composerControlsCollapsed &&
+                quietRestingControls &&
                   "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
               ),
             }
@@ -4894,7 +4897,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             interactionMode={interactionMode}
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
-            size={composerControlsCollapsed ? "xs" : "sm"}
+            size={quietRestingControls ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
             showRuntimeMode={!gameThread}
