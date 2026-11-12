@@ -257,7 +257,8 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                 onError={() => setFailedImageSrc(item.src)}
               />
             )}
-            <div className="mt-2 flex max-w-[var(--media-width)] items-center justify-center gap-1.5 text-xs text-white/80 max-sm:px-10">
+            {/* The caption sits on its own opaque bar under the media, never on the page behind. */}
+            <div className="mt-2 flex max-w-[var(--media-width)] items-center justify-center gap-2 rounded-md bg-stage-well px-3 py-1.5 text-xs text-white/85 max-sm:mx-10">
               <span
                 className="flex min-w-0 flex-col items-center"
                 aria-live="polite"

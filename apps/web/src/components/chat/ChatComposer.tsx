@@ -2569,6 +2569,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPromptChange: setPromptFromTraitsStable,
     planModeEnabled: settings.planModeEnabled,
     isComposerOwned: true,
+    // A game's pickers read in the full text colour: always in reach, never like footnotes.
+    ...(gameThread ? { triggerClassName: "text-foreground" } : {}),
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
   const [inlineRestingControlsHost, setInlineRestingControlsHost] = useState<HTMLDivElement | null>(
@@ -4836,7 +4838,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 !showInlineRestingControls &&
                   "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
               )
-            : "-ms-2.5 min-w-13"
+            : cn("-ms-2.5 min-w-13", gameThread && "text-foreground")
         }
         terminalOpen={terminalOpen}
         open={isComposerModelPickerOpen}

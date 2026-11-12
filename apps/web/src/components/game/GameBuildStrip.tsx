@@ -521,7 +521,9 @@ function BuildCard({
           build={build}
           title={buildName(build)}
           mark="name"
-          className="aspect-video w-full rounded-md"
+          // Keyboard focus is a second ring just inside the one that marks the build on the Stage,
+          // so the two never read as one and focus never crosses the caption.
+          className="aspect-video w-full rounded-md -outline-offset-4 group-focus-visible/card:outline-2 group-focus-visible/card:outline-ring group-focus-visible/card:outline-solid"
         >
           <CardRing
             on={picking ? false : onStage}
@@ -533,16 +535,30 @@ function BuildCard({
         </GameBuildStill>
         {/* Two lines, always both used: what it was, then which one (its name and time), so
             two cards with the same picture still tell apart and no caption line sits empty. */}
+        {/* A person's or a step's build leads with its name, the one thing that tells two apart
+            for good, and says "undone" in words; what was asked is its caption. A saved build's
+            label already is its name, so its time is the caption. */}
         <CardCaption
           strong={onStage}
-          title={<span className={cn(undone && "line-through")}>{caption}</span>}
+          title={
+            name === null || build.source._tag === "saved" ? (
+              <span className={cn(undone && "line-through")}>{caption}</span>
+            ) : (
+              <>
+                <span className={cn(undone && "line-through")}>{name}</span>
+                {undone ? <span className="text-muted-foreground"> · undone</span> : null}
+              </>
+            )
+          }
           meta={
             <>
               {step === null ? null : (
                 <FastForwardIcon className="size-3 shrink-0" aria-hidden="true" />
               )}
               <span className="truncate">
-                {[name, formatBuildTime(build.at)].filter((part) => part !== null).join(" · ")}
+                {name === null || build.source._tag === "saved"
+                  ? formatBuildTime(build.at)
+                  : caption}
               </span>
               <CheckDelta build={build} previous={previous} />
             </>
@@ -555,7 +571,7 @@ function BuildCard({
         <span className="flex flex-col gap-0.5">
           <span>{caption}</span>
           <span className="text-muted-foreground">
-            {[checksLine(build.facts), undone ? "undone" : null]
+            {[formatBuildTime(build.at), checksLine(build.facts), undone ? "undone" : null]
               .filter((part) => part !== null)
               .join(" · ")}
           </span>
@@ -606,16 +622,13 @@ function CardRing({
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
-        // A card's keyboard focus is drawn on its picture, in the app's ring colour, so it
-        // never crosses the caption under it.
-        "group-focus-visible/card:ring-2! group-focus-visible/card:ring-ring!",
         pick === "picked"
           ? "ring-2 ring-strong-foreground"
           : pick === "pickable"
             ? "ring-1 ring-foreground/35 group-hover/card:ring-2 group-hover/card:ring-foreground/70"
             : on
               ? "ring-2 ring-strong-foreground"
-              : "ring-1 ring-border group-hover/card:ring-foreground/30",
+              : "ring-1 ring-border group-hover/card:ring-2 group-hover/card:ring-foreground/45",
       )}
     />
   );
@@ -770,7 +783,7 @@ function NowCard({
           gameName={gameName}
           fallback={changed ? current : null}
           threadRef={threadRef}
-          className="aspect-video w-full rounded-md"
+          className="aspect-video w-full rounded-md -outline-offset-4 group-focus-visible/card:outline-2 group-focus-visible/card:outline-ring group-focus-visible/card:outline-solid"
         >
           {/* Now is a state, not a build: one chip on the picture says which card it is. */}
           <PictureChip>
