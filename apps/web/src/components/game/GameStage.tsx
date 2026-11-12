@@ -536,6 +536,7 @@ function ThreadGameStage({
   // being written, so a longer message shrinks the Stage but never the composer under it.
   const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
+  const hasTurn = latestRun !== null;
   const [titleUnderControls, setTitleUnderControls] = useState(true);
   const hasStatus = data != null;
   useLayoutEffect(() => {
@@ -582,7 +583,8 @@ function ThreadGameStage({
       const transient = [
         ...(section.parentElement?.querySelectorAll<HTMLElement>(TRANSIENT_ROWS) ?? []),
       ].reduce((sum, row) => sum + row.offsetHeight, 0);
-      const height = section.clientHeight + transient - TRANSIENT_ROWS_RESERVE;
+      // A game that has had no turn has no note or suggestion to make room for.
+      const height = section.clientHeight + transient - (hasTurn ? TRANSIENT_ROWS_RESERVE : 0);
       // The surface's side insets (mx-3) and a breath above the strip.
       const next = fitStage(
         section.clientWidth - 24,
@@ -637,7 +639,7 @@ function ThreadGameStage({
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight, comparing]);
+  }, [viewportWidth, viewportHeight, comparing, hasTurn]);
   const stageFitStyle =
     stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width + 24 };
   // The strip and the composer under it end where the fitted Stage ends, so a height-bound
