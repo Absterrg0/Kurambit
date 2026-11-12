@@ -1023,6 +1023,40 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  // A game's bot recordings play from its folder; their URL reaches that one video only.
+  it.effect("issues exact workspace URLs for a game's recording", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "kurambit-asset-video-workspace-",
+      });
+      const runDirectory = path.join(root, "builds", "logs", "run");
+      yield* fileSystem.makeDirectory(runDirectory, { recursive: true });
+      yield* fileSystem.writeFile(
+        path.join(runDirectory, "run.mp4"),
+        new Uint8Array([0, 0, 0, 24]),
+      );
+      yield* fileSystem.writeFile(
+        path.join(runDirectory, "trace.json"),
+        new Uint8Array([123, 125]),
+      );
+      const canonicalVideoPath = yield* fileSystem.realPath(path.join(runDirectory, "run.mp4"));
+
+      const result = yield* issueAssetUrl({
+        resource: { _tag: "draft-workspace-file", cwd: root, path: "builds/logs/run/run.mp4" },
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const token = suffix.slice(0, suffix.indexOf("/"));
+
+      expect(yield* resolveAsset(token, "run.mp4")).toEqual({
+        kind: "file",
+        path: canonicalVideoPath,
+      });
+      expect(yield* resolveAsset(token, "trace.json")).toBeNull();
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("previews workspace files with literal fragment characters in their paths", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

@@ -202,17 +202,6 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         }}
       >
         <DialogTitle className="sr-only">Expanded {mediaLabel} preview</DialogTitle>
-        <Button
-          type="button"
-          ref={closeButtonRef}
-          size="icon-sm"
-          variant="media-close"
-          className="absolute right-0 top-0 z-20"
-          onClick={onClose}
-          aria-label={`Close ${mediaLabel} preview`}
-        >
-          <XIcon />
-        </Button>
         {preview.images.length > 1 && (
           <Button
             type="button"
@@ -227,6 +216,18 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         )}
         <MediaActions source={actionsSource}>
           <div className="relative isolate z-10 flex max-h-full max-w-[var(--media-width)] flex-col items-center">
+            {/* Close sits on the media's own corner, where the eye already is, not the window's. */}
+            <Button
+              type="button"
+              ref={closeButtonRef}
+              size="icon-sm"
+              variant="media-close"
+              className="absolute -top-10 right-0 z-20"
+              onClick={onClose}
+              aria-label={`Close ${mediaLabel} preview`}
+            >
+              <XIcon />
+            </Button>
             {item.type === "video" ? (
               <ExpandedVideo key={index} item={item} />
             ) : showingAccessibilityDetails ? (

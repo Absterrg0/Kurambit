@@ -22,6 +22,7 @@ import {
   hostPreviewMimeTypeFromExtension,
   isWorkspaceImagePreviewPath,
   isWorkspacePreviewEntryPath,
+  isWorkspaceVideoPreviewPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
   WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
 } from "@kurambit/shared/filePreview";
@@ -450,7 +451,12 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
             }),
         ),
       );
-    if (!isWorkspacePreviewEntryPath(resolved.relativePath)) {
+    // A workspace video plays in the media viewer, as a game's bot recordings do: like an
+    // image, it is read only from inside the workspace.
+    if (
+      !isWorkspacePreviewEntryPath(resolved.relativePath) &&
+      !isWorkspaceVideoPreviewPath(resolved.relativePath)
+    ) {
       return yield* new AssetPreviewTypeValidationError({
         resource: input.resource,
       });
@@ -487,21 +493,24 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
       ? yield* readImageDimensionsFromHeader(canonicalFile)
       : null;
     return {
-      claims: isWorkspaceImagePreviewPath(resolved.relativePath)
-        ? {
-            version: 1 as const,
-            kind: "workspace-file-exact" as const,
-            workspaceRoot: canonicalWorkspaceRoot,
-            relativePath: resolved.relativePath,
-            expiresAt: input.expiresAt,
-          }
-        : {
-            version: 1 as const,
-            kind: "workspace-file" as const,
-            workspaceRoot: canonicalWorkspaceRoot,
-            baseRelativePath: path.dirname(resolved.relativePath),
-            expiresAt: input.expiresAt,
-          },
+      // An image or a video is one file: its claim reaches that file and nothing beside it.
+      claims:
+        isWorkspaceImagePreviewPath(resolved.relativePath) ||
+        isWorkspaceVideoPreviewPath(resolved.relativePath)
+          ? {
+              version: 1 as const,
+              kind: "workspace-file-exact" as const,
+              workspaceRoot: canonicalWorkspaceRoot,
+              relativePath: resolved.relativePath,
+              expiresAt: input.expiresAt,
+            }
+          : {
+              version: 1 as const,
+              kind: "workspace-file" as const,
+              workspaceRoot: canonicalWorkspaceRoot,
+              baseRelativePath: path.dirname(resolved.relativePath),
+              expiresAt: input.expiresAt,
+            },
       fileName: path.basename(resolved.relativePath),
       imageDimensions,
     };
