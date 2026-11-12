@@ -830,9 +830,12 @@ export function ProviderInstanceCard({
     <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">{headerAction}</span>
   ) : null;
 
+  // Versions read in the row's own type: a mono run beside a sans name looks like code.
   const versionCodeNode = versionLabel ? (
-    <code className="text-xs text-muted-foreground">{versionLabel}</code>
+    <span className="text-meta text-muted-foreground tabular-nums">{versionLabel}</span>
   ) : null;
+  // The list has one muted line per provider: its plan when signed in, else its state.
+  const planLabel = authLabel?.replace(/\s+subscription$/i, "") || null;
 
   const statusDotNode =
     statusKey === "warning" || statusKey === "error" ? (
@@ -876,8 +879,8 @@ export function ProviderInstanceCard({
               render={
                 <Button
                   type="button"
-                  size={mode === "list" ? "icon-micro" : "icon-xs"}
-                  variant="ghost-muted"
+                  size={mode === "list" ? "icon-micro" : "xs"}
+                  variant={mode === "list" ? "ghost-muted" : "outline"}
                   className={mode === "list" ? "pointer-events-auto relative shrink-0" : undefined}
                   aria-label={`${updateProgress ? "Updating" : versionAdvisory.title} — view details`}
                 >
@@ -891,6 +894,14 @@ export function ProviderInstanceCard({
                       )}
                     />
                   )}
+                  {/* The detail pane has room to say what the button does. */}
+                  {mode === "list"
+                    ? null
+                    : updateProgress
+                      ? "Updating"
+                      : hasCompatibilityWarning
+                        ? "Version issue"
+                        : "Update"}
                 </Button>
               }
             />
@@ -984,7 +995,7 @@ export function ProviderInstanceCard({
       <div
         data-slot="settings-row"
         className={cn(
-          "group flex min-h-18 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
+          "group flex min-h-14 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
           selected ? "bg-muted/45" : "hover:bg-muted/25",
         )}
       >
@@ -1006,24 +1017,26 @@ export function ProviderInstanceCard({
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
               {versionLabel ? (
-                <code className="max-w-24 shrink-0 truncate text-xs text-muted-foreground">
+                <span className="max-w-24 shrink-0 truncate text-meta text-muted-foreground tabular-nums">
                   {versionLabel}
-                </code>
+                </span>
               ) : null}
               {versionAdvisoryNode}
             </span>
-            <span className="mt-0.5 flex items-start gap-1.5 text-xs leading-normal text-muted-foreground/80">
+            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-meta text-muted-foreground">
               {statusDotNode && !updateProgress ? (
-                <span className="flex h-[1.45em] shrink-0 items-center">{statusDotNode}</span>
+                <span className="flex shrink-0 items-center">{statusDotNode}</span>
               ) : null}
               <ProviderStatusDiagnostic detail={statusDiagnostic}>
                 <span
                   tabIndex={statusDiagnostic ? 0 : undefined}
                   aria-live="polite"
-                  className="pointer-events-auto line-clamp-2 [overflow-wrap:anywhere]"
+                  className="pointer-events-auto block min-w-0 truncate"
                 >
                   {updateProgress ? (
                     `Updating · ${updateProgress}`
+                  ) : isAuthenticated && !needsAttention ? (
+                    (planLabel ?? "Signed in")
                   ) : (
                     <>
                       {summary.headline}

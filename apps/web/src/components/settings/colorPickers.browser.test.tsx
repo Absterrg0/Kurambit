@@ -159,7 +159,7 @@ describe("provider accent color picker", () => {
     const onCommit = await renderAccent(undefined);
     const clearButton = () =>
       [...document.querySelectorAll("button")].find((button) =>
-        button.textContent?.includes("Clear color"),
+        button.textContent?.includes("Clear colour"),
       );
     expect(onCommit).not.toHaveBeenCalled();
     expect(clearButton()).toBeUndefined();

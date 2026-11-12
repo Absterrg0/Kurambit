@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { hexToHsv, hsvToHex, type HsvColor } from "../../lib/color";
@@ -8,6 +8,7 @@ import { ColorHueSlider, ColorSaturationValuePlane } from "../ui/color-picker";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 
 const FALLBACK_ACCENT_COLOR = "#2563eb";
@@ -71,23 +72,35 @@ function ProviderCustomColorPicker(props: {
 
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost-muted"
-            style={normalized ? { backgroundColor: normalized } : undefined}
-            aria-label={`${normalized ? "Change" : "Add"} accent colour for ${props.displayName}`}
-          >
-            {normalized ? (
-              <span className="sr-only">Change accent color</span>
-            ) : (
-              <PlusIcon aria-hidden />
-            )}
-          </Button>
-        }
-      />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost-muted"
+                  aria-label={`${normalized ? "Change" : "Add"} accent colour for ${props.displayName}`}
+                >
+                  {/* A colour well, filled when set and an empty ring when not, so it reads as
+                the provider's colour rather than a stray "add" button. */}
+                  <span
+                    aria-hidden
+                    className={
+                      normalized
+                        ? "size-4 rounded-full ring-1 ring-strong-foreground/20 ring-inset"
+                        : "size-4 rounded-full border border-dashed border-muted-foreground"
+                    }
+                    style={normalized ? { backgroundColor: normalized } : undefined}
+                  />
+                </Button>
+              }
+            />
+          }
+        />
+        <TooltipPopup side="top">Accent colour</TooltipPopup>
+      </Tooltip>
       <PopoverPopup side="bottom" align="start" sideOffset={6} padding="none">
         <ProviderCustomColorPanel
           value={normalized ?? FALLBACK_ACCENT_COLOR}
@@ -105,7 +118,7 @@ function ProviderCustomColorPicker(props: {
                   onClick={props.onClear}
                 >
                   <XIcon className="size-3.5" aria-hidden />
-                  Clear color
+                  Clear colour
                 </Button>
               }
             />
