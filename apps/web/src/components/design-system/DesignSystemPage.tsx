@@ -270,7 +270,53 @@ function FoundationsSection() {
           </Cell>
         ))}
       </Specimen>
+      <MotionSpecimen />
     </Section>
+  );
+}
+
+const MOTION_TOKENS = [
+  ["--motion-fast", "150ms", "hover, press and colour changes (every transition-*)"],
+  ["--motion-popup", "150ms in · 100ms out", "menus, selects, popovers, tooltips (motion-popup)"],
+  [
+    "--motion-surface",
+    "200ms in · 150ms out",
+    "dialogs, sheets, the settings panel (motion-surface)",
+  ],
+  ["--ease-enter / --ease-exit", "decelerate in · accelerate out", "every popup and surface"],
+] as const;
+
+/** Each sample runs once per click, the only way motion runs in the app. */
+function MotionSpecimen() {
+  const [shown, setShown] = useState(true);
+  return (
+    <Specimen label="Motion" source="motion-popup · motion-surface" stack>
+      <div className="grid grid-cols-[auto_auto_1fr] gap-x-6 gap-y-1.5">
+        {MOTION_TOKENS.map(([token, value, use]) => (
+          <div key={token} className="contents">
+            <Caption>{token}</Caption>
+            <Text variant="meta">{value}</Text>
+            <Text variant="meta" tone="muted">
+              {use}
+            </Text>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-6">
+        <Button variant="secondary" size="sm" onClick={() => setShown((value) => !value)}>
+          {shown ? "Close" : "Open"}
+        </Button>
+        {(["motion-popup", "motion-surface"] as const).map((motion) => (
+          <Cell key={motion} caption={motion}>
+            <span
+              data-ending-style={shown ? undefined : ""}
+              className={`block h-12 w-20 rounded-lg surface-popover transition-[scale,opacity] ${motion} data-ending-style:scale-98 data-ending-style:opacity-0`}
+            />
+          </Cell>
+        ))}
+      </div>
+      <Caption>Reduced motion sets every token to 0ms.</Caption>
+    </Specimen>
   );
 }
 

@@ -23,10 +23,11 @@ const toggleVariants = cva(
         xs: "h-7 min-w-7 px-[calc(--spacing(1)-1px)] sm:h-6 sm:min-w-6 rounded-md",
       },
       variant: {
-        default: "border-transparent",
+        // Pressed (pointer down) deepens the hover fill; toggled-on is data-pressed.
+        default: "border-transparent active:surface-selected",
         pill: "border-transparent rounded-full px-3 font-normal text-muted-foreground data-pressed:text-foreground",
         ghost:
-          "border-transparent text-foreground disabled:opacity-100 disabled:text-muted-foreground disabled:[&_svg]:opacity-100",
+          "border-transparent text-foreground active:surface-selected disabled:opacity-100 disabled:text-muted-foreground disabled:[&_svg]:opacity-100",
         outline: "surface-raised hover:surface-raised-hover data-pressed:surface-raised-hover",
         // The active segment is raised out of its track (a well on ToggleGroup).
         segmented:

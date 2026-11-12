@@ -16,7 +16,7 @@ import { RELAXED_PICKER_CLASS } from "./picker-styles";
 // Rows are concentric with the popup: their radius is the popup's minus its 1px
 // rim and 4px padding. The highlight is the soft selected fill, so a row under
 // the pointer reads as a place in the list, not a pressed button.
-const ROW_BASE_CLASS = `cursor-pointer rounded-[var(--popup-item-radius,7px)] ${MENU_ROW_TEXT_CLASS} text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-disabled:opacity-45 sm:min-h-7`;
+const ROW_BASE_CLASS = `cursor-pointer rounded-[var(--popup-item-radius,7px)] ${MENU_ROW_TEXT_CLASS} text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-highlighted:active:surface-selected data-disabled:opacity-45 sm:min-h-7`;
 
 const Menu = MenuPrimitive.Root;
 
@@ -66,7 +66,7 @@ function MenuPopup({
       >
         <MenuPrimitive.Popup
           className={cn(
-            "surface-popover kbd-in-popover relative flex origin-(--transform-origin) rounded-lg outline-none focus:outline-none",
+            "surface-popover kbd-in-popover relative flex origin-(--transform-origin) rounded-lg outline-none focus:outline-none transition-[scale,opacity] motion-popup data-starting-style:scale-98 data-starting-style:opacity-0 data-ending-style:scale-98 data-ending-style:opacity-0",
             spacing === "relaxed" && RELAXED_PICKER_CLASS,
             // Portaled menus can overlap an Electron window drag region (e.g.
             // the Review panel header). Drag hit-testing ignores z-index, so
