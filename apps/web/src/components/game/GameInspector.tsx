@@ -117,7 +117,7 @@ export function GameInspectorTabs({ threadRef }: { threadRef: ScopedThreadRef })
     <div
       role="tablist"
       aria-label="Inspector"
-      className="grid h-8 w-full grid-cols-3 gap-0.5 rounded-lg bg-card p-0.5"
+      className="grid h-8 w-full max-w-80 grid-cols-3 gap-0.5 rounded-lg bg-card p-0.5"
     >
       {TABS.map((entry) => (
         <button
