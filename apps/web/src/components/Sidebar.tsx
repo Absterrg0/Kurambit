@@ -3,6 +3,7 @@ import { GamePicture } from "./game/GameBuildStill";
 import { GameLibraryStatusText, useGameLibraryLine } from "./game/GameLibraryStatus";
 import { sortGameThreadsByActivity } from "./game/gameLibrary.logic";
 import { openCommandPalette } from "../commandPaletteBus";
+import { isSettingsPage } from "./sidebar/mainAppLocation";
 import { Text } from "./ui/text";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
 import { type EnvironmentId, type ScopedProjectRef } from "@kurambit/contracts";
@@ -4292,7 +4293,14 @@ export default function Sidebar() {
   );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        isCommandPaletteOpen() ||
+        isModelPickerOpen() ||
+        // Behind the settings panel a jump would navigate away and close it.
+        isSettingsPage(router.state.location.pathname)
+      ) {
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {
@@ -4337,6 +4345,7 @@ export default function Sidebar() {
     orderedThreadKeys,
     routeTerminalOpen,
     routeThreadKey,
+    router,
     threadByKey,
   ]);
 
