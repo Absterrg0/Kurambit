@@ -1307,6 +1307,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     linear-gradient(180deg, var(--popover-top), var(--popover-bottom)) border-box;
   box-shadow: var(--surface-shadow);
 }
+/* A full panel over the app (Settings): the app's own background, so the page
+   inside reads like the app, held by the popover's rim and drop. */
+@utility surface-app-panel {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--background), var(--background)) padding-box,
+    var(--popover-rim) border-box;
+  box-shadow: var(--popover-shadow);
+}
 @utility surface-tooltip {
   @apply surface-popover;
   --surface-shadow: var(--tooltip-shadow);

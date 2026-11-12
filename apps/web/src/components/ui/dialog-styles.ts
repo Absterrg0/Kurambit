@@ -15,7 +15,7 @@ const DIALOG_MEDIA_POPUP_CLASS = `${DIALOG_POPUP_BASE_CLASS} max-h-[92vh] w-auto
 
 // A large panel over the live app, such as Settings: the app's own fill, so the
 // cards inside read as they do on a page, with the popover rim and shadow.
-const DIALOG_APP_PANEL_POPUP_CLASS = `${DIALOG_POPUP_BASE_CLASS} size-full max-h-[60rem] max-w-[75rem] overflow-hidden rounded-2xl border border-transparent [background:linear-gradient(var(--background),var(--background))_padding-box,var(--popover-rim)_border-box] text-body text-foreground [box-shadow:var(--popover-shadow)] duration-150 ease-out data-ending-style:scale-[0.985] data-starting-style:scale-[0.985] max-sm:rounded-none max-sm:pt-(--app-modal-titlebar-height)`;
+const DIALOG_APP_PANEL_POPUP_CLASS = `${DIALOG_POPUP_BASE_CLASS} size-full max-h-[60rem] max-w-[75rem] overflow-hidden surface-app-panel rounded-2xl text-body text-foreground duration-150 ease-out data-ending-style:scale-[0.985] data-starting-style:scale-[0.985] max-sm:rounded-none max-sm:pt-(--app-modal-titlebar-height)`;
 
 const DIALOG_MOBILE_SHEET_CLASS =
   "max-sm:max-w-none max-sm:rounded-none max-sm:border-x-0 max-sm:border-t max-sm:border-b-0 max-sm:opacity-[calc(1-min(var(--nested-dialogs),1))] max-sm:data-ending-style:translate-y-4 max-sm:data-starting-style:translate-y-4";
