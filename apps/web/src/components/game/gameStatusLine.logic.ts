@@ -143,6 +143,8 @@ export interface GameLibraryStatusInput {
   readonly keepGoing: string | null;
   /** An engine's own build (an export) is running. */
   readonly operationRunning: boolean;
+  /** A turn has ended and its build is being saved (useTurnLanding). */
+  readonly saving: boolean;
   /** The folder's build, else the newest one, as a sentence names it, with when it was made. */
   readonly build: { readonly name: string; readonly at: string } | null;
   /** The game's builds have been read; before that nothing is said about them. */
@@ -175,6 +177,7 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.chats === "approval" || input.chats === "input")
     return line("Needs your answer", "live");
   if (input.keepGoing !== null) return line(input.keepGoing, "live");
+  if (input.saving) return line("Saving", "live");
   // The game screen's top bar holds the turn's clock; the library says only that it builds.
   if (input.chats === "working") return line("Building", "live");
   if (input.operationRunning) return line("Building", "live");

@@ -1,6 +1,9 @@
 import { useNewGame } from "./game/gameEntryStore";
-import { GamePicture } from "./game/GameBuildStill";
-import { GameLibraryStatusText, useGameLibraryLine } from "./game/GameLibraryStatus";
+import {
+  GameLibraryPicture,
+  GameLibraryStatusText,
+  useGameLibraryLine,
+} from "./game/GameLibraryStatus";
 import { sortGameThreadsByActivity } from "./game/gameLibrary.logic";
 import { openCommandPalette } from "../commandPaletteBus";
 import { isSettingsPage } from "./sidebar/mainAppLocation";
@@ -1604,7 +1607,7 @@ function SidebarGameRowBody(props: {
   read: boolean;
   active: boolean;
 }) {
-  const { status, build, pending } = useGameLibraryLine({
+  const { status } = useGameLibraryLine({
     game: props.game,
     main: props.main,
     chats: props.chats,
@@ -1615,18 +1618,16 @@ function SidebarGameRowBody(props: {
   const rename = useRenameGame(props.game.environmentId);
   return (
     <div className="flex items-center gap-2.5 px-2 py-1.5 pe-7">
-      {pending ? (
-        // Its picture is not known yet: a quiet well, not an initial it will swap away.
-        <Skeleton shape="card" className="size-7.5 shrink-0" />
-      ) : (
-        <GamePicture
-          environmentId={props.game.environmentId}
-          root={props.game.root}
-          path={build?.still ?? null}
-          gameName={name}
-          className="size-7.5 shrink-0 rounded-md"
-        />
-      )}
+      {/* The game screen's own picture of its latest build, else its newest picture: never a
+          letter while a new build has none yet. */}
+      <GameLibraryPicture
+        game={props.game}
+        main={props.main}
+        chats={props.chats}
+        read={props.read}
+        gameName={name}
+        className="size-7.5 shrink-0"
+      />
       <span className="flex min-w-0 flex-1 flex-col">
         {renaming ? (
           <GameNameInput

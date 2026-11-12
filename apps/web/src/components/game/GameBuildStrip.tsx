@@ -574,7 +574,12 @@ function BuildCard({
           {/* The whole request only when the card had to cut it. */}
           {caption.length > CARD_CAPTION_FITS ? <span>{caption}</span> : null}
           <span className="text-muted-foreground">
-            {[formatBuildTime(build.at), checksLine(build.facts), undone ? "undone" : null]
+            {/* The time only when the caption shows the request in its place; "undone" is on
+                the caption already. */}
+            {[
+              name === null || build.source._tag === "saved" ? null : formatBuildTime(build.at),
+              checksLine(build.facts),
+            ]
               .filter((part) => part !== null)
               .join(" · ")}
           </span>
@@ -628,6 +633,8 @@ function CardRing({
         // Keyboard focus: a second, heavier ring just inside the one that marks the build on the
         // Stage, drawn here above the picture so no picture covers it; it never crosses the caption.
         "-outline-offset-5 group-focus-visible/card:outline-3 group-focus-visible/card:outline-solid group-focus-visible/card:outline-ring",
+        // A dark hairline inside the focus ring, so it holds 3:1 on a light or a busy picture.
+        "after:pointer-events-none after:absolute after:inset-[5px] after:rounded-xs after:opacity-0 after:ring-1 after:ring-black/60 group-focus-visible/card:after:opacity-100",
         pick === "picked"
           ? "ring-2 ring-strong-foreground"
           : pick === "pickable"

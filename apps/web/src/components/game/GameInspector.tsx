@@ -514,7 +514,8 @@ function BuildDetail({
         </Section>
       )}
       <Section
-        title="Checks"
+        // Under another build's heading, the checks name whose they are: never read as the Stage's.
+        title={heading === null ? "Checks" : `Checks · ${buildName(build)}`}
         detail={
           factsData !== null && factsData.state !== "never" && build.available
             ? checksSummary(factsData, busy && factsData.message.trim() !== "")

@@ -215,9 +215,9 @@ const BUILD_CARD_GAP = 12;
  * agent's note (two lines) and one suggestion. They appear as a turn runs and lands, and the
  * Stage must not shrink and re-centre each time; only rows past this budget take its height.
  */
-const TRANSIENT_ROWS_RESERVE = 100;
-const TRANSIENT_ROWS =
-  "[data-game-agent-note], [data-game-pointed], [data-game-direction-bar] [data-composer-banner-drawer]";
+const TRANSIENT_ROWS_RESERVE = 90;
+/** The loading skeleton's strip label, captions and gaps, around its Stage and cards. */
+const SKELETON_STRIP_CHROME = 80;
 
 /**
  * PURE. The Stage's width and its cards' picture height, in a column `width` wide with `height`
@@ -453,6 +453,8 @@ function ThreadGameStage({
   const [heldBuild, setHeldBuild] = useState(false);
   if ((turnRunning || landing) && liveShown !== null && live.revision !== liveShown && !heldBuild)
     setHeldBuild(true);
+  // An Undo or Redo is a new build too, though its build list may update after the folder does.
+  if (turnUndo.restoring && !heldBuild) setHeldBuild(true);
   // The request that made the slot, kept past the turn's end for the slot's last moments.
   const [slotRequest, setSlotRequest] = useState(turnRequest);
   if (turnRequest !== null && turnRequest !== slotRequest) setSlotRequest(turnRequest);
@@ -587,11 +589,15 @@ function ThreadGameStage({
           ?.firstElementChild?.getBoundingClientRect().height ?? BUILD_CARD_PICTURE.min;
       const stripChrome =
         strip === null ? 0 : Math.max(0, strip.getBoundingClientRect().height - picture);
-      // The rows that come and go under the strip are measured against their fixed budget,
-      // so the Stage's height does not follow them.
-      const transient = [
-        ...(section.parentElement?.querySelectorAll<HTMLElement>(TRANSIENT_ROWS) ?? []),
-      ].reduce((sum, row) => sum + row.offsetHeight, 0);
+      // The rows that come and go above the composer (the agent's note, a suggestion tucked
+      // under the composer's edge) are measured against their fixed budget, so the Stage's
+      // height does not follow them: their footprint is the bar's top to the composer's top.
+      const bar = section.parentElement?.querySelector<HTMLElement>("[data-game-direction-bar]");
+      const composer = bar?.querySelector<HTMLElement>('[data-chat-composer-main-surface="true"]');
+      const transient =
+        bar == null || composer == null
+          ? 0
+          : Math.max(0, composer.getBoundingClientRect().top - bar.getBoundingClientRect().top);
       // A game that has had no turn has no note or suggestion to make room for.
       const height = section.clientHeight + transient - (hasTurn ? TRANSIENT_ROWS_RESERVE : 0);
       // The surface's side insets (mx-3) and a breath above the strip.
@@ -813,11 +819,30 @@ function ThreadGameStage({
         <div className="flex h-(--workspace-topbar-height) shrink-0 items-center px-3">
           <Skeleton className="h-4 w-28" />
         </div>
-        <div className="mx-3 min-h-0 flex-1 rounded-xl bg-stage-well" />
-        <div className="grid shrink-0 grid-cols-3 gap-3 px-3 pt-9 pb-8">
-          {[0, 1, 2].map((n) => (
-            <Skeleton key={n} shape="card" className="aspect-video max-h-40 w-full" />
-          ))}
+        {/* The fitted column at a 16:9 game, the shape most games have: a Stage, the strip's
+            label and three cards a third of its width. Its width is the window's or what the
+            height allows (the Stage and a card row are 3/4 of the width tall, plus the strip's
+            label and captions), so only the game's own shape moves it when the game is read. */}
+        <div className="flex min-h-0 flex-1 justify-center" style={{ containerType: "size" }}>
+          <div
+            className="flex flex-col"
+            style={{ width: `min(100cqw - 24px, (100cqh - ${SKELETON_STRIP_CHROME}px) * 4 / 3)` }}
+          >
+            <div className="aspect-video w-full rounded-xl bg-stage-well" />
+            <div className="flex h-7 items-center pt-2.5">
+              <Text variant="meta" tone="muted">
+                Builds
+              </Text>
+            </div>
+            <div className="grid grid-cols-3 gap-3 pt-1.5">
+              {[0, 1, 2].map((n) => (
+                <div key={n} className="flex flex-col gap-1.5">
+                  <Skeleton shape="card" className="aspect-video w-full" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
     ) : null;

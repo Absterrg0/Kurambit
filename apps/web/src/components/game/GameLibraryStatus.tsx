@@ -12,6 +12,8 @@ import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { GamePicture } from "./GameBuildStill";
 import { useBuildFrame } from "./gameStageBridge";
+import { useTurnLanding } from "./useTurnLanding";
+import { derivePhase } from "../../session-logic";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarThreadStatus } from "../Sidebar.logic";
 import { buildName } from "./gameBuilds.logic";
@@ -71,9 +73,10 @@ export function useGameLibraryLine(input: {
   readonly pending: boolean;
 } {
   const { game, main, chats } = input;
-  const build = useGameLatestBuild(
-    input.read && main !== null ? scopeThreadRef(game.environmentId, main.id) : null,
-  );
+  const mainRef = input.read && main !== null ? scopeThreadRef(game.environmentId, main.id) : null;
+  const build = useGameLatestBuild(mainRef);
+  // Between a turn's end and its build being listed, as the game screen says it.
+  const saving = useTurnLanding(mainRef, derivePhase(main?.runtime ?? null) === "running");
   const status = gameLibraryStatus({
     chats:
       chats === "approval" || chats === "input" || chats === "failed"
@@ -83,6 +86,7 @@ export function useGameLibraryLine(input: {
           : "other",
     keepGoing: game.run?.step ?? null,
     operationRunning: game.operation?.state === "running",
+    saving,
     build: build == null ? null : { name: buildName(build), at: build.at },
     // A game with no chat has no builds to read; any other waits for its read.
     known: main === null || build !== undefined,
@@ -145,15 +149,18 @@ export function GameLibraryPicture(props: {
   readonly gameName: string;
   /** Size and placement; the picture's own rounding matches the sidebar's. */
   readonly className: string;
+  /** False reads nothing (a row scrolled out of view). */
+  readonly read?: boolean;
 }) {
+  const read = props.read !== false;
   const { build, pending } = useGameLibraryLine({
     game: props.game,
     main: props.main,
     chats: props.chats,
-    read: true,
+    read,
   });
   const still = useEnvironmentQuerySelector(
-    props.main === null
+    props.main === null || !read
       ? null
       : gameEnvironment.builds({
           environmentId: props.game.environmentId,

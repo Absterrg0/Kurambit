@@ -230,11 +230,12 @@ const runEvent = (sentence: string): string =>
 /** What a row's reading means, said under it when it differs: a scale or how much it varies. */
 const ROW_NOTES: Partial<Record<GameFactId, string>> = {
   masher: "Varies from run to run by itself.",
-  motion: "How much the picture changes from frame to frame; a still picture is 0.",
+  motion:
+    "How much the picture changes from frame to frame (a still picture is 0); it varies from run to run by itself.",
 };
 
 /** Rows that vary between runs of the same build: not counted as a difference a change made. */
-export const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher"]);
+export const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher", "motion"]);
 
 /** Rows Compare names by what they measure, since their readings are numbers. */
 const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {
@@ -252,6 +253,11 @@ export interface CompareRow {
   readonly tone: GameFactDelta["tone"] | null;
   /** Why the two readings cannot be compared, under the row; null when they can. */
   readonly note: string | null;
+  /**
+   * The check passes on one side and is one to look at on the other: only then is the move a
+   * verdict, Better or Worse. A move that leaves the check where it was is just a direction.
+   */
+  readonly flips?: boolean;
 }
 
 export interface CompareRows {
@@ -281,7 +287,10 @@ export const compareHeadline = (compared: CompareRows): string => {
   const differ = moved.filter((row) => !VARIES_BY_ITSELF.has(row.id)).length;
   const varies = moved.length - differ;
   const same = compared.rows.filter((row) => row.mark === "=").length;
-  const alsoVaries = varies > 0 ? "; random input's reading varies by itself" : "";
+  const alsoVaries =
+    varies === 0
+      ? ""
+      : `; ${varies === 1 ? "1 reading varies from run to run by itself" : `${varies} readings vary from run to run by themselves`}`;
   if (differ === 0 && same === 0) return "Nothing measured on both builds to compare yet.";
   if (differ === 0) return `No measured difference${alsoVaries}.`;
   return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}${alsoVaries}.`;
@@ -330,6 +339,11 @@ export const compareRows = (
     const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
     if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;
     return check.sentence.toLowerCase() === name.toLowerCase() ? "Yes" : check.sentence;
+  };
+  // Whether a side's check passes or is one to look at; null with no verdict either way.
+  const verdictOf = (side: "a" | "b", id: GameFactId) => {
+    const reading = checks?.[side].find((entry) => entry.id === id)?.reading;
+    return reading?._tag === "measured" && reading.tone !== "neutral" ? reading.tone : null;
   };
   // Two readings that differ never read alike: when their words match, the measured values show.
   const cells = (delta: GameFactDelta, name: string, same: boolean) => {
@@ -395,6 +409,7 @@ export const compareRows = (
       mark: line.mark,
       tone: line.tone,
       note: line.mark === "=" ? null : (ROW_NOTES[delta.id] ?? null),
+      flips: verdictOf("a", delta.id) !== verdictOf("b", delta.id),
     });
   }
   // What differs leads, then what varies by itself (outside the count), then what is the same.
@@ -415,11 +430,14 @@ export const compareRows = (
  * PURE. A row's change in words: better or worse where the check has a better, else which
  * way the number moved. Null when the readings are the same or cannot be compared.
  */
-export const changeWord = (row: Pick<CompareRow, "id" | "mark" | "tone">): string | null => {
+export const changeWord = (
+  row: Pick<CompareRow, "id" | "mark" | "tone" | "flips">,
+): string | null => {
   if (row.mark === null || row.mark === "=") return null;
-  // A share of colour or an amount of motion is a number that moved, not a verdict: whether the
-  // check passes is its own row's state on each side.
-  const verdict = row.id !== "colour" && row.id !== "motion";
+  if (VARIES_BY_ITSELF.has(row.id)) return "Varies";
+  // A verdict only where the check passes on one side and is one to look at on the other; any
+  // other move is a direction, the check standing where it was.
+  const verdict = row.flips === true;
   if (verdict && row.tone === "better") return "Better";
   if (verdict && row.tone === "worse") return "Worse";
   if (row.mark === "≠") return "Changed";

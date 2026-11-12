@@ -499,6 +499,19 @@
         </div>
       </div>
     </div>
+    <script>
+      // A long open says it is still going and for how long, never a progress it cannot know.
+      // It stops when the app replaces the splash.
+      (() => {
+        const started = Date.now();
+        const timer = setInterval(() => {
+          const label = document.getElementById("boot-shell-label");
+          if (!label) return clearInterval(timer);
+          const seconds = Math.round((Date.now() - started) / 1000);
+          if (seconds >= 6) label.textContent = `Still opening Kurambit… ${seconds} s`;
+        }, 1000);
+      })();
+    </script>
     <script type="module" src="/src/bootstrap.ts"></script>
   </body>
 </html>

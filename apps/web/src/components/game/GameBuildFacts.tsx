@@ -1,6 +1,8 @@
-import { MinusIcon } from "lucide-react";
+import { ChevronRightIcon, MinusIcon } from "lucide-react";
+import { useState } from "react";
 
 import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { changeWord, compareHeadline, type CompareRows } from "./gameBuilds.logic";
 
@@ -34,6 +36,10 @@ export function CompareSideBadge({ side }: { side: "A" | "B" }) {
  * direction and tone. Facts neither build measured close the table, one row per reason.
  */
 export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
+  // The readings that are the same fold under one counted line, so the differences fit in view
+  // and the headline's count of them is one click from its rows.
+  const [sameOpen, setSameOpen] = useState(false);
+  const same = compared.rows.filter((row) => row.mark === "=").length;
   if (compared.rows.length === 0 && compared.unmeasured.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
@@ -71,52 +77,63 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
             // The readings that are the same follow the ones that differ, under their own line.
             row.mark === "=" && compared.rows[index - 1]?.mark !== "=" ? (
               <tr key="same-heading">
-                <Text
-                  variant="caption"
-                  tone="muted"
-                  render={<td colSpan={4} className="border-t border-border pt-3 pb-1" />}
-                >
-                  The same on both
-                </Text>
+                <td colSpan={4} className="border-t border-border pt-2 pb-1">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    aria-expanded={sameOpen}
+                    onClick={() => setSameOpen(!sameOpen)}
+                  >
+                    <ChevronRightIcon
+                      className={cn("transition-transform", sameOpen && "rotate-90")}
+                      aria-hidden="true"
+                    />
+                    {same === 1
+                      ? "1 reading the same on both"
+                      : `${same} readings the same on both`}
+                  </Button>
+                </td>
               </tr>
             ) : null,
-            <tr key={row.id} className="border-t border-border align-baseline">
-              <Text variant="meta" tone="muted" render={<td className="py-2 pr-3" />}>
-                {row.name}
-              </Text>
-              <Text
-                variant="meta"
-                tone={row.a === null ? "dim" : "default"}
-                render={<td className="py-2 pr-3" />}
-              >
-                {row.a ?? "Not measured"}
-              </Text>
-              <Text
-                variant="meta"
-                tone={row.b === null ? "dim" : "default"}
-                render={<td className="py-2 pr-3" />}
-              >
-                {row.b ?? "Not measured"}
-              </Text>
-              <Text
-                variant="meta"
-                tone="inherit"
-                render={
-                  <td
-                    className={cn(
-                      "py-2 text-right",
-                      // Colour only for a verdict; a number that moved reads plain.
-                      row.tone === null || !["Better", "Worse"].includes(changeWord(row) ?? "")
-                        ? "text-muted-foreground"
-                        : DELTA_TEXT[row.tone],
-                    )}
-                  />
-                }
-              >
-                {changeWord(row) ?? ""}
-              </Text>
-            </tr>,
-            row.note === null ? null : (
+            row.mark === "=" && !sameOpen ? null : (
+              <tr key={row.id} className="border-t border-border align-baseline">
+                <Text variant="meta" tone="muted" render={<td className="py-2 pr-3" />}>
+                  {row.name}
+                </Text>
+                <Text
+                  variant="meta"
+                  tone={row.a === null ? "dim" : "default"}
+                  render={<td className="py-2 pr-3" />}
+                >
+                  {row.a ?? "Not measured"}
+                </Text>
+                <Text
+                  variant="meta"
+                  tone={row.b === null ? "dim" : "default"}
+                  render={<td className="py-2 pr-3" />}
+                >
+                  {row.b ?? "Not measured"}
+                </Text>
+                <Text
+                  variant="meta"
+                  tone="inherit"
+                  render={
+                    <td
+                      className={cn(
+                        "py-2 text-right",
+                        // Colour only for a verdict; a number that moved reads plain.
+                        row.tone === null || !["Better", "Worse"].includes(changeWord(row) ?? "")
+                          ? "text-muted-foreground"
+                          : DELTA_TEXT[row.tone],
+                      )}
+                    />
+                  }
+                >
+                  {changeWord(row) ?? ""}
+                </Text>
+              </tr>
+            ),
+            row.note === null || (row.mark === "=" && !sameOpen) ? null : (
               <tr key={`${row.id}-note`}>
                 <td />
                 <Text

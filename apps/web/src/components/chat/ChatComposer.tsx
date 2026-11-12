@@ -2394,7 +2394,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           type: "slash-command",
           command: "model",
           label: "/model",
-          description: "Switch the model for this Log",
+          description: "Switch the model the agent uses",
         },
         ...(planModeUiEnabled
           ? ([
