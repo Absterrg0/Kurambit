@@ -3,8 +3,10 @@ import * as Schema from "effect/Schema";
 import { ChevronDownIcon, PlayIcon, XIcon } from "lucide-react";
 import {
   GameBuildId,
+  gameChecksView,
   gameFactsView,
   type GameBuild,
+  type GameBuildFacts,
   type GameBuildPlayResult,
   type GameBuildRef,
   type GameViewport,
@@ -29,6 +31,10 @@ import { buildName, compareRows, formatBuildTime } from "./gameBuilds.logic";
 import { useBuildPlay, useMeasureOnOpen } from "./useBuildActions";
 
 const isBuildId = Schema.is(GameBuildId);
+const allChecks = (facts: GameBuildFacts) => {
+  const view = gameChecksView(facts);
+  return [...view.checks, ...view.more];
+};
 const SIDES = ["A", "B"] as const;
 
 /**
@@ -199,6 +205,7 @@ export function GameBuildCompare({
                   comparison.deltas,
                   gameFactsView(comparison.factsA),
                   gameFactsView(comparison.factsB),
+                  { a: allChecks(comparison.factsA), b: allChecks(comparison.factsB) },
                 )}
               />
             </>

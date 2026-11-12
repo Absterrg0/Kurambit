@@ -5,6 +5,7 @@ import {
   type GameAssetUse,
   type GameBuild,
   type GameBuildFactsSummary,
+  type GameCheck,
   type GameBuildsResult,
   type GameFactDelta,
   type GameFactTone,
@@ -183,9 +184,28 @@ export const plainWhy = (why: string): string =>
     .replace(/ \(load [\d.]+ on \d+ cores\)/g, "")
     // The renderer probe's raw output is for agents and bug reports.
     .replace(/ \([^()]*RENDERER=[^()]*\)/g, "")
+    // The harness's own diagnosis, in a person's words: what this computer could not do.
+    .replace(
+      /^a harness fault on this machine, not the game's: the plays drew in software.*$/,
+      "this computer has no graphics card Kurambit can use, so it cannot judge speed here",
+    )
+    .replace(
+      /^the harness renders in software here, so the game ran at [\d.]+× real time$/,
+      "this computer ran the game without a graphics card, too slowly to judge",
+    )
+    .replace(/, so the game ran at [\d.]+× real time$/, ", so the game ran too slowly to judge")
+    .replace(
+      "the game's shell predates scene reports",
+      "the game was made before Kurambit read scenes; a new build adds it",
+    )
+    .replace(
+      /the game's shell does not report frame times \(its copy of the shell predates performance measurement\)/,
+      "the game was made before Kurambit measured speed; a new build adds it",
+    )
+    .replace(/\btier bot\b/g, "bot")
     .replace(
       "this game has no play bot yet (keep going writes one once, or ask your agent for one)",
-      "no play bot yet; keep going writes one, or ask your agent",
+      "no play bot yet; Keep going writes one, or ask your agent",
     );
 
 export interface CompareRow {
@@ -207,7 +227,29 @@ export interface CompareRows {
     readonly names: ReadonlyArray<string>;
     readonly why: string;
   }>;
+  /** Facts one side has no reading of, one entry per side and reason, said once above the rows. */
+  readonly oneSided: ReadonlyArray<{
+    readonly side: "A" | "B";
+    readonly names: ReadonlyArray<string>;
+    readonly why: string;
+  }>;
 }
+
+/**
+ * PURE. A compare's answer in a line: what differs, or that nothing measured does, or that a
+ * side is still being measured so the answer is not in yet.
+ */
+export const compareHeadline = (compared: CompareRows): string => {
+  const pending = compared.oneSided.find((entry) => entry.why === "still being measured");
+  if (pending !== undefined)
+    return `${pending.side} is still being measured: the comparison fills in as its checks land.`;
+  const differ = compared.rows.filter((row) => row.mark !== null && row.mark !== "=").length;
+  const same = compared.rows.filter((row) => row.mark === "=").length;
+  if (differ === 0 && same === 0) return "Nothing measured on both builds to compare yet.";
+  if (differ === 0)
+    return `No measured difference: ${same === 1 ? "the one reading both have is" : `all ${same} readings both have are`} the same.`;
+  return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}.`;
+};
 
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;
 const sideWhy = (view: GameFactView | undefined): string | null =>
@@ -225,9 +267,35 @@ export const compareRows = (
   deltas: ReadonlyArray<GameFactDelta>,
   viewsA: ReadonlyArray<GameFactView>,
   viewsB: ReadonlyArray<GameFactView>,
+  /** Each side's checks as the Inspector words them, so a cell says its reading, not its row. */
+  checks?: {
+    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value">>;
+    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value">>;
+  },
 ): CompareRows => {
+  // A reading in the Inspector's words: its number when it has one ("at 7.9 s"), else its
+  // sentence unless that only repeats the row's name, where it is just "Yes".
+  const cell = (
+    side: "a" | "b",
+    id: GameFactId,
+    name: string,
+    fallback: string | null,
+  ): string | null => {
+    if (fallback === null) return null;
+    const check = checks?.[side].find((entry) => entry.id === id);
+    if (check === undefined) return fallback;
+    if (check.value !== null) return check.value;
+    return check.sentence.toLowerCase() === name.toLowerCase() ? "Yes" : check.sentence;
+  };
   const rows: Array<CompareRow> = [];
   const unmeasured = new Map<string, Array<string>>();
+  const oneSided = new Map<string, { side: "A" | "B"; why: string; names: Array<string> }>();
+  const missing = (side: "A" | "B", why: string, name: string) => {
+    const key = `${side}\0${why}`;
+    const entry = oneSided.get(key) ?? { side, why, names: [] };
+    entry.names.push(name);
+    oneSided.set(key, entry);
+  };
   const ordered = [...deltas].sort((x, y) => {
     const rank = (id: GameFactId) => {
       const at = LEAD_ORDER.indexOf(id);
@@ -253,25 +321,26 @@ export const compareRows = (
       rows.push({
         id: delta.id,
         name,
-        a: delta.a,
-        b: delta.b,
+        a: cell("a", delta.id, name, delta.a),
+        b: cell("b", delta.id, name, delta.b),
         mark: null,
         tone: null,
+        // A side's missing reading is said once, with every row it applies to, above the table.
         note:
-          delta.a === null
-            ? `A not measured: ${whyA ?? "no reading"}`
-            : delta.b === null
-              ? `B not measured: ${whyB ?? "no reading"}`
-              : `Not comparable: ${plainWhy(delta.why ?? "measured differently")}`,
+          delta.a === null || delta.b === null
+            ? null
+            : `Not comparable: ${plainWhy(delta.why ?? "measured differently")}`,
       });
+      if (delta.a === null) missing("A", whyA ?? "no reading", name);
+      else if (delta.b === null) missing("B", whyB ?? "no reading", name);
       continue;
     }
     const line = deltaLine(delta);
     rows.push({
       id: delta.id,
       name,
-      a: delta.a,
-      b: delta.b,
+      a: cell("a", delta.id, name, delta.a),
+      b: cell("b", delta.id, name, delta.b),
       mark: line.mark,
       tone: line.tone,
       note: null,
@@ -280,6 +349,7 @@ export const compareRows = (
   return {
     rows,
     unmeasured: [...unmeasured].map(([why, names]) => ({ names, why })),
+    oneSided: [...oneSided.values()],
   };
 };
 

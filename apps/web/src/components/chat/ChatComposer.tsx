@@ -2449,14 +2449,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
         composerTrigger.rangeStart === 0,
       );
-      // On a game, "/" alone offers the Log's own commands. The agent's coding commands and
-      // skills still run, but only appear once their name is typed.
-      if (gameThread && query.replace(/^\/+/, "") === "") {
-        return slashCommandItems.filter(
+      // On a game the menu is the Log's own commands only: a provider's coding commands and
+      // skills (and its internal or removed ones) are another product's. Typed by name they
+      // still reach the agent as text.
+      if (gameThread) {
+        const own = slashCommandItems.filter(
           (item) =>
             item.type === "slash-command" ||
             (item.type === "provider-slash-command" && item.command.name === "compact"),
         );
+        return query.replace(/^\/+/, "") === "" ? own : searchSlashCommandItems(own, query);
       }
       return searchSlashCommandItems(slashCommandItems, query);
     }

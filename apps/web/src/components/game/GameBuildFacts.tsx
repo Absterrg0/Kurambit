@@ -2,7 +2,7 @@ import { MinusIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import { Text } from "../ui/text";
-import type { CompareRows } from "./gameBuilds.logic";
+import { compareHeadline, type CompareRows } from "./gameBuilds.logic";
 
 const DELTA_TEXT = {
   better: "text-success-foreground",
@@ -36,96 +36,113 @@ export function CompareSideBadge({ side }: { side: "A" | "B" }) {
 export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
   if (compared.rows.length === 0 && compared.unmeasured.length === 0) return null;
   return (
-    <table className="w-full table-fixed border-collapse">
-      <thead>
-        <Text variant="caption" tone="muted" render={<tr className="text-left" />}>
-          <th className="w-[34%] py-1.5 pr-3 font-normal">Check</th>
-          <th className="py-1.5 pr-3 font-normal">
-            <span className="flex items-center gap-1.5">
-              <CompareSideBadge side="A" />
-              <span className="sr-only">A</span>
-            </span>
-          </th>
-          <th className="py-1.5 pr-3 font-normal">
-            <span className="flex items-center gap-1.5">
-              <CompareSideBadge side="B" />
-              <span className="sr-only">B</span>
-            </span>
-          </th>
-          <th className="w-8 py-1.5 font-normal">
-            <span className="sr-only">Change</span>
-          </th>
-        </Text>
-      </thead>
-      <tbody>
-        {compared.rows.map((row) => [
-          <tr key={row.id} className="border-t border-border align-baseline">
-            <Text variant="meta" tone="muted" render={<td className="py-2 pr-3" />}>
-              {row.name}
-            </Text>
-            <Text
-              variant="meta"
-              tone={row.a === null ? "dim" : "default"}
-              render={<td className="py-2 pr-3" />}
-            >
-              {row.a ?? "Not measured"}
-            </Text>
-            <Text
-              variant="meta"
-              tone={row.b === null ? "dim" : "default"}
-              render={<td className="py-2 pr-3" />}
-            >
-              {row.b ?? "Not measured"}
-            </Text>
-            <Text
-              variant="meta"
-              tone="inherit"
-              render={
-                <td
-                  className={cn(
-                    "py-2 text-center font-medium",
-                    row.tone === null ? "text-muted-foreground" : DELTA_TEXT[row.tone],
-                  )}
-                />
-              }
-            >
-              {row.mark ?? ""}
-            </Text>
-          </tr>,
-          row.note === null ? null : (
-            <tr key={`${row.id}-note`}>
-              <td />
-              <Text
-                variant="caption"
-                tone="muted"
-                render={<td colSpan={3} className="pb-2 pr-3" />}
-              >
-                {row.note}
-              </Text>
-            </tr>
-          ),
-        ])}
-        {compared.unmeasured.map((group) => (
-          <tr key={group.why} className="border-t border-border align-baseline">
-            <td colSpan={4} className="py-2">
-              <span className="flex items-baseline gap-2.5">
-                <MinusIcon
-                  className="size-3.5 shrink-0 translate-y-0.5 text-dim-foreground"
-                  aria-hidden="true"
-                />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <Text variant="meta" tone="muted">
-                    {group.names.join(", ")}
-                  </Text>
-                  <Text variant="caption" tone="dim">
-                    Not measured on either build: {group.why}
-                  </Text>
-                </span>
-              </span>
-            </td>
-          </tr>
+    <div className="flex flex-col gap-2">
+      <Text variant="label" tone="strong" render={<p />}>
+        {compareHeadline(compared)}
+      </Text>
+      {compared.oneSided
+        .filter((entry) => entry.why !== "still being measured")
+        .map((entry) => (
+          <Text key={`${entry.side}${entry.why}`} variant="caption" tone="muted" render={<p />}>
+            {entry.side} has no reading of {namesList(entry.names)}: {entry.why}.
+          </Text>
         ))}
-      </tbody>
-    </table>
+      <table className="w-full table-fixed border-collapse">
+        <thead>
+          <Text variant="caption" tone="muted" render={<tr className="text-left" />}>
+            <th className="w-[34%] py-1.5 pr-3 font-normal">Check</th>
+            <th className="py-1.5 pr-3 font-normal">
+              <span className="flex items-center gap-1.5">
+                <CompareSideBadge side="A" />
+                <span className="sr-only">A</span>
+              </span>
+            </th>
+            <th className="py-1.5 pr-3 font-normal">
+              <span className="flex items-center gap-1.5">
+                <CompareSideBadge side="B" />
+                <span className="sr-only">B</span>
+              </span>
+            </th>
+            <th className="w-8 py-1.5 font-normal">
+              <span className="sr-only">Change</span>
+            </th>
+          </Text>
+        </thead>
+        <tbody>
+          {compared.rows.map((row) => [
+            <tr key={row.id} className="border-t border-border align-baseline">
+              <Text variant="meta" tone="muted" render={<td className="py-2 pr-3" />}>
+                {row.name}
+              </Text>
+              <Text
+                variant="meta"
+                tone={row.a === null ? "dim" : "default"}
+                render={<td className="py-2 pr-3" />}
+              >
+                {row.a ?? "Not measured"}
+              </Text>
+              <Text
+                variant="meta"
+                tone={row.b === null ? "dim" : "default"}
+                render={<td className="py-2 pr-3" />}
+              >
+                {row.b ?? "Not measured"}
+              </Text>
+              <Text
+                variant="meta"
+                tone="inherit"
+                render={
+                  <td
+                    className={cn(
+                      "py-2 text-center font-medium",
+                      row.tone === null ? "text-muted-foreground" : DELTA_TEXT[row.tone],
+                    )}
+                  />
+                }
+              >
+                {row.mark ?? ""}
+              </Text>
+            </tr>,
+            row.note === null ? null : (
+              <tr key={`${row.id}-note`}>
+                <td />
+                <Text
+                  variant="caption"
+                  tone="muted"
+                  render={<td colSpan={3} className="pb-2 pr-3" />}
+                >
+                  {row.note}
+                </Text>
+              </tr>
+            ),
+          ])}
+          {compared.unmeasured.map((group) => (
+            <tr key={group.why} className="border-t border-border align-baseline">
+              <td colSpan={4} className="py-2">
+                <span className="flex items-baseline gap-2.5">
+                  <MinusIcon
+                    className="size-3.5 shrink-0 translate-y-0.5 text-dim-foreground"
+                    aria-hidden="true"
+                  />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <Text variant="meta" tone="muted">
+                      {group.names.join(", ")}
+                    </Text>
+                    <Text variant="caption" tone="dim">
+                      Not measured on either build: {group.why}
+                    </Text>
+                  </span>
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
+
+const namesList = (names: ReadonlyArray<string>) =>
+  names.length <= 2
+    ? names.map((name) => name.toLowerCase()).join(" or ")
+    : `${names.length} checks`;

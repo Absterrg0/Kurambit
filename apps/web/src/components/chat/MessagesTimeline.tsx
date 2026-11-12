@@ -2910,9 +2910,9 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
       };
     case "run_interrupt_result":
       return {
-        label: "Run interrupted",
+        label: "Stopped",
         detail: item.message,
-        tone: "danger",
+        tone: "muted",
         icon: XIcon,
       };
     case "handoff":

@@ -7,6 +7,8 @@ import {
   type GameManifest,
   type GameStageKind,
 } from "@kurambit/contracts";
+import { FIRST_TURN_LEADS } from "@kurambit/shared/gameFirstTurn";
+
 import { engineProfile, PROFILES } from "./engineProfile.ts";
 
 // Harness output, never game content: the bot runs' log and report, kept play
@@ -144,21 +146,6 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
     ...lines.slice(last + 1),
   ].join("\n");
 };
-
-/**
- * The game chat's first message: the brief, sent as the person's own, so they
- * see exactly what the agent was told, then one instruction line. That line
- * names AGENTS.md because some providers (Grok, Antigravity) do not load it by
- * themselves.
- */
-const FIRST_TURN_LEADS = [
-  "Make this game. Read AGENTS.md first.",
-  'Make this game. Follow "The first turn" in AGENTS.md.',
-] as const;
-
-/** The first turn's instruction line, which names no game, so a build's summary skips it. */
-export const isFirstTurnLead = (line: string): boolean =>
-  (FIRST_TURN_LEADS as ReadonlyArray<string>).includes(line);
 
 export const firstTurnMessage = (manifest: GameManifest): string => {
   const lead = FIRST_TURN_LEADS[FIRST_TURN_SECTIONS[manifest.engine.name] === undefined ? 0 : 1];

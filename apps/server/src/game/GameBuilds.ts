@@ -64,7 +64,7 @@ import { BOT_DIR, BuildName } from "./run/buildNames.ts";
 import { engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { captureBuild, isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
-import { isFirstTurnLead } from "./scaffold.ts";
+import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
 import { tuneFileText, tuneFileWith } from "./gameTune.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */

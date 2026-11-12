@@ -4,6 +4,8 @@ import {
   ScheduledTaskId,
 } from "@kurambit/contracts";
 
+import { withoutFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
+
 const LEGACY_AUTOMATION_PREFIX = /^\[Triggered by schedule task: [^\r\n]+\]\r?\n\r?\n/;
 const LEGACY_AUTOMATION_MESSAGE_ID = /^scheduled-task-message:(.+):\d+:(?:scheduled|manual)$/;
 
@@ -41,7 +43,9 @@ export function resolveUserMessagePresentation(message: {
     };
   }
   return {
-    text: message.text,
+    // A new game's first message ends with Kurambit's instruction to its agent: the person's
+    // brief is what they wrote.
+    text: withoutFirstTurnLead(message.text),
     attribution:
       message.createdBy !== "agent"
         ? null

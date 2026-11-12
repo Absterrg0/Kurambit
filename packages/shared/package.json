@@ -87,6 +87,10 @@
       "types": "./src/KeyedCoalescingWorker.ts",
       "import": "./src/KeyedCoalescingWorker.ts"
     },
+    "./gameFirstTurn": {
+      "types": "./src/gameFirstTurn.ts",
+      "import": "./src/gameFirstTurn.ts"
+    },
     "./gameNextLine": {
       "types": "./src/gameNextLine.ts",
       "import": "./src/gameNextLine.ts"

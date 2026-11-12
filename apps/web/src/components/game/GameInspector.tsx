@@ -11,7 +11,6 @@ import {
   ClockIcon,
   ColumnsIcon,
   GitCompareIcon,
-  FileIcon,
   FileSearchIcon,
   FileVideoIcon,
   ImageIcon,
@@ -985,6 +984,10 @@ function CheckRow({
 }
 
 /** What the build changed, folded to one row: it opens this chat's diff, else lists the files. */
+/**
+ * What the build changed, in place: its files, most changed first. The code diff is a
+ * deliberate second step, so a click here never turns the game screen into a code view.
+ */
 function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: GameBuild }) {
   const [open, setOpen] = useState(false);
   const turn =
@@ -996,14 +999,13 @@ function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: Game
       ?.runId ?? null;
   if (build.fileCount === null && build.files.length === 0) return null;
   const count = build.fileCount ?? build.files.length;
-  const complete = build.fileCount === null || build.fileCount <= build.files.length;
+  const listed = build.files.length;
+  // The lines are counted over the listed files only: a total over some files is not said.
+  const complete = build.fileCount === null || build.fileCount <= listed;
   const additions = build.files.reduce((sum, file) => sum + file.additions, 0);
   const deletions = build.files.reduce((sum, file) => sum + file.deletions, 0);
   const openDiff = () => {
-    if (runId === null) {
-      setOpen(!open);
-      return;
-    }
+    if (runId === null) return;
     useDiffPanelStore.getState().selectTurn(threadRef, runId);
     useRightPanelStore.getState().open(threadRef, "diff");
   };
@@ -1012,20 +1014,25 @@ function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: Game
       <Rows>
         <button
           type="button"
-          aria-expanded={runId === null ? open : undefined}
-          onClick={openDiff}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
           disabled={count === 0}
           className="flex items-center gap-2.5 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent disabled:hover:bg-transparent"
         >
-          <FileIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronRightIcon
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform motion-popup",
+              open && "rotate-90",
+            )}
+            aria-hidden="true"
+          />
           <Text variant="meta" tone="default">
             {count === 1 ? "1 file" : `${count} files`}
           </Text>
-          {count > 0 ? (
+          {count > 0 && complete ? (
             <Text variant="meta" tone="inherit" numeric render={<span className="ml-auto" />}>
               <span className="text-success-foreground">+{additions}</span>{" "}
               <span className="text-destructive-foreground">−{deletions}</span>
-              {complete ? "" : " in the top 8"}
             </Text>
           ) : null}
         </button>
@@ -1047,6 +1054,20 @@ function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: Game
               </div>
             ))
           : null}
+        {open && (!complete || runId !== null) ? (
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <Text variant="caption" tone="muted" render={<span className="min-w-0 flex-1" />}>
+              {complete
+                ? ""
+                : `${count - listed} smaller ${count - listed === 1 ? "file" : "files"} not listed`}
+            </Text>
+            {runId !== null ? (
+              <Button size="xs" variant="ghost" onClick={openDiff}>
+                Open the code changes
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </Rows>
     </Section>
   );

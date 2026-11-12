@@ -98,12 +98,8 @@ export function V2LifecycleRow(props: {
   }
   if (item.type === "run_interrupt_result") {
     return (
-      <TimelineSystemDivider
-        label="Run interrupted"
-        detail={item.message}
-        tone="danger"
-        icon={XIcon}
-      />
+      // A stop the person asked for is no failure: it reads as what happened, in neutral.
+      <TimelineSystemDivider label="Stopped" detail={item.message} tone="neutral" icon={XIcon} />
     );
   }
   if (item.type === "compaction") {
