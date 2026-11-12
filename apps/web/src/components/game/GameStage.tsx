@@ -7,7 +7,6 @@ import {
   CrosshairIcon,
   ChevronDownIcon,
   DownloadIcon,
-  FastForwardIcon,
   FilmIcon,
   FolderOpenIcon,
   HistoryIcon,
@@ -75,7 +74,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
 import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
 import { GameExports } from "./GameExports";
-import { GameKeepGoingMenuContent } from "./GameKeepGoingControl";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
 import {
@@ -85,7 +83,6 @@ import {
   useStageBridge,
   useThreadStageBridge,
 } from "./gameStageBridge";
-import { keepGoingControlView } from "./keepGoing.logic";
 import { useKeepGoing } from "./useKeepGoing";
 import { buildName } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
@@ -296,14 +293,6 @@ function ThreadGameStage({
     if (selectedId !== null && selectedId !== before) showInspectorTab("scene");
   }, [selectedId, showInspectorTab]);
   const keepGoing = useKeepGoing(threadRef);
-  const keepGoingView = keepGoingControlView({
-    status: keepGoing.status,
-    error: keepGoing.error,
-    threadId: threadRef.threadId,
-    canOperate: keepGoing.canOperate,
-    sending: keepGoing.sending,
-    chosenBudget: keepGoing.chosenBudget,
-  });
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{
     readonly n: number;
@@ -791,40 +780,6 @@ function ThreadGameStage({
           keepGoing: false,
         }
       : null;
-  // Keep going makes the next builds, so it sits with them in the strip's header.
-  // A parked engine's game builds and plays nothing, so it offers neither.
-  const keepGoingControl =
-    engine.status === "active" && hasBuild ? (
-      <Menu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <MenuTrigger
-                render={
-                  <Button
-                    size="xs"
-                    variant="secondary"
-                    aria-label="Keep going"
-                    aria-pressed={keepGoingView.pressed}
-                    data-game-keep-going=""
-                    disabled={!hasBuild}
-                  />
-                }
-              />
-            }
-          >
-            <FastForwardIcon className="size-3.5" aria-hidden="true" />
-            {keepGoingView.label}
-          </TooltipTrigger>
-          <TooltipPopup side="top" align="end">
-            {keepGoingView.tooltip}
-          </TooltipPopup>
-        </Tooltip>
-        <MenuPopup align="end">
-          <GameKeepGoingMenuContent threadRef={threadRef} />
-        </MenuPopup>
-      </Menu>
-    ) : null;
   return (
     <section
       ref={stageRef}
@@ -1150,7 +1105,6 @@ function ThreadGameStage({
         onPlayUnlisted={(ref) => void playBuild(ref)}
         onLive={backToLive}
         onCompare={setCompare}
-        actions={keepGoingControl}
         onInspect={(build) => {
           inspectBuild({ threadKey, build: build.id, snapshot: build });
           if (useGameWorkspaceStore.getState().inspectorTab !== "build") showInspectorTab("build");

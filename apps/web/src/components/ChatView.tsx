@@ -1,4 +1,5 @@
 import { GameStage } from "./game/GameStage";
+import { GameComposerTray } from "./game/GameComposerTray";
 import { GameInspectorPanel, GameInspectorTabs } from "./game/GameInspector";
 import { gameAgentNote as gameAgentNoteOf } from "./game/gameAgentNote.logic";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
@@ -7848,9 +7849,16 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             </div>
           </ComposerSurface.Shell>
+          {gameLayout && activeThreadRef !== null ? (
+            <GameComposerTray threadRef={activeThreadRef} />
+          ) : null}
           <div
             aria-hidden
-            className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
+            className={cn(
+              gameLayout
+                ? "h-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+                : "h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]",
+            )}
           />
         </div>
       </div>

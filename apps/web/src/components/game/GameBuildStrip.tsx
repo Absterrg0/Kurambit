@@ -76,7 +76,6 @@ export function GameBuildStrip({
   onPlayUnlisted,
   onLive,
   onCompare,
-  actions,
   onInspect,
 }: {
   threadRef: ScopedThreadRef;
@@ -93,8 +92,6 @@ export function GameBuildStrip({
   /** Back to the folder's own game. */
   onLive: () => void;
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
-  /** What makes the next builds (keep going), at the end of the strip's header. */
-  actions?: ReactNode;
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
 }) {
@@ -296,7 +293,6 @@ export function GameBuildStrip({
               Compare
             </Button>
           )}
-          {actions}
         </div>
       )}
       {/* A fixed height (a picture and two caption lines), so the Stage above never jumps

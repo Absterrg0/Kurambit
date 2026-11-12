@@ -190,7 +190,7 @@ Keep going lets your agent take the next step itself, turn after turn, in the ch
 in. It works on games whose engine Kurambit plays after every turn (three.js); on other games the
 control is disabled and says why.
 
-To start, open **Keep going** in the game's top bar (`mod+Shift+A`, the composer's mode shortcut,
+To start, open **Keep going** under the box where you tell the game what to change (`mod+Shift+A`, the composer's mode shortcut,
 opens it), and choose:
 
 - **Guided:** each next step is proposed above the composer, "Step 3 · a failing fact: …", and
@@ -241,9 +241,10 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 A game opens as a studio. The top bar says in one line what the game is doing (playing a build,
 making the next one, frozen, keep going's step, or that your agent needs a choice), with Undo, Redo
 and the **⋯** menu of stage controls; the game's name opens its menu (rename, folder, **Export…**).
-The game fills the middle; its builds sit under it as pictures, with **Compare** and **Keep going**;
+The game fills the middle; its builds sit under it as pictures, with **Compare**;
 and under them is the one box where you tell the game what to change, with your agent's
-latest words just above it (**Log** opens the whole conversation). On the right, the **Inspector**
+latest words just above it (**Log** opens the whole conversation) and, under it, which build your
+next message builds on and **Keep going**. On the right, the **Inspector**
 has three tabs: **Build** (a build's checks and changes), **Scene** (the game's look and its things)
 and **Log** (the full conversation). `mod+Alt+C` shows or hides the Inspector; in a narrow window it
 takes the place of the game until you switch back.
