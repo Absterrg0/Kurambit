@@ -61,16 +61,11 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
         // not what the next click changes.
         <>
           <GitCompareIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
-          <Text
-            variant="caption"
-            tone="muted"
-            truncate
-            render={<span className="min-w-0 flex-1" aria-live="polite" />}
-          >
+          <TraySentence live>
             {picking.first === null
               ? "Comparing: pick the first build on the strip · Esc cancels"
               : `Comparing with ${picking.first}: pick the other build · Esc cancels`}
-          </Text>
+          </TraySentence>
         </>
       ) : (
         <>
@@ -78,15 +73,9 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
             className="size-3.5 shrink-0 text-dim-foreground"
             aria-hidden="true"
           />
-          <Text
-            variant="caption"
-            tone="muted"
-            truncate
-            render={<span className="min-w-0 flex-1" />}
-          >
-            {target}
-            {copy !== null ? " · the copy on the Stage stays as it is" : ""}
-          </Text>
+          <TraySentence>
+            {`${target}${copy !== null ? " · the copy on the Stage stays as it is" : ""}`}
+          </TraySentence>
         </>
       )}
       {canKeepGoing ? (
@@ -118,5 +107,22 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
         </Menu>
       ) : null}
     </div>
+  );
+}
+
+/** The tray's sentence; a new one fades in on the popup clock instead of swapping in a frame. */
+function TraySentence({ live = false, children }: { live?: boolean; children: string }) {
+  return (
+    <span className="min-w-0 flex-1" aria-live={live ? "polite" : undefined}>
+      <Text
+        key={children}
+        variant="caption"
+        tone="muted"
+        truncate
+        render={<span className="block motion-popup transition-opacity starting:opacity-0" />}
+      >
+        {children}
+      </Text>
+    </span>
   );
 }

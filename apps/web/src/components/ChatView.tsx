@@ -7982,7 +7982,12 @@ export default function ChatView(props: ChatViewProps) {
         {gameLayout ? <GameInspectorPanel threadRef={activeThreadRef} /> : null}
 
         <div
-          className="relative flex min-h-0 min-w-0 flex-1"
+          className={cn(
+            "relative flex min-h-0 min-w-0 flex-1",
+            // The Log fades in as the tab panel over it goes, on the same clock as the others.
+            gameLayout && "motion-popup transition-opacity",
+            gameLayout && gameInspectorTab !== "log" && "opacity-0",
+          )}
           // Under another Inspector tab the Log stays mounted, so its scroll and find survive.
           inert={gameLayout && gameInspectorTab !== "log"}
         >

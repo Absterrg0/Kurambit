@@ -146,8 +146,13 @@ export function GameInspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }
       aria-label={TABS.find((entry) => entry.tab === tab)?.label}
       className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col overflow-y-auto bg-background"
     >
-      {/* In the wide sheet of a narrow window, the panel keeps a reading width. */}
-      <div className="w-full max-w-160">
+      {/* In the wide sheet of a narrow window, the panel keeps a reading width. Keyed by tab,
+          so a new tab fades in on the popup clock as the pill slides, like TabsPanel (the
+          tabs live in the column's header, outside this panel's tree). */}
+      <div
+        key={tab}
+        className="w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
+      >
         {tab === "build" ? (
           <BuildPanel threadRef={threadRef} />
         ) : (

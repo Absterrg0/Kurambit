@@ -68,6 +68,17 @@ export interface GameBuildSlot {
  * on the Stage is outlined; a click plays one and shows it in the Inspector.
  * Keep going's builds sit under one bracket; undone ones are dimmed and struck.
  */
+// Cards present when the strip first paints are simply there; a card that arrives
+// later (a build made, the slot that makes it, Now) slides in from the right. The
+// strip turns this on a frame after its first paint, like the Tabs indicator.
+function settleAfterFirstPaint(strip: HTMLElement | null) {
+  if (!strip) return;
+  const frame = requestAnimationFrame(() => strip.setAttribute("data-settled", ""));
+  return () => cancelAnimationFrame(frame);
+}
+const NEW_CARD_MOTION =
+  "motion-surface transition-[opacity,translate] in-data-settled:starting:translate-x-3 in-data-settled:starting:opacity-0";
+
 export function GameBuildStrip({
   threadRef,
   gameName,
@@ -290,6 +301,7 @@ export function GameBuildStrip({
     ) : null;
   return (
     <section
+      ref={settleAfterFirstPaint}
       aria-label="Builds"
       data-game-build-strip=""
       className="flex max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
@@ -474,6 +486,7 @@ function BuildCard({
             onClick={onClick}
             className={cn(
               "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
+              NEW_CARD_MOTION,
               (undone || !build.available) && "opacity-40",
             )}
           />
@@ -623,7 +636,10 @@ function FirstBuildSlot() {
 /** The build being made: a dashed slot with its elapsed time. */
 function SlotCard({ slot }: { slot: GameBuildSlot }) {
   return (
-    <div data-game-build-slot="" className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
+    <div
+      data-game-build-slot=""
+      className={cn("flex w-(--build-card-width) shrink-0 flex-col gap-1.5", NEW_CARD_MOTION)}
+    >
       <div className="flex aspect-video w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
         <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
         <Text variant="caption" tone="default">
@@ -673,7 +689,8 @@ function NowCard({
       disabled={picking}
       onClick={onClick}
       className={cn(
-        "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none transition-opacity disabled:cursor-default",
+        "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
+        NEW_CARD_MOTION,
         picking && "opacity-40",
       )}
     >
