@@ -1084,7 +1084,7 @@ function CodexWelcomeCard({
 }) {
   const footer = Children.toArray(children);
   return (
-    <div className="rounded-lg border border-border bg-background px-4 py-2">
+    <div className="px-4 py-2">
       {/* 56px like the other first-run rows; a ready account's email sits on the right. */}
       <div className="flex min-h-10 flex-wrap items-center gap-3">
         <OpenAI className="size-5 shrink-0 fill-foreground" />
