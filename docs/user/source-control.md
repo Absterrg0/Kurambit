@@ -115,7 +115,7 @@ Merging a stack lands it through GitCafe, and updating a branch restacks the lay
 
 ## Start, clone, or publish a project
 
-To start from nothing, choose **New project** in the command palette (`Cmd/Ctrl+K`), or
+To start from nothing, choose **Developer… → New project** in the command palette (`Cmd/Ctrl+K`), or
 **New project** under **Add Project** on any client, and type a name. Kurambit makes a Git
 repository in `~/.kurambit/projects` (the `projects` folder of your Kurambit data directory) with a README,
 an icon, and a first commit, then opens a new thread in it. Until the project has a thread, new

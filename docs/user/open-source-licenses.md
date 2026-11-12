@@ -3,8 +3,8 @@
 Kurambit includes third-party software and adapted assets. To read their license and attribution
 notices:
 
-Open **Settings → General**, find **Open source licenses** under **About**, and select
-**View licenses**.
+Open **Settings → General**, find **Open source licences** under **About**, and select
+**View licences**.
 
 The page lists the version when available, license identifier, and the parts of Kurambit that include
 or use the item. This also covers optional device tools that Kurambit installs on demand instead of

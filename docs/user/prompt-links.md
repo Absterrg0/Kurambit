@@ -8,7 +8,7 @@ change your permission mode, branch, or worktree. Your own defaults apply.
 
 ## Make a link
 
-Open the command palette and choose **Copy prompt link**. It copies the draft in the composer.
+Open the command palette, choose **Developer…**, then **Copy prompt link**. It copies the draft in the composer.
 When the project is on GitHub, **Copy prompt link with repo and model** also adds the repository
 and the model you picked. Sent messages have a **Copy prompt link** button too.
 
