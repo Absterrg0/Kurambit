@@ -62,6 +62,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CodeIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
@@ -1915,10 +1916,10 @@ function OpenCommandPaletteDialog(props: {
       developerItems.push({
         kind: "action",
         value: "action:new-thread",
-        searchTerms: ["new thread", "chat", "create", "draft"],
+        searchTerms: ["new chat", "new thread", "create", "draft"],
         title: (
           <>
-            New thread in <span className="font-semibold">{activeProjectTitle}</span>
+            New chat in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
@@ -1937,8 +1938,8 @@ function OpenCommandPaletteDialog(props: {
     developerItems.push({
       kind: "submenu",
       value: "action:new-thread-in",
-      searchTerms: ["new thread", "project", "pick", "choose", "select"],
-      title: "New thread in...",
+      searchTerms: ["new chat", "new thread", "project", "pick", "choose", "select"],
+      title: "New chat in…",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
@@ -1949,8 +1950,8 @@ function OpenCommandPaletteDialog(props: {
     developerItems.push({
       kind: "action",
       value: "action:new-thread-without-project",
-      searchTerms: ["new thread", "no project", "without project", "none", "chat"],
-      title: "New thread without a project",
+      searchTerms: ["new chat", "new thread", "no project", "without project", "none"],
+      title: "New chat without a project",
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.newWithoutProject",
       run: () => startScratchThread(scratchTargetEnvironmentId),
@@ -2025,7 +2026,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:copy-thread-reference",
       searchTerms: ["copy", "thread id", "reference"],
-      title: "Copy thread ID",
+      title: "Copy chat ID",
       description: activeThreadReferenceCopyTarget.value,
       icon: <HashIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
@@ -2352,6 +2353,18 @@ function OpenCommandPaletteDialog(props: {
     actionItems,
     developerItems,
     recentThreadItems,
+    developerEntry:
+      deferredQuery.trim().length === 0
+        ? {
+            kind: "submenu",
+            value: "action:developer",
+            searchTerms: ["developer"],
+            title: "Developer…",
+            icon: <CodeIcon className={ITEM_ICON_CLASS} />,
+            addonIcon: <CodeIcon className={ADDON_ICON_CLASS} />,
+            groups: [{ value: "developer", label: "Developer", items: developerItems }],
+          }
+        : undefined,
   });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
