@@ -48,16 +48,15 @@ const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; descr
   {
     repo_conventions: {
       label: "Repository conventions",
-      description: "In each project, matches recent change descriptions and change request titles.",
+      description: "In each game, matches its recent commit messages and pull request titles.",
     },
     conventional_commits: {
       label: "Conventional Commits",
-      description: "Use Conventional Commit prefixes and keep change request text concise.",
+      description: "Use Conventional Commit prefixes and keep pull request text concise.",
     },
     custom: {
       label: "Custom instructions",
-      description:
-        "Use your instructions for change descriptions and change requests in every project.",
+      description: "Use your instructions for commit messages and pull requests in every game.",
     },
   };
 
@@ -271,7 +270,7 @@ export function SourceControlWritingSettingsSection() {
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
         {...searchableSetting("source-control-writer-model")}
-        description="Model for source control text and branch or bookmark names. Off uses the environment's text generation model."
+        description="The model that writes commit messages and branch names. Off uses the text generation model under General."
         control={
           !hasServerTargets ? (
             <span className="text-sm text-muted-foreground">
