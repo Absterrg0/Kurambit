@@ -112,6 +112,7 @@ import {
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
+import { useTurnLanding } from "./useTurnLanding";
 
 const TABS: ReadonlyArray<{ readonly tab: GameInspectorTab; readonly label: string }> = [
   { tab: "build", label: "Build" },
@@ -267,6 +268,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     useIsGameThreadStatus(threadRef).data?.manifest.name ?? "",
   );
   const working = threadRuntimeIsActive(shell?.runtime);
+  const landing = useTurnLanding(threadRef, working);
   const data = list.data;
   if (data === null)
     return list.error === null ? (
@@ -314,15 +316,16 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     </section>
   );
   if (build === null)
-    return working ? (
+    return working || landing ? (
       <div className="flex flex-col gap-5 p-4">
         <div className="flex flex-col gap-1">
           <Text variant="label" tone="strong" render={<h2 />}>
             Build 1
           </Text>
           <Text variant="meta" tone="muted" render={<p />}>
-            Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to
-            measure these.
+            {landing
+              ? "Being saved. It plays on the Stage in a moment, and a bot plays it to measure these."
+              : "Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to measure these."}
           </Text>
         </div>
         {checksToCome}

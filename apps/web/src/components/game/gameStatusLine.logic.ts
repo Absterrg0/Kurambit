@@ -77,7 +77,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
               ? part(`Changed since ${input.changedSince} · not measured`, {
                   hint: `The game folder has changed since ${input.changedSince}, so the Stage plays something no build has measured yet. The next build measures it.`,
                 })
-              : input.measured
+              : input.measured || input.landing
                 ? null
                 : part("Not measured yet", {
                     hint: "No build of this game has been measured. Your agent's next change becomes its first build, measured by a bot.",

@@ -45,7 +45,7 @@ import {
   stagePlayTarget,
   turnBuild,
 } from "../../state/game";
-import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
+import { useQuietThreadShell } from "../../state/entities";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { shellEnvironment } from "../../state/shell";
@@ -103,6 +103,7 @@ import {
 import { useKeepGoing } from "./useKeepGoing";
 import { buildName, buildPhrase, checksLine } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
+import { useTurnLanding } from "./useTurnLanding";
 import { GameElapsed } from "./GameElapsed";
 import { gameStatusLine, type GameStatusPart } from "./gameStatusLine.logic";
 import { GameFrame, GameFrameBox, GamePlaySurface, type StudioMessage } from "./GamePlaySurface";
@@ -215,8 +216,6 @@ const BUILD_CARD_GAP = 12;
  * Stage must not shrink and re-centre each time; only rows past this budget take its height.
  */
 const TRANSIENT_ROWS_RESERVE = 92;
-/** How long a turn's build may take to be listed before the strip stops saying it is saved. */
-const LANDING_CAP_MS = 30_000;
 const TRANSIENT_ROWS =
   "[data-game-agent-note], [data-game-pointed], [data-game-direction-bar] [data-composer-banner-drawer]";
 
@@ -444,32 +443,7 @@ function ThreadGameStage({
     useAtomValue(
       turnBuild(sawTurnEnd && latestRun !== null ? threadRef : null, latestRun?.runId ?? null),
     ) !== null;
-  // Between a turn's end and its build being listed, the build is being saved: the strip keeps
-  // its slot and the top bar says so, so nothing steps back to the build before. The turn's
-  // checkpoint settles it: one with no changed files makes no build. Capped, so a save that
-  // never reports cannot hold the slot for ever.
-  const checkpoints = useThreadCheckpointSummaries(threadRef);
-  const latestCheckpoint =
-    latestRun === null ? undefined : checkpoints.find((entry) => entry.runId === latestRun.runId);
-  const buildComing =
-    latestCheckpoint === undefined ||
-    (latestCheckpoint.status === "ready" && latestCheckpoint.files.length > 0);
-  const [landingGaveUp, setLandingGaveUp] = useState<string | null>(null);
-  const landingRun =
-    !turnRunning &&
-    sawTurnEnd &&
-    latestRun !== null &&
-    !endedTurnBuilt &&
-    buildComing &&
-    landingGaveUp !== latestRun.runId
-      ? latestRun.runId
-      : null;
-  useEffect(() => {
-    if (landingRun === null) return;
-    const timeout = window.setTimeout(() => setLandingGaveUp(landingRun), LANDING_CAP_MS);
-    return () => window.clearTimeout(timeout);
-  }, [landingRun]);
-  const landing = landingRun !== null;
+  const landing = useTurnLanding(threadRef, turnRunning);
   // Which live change the frame shows: held while this chat's turn runs and its build is saved,
   // so the Stage switches games together with its label; the latest otherwise.
   const [liveShown, setLiveShown] = useState<number | null>(null);
@@ -1063,7 +1037,11 @@ function ThreadGameStage({
   // A live game's folder plays its starter shell until the first build lands;
   // the Stage says what is being made instead of showing a game that is not yet one.
   const shownPhase: typeof phase =
-    stageKind === "live" && buildsRead && !hasBuild && turnRunning && phase.kind === "playing"
+    stageKind === "live" &&
+    buildsRead &&
+    !hasBuild &&
+    (turnRunning || landing) &&
+    phase.kind === "playing"
       ? {
           kind: "first-build",
           startedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
