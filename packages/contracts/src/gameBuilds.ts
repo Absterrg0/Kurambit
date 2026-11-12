@@ -589,7 +589,7 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
     }
     case "winnable-without-skill":
       return from(facts.winnableWithoutSkill, (yes) => ({
-        text: yes ? "Won with no skill (no input or random input)" : "Needs skill to win",
+        text: yes ? "Won with no input or random input" : "Not won with no input or random input",
         value: null,
         tone: yes ? "bad" : "good",
         kind: String(yes),
@@ -897,7 +897,8 @@ const CHECK_LABELS: Readonly<
   boots: "Starts",
   idle: "Can be lost with no input",
   skilled: "Can be won by the play bot",
-  "winnable-without-skill": "Needs skill to win",
+  // What was observed, not a verdict on difficulty: the harness never judges taste.
+  "winnable-without-skill": "Not won by random or no input",
   performance: "Runs smoothly",
   freeze: "Keeps moving",
   colour: "Colour is varied",
@@ -971,8 +972,8 @@ const checkWords = (
       return facts.winnableWithoutSkill.status !== "measured"
         ? null
         : facts.winnableWithoutSkill.value
-          ? { sentence: "Can be won without skill", value: null }
-          : { sentence: "Needs skill to win", value: null };
+          ? { sentence: "Won by random or no input", value: null }
+          : { sentence: "Not won by random or no input", value: null };
     case "performance": {
       if (facts.performance.status !== "measured") return null;
       const perf = facts.performance.value;

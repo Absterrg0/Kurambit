@@ -19,6 +19,8 @@ import { serverEnvironment } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { MenuItem } from "../ui/menu";
+import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
@@ -81,24 +83,8 @@ const SavedFileActions = ({
   <GameFileActions threadRef={threadRef} path={media.path} relativePath={`saved/${media.name}`} />
 );
 
-/** Keeps a generated video or image past the log cleanup, as a copy in the game's saved/. */
-export function SaveMediaButton({
-  threadRef,
-  source,
-  label,
-  text = "Save",
-  icon,
-}: {
-  threadRef: ScopedThreadRef;
-  /** Game-relative path of the generated file. */
-  source: string;
-  /** The words after the date in the saved name. */
-  label: string;
-  /** The button's words, when several files share a row. */
-  text?: string;
-  /** Shown alone, with the words in its tooltip, where a row has no room for words. */
-  icon?: ReactNode;
-}) {
+/** One file's save into the game's saved/: whether it is there yet, and the way to put it there. */
+function useSaveMedia(threadRef: ScopedThreadRef, source: string, label: string) {
   const canSave = useAtomValue(gameEnvironment.saveMedia.permissionAtom(threadRef.environmentId));
   const save = useAtomCommand(gameEnvironment.saveMedia, { reportFailure: false });
   // One read of saved/ for every button of the game: a save is shown as saved
@@ -134,6 +120,63 @@ export function SaveMediaButton({
     setError(null);
     setJustSaved({ media: result.value, listAt: list.dataUpdatedAt });
   };
+  return { canSave, saving, saved, error, run };
+}
+
+/** A menu's Save row for one file: "Save the video", then "Video saved" once it is kept. */
+export function SaveMediaMenuItem({
+  threadRef,
+  source,
+  label,
+  text,
+  icon,
+}: {
+  threadRef: ScopedThreadRef;
+  source: string;
+  label: string;
+  /** What the file is, in a word: "Video". */
+  text: string;
+  icon: ReactNode;
+}) {
+  const { canSave, saving, saved, error, run } = useSaveMedia(threadRef, source, label);
+  return (
+    <MenuItem
+      disabled={saved !== null || !canSave || saving}
+      closeOnClick={false}
+      onClick={() => void run()}
+    >
+      {saved !== null ? <BookmarkCheckIcon aria-hidden="true" /> : icon}
+      <span className="flex min-w-0 flex-col">
+        {saved !== null ? `${text} saved` : saving ? "Saving…" : `Save the ${text.toLowerCase()}`}
+        {error === null ? null : (
+          <Text variant="caption" tone="destructive">
+            {error}
+          </Text>
+        )}
+      </span>
+    </MenuItem>
+  );
+}
+
+/** Keeps a generated video or image past the log cleanup, as a copy in the game's saved/. */
+export function SaveMediaButton({
+  threadRef,
+  source,
+  label,
+  text = "Save",
+  icon,
+}: {
+  threadRef: ScopedThreadRef;
+  /** Game-relative path of the generated file. */
+  source: string;
+  /** The words after the date in the saved name. */
+  label: string;
+  /** The button's words, when several files share a row. */
+  text?: string;
+  /** Shown alone, with the words in its tooltip, where a row has no room for words. */
+  icon?: ReactNode;
+}) {
+  const { canSave, saving, saved, error, run } = useSaveMedia(threadRef, source, label);
   if (icon !== undefined) {
     const label =
       saved !== null ? `${text} saved` : saving ? "Saving…" : `Save the ${text.toLowerCase()}`;

@@ -10,6 +10,8 @@ export interface GameStatusPart {
   readonly since: number | null;
   /** A key hint after the text, then its words: "Tab resumes". */
   readonly key: { readonly key: string; readonly after: string } | null;
+  /** The phrase in a full sentence, for its tooltip: the line itself is compressed. */
+  readonly hint: string | null;
 }
 
 const part = (text: string, more: Partial<Omit<GameStatusPart, "text">> = {}): GameStatusPart => ({
@@ -18,6 +20,7 @@ const part = (text: string, more: Partial<Omit<GameStatusPart, "text">> = {}): G
   strong: false,
   since: null,
   key: null,
+  hint: null,
   ...more,
 });
 
@@ -56,20 +59,33 @@ const sentence = (phrase: string) => `${phrase.charAt(0).toUpperCase()}${phrase.
  */
 export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatusPart> => {
   const stage: GameStatusPart | null = input.frozen
-    ? part(`Frozen on ${input.onStage ?? "the game"}`, { key: { key: "Tab", after: "resumes" } })
+    ? part(`Frozen on ${input.onStage ?? "the game"}`, {
+        key: { key: "Tab", after: "resumes" },
+        hint: "The game is held still so you can point at things in it. Tab plays on.",
+      })
     : input.phase === "playing"
       ? input.away && input.onStage !== null
-        ? part(`Paused on ${input.onStage} while you're away`)
+        ? part(`Paused on ${input.onStage} while you're away`, {
+            hint: "The game holds while the Stage doesn't have the keyboard. Click it to play on.",
+          })
         : input.focused
-          ? part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`)
+          ? part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`, {
+              hint: "The game has the keyboard. Click outside it, or press Esc in its menu, to leave it.",
+            })
           : // At rest the line names what plays, in the words the Inspector and sidebar use.
             input.onStage !== null
-            ? part(sentence(input.onStage))
+            ? part(sentence(input.onStage), {
+                hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
+              })
             : input.changedSince !== null
-              ? part(`Changed since ${input.changedSince} · not measured`)
+              ? part(`Changed since ${input.changedSince} · not measured`, {
+                  hint: `The game folder has changed since ${input.changedSince}, so the Stage plays something no build has measured yet. The next build measures it.`,
+                })
               : input.measured
                 ? null
-                : part("Not measured yet")
+                : part("Not measured yet", {
+                    hint: "No build of this game has been measured. Your agent's next change becomes its first build, measured by a bot.",
+                  })
       : input.phase === "stopped"
         ? part("Stopped")
         : input.phase === "ready"
@@ -86,16 +102,29 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
                     ? part("Plays in its own window")
                     : null;
   const work: GameStatusPart | null = input.needsChoice
-    ? part("The agent needs a choice", { strong: true, dot: "live" })
+    ? part("The agent needs a choice", {
+        strong: true,
+        dot: "live",
+        hint: "Your agent is waiting for your answer in the Log.",
+      })
     : input.keepGoingLive && input.keepGoingStep !== null
-      ? part(`Keep going, step ${input.keepGoingStep}`, { strong: true, dot: "live" })
+      ? part(`Keep going, step ${input.keepGoingStep}`, {
+          strong: true,
+          dot: "live",
+          hint: "Keep going is improving the game a step at a time, each step a build.",
+        })
       : input.keepGoingLive
-        ? part("Keep going", { strong: true, dot: "live" })
+        ? part("Keep going", {
+            strong: true,
+            dot: "live",
+            hint: "Keep going is improving the game a step at a time, each step a build.",
+          })
         : input.turnRunning
           ? part(`Making build ${input.nextBuild}`, {
               strong: true,
               dot: "live",
               since: input.turnStartedAt,
+              hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
             })
           : input.operation !== null && !input.live
             ? part(input.operation.text, { dot: "live", since: input.operation.since })

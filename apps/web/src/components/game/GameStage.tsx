@@ -461,10 +461,13 @@ function ThreadGameStage({
         section.clientHeight - taken - stripChrome - 8,
         viewportHeight / viewportWidth,
       );
+      // The strip's measured chrome rounds with its pictures' size, so a fit can flip by a
+      // pixel and back on every measure: a pixel's change is no change.
       setStageFit((previous) =>
-        previous?.width === next.width &&
-        previous.height === next.height &&
-        previous.cardWidth === next.cardWidth
+        previous !== null &&
+        Math.abs(previous.width - next.width) <= 1 &&
+        Math.abs(previous.height - next.height) <= 1 &&
+        Math.abs(previous.cardWidth - next.cardWidth) <= 1
           ? previous
           : next,
       );
@@ -1334,7 +1337,8 @@ function TruncatedText({ text, className }: { text: string; className?: string }
 }
 
 function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
-  return (
+  const hints = status.map((part) => part.hint).filter((hint) => hint !== null);
+  const line = (
     <span
       role="status"
       className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden whitespace-nowrap"
@@ -1366,6 +1370,20 @@ function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
         </span>
       ))}
     </span>
+  );
+  if (hints.length === 0) return line;
+  // The line is the app's most compressed sentence: hovering it says it in full.
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="flex min-w-0 shrink" />}>{line}</TooltipTrigger>
+      <TooltipPopup side="bottom" align="start" className="max-w-sm">
+        <span className="flex flex-col gap-1">
+          {hints.map((hint) => (
+            <span key={hint}>{hint}</span>
+          ))}
+        </span>
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 

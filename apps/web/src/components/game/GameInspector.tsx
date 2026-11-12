@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
   ColumnsIcon,
@@ -60,6 +61,7 @@ import { Switch } from "../ui/switch";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Kbd } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Skeleton } from "../ui/skeleton";
 import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { Text } from "../ui/text";
@@ -81,7 +83,7 @@ import {
   useGameGenerations,
   useGenerationActions,
 } from "./GameGenerationCard";
-import { GameFileActions, SaveMediaButton } from "./GameSavedMedia";
+import { GameFileActions, SaveMediaMenuItem } from "./GameSavedMedia";
 import {
   assetLibraryNote,
   assetLines,
@@ -190,21 +192,29 @@ function Notice({ children }: { children: ReactNode }) {
   );
 }
 
+/** A titled group. The heading reads above its rows; a count after it stays quieter. */
 function Section({
   title,
+  detail,
   aside,
   children,
 }: {
   title: string;
+  detail?: string | null;
   aside?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex min-h-6 items-center gap-2">
-        <Text variant="meta" tone="muted" render={<h3 />}>
+        <Text variant="meta" tone="strong" emphasis render={<h3 />}>
           {title}
         </Text>
+        {detail === undefined || detail === null ? null : (
+          <Text variant="meta" tone="muted" numeric truncate>
+            {detail}
+          </Text>
+        )}
         {aside === undefined ? null : <span className="ml-auto flex items-center">{aside}</span>}
       </div>
       {children}
@@ -301,18 +311,20 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       build={build}
       list={data}
       onStage={build.id === onStageId}
-      note={nowOnStage ? "last measured" : null}
+      heading={nowOnStage ? "Last measured build" : null}
     />
   );
   if (!nowOnStage) return detail;
+  // What plays now, then a hard line, then the build the checks are from: green ticks
+  // under the line are history, never a reading of the game on the Stage.
   return (
     <>
-      <div className="flex flex-col gap-0.5 px-4 pt-4">
+      <div className="flex flex-col gap-0.5 border-b border-border p-4">
         <Text variant="label" tone="strong" render={<h2 />}>
           Now on the Stage
         </Text>
         <Text variant="meta" tone="muted" render={<p />}>
-          Not measured yet. The checks below are from {buildName(build)}.
+          Not measured yet. The next build measures it.
         </Text>
       </div>
       {detail}
@@ -326,15 +338,15 @@ function BuildDetail({
   build,
   list,
   onStage,
-  note,
+  heading,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
   build: GameBuild;
   list: GameBuildsResult;
   onStage: boolean;
-  /** Said after the build's time, when it is shown for a reason other than being picked. */
-  note: string | null;
+  /** Said over the build when it is shown for a reason other than being picked. */
+  heading: string | null;
 }) {
   const facts = useEnvironmentQuery(
     build.available
@@ -366,6 +378,11 @@ function BuildDetail({
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   return (
     <div className="flex flex-col gap-5 p-4">
+      {heading === null ? null : (
+        <Text variant="meta" tone="strong" emphasis render={<h3 className="-mb-3" />}>
+          {heading}
+        </Text>
+      )}
       <BuildActions
         threadRef={threadRef}
         build={build}
@@ -386,7 +403,7 @@ function BuildDetail({
           </Text>
           <Text variant="meta" tone="muted" truncate>
             {formatBuildTime(build.at)}
-            {onStage ? " · on the Stage" : note === null ? "" : ` · ${note}`}
+            {onStage ? " · on the Stage" : ""}
           </Text>
         </div>
       </BuildActions>
@@ -406,10 +423,11 @@ function BuildDetail({
         </Section>
       )}
       <Section
-        title={
+        title="Checks"
+        detail={
           factsData !== null && factsData.state !== "never" && build.available
-            ? `Checks · ${checksSummary(factsData)}`
-            : "Checks"
+            ? checksSummary(factsData)
+            : null
         }
         aside={
           measure.canMeasure &&
@@ -549,6 +567,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
       : fact.id === "performance" && facts.renderer
         ? `Played with ${facts.renderer}.`
         : null;
+  const moreUnmeasured = view.more.filter((more) => more.reading._tag === "not-measured").length;
   const morePass = moreMeasured.filter(
     (fact) => fact.reading._tag === "measured" && fact.reading.tone === "good",
   ).length;
@@ -572,21 +591,25 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
       {view.more.length > 0 ? (
         <Rows>
           <Collapsible>
-            <CollapsibleTrigger className="group flex min-h-9 items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent">
+            <CollapsibleTrigger className="group flex min-h-9 w-full items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent">
               <ChevronRightIcon
                 className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
                 aria-hidden="true"
               />
               <Text variant="meta" tone="default" render={<span className="flex-1" />}>
-                More measurements
+                Other measurements
               </Text>
-              {/* One unit, measured facts, on both sides of the dot; the rows below say the rest. */}
-              <Text variant="caption" tone="muted" numeric>
+              {/* Counted like the Checks heading, of every fact in the group, so the two
+                  totals read the same way: "2 of 6 pass · 3 not measured". */}
+              <Text variant="meta" tone="muted" numeric truncate>
                 {moreMeasured.length === 0
                   ? morePending > 0
                     ? `${morePending} to measure`
                     : "None measured"
-                  : `${moreMeasured.length} measured · ${morePass} pass`}
+                  : [
+                      `${morePass} of ${view.more.length} pass`,
+                      ...(moreUnmeasured > 0 ? [`${moreUnmeasured} not measured`] : []),
+                    ].join(" · ")}
               </Text>
             </CollapsibleTrigger>
             <CollapsiblePanel>
@@ -655,30 +678,40 @@ function NotMeasured({
         <span className="flex size-4 shrink-0 items-center justify-center">
           <MinusIcon className="size-4 text-dim-foreground" aria-hidden="true" />
         </span>
+        {/* The dash and the quieter tone say "not measured"; the words would take the
+            sentence's room and wrap it. Why, and every name, open in a popover that stays. */}
         <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
           {namesPhrase(names)}
-        </Text>
-        {/* In the value column, like a reading. */}
-        <Text variant="caption" tone="dim" render={<span className="shrink-0" />}>
-          not measured
+          <span className="sr-only"> (not measured)</span>
         </Text>
         <span className="flex w-6 shrink-0 items-center justify-end">
-          <Tooltip>
-            <TooltipTrigger
+          <Popover>
+            <PopoverTrigger
               render={<Button size="icon-xs" variant="ghost" aria-label="Why not measured" />}
             >
               <InfoIcon aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="left" className="max-w-sm">
-              <span className="flex flex-col gap-1">
-                {names.length > 2 ? <span>{names.join(", ")}.</span> : null}
-                <span>{why.charAt(0).toUpperCase() + why.slice(1)}</span>
+            </PopoverTrigger>
+            <PopoverPopup side="left" align="start" width="sm" padding="compact">
+              <span className="flex flex-col gap-1.5">
+                <Text variant="meta" tone="strong">
+                  Not measured
+                </Text>
+                {names.length > 2 ? (
+                  <Text variant="meta" tone="default" render={<span />}>
+                    {names.join(", ")}.
+                  </Text>
+                ) : null}
+                <Text variant="meta" tone="muted" render={<span />}>
+                  {why.charAt(0).toUpperCase() + why.slice(1)}
+                </Text>
                 {notes.map((line) => (
-                  <span key={line}>{line}</span>
+                  <Text key={line} variant="meta" tone="muted" render={<span />}>
+                    {line}
+                  </Text>
                 ))}
               </span>
-            </TooltipPopup>
-          </Tooltip>
+            </PopoverPopup>
+          </Popover>
         </span>
       </div>
     );
@@ -961,26 +994,39 @@ function Recordings({
               </GameBuildStill>
             </button>
             <span className="flex min-w-0 items-center gap-1 ps-0.5">
-              <Text variant="caption" tone="default" truncate render={<span className="flex-1" />}>
+              <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
                 {fact}
               </Text>
-              {run.video === null ? null : (
-                <SaveMediaButton
-                  threadRef={threadRef}
-                  source={run.video.path}
-                  label={`${name} ${fact} ${run.video.label}`.toLowerCase()}
-                  text="Video"
-                  icon={<FileVideoIcon aria-hidden="true" />}
-                />
-              )}
-              {run.frame === null ? null : (
-                <SaveMediaButton
-                  threadRef={threadRef}
-                  source={run.frame.path}
-                  label={`${name} ${fact} ${run.frame.label}`.toLowerCase()}
-                  text="Frame"
-                  icon={<ImageIcon aria-hidden="true" />}
-                />
+              {run.video === null && run.frame === null ? null : (
+                // One labelled menu for the files, so the tile's footer is its name and Save.
+                <Menu>
+                  <MenuTrigger
+                    render={<Button size="micro" variant="ghost" aria-label={`${fact}: save`} />}
+                  >
+                    Save
+                    <ChevronDownIcon aria-hidden="true" />
+                  </MenuTrigger>
+                  <MenuPopup align="end">
+                    {run.video === null ? null : (
+                      <SaveMediaMenuItem
+                        threadRef={threadRef}
+                        source={run.video.path}
+                        label={`${name} ${fact} ${run.video.label}`.toLowerCase()}
+                        text="Video"
+                        icon={<FileVideoIcon aria-hidden="true" />}
+                      />
+                    )}
+                    {run.frame === null ? null : (
+                      <SaveMediaMenuItem
+                        threadRef={threadRef}
+                        source={run.frame.path}
+                        label={`${name} ${fact} ${run.frame.label}`.toLowerCase()}
+                        text="Frame"
+                        icon={<ImageIcon aria-hidden="true" />}
+                      />
+                    )}
+                  </MenuPopup>
+                </Menu>
               )}
             </span>
           </li>
@@ -1062,9 +1108,9 @@ function BuildActions({
             >
               <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
-            {/* Beside the build's own header, centred on it: above has no room when the
-                header tops the panel, and below would cover the Checks heading. */}
-            <MenuPopup side="left" align="center" className="w-64">
+            {/* Below, ending at the trigger: it falls over the Checks heading's empty right
+                side and leaves the build it acts on (picture, name, time) in view. */}
+            <MenuPopup side="bottom" align="end" sideOffset={4} className="w-64">
               {canPlay ? (
                 <MenuItem onClick={() => requestStage({ kind: "play", build: refOf(build) })}>
                   <PlayIcon />
@@ -1104,11 +1150,16 @@ function BuildActions({
                   <Undo2Icon />
                   <span className="flex min-w-0 flex-col">
                     {restores.restoring(action.target) ? kind.busy : kind.label}
-                    {action.blocked === null ? null : (
-                      <Text variant="caption" tone="muted">
-                        {action.blocked}
-                      </Text>
-                    )}
+                    <Text variant="caption" tone="muted">
+                      {action.blocked ??
+                        (action.kind === "undo"
+                          ? previous === undefined
+                            ? "The game goes back to before it; it stays on the strip"
+                            : `The game goes back to ${buildName(previous)}`
+                          : action.kind === "redo"
+                            ? "The game becomes this build again"
+                            : "The game becomes this build; later ones stay on the strip")}
+                    </Text>
                   </span>
                 </MenuItem>
               ) : null}
