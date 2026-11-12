@@ -88,6 +88,29 @@ interface CommandPaletteVirtualizedResultsProps extends Omit<CommandPaletteResul
   listRef: RefObject<LegendListRef | null>;
 }
 
+// The list's own bottom padding (py-2), kept under the last whole row.
+const LIST_BOTTOM_PADDING_PX = 8;
+
+/**
+ * The tallest height, at most the list's own, that ends on a whole row, so an
+ * overflowing palette never stops mid-glyph above its footer. Null when the
+ * list already ends on one.
+ */
+function wholeRowHeight(scrollElement: HTMLElement): number | null {
+  const viewportTop = scrollElement.getBoundingClientRect().top;
+  const limit = scrollElement.clientHeight - LIST_BOTTOM_PADDING_PX;
+  let lastWholeRowBottom = 0;
+  for (const row of scrollElement.querySelectorAll(
+    "[data-slot=command-item], [data-slot=command-group-label], [data-palette-row]",
+  )) {
+    const bottom = row.getBoundingClientRect().bottom - viewportTop;
+    if (bottom <= limit + 0.5) lastWholeRowBottom = Math.max(lastWholeRowBottom, bottom);
+  }
+  if (lastWholeRowBottom === 0) return null;
+  const height = Math.ceil(lastWholeRowBottom + LIST_BOTTOM_PADDING_PX);
+  return height < scrollElement.clientHeight ? height : null;
+}
+
 /**
  * The parent passes the flat item order to the Command root as `items` with
  * `virtualized`, scrolls keyboard highlights into view through `listRef`, and
@@ -96,6 +119,12 @@ interface CommandPaletteVirtualizedResultsProps extends Omit<CommandPaletteResul
 export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualizedResultsProps) {
   const { listRef } = props;
   const [scrollFade, setScrollFade] = useState({ top: false, bottom: false });
+  // The height that ends the list on a whole row, for the rows it was measured with.
+  const [snap, setSnap] = useState<{
+    readonly rows: ReadonlyArray<CommandPaletteRow>;
+    readonly height: number;
+  } | null>(null);
+  const snappedHeight = snap?.rows === props.rows ? snap.height : null;
   const updateScrollFade = () => {
     const scrollElement = listRef.current?.getScrollableNode?.();
     if (!(scrollElement instanceof HTMLElement)) return;
@@ -105,6 +134,10 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
     setScrollFade((current) =>
       current.top === top && current.bottom === bottom ? current : { top, bottom },
     );
+    if (snappedHeight === null && !top && bottom) {
+      const height = wholeRowHeight(scrollElement);
+      if (height !== null) setSnap({ rows: props.rows, height });
+    }
   };
 
   if (props.rows.length === 0) {
@@ -141,6 +174,7 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
         onLayout={updateScrollFade}
         onScroll={updateScrollFade}
         contentContainerClassName="px-2"
+        {...(snappedHeight === null ? {} : { style: { maxHeight: snappedHeight } })}
         className={cn(
           "min-h-0 scroll-py-6 overflow-x-hidden overscroll-y-contain py-2 [&::-webkit-scrollbar-track]:my-2",
           getVirtualizedScrollFadeClassName(scrollFade),
@@ -154,7 +188,10 @@ function DisabledCommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
 }) {
   return (
-    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
+    <div
+      data-palette-row=""
+      className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm"
+    >
       {props.item.icon}
       {props.item.description || props.item.threadContentMatch ? (
         <span className="flex min-w-0 flex-1 flex-col">
