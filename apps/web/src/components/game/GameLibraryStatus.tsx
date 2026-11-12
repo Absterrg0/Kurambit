@@ -10,6 +10,7 @@ import { Skeleton } from "../ui/skeleton";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
+import { GamePicture } from "./GameBuildStill";
 import type { SidebarThreadSummary } from "../../types";
 import { resolveWorkingStartedAt, type SidebarThreadStatus } from "../Sidebar.logic";
 import { buildName } from "./gameBuilds.logic";
@@ -121,4 +122,34 @@ function ShortRelativeTime({ timestamp }: { timestamp: string }) {
   const relative = useRelativeTimeState(timestamp);
   if (relative.status !== "relative") return null;
   return relative.suffix === null ? "now" : relative.value;
+}
+
+/**
+ * A game's picture as the sidebar shows it: its latest build's still, a quiet well while the
+ * builds are read, and the game's colour and initial when it has none.
+ */
+export function GameLibraryPicture(props: {
+  readonly game: GameLibraryEntry;
+  readonly main: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime"> | null;
+  readonly chats: SidebarThreadStatus | null;
+  readonly gameName: string;
+  /** Size and placement; the picture's own rounding matches the sidebar's. */
+  readonly className: string;
+}) {
+  const { build, pending } = useGameLibraryLine({
+    game: props.game,
+    main: props.main,
+    chats: props.chats,
+    read: true,
+  });
+  if (pending) return <Skeleton shape="card" className={props.className} />;
+  return (
+    <GamePicture
+      environmentId={props.game.environmentId}
+      root={props.game.root}
+      path={build?.still ?? props.game.keyArt}
+      gameName={props.gameName}
+      className={cn(props.className, "rounded-md")}
+    />
+  );
 }

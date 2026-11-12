@@ -4,12 +4,10 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@kurambit/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
   ACTIVE_GAME_ENGINES,
   GAME_ENGINES,
-  isNestedUnderLiveParent,
   type EnvironmentId,
   type GameCharacterRoute,
   type GameEngineId,
@@ -22,19 +20,13 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { cn } from "../../lib/utils";
-import { useThreadShells, waitForThreadShell } from "../../state/entities";
+import { waitForThreadShell } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
-import {
-  gameMainThread,
-  partitionGameChats,
-  resolveGameSidebarStatus,
-  useSidebarRowSubscriptionLease,
-  type SidebarThreadStatus,
-} from "../Sidebar.logic";
+import { useSidebarRowSubscriptionLease } from "../Sidebar.logic";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -49,6 +41,7 @@ import {
 } from "../ui/menu";
 import { SidebarInset } from "../ui/sidebar";
 import { Kbd } from "../ui/kbd";
+import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -63,10 +56,11 @@ import {
 import { showOpenGameDialog, useGameEntryStore } from "./gameEntryStore";
 import { GameLibraryStatusText, useGameLibraryLine } from "./GameLibraryStatus";
 import { useGameName } from "./GameName";
-import { draftGameName, sortGameThreadsByActivity } from "./gameLibrary.logic";
+import { draftGameName } from "./gameLibrary.logic";
 import { engineToolFor } from "./gameStageLogic";
 import { GameToolLink } from "./GameToolLink";
-import { useGameLibrary, useGameLibraryRefresh, type GameLibraryEntry } from "./useGameLibrary";
+import { useGameLibraryRefresh } from "./useGameLibrary";
+import { type GameCover, useGameCovers } from "./useGameCovers";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
 import { useGameModelChoice } from "./useGameModelChoice";
 
@@ -79,47 +73,11 @@ const BRIEF_IDEAS = [
 // Home continues the latest few; the sidebar already lists every game.
 const SHELF_CARDS = 3;
 
-type GameCover = {
-  readonly game: GameLibraryEntry;
-  readonly main: EnvironmentThreadShell | null;
-  readonly chats: SidebarThreadStatus | null;
-};
-
-const activityOf = (cover: GameCover) =>
-  [cover.game.updatedAt, cover.main?.updatedAt ?? ""].toSorted().at(-1) ?? "";
-
 export function GamesHome() {
-  const { games, isLoading, error } = useGameLibrary();
+  const { covers, isLoading, error } = useGameCovers();
   const environmentId = usePrimaryEnvironmentId();
-  const threads = useThreadShells();
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
-  const liveThreadIds = new Set<string>(
-    threads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
-  );
-  const threadsByProject = new Map<string, EnvironmentThreadShell[]>();
-  for (const thread of threads) {
-    if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
-    if (isNestedUnderLiveParent(thread, liveThreadIds)) continue;
-    const list = threadsByProject.get(thread.projectId);
-    if (list === undefined) threadsByProject.set(thread.projectId, [thread]);
-    else list.push(thread);
-  }
-  const covers = games
-    .map((game) => {
-      const list = threadsByProject.get(game.projectId) ?? [];
-      const chats = partitionGameChats(list, liveThreadIds);
-      // A game opens on its main chat, as its sidebar row does.
-      const main = chats.main ?? gameMainThread(list) ?? sortGameThreadsByActivity(list)[0] ?? null;
-      return {
-        game,
-        main,
-        chats: list.length === 0 ? null : resolveGameSidebarStatus(chats),
-      } satisfies GameCover;
-    })
-    // Latest work first, by the game's own chat rather than its project row, so
-    // home continues the game a turn last touched.
-    .toSorted((a, b) => activityOf(b).localeCompare(activityOf(a)));
   const openGame = (cover: GameCover) => {
     if (cover.main !== null) {
       void navigate({
@@ -162,6 +120,9 @@ export function GamesHome() {
 
             {covers.length > 0 && environmentId ? (
               <ContinueShelf covers={covers} environmentId={environmentId} onOpen={openGame} />
+            ) : isLoading ? (
+              // The shelf's room is kept while the games load, so the brief does not jump up.
+              <ShelfPlaceholder />
             ) : null}
           </div>
         </div>
@@ -515,6 +476,28 @@ function OpenGameLink({ className }: { className?: string }) {
   );
 }
 
+/** The shelf's shape while the games load: its heading row and three quiet cards. */
+function ShelfPlaceholder() {
+  return (
+    <section aria-hidden className="@container flex flex-col gap-4">
+      <Text variant="label" tone="muted" render={<h2 />}>
+        Continue
+      </Text>
+      <div className="grid grid-cols-2 gap-x-5 gap-y-6 @xl:grid-cols-3">
+        {Array.from({ length: SHELF_CARDS }, (_, index) => (
+          <div key={index} className="flex flex-col gap-2.5">
+            <Skeleton shape="card" className="aspect-video w-full" />
+            <div className="flex flex-col gap-1.5 py-0.5">
+              <Skeleton className="h-3.5 w-1/2" />
+              <Skeleton className="h-3 w-1/3" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /** Every game as an even card, latest first: the pictures are the colour on the page. */
 function ContinueShelf({
   covers,
@@ -569,16 +552,16 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
         onClick={onOpen}
         className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 text-left outline-none"
       >
+        {/* The name is said once, under the cover, so every card reads the same way. */}
         <GamePicture
           environmentId={cover.game.environmentId}
           root={cover.game.root}
           path={picture}
           gameName={name}
-          mark={shown === null ? "name" : "none"}
-          className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/25 group-focus-visible:ring-2 group-focus-visible:ring-ring"
+          mark="none"
+          className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow,translate] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:ring-foreground/40 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
         >
-          {/* Without a picture yet, the Stage's last frame, else the game's name as a title
-              card on its own colour. */}
+          {/* Without a picture yet, the Stage's last frame, else the game's own colour. */}
           {picture === null && shown !== null ? (
             <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
           ) : null}
