@@ -1805,7 +1805,7 @@ function OpenCommandPaletteDialog(props: {
         actionItems.push({
           kind: "action",
           value: "action:game-keep-going-stop",
-          title: "Stop keep going",
+          title: "Stop Keep going",
           searchTerms: ["keep going", "stop", "off", "pause", "game"],
           icon: <PauseIcon className={ITEM_ICON_CLASS} />,
           shortcutCommand: "game.keepGoing.stop",

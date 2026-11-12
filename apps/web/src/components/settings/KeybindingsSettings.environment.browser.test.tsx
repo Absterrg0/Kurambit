@@ -60,7 +60,7 @@ let container: HTMLDivElement;
 const render = () => act(async () => root.render(<KeybindingsSettingsPanel />));
 const openButton = () => {
   const button = container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Open keybindings.json"]',
+    'button[aria-label="Open the keybindings file"]',
   );
   expect(button).not.toBeNull();
   return button!;
