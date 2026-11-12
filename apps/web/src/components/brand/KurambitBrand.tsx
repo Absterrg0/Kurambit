@@ -49,7 +49,3 @@ export function KurambitMark({
     </>
   );
 }
-
-export function KurambitWordmark({ className }: { className?: string }) {
-  return <span className={cn("font-semibold uppercase tracking-brand", className)}>Kurambit</span>;
-}

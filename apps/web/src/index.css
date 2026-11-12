@@ -269,8 +269,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     );
   --color-zinc-25: oklch(99.2% 0 0);
   --color-vermilion: #d4552b;
-  /* Uppercase brand labels: the wordmark and section eyebrows. */
-  --tracking-brand: 0.14em;
+  /* Uppercase section eyebrows. */
   --tracking-eyebrow: 0.18em;
   --color-washi: #ece4d6;
   --color-sumi: #13110f;
