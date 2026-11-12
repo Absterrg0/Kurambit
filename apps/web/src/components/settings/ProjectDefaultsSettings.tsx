@@ -1,3 +1,4 @@
+import { newGameFallback, useLastGameModel } from "../game/useGameModelChoice";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
@@ -67,7 +68,7 @@ export function ProjectDefaultsSettings({
     (representative?.serverConfig
       ? providersByEnvironment.get(representative.environmentId)
       : undefined) ?? EMPTY_SERVER_PROVIDERS;
-  const selection = resolveDefaultProviderModelSelection(providers, settings.defaultModelSelection);
+  const [lastGameModel] = useLastGameModel(representative?.environmentId ?? "none");
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(
       deriveProviderInstanceEntries(providers),
@@ -75,6 +76,12 @@ export function ProjectDefaultsSettings({
       target?.projectId ?? null,
     ),
   );
+  // Unset, a new game starts on Home's own fallback, so the row shows that one,
+  // never a different default that no game would use.
+  const selection =
+    settings.defaultModelSelection === null && target?.projectId == null && entries.length > 0
+      ? newGameFallback(entries, providers, settings, lastGameModel)
+      : resolveDefaultProviderModelSelection(providers, settings.defaultModelSelection);
   const modelOptions = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -143,7 +150,9 @@ export function ProjectDefaultsSettings({
       description={
         isProjectScope
           ? "New chats in this game start on this model. The model picked in the game's composer wins."
-          : "New games start on this model. After that, each game keeps the model picked in its own composer."
+          : settings.defaultModelSelection === null
+            ? "New games start on the model your last game used, until you pick one here. Each game then keeps its own."
+            : "New games start on this model. After that, each game keeps the model picked in its own composer."
       }
       resetAction={
         settings.defaultModelSelection !== null ? (

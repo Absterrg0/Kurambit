@@ -19,11 +19,47 @@ import { useEnvironmentProviders } from "../../state/environments";
 
 const lastGameModelSchema = Schema.NullOr(ModelSelection);
 
+type ProviderEntries = ReturnType<typeof deriveProviderInstanceEntries>;
+
+/** The model the person's last game started on, kept per environment. */
+export const useLastGameModel = (environmentId: string) =>
+  useLocalStorage(`game-entry-picked-model:${environmentId}`, null, lastGameModelSchema);
+
+/**
+ * PURE. What a new game starts on when Settings names no model for new games:
+ * the one the person's last game used while its provider is usable, else
+ * Claude's own default, else the first ready provider's. Settings shows this
+ * same answer, so the setting and Home's box never disagree.
+ */
+export const newGameFallback = (
+  entries: ProviderEntries,
+  providers: Parameters<typeof getDefaultProviderInstanceModel>[0],
+  settings: Parameters<typeof resolveAppModelSelectionState>[0],
+  lastGameModel: ModelSelection | null,
+): ModelSelection => {
+  const isReady = (instanceId: string) =>
+    entries.some(
+      (entry) => entry.instanceId === instanceId && isProviderInstancePickerReady(entry),
+    );
+  if (lastGameModel !== null && isReady(lastGameModel.instanceId)) return lastGameModel;
+  // A game's first turn builds the whole game, so it gets the provider's own default (its
+  // flagship) at the provider's default effort, never the cheap model the app summarises with.
+  const firstChoice =
+    entries.find(
+      (entry) => entry.driverKind === "claudeAgent" && isProviderInstancePickerReady(entry),
+    ) ?? entries.find(isProviderInstancePickerReady);
+  const textDefault = resolveAppModelSelectionState(settings, providers);
+  const instanceId = firstChoice?.instanceId ?? textDefault.instanceId;
+  return {
+    instanceId,
+    model: getDefaultProviderInstanceModel(providers, instanceId) ?? textDefault.model,
+  };
+};
+
 /**
  * The agent and model a new or opened game starts with: the person's pick,
- * else Settings' "Model for new games" while its provider is usable, else the
- * one their last game used, else Claude's own default, else the first ready
- * provider's.
+ * else Settings' "Model for new games" while its provider is usable, else
+ * newGameFallback.
  */
 export function useGameModelChoice(environmentId: EnvironmentId) {
   const settings = useEnvironmentSettings(environmentId);
@@ -32,11 +68,7 @@ export function useGameModelChoice(environmentId: EnvironmentId) {
     applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, null),
   );
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-  const [lastGameModel, setLastGameModel] = useLocalStorage(
-    `game-entry-picked-model:${environmentId}`,
-    null,
-    lastGameModelSchema,
-  );
+  const [lastGameModel, setLastGameModel] = useLastGameModel(environmentId);
   // A game's first turn starts the moment it is created, so only an agent that
   // can work now (installed and signed in) may make it.
   const isReady = (instanceId: string) =>
@@ -49,21 +81,8 @@ export function useGameModelChoice(environmentId: EnvironmentId) {
     isReady(settings.defaultModelSelection.instanceId)
       ? settings.defaultModelSelection
       : null;
-  const remembered =
-    lastGameModel !== null && isReady(lastGameModel.instanceId) ? lastGameModel : null;
-  // A game's first turn builds the whole game, so it gets the provider's own default (its
-  // flagship) at the provider's default effort, never the cheap model the app summarises with.
-  const firstChoice =
-    entries.find(
-      (entry) => entry.driverKind === "claudeAgent" && isProviderInstancePickerReady(entry),
-    ) ?? entries.find(isProviderInstancePickerReady);
-  const textDefault = resolveAppModelSelectionState(settings, providers);
-  const freshInstanceId = firstChoice?.instanceId ?? textDefault.instanceId;
-  const fresh: ModelSelection = {
-    instanceId: freshInstanceId,
-    model: getDefaultProviderInstanceModel(providers, freshInstanceId) ?? textDefault.model,
-  };
-  const model = selection ?? configured ?? remembered ?? fresh;
+  const model =
+    selection ?? configured ?? newGameFallback(entries, providers, settings, lastGameModel);
   const modelEntry = entries.find((entry) => entry.instanceId === model.instanceId);
   return {
     entries,
