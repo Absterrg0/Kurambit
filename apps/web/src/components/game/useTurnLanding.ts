@@ -28,12 +28,13 @@ export function useTurnLanding(threadRef: ScopedThreadRef | null, turnActive: bo
   const completedAt = latestRun?.completedAt == null ? null : Date.parse(latestRun.completedAt);
   // The moment last checked against the cap; a timeout moves it on when the cap passes.
   const [now, setNow] = useState(() => Date.now());
+  // A run that has just ended may not carry its end time yet: it is landing from that moment.
   const landing =
     !turnActive &&
-    completedAt !== null &&
+    latestRun !== null &&
     !built &&
     buildComing &&
-    now - completedAt < LANDING_CAP_MS;
+    (completedAt === null || now - completedAt < LANDING_CAP_MS);
   useEffect(() => {
     if (!landing || completedAt === null) return;
     const timeout = window.setTimeout(
