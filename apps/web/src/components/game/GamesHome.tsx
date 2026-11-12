@@ -79,6 +79,9 @@ type GameCover = {
   readonly chats: SidebarThreadStatus | null;
 };
 
+const activityOf = (cover: GameCover) =>
+  [cover.game.updatedAt, cover.main?.updatedAt ?? ""].toSorted().at(-1) ?? "";
+
 export function GamesHome() {
   const { games, isLoading, error } = useGameLibrary();
   const environmentId = usePrimaryEnvironmentId();
@@ -96,9 +99,7 @@ export function GamesHome() {
     if (list === undefined) threadsByProject.set(thread.projectId, [thread]);
     else list.push(thread);
   }
-  // Latest first: home continues what was touched most recently.
   const covers = games
-    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((game) => {
       const list = threadsByProject.get(game.projectId) ?? [];
       const chats = partitionGameChats(list, liveThreadIds);
@@ -109,7 +110,10 @@ export function GamesHome() {
         main,
         chats: list.length === 0 ? null : resolveGameSidebarStatus(chats),
       } satisfies GameCover;
-    });
+    })
+    // Latest work first, by the game's own chat rather than its project row, so
+    // home continues the game a turn last touched.
+    .toSorted((a, b) => activityOf(b).localeCompare(activityOf(a)));
   const openGame = (cover: GameCover) => {
     if (cover.main !== null) {
       void navigate({

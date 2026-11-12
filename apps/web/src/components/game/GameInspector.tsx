@@ -503,6 +503,12 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
       : fact.id === "use" && facts.use.status === "measured"
         ? assetUseLines(facts.use.value)
         : [];
+  const moreRows =
+    moreMeasured.length +
+    (view.more.some((fact) => fact.reading._tag === "pending") ? 1 : 0) +
+    new Set(
+      view.more.flatMap((fact) => (fact.reading._tag === "not-measured" ? [fact.reading.why] : [])),
+    ).size;
   const morePass = moreMeasured.filter(
     (fact) => fact.reading._tag === "measured" && fact.reading.tone === "good",
   ).length;
@@ -538,7 +544,8 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
               aria-hidden="true"
             />
             <Text variant="meta" tone="default" render={<span className="flex-1" />}>
-              {view.more.length} more measurements
+              {/* The count of what opens below: not-measured facts sharing a reason are one row. */}
+              {moreRows} more measurements
             </Text>
             {morePass > 0 ? (
               <Text variant="caption" tone="muted" numeric>

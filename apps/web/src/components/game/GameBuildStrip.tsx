@@ -526,7 +526,7 @@ function FirstBuildSlot() {
     <div className="flex w-40 shrink-0 flex-col gap-1.5">
       <div className="surface-well aspect-video w-full rounded-md" />
       <Text variant="caption" tone="muted" render={<span className="px-0.5" />}>
-        The first build lands here
+        Not measured yet
       </Text>
     </div>
   );
