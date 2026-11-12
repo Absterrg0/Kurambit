@@ -26,7 +26,14 @@ import { GameBuildStill, GameNowPicture } from "./GameBuildStill";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
-import { buildCaption, buildName, checksPhrase, formatBuildTime } from "./gameBuilds.logic";
+import {
+  buildCaption,
+  buildName,
+  checksLine,
+  factsSettled,
+  formatBuildTime,
+  passDelta,
+} from "./gameBuilds.logic";
 import {
   isUndone,
   stageBuildId,
@@ -547,7 +554,7 @@ function BuildCard({
         <span className="flex flex-col gap-0.5">
           <span>{caption}</span>
           <span className="text-muted-foreground">
-            {[checksPhrase(build.facts) ?? "Not measured", undone ? "undone" : null]
+            {[checksLine(build.facts), undone ? "undone" : null]
               .filter((part) => part !== null)
               .join(" · ")}
           </span>
@@ -627,13 +634,22 @@ function PickBadge() {
 }
 
 /**
- * What changed in the checks since the build before: the thing keep going
- * decides on. A build with something to look at says so; one that only
- * repeats the count before it says nothing.
+ * What changed in the checks since the build before, over the checks both measured: the thing
+ * keep going decides on. While a build is being measured it says only that; a build with
+ * something to look at says so; one that only repeats the count before it says nothing.
  */
 function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild | null }) {
-  const { good, bad } = build.facts;
-  const gained = previous === null ? 0 : good - previous.facts.good;
+  const state = build.facts.state;
+  if (state === "queued" || state === "measuring")
+    return (
+      <span className="flex shrink-0 items-center gap-1" aria-label="Being measured">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
+        Measuring
+      </span>
+    );
+  if (!factsSettled(build.facts)) return null;
+  const bad = build.facts.bad;
+  const gained = passDelta(build, previous) ?? 0;
   if (bad === 0 && gained === 0) return null;
   return (
     <span className="flex shrink-0 items-center gap-1.5">

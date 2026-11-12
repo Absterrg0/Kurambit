@@ -276,13 +276,43 @@ const factsOf = (engine: GameEngineId | undefined): ReadonlyArray<FactName> =>
   engine !== undefined && useNotMeasured(engine) !== null
     ? FACT_NAMES.filter((name) => !BROWSER_ONLY.has(name))
     : FACT_NAMES;
-/** About how long each tier takes, for the message. */
-const TIER_SECONDS: Readonly<Record<Tier, number>> = {
-  assets: 2,
-  boots: 20,
-  idle: 80,
-  masher: 85,
-  skilled: 80,
+/** Each tier's step as the measuring line names it. */
+const TIER_STEP: Readonly<Record<Tier, string>> = {
+  assets: "reading its files",
+  boots: "starting it",
+  idle: "playing it with no input",
+  masher: "playing it with random input",
+  skilled: "the play bot's run",
+};
+
+/**
+ * What a running measure is doing, by the step it is on and how many are done: never a time
+ * left, which the machine's load makes a guess. On a GPU a browser game's no-input and
+ * random-input plays run at once (measureJob), so they are one step.
+ */
+const measuringMessage = (
+  tiers: ReadonlySet<Tier> | null,
+  owed: (tier: Tier) => boolean,
+  engine: GameEngineId,
+  renderer: string,
+): string => {
+  if (tiers === null) return "Measuring: getting a copy of the build ready.";
+  const planned = TIERS.filter((tier) => tiers.has(tier));
+  const together =
+    tiers.has("idle") &&
+    tiers.has("masher") &&
+    engineProfile(engine).play === "browser" &&
+    !isSoftwareRenderer(renderer);
+  const steps: Array<ReadonlyArray<Tier>> = [];
+  for (const tier of planned)
+    if (together && tier === "masher") continue;
+    else steps.push(together && tier === "idle" ? ["idle", "masher"] : [tier]);
+  const at = steps.findIndex((step) => step.some(owed));
+  if (at === -1) return "Measuring: saving the readings.";
+  const step = steps[at]!;
+  const name =
+    step.length === 2 ? "playing it with no input and with random input" : TIER_STEP[step[0]!];
+  return `Measuring: ${name} (step ${at + 1} of ${steps.length}).`;
 };
 
 /** One measurement asked for: queued until it holds the server's one permit, then running. */
@@ -296,6 +326,8 @@ interface Job {
   supersedable: boolean;
   /** What it measures, known once it runs. */
   tiers: ReadonlySet<Tier> | null;
+  /** Facts this measure has saved so far: each shows as it lands, not when the job ends. */
+  readonly written: Set<FactName>;
   running: boolean;
   stopped: boolean;
   fiber: Fiber.Fiber<void> | null;
@@ -414,9 +446,13 @@ const make = Effect.gen(function* () {
     const job = jobs.get(build.key);
     const current = found !== null && found.harness === harness ? found.stored : null;
     const stored = found?.stored;
-    const pending = (fact: FactName) =>
+    const owedTier = (tier: Tier) =>
       job?.tiers != null &&
-      TIERS.some((tier) => job.tiers!.has(tier) && TIER_FACTS[tier].includes(fact));
+      job.tiers.has(tier) &&
+      // Asset use is rewritten after every play, so a tier is done once its own facts are in.
+      TIER_FACTS[tier].some((fact) => fact !== "use" && !job.written.has(fact));
+    const pending = (fact: FactName) =>
+      TIERS.some((tier) => owedTier(tier) && TIER_FACTS[tier].includes(fact));
     const get = <K extends FactName>(fact: K): Fact<K> =>
       pending(fact) ? { status: "pending" } : ((stored?.[fact] as Fact<K> | undefined) ?? NEVER);
     const idle = get("idle");
@@ -454,24 +490,14 @@ const make = Effect.gen(function* () {
             : counted.every((fact) => fact.status === "measured")
               ? "measured"
               : "incomplete";
-    const owed = TIERS.filter((tier) => job?.tiers == null || job.tiers.has(tier));
-    // On a GPU a browser game's no-input and random-input plays run at once (measureJob).
-    const shared =
-      owed.includes("idle") &&
-      owed.includes("masher") &&
-      engineProfile(build.engine).play === "browser" &&
-      !isSoftwareRenderer(stored?.renderer ?? "");
-    const left =
-      job === undefined
-        ? 0
-        : owed.reduce((sum, tier) => sum + TIER_SECONDS[tier], 0) -
-          (shared ? Math.min(TIER_SECONDS.idle, TIER_SECONDS.masher) : 0);
     const ahead = Math.max(0, waiting() - 1);
     const message =
       state === "queued"
-        ? `Queued${ahead > 0 ? ` behind ${ahead} other measurement${ahead === 1 ? "" : "s"}` : ""}; about ${Math.max(1, Math.ceil(left / 60))} min once it starts.`
+        ? ahead > 0
+          ? `Queued behind ${ahead} other measurement${ahead === 1 ? "" : "s"}.`
+          : "Queued: it starts when the measurement before it ends."
         : state === "measuring"
-          ? `Measuring: about ${Math.max(1, Math.ceil(left / 60))} min left.`
+          ? measuringMessage(job?.tiers ?? null, owedTier, build.engine, stored?.renderer ?? "")
           : state === "never"
             ? "Not measured yet: opening or playing the build measures it."
             : state === "stale"
@@ -667,6 +693,7 @@ const make = Effect.gen(function* () {
     tiers: ReadonlySet<Tier>,
     found: Found | null,
     skilledWanted: boolean,
+    written: Set<FactName>,
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -695,6 +722,7 @@ const make = Effect.gen(function* () {
               measuredAt: DateTime.formatIso(yield* DateTime.now),
             };
             yield* save(key, stored);
+            for (const name of names) written.add(name);
             yield* announce(`Build ${build.build.slice(0, 8)}: ${names.join(", ")} measured.`);
           });
 
@@ -1143,13 +1171,14 @@ const make = Effect.gen(function* () {
             skilled,
           );
           job.tiers = tiers;
+          job.written.clear();
           if (tiers.size === 0) return;
           yield* operations.changed(
             build.root,
             GAME_FACTS_EVENT,
             `Measuring build ${build.build.slice(0, 8)}.`,
           );
-          yield* measureJob(build, tiers, found, skilled);
+          yield* measureJob(build, tiers, found, skilled, job.written);
           // Keep going or a person asked for the tester's bot while this measure
           // ran without it: only its play is owed, the rest was just measured.
           if (!skilled && job.skilled && !job.stopped) {
@@ -1162,7 +1191,8 @@ const make = Effect.gen(function* () {
               true,
             );
             job.tiers = again.has("skilled") ? new Set<Tier>(["skilled"]) : new Set<Tier>();
-            if (job.tiers.size > 0) yield* measureJob(build, job.tiers, now, true);
+            job.written.clear();
+            if (job.tiers.size > 0) yield* measureJob(build, job.tiers, now, true, job.written);
           }
         }),
       );
@@ -1236,6 +1266,7 @@ const make = Effect.gen(function* () {
             skilled: options.skilled !== false,
             supersedable: supersede,
             tiers: null,
+            written: new Set(),
             running: false,
             stopped: false,
             fiber: null,

@@ -374,6 +374,9 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
     .toSorted((a, b) => TONE_ORDER[a.tone] - TONE_ORDER[b.tone])
     .slice(0, 3);
   const checks = gameChecksView(facts);
+  const passing = checks.checks.flatMap((check) =>
+    check.reading._tag === "measured" && check.reading.tone === "good" ? [check.id] : [],
+  );
   return {
     state: facts.state,
     chips,
@@ -381,10 +384,12 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
     good: checks.pass,
     bad: checks.toLook,
     lead: {
-      pass: checks.checks.filter(
-        (check) => check.reading._tag === "measured" && check.reading.tone === "good",
-      ).length,
+      pass: passing.length,
       of: checks.checks.length,
+      measured: checks.checks.flatMap((check) =>
+        check.reading._tag === "measured" ? [check.id] : [],
+      ),
+      passing,
     },
   };
 };

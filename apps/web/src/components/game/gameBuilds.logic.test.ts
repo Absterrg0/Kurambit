@@ -1,8 +1,8 @@
-import type { GameFactView } from "@kurambit/contracts";
+import type { GameBuild, GameFactId, GameFactView } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { FAKE_DELTAS, FAKE_FACT_VIEWS } from "./gameBuilds.fixtures";
-import { compareRows, deltaLine, factLine } from "./gameBuilds.logic";
+import { compareRows, deltaLine, factLine, passDelta } from "./gameBuilds.logic";
 
 // A fact with no reading never reads as a result, a good or bad tone, or "unchanged".
 describe("facts as drawn", () => {
@@ -75,5 +75,52 @@ describe("a compare's rows", () => {
         why: "the picture stood still while the machine was busy, so it says nothing about the game",
       },
     ]);
+  });
+});
+
+describe("a build's pass change on the strip", () => {
+  const build = (
+    state: GameBuild["facts"]["state"],
+    measured: ReadonlyArray<GameFactId>,
+    passing: ReadonlyArray<GameFactId>,
+  ): Pick<GameBuild, "facts"> => ({
+    facts: {
+      state,
+      chips: [],
+      notMeasured: 0,
+      good: passing.length,
+      bad: 0,
+      lead: { pass: passing.length, of: 7, measured, passing },
+    },
+  });
+
+  it("says nothing while either build is being measured", () => {
+    const before = build("measured", ["boots", "idle"], ["boots", "idle"]);
+    expect(passDelta(build("queued", [], []), before)).toBeNull();
+    expect(passDelta(build("measuring", ["boots"], []), before)).toBeNull();
+    expect(passDelta(before, build("never", [], []))).toBeNull();
+  });
+
+  it("counts only the checks both builds measured", () => {
+    // The newer build measured more checks: coverage, not improvement.
+    const before = build("incomplete", ["boots"], ["boots"]);
+    const after = build("measured", ["boots", "idle", "masher"], ["boots", "idle", "masher"]);
+    expect(passDelta(after, before)).toBe(0);
+    // A check both measured that stopped passing is a loss.
+    expect(passDelta(build("measured", ["boots", "idle"], ["idle"]), before)).toBe(-1);
+  });
+
+  it("has no answer for summaries counted before the measured list existed", () => {
+    const old: Pick<GameBuild, "facts"> = {
+      facts: {
+        state: "measured",
+        chips: [],
+        notMeasured: 0,
+        good: 3,
+        bad: 0,
+        lead: { pass: 3, of: 7 },
+      },
+    };
+    expect(passDelta(old, build("measured", ["boots"], ["boots"]))).toBeNull();
   });
 });

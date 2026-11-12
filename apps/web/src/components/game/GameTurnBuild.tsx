@@ -1,23 +1,12 @@
-import { CheckIcon, Redo2Icon, TriangleAlertIcon, Undo2Icon } from "lucide-react";
+import { CheckIcon, CircleDashedIcon, Redo2Icon, TriangleAlertIcon, Undo2Icon } from "lucide-react";
 import type { GameBuild, RunId, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
-import { buildName, factsSummaryLine } from "./gameBuilds.logic";
+import { buildName, checksLine, factsSettled } from "./gameBuilds.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
-
-/** "4 checks pass, 1 to look at", or what state the checks are in. */
-const checksLine = (build: GameBuild): string => {
-  const { good, bad, state } = build.facts;
-  if (good === 0 && bad === 0) return factsSummaryLine(build.facts) ?? "Measured";
-  const parts = [
-    ...(good > 0 ? [`${good} ${good === 1 ? "check passes" : "checks pass"}`] : []),
-    ...(bad > 0 ? [`${bad} to look at`] : []),
-  ];
-  return `${parts.join(", ")}${state === "measuring" || state === "queued" ? " so far" : ""}`;
-};
 
 /**
  * A changing chat turn's build in the Log, on one line: its name, its checks,
@@ -49,7 +38,9 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
   return (
     <div data-game-turn-build={build.id} className="mt-1.5 flex flex-col gap-1">
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5">
-        {build.facts.bad > 0 ? (
+        {!factsSettled(build.facts) ? (
+          <CircleDashedIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
+        ) : build.facts.bad > 0 ? (
           <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden="true" />
         ) : (
           <CheckIcon className="size-3.5 shrink-0 text-success" aria-hidden="true" />
@@ -59,7 +50,7 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
         </Button>
         <Text variant="meta" tone="muted" truncate>
           {step?.verdict != null ? `${stepVerdictText(step)} · ` : ""}
-          {checksLine(build)}
+          {checksLine(build.facts)}
         </Text>
         {action !== null ? (
           <Button

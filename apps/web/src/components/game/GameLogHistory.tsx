@@ -10,7 +10,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { GameBuildStill, GameNowPicture } from "./GameBuildStill";
 import { useStageStill } from "./gameStageBridge";
-import { buildCaption, buildName, checksPhrase, formatBuildTime } from "./gameBuilds.logic";
+import { buildCaption, buildName, checksLine, formatBuildTime } from "./gameBuilds.logic";
 
 /**
  * A game's Log before its chat has any turns: the game's builds so far, newest
@@ -113,7 +113,7 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
                         <Text variant="meta" tone="muted" numeric truncate>
                           {/* When and how it measured: what tells builds apart. Its files are
                               in the build itself, one click away. */}
-                          {[formatBuildTime(build.at), checksPhrase(build.facts) ?? "Not measured"]
+                          {[formatBuildTime(build.at), checksLine(build.facts)]
                             .filter((part) => part !== null)
                             .join(" · ")}
                         </Text>

@@ -65,7 +65,7 @@ export const formatBuildTime = (at: string, now: Date = new Date()): string => {
 export const factsSummaryLine = (summary: GameBuildFactsSummary): string | null => {
   switch (summary.state) {
     case "never":
-      return "Not measured";
+      return "Not measured yet";
     case "queued":
       return "Queued to measure";
     case "measuring":
@@ -282,3 +282,37 @@ export const compareRows = (
     unmeasured: [...unmeasured].map(([why, names]) => ({ names, why })),
   };
 };
+
+/** PURE. A build's checks have settled: measured, with or without some not measured. */
+export const factsSettled = (summary: Pick<GameBuildFactsSummary, "state">): boolean =>
+  summary.state === "measured" || summary.state === "incomplete";
+
+/**
+ * PURE. How many more lead checks pass on `build` than on `before`, counted only over the
+ * checks both measured: a check one build could not measure is no gain or loss. Null when
+ * either build has not settled, or they share no measured check, so a build being measured
+ * is never shown as better or worse.
+ */
+export const passDelta = (
+  build: Pick<GameBuild, "facts">,
+  before: Pick<GameBuild, "facts"> | null,
+): number | null => {
+  if (before === null || !factsSettled(build.facts) || !factsSettled(before.facts)) return null;
+  const now = build.facts.lead;
+  const then = before.facts.lead;
+  if (now?.measured === undefined || then?.measured === undefined) return null;
+  const both = new Set(now.measured.filter((id) => then.measured!.includes(id)));
+  if (both.size === 0) return null;
+  const passes = (ids: ReadonlyArray<string> | undefined) =>
+    (ids ?? []).filter((id) => both.has(id as never)).length;
+  return passes(now.passing) - passes(then.passing);
+};
+
+/**
+ * PURE. A build's checks in one line, as every surface says them: the count once they have
+ * settled ("5 of 7 pass · 1 to look at"), else the state they are in ("Measuring…").
+ */
+export const checksLine = (facts: GameBuild["facts"]): string =>
+  factsSettled(facts)
+    ? (checksPhrase(facts) ?? "Measured")
+    : (factsSummaryLine(facts) ?? "Not measured yet");

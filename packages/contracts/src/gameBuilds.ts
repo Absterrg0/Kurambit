@@ -155,7 +155,18 @@ export const GameBuildFactsSummary = Schema.Struct({
    * how many. Every surface says a build's checks in these words, so none
    * disagrees. Absent on summaries counted before it existed.
    */
-  lead: Schema.optionalKey(Schema.Struct({ pass: NonNegativeInt, of: NonNegativeInt })),
+  lead: Schema.optionalKey(
+    Schema.Struct({
+      pass: NonNegativeInt,
+      of: NonNegativeInt,
+      /**
+       * Which lead checks have a reading and which of those pass, so two builds are compared
+       * only on the checks both measured. Absent on summaries counted before it existed.
+       */
+      measured: Schema.optionalKey(Schema.Array(GameFactId)),
+      passing: Schema.optionalKey(Schema.Array(GameFactId)),
+    }),
+  ),
 });
 export type GameBuildFactsSummary = typeof GameBuildFactsSummary.Type;
 
