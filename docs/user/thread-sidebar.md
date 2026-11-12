@@ -17,7 +17,7 @@ if that project exists there. Otherwise it selects an environment that has it.
 
 A thread does not need a project. To start one without a project, click **or
 start without a project** under a new thread's heading, pick **No project** from
-the project menu in that heading or from **New thread in...** in the command
+the project menu in that heading or from **Developer… → New chat in…** in the command
 palette, or press `mod+alt+n`. It starts on this machine. To move a draft into a project, pick
 the project in the heading.
 

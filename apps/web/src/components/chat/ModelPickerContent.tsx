@@ -221,19 +221,23 @@ function ModelPickerProviderNotices({
   );
 }
 
+// How many rows below its group label the current model may sit and still open with the
+// label at the top of the list; about the rows the list shows at once.
+const MODEL_LIST_LABEL_REACH = 6;
+
 // Owns the list's measured height and scroll fades, which change on every scroll and
 // resize without touching the picker's model lists.
 function ModelPickerList({
   listRef,
   itemKeys,
-  initialIndex,
+  initialScroll,
   extraData,
   renderItem,
 }: {
   listRef: RefObject<LegendListRef | null>;
   itemKeys: ReadonlyArray<string>;
   /** Opens with this row in view, such as the current model further down the groups. */
-  initialIndex: number | undefined;
+  initialScroll: { index: number; viewPosition: number } | undefined;
   extraData: unknown;
   renderItem: (props: { item: string; index: number }) => ReactNode;
 }) {
@@ -289,9 +293,7 @@ function ModelPickerList({
           data={itemKeys}
           extraData={extraData}
           keyExtractor={(modelKey) => modelKey}
-          {...(initialIndex === undefined
-            ? {}
-            : { initialScrollIndex: { index: initialIndex, viewPosition: 0.5 } })}
+          {...(initialScroll === undefined ? {} : { initialScrollIndex: initialScroll })}
           renderItem={renderItem}
           estimatedItemSize={MODEL_LIST_ESTIMATED_ITEM_SIZE}
           drawDistance={480}
@@ -629,6 +631,21 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }
   const comboboxIndexByKey = new Map(filteredItemKeys.map((key, index) => [key, index] as const));
   const listIndexByKey = new Map(listKeys.map((key, index) => [key, index] as const));
+  // Open on the current model's group label when the model is near it, so the first rows
+  // in view say whose models they are; a model deep in a long group is centred instead.
+  const activeListIndex = activeModelKey === null ? undefined : listIndexByKey.get(activeModelKey);
+  const activeGroupId = activeModelKey === null ? undefined : groupIdByKey.get(activeModelKey);
+  const activeLabelIndex =
+    showGroupLabels && activeGroupId !== undefined
+      ? listIndexByKey.get(`${MODEL_PICKER_GROUP_LABEL_PREFIX}${activeGroupId}`)
+      : undefined;
+  const initialScroll =
+    activeListIndex === undefined
+      ? undefined
+      : activeLabelIndex !== undefined &&
+          activeListIndex - activeLabelIndex <= MODEL_LIST_LABEL_REACH
+        ? { index: activeLabelIndex, viewPosition: 0 }
+        : { index: activeListIndex, viewPosition: 0.5 };
 
   const providerSetupEntries =
     !isSearching && canOpenProviderSetup
@@ -828,9 +845,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             <ModelPickerList
               listRef={modelListRef}
               itemKeys={listKeys}
-              initialIndex={
-                activeModelKey === null ? undefined : listIndexByKey.get(activeModelKey)
-              }
+              initialScroll={initialScroll}
               extraData={modelListExtraData}
               renderItem={({ item: modelKey }) => {
                 const groupLabel = groupLabelByKey.get(modelKey);
@@ -892,7 +907,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         ? selectedModelKeySet.has(modelKey)
                         : modelKey === activeModelKey
                     }
-                    showSelection={selectedModelKeys !== undefined}
+                    // The current model carries a check: a fill alone matches the hover fill.
+                    showSelection
                     // Under one provider's tab every row would repeat its name.
                     showProvider={providerShownKeys.has(modelKey)}
                     preferShortName={!isLocked}

@@ -1,5 +1,5 @@
 import { XIcon } from "lucide-react";
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 
 import { useNativeTitlebarHeight } from "../../lib/windowControlsOverlay";
 import { useCloseSettings } from "../sidebar/mainAppLocation";
@@ -16,6 +16,20 @@ export function isSettingsDialogOpen(): boolean {
   return document.querySelector("[data-settings-dialog]") !== null;
 }
 
+function subscribeToWindowResize(onChange: () => void): () => void {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+
+/**
+ * How far the app sidebar reaches into the window: its width while it is open
+ * beside the page, 0 when it is collapsed off-canvas or shown as a sheet.
+ */
+function readAppSidebarInset(): number {
+  const sidebar = document.querySelector("[data-app-sidebar]");
+  return sidebar ? Math.max(0, Math.round(sidebar.getBoundingClientRect().right)) : 0;
+}
+
 /**
  * Settings as a panel over the running app. The route opens it; closing it
  * (Esc, ✕, a backdrop click) animates out, then returns to the page that opened it.
@@ -29,6 +43,9 @@ export function SettingsDialog({ children }: { children: ReactNode }) {
   // Focus the panel, not its first control, so no stray focus ring shows on open.
   const popupRef = useRef<HTMLDivElement>(null);
   const nativeTitlebarHeight = useNativeTitlebarHeight();
+  // Centred in the main column so the sidebar stays whole beside the panel
+  // instead of showing a clipped sliver under it.
+  const sidebarInset = useSyncExternalStore(subscribeToWindowResize, readAppSidebarInset);
 
   return (
     <Dialog
@@ -63,6 +80,7 @@ export function SettingsDialog({ children }: { children: ReactNode }) {
         viewportProps={{
           style: {
             "--app-modal-titlebar-height": `${nativeTitlebarHeight}px`,
+            "--app-modal-left-inset": `${sidebarInset}px`,
           } as CSSProperties,
           onPointerDown: (event) => {
             backdropPressRef.current = event.target === event.currentTarget;

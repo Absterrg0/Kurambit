@@ -26,6 +26,7 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuRadioItemIndicator,
   MenuSeparator as MenuDivider,
   MenuSub,
   MenuSubPopup,
@@ -35,7 +36,6 @@ import {
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
-import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ComposerControl,
@@ -113,13 +113,16 @@ const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
   "thinking",
 ]);
 
-function DefaultBadge() {
-  return (
-    <Badge variant="outline" size="sm" className="min-w-0">
-      Default
-    </Badge>
-  );
+// Quieter than the selected row's check: "Default" is a fact about the option, not a state.
+function DefaultNote() {
+  return <span className="text-meta text-muted-foreground">Default</span>;
 }
+
+// Providers describe some levels in their own terms ("xhigh effort plus multi-agent workflow
+// orchestration"); a game maker reads these instead.
+const PLAIN_OPTION_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  ultracode: "Extra-high effort, with several agents working in parallel.",
+};
 
 function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
@@ -508,9 +511,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     descriptor: SelectDescriptor,
     options: SelectDescriptor["options"],
     showDescriptions: boolean,
+    // The Advanced half of a group the main menu already labels goes without the label.
+    showLabel = true,
   ) => (
     <MenuGroup key={descriptor.id}>
-      <MenuGroupLabel>{sentenceCaseLabel(descriptor.label)}</MenuGroupLabel>
+      {showLabel ? <MenuGroupLabel>{sentenceCaseLabel(descriptor.label)}</MenuGroupLabel> : null}
       {effortLocked(descriptor) && !showDescriptions ? (
         <div className="px-2 pb-1.5 text-meta text-muted-foreground">
           Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this option.
@@ -524,27 +529,30 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           <MenuRadioItem
             key={option.id}
             value={option.id}
-            hideIndicator
             // Base UI keeps radio menus open by default. Close on pick so
             // the traits menu behaves like the model picker.
             closeOnClick
             disabled={effortLocked(descriptor)}
           >
-            <span className="flex w-full min-w-0 flex-col">
-              <span className="min-w-0 truncate">
-                {sentenceCaseLabel(option.label)}
-                {option.isDefault ? (
-                  <>
-                    {" "}
-                    <DefaultBadge />
-                  </>
+            <span className="flex w-full min-w-0 items-center gap-2">
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="min-w-0 truncate">
+                  {sentenceCaseLabel(option.label)}
+                  {option.isDefault ? (
+                    <>
+                      {" "}
+                      <DefaultNote />
+                    </>
+                  ) : null}
+                </span>
+                {showDescriptions && option.description ? (
+                  <span className="max-w-56 text-pretty text-meta text-muted-foreground">
+                    {PLAIN_OPTION_DESCRIPTIONS[option.id] ?? option.description}
+                  </span>
                 ) : null}
               </span>
-              {showDescriptions && option.description ? (
-                <span className="max-w-56 text-pretty text-meta text-muted-foreground">
-                  {option.description}
-                </span>
-              ) : null}
+              {/* The selected level carries a check: its fill alone matches the hover fill. */}
+              <MenuRadioItemIndicator />
             </span>
           </MenuRadioItem>
         ))}
@@ -588,7 +596,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     if (advanced.length > 0) {
       advancedGroups.push({
         key: descriptor.id,
-        node: renderSelectGroup(descriptor, advanced, true),
+        node: renderSelectGroup(descriptor, advanced, true, plain.length === 0),
       });
       advancedValueLabel =
         sentenceCaseLabel(

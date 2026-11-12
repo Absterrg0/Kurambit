@@ -972,4 +972,23 @@ describe("root command groups", () => {
       "go-to-file",
     ]);
   });
+
+  it("collapses coding commands into one unlabelled Developer row", () => {
+    const collapsed = buildRootGroups({
+      gameItems: [action("play")],
+      actionItems: [],
+      developerItems: [action("go-to-file")],
+      recentThreadItems: [],
+      developerEntry: {
+        kind: "submenu",
+        value: "developer",
+        searchTerms: ["developer"],
+        title: "Developer…",
+        icon: null,
+        addonIcon: null,
+        groups: [{ value: "developer", label: "Developer", items: [action("go-to-file")] }],
+      },
+    });
+    expect(collapsed.at(-1)).toMatchObject({ label: "", items: [{ value: "developer" }] });
+  });
 });

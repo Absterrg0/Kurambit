@@ -27,9 +27,6 @@ import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
-import { useAtomValue } from "@effect/atom-react";
-import { primaryServerProvidersAtom } from "../../state/server";
-import { collectProviderUpdateCandidates } from "../ProviderUpdateLaunchNotification.logic";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -106,42 +103,40 @@ export function SidebarBrandWidthProbe({
 
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
-    <Link
-      aria-label="Go to home"
-      className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
-        onBackdrop ? "text-white" : "text-foreground",
-      )}
-      to="/"
-    >
-      <SidebarBrandMark onBackdrop={onBackdrop} />
-    </Link>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            aria-label="Go to home"
+            className={cn(
+              "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden size-7 shrink-0 items-center justify-center rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
+              onBackdrop ? "text-white" : "text-foreground",
+            )}
+            to="/"
+          />
+        }
+      >
+        <SidebarBrandMark onBackdrop={onBackdrop} />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">Home</TooltipPopup>
+    </Tooltip>
   );
 }
 
-// The wordmark stays modest: back and forward lead the row, and the brand is a quiet
-// way home rather than a heading.
+// Only the mark, as a quiet way home: the window already says Kurambit, so the row
+// leads with the sidebar toggle and back and forward rather than a wordmark.
 function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <KurambitMark className="size-4 shrink-0" tone={onBackdrop ? "light" : "auto"} />
-      <Text variant="label" tone={onBackdrop ? "inherit" : "muted"} truncate>
-        Kurambit
-      </Text>
-    </span>
-  );
+  return <KurambitMark className="size-4 shrink-0" tone={onBackdrop ? "light" : "auto"} />;
 }
 
+// No badge on these: updates of the app and of agents speak through the one update pill.
 function SidebarUtilityItem({
   icon,
   label,
-  dot = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
-  /** Something waits on that page, such as a provider update. */
-  dot?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -149,19 +144,8 @@ function SidebarUtilityItem({
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton
-              aria-label={label}
-              onClick={onClick}
-              size="icon"
-              className="relative"
-            >
+            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
               {icon}
-              {dot ? (
-                <span
-                  aria-hidden
-                  className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary"
-                />
-              ) : null}
             </SidebarMenuButton>
           }
         />
@@ -183,11 +167,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       setOpenMobile(false);
     }
   };
-  const providers = useAtomValue(primaryServerProvidersAtom);
-  const providerUpdates = collectProviderUpdateCandidates(providers).length;
   const handleSettingsClick = () => {
     closeMobileSidebar();
-    void navigate({ to: providerUpdates > 0 ? "/settings/providers" : "/settings" });
+    void navigate({ to: "/settings" });
   };
 
   const handleUsageClick = () => {
@@ -215,12 +197,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         <>
           <SidebarUtilityItem
             icon={<SettingsIcon />}
-            label={
-              providerUpdates === 0
-                ? "Settings"
-                : `Settings · ${providerUpdates === 1 ? "a provider update is" : `${providerUpdates} provider updates are`} available`
-            }
-            dot={providerUpdates > 0}
+            label="Settings"
             onClick={handleSettingsClick}
           />
 

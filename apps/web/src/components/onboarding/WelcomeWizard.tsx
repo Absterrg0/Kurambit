@@ -15,7 +15,7 @@ import {
   ThreadId,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
-import { ArrowRightIcon, CheckIcon, TerminalIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
@@ -38,6 +38,7 @@ import { getProviderSummary } from "../settings/providerStatus";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator";
 import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/CodexSetupSection";
+import { SettingsGroup } from "../settings/SettingsGroup";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
 import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.logic";
 import { TerminalViewport } from "../ThreadTerminalDrawer";
@@ -177,7 +178,7 @@ function AgentsStep({
       {/* The list gets what the dialog's header, title and button leave, so the
           button stays on screen on short windows. */}
       <ScrollArea scrollFade className="mt-5 h-auto max-h-[min(32rem,calc(100dvh-24rem))]">
-        <div className="space-y-5 pr-3">
+        <div className="space-y-5">
           {environmentIds.map((environmentId) => (
             <ConnectedAgentsStep
               key={environmentId}
@@ -265,7 +266,8 @@ function ConnectedAgentsStep({
           This connection cannot control terminals.
         </p>
       ) : null}
-      <div className="space-y-1.5">
+      {/* One card of rows, as Settings groups the same rows. */}
+      <SettingsGroup>
         {primaryAgents.map(({ driver, provider, instanceId }) =>
           driver === "codex" && serverConfig !== null ? (
             <OnboardingCodexSetup
@@ -338,24 +340,21 @@ function ConnectedAgentsStep({
             />
           ),
         )}
-      </div>
-      {otherAgents.length > 0 ? (
-        <div className="mt-1.5 space-y-1.5">
-          {otherAgents.map((provider) => (
-            <OtherAgentCard key={provider.instanceId} provider={provider} />
-          ))}
-        </div>
-      ) : null}
-      {providers?.some(
-        (provider) =>
-          provider.driver === "codex" && getOnboardingProviderState(provider) === "ready",
-      ) ? (
-        <div className="mt-3">
-          <Button size="xs" variant="ghost-muted" onClick={() => setAddingAccount(true)}>
-            Connect another ChatGPT account
-          </Button>
-        </div>
-      ) : null}
+        {otherAgents.map((provider) => (
+          <OtherAgentCard key={provider.instanceId} provider={provider} />
+        ))}
+        {providers?.some(
+          (provider) =>
+            provider.driver === "codex" && getOnboardingProviderState(provider) === "ready",
+        ) ? (
+          <div className="px-2 py-1.5">
+            <Button size="sm" variant="ghost-muted" onClick={() => setAddingAccount(true)}>
+              <PlusIcon />
+              Connect another account
+            </Button>
+          </div>
+        ) : null}
+      </SettingsGroup>
       {addingAccount ? (
         <AddManagedCodexAccountDialog
           environmentId={environmentId}
@@ -484,7 +483,7 @@ function AgentCard({
   const providerState = getOnboardingProviderState(provider);
 
   return (
-    <div className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-background px-4 py-2">
+    <div className="flex min-h-14 items-center gap-3 px-4 py-2">
       <ProviderInstanceIcon
         tone="brand"
         driverKind={ProviderDriverKind.make(driver)}
@@ -536,7 +535,7 @@ function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
   const summary = getProviderSummary(provider);
   const providerState = getOnboardingProviderState(provider);
   return (
-    <div className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-background px-4 py-2">
+    <div className="flex min-h-14 items-center gap-3 px-4 py-2">
       <ProviderInstanceIcon
         tone="brand"
         driverKind={provider.driver}

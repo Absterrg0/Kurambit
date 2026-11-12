@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useLocation } from "@tanstack/react-router";
 import {
+  Fragment,
   type KeyboardEvent,
   type ReactNode,
   type RefObject,
@@ -28,7 +29,7 @@ import {
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
 } from "@kurambit/contracts";
-import { mergeWithDefaultKeybindings } from "@kurambit/shared/keybindings";
+import { isMacPlatform, mergeWithDefaultKeybindings } from "@kurambit/shared/keybindings";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -77,7 +78,15 @@ import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
 
+// The same modifier style as every other shortcut label (formatShortcutLabel): glyphs on
+// macOS, words elsewhere, never a mix of the two in one chord.
+const MODIFIER_LABELS = {
+  mac: { mod: "⌘", meta: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" },
+  other: { mod: "Ctrl", meta: "Meta", ctrl: "Ctrl", alt: "Alt", shift: "Shift" },
+} as const;
+
 function KeybindingPill({ value }: { value: string }) {
+  const modifiers = MODIFIER_LABELS[isMacPlatform(navigator.platform) ? "mac" : "other"];
   // Keys dedupe repeated parts; a literal "+" in a shortcut splits into empty strings.
   const seenParts = new Map<string, number>();
   const parts = value.split("+").map((part) => {
@@ -89,21 +98,11 @@ function KeybindingPill({ value }: { value: string }) {
     <KbdGroup>
       {parts.map(({ part, key }) => (
         <Kbd key={key}>
-          {part === "mod"
-            ? navigator.platform.toLowerCase().includes("mac")
-              ? "⌘"
-              : "Ctrl"
-            : part === "shift"
-              ? "⇧"
-              : part === "alt"
-                ? navigator.platform.toLowerCase().includes("mac")
-                  ? "⌥"
-                  : "Alt"
-                : part === "ctrl"
-                  ? "⌃"
-                  : part.length === 1
-                    ? part.toUpperCase()
-                    : part}
+          {Object.hasOwn(modifiers, part)
+            ? modifiers[part as keyof typeof modifiers]
+            : part.length === 1
+              ? part.toUpperCase()
+              : part}
         </Kbd>
       ))}
     </KbdGroup>
@@ -1248,17 +1247,83 @@ function KeybindingsGroups(props: KeybindingsGroupsProps) {
   const { groups, anchorIds, savingCommand, ...rowActions } = props;
   return groups.map((group) => (
     <SettingsSection key={group.id} id={`keybindings-${group.id}`} title={group.title}>
-      {group.rows.map((row) => (
-        <KeybindingSettingsRow
-          key={row.id}
-          row={row}
-          anchorId={anchorIds.get(row.id)}
-          isSaving={savingCommand === row.command}
-          {...rowActions}
-        />
-      ))}
+      {rowActions.showConditions
+        ? // Each binding has its own condition to edit, so Advanced keeps one row per binding.
+          group.rows.map((row) => (
+            <KeybindingSettingsRow
+              key={row.id}
+              row={row}
+              anchorId={anchorIds.get(row.id)}
+              isSaving={savingCommand === row.command}
+              {...rowActions}
+            />
+          ))
+        : groupRowsByCommand(group.rows).map((rows) => (
+            <KeybindingCommandRow
+              key={rows[0].id}
+              rows={rows}
+              anchorId={anchorIds.get(rows[0].id)}
+              isSaving={savingCommand === rows[0].command}
+              {...rowActions}
+            />
+          ))}
     </SettingsSection>
   ));
+}
+
+/** A command's bindings together, in the order the first of each command appears. */
+function groupRowsByCommand(
+  rows: ReadonlyArray<KeybindingRow>,
+): ReadonlyArray<readonly [KeybindingRow, ...KeybindingRow[]]> {
+  const byCommand = new Map<KeybindingCommand, [KeybindingRow, ...KeybindingRow[]]>();
+  for (const row of rows) {
+    const bucket = byCommand.get(row.command);
+    if (bucket) bucket.push(row);
+    else byCommand.set(row.command, [row]);
+  }
+  return [...byCommand.values()];
+}
+
+/** One chord of a command row: its own editor, so each alternative records on its own. */
+function KeybindingChord(props: KeybindingRowProps) {
+  const { row, isSaving, allRows, onSave, onReset, onRemove } = props;
+  const editor = useKeybindingRowEditor({ row, allRows, onSave });
+  return (
+    <span className="flex items-center gap-1.5">
+      <KeybindingConflictWarning labels={editor.conflictLabels} />
+      <KeybindingHoverRowMenu row={row} isSaving={isSaving} onReset={onReset} onRemove={onRemove} />
+      <KeybindingKeyControl row={row} editor={editor} isSaving={isSaving} />
+    </span>
+  );
+}
+
+/** One row per command; alternative chords sit side by side ("Ctrl N · Ctrl Shift O"). */
+function KeybindingCommandRow(
+  props: Omit<KeybindingRowProps, "row"> & { rows: readonly [KeybindingRow, ...KeybindingRow[]] },
+) {
+  const { rows, anchorId, showConditions, ...chordProps } = props;
+  const first = rows[0];
+  return (
+    <SettingsRow
+      id={anchorId}
+      className="group/row rounded-none"
+      title={<KeybindingRowTitle row={first} showId={showConditions} />}
+      control={
+        <div className="-mr-1.5 flex flex-wrap items-center justify-end gap-1">
+          {rows.map((row, index) => (
+            <Fragment key={row.id}>
+              {index > 0 ? (
+                <Text variant="meta" tone="muted" render={<span aria-hidden />}>
+                  ·
+                </Text>
+              ) : null}
+              <KeybindingChord row={row} showConditions={showConditions} {...chordProps} />
+            </Fragment>
+          ))}
+        </div>
+      }
+    />
+  );
 }
 
 function keybindingAnchorIds(rows: ReturnType<typeof buildKeybindingRows>) {
@@ -1464,13 +1529,13 @@ export function KeybindingsSettingsPanel() {
                   size="icon"
                   disabled={!keybindingsConfigPath || !canOpenKeybindingsFile}
                   onClick={openKeybindingsFile}
-                  aria-label="Open keybindings.json"
+                  aria-label="Open the keybindings file"
                 >
                   <FileJsonIcon aria-hidden className="size-4" />
                 </Button>
               }
             />
-            <TooltipPopup side="top">Open keybindings.json</TooltipPopup>
+            <TooltipPopup side="top">Open the keybindings file (keybindings.json)</TooltipPopup>
           </Tooltip>
           <Toggle
             variant="outline"

@@ -948,17 +948,32 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   @keyframes settings-search-target-pulse {
     0%,
     100% {
-      box-shadow: inset 0 0 0 0 transparent;
+      opacity: 0;
     }
-    50% {
-      box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--color-primary) 70%, transparent);
+    25%,
+    70% {
+      opacity: 1;
     }
   }
 
+  /* A search or deep link lands on a row, or on a section's card, and tints it for a moment:
+     an outline on the heading read as a focused input. The tint is an overlay so the card's
+     surface recipe (its fill, rim and shadow) stays as it is underneath. */
   [data-settings-page-scroll] div.settings-search-target-pulse,
-  [data-settings-page-scroll] section.settings-search-target-pulse > div:first-child {
-    animation: settings-search-target-pulse 650ms ease-in-out 2;
-    border-radius: 0.75rem;
+  [data-settings-page-scroll] section.settings-search-target-pulse > div:last-child {
+    position: relative;
+  }
+
+  [data-settings-page-scroll] div.settings-search-target-pulse::after,
+  [data-settings-page-scroll] section.settings-search-target-pulse > div:last-child::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: color-mix(in oklab, var(--foreground) 7%, transparent);
+    pointer-events: none;
+    opacity: 0;
+    animation: settings-search-target-pulse 1300ms ease-in-out;
   }
 
   /* The pulse is the destination indicator; without it (reduced motion), the
@@ -1474,8 +1489,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --input: rgb(0 0 0 / 14%);
   --ring: #86817a;
   --destructive-foreground: var(--error-foreground);
-  --info: #4767c9;
-  --info-foreground: #3653ad;
+  /* A slate barely cooler than the warm greys: info is a note, never a colour of its own. */
+  --info: #5d6672;
+  --info-foreground: #4b535e;
   --success: #2f8f55;
   --success-foreground: #23703f;
   --warning: #a7740f;
@@ -1533,8 +1549,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --border: rgb(255 255 255 / 7.5%);
     --input: rgb(255 255 255 / 12%);
     --ring: #77736c;
-    --info: #8aa2f2;
-    --info-foreground: #a5b8f5;
+    --info: #98a0aa;
+    --info-foreground: #b2b8c0;
     --success: #57b97c;
     --success-foreground: #7cc996;
     --warning: #d6a03c;

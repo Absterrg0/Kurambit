@@ -155,9 +155,8 @@ function RetentionControl({
             <NumberFieldIncrement aria-label={`Increase ${label}`} />
           </NumberFieldGroup>
         </NumberField>
-      ) : (
-        <span className="text-xs text-muted-foreground">Off</span>
-      )}
+      ) : null}
+      {/* Off needs no word: no other switch row says it, and the track already shows it. */}
       <Switch
         aria-label={label}
         checked={value !== null}

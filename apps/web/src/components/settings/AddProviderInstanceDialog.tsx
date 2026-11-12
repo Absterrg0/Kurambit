@@ -3,7 +3,7 @@
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
@@ -401,7 +401,7 @@ export function AddProviderInstanceDialog({
             >
               <div className={cn("grid gap-2", wizardStep !== 0 && "hidden")}>
                 <div id="add-instance-driver-label" className="text-sm font-medium text-foreground">
-                  Provider
+                  Agent
                 </div>
                 <RadioGroup
                   disabled={isPreparingRegistryAgent}
@@ -421,7 +421,7 @@ export function AddProviderInstanceDialog({
                         <RadioPrimitive.Root
                           key={option.driverKind}
                           value={option.driverKind}
-                          className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
+                          className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:hover:bg-primary/15"
                         >
                           <ProviderInstanceIcon
                             tone="brand"
@@ -439,7 +439,8 @@ export function AddProviderInstanceDialog({
                             <CheckIcon className="size-3.5 shrink-0" />
                           </RadioPrimitive.Indicator>
                           {option.badgeLabel ? (
-                            <Badge variant="warning" size="sm">
+                            // A quiet tag: colour in chrome is kept for live states.
+                            <Badge variant="secondary" size="sm">
                               {option.badgeLabel}
                             </Badge>
                           ) : null}
@@ -452,14 +453,13 @@ export function AddProviderInstanceDialog({
               {wizardStep === 0 ? (
                 <div className="space-y-4 pt-4">
                   {!showRegistry && !isAcpRegistry ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => setShowRegistry(true)}
-                    >
-                      More agents…
-                    </Button>
+                    // Left-aligned under the tiles, as the next row of the list.
+                    <div className="-mt-2 flex">
+                      <Button variant="ghost" onClick={() => setShowRegistry(true)}>
+                        <PlusIcon />
+                        More agents…
+                      </Button>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-3 text-meta text-muted-foreground">
                       <div aria-hidden className="flex-1 border-t border-border/70" />

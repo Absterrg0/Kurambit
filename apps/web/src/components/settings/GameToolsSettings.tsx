@@ -1,7 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   BoxIcon,
+  CheckIcon,
+  CopyIcon,
+  RefreshCwIcon,
   FilmIcon,
   FolderIcon,
   Gamepad2Icon,
@@ -22,22 +25,34 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { GAME_TOOL_NAMES, GameToolLink } from "../game/GameToolLink";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
+// One line each; requirements and where a tool comes from sit behind the row's About.
 const TOOL_PURPOSE = {
-  godot: "The engine for native games: Godot 4.7.x with its export templates.",
+  godot: "The engine for native games.",
+  unity: "The engine for Unity games.",
+  blender: "Models, rigs and renders game art.",
+  uv: "Runs the live Blender view's helper.",
+  mpfb: "Makes human bodies for characters built in Blender.",
+  ffmpeg: "Records each bot play.",
+} as const satisfies Record<GameToolStatus["tool"], string>;
+
+const TOOL_ABOUT = {
+  godot: "Godot 4.7.x with its export templates.",
   unity:
-    "The engine for Unity games: a Unity 6 editor from Unity Hub (6000.6.7f1 or later) with Windows Build Support (Mono), and a Unity licence.",
-  blender: "Models, rigs and renders game art. Blender 4.2 or later.",
-  uv: "Runs the live Blender view's helper. Kurambit fetches it itself when it is not installed.",
-  mpfb: "MPFB2 2.0.18 makes human bodies for characters built in Blender. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
+    "A Unity 6 editor from Unity Hub (6000.6.7f1 or later) with Windows Build Support (Mono), and a Unity licence.",
+  blender: "Blender 4.2 or later.",
+  uv: "Kurambit fetches it itself when it is not installed.",
+  mpfb: "MPFB2 2.0.18. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
   ffmpeg:
-    "Records each bot play. A build's play facts and Keep going are read from these recordings; without ffmpeg a build is only checked for booting.",
+    "A build's play facts and Keep going are read from these recordings; without ffmpeg a build is only checked for booting.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 const TOOL_ICONS = {
@@ -50,11 +65,11 @@ const TOOL_ICONS = {
 } as const satisfies Record<GameToolStatus["tool"], unknown>;
 
 const SOURCE_LABELS = {
-  settings: "path set here",
-  env: "environment variable",
-  "unity-hub": "Unity Hub",
-  kurambit: "Kurambit's tools folder",
-  path: "PATH",
+  settings: "Path set below",
+  env: "Set by an environment variable",
+  "unity-hub": "From Unity Hub",
+  kurambit: "Installed by Kurambit",
+  path: "Found on this computer",
 } as const satisfies Record<NonNullable<GameToolStatus["source"]>, string>;
 
 const STATUS_LABELS = {
@@ -101,82 +116,38 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
       });
   };
   return (
-    <SettingsSection id="game-tools" title="Game tools">
-      {query.data?.tools.map((tool) => {
-        const status = STATUS_LABELS[tool.status];
-        const ToolIcon = TOOL_ICONS[tool.tool];
-        const found =
-          tool.path === null
-            ? null
-            : [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source], tool.path]
-                .filter((part) => part !== null)
-                .join(" · ");
-        // A ready tool's dot and its purpose already say it all; its message only repeats them.
-        const showMessage = tool.status !== "ready";
-        const details = showMessage || INSTALLABLE.has(tool.tool) || tool.status !== "ready";
-        return (
-          <SettingsRow
-            key={tool.tool}
-            icon={<ToolIcon />}
-            title={GAME_TOOL_NAMES[tool.tool]}
-            description={TOOL_PURPOSE[tool.tool]}
-            status={found === null ? null : <span className="wrap-anywhere">{found}</span>}
-            control={
-              <span className="flex items-center gap-2">
-                <StatusDot tone={status.tone} size="md" />
-                <Text variant="meta" tone="muted">
-                  {status.label}
-                </Text>
-              </span>
-            }
-          >
-            {details ? (
-              <div className="flex min-w-0 flex-col gap-1 break-words ps-7">
-                {/* The status in the control column already says a ready tool is ready. */}
-                {!showMessage ? null : tool.installed ? (
-                  <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
-                    {tool.message}
-                  </Text>
-                ) : (
-                  <Text variant="meta" tone="muted" render={<details />}>
-                    <summary className="cursor-pointer">Not installed · Details</summary>
-                    <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
-                  </Text>
-                )}
-                {INSTALLABLE.has(tool.tool) ? (
-                  <GameToolChange
-                    environmentId={environmentId}
-                    tool={tool}
-                    onChanged={() => query.refresh()}
-                  />
-                ) : null}
-                {tool.status === "ready" ? null : (
-                  <div>
-                    <GameToolLink tool={tool} />
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </SettingsRow>
-        );
-      })}
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+    <SettingsSection
+      id="game-tools"
+      title="Game tools"
+      headerAction={
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
           disabled={query.isPending}
           onClick={() => query.refresh()}
         >
+          <RefreshCwIcon />
           Check again
         </Button>
-        {/* A refetch cut off by the next one (a save, Check again) fails with no
-            error of its own; with the last results on screen it says nothing. */}
-        {query.error !== null && (query.failure !== null || query.data === null) ? (
+      }
+    >
+      {query.data?.tools.map((tool) => (
+        <GameToolRow
+          key={tool.tool}
+          environmentId={environmentId}
+          tool={tool}
+          onChanged={() => query.refresh()}
+        />
+      ))}
+      {/* A refetch cut off by the next one (a save, Check again) fails with no
+          error of its own; with the last results on screen it says nothing. */}
+      {query.error !== null && (query.failure !== null || query.data === null) ? (
+        <div className="px-4 py-3">
           <Text variant="body" tone="destructive" render={<p role="alert" />}>
             {query.error}
           </Text>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {PATH_ROWS.filter((row) => row.shown).map((row) => (
         <SettingsRow
           key={row.key}
@@ -216,8 +187,12 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
   );
 }
 
-/** Install or Remove for a tool Kurambit fetches itself; a failure stays on the row. */
-function GameToolChange({
+/**
+ * One tool: what it is for, its version and where it came from, its status, and
+ * Install or Remove for a tool Kurambit fetches itself. The path is copied, not shown:
+ * a home directory in the middle of a row says nothing a person needs to read.
+ */
+function GameToolRow({
   environmentId,
   tool,
   onChanged,
@@ -230,8 +205,11 @@ function GameToolChange({
   const remove = useAtomCommand(gameEnvironment.toolchainRemove, { reportFailure: false });
   const canInstall = useAtomValue(gameEnvironment.toolchainInstall.permissionAtom(environmentId));
   const canRemove = useAtomValue(gameEnvironment.toolchainRemove.permissionAtom(environmentId));
+  const { copyToClipboard, isCopied } = useCopyToClipboard();
   const [pending, setPending] = useState<"install" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const aboutId = useId();
   const change = async (kind: "install" | "remove") => {
     if (pending !== null || tool.tool !== "mpfb") return;
     setPending(kind);
@@ -242,39 +220,119 @@ function GameToolChange({
     setPending(null);
     onChanged();
   };
+  const status = STATUS_LABELS[tool.status];
+  const ToolIcon = TOOL_ICONS[tool.tool];
+  const found = [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
+    .filter((part) => part !== null)
+    .join(" · ");
+  // A ready tool's dot and its purpose already say it all; its message only repeats them.
+  const showMessage = tool.status !== "ready";
+  const changeButton = !INSTALLABLE.has(tool.tool) ? null : tool.installed ? (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={!canRemove || pending !== null}
+      onClick={() => void change("remove")}
+    >
+      {pending === "remove" ? "Removing…" : "Remove"}
+    </Button>
+  ) : (
+    <Button
+      size="sm"
+      // Blender missing or too old: the message says what to fix first.
+      disabled={!canInstall || pending !== null || tool.status === "error"}
+      onClick={() => void change("install")}
+    >
+      {pending === "install" ? "Installing…" : "Install"}
+    </Button>
+  );
+  const details = showMessage || error !== null || aboutOpen;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap gap-2">
-        {tool.installed ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!canRemove || pending !== null}
-            onClick={() => void change("remove")}
+    <SettingsRow
+      icon={<ToolIcon />}
+      title={GAME_TOOL_NAMES[tool.tool]}
+      description={TOOL_PURPOSE[tool.tool]}
+      status={
+        <span className="flex flex-wrap items-center gap-x-1.5">
+          {found === "" ? null : <span>{found}</span>}
+          {tool.path === null ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    aria-label={`Copy ${GAME_TOOL_NAMES[tool.tool]}'s path`}
+                    onClick={() => {
+                      if (tool.path !== null) copyToClipboard(tool.path);
+                    }}
+                  >
+                    {isCopied ? <CheckIcon /> : <CopyIcon />}
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top" className="max-w-96 break-all">
+                {isCopied ? "Copied" : tool.path}
+              </TooltipPopup>
+            </Tooltip>
+          )}
+          <InlineButton
+            tone="muted"
+            aria-expanded={aboutOpen}
+            aria-controls={aboutId}
+            onClick={() => setAboutOpen((open) => !open)}
           >
-            {pending === "remove" ? "Removing…" : "Remove"}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            // Blender missing or too old: the message says what to fix first.
-            disabled={!canInstall || pending !== null || tool.status === "error"}
-            onClick={() => void change("install")}
-          >
-            {pending === "install" ? "Installing…" : "Install"}
-          </Button>
-        )}
-      </div>
-      {error === null ? null : (
-        <Text
-          variant="meta"
-          tone="destructive"
-          render={<p role="alert" className="whitespace-pre-wrap" />}
-        >
-          {error}
-        </Text>
-      )}
-    </div>
+            {aboutOpen ? "Hide" : "About"}
+          </InlineButton>
+        </span>
+      }
+      control={
+        <span className="flex items-center gap-3">
+          <span className="flex items-center gap-2">
+            <StatusDot tone={status.tone} size="md" />
+            <Text variant="meta" tone="muted">
+              {status.label}
+            </Text>
+          </span>
+          {changeButton}
+        </span>
+      }
+    >
+      {details ? (
+        <div className="flex min-w-0 flex-col gap-1 break-words ps-7 pb-2">
+          {aboutOpen ? (
+            <Text variant="meta" tone="muted" render={<p id={aboutId} className="text-pretty" />}>
+              {TOOL_ABOUT[tool.tool]}
+            </Text>
+          ) : null}
+          {/* The status in the control column already says a ready tool is ready. */}
+          {!showMessage ? null : tool.installed ? (
+            <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
+              {tool.message}
+            </Text>
+          ) : (
+            <Text variant="meta" tone="muted" render={<details />}>
+              <summary className="cursor-pointer">Not installed · Details</summary>
+              <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
+            </Text>
+          )}
+          {error === null ? null : (
+            <Text
+              variant="meta"
+              tone="destructive"
+              render={<p role="alert" className="whitespace-pre-wrap" />}
+            >
+              {error}
+            </Text>
+          )}
+          {tool.status === "ready" ? null : (
+            <div>
+              <GameToolLink tool={tool} />
+            </div>
+          )}
+        </div>
+      ) : null}
+    </SettingsRow>
   );
 }
 

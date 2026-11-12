@@ -489,7 +489,10 @@ function SidebarUpdateControl() {
             : "Downloading…"
           : iconStatus === "available"
             ? "Update available"
-            : "Update ready"}
+            : // App, server and agent updates share this one pill; its tooltip and dialog list them.
+              iconStatus === "everything"
+              ? "Updates ready"
+              : "Update ready"}
       </span>
     </button>
   ) : (

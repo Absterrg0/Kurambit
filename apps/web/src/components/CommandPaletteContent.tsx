@@ -3,6 +3,7 @@ import { type ComponentProps, type ReactNode, useLayoutEffect, useRef } from "re
 
 import { Command, CommandFooter, CommandInput, CommandPanel } from "./ui/command";
 import { Kbd, KbdGroup } from "./ui/kbd";
+import { Text } from "./ui/text";
 
 type CommandPaletteContentProps = Omit<ComponentProps<typeof Command>, "children"> & {
   readonly children: ReactNode;
@@ -56,36 +57,42 @@ export function CommandPaletteContent({
           {children}
         </CommandPanel>
         <CommandFooter className="max-sm:flex-col max-sm:items-start">
+          {/* Labels sit beside the key chips, not inside the <kbd> group, which would set
+              them in the browser's monospace face. */}
           <div className="flex items-center gap-3">
-            <KbdGroup>
-              <Kbd>
-                <ArrowUpIcon />
-              </Kbd>
-              <Kbd>
-                <ArrowDownIcon />
-              </Kbd>
-              <span>Navigate</span>
-            </KbdGroup>
+            <FooterHint
+              keys={
+                <>
+                  <Kbd>
+                    <ArrowUpIcon />
+                  </Kbd>
+                  <Kbd>
+                    <ArrowDownIcon />
+                  </Kbd>
+                </>
+              }
+              label="Navigate"
+            />
             {footerActionLabel !== undefined ? (
-              <KbdGroup>
-                <Kbd>Enter</Kbd>
-                <span>{footerActionLabel}</span>
-              </KbdGroup>
+              <FooterHint keys={<Kbd>Enter</Kbd>} label={footerActionLabel} />
             ) : null}
-            {showBackHint ? (
-              <KbdGroup>
-                <Kbd>Backspace</Kbd>
-                <span>Back</span>
-              </KbdGroup>
-            ) : null}
-            <KbdGroup>
-              <Kbd>Esc</Kbd>
-              <span>{escapeLabel}</span>
-            </KbdGroup>
+            {showBackHint ? <FooterHint keys={<Kbd>Backspace</Kbd>} label="Back" /> : null}
+            <FooterHint keys={<Kbd>Esc</Kbd>} label={escapeLabel} />
           </div>
           {footerTrailing}
         </CommandFooter>
       </Command>
     </div>
+  );
+}
+
+function FooterHint({ keys, label }: { keys: ReactNode; label: ReactNode }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <KbdGroup>{keys}</KbdGroup>
+      <Text variant="caption" tone="muted">
+        {label}
+      </Text>
+    </span>
   );
 }

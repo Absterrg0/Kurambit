@@ -431,13 +431,13 @@ describe("KeybindingsSettings.logic", () => {
       },
     ] satisfies ResolvedKeybindingsConfig);
 
-    expect(rows[0]?.conflicts).toEqual(["New chat in this game"]);
+    expect(rows[0]?.conflicts).toEqual(["Start a fresh Log"]);
     expect(
       keybindingConflictLabels(rows, {
         rowId: rows[0]?.id ?? "",
         key: "mod+n",
         when: "",
       }),
-    ).toEqual(["New chat in this game"]);
+    ).toEqual(["Start a fresh Log"]);
   });
 });

@@ -667,6 +667,9 @@ export function ProviderInstanceCard({
     enabled,
   );
   const updateCommand = versionAdvisory?.updateCommand ?? null;
+  const updateTargetLabel = getProviderVersionLabel(
+    versionAdvisory?.targetVersion ?? liveProvider?.versionAdvisory?.latestVersion,
+  );
   const updateState = liveProvider?.updateState;
   const updateProgress = isUpdating
     ? ((updateState?.status === "queued" || updateState?.status === "running"
@@ -902,7 +905,9 @@ export function ProviderInstanceCard({
                       ? "Updating"
                       : hasCompatibilityWarning
                         ? "Version issue"
-                        : "Update"}
+                        : updateTargetLabel
+                          ? `Update to ${updateTargetLabel}`
+                          : "Update"}
                 </Button>
               }
             />
@@ -1222,7 +1227,11 @@ export function ProviderInstanceCard({
         </SettingsSection>
       ) : null}
 
-      {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed" ? (
+      {/* Binary paths, homes and launch arguments are for people debugging a provider,
+          so they stay folded until asked for. */}
+      {(instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed") ||
+      !driverOption ||
+      deriveProviderSettingsFields(driverOption).length > 0 ? (
         <div
           inert={readOnly}
           aria-disabled={readOnly || undefined}
@@ -1231,21 +1240,14 @@ export function ProviderInstanceCard({
           <FoldedSettingsSection
             key={instanceId}
             id={`provider-instance-${instanceId}-runtime`}
-            title="Runtime"
+            title="Advanced options"
             headerPlacement="outside"
           >
-            {runtime ?? runtimeFields}
+            {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed"
+              ? (runtime ?? runtimeFields)
+              : runtimeFields}
           </FoldedSettingsSection>
         </div>
-      ) : !driverOption || deriveProviderSettingsFields(driverOption).length > 0 ? (
-        <SettingsSection
-          title="Runtime"
-          inert={readOnly}
-          aria-disabled={readOnly || undefined}
-          className={readOnly ? "opacity-50 select-none" : undefined}
-        >
-          {runtimeFields}
-        </SettingsSection>
       ) : null}
 
       <SettingsSection

@@ -579,13 +579,18 @@ export function getCommandPaletteMode(input: {
 
 /**
  * A game studio's order: the open game's commands, then the studio's, then recent
- * chats. Coding commands (threads, files, projects) wait at the end under Developer.
+ * chats. Coding commands (chats, files, projects) wait at the end under Developer.
  */
 export function buildRootGroups(input: {
   gameItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   developerItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
+  /**
+   * One "Developer…" row standing in for the coding commands, last and unlabelled. Given
+   * while nothing is typed; a search lists the commands themselves so they can be found.
+   */
+  developerEntry?: CommandPaletteSubmenuItem | undefined;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
   if (input.gameItems.length > 0) {
@@ -602,7 +607,11 @@ export function buildRootGroups(input: {
     });
   }
   if (input.developerItems.length > 0) {
-    groups.push({ value: "developer", label: "Developer", items: input.developerItems });
+    groups.push(
+      input.developerEntry
+        ? { value: "developer", label: "", items: [input.developerEntry] }
+        : { value: "developer", label: "Developer", items: input.developerItems },
+    );
   }
   return groups;
 }
@@ -610,7 +619,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search games and actions…";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":

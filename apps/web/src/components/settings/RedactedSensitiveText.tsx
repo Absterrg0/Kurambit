@@ -3,25 +3,14 @@ import { useState } from "react";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-const REDACTED_TEXT_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
-
-function redactedPlaceholder(value: string): string {
-  let state = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    state ^= value.charCodeAt(index);
-    state = Math.imul(state, 0x01000193);
-  }
-
-  const nextChar = () => {
-    state = Math.imul(state ^ (state >>> 13), 0x85ebca6b);
-    state = Math.imul(state ^ (state >>> 16), 0xc2b2ae35);
-    return REDACTED_TEXT_ALPHABET[Math.abs(state) % REDACTED_TEXT_ALPHABET.length] ?? "x";
-  };
-
-  return Array.from(value, (char) => {
-    if (char === "@" || char === "." || char === "-" || char === "_") return char;
-    return nextChar();
-  }).join("");
+/**
+ * Hidden values read as masked text ("p•••@gmail.com"): a blur over scrambled letters looked
+ * like a rendering fault, not privacy. An email keeps its domain, which says which account
+ * it is without naming the person.
+ */
+function maskedPlaceholder(value: string): string {
+  const at = value.lastIndexOf("@");
+  return at > 0 ? `${value[0]}•••${value.slice(at)}` : `${value[0]}•••`;
 }
 
 export function RedactedSensitiveText(props: {
@@ -33,7 +22,7 @@ export function RedactedSensitiveText(props: {
 }) {
   const [revealed, setRevealed] = useState(false);
   const value = props.value?.trim();
-  const redacted = value ? redactedPlaceholder(value) : "";
+  const masked = value ? maskedPlaceholder(value) : "";
 
   if (!value) return null;
 
@@ -44,14 +33,14 @@ export function RedactedSensitiveText(props: {
           <button
             type="button"
             className={cn(
-              "min-w-0 cursor-pointer rounded-sm font-mono text-2xs leading-normal transition hover:text-foreground",
-              revealed ? "text-muted-foreground" : "select-none text-muted-foreground blur-xs",
+              "min-w-0 cursor-pointer rounded-sm leading-normal text-muted-foreground transition-colors hover:text-foreground",
+              !revealed && "select-none",
               props.className,
             )}
             onClick={() => setRevealed((current) => !current)}
             aria-label={props.ariaLabel}
           >
-            {revealed ? value : redacted}
+            {revealed ? value : masked}
           </button>
         }
       />
