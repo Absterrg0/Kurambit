@@ -784,25 +784,17 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["commands scripts setup run dev server checkout worktree kurambit.json import"],
   },
   {
-    id: "local-environment",
-    title: "Local environment",
-    to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["local server agents status"],
-    desktopOnly: true,
-  },
-  {
     id: "connections-environment",
-    title: "This machine",
-    to: "/settings/connections",
-    searchTerms: ["connections local server status"],
+    title: "Kurambit server",
+    to: "/settings/general",
+    searchTerms: ["connections connected local server machine status agents"],
   },
 
   {
     id: "archive",
-    title: "Archived threads",
+    title: "Archived chats",
     to: "/settings/archived",
-    searchTerms: ["restore reopen deleted history projects"],
+    searchTerms: ["restore reopen unarchive threads history games"],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 

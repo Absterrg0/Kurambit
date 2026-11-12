@@ -50,7 +50,7 @@ function EnvironmentPermissionNotice({
       timeout: 0,
       onClose: persistDismissal,
       actionProps: {
-        children: "Open Connections",
+        children: "Open settings",
         onClick: () => {
           dismiss();
           void navigate({ to: "/settings/connections" });

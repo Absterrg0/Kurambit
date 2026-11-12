@@ -13,10 +13,10 @@ import {
 import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
-import { Spinner } from "~/components/ui/spinner";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { NotificationSettings } from "./NotificationSettings";
 
-import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
+import { ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
 import { use, useEffect, useEffectEvent, useRef, useState } from "react";
@@ -161,6 +161,7 @@ import {
   SettingsPageContainer,
   SettingsRestoredContext,
   SettingsRow,
+  SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTarget,
   useSettingsSearchTargetId,
@@ -168,6 +169,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
+import { LocalServerRow } from "./ConnectionsSettings";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -2968,6 +2970,7 @@ export function GeneralSettingsPanel() {
             />
           </>
         )}
+        <LocalServerRow />
         <SettingsRow
           title="Privacy"
           description="Kurambit does not collect product usage analytics. Local diagnostics remain on this machine unless you configure an export."
@@ -3168,7 +3171,7 @@ export function ArchivedThreadsPanel() {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to unarchive thread",
+            title: "Could not bring the chat back",
             description: error instanceof Error ? error.message : "An error occurred.",
           }),
         );
@@ -3185,7 +3188,7 @@ export function ArchivedThreadsPanel() {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to delete thread",
+            title: "Could not delete the chat",
             description: error instanceof Error ? error.message : "An error occurred.",
           }),
         );
@@ -3196,32 +3199,21 @@ export function ArchivedThreadsPanel() {
   return (
     <SettingsPageContainer>
       {archivedGroups.length === 0 ? (
-        <SettingsSection
-          id={isLoadingArchive ? undefined : searchableSetting("archive").id}
-          title={searchableSetting("archive").title}
-        >
-          <SettingsRow
-            title={
-              <span className="inline-flex items-center gap-2">
-                {isLoadingArchive ? (
-                  <Spinner size="sm" tone="muted" />
-                ) : (
-                  <ArchiveIcon className="size-3.5 text-muted-foreground" />
-                )}
-                {isLoadingArchive
-                  ? "Loading archived threads"
-                  : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
-              </span>
-            }
-            description={
-              isLoadingArchive
-                ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
-            }
-          />
-        </SettingsSection>
+        <SettingsSearchTarget id={isLoadingArchive ? undefined : searchableSetting("archive").id}>
+          {isLoadingArchive ? null : (
+            <Empty variant="well">
+              <EmptyHeader>
+                <EmptyTitle>
+                  {archiveError ? "Could not load archived chats" : "No archived chats"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {archiveError ??
+                    "A chat you archive waits here until you bring it back or delete it."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+        </SettingsSearchTarget>
       ) : (
         archivedGroups.map(({ key, project, title, threads: projectThreads }, index) => (
           <SettingsSection
@@ -3250,7 +3242,7 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Archived thread action failed",
+                          title: "Could not change the archived chat",
                           description:
                             error instanceof Error ? error.message : "An error occurred.",
                         }),
@@ -3287,7 +3279,7 @@ export function ArchivedThreadsPanel() {
                           toastManager.add(
                             stackedThreadToast({
                               type: "error",
-                              title: "Failed to unarchive thread",
+                              title: "Could not bring the chat back",
                               description:
                                 error instanceof Error ? error.message : "An error occurred.",
                             }),

@@ -1,24 +1,30 @@
+import type { EnvironmentConnectionPhase } from "@kurambit/client-runtime/connection";
+
 import { usePrimaryEnvironment } from "../../state/environments";
-import { Badge } from "../ui/badge";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { StatusLabel, type StatusDotTone } from "../ui/status-dot";
+import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
-export function ConnectionsSettings() {
+const PHASE_STATUS: Record<EnvironmentConnectionPhase, { tone: StatusDotTone; label: string }> = {
+  connected: { tone: "success", label: "Connected" },
+  connecting: { tone: "neutral", label: "Connecting" },
+  reconnecting: { tone: "warning", label: "Reconnecting" },
+  available: { tone: "neutral", label: "Not connected" },
+  offline: { tone: "danger", label: "Offline" },
+  error: { tone: "danger", label: "Could not connect" },
+  unsupported: { tone: "danger", label: "Needs an update" },
+};
+
+/** The one server Kurambit runs, as a row in General's About. */
+export function LocalServerRow() {
   const environment = usePrimaryEnvironment();
-  const phase = environment?.connection.phase ?? "connecting";
+  const status = PHASE_STATUS[environment?.connection.phase ?? "connecting"];
   return (
-    <SettingsPageContainer>
-      <SettingsSection {...searchableSetting("connections-environment")}>
-        <SettingsRow
-          title={environment?.label ?? "Local server"}
-          description="This machine's Kurambit server, which runs your agents and game tools."
-          status={
-            <Badge variant={phase === "connected" ? "success" : "outline"} size="sm">
-              {phase === "connected" ? "Connected" : phase}
-            </Badge>
-          }
-        />
-      </SettingsSection>
-    </SettingsPageContainer>
+    <SettingsRow
+      {...searchableSetting("connections-environment")}
+      description={`Runs your agents and game tools on ${environment?.label ?? "this computer"}.`}
+      status={<StatusLabel tone={status.tone}>{status.label}</StatusLabel>}
+      inlineControl
+    />
   );
 }
