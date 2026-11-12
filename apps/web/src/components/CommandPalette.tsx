@@ -81,7 +81,11 @@ import {
   PlayIcon,
   Redo2Icon,
   PanelRightIcon,
-  ScanIcon,
+  CircleStopIcon,
+  CrosshairIcon,
+  ListChecksIcon,
+  ShapesIcon,
+  ScrollTextIcon,
   SquareIcon,
   Undo2Icon,
   WrenchIcon,
@@ -1539,7 +1543,7 @@ function OpenCommandPaletteDialog(props: {
         value: "action:game-stop",
         title: "Stop game",
         searchTerms: ["stop", "close", "quit", "game"],
-        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+        icon: <CircleStopIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("stop"),
       });
     actionItems.push({
@@ -1571,25 +1575,36 @@ function OpenCommandPaletteDialog(props: {
         value: "action:game-freeze",
         title: "Freeze the game or play on",
         searchTerms: ["freeze", "pause", "point", "select", "inspect", "stage", "game"],
-        icon: <ScanIcon className={ITEM_ICON_CLASS} />,
+        icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.freeze",
         run: requestStage({ kind: "freeze" }),
       });
-    for (const [tab, title, terms] of [
-      ["build", "Show the build's checks", ["build", "checks", "facts", "measured", "changes"]],
+    for (const [tab, title, terms, Icon] of [
+      [
+        "build",
+        "Show the build's checks",
+        ["build", "checks", "facts", "measured", "changes"],
+        ListChecksIcon,
+      ],
       [
         "scene",
         "Show the game's scene",
         ["scene", "things", "look", "art", "selection", "values", "style"],
+        ShapesIcon,
       ],
-      ["log", "Show the log", ["log", "chat", "conversation", "transcript", "messages"]],
+      [
+        "log",
+        "Show the log",
+        ["log", "chat", "conversation", "transcript", "messages"],
+        ScrollTextIcon,
+      ],
     ] as const)
       actionItems.push({
         kind: "action",
         value: `action:game-inspector-${tab}`,
         title,
         searchTerms: [...terms, "inspector", "game"],
-        icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+        icon: <Icon className={ITEM_ICON_CLASS} />,
         run: async () => {
           useGameWorkspaceStore.getState().showInspectorTab(tab);
         },

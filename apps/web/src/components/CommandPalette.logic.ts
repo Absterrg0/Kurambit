@@ -574,28 +574,51 @@ export function getCommandPaletteMode(input: {
   return input.isBrowsing ? "root-browse" : "root";
 }
 
+// Kurambit is a game studio first: the open game's commands and the games
+// themselves lead, the app's own settings follow, and the coding tools it
+// inherits wait at the end under Developer.
+const GAME_ACTIONS = new Set([
+  "action:game-create",
+  "action:game-open",
+  "action:game-tools",
+  "action:game-art-providers",
+]);
+const APP_ACTIONS = new Set([
+  "action:change-theme",
+  "action:change-appearance",
+  "action:theme-editor",
+  "action:usage",
+  "action:settings",
+  "action:project-settings",
+]);
+
+function rootGroupOf(value: string): "game" | "games" | "app" | "developer" {
+  if (GAME_ACTIONS.has(value)) return "games";
+  if (value.startsWith("action:game-")) return "game";
+  if (APP_ACTIONS.has(value)) return "app";
+  return "developer";
+}
+
 export function buildRootGroups(input: {
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
-  const groups: CommandPaletteGroup[] = [];
-  if (input.actionItems.length > 0) {
-    groups.push({ value: "actions", label: "Actions", items: input.actionItems });
-  }
-  if (input.recentThreadItems.length > 0) {
-    groups.push({
-      value: "recent-threads",
-      label: "Recent Threads",
-      items: input.recentThreadItems,
-    });
-  }
-  return groups;
+  const of = (group: ReturnType<typeof rootGroupOf>) =>
+    input.actionItems.filter((item) => rootGroupOf(item.value) === group);
+  const groups: CommandPaletteGroup[] = [
+    { value: "game", label: "This game", items: of("game") },
+    { value: "actions", label: "Games", items: of("games") },
+    { value: "recent-threads", label: "Recent", items: input.recentThreadItems },
+    { value: "app", label: "App", items: of("app") },
+    { value: "developer", label: "Developer", items: of("developer") },
+  ];
+  return groups.filter((group) => group.items.length > 0);
 }
 
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search games and commands…";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":
