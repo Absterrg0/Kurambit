@@ -20,11 +20,16 @@ import { memo } from "react";
 import { BrainIcon } from "lucide-react";
 import {
   Menu,
+  MenuCheckboxItem,
   MenuGroup,
+  MenuGroupLabel,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
   MenuSeparator as MenuDivider,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
@@ -480,16 +485,49 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
             ? "ultrathink"
             : (getDescriptorStringValue(descriptor, modelSelection, reportedModelSelection) ?? "");
-
+        const locked = ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id;
+        // The plain levels lead; the provider's special modes (anything it has to explain,
+        // and ultrathink) wait one step away under More, so the menu reads as a scale.
+        const advanced = descriptor.options.filter(
+          (option) => option.description || option.id === "ultrathink",
+        );
+        const plain = descriptor.options.filter((option) => !advanced.includes(option));
+        const chosenAdvanced = advanced.find((option) => option.id === selectedValue);
+        const radio = (option: (typeof descriptor.options)[number]) => (
+          <MenuRadioItem
+            key={option.id}
+            value={option.id}
+            hideIndicator
+            // Base UI keeps radio menus open by default. Close on pick so
+            // the traits menu behaves like the model picker.
+            closeOnClick
+            disabled={locked}
+          >
+            <span className="flex w-full min-w-0 flex-col">
+              <span className="min-w-0 truncate">
+                {option.label}
+                {option.isDefault ? (
+                  <>
+                    {" "}
+                    <DefaultBadge />
+                  </>
+                ) : null}
+              </span>
+              {option.description ? (
+                <span className="max-w-56 text-pretty text-muted-foreground text-xs">
+                  {option.description}
+                </span>
+              ) : null}
+            </span>
+          </MenuRadioItem>
+        );
         return (
           <div key={descriptor.id}>
             {index > 0 ? <MenuDivider /> : null}
             <MenuGroup>
-              <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
-              </div>
-              {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
-                <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
+              <MenuGroupLabel>{descriptor.label}</MenuGroupLabel>
+              {locked ? (
+                <div className="px-2 pb-1.5 text-muted-foreground text-xs">
                   Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
                   option.
                 </div>
@@ -498,71 +536,46 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 value={selectedValue}
                 onValueChange={(value) => handleSelectChange(descriptor, value)}
               >
-                {descriptor.options.map((option) => (
-                  <MenuRadioItem
-                    key={option.id}
-                    value={option.id}
-                    hideIndicator
-                    // Base UI keeps radio menus open by default. Close on pick so
-                    // the traits menu behaves like the model picker.
-                    closeOnClick
-                    disabled={ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id}
-                  >
-                    <span className="flex w-full min-w-0 flex-col">
-                      <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                        <span className="min-w-0 truncate">
-                          {option.label}
-                          {option.isDefault ? (
-                            <>
-                              {" "}
-                              <DefaultBadge />
-                            </>
-                          ) : null}
-                        </span>
-                      </span>
-                      {option.description ? (
-                        <span className="max-w-56 text-pretty text-muted-foreground/80 text-xs">
-                          {option.description}
-                        </span>
-                      ) : null}
-                    </span>
-                  </MenuRadioItem>
-                ))}
+                {plain.map(radio)}
               </MenuRadioGroup>
+              {advanced.length > 0 ? (
+                <MenuSub>
+                  <MenuSubTrigger disabled={locked}>
+                    {chosenAdvanced === undefined ? "More" : `More · ${chosenAdvanced.label}`}
+                  </MenuSubTrigger>
+                  <MenuSubPopup className="w-64">
+                    <MenuRadioGroup
+                      value={selectedValue}
+                      onValueChange={(value) => handleSelectChange(descriptor, value)}
+                    >
+                      {advanced.map(radio)}
+                    </MenuRadioGroup>
+                  </MenuSubPopup>
+                </MenuSub>
+              ) : null}
             </MenuGroup>
           </div>
         );
       })}
-      {booleanDescriptors.map((descriptor, index) => {
-        const selectedValue = descriptor.currentValue === true ? "on" : "off";
-
-        return (
-          <div key={descriptor.id}>
-            {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
-            <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
-              </div>
-              <MenuRadioGroup
-                value={selectedValue}
-                onValueChange={(value) => {
-                  updateDescriptors(
-                    replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                  );
-                }}
-              >
-                {(["on", "off"] as const).map((value) => (
-                  <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
-                    <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                      <span>{value === "on" ? "On" : "Off"}</span>
-                    </span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </div>
-        );
-      })}
+      {booleanDescriptors.length > 0 ? (
+        <>
+          {selectDescriptors.length > 0 ? <MenuDivider /> : null}
+          {/* A switch is one row that is on or off, not a group of two choices. */}
+          {booleanDescriptors.map((descriptor) => (
+            <MenuCheckboxItem
+              key={descriptor.id}
+              checked={descriptor.currentValue === true}
+              onCheckedChange={(checked) =>
+                updateDescriptors(
+                  replaceDescriptorCurrentValue(descriptors, descriptor.id, checked),
+                )
+              }
+            >
+              {descriptor.label}
+            </MenuCheckboxItem>
+          ))}
+        </>
+      ) : null}
     </>
   );
 });

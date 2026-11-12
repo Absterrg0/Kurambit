@@ -133,7 +133,7 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
             {details ? (
               <div className="flex min-w-0 flex-col gap-1 break-words ps-7">
                 {/* The status in the control column already says a ready tool is ready. */}
-                {!showMessage ? null : tool.installed || tool.status === "ready" ? (
+                {!showMessage ? null : tool.installed ? (
                   <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
                     {tool.message}
                   </Text>
