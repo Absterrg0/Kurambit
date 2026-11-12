@@ -27,6 +27,7 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import {
   gameMainThread,
   partitionGameChats,
@@ -334,6 +335,29 @@ function BriefBox({
             disabled={busy}
             onInstanceModelChange={(instanceId, model) => choice.choose({ instanceId, model })}
           />
+          {/* The same model and effort pair as a game's own composer, so the first build is
+              asked for in the words every later one is. */}
+          {choice.modelEntry === undefined ? null : (
+            <TraitsPicker
+              provider={choice.modelEntry.driverKind}
+              instanceId={choice.model.instanceId}
+              models={choice.modelEntry.models}
+              model={choice.model.model}
+              prompt=""
+              onPromptChange={() => {}}
+              modelOptions={choice.model.options}
+              allowPromptInjectedEffort={false}
+              planModeEnabled={false}
+              disabled={busy}
+              onModelOptionsChange={(options) =>
+                choice.choose({
+                  instanceId: choice.model.instanceId,
+                  model: choice.model.model,
+                  ...(options === undefined ? {} : { options }),
+                })
+              }
+            />
+          )}
           <BriefOptions
             environmentId={environmentId}
             characters={characters}
