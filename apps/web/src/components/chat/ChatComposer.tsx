@@ -2394,7 +2394,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           type: "slash-command",
           command: "model",
           label: "/model",
-          description: "Switch response model for this thread",
+          description: "Switch the model for this Log",
         },
         ...(planModeUiEnabled
           ? ([
@@ -2449,6 +2449,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
         composerTrigger.rangeStart === 0,
       );
+      // On a game, "/" alone offers the Log's own commands. The agent's coding commands and
+      // skills still run, but only appear once their name is typed.
+      if (gameThread && query.replace(/^\/+/, "") === "") {
+        return slashCommandItems.filter(
+          (item) =>
+            item.type === "slash-command" ||
+            (item.type === "provider-slash-command" && item.command.name === "compact"),
+        );
+      }
       return searchSlashCommandItems(slashCommandItems, query);
     }
     if (composerTrigger.kind === "skill") {

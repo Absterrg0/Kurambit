@@ -90,6 +90,55 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/archived": "Archive",
 };
 
+/** General rows that live in its Advanced fold; search names that as their place. */
+export const ADVANCED_TARGET_IDS: ReadonlySet<string> = new Set([
+  "project-grouping",
+  "project-order",
+  "auto-resume-limited-threads",
+  "snooze-limited-threads",
+  "working-shelf",
+  "auto-settle-inactive-threads",
+  "days-before-auto-settle",
+  "response-streaming",
+  "hide-whitespace-changes",
+  "default-diff-file-state",
+  "diff-layout",
+  "proactive-panels",
+  "skills-in-slash-menu",
+  "composer-rich-text",
+  "composer-collapse",
+  "provider-update-checks",
+  "continue-threads-after-server-update",
+  "background-activity",
+  "start-from-origin",
+  "add-project-starts-in",
+  "default-permissions",
+  "new-threads",
+  "worktree-submodules",
+  "unpin-confirmation",
+  "archive-confirmation",
+  "delete-confirmation",
+  "quit-confirmation",
+  "text-generation-model",
+  "legacy-features",
+  "legacy-plan-mode",
+  "legacy-context-window-indicator",
+  "legacy-sidebar",
+]);
+
+type SettingsSearchPlace = Pick<SettingsSearchItem, "id" | "targetId" | "to">;
+
+/** A General row behind its Advanced fold: the code chat's, so it follows the studio's own. */
+export function isAdvancedSetting(item: SettingsSearchPlace): boolean {
+  return item.to === "/settings/general" && ADVANCED_TARGET_IDS.has(item.targetId ?? item.id);
+}
+
+/** Where a result lives, as the reader would walk to it. */
+export function settingsSearchLocation(item: SettingsSearchPlace): string {
+  const section = SETTINGS_SECTION_LABELS[item.to];
+  return isAdvancedSetting(item) ? `${section} → Advanced` : section;
+}
+
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
   return `keybinding-${command}` as const;
 }
@@ -310,27 +359,27 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-grouping",
-    title: "Project grouping",
+    title: "Game grouping",
     to: "/settings/general",
-    searchTerms: ["combine matching repositories environments sidebar"],
+    searchTerms: ["project grouping combine matching repositories environments sidebar"],
   },
   {
     id: "project-order",
-    title: "Project order",
+    title: "Game order",
     to: "/settings/general",
-    searchTerms: ["sort projects sidebar manual created recent"],
+    searchTerms: ["project order sort projects sidebar manual created recent"],
   },
   {
     id: "snooze-limited-threads",
-    title: "Snooze limited threads",
+    title: "Snooze limited Logs",
     to: "/settings/general",
-    searchTerms: ["usage quota rate limit reset wake recover continue"],
+    searchTerms: ["snooze limited threads usage quota rate limit reset wake recover continue"],
   },
   {
     id: "auto-resume-limited-threads",
-    title: "Auto-resume limited threads",
+    title: "Auto-resume limited Logs",
     to: "/settings/general",
-    searchTerms: ["usage quota rate limit reset recover continue"],
+    searchTerms: ["auto-resume limited threads usage quota rate limit reset recover continue"],
   },
   {
     id: "working-shelf",
@@ -340,9 +389,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-inactive-threads",
-    title: "Auto-settle inactive threads",
+    title: "Auto-settle inactive Logs",
     to: "/settings/general",
-    searchTerms: ["sidebar inactivity days no activity automatically"],
+    searchTerms: ["auto-settle inactive threads sidebar inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
   },
@@ -443,11 +492,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "continue-threads-after-server-update",
-    title: "Continue threads after restarts",
+    title: "Continue Logs after restarts",
     to: "/settings/general",
     scope: "project-defaults",
     searchTerms: [
-      "resume running active interrupted work restart reboot machine crash desktop update automatically",
+      "continue threads resume running active interrupted work restart reboot machine crash desktop update automatically",
     ],
   },
   {
@@ -461,10 +510,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "new-threads",
-    title: "New threads",
+    title: "New Logs",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["default workspace mode draft local worktree"],
+    searchTerms: ["new threads chats default workspace mode draft local worktree"],
   },
   {
     id: "worktree-submodules",
@@ -482,10 +531,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    title: "Open a game folder starts in",
     to: "/settings/general",
     scope: "environment-defaults",
-    searchTerms: ["base directory folder browser path home"],
+    searchTerms: ["add project base directory folder browser path home"],
   },
   {
     id: "unpin-confirmation",
@@ -997,24 +1046,32 @@ export function searchSettings(
       ];
       if (!queryTokens.every((token) => fields.some((field) => field.includes(token)))) return [];
 
-      const exactPhraseField = fields.findIndex((field) => field.includes(normalizedQuery));
+      // A word that starts with what was typed beats the same letters inside a word:
+      // "art" finds Art providers before "Continue … restarts".
+      const startsWord = (field: string, token: string) =>
+        field.startsWith(token) || field.includes(` ${token}`);
       const rank =
         title === normalizedQuery
-          ? 5
+          ? 6
           : title.startsWith(normalizedQuery)
-            ? 4
-            : title.includes(normalizedQuery)
-              ? 3
-              : queryTokens.every((token) => title.includes(token))
-                ? 2
-                : exactPhraseField >= 0
-                  ? 1
-                  : 0;
-      return [{ item, index, rank }];
+            ? 5
+            : queryTokens.every((token) => startsWord(title, token))
+              ? 4
+              : queryTokens.every((token) => fields.some((field) => startsWord(field, token)))
+                ? fields.some((field) => field.includes(normalizedQuery))
+                  ? 3.5
+                  : 3
+                : title.includes(normalizedQuery)
+                  ? 2
+                  : fields.some((field) => field.includes(normalizedQuery))
+                    ? 1
+                    : 0;
+      const later = (item.secondary ?? false) || isAdvancedSetting(item);
+      return [{ item, index, rank, later }];
     })
     .toSorted(
       (left, right) =>
-        Number(left.item.secondary ?? false) - Number(right.item.secondary ?? false) ||
+        Number(left.later) - Number(right.later) ||
         right.rank - left.rank ||
         left.index - right.index,
     )

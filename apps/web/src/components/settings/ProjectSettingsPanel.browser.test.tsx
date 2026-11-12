@@ -227,7 +227,7 @@ async function mountPanel() {
   await vi.waitFor(() => expect(nameInput()).not.toBeNull());
 }
 
-const nameInput = () => container.querySelector<HTMLInputElement>('[aria-label="Project name"]')!;
+const nameInput = () => container.querySelector<HTMLInputElement>('[aria-label="Game name"]')!;
 const removeCheckout = (root: string) =>
   container.querySelector<HTMLButtonElement>(`[aria-label="Remove checkout ${root}"]`)!;
 const removeAll = () =>

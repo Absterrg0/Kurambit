@@ -38,7 +38,7 @@ import {
 
 import { isElectron } from "../../env";
 import { useOpenInPreferredEditor } from "../../editorPreferences";
-import { formatShortcutLabel } from "../../keybindings";
+import { formatShortcutKeyLabel, formatShortcutLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -108,9 +108,7 @@ function KeybindingPill({ value }: { value: string }) {
         <Kbd key={key}>
           {Object.hasOwn(modifiers, part)
             ? modifiers[part as keyof typeof modifiers]
-            : part.length === 1
-              ? part.toUpperCase()
-              : part}
+            : formatShortcutKeyLabel(part)}
         </Kbd>
       ))}
     </KbdGroup>
@@ -1253,6 +1251,7 @@ interface KeybindingsGroupsProps extends KeybindingRowActions {
 
 // The coding app's own areas: real shortcuts, but nothing on a game's screen uses them.
 const CODE_CHAT_GROUP_IDS: ReadonlySet<string> = new Set([
+  "chat-composer",
   "threads",
   "terminal",
   "preview",
@@ -1308,7 +1307,7 @@ function CodeChatKeybindingsFold({
             tone="muted"
             render={<h2 className="[--type-title:1rem] group-hover:text-foreground" />}
           >
-            Chats, terminal and preview
+            Code chat, terminal and preview
           </Text>
           <ChevronRightIcon
             aria-hidden

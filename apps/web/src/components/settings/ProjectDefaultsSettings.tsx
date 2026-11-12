@@ -150,10 +150,10 @@ export function ProjectDefaultsSettings({
       settingKeys={["defaultModelSelection"]}
       mixed={mixedModel}
       id="default-model"
-      title="Model for new games"
+      title={isProjectScope ? "Model for new Logs" : "Model for new games"}
       description={
         isProjectScope
-          ? "New chats in this game start on this model. The model picked in the game's composer wins."
+          ? "New Logs in this game start on this model. The model picked in the game's composer wins."
           : settings.defaultModelSelection === null
             ? "New games start on the model your last game used, until you pick one here. Each game then keeps its own."
             : "New games start on this model. After that, each game keeps the model picked in its own composer."
@@ -219,8 +219,8 @@ export function ProjectDefaultsSettings({
       title="Workspace"
       description={
         isProjectScope
-          ? "Where new threads in this project start."
-          : "Where new threads start. Projects and their kurambit.json can override it."
+          ? "Where new Logs in this game start: the game folder or a side copy."
+          : "Where new Logs start. Each game and its kurambit.json can override it."
       }
       resetAction={
         !isProjectScope && settings.defaultThreadEnvMode !== null ? (
@@ -273,9 +273,9 @@ export function ProjectDefaultsSettings({
         category === "general"
           ? "Agent"
           : category === "project"
-            ? "New threads"
+            ? "New Logs"
             : category === "general-advanced"
-              ? "New threads"
+              ? "New Logs"
               : category === "integrations"
                 ? "Browser"
                 : "Repositories"
@@ -297,8 +297,8 @@ export function ProjectDefaultsSettings({
             {...searchableSetting("default-permissions")}
             description={
               isProjectScope
-                ? "Permissions for new threads in this project."
-                : "Default permissions for new threads. Each game can override them."
+                ? "Permissions for new Logs in this game."
+                : "Default permissions for new Logs. Each game can override them."
             }
             resetAction={
               settings.defaultRuntimeMode !== DEFAULT_SERVER_SETTINGS.defaultRuntimeMode ? (
@@ -359,8 +359,8 @@ export function ProjectDefaultsSettings({
             {...searchableSetting("worktree-submodules")}
             description={
               isProjectScope
-                ? "How new worktrees in this project populate git submodules."
-                : "How new worktrees populate git submodules. Projects and their kurambit.json can override it."
+                ? "How new side copies of this game populate git submodules."
+                : "How new side copies populate git submodules. Each game and its kurambit.json can override it."
             }
             resetAction={
               !isProjectScope && settings.worktreeSubmodules !== null ? (

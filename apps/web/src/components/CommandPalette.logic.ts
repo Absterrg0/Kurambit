@@ -16,7 +16,7 @@ import { normalizeSearchText } from "../lib/utils";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
-export const RECENT_THREAD_LIMIT = 12;
+export const RECENT_GAME_LIMIT = 5;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 export const ADDON_ICON_CLASS = "size-4";
 
@@ -425,7 +425,7 @@ export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
   query: string;
   isInSubmenu: boolean;
-  projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  gameSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   settingsSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
@@ -450,11 +450,11 @@ export function filterCommandPaletteGroups(input: {
 
   const searchableGroups = [...baseGroups];
   if (!input.isInSubmenu && !isActionsFilter) {
-    if (input.projectSearchItems.length > 0) {
+    if (input.gameSearchItems.length > 0) {
       searchableGroups.push({
-        value: "projects-search",
-        label: "Projects",
-        items: input.projectSearchItems,
+        value: "games-search",
+        label: "Games",
+        items: input.gameSearchItems,
       });
     }
     if (input.settingsSearchItems && input.settingsSearchItems.length > 0) {
@@ -578,8 +578,9 @@ export function getCommandPaletteMode(input: {
 }
 
 /**
- * A game studio's order: the open game's commands, then the studio's, then recent
- * chats. Coding commands (chats, files, projects) wait at the end under Developer.
+ * A game studio's order: where to go first (the latest games), then the open game's
+ * commands, then the studio's. Coding commands (chats, files, projects) wait at the end
+ * under Developer.
  */
 export function buildRootGroups(input: {
   gameItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
@@ -593,18 +594,18 @@ export function buildRootGroups(input: {
   developerEntry?: CommandPaletteSubmenuItem | undefined;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
+  if (input.recentThreadItems.length > 0) {
+    groups.push({
+      value: "recent-threads",
+      label: "Recent games",
+      items: input.recentThreadItems,
+    });
+  }
   if (input.gameItems.length > 0) {
     groups.push({ value: "game", label: "This game", items: input.gameItems });
   }
   if (input.actionItems.length > 0) {
     groups.push({ value: "actions", label: "Actions", items: input.actionItems });
-  }
-  if (input.recentThreadItems.length > 0) {
-    groups.push({
-      value: "recent-threads",
-      label: "Recent",
-      items: input.recentThreadItems,
-    });
   }
   if (input.developerItems.length > 0) {
     groups.push(

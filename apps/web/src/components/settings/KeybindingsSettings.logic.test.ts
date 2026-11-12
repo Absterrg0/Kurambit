@@ -75,6 +75,7 @@ describe("KeybindingsSettings.logic", () => {
     expect(groups.map((group) => group.title)).toEqual([
       "Game",
       "Navigation",
+      "Code chat composer",
       "Composer",
       "Chats",
       "Terminal",
@@ -84,7 +85,11 @@ describe("KeybindingsSettings.logic", () => {
     ]);
     const composer = groups.find((group) => group.id === "composer");
     expect(composer?.rows.map((row) => row.command)).toEqual(
-      expect.arrayContaining(["composer.host", "modelPicker.toggle"]),
+      expect.arrayContaining(["composer.effort", "modelPicker.toggle"]),
+    );
+    const chatComposer = groups.find((group) => group.id === "chat-composer");
+    expect(chatComposer?.rows.map((row) => row.command)).toEqual(
+      expect.arrayContaining(["composer.host", "composer.branch"]),
     );
     expect(
       groupKeybindingRows(

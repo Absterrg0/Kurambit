@@ -33,6 +33,7 @@ import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
   SETTINGS_SECTION_LABELS,
+  settingsSearchLocation,
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
@@ -322,9 +323,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                       <span className="block text-label text-pretty text-sidebar-foreground">
                         {item.title}
                       </span>
-                      <span className="block truncate text-meta text-sidebar-muted-foreground">
-                        {SETTINGS_SECTION_LABELS[item.to]}
-                      </span>
+                      {/* A page found by its own name needs no second line repeating it. */}
+                      {settingsSearchLocation(item) === item.title ? null : (
+                        <span className="block truncate text-meta text-sidebar-muted-foreground">
+                          {settingsSearchLocation(item)}
+                        </span>
+                      )}
                     </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

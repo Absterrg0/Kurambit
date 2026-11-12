@@ -163,7 +163,7 @@ import {
   useSettingsSearchTarget,
   useSettingsSearchTargetId,
 } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { ADVANCED_TARGET_IDS, searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { LocalServerRow } from "./ConnectionsSettings";
@@ -333,32 +333,32 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["In-app alerts"]
       : []),
     ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-      ? ["Visible threads"]
+      ? ["Visible Logs"]
       : []),
     ...(settings.sidebarProjectGroupingMode !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
-      ? ["Project Grouping"]
+      ? ["Game grouping"]
       : []),
     ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
-      ? ["Project order"]
+      ? ["Game order"]
       : []),
     ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
       ? ["Working section"]
       : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-      ? ["Auto-settle inactive threads"]
+      ? ["Auto-settle inactive Logs"]
       : []),
     ...(settings.sidebarAutoSettleKeepPullRequests !==
     DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests
-      ? ["Keep threads with a PR"]
+      ? ["Keep Logs with a PR"]
       : []),
     ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-      ? ["Auto-settle merged threads"]
+      ? ["Auto-settle merged Logs"]
       : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
-      ? ["Auto-resume limited threads"]
+      ? ["Auto-resume limited Logs"]
       : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
-      ? ["Snooze limited threads"]
+      ? ["Snooze limited Logs"]
       : []),
     ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
     ...(settings.persistComposerContextStrip !==
@@ -400,18 +400,18 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.continueThreadsAfterServerUpdate !==
     DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
-      ? ["Continue threads after restarts"]
+      ? ["Continue Logs after restarts"]
       : []),
     ...(isBackgroundActivityDirty ? ["Background activity"] : []),
     ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-      ? ["New thread mode"]
+      ? ["New Log mode"]
       : []),
     ...(settings.newWorktreesStartFromOrigin !==
     DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
       ? ["New worktrees start from origin"]
       : []),
     ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-      ? ["Add project base directory"]
+      ? ["Open a game folder starts in"]
       : []),
     ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
       ? ["Unpin confirmation"]
@@ -1757,40 +1757,6 @@ function AutoSettleDaysInput({
 }
 
 // Every search target inside the Advanced fold: a search jump opens the fold first.
-const ADVANCED_TARGET_IDS: ReadonlySet<string> = new Set([
-  "project-grouping",
-  "project-order",
-  "auto-resume-limited-threads",
-  "snooze-limited-threads",
-  "working-shelf",
-  "auto-settle-inactive-threads",
-  "days-before-auto-settle",
-  "response-streaming",
-  "hide-whitespace-changes",
-  "default-diff-file-state",
-  "diff-layout",
-  "proactive-panels",
-  "skills-in-slash-menu",
-  "composer-rich-text",
-  "composer-collapse",
-  "provider-update-checks",
-  "continue-threads-after-server-update",
-  "background-activity",
-  "start-from-origin",
-  "add-project-starts-in",
-  "default-permissions",
-  "new-threads",
-  "worktree-submodules",
-  "unpin-confirmation",
-  "archive-confirmation",
-  "delete-confirmation",
-  "quit-confirmation",
-  "text-generation-model",
-  "legacy-features",
-  "legacy-plan-mode",
-  "legacy-context-window-indicator",
-  "legacy-sidebar",
-]);
 
 function AdvancedSettingsFold({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -2140,7 +2106,7 @@ export function GeneralSettingsPanel() {
           They still work, but nothing on a game's screen uses them, so they wait behind
           one fold instead of filling the studio's first settings page. */}
       <AdvancedSettingsFold>
-        <SettingsSection id="organization" title="Sidebar & threads">
+        <SettingsSection id="organization" title="Sidebar & Logs">
           <SettingsRow
             {...searchableSetting("project-grouping")}
             description="Combine matching repositories across environments."
@@ -2173,7 +2139,7 @@ export function GeneralSettingsPanel() {
                     ),
                   });
                 }}
-                aria-label="Project grouping"
+                aria-label="Game grouping"
               />
             }
           />
@@ -2202,7 +2168,7 @@ export function GeneralSettingsPanel() {
                   }
                 }}
               >
-                <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Project order">
+                <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Game order">
                   <SelectValue>
                     {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
                   </SelectValue>
@@ -2221,7 +2187,7 @@ export function GeneralSettingsPanel() {
           <SettingsRow
             serverScoped
             {...searchableSetting("auto-resume-limited-threads")}
-            description="Resume usage-limit stops at the reported reset time. Each thread can cancel its scheduled continuation."
+            description="Resume usage-limit stops at the reported reset time. Each Log can cancel its scheduled continuation."
             settingKeys={["autoResumeLimitedThreads"]}
             control={
               <ScopedSwitch
@@ -2230,7 +2196,7 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
                 }
-                aria-label="Auto-resume limited threads"
+                aria-label="Auto-resume limited Logs"
               />
             }
           />
@@ -2246,14 +2212,14 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ snoozeLimitedThreads: Boolean(checked) })
                 }
-                aria-label="Snooze limited threads"
+                aria-label="Snooze limited Logs"
               />
             }
           />
 
           <SettingsRow
             {...searchableSetting("working-shelf")}
-            description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
+            description="Fold working and monitoring Logs into a Working section. They return to the top of the inbox when they need you."
             resetAction={
               settings.sidebarWorkingShelfEnabled !==
               DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
@@ -2285,7 +2251,7 @@ export function GeneralSettingsPanel() {
                 serverScoped
                 settingKeys={["sidebarAutoSettleAfterDays"]}
                 {...searchableSetting("auto-settle-inactive-threads")}
-                description="Sidebar threads with no activity for this long settle automatically."
+                description="Sidebar Logs with no activity for this long settle automatically."
                 resetAction={
                   settings.sidebarAutoSettleAfterDays !==
                   DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ? (
@@ -2309,7 +2275,7 @@ export function GeneralSettingsPanel() {
                         sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                       })
                     }
-                    aria-label="Auto-settle inactive threads"
+                    aria-label="Auto-settle inactive Logs"
                   />
                 }
               />
@@ -2318,7 +2284,7 @@ export function GeneralSettingsPanel() {
                   serverScoped
                   settingKeys={["sidebarAutoSettleAfterDays"]}
                   title={searchableSetting("days-before-auto-settle").title}
-                  description="Any new activity un-settles a thread automatically."
+                  description="Any new activity un-settles a Log automatically."
                   control={
                     <AutoSettleDaysInput
                       value={settings.sidebarAutoSettleAfterDays}
@@ -2564,7 +2530,7 @@ export function GeneralSettingsPanel() {
           />
           <SettingsRow
             {...searchableSetting("composer-collapse")}
-            description="Rest the composer of an existing thread into a single line when you scroll the conversation. Focus the composer or start typing to expand it again."
+            description="Rest the composer of an existing Log into a single line when you scroll the conversation. Focus the composer or start typing to expand it again."
             resetAction={
               settings.composerCollapseOnScroll !==
               DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll ? (
@@ -2625,7 +2591,7 @@ export function GeneralSettingsPanel() {
             {...searchableSetting("continue-threads-after-server-update")}
             serverScoped
             settingKeys={["continueThreadsAfterServerUpdate"]}
-            description="Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments."
+            description="Automatically resume interrupted Logs after an update, crash, or machine restart on the selected environments."
             status={
               !supportsRestartContinuation
                 ? "All selected connected environments must support restart continuation."
@@ -2654,7 +2620,7 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
                 }
-                aria-label="Continue threads after restarts"
+                aria-label="Continue Logs after restarts"
               />
             }
           />
@@ -2752,7 +2718,7 @@ export function GeneralSettingsPanel() {
           />
         </SettingsSection>
 
-        <SettingsSection id="projects-and-threads" title="Projects & threads">
+        <SettingsSection id="projects-and-threads" title="Side copies & Logs">
           <SettingsRow
             serverScoped
             settingKeys={["newWorktreesStartFromOrigin"]}
@@ -2820,7 +2786,7 @@ export function GeneralSettingsPanel() {
         <SettingsSection id="confirmations" title="Confirmations">
           <SettingsRow
             {...searchableSetting("unpin-confirmation")}
-            description="Ask before unpinning a thread from the pinned section."
+            description="Ask before unpinning a Log from the pinned section."
             resetAction={
               settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin ? (
                 <SettingResetButton
@@ -2846,7 +2812,7 @@ export function GeneralSettingsPanel() {
 
           <SettingsRow
             {...searchableSetting("archive-confirmation")}
-            description="Require a second click on the inline archive action before a thread is archived."
+            description="Require a second click on the inline archive action before a Log is archived."
             resetAction={
               settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
                 <SettingResetButton
@@ -2872,7 +2838,7 @@ export function GeneralSettingsPanel() {
 
           <SettingsRow
             {...searchableSetting("delete-confirmation")}
-            description="Ask before deleting a thread and its chat history."
+            description="Ask before deleting a Log and its history."
             resetAction={
               settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
                 <SettingResetButton
@@ -2944,7 +2910,7 @@ export function GeneralSettingsPanel() {
             serverScoped
             settingKeys={["textGenerationModelSelection"]}
             {...searchableSetting("text-generation-model")}
-            description="Used for thread titles and other generated text on connected devices with this provider. Source control can override it."
+            description="Used for Log titles and other generated text on connected devices with this provider. Source control can override it."
             resetAction={
               hasServerTargets && isTextGenerationModelDirty ? (
                 <SettingResetButton

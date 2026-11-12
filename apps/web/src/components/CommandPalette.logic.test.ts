@@ -50,7 +50,7 @@ describe("linked pull request thread navigation", () => {
       activeGroups: [],
       query,
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       settingsSearchItems: [],
       threadSearchItems: items,
     });
@@ -103,7 +103,7 @@ describe("buildCommandPaletteProjectMetadata", () => {
       activeGroups: [],
       query: "build box",
       isInSubmenu: false,
-      projectSearchItems: [
+      gameSearchItems: [
         {
           kind: "action",
           value: "project:kurambit",
@@ -429,7 +429,7 @@ describe("buildThreadActionItems", () => {
       activeGroups: [],
       query: "project",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       threadSearchItems: threadItems,
     });
 
@@ -478,7 +478,7 @@ describe("buildThreadActionItems", () => {
       activeGroups: [],
       query: "convex",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       threadSearchItems: items,
     });
 
@@ -510,7 +510,7 @@ describe("buildThreadActionItems", () => {
       activeGroups: [group],
       query: "project",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       threadSearchItems: [],
     });
 
@@ -542,7 +542,7 @@ describe("buildThreadActionItems", () => {
       activeGroups: [],
       query: "pairing remote",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       settingsSearchItems,
       threadSearchItems: [],
     });
@@ -578,7 +578,7 @@ describe("buildThreadActionItems", () => {
         activeGroups: [actions],
         query,
         isInSubmenu: false,
-        projectSearchItems: [],
+        gameSearchItems: [],
         threadSearchItems: [],
       })[0]?.items.map((item) => item.value);
 
@@ -591,7 +591,7 @@ describe("buildThreadActionItems", () => {
       activeGroups: [],
       query: "thè\u{1ab0}mes",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       settingsSearchItems: [
         {
           kind: "action",
@@ -620,7 +620,7 @@ describe("buildThreadActionItems", () => {
         activeGroups: [],
         query: "GIT",
         isInSubmenu: false,
-        projectSearchItems: [],
+        gameSearchItems: [],
         threadSearchItems: [],
         settingsSearchItems: [
           {
@@ -687,7 +687,7 @@ describe("buildThreadActionItems", () => {
       activeGroups: [],
       query: "  THREAD-ALPHA-1234  ",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       settingsSearchItems: [],
       threadSearchItems: items,
     });
@@ -846,7 +846,7 @@ it.each([
     activeGroups: [],
     query,
     isInSubmenu: false,
-    projectSearchItems: [],
+    gameSearchItems: [],
     threadSearchItems: items,
   });
   expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
@@ -870,7 +870,7 @@ describe("filterCommandPaletteGroups", () => {
       activeGroups: [],
       query: "model",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       settingsSearchItems: [
         item("setting:keybinding-modelPicker.toggle", "Model Picker: Toggle", true),
         item("setting:default-model", "Default model"),
@@ -943,11 +943,11 @@ describe("root command groups", () => {
     recentThreadItems: [action("recent-chat")],
   });
 
-  it("puts the game first and coding commands last", () => {
+  it("leads with recent games, then the game, and puts coding commands last", () => {
     expect(groups.map((group) => group.value)).toEqual([
+      "recent-threads",
       "game",
       "actions",
-      "recent-threads",
       "developer",
     ]);
   });
@@ -957,7 +957,7 @@ describe("root command groups", () => {
       activeGroups: groups,
       query: ">",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       threadSearchItems: [],
     });
     expect(filtered.map((group) => group.value)).toEqual(["game", "actions", "developer"]);
@@ -965,7 +965,7 @@ describe("root command groups", () => {
       activeGroups: groups,
       query: ">file",
       isInSubmenu: false,
-      projectSearchItems: [],
+      gameSearchItems: [],
       threadSearchItems: [],
     });
     expect(searched.flatMap((group) => group.items.map((item) => item.value))).toEqual([

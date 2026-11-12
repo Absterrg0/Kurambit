@@ -183,7 +183,7 @@ import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
-import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
+import { getLatestThreadForProject } from "../lib/threadSort";
 import {
   cn,
   getLocalFileManagerName,
@@ -199,7 +199,6 @@ import {
   ADDON_ICON_CLASS,
   browseInputEndPaddingClass,
   buildBrowseGroups,
-  buildCommandPaletteProjectMetadata,
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
@@ -217,7 +216,7 @@ import {
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
-  RECENT_THREAD_LIMIT,
+  RECENT_GAME_LIMIT,
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
@@ -240,7 +239,12 @@ import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
-import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
+import {
+  isAdvancedSetting,
+  searchSettings,
+  SETTINGS_SECTION_LABELS,
+  settingsSearchLocation,
+} from "./settings/settingsSearch";
 import {
   COMMAND_PALETTE_META_ICON_CLASS,
   CommandPaletteMetaDot,
@@ -1060,76 +1064,6 @@ function OpenCommandPaletteDialog(props: {
     [browseNavigation],
   );
 
-  const openProjectFromSearch = async (project: (typeof projects)[number]) => {
-    const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-    const groupedProjectKeys = group
-      ? new Set(
-          group.memberProjectRefs.map(
-            (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-          ),
-        )
-      : null;
-    const latestThread = groupedProjectKeys
-      ? (sortThreads(
-          threads.filter(
-            (thread) =>
-              thread.archivedAt === null &&
-              groupedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-          ),
-          clientSettings.sidebarThreadSortOrder,
-        )[0] ?? null)
-      : getLatestThreadForProject(
-          threads.filter((thread) => thread.environmentId === project.environmentId),
-          project.id,
-          clientSettings.sidebarThreadSortOrder,
-        );
-    if (latestThread) {
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(latestThread.environmentId, latestThread.id)),
-      });
-      return;
-    }
-
-    await handleNewThread(scopeProjectRef(project.environmentId, project.id));
-  };
-
-  const projectSearchItems = buildProjectActionItems({
-    projects: pickerProjects,
-    valuePrefix: "project",
-    searchTerms: (project) => {
-      const members = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`)
-        ?.memberProjects ?? [project];
-      return buildCommandPaletteProjectMetadata({
-        projects: members,
-        locationByEnvironmentId: projectEnvironmentLocationById,
-      }).searchTerms;
-    },
-    renderDescription: (project) => {
-      const members = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`)
-        ?.memberProjects ?? [project];
-      const metadata = buildCommandPaletteProjectMetadata({
-        projects: members,
-        locationByEnvironmentId: projectEnvironmentLocationById,
-      });
-      const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
-        kind: "remote" as const,
-        label: "Remote",
-        machine: "server" as const,
-      };
-      return (
-        <ProjectSearchDescription
-          environmentLabels={metadata.environmentLabels}
-          grouped={members.length > 1}
-          location={location}
-          workspaceRoot={project.workspaceRoot}
-        />
-      );
-    },
-    icon: projectFaviconIcon,
-    runProject: openProjectFromSearch,
-  });
-
   const projectThreadItems = (() => {
     const isScratch = (project: CommandPaletteProject) =>
       isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
@@ -1264,25 +1198,22 @@ function OpenCommandPaletteDialog(props: {
       });
     },
   });
-  // Recent lists games, not threads: a game's chats fold into one row that opens its
-  // main chat and reads like the sidebar's (still, name, latest status). Threads of
-  // projects that are not games keep their thread rows.
-  const recentThreadItems: CommandPaletteActionItem[] = [];
+  // The palette's games are the sidebar's: one row per game, latest first, that opens its
+  // main Log and reads like the sidebar's (still, name, latest status). Projects that are
+  // not games, and their threads, stay out; the Developer view still reaches them.
+  const threadShellById = new Map(threads.map((thread) => [thread.id, thread] as const));
+  const gameRowItems: CommandPaletteActionItem[] = [];
   {
-    const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
+    const threadById = threadShellById;
     const liveThreadIds = new Set<string>(
       threads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
     );
     const seenGames = new Set<string>();
     for (const item of allThreadItems) {
-      if (recentThreadItems.length >= RECENT_THREAD_LIMIT) break;
       const thread = threadById.get(item.value.slice("thread:".length) as ThreadId);
       const gameKey = thread ? `${thread.environmentId}:${thread.projectId}` : null;
       const game = gameKey === null ? undefined : gameByProjectKey.get(gameKey);
-      if (thread === undefined || gameKey === null || game === undefined) {
-        recentThreadItems.push(item);
-        continue;
-      }
+      if (thread === undefined || gameKey === null || game === undefined) continue;
       if (seenGames.has(gameKey)) continue;
       seenGames.add(gameKey);
       const chats = partitionGameChats(
@@ -1293,7 +1224,7 @@ function OpenCommandPaletteDialog(props: {
       );
       const main = chats.main ?? thread;
       const chatsStatus = resolveGameSidebarStatus(chats);
-      recentThreadItems.push({
+      gameRowItems.push({
         kind: "action",
         value: `game:${gameKey}`,
         searchTerms: [game.name, "game"],
@@ -1310,6 +1241,22 @@ function OpenCommandPaletteDialog(props: {
       });
     }
   }
+
+  // An empty palette leads with where to go: the latest few games, not the one already open.
+  const openGameValue =
+    isGameThread && activeThread !== null
+      ? `game:${activeThread.environmentId}:${activeThread.projectId}`
+      : null;
+  const recentThreadItems = gameRowItems
+    .filter((item) => item.value !== openGameValue)
+    .slice(0, RECENT_GAME_LIMIT);
+  // Search finds the Logs of the sidebar's games only.
+  const gameThreadItems = allThreadItems.filter((item) => {
+    const thread = threadShellById.get(item.value.slice("thread:".length) as ThreadId);
+    return (
+      thread !== undefined && gameByProjectKey.has(`${thread.environmentId}:${thread.projectId}`)
+    );
+  });
 
   // Stable so the item builders that capture it during render never see the
   // highlight ref it writes.
@@ -2336,7 +2283,9 @@ function OpenCommandPaletteDialog(props: {
     projectGroups[0] ??
     null;
   if (contextualProjectGroup) {
-    developerItems.push({
+    // On a game this is the game's own settings page, a studio action; elsewhere it is a
+    // coding project's and waits under Developer.
+    (isGameThread ? actionItems : developerItems).push({
       kind: "action",
       value: "action:project-settings",
       searchTerms: [
@@ -2369,8 +2318,9 @@ function OpenCommandPaletteDialog(props: {
     actionItems,
     developerItems,
     recentThreadItems,
+    // ">" alone lists commands, so it keeps coding commands behind the one Developer row.
     developerEntry:
-      deferredQuery.trim().length === 0
+      deferredQuery.replace(/^>/, "").trim().length === 0
         ? {
             kind: "submenu",
             value: "action:developer",
@@ -2399,8 +2349,11 @@ function OpenCommandPaletteDialog(props: {
       value: `setting:${item.id}`,
       searchTerms: [item.title, SETTINGS_SECTION_LABELS[item.to], ...(item.searchTerms ?? [])],
       title: item.title,
-      description: `Settings · ${SETTINGS_SECTION_LABELS[item.to]}`,
-      ...(item.secondary ? { secondary: true } : {}),
+      description:
+        settingsSearchLocation(item) === item.title
+          ? "Settings"
+          : `Settings · ${settingsSearchLocation(item)}`,
+      ...(item.secondary || isAdvancedSetting(item) ? { secondary: true } : {}),
       icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         await navigate({
@@ -2429,7 +2382,7 @@ function OpenCommandPaletteDialog(props: {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
-    projectSearchItems: projectSearchItems,
+    gameSearchItems: gameRowItems,
     settingsSearchItems,
     threadSearchItems:
       linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query
@@ -2444,7 +2397,7 @@ function OpenCommandPaletteDialog(props: {
               });
             },
           })
-        : allThreadItems,
+        : gameThreadItems,
   });
 
   const handleAddProjectForEnvironment = async (input: {
@@ -3402,41 +3355,9 @@ function OpenCommandPaletteDialog(props: {
                     emptyStateMessage: "Press Enter to create this folder and add it as a project.",
                   }
                 : threadSearch.isPending
-                  ? { emptyStateMessage: "Searching thread messages…" }
+                  ? { emptyStateMessage: "Searching Logs…" }
                   : {})}
       />
     </CommandPaletteContent>
   );
-}
-
-function ProjectSearchDescription(props: {
-  readonly environmentLabels: ReadonlyArray<string>;
-  readonly grouped: boolean;
-  readonly location: {
-    readonly kind: "local" | "remote";
-    readonly label: string;
-    readonly machine: EnvironmentMachineKind;
-  };
-  readonly workspaceRoot: string;
-}) {
-  if (!props.grouped) {
-    return (
-      <span className="flex min-w-0 items-center gap-1">
-        <span className="inline-flex min-w-0 items-center gap-1">
-          {props.location.kind === "remote" ? (
-            <EnvironmentMachineIcon
-              aria-hidden
-              kind={props.location.machine}
-              className={COMMAND_PALETTE_META_ICON_CLASS}
-            />
-          ) : null}
-          <span className="truncate">{props.location.label}</span>
-        </span>
-        <CommandPaletteMetaDot />
-        <span className="truncate">{props.workspaceRoot}</span>
-      </span>
-    );
-  }
-
-  return <span className="truncate">{props.environmentLabels.join(" · ")}</span>;
 }
