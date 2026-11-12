@@ -212,7 +212,9 @@ export function GameNowPicture({
           gameName={gameName}
           build={fallback}
           mark="name"
-          className="absolute inset-0 opacity-55 saturate-50"
+          // At full strength: a veiled picture reads as disabled. Its chip and caption say whose
+          // picture it is.
+          className="absolute inset-0"
         />
       ) : (
         <GameTitleMark gameName={gameName} mark="name" />

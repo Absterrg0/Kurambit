@@ -102,14 +102,14 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                 </Text>
                 <Text
                   variant="meta"
-                  tone={row.a === null ? "dim" : "default"}
+                  tone={row.a === null ? "muted" : "default"}
                   render={<td className="py-2 pr-3" />}
                 >
                   {row.a ?? "Not measured"}
                 </Text>
                 <Text
                   variant="meta"
-                  tone={row.b === null ? "dim" : "default"}
+                  tone={row.b === null ? "muted" : "default"}
                   render={<td className="py-2 pr-3" />}
                 >
                   {row.b ?? "Not measured"}
@@ -158,7 +158,7 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                     <Text variant="meta" tone="muted">
                       {group.names.join(", ")}
                     </Text>
-                    <Text variant="caption" tone="dim">
+                    <Text variant="caption" tone="muted">
                       Not measured on either build: {group.why}
                     </Text>
                   </span>

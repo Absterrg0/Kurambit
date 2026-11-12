@@ -64,7 +64,7 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collaps
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
-import { Kbd } from "../ui/kbd";
+import { KbdShortcut } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Skeleton } from "../ui/skeleton";
@@ -312,7 +312,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         {GAME_LEAD_FACTS.map((id) => (
           <li key={id} className="flex items-center gap-2">
             <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
-            <Text variant="meta" tone="dim">
+            <Text variant="meta" tone="muted">
               {gameFactName(id)}
             </Text>
           </li>
@@ -797,7 +797,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
                   ? morePending > 0
                     ? `${morePending} to measure`
                     : "None measured"
-                  : `${moreMeasured.length} of ${view.more.length} measured`}
+                  : `${moreMeasured.length} of ${view.more.length} have readings`}
               </Text>
             </CollapsibleTrigger>
             <CollapsiblePanel>
@@ -1699,7 +1699,7 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         </button>
       </Rows>
       {style === null ? (
-        <Text variant="caption" tone="dim" render={<p />}>
+        <Text variant="caption" tone="muted" render={<p />}>
           The agent writes {GAME_STYLE_FILE} when it picks a look.
         </Text>
       ) : null}
@@ -1746,7 +1746,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
       title="On screen"
       aside={
         things.length === 0 ? undefined : (
-          <Text variant="caption" tone="dim">
+          <Text variant="caption" tone="muted">
             {things.length === 1 ? "1 thing" : `${things.length} things`}
           </Text>
         )
@@ -1773,7 +1773,8 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
                 "Play, then freeze the game to point at something."
               ) : (
                 <>
-                  Play, then press <Kbd>{freezeKey}</Kbd> to freeze and point at something.
+                  Play, then press <KbdShortcut>{freezeKey}</KbdShortcut> to freeze and point at
+                  something.
                 </>
               )}
             </EmptyDescription>
@@ -1785,7 +1786,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         if (rows.length === 0) return null;
         return (
           <div key={group.kind} role="group" aria-label={group.label} className="flex flex-col">
-            <Text variant="caption" tone="dim" render={<h4 className="px-2 pt-1.5 pb-1" />}>
+            <Text variant="caption" tone="muted" render={<h4 className="px-2 pt-1.5 pb-1" />}>
               {group.label} {rows.length}
             </Text>
             {rows.map((thing) => {
@@ -1817,7 +1818,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
                   <Text variant="meta" tone="inherit" truncate render={<span className="flex-1" />}>
                     {thing.name}
                   </Text>
-                  <Text variant="caption" tone="dim">
+                  <Text variant="caption" tone="muted">
                     {thing.values !== undefined && thing.values.length > 0
                       ? `${thing.values.length} ${thing.values.length === 1 ? "value" : "values"}`
                       : hasBody
@@ -1903,7 +1904,7 @@ function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: Ga
       <Section
         title="Look"
         aside={
-          <Text variant="caption" tone="dim">
+          <Text variant="caption" tone="muted">
             Generated
           </Text>
         }
@@ -1921,7 +1922,7 @@ function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: Ga
     <Section
       title="Look"
       aside={
-        <Text variant="caption" tone="dim">
+        <Text variant="caption" tone="muted">
           {asset.path.includes("/library/") ? "Library pack" : "Game file"}
         </Text>
       }
@@ -1997,7 +1998,7 @@ function ValuesSection({ threadRef, thing }: { threadRef: ScopedThreadRef; thing
       title="Values"
       aside={
         tunable ? (
-          <Text variant="caption" tone="dim">
+          <Text variant="caption" tone="muted">
             Live in the running game
           </Text>
         ) : undefined

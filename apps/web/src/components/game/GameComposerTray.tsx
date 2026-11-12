@@ -30,8 +30,8 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     }),
   ).data;
   const copy = useAtomValue(stagePlayTarget(threadRef));
-  // While a turn runs the next message does not change the game yet, and Keep going waits:
-  // the tray says neither, rather than something untrue for the length of the turn.
+  // While a turn runs a message queues behind it and Keep going waits; the line says so, so it
+  // is there, and true, in every state.
   const working = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
   const keepGoing = useKeepGoing(threadRef);
   const keepGoingView = keepGoingControlView({
@@ -47,25 +47,17 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
   // What the next message does, plainly: the top bar already says what the game changed since.
   // The agent always changes the game folder, so a copy on the Stage stays as it is, and that
   // is the one qualification worth a second line.
-  const sentence =
-    copy !== null
+  const sentence = working
+    ? "Your next message waits for this turn, then changes the game."
+    : copy !== null
       ? "Your next message changes the current game, not the build you're playing."
       : "Your next message changes the current game.";
   const canKeepGoing =
     GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null && !working;
   return (
     <div className="flex min-h-9 items-center gap-2 pt-1.5" data-game-composer-tray="">
-      {working ? (
-        <span className="flex-1" />
-      ) : (
-        <>
-          <CornerDownRightIcon
-            className="size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <TraySentence>{sentence}</TraySentence>
-        </>
-      )}
+      <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <TraySentence>{sentence}</TraySentence>
       {canKeepGoing ? (
         <Menu>
           <Tooltip>

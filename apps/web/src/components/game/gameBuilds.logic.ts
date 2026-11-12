@@ -240,7 +240,7 @@ export const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher", "mot
 
 /** Rows Compare names by what they measure, since their readings are numbers. */
 const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {
-  colour: "Largest single colour",
+  colour: "Largest colour",
   motion: "Picture change (motion)",
 };
 
@@ -335,7 +335,7 @@ export const compareRows = (
     if (RUN_FACTS.has(id) && check.value !== null)
       return `${runEvent(check.sentence)} ${check.value}`;
     // Colour and motion are numbers, named by the row: just the number.
-    if (id === "colour") return check.value?.replace(/^largest /, "") ?? fallback;
+    if (id === "colour") return check.value?.replace(/^largest colour /, "") ?? fallback;
     if (id === "motion") return fallback.replace(/^Motion |^Almost no motion \(|\)$/g, "");
     const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
     if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;

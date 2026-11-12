@@ -423,7 +423,7 @@ export function GameFrame({
         // A game page that sets no colour scheme is light: the frame says so too, so its canvas
         // stays transparent over the black instead of painting white in the dark theme.
         // Its keyboard focus is the app's ring, drawn inside: the frame's box clips anything outside.
-        className="size-full border-0 bg-black [color-scheme:light] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid"
+        className="size-full border-0 bg-black [color-scheme:light] focus-visible:outline-3 focus-visible:-outline-offset-3 focus-visible:outline-ring focus-visible:outline-solid"
         onPointerEnter={() => {
           pointerOver.current = true;
         }}
@@ -452,7 +452,7 @@ export function GameFrame({
       {keyboardFocused ? (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-30 ring-2 ring-ring ring-inset"
+          className="pointer-events-none absolute inset-0 z-30 ring-3 ring-ring ring-inset"
         />
       ) : null}
       {/* One quiet line in a corner that lets every click through. The frame belongs to the

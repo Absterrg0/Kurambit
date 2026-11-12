@@ -562,9 +562,9 @@ function BuildCard({
                   ? formatBuildTime(build.at)
                   : caption}
               </span>
-              <CheckDelta build={build} previous={previous} />
             </>
           }
+          aside={<CheckDelta build={build} previous={previous} />}
         />
       </TooltipTrigger>
       {/* Under the card, so it never covers the strip's own row above: the whole caption, its
@@ -592,18 +592,38 @@ function BuildCard({
 /** A card's two caption lines, at the size a person reads a build by. */
 function CardCaption({
   title,
+  aside = null,
   meta,
   strong,
 }: {
   title: ReactNode;
+  /** Beside the name, so the second line is the request's whole width. */
+  aside?: ReactNode;
   meta: ReactNode;
   strong: boolean;
 }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <Text variant="meta" tone={strong ? "strong" : "default"} truncate render={<span />}>
-        {title}
-      </Text>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <Text
+          variant="meta"
+          tone={strong ? "strong" : "default"}
+          truncate
+          render={<span className="min-w-0" />}
+        >
+          {title}
+        </Text>
+        {aside === null ? null : (
+          <Text
+            variant="meta"
+            tone="muted"
+            numeric
+            render={<span className="ms-auto flex shrink-0" />}
+          >
+            {aside}
+          </Text>
+        )}
+      </span>
       <Text
         variant="meta"
         tone="muted"

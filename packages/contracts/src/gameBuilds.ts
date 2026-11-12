@@ -1017,11 +1017,12 @@ const checkWords = (
           : { sentence: "Keeps moving", value: `longest still ${seconds(live.longestFreeze)}` };
     }
     case "colour": {
+      // One noun for the reading in either verdict, the one Compare names its row by.
       if (facts.liveness.status !== "measured") return null;
       const share = Math.round(facts.liveness.value.dominantColour * 100);
       return facts.liveness.value.dominantColour > 0.6
-        ? { sentence: "One colour fills the screen", value: `${share}%` }
-        : { sentence: "Colour is varied", value: `largest ${share}%` };
+        ? { sentence: "One colour fills the screen", value: `largest colour ${share}%` }
+        : { sentence: "Colour is varied", value: `largest colour ${share}%` };
     }
     case "masher":
       return facts.masher.status === "measured"
