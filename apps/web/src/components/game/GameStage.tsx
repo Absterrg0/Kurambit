@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   CircleStopIcon,
@@ -54,6 +54,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { isElectron } from "../../env";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
@@ -389,6 +390,47 @@ function ThreadGameStage({
   );
   const renameGame = useRenameGame(threadRef.environmentId);
   const [renamingGame, setRenamingGame] = useState(false);
+  // The Stage takes the game's own shape: as tall as the column leaves after the
+  // top bar, any banner and the builds strip, as wide as that height allows, so
+  // the game fills its frame with no letterbox and the strip sits right under it.
+  // Whatever height is left over collects below the strip, above the composer.
+  const viewportWidth = data?.viewport.width ?? 16;
+  const viewportHeight = data?.viewport.height ?? 9;
+  const [stageFit, setStageFit] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const section = stageRef.current;
+    if (section === null) return;
+    const measure = () => {
+      let taken = 0;
+      for (const child of section.children)
+        if (!(child instanceof HTMLElement) || child.dataset.stageFit !== undefined) continue;
+        else if (child.dataset.stageSpacer === undefined) taken += child.offsetHeight;
+      // The surface's side insets (mx-3) and a breath above the strip.
+      const width = section.clientWidth - 24;
+      const height = Math.floor(
+        Math.max(
+          0,
+          Math.min(section.clientHeight - taken - 8, (width * viewportHeight) / viewportWidth),
+        ),
+      );
+      const next = { width: Math.floor((height * viewportWidth) / viewportHeight), height };
+      setStageFit((previous) =>
+        previous?.width === next.width && previous.height === next.height ? previous : next,
+      );
+    };
+    measure();
+    return observeResize(
+      [
+        section,
+        ...[...section.children].filter(
+          (child) => !(child instanceof HTMLElement && child.dataset.stageFit !== undefined),
+        ),
+      ],
+      measure,
+    );
+  }, [viewportWidth, viewportHeight]);
+  const stageFitStyle =
+    stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width + 24 };
   if (seenRevision === null && data) setSeenRevision(data.operation?.revision ?? 0);
   // Operation pushes reread the status (statusSignal in state/game), so nothing polls it.
   const operationState = data?.operation?.state ?? null;
@@ -1026,10 +1068,19 @@ function ThreadGameStage({
         <div
           aria-hidden={compare !== null}
           data-game-play-surface="build"
+          data-stage-fit=""
           className={
             compare === null
-              ? "group/stage relative mx-3 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage-well [container-type:size]"
+              ? cn(
+                  "group/stage relative mx-3 flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
+                  stageFit === null ? "flex-1" : "shrink-0",
+                )
               : "hidden"
+          }
+          style={
+            compare === null && stageFit !== null
+              ? { height: stageFit.height, width: stageFit.width }
+              : undefined
           }
         >
           <GameFrameBox viewport={data.viewport} gameName={gameName} playing>
@@ -1051,11 +1102,16 @@ function ThreadGameStage({
       ) : null}
       <div
         aria-hidden={playTarget !== null || compare !== null}
+        data-stage-fit=""
         className={
           playTarget === null && compare === null
-            ? "relative flex min-h-0 flex-1 flex-col px-3"
+            ? cn(
+                "relative flex min-h-0 flex-col self-center px-3",
+                stageFit === null ? "flex-1 self-stretch" : "shrink-0",
+              )
             : "hidden"
         }
+        style={playTarget === null && compare === null ? stageFitStyle : undefined}
       >
         {noWebGl ? <NoWebGlCard /> : null}
         <GamePlaySurface
@@ -1111,6 +1167,10 @@ function ThreadGameStage({
           if (useGameWorkspaceStore.getState().inspectorTab !== "build") showInspectorTab("build");
         }}
       />
+      {/* What the Stage's fitted height leaves over, kept under the strip, never as bands round the game. */}
+      {compare === null ? (
+        <div aria-hidden="true" data-stage-spacer="" className="min-h-0 flex-1" />
+      ) : null}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
           <DialogHeader>
