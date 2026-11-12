@@ -271,6 +271,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --color-sumi: #13110f;
   /* The game viewport, like an engine's stage: always black, in both themes. */
   --color-stage: #000000;
+  /* Around the game's frame: a dark neutral the same in both themes, so the
+     letterbox reads as the Stage's floor, not a black TV bezel. */
+  --color-stage-well: #151514;
   --color-stage-foreground: #ecebe7;
   --color-stage-muted: #a19e97;
   --color-stage-subtle: #6e655a;

@@ -130,7 +130,7 @@ export function GamePlaySurface({
   return (
     <div
       data-game-play-surface="true"
-      className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
+      className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage-well [container-type:size]"
     >
       <GameFrameBox viewport={viewport} gameName={gameName} playing={playing}>
         {playing ? (

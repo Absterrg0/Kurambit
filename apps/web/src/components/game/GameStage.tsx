@@ -1062,7 +1062,7 @@ function ThreadGameStage({
           data-game-play-surface="build"
           className={
             compare === null
-              ? "group/stage relative mx-3 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage [container-type:size]"
+              ? "group/stage relative mx-3 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage-well [container-type:size]"
               : "hidden"
           }
         >
