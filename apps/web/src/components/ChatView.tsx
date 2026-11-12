@@ -3159,7 +3159,8 @@ export default function ChatView(props: ChatViewProps) {
     activeLatestRun?.runId ?? null,
   );
   const gameStageMakingFirst = useGameMakingFirstBuild(
-    isGameThread && isServerThread && isWorking ? activeThreadRef : null,
+    isGameThread && isServerThread ? activeThreadRef : null,
+    isWorking,
   );
   const gameNextBanner = useGameNextBanner(
     keepGoingBanner.hidesNext || latestTurnUndone ? null : gameNextReply,

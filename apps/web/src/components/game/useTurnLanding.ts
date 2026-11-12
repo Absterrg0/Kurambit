@@ -14,7 +14,7 @@ const LANDING_CAP_MS = 30_000;
  * says there is none. The turn's checkpoint settles it: one with no changed files makes no
  * build. Capped, so a save that never reports cannot hold the screen for ever.
  */
-export function useTurnLanding(threadRef: ScopedThreadRef, turnActive: boolean): boolean {
+export function useTurnLanding(threadRef: ScopedThreadRef | null, turnActive: boolean): boolean {
   const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
   const built =
     useAtomValue(

@@ -34,7 +34,12 @@ export type GameStagePhase =
   | { kind: "parked"; message: string }
   | { kind: "tools-missing" }
   /** The agent's turn is making the game's first build: nothing to play yet, nothing to press. */
-  | { kind: "first-build"; startedAt: number | null }
+  | {
+      kind: "first-build";
+      startedAt: number | null;
+      /** The turn has ended and build 1 is being saved: it plays in a moment. */
+      saving?: boolean;
+    }
   | { kind: "building"; message: string; startedAt: number | null }
   /** `open`: the live folder could not be served; `build`: an export failed. */
   | { kind: "failed"; message: string; what: "build" | "open" }

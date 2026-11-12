@@ -1044,6 +1044,7 @@ function ThreadGameStage({
     phase.kind === "playing"
       ? {
           kind: "first-build",
+          saving: !turnRunning,
           startedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
         }
       : phase;
