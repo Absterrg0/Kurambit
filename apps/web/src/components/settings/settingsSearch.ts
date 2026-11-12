@@ -876,9 +876,9 @@ export const SETTINGS_SEARCH_ITEMS = [
 
   {
     id: "archive",
-    title: "Archived chats",
+    title: "Archived Logs",
     to: "/settings/archived",
-    searchTerms: ["restore reopen unarchive threads history games"],
+    searchTerms: ["archived chats restore reopen unarchive threads history games"],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
