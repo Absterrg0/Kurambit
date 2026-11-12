@@ -58,6 +58,17 @@ const readStudioMessage = (data: unknown): StudioMessage | null => {
   return { type: "studio-error", message: where === "" ? message : `${message} (${where})` };
 };
 
+/**
+ * The app's modal surfaces. A person cannot click into the game past one (its backdrop takes
+ * the click), so a game that takes the keyboard from one did it from its own script, as a title
+ * screen focusing its first button does when it shows.
+ */
+const MODAL_SURFACES =
+  '[data-slot="menu-popup"],[data-slot="dialog-popup"],[data-slot="alert-dialog-popup"],[data-slot="sheet-popup"],[data-slot="command-dialog-popup"],[data-slot="select-popup"]';
+
+/** How long a game may take to load before the Stage says it is slow, and offers a reload. */
+const SLOW_START_MS = 15_000;
+
 /** The game's answer, so the stage knows whether hidden playback really stopped. */
 interface VisibilityAck {
   readonly type: "studio-visibility-ack";
@@ -87,8 +98,11 @@ export function GamePlaySurface({
   bridge,
   overlay,
   note = null,
+  poster = null,
 }: {
   phase: GameStagePhase;
+  /** The game's last picture, shown faintly while its page loads. */
+  poster?: ReactNode;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
   operation: { readonly name: string; readonly own: boolean } | null;
   viewport: GameViewport;
@@ -138,6 +152,8 @@ export function GamePlaySurface({
             key={frameKey}
             url={previewUrl}
             title={`${gameName} preview`}
+            gameName={gameName}
+            poster={poster}
             hidden={hidden}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest}
@@ -229,9 +245,15 @@ export function GameFrame({
   onFrame,
   frozen = false,
   freezeHint = false,
+  gameName,
+  poster = null,
 }: {
   url: string;
   title: string;
+  /** Said while the game's page loads, so the wait names what it waits for. */
+  gameName: string;
+  /** The game's last picture, behind that wait: what is coming, not a black box. */
+  poster?: ReactNode;
   /** The game should pause and mute itself: another tab is open, or another frame has focus. */
   hidden: boolean;
   /** Hears the bridge's error and ready messages from this frame only. */
@@ -252,6 +274,12 @@ export function GameFrame({
   const [frameFocused, setFrameFocused] = useState(false);
   // Until the game's page loads the frame is blank; it says the game is starting instead.
   const [loaded, setLoaded] = useState(false);
+  // A reload remounts the iframe in place, for a start that is taking too long.
+  const [attempt, setAttempt] = useState(0);
+  const reload = () => {
+    setLoaded(false);
+    setAttempt(attempt + 1);
+  };
   // Track the hide request the game never answered: without StudioProbe or when
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
@@ -311,6 +339,7 @@ export function GameFrame({
   return (
     <>
       <iframe
+        key={attempt}
         ref={setFrameRef}
         src={url}
         // Not title: Chromium shows an iframe's title as a tooltip over the
@@ -331,20 +360,18 @@ export function GameFrame({
           // a fresh document needs the current state restated.
           frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
         }}
-        onFocus={() => setFrameFocused(true)}
+        onFocus={(event) => {
+          const from = event.relatedTarget;
+          if (from instanceof HTMLElement && from.isConnected && from.closest(MODAL_SURFACES)) {
+            // Handed straight back, so Escape and the arrows keep working in the open menu.
+            from.focus({ preventScroll: true });
+            return;
+          }
+          setFrameFocused(true);
+        }}
         onBlur={() => setFrameFocused(false)}
       />
-      {loaded ? null : (
-        <Text
-          variant="meta"
-          tone="inherit"
-          render={
-            <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-stage text-stage-muted" />
-          }
-        >
-          Starting the game…
-        </Text>
-      )}
+      {loaded ? null : <StartingCard name={gameName} poster={poster} onReload={reload} />}
       {/* One quiet line in a corner that lets every click through. The frame belongs to the
           game, so the click hint shows only while the pointer is over it; a warning or a
           freeze always shows. */}
@@ -384,6 +411,52 @@ export function GameFrame({
         </Text>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The wait before the game's own page answers: the game's name over its last picture, dimmed,
+ * so the Stage says what is coming. A start that runs long says so and offers a reload; it never
+ * claims progress it cannot see, and nothing spins.
+ */
+function StartingCard({
+  name,
+  poster,
+  onReload,
+}: {
+  name: string;
+  poster: ReactNode;
+  onReload: () => void;
+}) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), SLOW_START_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div className="absolute inset-0 z-10 grid place-items-center overflow-hidden bg-stage">
+      {poster === null ? null : (
+        <div aria-hidden="true" className="absolute inset-0 opacity-25 blur-xs">
+          {poster}
+        </div>
+      )}
+      <div className="relative flex max-w-sm flex-col items-center gap-2 p-6 text-center">
+        <Text variant="title" tone="inherit" render={<p className="text-stage-foreground" />}>
+          {name}
+        </Text>
+        <Text variant="meta" tone="inherit" render={<p className="text-stage-muted" />}>
+          {slow
+            ? "The game is taking longer than usual to start. Its page has not answered yet."
+            : "Starting the game…"}
+        </Text>
+        {slow ? (
+          <Button size="sm" variant="outline" className="mt-2" onClick={onReload}>
+            <RefreshCwIcon aria-hidden="true" />
+            Reload the game
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

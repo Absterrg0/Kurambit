@@ -131,3 +131,48 @@ export function GamePicture({
     </div>
   );
 }
+
+/**
+ * Now's picture: the frame the Stage last showed, taken from the game itself. Before it has
+ * shown one (a title drawn in the page, not its canvas, gives none), the last build's picture,
+ * dimmed, since the game has changed since it; with no build either, the game's name.
+ */
+export function GameNowPicture({
+  still,
+  gameName,
+  fallback,
+  threadRef,
+  className,
+  children,
+}: {
+  still: string | null;
+  gameName: string;
+  fallback: Pick<GameBuild, "still"> | null;
+  threadRef: ScopedThreadRef | null;
+  className?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "relative block overflow-hidden bg-muted [container-type:inline-size]",
+        className,
+      )}
+    >
+      {still !== null ? (
+        <img src={still} alt="" className="absolute inset-0 size-full object-cover" />
+      ) : fallback !== null && threadRef !== null ? (
+        <GameBuildStill
+          threadRef={threadRef}
+          gameName={gameName}
+          build={fallback}
+          mark="name"
+          className="absolute inset-0 opacity-45 saturate-50"
+        />
+      ) : (
+        <GameTitleMark gameName={gameName} mark="name" />
+      )}
+      {children}
+    </span>
+  );
+}

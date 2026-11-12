@@ -74,6 +74,7 @@ import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
+import { GameBuildStill } from "./GameBuildStill";
 import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -83,6 +84,7 @@ import {
   toggleStageFreeze,
   useStageAwayFreeze,
   useStageBridge,
+  useStageStill,
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
@@ -118,6 +120,12 @@ const folderBuildName = (result: AsyncResult.AsyncResult<GameBuildsResult, unkno
   if (!AsyncResult.isSuccess(result)) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
   return build === undefined ? null : buildName(build);
+};
+
+/** The folder's build's picture, for the Stage to show faintly while the game loads. */
+const folderBuildStill = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result)) return null;
+  return result.value.builds.find((each) => each.id === result.value.current)?.still ?? null;
 };
 
 const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
@@ -403,6 +411,8 @@ function ThreadGameStage({
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
+  const posterStill = useEnvironmentQuerySelector(buildsAtom, folderBuildStill) ?? null;
+  const stageStill = useStageStill(threadKey);
   const stageRef = useRef<HTMLElement | null>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   // A compact switch unmounts nothing, but focus would die with the hidden
@@ -1173,6 +1183,7 @@ function ThreadGameStage({
                 key={`${playTarget.build}\0${playTarget.result.url}`}
                 url={playTarget.result.url}
                 title={`${gameName}, ${playTarget.label}`}
+                gameName={gameName}
                 hidden={hidden || compare !== null}
                 focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
               />
@@ -1233,6 +1244,19 @@ function ThreadGameStage({
           bridge={{ threadKey, enabled: engine.stageBridge }}
           overlay={<GameStageOverlay threadKey={threadKey} />}
           note={note}
+          poster={
+            stageStill !== null ? (
+              <img src={stageStill} alt="" className="size-full object-cover" />
+            ) : posterStill !== null ? (
+              <GameBuildStill
+                threadRef={threadRef}
+                gameName={gameName}
+                build={{ still: posterStill }}
+                mark="none"
+                className="size-full"
+              />
+            ) : null
+          }
         />
       </div>
       <GameBuildStrip

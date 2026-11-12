@@ -22,7 +22,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
-import { GameBuildStill, GameTitleMark } from "./GameBuildStill";
+import { GameBuildStill, GameNowPicture } from "./GameBuildStill";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
@@ -654,8 +654,14 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
 function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: string }) {
   return (
     <div className="flex w-40 shrink-0 flex-col gap-1.5">
-      <NowPicture still={still} gameName={gameName} fallback={null} threadRef={null} />
-      <CardCaption strong={false} title="Now" meta="No build yet" />
+      <GameNowPicture
+        still={still}
+        gameName={gameName}
+        fallback={null}
+        threadRef={null}
+        className="aspect-video w-full rounded-md"
+      />
+      <CardCaption strong={false} title="Now" meta="The game so far" />
     </div>
   );
 }
@@ -679,44 +685,6 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
         meta={slot.since === null ? "\u00a0" : <GameElapsed since={slot.since} />}
       />
     </div>
-  );
-}
-
-/**
- * Now's picture: the frame the Stage last showed, taken from the game itself. Before it has
- * shown one (a title drawn in the page, not its canvas, gives none), the last build's picture,
- * dimmed, since the game has changed since it; with no build either, the game's name.
- */
-function NowPicture({
-  still,
-  gameName,
-  fallback,
-  threadRef,
-  children,
-}: {
-  still: string | null;
-  gameName: string;
-  fallback: GameBuild | null;
-  threadRef: ScopedThreadRef | null;
-  children?: ReactNode;
-}) {
-  return (
-    <span className="relative block aspect-video w-full overflow-hidden rounded-md bg-muted [container-type:inline-size]">
-      {still !== null ? (
-        <img src={still} alt="" className="absolute inset-0 size-full object-cover" />
-      ) : fallback !== null && threadRef !== null ? (
-        <GameBuildStill
-          threadRef={threadRef}
-          gameName={gameName}
-          build={fallback}
-          mark="name"
-          className="absolute inset-0 opacity-45 saturate-50"
-        />
-      ) : (
-        <GameTitleMark gameName={gameName} mark="name" />
-      )}
-      {children}
-    </span>
   );
 }
 
@@ -767,11 +735,12 @@ function NowCard({
           />
         }
       >
-        <NowPicture
+        <GameNowPicture
           still={still}
           gameName={gameName}
           fallback={changed ? current : null}
           threadRef={threadRef}
+          className="aspect-video w-full rounded-md"
         >
           {/* Now is a state, not a build: one chip on the picture says which card it is. */}
           <Text
@@ -787,7 +756,7 @@ function NowCard({
             Now
           </Text>
           <CardRing on={active && !picking} />
-        </NowPicture>
+        </GameNowPicture>
         <CardCaption strong={active} title="Now" meta={meta} />
       </TooltipTrigger>
       <TooltipPopup side="top" className="max-w-xs">

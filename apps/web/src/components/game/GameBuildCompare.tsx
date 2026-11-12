@@ -150,7 +150,12 @@ function ComparePane({
       <div className="flex aspect-video items-center justify-center [container-type:size]">
         <GameFrameBox viewport={viewport} gameName={gameName} playing={url !== null}>
           {url !== null ? (
-            <GameFrame url={url} title={`${gameName}, ${label}`} hidden={!focused} />
+            <GameFrame
+              url={url}
+              title={`${gameName}, ${label}`}
+              gameName={gameName}
+              hidden={!focused}
+            />
           ) : (
             <div className="flex size-full flex-col items-center justify-center gap-2 p-3 text-center">
               {result?._tag === "window" ? (

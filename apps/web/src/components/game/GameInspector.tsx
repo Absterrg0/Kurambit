@@ -99,6 +99,7 @@ import {
   resetStageValues,
   selectStageThing,
   tuneStageValue,
+  useStageStill,
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { turnStripRestore } from "./gameTurnBuild.logic";
@@ -294,10 +295,12 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     ) : (
       <div className="p-4">
         <Empty variant="well">
+          {/* The top bar already says it is not measured: this says what comes next. */}
           <EmptyHeader>
-            <EmptyTitle>Not measured yet</EmptyTitle>
+            <EmptyTitle>Build 1 comes from your first change</EmptyTitle>
             <EmptyDescription>
-              The next change your agent makes becomes a build, with its checks here.
+              Tell your game what to change. Your agent's change becomes build 1, and a bot plays it
+              to measure its checks here.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -567,10 +570,6 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
       : fact.id === "performance" && facts.renderer
         ? `Played with ${facts.renderer}.`
         : null;
-  const moreUnmeasured = view.more.filter((more) => more.reading._tag === "not-measured").length;
-  const morePass = moreMeasured.filter(
-    (fact) => fact.reading._tag === "measured" && fact.reading.tone === "good",
-  ).length;
   return (
     <div className="flex flex-col gap-2">
       <Rows>
@@ -599,17 +598,14 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
               <Text variant="meta" tone="default" render={<span className="flex-1" />}>
                 Other measurements
               </Text>
-              {/* Counted like the Checks heading, of every fact in the group, so the two
-                  totals read the same way: "2 of 6 pass · 3 not measured". */}
-              <Text variant="meta" tone="muted" numeric truncate>
+              {/* How much of this group was measured, so its scope never reads as a second
+                  total of the checks above; what passed is in its rows. */}
+              <Text variant="meta" tone="muted" numeric>
                 {moreMeasured.length === 0
                   ? morePending > 0
                     ? `${morePending} to measure`
                     : "None measured"
-                  : [
-                      `${morePass} of ${view.more.length} pass`,
-                      ...(moreUnmeasured > 0 ? [`${moreUnmeasured} not measured`] : []),
-                    ].join(" · ")}
+                  : `${moreMeasured.length} of ${view.more.length} measured`}
               </Text>
             </CollapsibleTrigger>
             <CollapsiblePanel>
@@ -1185,15 +1181,36 @@ function BuildActions({
 
 const decodeStyle = Schema.decodeUnknownOption(Schema.fromJsonString(GameStyle));
 
-/** Why there is nothing to select, in this engine or this game's shell; null when selecting works. */
-function useSelectNotice(threadRef: ScopedThreadRef): string | null {
+/**
+ * Why there is nothing to select, said as what is true now: this engine or this game's shell
+ * cannot point at things, the game is not on the Stage, or it has not answered yet. Null when
+ * selecting works, and the list itself says whether it is empty.
+ */
+function useSelectNotice(
+  threadRef: ScopedThreadRef,
+): { readonly title: string; readonly body: string } | null {
   const engine = useIsGameThreadStatus(threadRef).data?.manifest.engine.name ?? null;
   const status = useThreadStageBridge(scopedThreadKey(threadRef), (state) => state.status, null);
   if (engine !== null && !GAME_ENGINES[engine].stageBridge)
-    return `Pointing at things in the running game is not in ${GAME_ENGINES[engine].name} yet.`;
+    return {
+      title: "Not in this engine yet",
+      body: `Pointing at things in the running game is not in ${GAME_ENGINES[engine].name} yet.`,
+    };
   if (status === "none")
-    return "Pointing at things needs the newer game shell, which games made from now on have. Freeze still pauses this one.";
-  if (status === null) return "Play the game on the Stage to see its things.";
+    return {
+      title: "This game's shell is older",
+      body: "Pointing at things needs the newer game shell, which games made from now on have. Freeze still pauses this one.",
+    };
+  if (status === null)
+    return {
+      title: "The game isn't on the Stage",
+      body: "Play it on the Stage and the characters, props and rules it names show here.",
+    };
+  if (status === "waiting")
+    return {
+      title: "Waiting for the game",
+      body: "The game is starting. Its named things show here once it answers.",
+    };
   return null;
 }
 
@@ -1211,9 +1228,12 @@ function ScenePanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : null}
       {notice !== null ? (
         <Section title="On screen">
-          <Text variant="meta" tone="muted" render={<p />}>
-            {notice}
-          </Text>
+          <Empty variant="well">
+            <EmptyHeader>
+              <EmptyTitle>{notice.title}</EmptyTitle>
+              <EmptyDescription>{notice.body}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         </Section>
       ) : (
         <ThingsSection threadRef={threadRef} />
@@ -1258,18 +1278,27 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
       input: { threadId: threadRef.threadId },
     }),
   ).data;
-  const lookStill = builds?.builds.find((build) => build.id === builds.current)?.still ?? null;
+  const buildStill = builds?.builds.find((build) => build.id === builds.current)?.still ?? null;
+  // A game with no build still has a look: the Stage's last frame of it, once it has shown one.
+  const stageStill = useStageStill(scopedThreadKey(threadRef));
+  const lookStill = buildStill ?? stageStill;
   const gameName = useIsGameThreadStatus(threadRef).data?.manifest.name ?? "";
   return (
     <Section title="Look">
-      {lookStill === null ? null : (
+      {buildStill !== null ? (
         <GameBuildStill
           threadRef={threadRef}
           gameName={gameName}
-          build={{ still: lookStill }}
+          build={{ still: buildStill }}
           className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset"
-        ></GameBuildStill>
-      )}
+        />
+      ) : stageStill !== null ? (
+        <img
+          src={stageStill}
+          alt=""
+          className="aspect-video w-full rounded-lg object-cover ring-1 ring-border ring-inset"
+        />
+      ) : null}
       {/* The look's colours under its picture, as a strip a person can read at a glance. */}
       {lookStill !== null && swatches.length > 0 ? (
         <div className="flex h-3 overflow-hidden rounded-sm ring-1 ring-border ring-inset">
@@ -1301,7 +1330,7 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
                   ))}
                 </span>
               ) : null}
-              <Text variant="caption" tone="muted" truncate>
+              <Text variant="meta" tone="muted" truncate>
                 {[
                   style.family === undefined || style.family === null
                     ? null
@@ -1413,11 +1442,13 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
       ) : null}
       {things.length === 0 ? (
         <Empty variant="well">
+          {/* The game answered and names nothing in this scene: a title or menu often has
+              nothing to point at, and play does. */}
           <EmptyHeader>
-            <EmptyTitle>Nothing named yet</EmptyTitle>
+            <EmptyTitle>Nothing named in this scene</EmptyTitle>
             <EmptyDescription>
-              Named characters, props and rules show here while the game plays. <Kbd>Tab</Kbd> on
-              the Stage freezes it so you can point at one.
+              A title or menu often names nothing. Start playing and the characters, props and rules
+              the game names show here; <Kbd>Tab</Kbd> on the Stage freezes it to point at one.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
