@@ -292,7 +292,6 @@ function ProviderSetupActions({
 
       <ProviderAuthenticationSection
         environmentId={environmentId}
-        environmentLabel={environmentLabel}
         instanceId={instanceId}
         provider={provider}
         readOnly={false}

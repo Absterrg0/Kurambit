@@ -112,7 +112,6 @@ function render(onOpenChange = actions.onOpenChange) {
       <AddProviderInstanceDialog
         open
         environmentId={remoteEnvironmentId}
-        environmentLabel="Remote device"
         onOpenChange={onOpenChange}
       />,
     ),
@@ -207,6 +206,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
     const mutation = deferred<{ readonly _tag: "Success"; readonly value: unknown }>();
     settingsHooks.mutate.mockReturnValueOnce(mutation.promise);
     await render();
+    await click("More agents…");
     await click("Use Kilo Code");
 
     expect(document.body.textContent).toContain("v4.2.0 · binary");
@@ -237,6 +237,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
 
   it("configures a manually entered registry agent from the first provider screen", async () => {
     await render();
+    await click("More agents…");
     await click("Enter registry agent");
     await type("#add-provider-acpRegistry-manual-agentId", "devin");
     await click("Next");
@@ -255,6 +256,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
 
   it("creates a local command in the selected environment without a sign-in step", async () => {
     await render();
+    await click("More agents…");
     await click("Use local command");
     await click("Next");
     expect(document.body.textContent).toContain("Executable is required.");
@@ -301,6 +303,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
   it("keeps the dialog open when the atomic upsert fails", async () => {
     settingsHooks.mutate.mockResolvedValueOnce({ _tag: "Failure", cause: new Error("Conflict") });
     await render();
+    await click("More agents…");
     await click("Use Kilo Code");
     await click("Continue to sign-in");
 

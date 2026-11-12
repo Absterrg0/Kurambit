@@ -29,13 +29,11 @@ const ProviderAuthTerminal = lazy(() => import("./ProviderAuthTerminal"));
 
 export function ProviderAuthenticationSection({
   environmentId,
-  environmentLabel,
   instanceId,
   provider,
   readOnly,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
   readonly instanceId: ProviderInstanceId;
   readonly provider: ServerProvider;
   readonly readOnly: boolean;
@@ -89,7 +87,7 @@ export function ProviderAuthenticationSection({
         ? "Discovering sign-in methods…"
         : needsExternalSetup
           ? "No in-app sign-in advertised. Follow the provider's docs to finish setup."
-          : `Sign in on ${environmentLabel}.`;
+          : "Sign in to use it.";
   const statusMessage = auth?.phase === "failed" ? auth.message : null;
   const disabled = readOnly || pending || query.error !== null || isDiscovering;
   const draftId = `${auth?.flowId ?? ""}:${interaction?.id ?? ""}`;
@@ -304,7 +302,7 @@ export function ProviderAuthenticationSection({
                 onClick={() => {
                   void ensureLocalApi()
                     .dialogs.confirm(
-                      `Sign out of ${provider.displayName ?? provider.driver} on ${environmentLabel}? This stops running threads that share this sign-in. Thread history is kept.`,
+                      `Sign out of ${provider.displayName ?? provider.driver}? This stops running chats that share this sign-in. Their history is kept.`,
                     )
                     .then((confirmed) => {
                       if (confirmed) void run(() => logout(target));

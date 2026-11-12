@@ -95,7 +95,6 @@ function validateInstanceId(id: string, existing: ReadonlySet<string>): string |
 interface AddProviderInstanceDialogProps {
   readonly open: boolean;
   readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
   readonly onOpenChange: (open: boolean) => void;
   readonly onCreated?: (instanceId: ProviderInstanceId) => void;
 }
@@ -103,7 +102,6 @@ interface AddProviderInstanceDialogProps {
 export function AddProviderInstanceDialog({
   open,
   environmentId,
-  environmentLabel,
   onOpenChange,
   onCreated,
 }: AddProviderInstanceDialogProps) {
@@ -122,6 +120,9 @@ export function AddProviderInstanceDialog({
     ReadonlyArray<ProviderInstanceEnvironmentVariable>
   >([]);
   const [isManualAcpConfiguration, setIsManualAcpConfiguration] = useState(false);
+  // The registry lists dozens of agents with long blurbs. The built-in providers come
+  // first; the registry opens on request.
+  const [showRegistry, setShowRegistry] = useState(false);
   const [isRegistryLoading, setIsRegistryLoading] = useState(false);
   const [isPreparingRegistryAgent, setIsPreparingRegistryAgent] = useState(false);
   const [configByDriver, setConfigByDriver] = useState<Record<string, Record<string, unknown>>>({});
@@ -362,7 +363,7 @@ export function AddProviderInstanceDialog({
       <WizardPopup size="wide">
         <WizardHeader
           title="Add provider"
-          description={<>Add an account or configure a provider on {environmentLabel}.</>}
+          description="Sign in to an agent or set one up for your games."
         >
           {isAcpRegistry ? (
             <AddProviderInstanceWizardSteps
@@ -389,7 +390,6 @@ export function AddProviderInstanceDialog({
         {createdInstanceId ? (
           <ProviderWizardAuthenticationStep
             environmentId={environmentId}
-            environmentLabel={environmentLabel}
             instanceId={createdInstanceId}
             onFinish={() => onOpenChange(false)}
           />
@@ -450,12 +450,24 @@ export function AddProviderInstanceDialog({
 
               {wizardStep === 0 ? (
                 <div className="space-y-4 pt-4">
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <div aria-hidden className="flex-1 border-t border-border/70" />
-                    <span>Or choose from ACP Registry</span>
-                    <div aria-hidden className="flex-1 border-t border-border/70" />
-                  </div>
-                  {isAcpRegistry && isManualAcpConfiguration ? (
+                  {!showRegistry && !isAcpRegistry ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setShowRegistry(true)}
+                    >
+                      More agents…
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-3 text-meta text-muted-foreground">
+                      <div aria-hidden className="flex-1 border-t border-border/70" />
+                      <span>More agents from the ACP registry</span>
+                      <div aria-hidden className="flex-1 border-t border-border/70" />
+                    </div>
+                  )}
+                  {!showRegistry && !isAcpRegistry ? null : isAcpRegistry &&
+                    isManualAcpConfiguration ? (
                     <div className="grid gap-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
@@ -464,7 +476,7 @@ export function AddProviderInstanceDialog({
                           </h3>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {isLocalAcp
-                              ? `Run an installed ACP executable on ${environmentLabel}.`
+                              ? "Run an ACP agent installed on this computer."
                               : "Enter an official registry ID and any local executable or auth override."}
                           </p>
                         </div>
@@ -646,20 +658,24 @@ export function AddProviderInstanceDialog({
             </WizardPanel>
 
             <WizardFooter>
-              <Button
-                variant={wizardStep === 0 ? "ghost-muted" : "outline"}
-                size="sm"
-                disabled={isSaving || isPreparingRegistryAgent}
-                onClick={() => {
-                  if (wizardStep === 0) {
-                    onOpenChange(false);
-                    return;
-                  }
-                  setWizardStep((step) => Math.max(0, step - 1));
-                }}
-              >
-                {wizardStep === 0 ? "Cancel" : "Back"}
-              </Button>
+              {/* One secondary and one primary: on Codex's first step, "Configure manually"
+                  is the secondary, and the ✕ above cancels. */}
+              {wizardStep === 0 && driver === "codex" ? null : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isSaving || isPreparingRegistryAgent}
+                  onClick={() => {
+                    if (wizardStep === 0) {
+                      onOpenChange(false);
+                      return;
+                    }
+                    setWizardStep((step) => Math.max(0, step - 1));
+                  }}
+                >
+                  {wizardStep === 0 ? "Cancel" : "Back"}
+                </Button>
+              )}
               {wizardStep === 0 && driver === "codex" ? (
                 <>
                   <Button variant="outline" size="sm" onClick={() => navigateToStep(1)}>
