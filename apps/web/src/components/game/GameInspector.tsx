@@ -6,13 +6,14 @@ import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
   CheckIcon,
   ChevronRightIcon,
-  CircleIcon,
+  DotIcon,
   ClockIcon,
   ColumnsIcon,
   FileIcon,
   FileSearchIcon,
   FileVideoIcon,
   ImageIcon,
+  InfoIcon,
   MinusIcon,
   MoreHorizontalIcon,
   PlayIcon,
@@ -55,7 +56,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Kbd } from "../ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -589,17 +590,27 @@ function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck>
         ...(folded.get(fact.reading.why) ?? []),
         "sentence" in fact ? fact.sentence : fact.label,
       ]);
+  // One 36px row like every check; why it was not measured waits behind its info button.
   return [...folded].map(([why, names]) => (
-    <div key={why} className="flex items-start gap-2.5 px-3 py-2">
-      <MinusIcon className="mt-0.5 size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <Text variant="meta" tone="muted">
-          {names.join(", ")} · not measured
-        </Text>
-        <Text variant="caption" tone="dim" render={<p className="break-words" />}>
-          {why.charAt(0).toUpperCase() + why.slice(1)}
-        </Text>
-      </div>
+    <div key={why} className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <MinusIcon className="size-4 text-dim-foreground" aria-hidden="true" />
+      </span>
+      <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
+        {names.join(", ")} · not measured
+      </Text>
+      <span className="flex w-6 shrink-0 items-center justify-end">
+        <Tooltip>
+          <TooltipTrigger
+            render={<Button size="icon-xs" variant="ghost" aria-label="Why not measured" />}
+          >
+            <InfoIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipPopup side="left" className="max-w-sm">
+            {why.charAt(0).toUpperCase() + why.slice(1)}
+          </TooltipPopup>
+        </Tooltip>
+      </span>
     </div>
   ));
 }
@@ -639,7 +650,8 @@ function CheckRow({
   detail: ReadonlyArray<string>;
 }) {
   const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
-  const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : CircleIcon;
+  // A reading that is neither good nor bad gets a small solid dot: a hollow ring reads as an unticked option.
+  const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : DotIcon;
   return (
     <div className="flex flex-col gap-1 px-3 py-1.5">
       <div className="flex min-h-6 items-center gap-2.5">
@@ -650,7 +662,7 @@ function CheckRow({
                 ? "size-4 text-success"
                 : tone === "bad"
                   ? "size-4 text-warning"
-                  : "size-2.5 text-dim-foreground",
+                  : "size-4 text-muted-foreground",
             )}
             aria-hidden="true"
           />
@@ -817,7 +829,8 @@ function Recordings({
   if (runs.size === 0) return null;
   return (
     <Section title="Recordings">
-      <ul role="list" className="grid grid-cols-2 gap-x-3 gap-y-4">
+      {/* Two stills a row, each no wider than a glance needs, at every Inspector width. */}
+      <ul role="list" className="grid max-w-120 grid-cols-2 gap-x-3 gap-y-4">
         {[...runs].map(([fact, run]) => (
           <li key={fact} className="flex min-w-0 flex-col gap-1.5">
             <button
@@ -847,16 +860,17 @@ function Recordings({
                 )}
               </GameBuildStill>
             </button>
-            <Text variant="caption" tone="default" truncate render={<span className="px-0.5" />}>
-              {fact}
-            </Text>
-            <span className="-ms-1.5 flex flex-wrap items-center">
+            <span className="flex min-w-0 items-center gap-1 ps-0.5">
+              <Text variant="caption" tone="default" truncate render={<span className="flex-1" />}>
+                {fact}
+              </Text>
               {run.video === null ? null : (
                 <SaveMediaButton
                   threadRef={threadRef}
                   source={run.video.path}
                   label={`${name} ${fact} ${run.video.label}`.toLowerCase()}
                   text="Video"
+                  icon={<FileVideoIcon aria-hidden="true" />}
                 />
               )}
               {run.frame === null ? null : (
@@ -865,6 +879,7 @@ function Recordings({
                   source={run.frame.path}
                   label={`${name} ${fact} ${run.frame.label}`.toLowerCase()}
                   text="Frame"
+                  icon={<ImageIcon aria-hidden="true" />}
                 />
               )}
             </span>
@@ -929,11 +944,14 @@ function BuildActions({
   const kind = action === null ? null : RESTORE[action.kind];
   const error = action === null ? null : restores.error(action.target);
   const canCompare = previous !== undefined && build.available && previous.available;
+  const requestStage = useGameWorkspaceStore((state) => state.requestStage);
+  const onStageNow = stageBuildId(list, useAtomValue(stagePlayTarget(threadRef))?.build ?? null);
+  const canPlay = build.available && build.id !== onStageNow;
   return (
     <div className="flex flex-col gap-1.5">
       <header className="flex items-center gap-3">
         {children}
-        {(action !== null && kind !== null) || canCompare ? (
+        {(action !== null && kind !== null) || canCompare || canPlay ? (
           <Menu>
             <MenuTrigger
               render={
@@ -943,6 +961,21 @@ function BuildActions({
               <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
             <MenuPopup align="end" className="w-64">
+              {canPlay ? (
+                <MenuItem onClick={() => requestStage({ kind: "play", build: refOf(build) })}>
+                  <PlayIcon />
+                  Play this build
+                </MenuItem>
+              ) : null}
+              {canCompare && previous !== undefined ? (
+                <MenuItem onClick={() => onCompare(previous)}>
+                  <ColumnsIcon />
+                  Compare with {buildName(previous).replace(/^Build /, "")}
+                </MenuItem>
+              ) : null}
+              {(canPlay || canCompare) && action !== null && kind !== null ? (
+                <MenuSeparator />
+              ) : null}
               {action !== null && kind !== null ? (
                 <MenuItem
                   disabled={action.blocked !== null || !restores.canRestore || restores.pending}
@@ -962,12 +995,6 @@ function BuildActions({
                       </Text>
                     )}
                   </span>
-                </MenuItem>
-              ) : null}
-              {canCompare && previous !== undefined ? (
-                <MenuItem onClick={() => onCompare(previous)}>
-                  <ColumnsIcon />
-                  Compare with {buildName(previous).replace(/^Build /, "")}
                 </MenuItem>
               ) : null}
             </MenuPopup>

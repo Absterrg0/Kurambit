@@ -1,6 +1,13 @@
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { BookmarkIcon, FolderOpenIcon, ExternalLinkIcon, Trash2Icon } from "lucide-react";
+import {
+  BookmarkCheckIcon,
+  BookmarkIcon,
+  FolderOpenIcon,
+  ExternalLinkIcon,
+  Trash2Icon,
+} from "lucide-react";
 import type { GameSavedMedia, ScopedThreadRef } from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
@@ -12,6 +19,7 @@ import { serverEnvironment } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
  * Open and Show in folder for a file in the game: the system's own apps
@@ -79,6 +87,7 @@ export function SaveMediaButton({
   source,
   label,
   text = "Save",
+  icon,
 }: {
   threadRef: ScopedThreadRef;
   /** Game-relative path of the generated file. */
@@ -87,6 +96,8 @@ export function SaveMediaButton({
   label: string;
   /** The button's words, when several files share a row. */
   text?: string;
+  /** Shown alone, with the words in its tooltip, where a row has no room for words. */
+  icon?: ReactNode;
 }) {
   const canSave = useAtomValue(gameEnvironment.saveMedia.permissionAtom(threadRef.environmentId));
   const save = useAtomCommand(gameEnvironment.saveMedia, { reportFailure: false });
@@ -123,6 +134,28 @@ export function SaveMediaButton({
     setError(null);
     setJustSaved({ media: result.value, listAt: list.dataUpdatedAt });
   };
+  if (icon !== undefined) {
+    const label =
+      saved !== null ? `${text} saved` : saving ? "Saving…" : `Save the ${text.toLowerCase()}`;
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              aria-label={label}
+              disabled={saved !== null || !canSave || saving}
+              onClick={() => void run()}
+            />
+          }
+        >
+          {saved !== null ? <BookmarkCheckIcon aria-hidden="true" /> : icon}
+        </TooltipTrigger>
+        <TooltipPopup side="top">{error ?? label}</TooltipPopup>
+      </Tooltip>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-1">
       {saved === null ? (

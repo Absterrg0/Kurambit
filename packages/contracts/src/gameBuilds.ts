@@ -892,7 +892,7 @@ const CHECK_LABELS: Readonly<Record<(typeof GAME_LEAD_FACTS)[number], string>> =
   "winnable-without-skill": "Needs skill to win",
   performance: "Runs smoothly",
   freeze: "Keeps moving",
-  colour: "No one colour fills the screen",
+  colour: "Colour is varied",
 };
 
 const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.at)}`);
@@ -976,7 +976,7 @@ const checkWords = (
       const share = Math.round(facts.liveness.value.dominantColour * 100);
       return facts.liveness.value.dominantColour > 0.6
         ? { sentence: "One colour fills the screen", value: `${share}%` }
-        : { sentence: "No one colour fills the screen", value: `largest ${share}%` };
+        : { sentence: "Colour is varied", value: `largest ${share}%` };
     }
   }
 };
