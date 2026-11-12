@@ -32,6 +32,10 @@ const toggleVariants = cva(
         // The active segment is raised out of its track (a well on ToggleGroup).
         segmented:
           "border-transparent text-muted-foreground transition-colors hover:text-foreground data-pressed:surface-raised data-pressed:text-strong-foreground",
+        // A segment of a single-choice group: the group slides one raised pill
+        // under the pressed segment, so the segment paints only its label.
+        "segmented-slide":
+          "border-transparent text-muted-foreground transition-colors hover:text-foreground data-pressed:text-strong-foreground",
       },
     },
   },

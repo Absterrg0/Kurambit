@@ -25,6 +25,7 @@ import {
 } from "../ui/empty";
 import { Input } from "../ui/input";
 import { Kbd, KbdGroup } from "../ui/kbd";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { LabeledSection } from "../ui/labeled-section";
 import {
   Menu,
@@ -654,6 +655,30 @@ function ControlsSection() {
           <Toggle value="log">Log</Toggle>
         </ToggleGroup>
       </Specimen>
+      <Specimen label="Tabs" source="<Tabs> <TabsList> <TabsTab> <TabsPanel>">
+        <Tabs defaultValue="build" className="w-64">
+          <TabsList aria-label="Inspector" className="w-full">
+            <TabsTab value="build">Build</TabsTab>
+            <TabsTab value="scene">Scene</TabsTab>
+            <TabsTab value="log">Log</TabsTab>
+          </TabsList>
+          <TabsPanel value="build">
+            <Text variant="meta" tone="muted" render={<p className="pt-2" />}>
+              Checks and recordings
+            </Text>
+          </TabsPanel>
+          <TabsPanel value="scene">
+            <Text variant="meta" tone="muted" render={<p className="pt-2" />}>
+              The look and the characters
+            </Text>
+          </TabsPanel>
+          <TabsPanel value="log">
+            <Text variant="meta" tone="muted" render={<p className="pt-2" />}>
+              Every turn so far
+            </Text>
+          </TabsPanel>
+        </Tabs>
+      </Specimen>
     </Section>
   );
 }
@@ -891,6 +916,19 @@ function StructureSection() {
             </EmptyContent>
           </Empty>
         </div>
+      </Specimen>
+      <Specimen label="Empty well" source='<Empty variant="well">'>
+        <Empty variant="well" className="w-full max-w-md">
+          <EmptyHeader>
+            <EmptyTitle>Not measured yet</EmptyTitle>
+            <EmptyDescription>Measuring plays the game and fills in its checks.</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button variant="secondary" size="sm">
+              Measure now
+            </Button>
+          </EmptyContent>
+        </Empty>
       </Specimen>
     </Section>
   );

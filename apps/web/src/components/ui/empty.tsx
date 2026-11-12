@@ -9,19 +9,36 @@ const emptySizeClassName = {
   hero: "gap-6 p-6 md:p-12 [--type-title:1.5rem] sm:[--type-title:1.875rem]",
 } as const;
 
+/**
+ * `page` fills the space it is given (a whole route or pane with nothing in it).
+ * `well` is the in-flow empty state: a sunken box holding a title, one line and
+ * at most one action, sized to its content, for a list or panel with nothing in
+ * it yet.
+ */
+const emptyVariantClassName = {
+  page: "flex-1",
+  well: "flex-none gap-3 rounded-xl surface-well px-6 py-8 [&_[data-slot=empty-content]]:mt-1 [--type-title:0.9375rem]",
+} as const;
+
 function Empty({
   className,
   size = "default",
+  variant = "page",
   ...props
-}: React.ComponentProps<"div"> & { size?: keyof typeof emptySizeClassName }) {
+}: React.ComponentProps<"div"> & {
+  size?: keyof typeof emptySizeClassName;
+  variant?: keyof typeof emptyVariantClassName;
+}) {
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-1 flex-col items-center justify-center text-balance text-center",
-        emptySizeClassName[size],
+        "flex min-w-0 flex-col items-center justify-center text-balance text-center",
+        variant === "page" && emptySizeClassName[size],
+        emptyVariantClassName[variant],
         className,
       )}
       data-slot="empty"
+      data-variant={variant}
       {...props}
     />
   );

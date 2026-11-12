@@ -5,6 +5,7 @@ import { ToggleGroup as ToggleGroupPrimitive } from "@base-ui/react/toggle-group
 import type { VariantProps } from "class-variance-authority";
 import * as React from "react";
 
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { Toggle as ToggleComponent, type toggleVariants } from "~/components/ui/toggle";
 
@@ -12,6 +13,42 @@ const ToggleGroupContext = React.createContext<VariantProps<typeof toggleVariant
   size: "default",
   variant: "default",
 });
+
+/**
+ * Keeps a single-choice segmented group's pill under its pressed segment. It
+ * watches the DOM instead of the group's value, so controlled and uncontrolled
+ * groups and toggles wrapped in tooltips all work. The slide is turned on a
+ * frame after the first placement, so the pill appears in place instead of
+ * sliding in from the group's edge.
+ */
+function trackPressedSegment(indicator: HTMLSpanElement | null) {
+  const group = indicator?.parentElement;
+  if (!indicator || !group) return;
+  const place = () => {
+    const pressed = group.querySelector<HTMLElement>('[data-slot="toggle"][data-pressed]');
+    indicator.hidden = pressed === null;
+    if (pressed === null) return;
+    indicator.style.setProperty("--segment-x", `${pressed.offsetLeft}px`);
+    indicator.style.setProperty("--segment-y", `${pressed.offsetTop}px`);
+    indicator.style.setProperty("--segment-width", `${pressed.offsetWidth}px`);
+    indicator.style.setProperty("--segment-height", `${pressed.offsetHeight}px`);
+  };
+  place();
+  const frame = requestAnimationFrame(() => indicator.setAttribute("data-ready", ""));
+  const mutations = new MutationObserver(place);
+  mutations.observe(group, {
+    attributes: true,
+    attributeFilter: ["data-pressed"],
+    childList: true,
+    subtree: true,
+  });
+  const stopResize = observeResize(group, place);
+  return () => {
+    cancelAnimationFrame(frame);
+    mutations.disconnect();
+    stopResize();
+  };
+}
 
 function ToggleGroup({
   className,
@@ -23,7 +60,9 @@ function ToggleGroup({
 }: ToggleGroupPrimitive.Props & VariantProps<typeof toggleVariants>) {
   const size =
     sizeProp === undefined ? (variant === "segmented" ? "segmented" : "default") : sizeProp;
-  const value = { size, variant };
+  // One pressed segment can slide; a multi-select group raises each pressed one.
+  const slides = variant === "segmented" && props.multiple !== true;
+  const value = { size, variant: slides ? ("segmented-slide" as const) : variant };
   return (
     <ToggleGroupPrimitive
       className={cn(
@@ -32,7 +71,7 @@ function ToggleGroup({
           ? "*:pointer-coarse:after:min-w-auto"
           : "*:pointer-coarse:after:min-h-auto",
         variant === "segmented"
-          ? "surface-well gap-0.5 rounded-lg p-0.5"
+          ? "relative surface-well gap-0.5 rounded-lg p-0.5"
           : variant === "default"
             ? "gap-0.5"
             : orientation === "horizontal"
@@ -46,6 +85,14 @@ function ToggleGroup({
       orientation={orientation}
       {...props}
     >
+      {slides ? (
+        <span
+          aria-hidden
+          ref={trackPressedSegment}
+          className="pointer-events-none absolute top-0 left-0 h-(--segment-height) w-(--segment-width) translate-x-(--segment-x) translate-y-(--segment-y) rounded-md surface-raised data-ready:transition-[translate,width] data-ready:ease-enter"
+          data-slot="toggle-group-indicator"
+        />
+      ) : null}
       <ToggleGroupContext value={value}>{children}</ToggleGroupContext>
     </ToggleGroupPrimitive>
   );
