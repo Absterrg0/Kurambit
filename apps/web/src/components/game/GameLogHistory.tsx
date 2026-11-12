@@ -5,6 +5,7 @@ import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { GameBuildStill } from "./GameBuildStill";
@@ -35,16 +36,25 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
   };
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <div className="flex flex-col gap-1">
-        <Text variant="label" tone="default" render={<h2 />}>
-          {builds.length > 0 ? "Builds" : "Nothing in the Log yet"}
-        </Text>
-        <Text variant="caption" tone="muted" render={<p />}>
-          {builds.length > 0
-            ? "Newest first. Your agent's turns in this Log show here as it works."
-            : "Your agent's work on this game shows here, turn by turn. Tell it what to change below the game."}
-        </Text>
-      </div>
+      {builds.length > 0 || loading ? (
+        <div className="flex flex-col gap-1">
+          <Text variant="label" tone="default" render={<h2 />}>
+            Builds
+          </Text>
+          <Text variant="caption" tone="muted" render={<p />}>
+            Newest first. Your agent's turns in this Log show here as it works.
+          </Text>
+        </div>
+      ) : (
+        <Empty variant="well">
+          <EmptyHeader>
+            <EmptyTitle>Nothing in the Log yet</EmptyTitle>
+            <EmptyDescription>
+              Your agent's work on this game shows here, turn by turn.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
       {loading ? (
         <div className="flex flex-col gap-2">
           {[0, 1, 2].map((n) => (

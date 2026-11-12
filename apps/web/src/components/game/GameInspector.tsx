@@ -54,9 +54,11 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Kbd } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
+import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
@@ -113,32 +115,22 @@ export function GameInspectorTabs({ threadRef }: { threadRef: ScopedThreadRef })
   // A generation waiting on the person's pick is never missed behind another tab.
   const choosing = useChoosingCount(threadRef);
   return (
-    <div
-      role="tablist"
-      aria-label="Inspector"
-      className="grid h-8 w-full max-w-80 grid-cols-3 gap-0.5 rounded-lg bg-card p-0.5"
+    <Tabs
+      value={tab}
+      onValueChange={(next: GameInspectorTab) => showTab(next)}
+      className="w-full max-w-80"
     >
-      {TABS.map((entry) => (
-        <button
-          key={entry.tab}
-          type="button"
-          role="tab"
-          aria-selected={tab === entry.tab}
-          onClick={() => showTab(entry.tab)}
-          className={cn(
-            "flex items-center justify-center gap-1.5 rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-            tab === entry.tab && "bg-accent text-strong-foreground",
-          )}
-        >
-          <Text variant="meta" tone="inherit">
+      <TabsList aria-label="Inspector" className="w-full">
+        {TABS.map((entry) => (
+          <TabsTab key={entry.tab} value={entry.tab}>
             {entry.label}
-          </Text>
-          {entry.tab === "scene" && choosing > 0 ? (
-            <span className="size-1.5 rounded-full bg-warning" aria-label="A pick is waiting" />
-          ) : null}
-        </button>
-      ))}
-    </div>
+            {entry.tab === "scene" && choosing > 0 ? (
+              <span className="size-1.5 rounded-full bg-warning" aria-label="A pick is waiting" />
+            ) : null}
+          </TabsTab>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -264,14 +256,15 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Text>
       </div>
     ) : (
-      <div className="flex flex-col gap-1 p-4">
-        <Text variant="label" tone="default" render={<h2 />}>
-          Not measured yet
-        </Text>
-        <Text variant="caption" tone="muted" render={<p />}>
-          The game plays, but no build of it is measured yet. The next change your agent makes
-          becomes one, with its checks here.
-        </Text>
+      <div className="p-4">
+        <Empty variant="well">
+          <EmptyHeader>
+            <EmptyTitle>Not measured yet</EmptyTitle>
+            <EmptyDescription>
+              The next change your agent makes becomes a build, with its checks here.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     );
   const detail = (
@@ -1262,15 +1255,15 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         />
       ) : null}
       {things.length === 0 ? (
-        <div className="surface-well flex flex-col gap-1.5 rounded-lg px-3 py-3">
-          <Text variant="meta" tone="default" render={<p />}>
-            Nothing named yet
-          </Text>
-          <Text variant="caption" tone="muted" render={<p />}>
-            The game's characters, props and rules show here while it plays, once your agent names
-            them. Then <Kbd>Tab</Kbd> on the Stage freezes it so you can point at one.
-          </Text>
-        </div>
+        <Empty variant="well">
+          <EmptyHeader>
+            <EmptyTitle>Nothing named yet</EmptyTitle>
+            <EmptyDescription>
+              Named characters, props and rules show here while the game plays. <Kbd>Tab</Kbd> on
+              the Stage freezes it so you can point at one.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : null}
       {KIND_GROUPS.map((group) => {
         const rows = shownThings.filter((thing) => thing.kind === group.kind);
