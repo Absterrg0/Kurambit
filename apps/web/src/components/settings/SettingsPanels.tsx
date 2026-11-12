@@ -3263,11 +3263,11 @@ export function ArchivedThreadsPanel() {
             <Empty variant="well">
               <EmptyHeader>
                 <EmptyTitle>
-                  {archiveError ? "Could not load archived chats" : "No archived chats"}
+                  {archiveError ? "Could not load archived Logs" : "No archived Logs"}
                 </EmptyTitle>
                 <EmptyDescription>
                   {archiveError ??
-                    "A chat you archive waits here until you bring it back or delete it."}
+                    "A Log you archive waits here until you bring it back or delete it."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -3301,7 +3301,7 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Could not change the archived chat",
+                          title: "Could not change the archived Log",
                           description:
                             error instanceof Error ? error.message : "An error occurred.",
                         }),

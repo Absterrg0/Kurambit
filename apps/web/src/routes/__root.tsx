@@ -1,11 +1,11 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { AppNotFound } from "../components/AppNotFound";
 import { GameOpenDialogHost } from "../components/game/GameEntry";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
 import { type ServerLifecycleWelcomePayload } from "@kurambit/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@kurambit/client-runtime/environment";
 import {
   Outlet,
-  Link,
   redirect,
   createRootRoute,
   type ErrorComponentProps,
@@ -95,26 +95,11 @@ export const Route = createRootRoute({
   },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
-  notFoundComponent: RootRouteNotFoundView,
+  notFoundComponent: AppNotFound,
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],
   }),
 });
-
-function RootRouteNotFoundView() {
-  return (
-    <main className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
-      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <h1 className="text-lg font-medium text-foreground">Page not found</h1>
-        <p className="text-sm text-muted-foreground">
-          This link doesn't point to a page in {APP_DISPLAY_NAME}. Go home to choose a project or
-          start a thread.
-        </p>
-        <Button render={<Link to="/" replace />}>Go home</Button>
-      </div>
-    </main>
-  );
-}
 
 function RootRouteView() {
   useEffect(() => installDesktopPasteAsText(window.desktopBridge, window), []);

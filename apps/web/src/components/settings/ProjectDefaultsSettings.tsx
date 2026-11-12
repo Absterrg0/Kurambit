@@ -298,7 +298,7 @@ export function ProjectDefaultsSettings({
             description={
               isProjectScope
                 ? "Permissions for new threads in this project."
-                : "Default permissions for new threads. Projects can override them."
+                : "Default permissions for new threads. Each game can override them."
             }
             resetAction={
               settings.defaultRuntimeMode !== DEFAULT_SERVER_SETTINGS.defaultRuntimeMode ? (
@@ -409,8 +409,8 @@ export function ProjectDefaultsSettings({
             title="Automatically pull"
             description={
               isProjectScope
-                ? "Keeps this project's default branch current when the checkout has no local changes or commits."
-                : "Keeps the default branch current when the checkout has no local changes or commits. Projects can override it."
+                ? "Keeps this game's default branch current when its folder has no local changes or commits."
+                : "Keeps the default branch current when a game's folder has no local changes or commits. Each game can override it."
             }
             resetAction={
               settings.defaultAutoPull ? (
@@ -441,8 +441,8 @@ export function ProjectDefaultsSettings({
             title="Agent browser access"
             description={
               isProjectScope
-                ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
-                : "Allow agents to use the shared browser. Projects can override it."
+                ? "Allow agents in this game to use the shared browser. Applies when the agent session next starts."
+                : "Allow agents to use the shared browser. Each game can override it."
             }
             resetAction={
               settings.enableAgentBrowserAccess !==

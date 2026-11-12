@@ -1139,7 +1139,7 @@ export function ProviderInstanceCard({
     <>
       <SettingsSection title={displayName} icon={titleIconNode} headerAction={editorHeaderAction}>
         <SettingsRow
-          title="Display name"
+          title="Status"
           status={
             <>
               <ProviderStatusDiagnostic detail={statusDiagnostic}>
@@ -1175,14 +1175,40 @@ export function ProviderInstanceCard({
               ) : null}
             </>
           }
+        />
+        {/* The account, the name and the colour each on a labelled row of its own. */}
+        <SettingsRow
+          title="Name"
+          description="As the model pickers show it."
+          inlineControl
           control={
             <div
               inert={readOnly}
               aria-disabled={readOnly || undefined}
-              className={cn(
-                "flex w-full min-w-0 items-center justify-end gap-2 @min-[32rem]/settings-row:w-auto",
-                readOnly && "opacity-50 select-none",
-              )}
+              className={cn("flex items-center", readOnly && "opacity-50 select-none")}
+            >
+              <DraftInput
+                id={`provider-instance-${instanceId}-display-name`}
+                size="sm"
+                className="w-44"
+                aria-label="Name"
+                value={instance.displayName ?? ""}
+                onCommit={updateDisplayName}
+                placeholder={driverOption?.label ?? "Instance label"}
+                spellCheck={false}
+              />
+            </div>
+          }
+        />
+        <SettingsRow
+          title="Colour"
+          description="Marks its models in the pickers."
+          inlineControl
+          control={
+            <div
+              inert={readOnly}
+              aria-disabled={readOnly || undefined}
+              className={cn("flex items-center", readOnly && "opacity-50 select-none")}
             >
               <ProviderAccentColorPicker
                 layout="inline"
@@ -1190,15 +1216,6 @@ export function ProviderInstanceCard({
                 value={accentColor}
                 onCommit={updateAccentColor}
                 commitDelayMs={120}
-              />
-              <DraftInput
-                id={`provider-instance-${instanceId}-display-name`}
-                size="sm"
-                className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
-                value={instance.displayName ?? ""}
-                onCommit={updateDisplayName}
-                placeholder={driverOption?.label ?? "Instance label"}
-                spellCheck={false}
               />
             </div>
           }

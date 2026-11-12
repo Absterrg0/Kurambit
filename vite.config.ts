@@ -347,7 +347,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/routes/__root.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 6 }] },
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 3 }] },
       },
       {
         files: ["apps/web/src/components/game/GameBuildCompare.tsx"],

@@ -51,9 +51,23 @@ function describeModelCapabilities(model: ServerProviderModel): string[] {
           descriptor.id === "variant"),
     )
   ) {
-    labels.push("Reasoning");
+    labels.push("Effort");
   }
   return labels;
+}
+
+/** The capabilities every model has: said once over the list instead of on each row. */
+function sharedCapabilities(models: ReadonlyArray<ServerProviderModel>): ReadonlyArray<string> {
+  const [first, ...rest] = models.map(describeModelCapabilities);
+  if (first === undefined) return [];
+  return first.filter((label) => rest.every((labels) => labels.includes(label)));
+}
+
+function capabilityPhrase(labels: ReadonlyArray<string>): string {
+  const lower = labels.map((label) => label.toLowerCase());
+  return lower.length <= 1
+    ? (lower[0] ?? "")
+    : `${lower.slice(0, -1).join(", ")} and ${lower.at(-1)}`;
 }
 
 export function groupModelsForDisplay<
@@ -268,6 +282,7 @@ export function ProviderModelsSection({
     onRemove: useStableCallback(handleRemove),
   };
 
+  const shared = sharedCapabilities(models);
   const renderRow = (model: (typeof displayModels)[number]) => {
     const group = groupOf(model);
     const index = displayModels.indexOf(model);
@@ -284,6 +299,7 @@ export function ProviderModelsSection({
         isFiltering={isFiltering}
         canWritePreferences={canWritePreferences}
         canManageCustomModels={canManageCustomModels}
+        sharedCapabilities={shared}
         {...rowHandlers}
       />
     );
@@ -309,7 +325,16 @@ export function ProviderModelsSection({
             aria-label="Filter models"
           />
         ) : null}
-        <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">
+          {models.length} model{models.length === 1 ? "" : "s"}
+          {favoriteCount > 0 ? ` · ${favoriteCount} favorite${favoriteCount === 1 ? "" : "s"}` : ""}
+          {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
+          {shared.length > 0 && models.length > 1
+            ? ` · ${models.length === 2 ? "both have" : "all have"} ${capabilityPhrase(shared)}`
+            : ""}
+        </span>
+        {/* The list's actions together on the right, after what they act on. */}
+        <div className="ml-auto flex items-center gap-1">
           {builtInModels.length > 0 ? (
             <Button
               type="button"
@@ -325,26 +350,13 @@ export function ProviderModelsSection({
               {allBuiltInModelsHidden ? "Enable all" : "Disable all"}
             </Button>
           ) : null}
-          <span className="text-xs text-muted-foreground">
-            {models.length} model{models.length === 1 ? "" : "s"}
-            {favoriteCount > 0
-              ? ` · ${favoriteCount} favorite${favoriteCount === 1 ? "" : "s"}`
-              : ""}
-            {hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ""}
-          </span>
+          {driverKind !== "antigravity" && !isAdding ? (
+            <Button type="button" size="xs" variant="ghost-muted" onClick={() => setIsAdding(true)}>
+              <PlusIcon className="size-3" />
+              Add custom model
+            </Button>
+          ) : null}
         </div>
-        {driverKind !== "antigravity" && !isAdding ? (
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost-muted"
-            className="ml-auto"
-            onClick={() => setIsAdding(true)}
-          >
-            <PlusIcon className="size-3" />
-            Add custom model
-          </Button>
-        ) : null}
       </div>
       <div
         ref={listRef}
@@ -449,6 +461,7 @@ function ProviderModelRow({
   onSetHidden,
   onToggleEdit,
   onRemove,
+  sharedCapabilities,
 }: {
   readonly model: ServerProviderModel;
   readonly isHidden: boolean;
@@ -463,8 +476,12 @@ function ProviderModelRow({
   readonly onSetHidden: (slug: string, hidden: boolean) => void;
   readonly onToggleEdit: (slug: string) => void;
   readonly onRemove: (slug: string) => void;
+  /** Said once over the list, so a row names only what sets it apart. */
+  readonly sharedCapabilities: ReadonlyArray<string>;
 }) {
-  const capLabels = describeModelCapabilities(model);
+  const capLabels = describeModelCapabilities(model).filter(
+    (label) => !sharedCapabilities.includes(label),
+  );
   const nameClassName = cn("text-xs", isHidden ? "text-muted-foreground" : "text-foreground/90");
   const pickerTooltip = model.isCustom
     ? "Custom models are always shown in the picker"

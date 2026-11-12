@@ -2,6 +2,7 @@ import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-
 import { useState, type ReactNode } from "react";
 
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
+import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import { SettingsDialog, SettingsDialogClose } from "../components/settings/SettingsDialog";
 import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
 import {
@@ -105,9 +106,15 @@ function SettingsContentLayout() {
       <div className="flex min-h-0 flex-1">
         <SettingsSidebarNav pathname={location.pathname} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex h-13 shrink-0 items-center gap-3 ps-5 pe-3">
-            <SettingsBreadcrumb />
-            <div className="ms-auto flex shrink-0 items-center gap-1">
+          {/* The panel's name starts on the page title's edge: the same centred column and
+              the same scrollbar gutter as the page below, at every width. */}
+          <header className="scrollbar-gutter-both relative flex h-13 shrink-0 items-center overflow-hidden">
+            <WorkspacePageContainer className="flex-row items-center py-0 sm:py-0">
+              <div className="min-w-0 px-3 sm:px-4">
+                <SettingsBreadcrumb />
+              </div>
+            </WorkspacePageContainer>
+            <div className="absolute end-3 flex shrink-0 items-center gap-1">
               <SettingsDialogClose />
             </div>
           </header>

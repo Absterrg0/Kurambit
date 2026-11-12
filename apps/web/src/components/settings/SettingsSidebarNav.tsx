@@ -326,7 +326,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               ))}
             </SidebarMenu>
           ) : (
-            <div className="flex flex-col gap-3">
+            // The first heading sits as far under the search as each later one under its group.
+            <div className="flex flex-col gap-3 pt-0.75">
               {SETTINGS_NAV_GROUPS.map((group) => (
                 <div
                   key={group.heading}

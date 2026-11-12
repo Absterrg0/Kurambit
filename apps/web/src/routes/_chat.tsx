@@ -1,12 +1,19 @@
 import { AuthPreviewOperateScope } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
+import {
+  Outlet,
+  createFileRoute,
+  redirect,
+  useLocation,
+  useRouterState,
+} from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useState } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { GamesHome } from "../components/game/GamesHome";
+import { AppNotFound } from "../components/AppNotFound";
 import { isSettingsPage } from "../components/sidebar/mainAppLocation";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { useLegacySidebarEnabled } from "../hooks/useSettings";
@@ -219,13 +226,20 @@ function ChatRouteLayout() {
   const threadTarget = useThreadRouteTarget();
   const pathname = useLocation({ select: (location) => location.pathname });
   const settingsOpen = isSettingsPage(pathname);
-  const routeView: MainView | null = settingsOpen
-    ? null
-    : threadTarget
-      ? { kind: "thread", target: threadTarget }
-      : pathname === "/"
-        ? HOME_VIEW
-        : null;
+  // An address that only begins like a thread's (/a/b/c) matches the thread route's two
+  // params and then misses: the not-found page shows, not a blank thread.
+  const notFound = useRouterState({
+    select: (state) =>
+      state.matches.some((match) => match.status === "notFound" || match.globalNotFound === true),
+  });
+  const routeView: MainView | null =
+    settingsOpen || notFound
+      ? null
+      : threadTarget
+        ? { kind: "thread", target: threadTarget }
+        : pathname === "/"
+          ? HOME_VIEW
+          : null;
   // The view Settings opens over: the last one shown, so a game keeps playing behind it.
   // A settings link opened cold has none, and Home stands in.
   const [lastView, setLastView] = useState<MainView | null>(routeView);
@@ -256,4 +270,6 @@ export const Route = createFileRoute("/_chat")({
     }
   },
   component: ChatRouteLayout,
+  // Inside the pane, not over the bare window, for any address under the app's layout.
+  notFoundComponent: AppNotFound,
 });
