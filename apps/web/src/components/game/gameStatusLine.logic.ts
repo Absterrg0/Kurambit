@@ -3,8 +3,8 @@ import type { GameStagePhase } from "./gameStageLogic";
 /** One phrase of the top bar's status line. */
 export interface GameStatusPart {
   readonly text: string;
-  /** live: work in progress; ok: a game playing. */
-  readonly dot: "live" | "ok" | null;
+  /** live: work in progress. */
+  readonly dot: "live" | null;
   readonly strong: boolean;
   /** Ticks an elapsed time after the text. */
   readonly since: number | null;
@@ -42,7 +42,13 @@ export interface GameStatusInput {
   readonly live: boolean;
   /** The game has the keyboard: the person is playing it, not just looking at it. */
   readonly focused: boolean;
+  /** The folder's last build, as a sentence names it, when the folder changed since it. */
+  readonly changedSince: string | null;
+  /** The game has at least one measured build. */
+  readonly measured: boolean;
 }
+
+const sentence = (phrase: string) => `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}`;
 
 /**
  * PURE. What the game is doing, in at most two phrases: what plays on the
@@ -55,13 +61,15 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
       ? input.away && input.onStage !== null
         ? part(`Paused on ${input.onStage} while you're away`)
         : input.focused
-          ? part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`, { dot: "ok" })
-          : part(
-              input.onStage === null
-                ? "On the Stage"
-                : `${input.onStage.charAt(0).toUpperCase()}${input.onStage.slice(1)} on the Stage`,
-              { dot: "ok" },
-            )
+          ? part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`)
+          : // At rest the line names what plays, in the words the Inspector and sidebar use.
+            input.onStage !== null
+            ? part(sentence(input.onStage))
+            : input.changedSince !== null
+              ? part(`Changed since ${input.changedSince} · not measured`)
+              : input.measured
+                ? null
+                : part("Not measured yet")
       : input.phase === "stopped"
         ? part("Stopped")
         : input.phase === "ready"

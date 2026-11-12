@@ -263,10 +263,11 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     ) : (
       <div className="flex flex-col gap-1 p-4">
         <Text variant="label" tone="default" render={<h2 />}>
-          No builds yet
+          Not measured yet
         </Text>
         <Text variant="caption" tone="muted" render={<p />}>
-          Each change your agent makes becomes a build, with its checks measured here.
+          The game plays, but no build of it is measured yet. The next change your agent makes
+          becomes one, with its checks here.
         </Text>
       </div>
     );
@@ -460,19 +461,17 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
  * once, with the reason, so a missing tool is named once with its fix.
  */
 /**
- * The Checks heading's count, of the rows it heads, so it never disagrees with
- * what the person sees. Before any reading lands, "0 pass" would read as a verdict.
+ * The Checks heading's count: every check this build passed, the same number
+ * the strip, the Log and the sidebar give for it, so no two places disagree.
+ * The rows below show the few that matter most; "more measurements" holds the
+ * rest with their own pass count. Before any reading lands, "0 pass" would read
+ * as a verdict.
  */
 function checksSummary(facts: GameBuildFacts): string {
   const view = gameChecksView(facts);
   const busy = facts.state === "measuring" || facts.state === "queued";
-  const shownPass = view.checks.filter(
-    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
-  ).length;
   return [
-    ...(shownPass > 0 || view.toLook > 0 || !busy
-      ? [`${shownPass} of ${view.checks.length} pass`]
-      : []),
+    ...(view.pass > 0 || view.toLook > 0 || !busy ? [`${view.pass} pass`] : []),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
     ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
   ].join(" · ");

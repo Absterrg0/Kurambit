@@ -24,6 +24,9 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
   const gameName = useIsGameThreadStatus(threadRef).data?.manifest.name ?? "";
   const builds = list.data?.builds ?? [];
+  const current = builds.find((build) => build.id === list.data?.current);
+  // The folder changed since its last build: the strip's Now, said here too.
+  const changedSince = list.data?.folderEdited === true && current !== undefined ? current : null;
   const loading = list.data === null && list.error === null;
   const open = (build: (typeof builds)[number]) => {
     const store = useGameWorkspaceStore.getState();
@@ -53,6 +56,19 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
           role="list"
           className="surface-card-settings flex flex-col divide-y divide-border overflow-hidden rounded-lg"
         >
+          {changedSince === null ? null : (
+            <li className="flex items-center gap-3 px-3 py-2">
+              <span className="surface-well aspect-video w-16 shrink-0 rounded-sm" />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <Text variant="meta" tone="default" truncate>
+                  Now
+                </Text>
+                <Text variant="caption" tone="muted" truncate>
+                  Changed since {buildName(changedSince)} · not measured
+                </Text>
+              </span>
+            </li>
+          )}
           {builds.map((build) => {
             const additions = build.files.reduce((sum, file) => sum + file.additions, 0);
             const deletions = build.files.reduce((sum, file) => sum + file.deletions, 0);
@@ -81,6 +97,7 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
                         files > 0
                           ? `${files === 1 ? "1 file" : `${files} files`} +${additions} −${deletions}`
                           : null,
+                        // The same count the Build tab's Checks heading gives.
                         build.facts.good + build.facts.bad > 0
                           ? `${build.facts.good} pass${build.facts.bad > 0 ? ` · ${build.facts.bad} to look at` : ""}`
                           : null,

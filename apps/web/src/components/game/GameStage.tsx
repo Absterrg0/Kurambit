@@ -131,6 +131,13 @@ const folderBuildPhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unk
   return build === undefined ? null : buildPhrase(buildName(build));
 };
 
+/** The folder's last build, as a sentence names it, when the folder changed since it. */
+const changedSincePhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result) || result.value.folderEdited !== true) return null;
+  const build = result.value.builds.find((each) => each.id === result.value.current);
+  return build === undefined ? null : buildPhrase(buildName(build));
+};
+
 /** The number the next person build takes: one past the newest numbered one. */
 const nextBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result)) return 1;
@@ -370,6 +377,7 @@ function ThreadGameStage({
   });
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
+  const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
@@ -763,6 +771,8 @@ function ThreadGameStage({
     operation: building ? { text: buildingMessage, since: buildingStartedAt } : null,
     live: stageKind === "live",
     focused: gameFocused && !frameHidden,
+    changedSince: playTarget === null ? (changedSince ?? null) : null,
+    measured: hasBuild,
   });
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
