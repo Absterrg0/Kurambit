@@ -45,6 +45,8 @@ export interface GameStatusInput {
   readonly changedSince: string | null;
   /** The game has at least one measured build. */
   readonly measured: boolean;
+  /** An Undo or Redo the person asked for, while it restores: "Undoing build 2". */
+  readonly restoring: string | null;
 }
 
 const sentence = (phrase: string) => `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}`;
@@ -111,24 +113,24 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
             dot: "live",
             hint: "Keep going is improving the game a step at a time, each step a build.",
           })
-        : input.turnRunning
-          ? part(`Making build ${input.nextBuild}`, {
-              strong: true,
-              dot: "live",
-              since: input.turnStartedAt,
-              hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
-            })
-          : input.operation !== null && !input.live
-            ? part(input.operation.text, { dot: "live", since: input.operation.since })
-            : null;
+        : input.restoring !== null
+          ? part(input.restoring, { strong: true, dot: "live" })
+          : input.turnRunning
+            ? part(`Making build ${input.nextBuild}`, {
+                strong: true,
+                dot: "live",
+                since: input.turnStartedAt,
+                hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
+              })
+            : input.operation !== null && !input.live
+              ? part(input.operation.text, { dot: "live", since: input.operation.since })
+              : null;
   return [stage, work].filter((entry) => entry !== null);
 };
 
 export interface GameLibraryStatusInput {
   /** The most urgent state of the game's chats (resolveGameSidebarStatus). */
   readonly chats: "approval" | "input" | "working" | "failed" | "other";
-  /** When the running turn started, while `chats` is working. */
-  readonly turnStartedAt: string | null;
   /** Keep going's own line while a run is live here ("Keep going · step 3"). */
   readonly keepGoing: string | null;
   /** An engine's own build (an export) is running. */
@@ -165,7 +167,8 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.chats === "approval" || input.chats === "input")
     return line("Needs your answer", "live");
   if (input.keepGoing !== null) return line(input.keepGoing, "live");
-  if (input.chats === "working") return line("Building", "live", { since: input.turnStartedAt });
+  // The game screen's top bar holds the turn's clock; the library says only that it builds.
+  if (input.chats === "working") return line("Building", "live");
   if (input.operationRunning) return line("Building", "live");
   if (input.chats === "failed") return line("The last turn failed", "failed");
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });

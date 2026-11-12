@@ -5,31 +5,50 @@ import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameKeyArt } from "./GameKeyArt";
+import { useBuildFrame } from "./gameStageBridge";
 
-/** A build's picture, for a game screen that knows its thread rather than its folder. */
+/**
+ * A build's picture, for a game screen that knows its thread rather than its folder: its
+ * measured play's frame, else the frame the Stage showed while it played, else its `title`
+ * (the build's own name, so two builds without pictures never look alike).
+ */
 export function GameBuildStill({
   threadRef,
   gameName,
   build,
+  title,
   className,
   mark,
   children,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
-  build: Pick<GameBuild, "still">;
+  build: Pick<GameBuild, "still"> & { readonly id?: string };
+  /** What a picture-less build's title card says, in place of the game's name. */
+  title?: string;
   className?: string;
   /** What stands in for a build with no picture: see GamePicture. */
   mark?: GamePictureMark;
   children?: ReactNode;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
+  const frame = useBuildFrame(build.still === null ? (build.id ?? null) : null);
+  if (frame !== null)
+    return (
+      <div
+        className={cn("relative overflow-hidden bg-muted [container-type:inline-size]", className)}
+      >
+        <img src={frame} alt="" className="absolute inset-0 size-full object-cover" />
+        {children}
+      </div>
+    );
   return (
     <GamePicture
       environmentId={threadRef.environmentId}
       root={root}
       path={build.still}
       gameName={gameName}
+      title={title}
       className={className}
       mark={mark}
     >
@@ -49,9 +68,18 @@ export type GamePictureMark = "name" | "initial" | "absent" | "none";
  * A game with no picture: its own pigment with its name as a title card, or its initial at icon
  * size, so it is never a blank box nor mistaken for a picture still loading.
  */
-export function GameTitleMark({ gameName, mark }: { gameName: string; mark: GamePictureMark }) {
+export function GameTitleMark({
+  gameName,
+  mark,
+  title,
+}: {
+  gameName: string;
+  mark: GamePictureMark;
+  /** Said on the card in place of the game's name; the pigment stays the game's. */
+  title?: string | undefined;
+}) {
   const [pigment, ink] = gamePigment(gameName);
-  const name = gameName.trim();
+  const name = (title ?? gameName).trim();
   // Evidence with no frame is a neutral well, like a picture still coming: the game's pigment
   // would read as a picture of something.
   if (mark === "absent")
@@ -96,6 +124,7 @@ export function GamePicture({
   root,
   path,
   gameName,
+  title,
   className,
   mark = "initial",
   children,
@@ -104,6 +133,7 @@ export function GamePicture({
   root: string | null;
   path: string | null;
   gameName: string;
+  title?: string | undefined;
   className?: string | undefined;
   mark?: GamePictureMark | undefined;
   children?: ReactNode;
@@ -126,13 +156,13 @@ export function GamePicture({
       className={cn("relative overflow-hidden bg-muted [container-type:inline-size]", className)}
     >
       {path === null ? (
-        <GameTitleMark gameName={gameName} mark={mark} />
+        <GameTitleMark gameName={gameName} mark={mark} title={title} />
       ) : seen && root !== null ? (
         <GameKeyArt
           environmentId={environmentId}
           root={root}
           path={path}
-          missing={<GameTitleMark gameName={gameName} mark={mark} />}
+          missing={<GameTitleMark gameName={gameName} mark={mark} title={title} />}
         />
       ) : null}
       {children}

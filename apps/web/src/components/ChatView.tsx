@@ -4,7 +4,14 @@ import { GameInspectorPanel, GameInspectorTabs } from "./game/GameInspector";
 import { gameAgentNote as gameAgentNoteOf } from "./game/gameAgentNote.logic";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
-import { GameDirectionNote, GamePointedChip, GameInspectorResize } from "./game/GameDirectionBar";
+import {
+  GameDirectionNote,
+  GameInspectorResize,
+  GamePointedChip,
+  GameUndoneNote,
+  useGameMakingFirstBuild,
+  useLatestTurnUndone,
+} from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -3142,8 +3149,16 @@ export default function ChatView(props: ChatViewProps) {
     isGameThread && isServerThread ? activeThreadRef : null,
     askAgentToFixStable,
   );
+  // After an Undo the latest reply describes a build no longer on the Stage: its Next goes too.
+  const latestTurnUndone = useLatestTurnUndone(
+    isGameThread && isServerThread ? activeThreadRef : null,
+    activeLatestRun?.runId ?? null,
+  );
+  const gameStageMakingFirst = useGameMakingFirstBuild(
+    isGameThread && isServerThread && isWorking ? activeThreadRef : null,
+  );
   const gameNextBanner = useGameNextBanner(
-    keepGoingBanner.hidesNext ? null : gameNextReply,
+    keepGoingBanner.hidesNext || latestTurnUndone ? null : gameNextReply,
     askAgentToFixStable,
   );
   const sendAppMessage = async (text: string) => {
@@ -7901,12 +7916,16 @@ export default function ChatView(props: ChatViewProps) {
             // shares both its edges.
             className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col"
           >
-            {activePendingApproval === null && activePendingUserInput === null ? (
+            {activePendingApproval !== null ||
+            activePendingUserInput !== null ? null : latestTurnUndone && !isWorking ? (
+              <GameUndoneNote threadRef={activeThreadRef} runId={activeLatestRun?.runId ?? null} />
+            ) : (
               <GameDirectionNote
-                note={gameAgentNote}
+                // Before build 1 the Stage carries the agent's words: said once, there.
+                note={gameStageMakingFirst ? null : gameAgentNote}
                 onOpenLog={() => useGameWorkspaceStore.getState().showInspectorTab("log")}
               />
-            ) : null}
+            )}
             <GamePointedChip threadRef={activeThreadRef} />
             {composerLane}
           </div>

@@ -1,6 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ChevronRightIcon, CrosshairIcon, XIcon } from "lucide-react";
-import type { ScopedThreadRef } from "@kurambit/contracts";
+import { ChevronRightIcon, CrosshairIcon, Redo2Icon, Undo2Icon, XIcon } from "lucide-react";
+import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
 import { clampGameInspectorWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -8,8 +8,12 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import type { GameAgentNote } from "./gameAgentNote.logic";
-import { GameElapsed } from "./GameElapsed";
+import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuery } from "../../state/query";
+import { buildName, buildPhrase } from "./gameBuilds.logic";
 import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
+
+import { useTurnUndo } from "./useBuildActions";
 
 /**
  * The agent's latest words above the box where the person directs the game:
@@ -37,11 +41,6 @@ export function GameDirectionNote({
         render={<p className="line-clamp-2 min-w-0 flex-1" aria-live="polite" />}
       >
         {note.text}
-        {note.live && note.since !== null ? (
-          <Text variant="meta" tone="muted" numeric>
-            <GameElapsed since={note.since} prefix="  " />
-          </Text>
-        ) : null}
       </Text>
       <Button size="xs" variant="ghost" onClick={onOpenLog} className="shrink-0">
         Log
@@ -49,6 +48,72 @@ export function GameDirectionNote({
       </Button>
     </div>
   );
+}
+
+/**
+ * The note once the latest turn's build has been undone: the agent's reply describes a game
+ * that is no longer on the Stage, so this says what happened instead, with the way back.
+ */
+export function GameUndoneNote({
+  threadRef,
+  runId,
+}: {
+  threadRef: ScopedThreadRef;
+  runId: RunId | null;
+}) {
+  const undo = useTurnUndo(threadRef, runId);
+  const list = useEnvironmentQuery(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  ).data;
+  const view = undo.view;
+  if (view === null || undo.action?.kind !== "redo") return null;
+  const base = list?.builds.find((build) => build.id === view.build.base) ?? null;
+  const name = buildName(view.build);
+  return (
+    <div className="flex items-start gap-2.5 px-4 pt-2 pb-1.5" data-game-agent-note="undone">
+      <Undo2Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <Text
+        variant="body"
+        tone="default"
+        render={<p className="min-w-0 flex-1" aria-live="polite" />}
+      >
+        {base === null
+          ? `${name} undone: the game is back to how it was before it.`
+          : `${name} undone: the game is back to ${buildPhrase(buildName(base))}.`}
+      </Text>
+      <Button
+        size="xs"
+        variant="ghost"
+        className="shrink-0"
+        disabled={undo.action.blocked !== null || !undo.canRestore || undo.pending}
+        onClick={() => void undo.send()}
+      >
+        <Redo2Icon aria-hidden="true" />
+        {undo.restoring ? "Redoing…" : "Redo"}
+      </Button>
+    </div>
+  );
+}
+
+/** The game has no build yet while its first turn runs: the Stage shows the making card. */
+export function useGameMakingFirstBuild(threadRef: ScopedThreadRef | null): boolean {
+  const list = useEnvironmentQuery(
+    threadRef === null
+      ? null
+      : gameEnvironment.builds({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId },
+        }),
+  ).data;
+  return threadRef !== null && list !== null && list.builds.length === 0;
+}
+
+/** The latest turn's build was undone: its reply and its Next no longer describe the game. */
+export function useLatestTurnUndone(threadRef: ScopedThreadRef | null, runId: RunId | null) {
+  return useTurnUndo(threadRef, runId).action?.kind === "redo";
 }
 
 /**

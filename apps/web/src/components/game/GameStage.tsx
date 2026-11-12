@@ -94,11 +94,12 @@ import {
   useStageAwayFreeze,
   useStageBridge,
   useStageStill,
+  keepBuildFrame,
   useGameFreezeKey,
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
-import { buildName } from "./gameBuilds.logic";
+import { buildName, buildPhrase } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
 import { gameStatusLine, type GameStatusPart } from "./gameStatusLine.logic";
@@ -142,6 +143,12 @@ const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>)
   AsyncResult.isSuccess(result) && result.value.builds.length > 0;
 
 /** The build the folder holds, as a sentence names it ("build 7"), unless edited since. */
+/** The build the folder holds, unchanged since; null while it is edited or unknown. */
+const folderBuildIdOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result) && result.value.folderEdited === false
+    ? result.value.current
+    : null;
+
 const folderBuildPhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result) || result.value.folderEdited === true) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
@@ -205,8 +212,6 @@ const fitStage = (width: number, height: number, ratio: number) => {
     ),
   };
 };
-
-const buildPhrase = (name: string) => name.replace(/^Build /, "build ").replace(/^Step /, "step ");
 
 /** The folder's own game frame, not a build copy's. */
 const isFolderGameFrame = (target: EventTarget) =>
@@ -431,6 +436,16 @@ function ThreadGameStage({
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
   const posterStill = useEnvironmentQuerySelector(buildsAtom, folderBuildStill) ?? null;
   const stageStill = useStageStill(threadKey);
+  // A frame the folder's game showed is the picture of the build the folder holds, unless a
+  // turn is changing the folder under it. Only a new frame is kept, never one from before.
+  const folderBuild = useEnvironmentQuerySelector(buildsAtom, folderBuildIdOf) ?? null;
+  const keptStill = useRef(stageStill);
+  useEffect(() => {
+    if (stageStill === keptStill.current) return;
+    keptStill.current = stageStill;
+    if (stageStill !== null && folderBuild !== null && !turnRunning)
+      keepBuildFrame(folderBuild, stageStill);
+  }, [stageStill, folderBuild, turnRunning]);
   const stageRef = useRef<HTMLElement | null>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const freezeKey = useGameFreezeKey();
@@ -989,6 +1004,10 @@ function ThreadGameStage({
     live: stageKind === "live",
     changedSince: playTarget === null ? (changedSince ?? null) : null,
     measured: hasBuild,
+    restoring:
+      turnUndo.restoring && turnUndo.view !== null && turnUndo.action !== null
+        ? `${turnUndo.action.kind === "redo" ? "Redoing" : turnUndo.action.kind === "undo" ? "Undoing" : "Going back to"} ${buildPhrase(buildName(turnUndo.view.build))}…`
+        : null,
   });
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");

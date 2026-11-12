@@ -23,7 +23,6 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill, GameNowPicture } from "./GameBuildStill";
-import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
 import {
@@ -519,6 +518,7 @@ function BuildCard({
           threadRef={threadRef}
           gameName={gameName}
           build={build}
+          title={buildName(build)}
           mark="name"
           className="aspect-video w-full rounded-md"
         >
@@ -709,7 +709,8 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
       <CardCaption
         strong={false}
         title={slot.caption ?? slot.label}
-        meta={slot.since === null ? "\u00a0" : <GameElapsed since={slot.since} />}
+        // The top bar holds the turn's clock; the slot says only what it is.
+        meta="Being made"
       />
     </div>
   );

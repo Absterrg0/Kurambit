@@ -12,7 +12,7 @@ import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { GamePicture } from "./GameBuildStill";
 import type { SidebarThreadSummary } from "../../types";
-import { resolveWorkingStartedAt, type SidebarThreadStatus } from "../Sidebar.logic";
+import type { SidebarThreadStatus } from "../Sidebar.logic";
 import { buildName } from "./gameBuilds.logic";
 import { gameLibraryStatus, type GameLibraryStatus } from "./gameStatusLine.logic";
 import type { GameLibraryEntry } from "./useGameLibrary";
@@ -70,7 +70,6 @@ export function useGameLibraryLine(input: {
         : chats === "working" || chats === "waiting"
           ? "working"
           : "other",
-    turnStartedAt: main === null ? null : resolveWorkingStartedAt(main),
     keepGoing: game.run?.step ?? null,
     operationRunning: game.operation?.state === "running",
     build: build == null ? null : { name: buildName(build), at: build.at },

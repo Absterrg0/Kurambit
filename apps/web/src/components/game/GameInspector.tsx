@@ -292,25 +292,52 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     data.builds.find((entry) => entry.id === (onStageId ?? data.current)) ??
     data.builds[0] ??
     null;
+  // The checks every build gets, unlit: the loop's next step, shown before it happens.
+  const checksToCome = (
+    <section aria-labelledby="checks-to-come" className="flex flex-col gap-2 px-1">
+      <Text variant="meta" tone="muted" render={<h3 id="checks-to-come" />}>
+        What each build is measured on
+      </Text>
+      <ul className="flex flex-col gap-1.5">
+        {GAME_LEAD_FACTS.map((id) => (
+          <li key={id} className="flex items-center gap-2">
+            <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
+            <Text variant="meta" tone="dim">
+              {gameFactName(id)}
+            </Text>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
   if (build === null)
     return working ? (
-      <div className="flex flex-col gap-1 p-4">
-        <Text variant="label" tone="strong" render={<h2 />}>
-          Build 1
-        </Text>
-        <Text variant="meta" tone="muted" render={<p />}>
-          Being made. Its checks are measured after its first play.
-        </Text>
+      <div className="flex flex-col gap-5 p-4">
+        <div className="flex flex-col gap-1">
+          <Text variant="label" tone="strong" render={<h2 />}>
+            Build 1
+          </Text>
+          <Text variant="meta" tone="muted" render={<p />}>
+            Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to
+            measure these.
+          </Text>
+        </div>
+        {checksToCome}
       </div>
     ) : (
       <div className="flex flex-col gap-4 p-4">
         <Empty variant="well">
-          {/* The top bar already says it is not measured: this says what comes next. */}
+          {/* The top bar already says it is not measured: this says what comes next. A game
+              whose turn has run is never told its first change is still to come: the turn's
+              build may be a moment from landing, or the turn changed nothing. */}
           <EmptyHeader>
-            <EmptyTitle>Build 1 comes from your first change</EmptyTitle>
+            <EmptyTitle>
+              {shell?.latestRun == null ? "Build 1 comes from your first change" : "No build yet"}
+            </EmptyTitle>
             <EmptyDescription>
-              Tell your game what to change. Your agent's change becomes build 1, and a bot plays it
-              to measure its checks here.
+              {shell?.latestRun == null
+                ? "Tell your game what to change. Your agent's change becomes build 1, and a bot plays it to measure its checks here."
+                : "Build 1 lands here when a turn of your agent changes the game."}
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
@@ -320,22 +347,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             </Button>
           </EmptyContent>
         </Empty>
-        {/* The loop's next step, shown before it happens: the checks build 1 gets, unlit. */}
-        <section aria-labelledby="checks-to-come" className="flex flex-col gap-2 px-1">
-          <Text variant="meta" tone="muted" render={<h3 id="checks-to-come" />}>
-            What each build is measured on
-          </Text>
-          <ul className="flex flex-col gap-1.5">
-            {GAME_LEAD_FACTS.map((id) => (
-              <li key={id} className="flex items-center gap-2">
-                <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
-                <Text variant="meta" tone="dim">
-                  {gameFactName(id)}
-                </Text>
-              </li>
-            ))}
-          </ul>
-        </section>
+        {checksToCome}
       </div>
     );
   const detail = (

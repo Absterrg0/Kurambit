@@ -79,6 +79,21 @@ export const useStageBridge = create<StageBridgeState>()(() => ({
 export const useStageStills = create<Readonly<Record<string, string>>>()(() => ({}));
 
 /**
+ * A build's picture taken from the Stage while it played, by build id: what its card shows
+ * until a measured play gives it one, so a new build has a face from its first play. In memory
+ * only, like the Stage's own still.
+ */
+export const useBuildFrames = create<Readonly<Record<string, string>>>()(() => ({}));
+export const keepBuildFrame = (build: string, still: string) => {
+  if (useBuildFrames.getState()[build] !== still) useBuildFrames.setState({ [build]: still });
+};
+export const useBuildFrame = (build: string | null): string | null =>
+  useBuildFrames((frames) => (build === null ? null : (frames[build] ?? null)));
+
+/** How long after a game comes up its first frame is taken: past its first paint and fade-in. */
+const FIRST_FRAME_MS = 2500;
+
+/**
  * A title or menu drawn in the page, not the canvas, leaves the canvas one flat colour: that
  * is not what the Stage shows, so it is no still. Sampled, since a card needs no exact answer.
  */
@@ -167,6 +182,10 @@ export function useStageBridgeFrame(
         case "studio-ready":
           useStageBridge.setState({ status: "ready", capabilities: message.capabilities });
           post({ type: "studio-things-request" });
+          // One frame of the game as it comes up, so the build it plays has a picture at once.
+          window.setTimeout(() => {
+            if (useStageBridge.getState().owner === owner) void captureStageFrame();
+          }, FIRST_FRAME_MS);
           return;
         case "studio-things":
           useStageBridge.setState({ things: message.things });

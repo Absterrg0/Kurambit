@@ -632,13 +632,9 @@ function StageStateCard({
           </>
         ) : null}
         {phase.kind === "first-build" ? (
+          // The top bar says "Making build 1" with the turn's one clock; the Stage carries what
+          // the agent is doing, which nothing else on the screen says while it makes the game.
           <div className="flex max-w-md flex-col items-center gap-3">
-            <Text variant="meta" tone="inherit" render={<p className="text-stage-muted" />}>
-              Making build 1
-              {phase.startedAt === null ? null : (
-                <GameElapsed since={phase.startedAt} prefix=" · " />
-              )}
-            </Text>
             {note === null ? null : (
               <Text
                 variant="body"
@@ -649,7 +645,7 @@ function StageStateCard({
               </Text>
             )}
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
-              It plays here as soon as the turn ends.
+              Build 1 plays here as soon as the agent's turn ends.
             </Text>
           </div>
         ) : null}

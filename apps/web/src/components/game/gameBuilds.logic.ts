@@ -316,3 +316,7 @@ export const checksLine = (facts: GameBuild["facts"]): string =>
   factsSettled(facts)
     ? (checksPhrase(facts) ?? "Measured")
     : (factsSummaryLine(facts) ?? "Not measured yet");
+
+/** PURE. A build's name inside a sentence: "build 5", "step 2's build", a saved build's label. */
+export const buildPhrase = (name: string): string =>
+  name.replace(/^Build /, "build ").replace(/^Step /, "step ");

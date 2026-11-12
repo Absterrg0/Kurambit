@@ -258,7 +258,9 @@ function ComparePane({
               threadRef={threadRef}
               gameName={gameName}
               build={build}
-              mark="name"
+              // The Play pill sits where a title card's name would: a picture-less side is its
+              // pigment only, and the caption under it names the build.
+              mark="none"
               className="absolute inset-0"
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/35 p-3 text-center">
@@ -313,8 +315,9 @@ function ComparePane({
         />
       </div>
       <Text variant="meta" tone="muted" numeric truncate render={<p />}>
-        {formatBuildTime(build.at)}
-        {shown ? " · in the Inspector" : ""}
+        {[buildName(build), formatBuildTime(build.at), shown ? "in the Inspector" : null]
+          .filter((part) => part !== null)
+          .join(" · ")}
       </Text>
     </div>
   );
