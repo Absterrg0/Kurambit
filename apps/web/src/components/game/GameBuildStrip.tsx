@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { FastForwardIcon, GitCompareIcon } from "lucide-react";
 import type {
   GameBuild,
@@ -24,6 +25,7 @@ import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
+import { useStageStill } from "./gameStageBridge";
 import { buildCaption, buildName, checksPhrase, formatBuildTime } from "./gameBuilds.logic";
 import {
   isUndone,
@@ -99,6 +101,7 @@ export function GameBuildStrip({
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
 }) {
+  const still = useStageStill(scopedThreadKey(threadRef));
   const first = useEnvironmentQuery(
     gameEnvironment.builds({
       environmentId: threadRef.environmentId,
@@ -253,7 +256,13 @@ export function GameBuildStrip({
   const slotInBracket = slot?.keepGoing === true && groups.at(-1)?.steps === true;
   const nowCard =
     slot === null && list !== null && (list.folderEdited === true || playing !== null) ? (
-      <NowCard list={list} active={onStage === null} onClick={onLive} />
+      <NowCard
+        list={list}
+        still={still}
+        active={onStage === null}
+        picking={picking !== null}
+        onClick={onLive}
+      />
     ) : null;
   return (
     <section
@@ -484,15 +493,20 @@ function BuildCard({
   );
 }
 
-/** The outline of the card on the Stage, drawn over the picture so it is never covered. */
-function CardRing({ on }: { on: boolean }) {
+/**
+ * The outline of the card on the Stage, drawn over the picture so it is never covered. Over an
+ * empty well it is `quiet`: on a blank it would otherwise be the strongest line in the strip.
+ */
+function CardRing({ on, quiet = false }: { on: boolean; quiet?: boolean }) {
   return (
     <span
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
         on
-          ? "ring-1 ring-foreground/45"
+          ? quiet
+            ? "ring-1 ring-foreground/20"
+            : "ring-1 ring-foreground/45"
           : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
       )}
     />
@@ -591,11 +605,17 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
 /** The game folder when it is no build: edited since, or another build plays from a copy. */
 function NowCard({
   list,
+  still,
   active,
+  picking,
   onClick,
 }: {
   list: GameBuildsResult;
+  /** The folder's game's last frame on the Stage, once it has shown one. */
+  still: string | null;
   active: boolean;
+  /** Now is no build, so a compare cannot pick it: it steps back while one is picked. */
+  picking: boolean;
   onClick: () => void;
 }) {
   const current = list.builds.find((build) => build.id === list.current);
@@ -608,16 +628,35 @@ function NowCard({
       type="button"
       data-game-build-card="now"
       aria-current={active ? "true" : undefined}
+      disabled={picking}
       onClick={onClick}
-      className="group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none"
+      className={cn(
+        "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none transition-opacity disabled:cursor-default",
+        picking && "opacity-40",
+      )}
     >
-      {/* No build holds the folder's game yet, so it has no picture of its own: a quiet
-          well stands in, never another build's still. */}
-      <span className="surface-well relative flex aspect-video w-full items-center justify-center rounded-md">
-        <CardRing on={active} />
-        <Text variant="caption" tone="muted">
-          Now
-        </Text>
+      {/* The frame the Stage last showed, taken from the game itself; before it has shown
+          one, a quiet well, never another build's still. */}
+      <span className="surface-well relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-md">
+        {still === null ? (
+          <Text variant="caption" tone="muted">
+            Now
+          </Text>
+        ) : (
+          <>
+            <img src={still} alt="" className="absolute inset-0 size-full object-cover" />
+            <Text
+              variant="micro"
+              tone="inherit"
+              render={
+                <span className="absolute bottom-1.5 left-1.5 z-20 rounded-sm bg-black/65 px-1.5 py-px text-white" />
+              }
+            >
+              Now
+            </Text>
+          </>
+        )}
+        <CardRing on={active && !picking} quiet={still === null} />
       </span>
       <Text
         variant="caption"

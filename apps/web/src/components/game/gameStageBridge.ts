@@ -66,6 +66,60 @@ export const useStageBridge = create<StageBridgeState>()(() => ({
   hold: null,
 }));
 
+/**
+ * The last frame the folder's game showed, per thread: what the strip's Now stands for, so
+ * Now shows the game itself instead of a blank. Taken when the game freezes (the Stage lost
+ * focus, or the person froze it), so capturing never costs a frame of play. In memory only:
+ * a reload takes a new one as the game comes up and is held.
+ */
+export const useStageStills = create<Readonly<Record<string, string>>>()(() => ({}));
+
+/**
+ * A title or menu drawn in the page, not the canvas, leaves the canvas one flat colour: that
+ * is not what the Stage shows, so it is no still. Sampled, since a card needs no exact answer.
+ */
+const isBlank = (pixels: Uint8ClampedArray) => {
+  let low = 255 * 4;
+  let high = 0;
+  for (let index = 0; index < pixels.length; index += 4 * 97) {
+    const sum = pixels[index]! + pixels[index + 1]! + pixels[index + 2]! + pixels[index + 3]!;
+    low = Math.min(low, sum);
+    high = Math.max(high, sum);
+  }
+  return high - low < 24;
+};
+
+/** The PNG the game sends is the canvas at full size; a card needs a few hundred pixels. */
+const STILL_WIDTH = 480;
+const shrinkStill = (png: string): Promise<string | null> => {
+  const image = new Image();
+  image.src = png;
+  return image.decode().then(
+    () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = STILL_WIDTH;
+      canvas.height = Math.max(
+        1,
+        Math.round((STILL_WIDTH * image.naturalHeight) / Math.max(1, image.naturalWidth)),
+      );
+      const context = canvas.getContext("2d");
+      if (context === null) return null;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return isBlank(context.getImageData(0, 0, canvas.width, canvas.height).data)
+        ? null
+        : canvas.toDataURL("image/webp", 0.82);
+    },
+    () => null,
+  );
+};
+const keepStill = (owner: string, png: string) => {
+  const threadKey = owner.slice(0, owner.indexOf("\0"));
+  void shrinkStill(png).then((still) => {
+    // A frame that arrives after its game left the Stage is still that game's last frame.
+    if (still !== null) useStageStills.setState({ [threadKey]: still });
+  });
+};
+
 // The one capture in flight: a second Ask waits for the same frame.
 let captureWaiters: Array<(png: string | null) => void> = [];
 const settleCapture = (png: string | null) => {
@@ -129,9 +183,11 @@ export function useStageBridgeFrame(
         case "studio-frozen":
           // Playing on keeps the selection, so its values can be tuned while playing.
           useStageBridge.setState(message.on ? { frozen: true } : { frozen: false, hover: null });
+          if (message.on) void captureStageFrame();
           return;
         case "studio-frame":
           settleCapture(message.png);
+          keepStill(owner, message.png);
           return;
         case "studio-key":
           // The same keys as on the Stage itself, from a game that has focus.
@@ -150,6 +206,10 @@ export function useStageBridgeFrame(
     };
   }, [owner, frame, enabled]);
 }
+
+/** The folder's game's last frame on this thread's Stage, or null before it has shown one. */
+export const useStageStill = (threadKey: string): string | null =>
+  useStageStills((stills) => stills[threadKey] ?? null);
 
 /** The bridge state, only when it describes this thread's frame. */
 export const useThreadStageBridge = <T>(

@@ -9,6 +9,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { GameBuildStill } from "./GameBuildStill";
+import { useStageStill } from "./gameStageBridge";
 import { buildCaption, buildName, checksPhrase, formatBuildTime } from "./gameBuilds.logic";
 
 /**
@@ -24,6 +25,7 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
     }),
   );
   const gameName = useIsGameThreadStatus(threadRef).data?.manifest.name ?? "";
+  const still = useStageStill(scopedThreadKey(threadRef));
   const builds = list.data?.builds ?? [];
   const current = builds.find((build) => build.id === list.data?.current);
   // The folder changed since its last build: the strip's Now, said here too.
@@ -68,7 +70,15 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
         >
           {changedSince === null ? null : (
             <li className="flex items-center gap-3 px-3 py-2">
-              <span className="surface-well aspect-video w-16 shrink-0 rounded-sm" />
+              {still === null ? (
+                <span className="surface-well aspect-video w-16 shrink-0 rounded-sm" />
+              ) : (
+                <img
+                  src={still}
+                  alt=""
+                  className="aspect-video w-16 shrink-0 rounded-sm object-cover ring-1 ring-border ring-inset"
+                />
+              )}
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <Text variant="meta" tone="default" truncate>
                   Now · changed since {buildName(changedSince)}
