@@ -69,16 +69,18 @@ export function SettingsScopeSentence() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { environments } = useEnvironments();
   if (scope === null || SETTINGS_DEVICE_ONLY_PATHS.has(pathname)) return null;
-  // A picker reading "All games" on every visit is noise. It shows in full once a game is
-  // chosen (to say so, and to go back) or once some game holds a value of its own; until
-  // then the way in is a quiet link. Storage cleans up after every game at once.
-  const showGame =
-    SETTINGS_PER_GAME_PATHS.has(pathname) &&
-    (Boolean(scope.search.project) || !SETTINGS_NO_GAME_PICKER_PATHS.has(pathname));
+  // A picker reading "All games" on every visit is noise. It shows once a game is chosen
+  // (to say so, and to go back) or once some game holds a value of its own. Until then the
+  // way in is the game's own "Game settings" (sidebar menu, palette), not a line under every
+  // page title. Storage cleans up after every game at once.
   const gameInPlay =
     Boolean(scope.search.project) ||
     listProjectOverrides(scope.connectedEnvironments, PROJECT_SCOPED_SERVER_SETTING_KEYS).length >
       0;
+  const showGame =
+    gameInPlay &&
+    SETTINGS_PER_GAME_PATHS.has(pathname) &&
+    (Boolean(scope.search.project) || !SETTINGS_NO_GAME_PICKER_PATHS.has(pathname));
   // One environment is the only one there is: naming it, or "all" of it, says nothing.
   const showEnvironment = environments.length > 1;
   if (!showGame && !showEnvironment) return null;
@@ -95,9 +97,7 @@ export function SettingsScopeSentence() {
       tone="muted"
       render={<p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 sm:px-4" />}
     >
-      {showGame && !gameInPlay && !showEnvironment ? (
-        <ProjectScopeMenu {...props} quiet />
-      ) : showGame ? (
+      {showGame ? (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="shrink-0">Applying settings for</span>
           <ProjectScopeMenu {...props} />
@@ -157,9 +157,7 @@ function ScopeMenu({
   allOption,
   searchLabel,
   onChange,
-  quiet = false,
 }: {
-  quiet?: boolean;
   ariaLabel: string;
   icon: ReactNode;
   label: string;
@@ -174,14 +172,12 @@ function ScopeMenu({
   const trigger = (
     <Trigger
       aria-label={`${ariaLabel}: ${label}`}
-      render={<InlineButton tone={quiet ? "muted" : "picker"} />}
+      render={<InlineButton tone="picker" />}
       className="min-w-0 max-w-72"
     >
-      {quiet ? null : icon}
-      <span className="min-w-0 truncate">{quiet ? "Set for one game…" : label}</span>
-      {quiet ? null : (
-        <ChevronDownIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-      )}
+      {icon}
+      <span className="min-w-0 truncate">{label}</span>
+      <ChevronDownIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
     </Trigger>
   );
   const choices = allOption ? [allOption, ...options] : options;
@@ -329,13 +325,7 @@ function EnvironmentScopeMenu({
   );
 }
 
-function ProjectScopeMenu({
-  value,
-  groups,
-  environments,
-  onChange,
-  quiet = false,
-}: SettingsScopeMenuProps & { quiet?: boolean }) {
+function ProjectScopeMenu({ value, groups, environments, onChange }: SettingsScopeMenuProps) {
   const selected = groups.find((group) => group.projectKey === value.project);
   const projects = groups.map((group) => ({
     group,
@@ -344,7 +334,6 @@ function ProjectScopeMenu({
   return (
     <ScopeMenu
       ariaLabel="Game scope"
-      quiet={quiet}
       icon={selected ? <ProjectFavicon project={selected} className="size-3.5 shrink-0" /> : null}
       label={selected?.displayName ?? (value.project ? "Unavailable game" : "All games")}
       value={projectAxisValue(value)}

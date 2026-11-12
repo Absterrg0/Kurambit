@@ -10,12 +10,11 @@ import { Button } from "../components/ui/button";
  */
 function SettingsNotFound() {
   return (
-    <SettingsPageContainer>
-      <div className="flex flex-col items-start gap-3 py-6">
-        <h2 className="text-lg font-medium text-foreground">Page not found</h2>
-        <p className="text-sm text-muted-foreground">
-          There is no settings page at this address. Pick one from the list, or go back to General.
-        </p>
+    <SettingsPageContainer
+      title="Page not found"
+      description="There is no settings page at this address. Pick one from the list, or go back to General."
+    >
+      <div className="px-3 sm:px-4">
         <Button render={<Link to="/settings/general" replace />}>Back to General</Button>
       </div>
     </SettingsPageContainer>

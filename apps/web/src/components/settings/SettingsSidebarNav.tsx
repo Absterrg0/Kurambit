@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { isElectron } from "../../env";
 import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Kbd } from "../ui/kbd";
@@ -342,6 +343,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   <SidebarMenu>
                     {group.paths
                       .filter((to) => to !== "/settings/projects" || projectPageVisible)
+                      // Snapshots capture other windows, which only the desktop app can do.
+                      .filter((to) => to !== "/settings/snap-shot" || isElectron)
                       .map((to) => {
                         const Icon = SETTINGS_SECTION_ICONS[to];
                         const isActive = activePath === to || activePath.startsWith(`${to}/`);

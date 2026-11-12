@@ -393,7 +393,8 @@ export function SnapShotSettings() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="snap-shot" title="Snapshots">
+      {/* The page is titled Snapshots; the section keeps its name for search. */}
+      <SettingsSection id="snap-shot" title="Snapshots" hideTitle>
         <SettingsUnavailableGroup message={unavailableMessage}>
           <SettingsRow
             {...searchableSetting("snap-shot-enabled")}
@@ -586,7 +587,7 @@ export function SnapShotSettings() {
               />
               <SettingsRow
                 {...searchableSetting("snap-shot-animations")}
-                description="Animate captured windows into your draft."
+                description="Animate captured windows into the composer."
                 status={feedbackUnavailable}
                 control={
                   <Switch
