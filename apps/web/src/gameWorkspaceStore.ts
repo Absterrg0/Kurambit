@@ -16,34 +16,21 @@ const GAME_INSPECTOR_MAX_WORKSPACE_SHARE = 0.45;
 /**
  * Below this workspace width (the row after the sidebar, not the window) the
  * Inspector and the stage cannot both stay usable, so the workbench shows one
- * pane at a time. Above it the game and its checks stay side by side: at a
- * 1100px window with the sidebar open, the centre keeps about 480px.
+ * pane at a time: the game takes the row, and the Inspector, one click away,
+ * names the checks on its button. At a 1100px window with the sidebar open,
+ * side by side would leave the game under 500px wide.
  */
-const GAME_WORKSPACE_DOCK_MIN_WIDTH = 800;
+const GAME_WORKSPACE_DOCK_MIN_WIDTH = 900;
 
 export const isGameWorkspaceCompact = (workspaceWidth: number) =>
   workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;
 
-/**
- * Below this workspace width both panes stay but the Stage needs the room more: the Inspector
- * gives up to a third of the row, down to its narrow width, so the game is never a thumbnail.
- */
-const GAME_WORKSPACE_TIGHT_WIDTH = 900;
-const GAME_INSPECTOR_TIGHT_SHARE = 0.34;
-const GAME_INSPECTOR_NARROW_WIDTH = 272;
-
-export const clampGameInspectorWidth = (
-  width: number,
-  workspaceWidth = Number.POSITIVE_INFINITY,
-) => {
-  const share =
-    workspaceWidth < GAME_WORKSPACE_TIGHT_WIDTH
-      ? GAME_INSPECTOR_TIGHT_SHARE
-      : GAME_INSPECTOR_MAX_WORKSPACE_SHARE;
-  const cap = Math.floor(workspaceWidth * share);
-  const min = Math.min(GAME_INSPECTOR_MIN_WIDTH, Math.max(GAME_INSPECTOR_NARROW_WIDTH, cap));
-  return Math.min(GAME_INSPECTOR_MAX_WIDTH, cap, Math.max(min, Math.round(width)));
-};
+export const clampGameInspectorWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
+  Math.min(
+    GAME_INSPECTOR_MAX_WIDTH,
+    Math.floor(workspaceWidth * GAME_INSPECTOR_MAX_WORKSPACE_SHARE),
+    Math.max(GAME_INSPECTOR_MIN_WIDTH, Math.round(width)),
+  );
 
 /**
  * What another surface (the palette, a key, the timeline, a chat turn's strip)

@@ -312,6 +312,9 @@ export const compareRows = (
     return rank(x.id) - rank(y.id);
   });
   for (const delta of ordered) {
+    // Picture detail is kept to tell builds apart, a fingerprint rather than a reading: its
+    // numbers mean nothing to read side by side.
+    if (delta.id === "detail") continue;
     const name = gameFactName(delta.id);
     const whyA = sideWhy(viewsA.find((view) => view.id === delta.id));
     const whyB = sideWhy(viewsB.find((view) => view.id === delta.id));
@@ -352,11 +355,24 @@ export const compareRows = (
       note: null,
     });
   }
+  // What differs leads; readings that are the same follow, so the answer is read first.
+  const same = (row: CompareRow) => row.mark === "=";
   return {
-    rows,
+    rows: [...rows.filter((row) => !same(row)), ...rows.filter(same)],
     unmeasured: [...unmeasured].map(([why, names]) => ({ names, why })),
     oneSided: [...oneSided.values()],
   };
+};
+
+/**
+ * PURE. A row's change in words: better or worse where the check has a better, else which
+ * way the number moved. Null when the readings are the same or cannot be compared.
+ */
+export const changeWord = (row: Pick<CompareRow, "mark" | "tone">): string | null => {
+  if (row.mark === null || row.mark === "=") return null;
+  if (row.tone === "better") return "Better";
+  if (row.tone === "worse") return "Worse";
+  return row.mark === "↑" ? "Higher" : row.mark === "↓" ? "Lower" : "Changed";
 };
 
 /** PURE. A build's checks have settled: measured, with or without some not measured. */

@@ -4453,7 +4453,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerHasExpandedChrome =
     showComposerTopDrawer ||
     isTasksDrawerOpen ||
-    composerMenuOpen ||
+    // A game's slash and @ menus float over the column: opening one leaves the composer, and
+    // the Stage above it, the size they were.
+    (composerMenuOpen && !gameThread) ||
     isStashMenuOpen ||
     isDragOverComposer ||
     isPreparingWorktree ||

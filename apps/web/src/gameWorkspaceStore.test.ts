@@ -18,8 +18,8 @@ beforeEach(() => {
 describe("game workspace width", () => {
   it("treats a workspace below the dock threshold as compact", () => {
     expect(isGameWorkspaceCompact(0)).toBe(false);
-    expect(isGameWorkspaceCompact(799)).toBe(true);
-    expect(isGameWorkspaceCompact(800)).toBe(false);
+    expect(isGameWorkspaceCompact(899)).toBe(true);
+    expect(isGameWorkspaceCompact(900)).toBe(false);
     expect(isGameWorkspaceCompact(1280)).toBe(false);
   });
 
@@ -39,9 +39,6 @@ describe("game workspace width", () => {
     useGameWorkspaceStore.getState().setInspectorWidth(700);
     useGameWorkspaceStore.getState().fitInspectorWidth(960);
     expect(drawn()).toBe(432);
-    // A tight row gives the Stage the room: a third of it.
-    useGameWorkspaceStore.getState().fitInspectorWidth(840);
-    expect(drawn()).toBe(285);
     // A narrow window never shrinks the width chosen for a wide one.
     useGameWorkspaceStore.getState().fitInspectorWidth(2000);
     expect(drawn()).toBe(700);

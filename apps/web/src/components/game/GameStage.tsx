@@ -101,7 +101,7 @@ import {
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
-import { buildName, buildPhrase } from "./gameBuilds.logic";
+import { buildName, buildPhrase, checksLine } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { GameElapsed } from "./GameElapsed";
 import { gameStatusLine, type GameStatusPart } from "./gameStatusLine.logic";
@@ -143,13 +143,20 @@ const folderBuildStill = (result: AsyncResult.AsyncResult<GameBuildsResult, unkn
 const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) && result.value.builds.length > 0;
 
-/** The build the folder holds, as a sentence names it ("build 7"), unless edited since. */
 /** The build the folder holds, unchanged since; null while it is edited or unknown. */
 const folderBuildIdOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) && result.value.folderEdited === false
     ? result.value.current
     : null;
 
+/** The checks of the build the folder holds, in the words every surface uses. */
+const folderChecksOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result) || result.value.folderEdited !== false) return null;
+  const build = result.value.builds.find((each) => each.id === result.value.current);
+  return build === undefined ? null : checksLine(build.facts);
+};
+
+/** The build the folder holds, as a sentence names it ("build 7"), unless edited since. */
 const folderBuildPhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result) || result.value.folderEdited === true) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
@@ -461,6 +468,8 @@ function ThreadGameStage({
   // A frame the folder's game showed is the picture of the build the folder holds, unless a
   // turn is changing the folder under it. Only a new frame is kept, never one from before.
   const folderBuild = useEnvironmentQuerySelector(buildsAtom, folderBuildIdOf) ?? null;
+  // One pane at a time, the Inspector's way in carries what it would show first.
+  const folderChecks = useEnvironmentQuerySelector(buildsAtom, folderChecksOf) ?? null;
   const keptStill = useRef(stageStill);
   // The folder settling on a new build (a turn's end, an Undo) takes one frame of it, since the
   // game may have come up mid-turn, before the build it now shows existed.
@@ -1296,7 +1305,7 @@ function ThreadGameStage({
               }
             >
               <PanelRightIcon className="size-3.5" aria-hidden="true" />
-              {compact ? "Inspector" : null}
+              {compact ? (playTarget === null ? (folderChecks ?? "Inspector") : "Inspector") : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               {compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"}

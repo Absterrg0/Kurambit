@@ -2,7 +2,7 @@ import { MinusIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import { Text } from "../ui/text";
-import { compareHeadline, type CompareRows } from "./gameBuilds.logic";
+import { changeWord, compareHeadline, type CompareRows } from "./gameBuilds.logic";
 
 const DELTA_TEXT = {
   better: "text-success-foreground",
@@ -63,13 +63,23 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                 <span className="sr-only">B</span>
               </span>
             </th>
-            <th className="w-8 py-1.5 font-normal">
-              <span className="sr-only">Change</span>
-            </th>
+            <th className="w-16 py-1.5 text-right font-normal">Change</th>
           </Text>
         </thead>
         <tbody>
-          {compared.rows.map((row) => [
+          {compared.rows.map((row, index) => [
+            // The readings that are the same follow the ones that differ, under their own line.
+            row.mark === "=" && compared.rows[index - 1]?.mark !== "=" ? (
+              <tr key="same-heading">
+                <Text
+                  variant="caption"
+                  tone="muted"
+                  render={<td colSpan={4} className="border-t border-border pt-3 pb-1" />}
+                >
+                  The same on both
+                </Text>
+              </tr>
+            ) : null,
             <tr key={row.id} className="border-t border-border align-baseline">
               <Text variant="meta" tone="muted" render={<td className="py-2 pr-3" />}>
                 {row.name}
@@ -94,13 +104,13 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                 render={
                   <td
                     className={cn(
-                      "py-2 text-center font-medium",
+                      "py-2 text-right",
                       row.tone === null ? "text-muted-foreground" : DELTA_TEXT[row.tone],
                     )}
                   />
                 }
               >
-                {row.mark ?? ""}
+                {changeWord(row) ?? ""}
               </Text>
             </tr>,
             row.note === null ? null : (

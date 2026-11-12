@@ -28,6 +28,7 @@ import { GameBuildStill } from "./GameBuildStill";
 import { refOf } from "./gameBuildRef";
 import { GameFrame, GameFrameBox } from "./GamePlaySurface";
 import { buildName, compareRows, formatBuildTime } from "./gameBuilds.logic";
+import { isUndone } from "./gameBuildTimeline.logic";
 import { useBuildPlay, useMeasureOnOpen } from "./useBuildActions";
 
 const isBuildId = Schema.is(GameBuildId);
@@ -195,6 +196,7 @@ export function GameBuildCompare({
                     viewport={viewport}
                     gameName={gameName}
                     shown={focused === index}
+                    undone={builds !== null && isUndone(side, builds)}
                     playing={!hidden && focused === index}
                     onFocus={() => setFocused(index === 0 ? 0 : 1)}
                   />
@@ -224,6 +226,7 @@ function ComparePane({
   gameName,
   shown,
   playing,
+  undone,
   onFocus,
 }: {
   threadRef: ScopedThreadRef;
@@ -235,6 +238,8 @@ function ComparePane({
   shown: boolean;
   /** Its copy plays; the other side's is paused and muted. */
   playing: boolean;
+  /** An Undo took it out of the game; it is compared all the same. */
+  undone: boolean;
   onFocus: () => void;
 }) {
   const plays = useBuildPlay(threadRef);
@@ -322,7 +327,12 @@ function ComparePane({
         />
       </div>
       <Text variant="meta" tone="muted" numeric truncate render={<p />}>
-        {[buildName(build), formatBuildTime(build.at), shown ? "in the Inspector" : null]
+        {[
+          buildName(build),
+          undone ? "undone" : null,
+          formatBuildTime(build.at),
+          shown ? "in the Inspector" : null,
+        ]
           .filter((part) => part !== null)
           .join(" · ")}
       </Text>
