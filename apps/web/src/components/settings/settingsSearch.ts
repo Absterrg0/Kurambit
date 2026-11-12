@@ -15,6 +15,8 @@ import {
 export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
+  | "/settings/game-tools"
+  | "/settings/art"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -72,8 +74,10 @@ export interface SettingsSearchAvailability {
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
-  "/settings/projects": "Project",
+  "/settings/projects": "Games",
   "/settings/general": "General",
+  "/settings/game-tools": "Game tools",
+  "/settings/art": "Art providers",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "Snapshots",
@@ -110,7 +114,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "game-tools",
     title: "Game tools",
-    to: "/settings/general",
+    to: "/settings/game-tools",
     scope: "environment",
     environmentOnly: true,
     searchTerms: ["blender godot unity hub executable paths install download toolchain"],
@@ -118,12 +122,28 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "art-providers",
     title: "Art providers",
-    to: "/settings/general",
+    to: "/settings/art",
     scope: "environment",
     environmentOnly: true,
     searchTerms: [
-      "generated art keys codex chatgpt openai gemini google tripo meshy elevenlabs daily limit spend licence",
+      "generated art keys codex chatgpt openai gemini google tripo meshy elevenlabs uthana licence",
     ],
+  },
+  {
+    id: "art-lanes",
+    title: "Who makes each kind of asset",
+    to: "/settings/art",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: ["image character creature model texture sound effect music voice motion auto"],
+  },
+  {
+    id: "art-daily-limit",
+    title: "Daily art limit",
+    to: "/settings/art",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: ["spend cost budget money usd dollars"],
   },
   {
     id: "storage-worktree-keep-when",
@@ -174,9 +194,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-overview",
-    title: "Project overview",
+    title: "Games",
     to: "/settings/projects",
-    searchTerms: ["name icon emoji image checkout remove delete"],
+    searchTerms: ["project overview name icon emoji image checkout remove delete"],
   },
   {
     id: "default-model",
@@ -350,7 +370,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "time-format",
     title: "Time format",
-    to: "/settings/general",
+    to: "/settings/appearance",
     searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
@@ -518,12 +538,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["cli terminal shell path install command line"],
     desktopOnly: true,
-  },
-  {
-    id: "mobile-app",
-    title: "Mobile app",
-    to: "/settings/general",
-    searchTerms: ["phone tablet iPhone iPad iOS Android App Store Google Play QR"],
   },
   {
     id: "privacy-policy",
@@ -818,6 +832,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
+  "/settings/game-tools": null,
+  "/settings/art": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
   "/settings/keybindings": null,

@@ -13,6 +13,7 @@ import { SettingsRow } from "./settingsLayout";
  * has set reads as a short list instead of a stack of empty forms.
  */
 export function SettingsKeyRow({
+  id,
   icon,
   title,
   description,
@@ -24,6 +25,8 @@ export function SettingsKeyRow({
   onSave,
   onClear,
 }: {
+  /** An anchor, so another row can send the reader to this key. */
+  id?: string;
   icon?: ReactNode;
   title: string;
   description: string;
@@ -41,6 +44,7 @@ export function SettingsKeyRow({
   const [editing, setEditing] = useState(false);
   return (
     <SettingsRow
+      id={id}
       inlineControl
       icon={icon ?? <KeyRoundIcon />}
       title={title}

@@ -13,7 +13,7 @@ records each bot play with it, and a build's play facts and **Keep going** are r
 recordings. Without ffmpeg a build is only checked for booting, and Keep going stops at once,
 since it could not judge a step; once ffmpeg is installed, measure the build again. Art tools are programs you install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
-**Settings → General → Game tools** shows each one's status, where it was found, and a **Get**
+**Settings → Game tools** shows each one's status, where it was found, and a **Get**
 button for the vendor's download page when it is missing or the wrong version. After installing
 something, press **Check again**.
 
@@ -108,8 +108,8 @@ and sprites. Generated can be picked once a 3D provider
 or Codex is ready; until then the choice says what to set up. The agent never changes the setting itself: when the chosen way cannot make
 something, it says so and names the others, and you switch the setting when you want to.
 
-Human bodies on **Blender** come from MPFB2, which you install once: **Settings → General → Game
-tools**, MPFB2, **Install**. Its code is GPL-3.0, so Kurambit does not ship it; Install downloads
+Human bodies on **Blender** come from MPFB2, which you install once: **Settings → Game tools**, under
+Blender, **Human bodies**, **Install**. Its code is GPL-3.0, so Kurambit does not ship it; Install downloads
 it from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender
 settings, and the bodies it makes are CC0. **Remove** deletes it again; a live Blender view already
 open keeps it until it reopens. Without MPFB2, Blender characters use library bodies.
@@ -136,9 +136,9 @@ later build brings them back. Characters and creatures are generated only on a g
 characters are made with **Generated**, so nothing is spent on one the game could not use; images,
 props, textures, sound and moves can be generated on every game.
 
-Set it up in **Settings → General → Art providers**. Codex needs no key: it uses your ChatGPT plan
+Set it up in **Settings → Art providers**. Codex needs no key: it uses your ChatGPT plan
 through the Codex you already run in Kurambit. Every other provider takes your own API key: choose **Add key…** on its row, which
-also links to where you get one and shows whether it is ready. **Provider per kind of asset** picks one
+also links to where you get one and shows whether it is ready. **Each kind of asset** shows who makes it, picks one
 provider for a kind or leaves it on **Auto**, the first ready one. The agent never switches provider
 or route to get past a refusal; it tells you what is missing.
 

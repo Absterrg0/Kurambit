@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   BlocksIcon,
   BotIcon,
+  BrushIcon,
   CalendarClockIcon,
   createLucideIcon,
   GitBranchIcon,
@@ -12,6 +13,7 @@ import {
   PaletteIcon,
   SearchIcon,
   Settings2Icon,
+  WrenchIcon,
   XIcon,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -54,6 +56,8 @@ const SETTINGS_SECTION_ICONS: Readonly<
   Record<SettingsPath, ComponentType<{ className?: string }>>
 > = {
   "/settings/general": Settings2Icon,
+  "/settings/game-tools": WrenchIcon,
+  "/settings/art": BrushIcon,
   "/settings/diagnostics": Settings2Icon,
   "/settings/appearance": PaletteIcon,
   "/settings/projects": PanelsTopLeftIcon,
@@ -78,6 +82,8 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     heading: "Studio",
     paths: [
       "/settings/general",
+      "/settings/game-tools",
+      "/settings/art",
       "/settings/appearance",
       "/settings/keybindings",
       "/settings/snap-shot",

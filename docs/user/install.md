@@ -15,7 +15,7 @@ it makes export to Windows, Linux and the web.
   `sudo apt install ffmpeg` (Debian, Ubuntu), `sudo dnf install ffmpeg` (Fedora, with RPM
   Fusion), `brew install ffmpeg` (macOS) or `winget install ffmpeg` (Windows), or get it from
   [ffmpeg.org/download](https://ffmpeg.org/download.html).
-- For game art, Blender 4.2 or later, installed yourself. **Settings → General → Game tools**
+- For game art, Blender 4.2 or later, installed yourself. **Settings → Game tools**
   shows what Kurambit found, ffmpeg included, and links to each download. Games are three.js
   browser games and need nothing else installed.
 

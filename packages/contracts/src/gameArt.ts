@@ -114,6 +114,7 @@ export const GAME_ART_PROVIDERS: Readonly<Record<GameArtProviderId, GameArtProvi
     label: "ElevenLabs",
     lanes: ["sfx", "music", "voice"],
     keySetting: "gameElevenLabsApiKey",
+    note: "Its music licence has a studio-size limit.",
     hosts: ["api.elevenlabs.io"],
     site: "https://elevenlabs.io/app/settings/api-keys",
   },

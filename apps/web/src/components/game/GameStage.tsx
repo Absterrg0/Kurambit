@@ -1016,9 +1016,7 @@ function ThreadGameStage({
                   Export…
                 </MenuItem>
                 <MenuSeparator />
-                <MenuItem
-                  onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
-                >
+                <MenuItem onClick={() => void navigate({ to: "/settings/game-tools" })}>
                   <WrenchIcon />
                   Game tools…
                 </MenuItem>
@@ -1254,7 +1252,7 @@ function ThreadGameStage({
           onRebuild={() => void perform("rebuild")}
           onStop={() => void perform("stop")}
           onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
-          onOpenTools={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
+          onOpenTools={() => void navigate({ to: "/settings/game-tools" })}
           held={held}
           onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
           onStudioMessage={onStudioMessage}

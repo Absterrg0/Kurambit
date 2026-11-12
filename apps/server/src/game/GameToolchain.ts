@@ -173,7 +173,7 @@ export const toolCandidates = (
   ];
 };
 const describeCandidates = (tool: BinaryTool) =>
-  `the path in Settings > General > Game tools, ${ENV_OVERRIDES[tool]}, an earlier Kurambit install, then PATH (${tool === "godot" ? "godot, godot4" : tool})`;
+  `the path in Settings > Game tools, ${ENV_OVERRIDES[tool]}, an earlier Kurambit install, then PATH (${tool === "godot" ? "godot, godot4" : tool})`;
 export interface ResolvedTool {
   readonly path: string;
   readonly version: string;
@@ -381,8 +381,8 @@ const make = Effect.gen(function* () {
     found.kind === "missing"
       ? `${NAMES[tool]} was not found. Kurambit looks at ${describeCandidates(tool)}. Get ${REQUIRED[tool]} from ${DOWNLOADS[tool]}.`
       : found.kind === "wrong-version"
-        ? `${found.path} is ${NAMES[tool]} ${found.version}; Kurambit needs ${REQUIRED[tool]}. Get it from ${DOWNLOADS[tool]}, or point Settings > General > Game tools at a supported copy.`
-        : `${found.path} did not run as ${NAMES[tool]} (\`--version\` failed). Fix or reinstall it from ${DOWNLOADS[tool]}, or point Settings > General > Game tools at a working copy.${found.detail ? `\n${found.detail}` : ""}`;
+        ? `${found.path} is ${NAMES[tool]} ${found.version}; Kurambit needs ${REQUIRED[tool]}. Get it from ${DOWNLOADS[tool]}, or point Settings > Game tools at a supported copy.`
+        : `${found.path} did not run as ${NAMES[tool]} (\`--version\` failed). Fix or reinstall it from ${DOWNLOADS[tool]}, or point Settings > Game tools at a working copy.${found.detail ? `\n${found.detail}` : ""}`;
   const executable: GameToolchain["Service"]["executable"] = Effect.fn("GameToolchain.executable")(
     function* (tool) {
       const found = yield* probe(tool);
@@ -756,7 +756,7 @@ const make = Effect.gen(function* () {
   );
   const unityMissing = (path: string, detail: string, reason: GameOperationError["reason"]) =>
     new GameOperationError({ operation: "Unity", path, reason, detail });
-  const getUnity = `Install Unity Hub from ${UNITY_DOWNLOAD_URL} and add a Unity ${UNITY_MIN_VERSION} or later Unity 6 editor with Windows Build Support (Mono), or set its path in Settings > General > Game tools.`;
+  const getUnity = `Install Unity Hub from ${UNITY_DOWNLOAD_URL} and add a Unity ${UNITY_MIN_VERSION} or later Unity 6 editor with Windows Build Support (Mono), or set its path in Settings > Game tools.`;
   /** The editor for a project, or why there is none; the licence and CLI are checked by the caller. */
   const unityEditor = (projectDir: string | undefined) =>
     Effect.gen(function* () {
@@ -765,7 +765,7 @@ const make = Effect.gen(function* () {
       if (override !== undefined && !(yield* Effect.promise(() => isExecutable(override.editor))))
         return yield* unityMissing(
           override.editor,
-          `${override.source === "settings" ? "The Unity editor path in Settings > General > Game tools" : "KURAMBIT_UNITY_EDITOR"} names ${override.editor}, which is not an executable file. ${getUnity}`,
+          `${override.source === "settings" ? "The Unity editor path in Settings > Game tools" : "KURAMBIT_UNITY_EDITOR"} names ${override.editor}, which is not an executable file. ${getUnity}`,
           "tool-missing",
         );
       const project =
@@ -783,7 +783,7 @@ const make = Effect.gen(function* () {
       if (choice.kind === "none")
         return yield* unityMissing(
           hub.editors,
-          `No Unity editor was found. Kurambit looks at the path in Settings > General > Game tools, KURAMBIT_UNITY_EDITOR, Unity Hub's editors folder (${hub.editors}) and the folder in ${hub.secondaryInstallPathFile}, and an earlier Kurambit install. ${getUnity}`,
+          `No Unity editor was found. Kurambit looks at the path in Settings > Game tools, KURAMBIT_UNITY_EDITOR, Unity Hub's editors folder (${hub.editors}) and the folder in ${hub.secondaryInstallPathFile}, and an earlier Kurambit install. ${getUnity}`,
           "tool-missing",
         );
       if (choice.kind === "unknown-version")

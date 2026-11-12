@@ -28,8 +28,10 @@ import { Route as ChatSettingsOpenSourceLicensesRouteImport } from './routes/_ch
 import { Route as ChatSettingsKeybindingsRouteImport } from './routes/_chat.settings.keybindings'
 import { Route as ChatSettingsIntegrationsRouteImport } from './routes/_chat.settings.integrations'
 import { Route as ChatSettingsGeneralRouteImport } from './routes/_chat.settings.general'
+import { Route as ChatSettingsGameToolsRouteImport } from './routes/_chat.settings.game-tools'
 import { Route as ChatSettingsDiagnosticsRouteImport } from './routes/_chat.settings.diagnostics'
 import { Route as ChatSettingsConnectionsRouteImport } from './routes/_chat.settings.connections'
+import { Route as ChatSettingsArtRouteImport } from './routes/_chat.settings.art'
 import { Route as ChatSettingsArchivedRouteImport } from './routes/_chat.settings.archived'
 import { Route as ChatSettingsAppearanceRouteImport } from './routes/_chat.settings.appearance'
 import { Route as ChatSettingsSplatRouteImport } from './routes/_chat.settings.$'
@@ -134,6 +136,11 @@ const ChatSettingsGeneralRoute = ChatSettingsGeneralRouteImport.update({
   path: '/general',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
+const ChatSettingsGameToolsRoute = ChatSettingsGameToolsRouteImport.update({
+  id: '/game-tools',
+  path: '/game-tools',
+  getParentRoute: () => ChatSettingsRoute,
+} as any)
 const ChatSettingsDiagnosticsRoute = ChatSettingsDiagnosticsRouteImport.update({
   id: '/diagnostics',
   path: '/diagnostics',
@@ -142,6 +149,11 @@ const ChatSettingsDiagnosticsRoute = ChatSettingsDiagnosticsRouteImport.update({
 const ChatSettingsConnectionsRoute = ChatSettingsConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
+  getParentRoute: () => ChatSettingsRoute,
+} as any)
+const ChatSettingsArtRoute = ChatSettingsArtRouteImport.update({
+  id: '/art',
+  path: '/art',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
 const ChatSettingsArchivedRoute = ChatSettingsArchivedRouteImport.update({
@@ -185,8 +197,10 @@ export interface FileRoutesByFullPath {
   '/settings/$': typeof ChatSettingsSplatRoute
   '/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/settings/archived': typeof ChatSettingsArchivedRoute
+  '/settings/art': typeof ChatSettingsArtRoute
   '/settings/connections': typeof ChatSettingsConnectionsRoute
   '/settings/diagnostics': typeof ChatSettingsDiagnosticsRoute
+  '/settings/game-tools': typeof ChatSettingsGameToolsRoute
   '/settings/general': typeof ChatSettingsGeneralRoute
   '/settings/integrations': typeof ChatSettingsIntegrationsRoute
   '/settings/keybindings': typeof ChatSettingsKeybindingsRoute
@@ -212,8 +226,10 @@ export interface FileRoutesByTo {
   '/settings/$': typeof ChatSettingsSplatRoute
   '/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/settings/archived': typeof ChatSettingsArchivedRoute
+  '/settings/art': typeof ChatSettingsArtRoute
   '/settings/connections': typeof ChatSettingsConnectionsRoute
   '/settings/diagnostics': typeof ChatSettingsDiagnosticsRoute
+  '/settings/game-tools': typeof ChatSettingsGameToolsRoute
   '/settings/general': typeof ChatSettingsGeneralRoute
   '/settings/integrations': typeof ChatSettingsIntegrationsRoute
   '/settings/keybindings': typeof ChatSettingsKeybindingsRoute
@@ -241,8 +257,10 @@ export interface FileRoutesById {
   '/_chat/settings/$': typeof ChatSettingsSplatRoute
   '/_chat/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/_chat/settings/archived': typeof ChatSettingsArchivedRoute
+  '/_chat/settings/art': typeof ChatSettingsArtRoute
   '/_chat/settings/connections': typeof ChatSettingsConnectionsRoute
   '/_chat/settings/diagnostics': typeof ChatSettingsDiagnosticsRoute
+  '/_chat/settings/game-tools': typeof ChatSettingsGameToolsRoute
   '/_chat/settings/general': typeof ChatSettingsGeneralRoute
   '/_chat/settings/integrations': typeof ChatSettingsIntegrationsRoute
   '/_chat/settings/keybindings': typeof ChatSettingsKeybindingsRoute
@@ -270,8 +288,10 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/art'
     | '/settings/connections'
     | '/settings/diagnostics'
+    | '/settings/game-tools'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
@@ -297,8 +317,10 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/art'
     | '/settings/connections'
     | '/settings/diagnostics'
+    | '/settings/game-tools'
     | '/settings/general'
     | '/settings/integrations'
     | '/settings/keybindings'
@@ -325,8 +347,10 @@ export interface FileRouteTypes {
     | '/_chat/settings/$'
     | '/_chat/settings/appearance'
     | '/_chat/settings/archived'
+    | '/_chat/settings/art'
     | '/_chat/settings/connections'
     | '/_chat/settings/diagnostics'
+    | '/_chat/settings/game-tools'
     | '/_chat/settings/general'
     | '/_chat/settings/integrations'
     | '/_chat/settings/keybindings'
@@ -483,6 +507,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatSettingsGeneralRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
+    '/_chat/settings/game-tools': {
+      id: '/_chat/settings/game-tools'
+      path: '/game-tools'
+      fullPath: '/settings/game-tools'
+      preLoaderRoute: typeof ChatSettingsGameToolsRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
     '/_chat/settings/diagnostics': {
       id: '/_chat/settings/diagnostics'
       path: '/diagnostics'
@@ -495,6 +526,13 @@ declare module '@tanstack/react-router' {
       path: '/connections'
       fullPath: '/settings/connections'
       preLoaderRoute: typeof ChatSettingsConnectionsRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
+    '/_chat/settings/art': {
+      id: '/_chat/settings/art'
+      path: '/art'
+      fullPath: '/settings/art'
+      preLoaderRoute: typeof ChatSettingsArtRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
     '/_chat/settings/archived': {
@@ -539,8 +577,10 @@ interface ChatSettingsRouteChildren {
   ChatSettingsSplatRoute: typeof ChatSettingsSplatRoute
   ChatSettingsAppearanceRoute: typeof ChatSettingsAppearanceRoute
   ChatSettingsArchivedRoute: typeof ChatSettingsArchivedRoute
+  ChatSettingsArtRoute: typeof ChatSettingsArtRoute
   ChatSettingsConnectionsRoute: typeof ChatSettingsConnectionsRoute
   ChatSettingsDiagnosticsRoute: typeof ChatSettingsDiagnosticsRoute
+  ChatSettingsGameToolsRoute: typeof ChatSettingsGameToolsRoute
   ChatSettingsGeneralRoute: typeof ChatSettingsGeneralRoute
   ChatSettingsIntegrationsRoute: typeof ChatSettingsIntegrationsRoute
   ChatSettingsKeybindingsRoute: typeof ChatSettingsKeybindingsRoute
@@ -557,8 +597,10 @@ const ChatSettingsRouteChildren: ChatSettingsRouteChildren = {
   ChatSettingsSplatRoute: ChatSettingsSplatRoute,
   ChatSettingsAppearanceRoute: ChatSettingsAppearanceRoute,
   ChatSettingsArchivedRoute: ChatSettingsArchivedRoute,
+  ChatSettingsArtRoute: ChatSettingsArtRoute,
   ChatSettingsConnectionsRoute: ChatSettingsConnectionsRoute,
   ChatSettingsDiagnosticsRoute: ChatSettingsDiagnosticsRoute,
+  ChatSettingsGameToolsRoute: ChatSettingsGameToolsRoute,
   ChatSettingsGeneralRoute: ChatSettingsGeneralRoute,
   ChatSettingsIntegrationsRoute: ChatSettingsIntegrationsRoute,
   ChatSettingsKeybindingsRoute: ChatSettingsKeybindingsRoute,

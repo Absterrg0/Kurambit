@@ -1898,7 +1898,7 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: ["game tools", "blender godot unity install download executable paths"],
     icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/settings/general", hash: "game-tools" });
+      await navigate({ to: "/settings/game-tools" });
     },
   });
   actionItems.push({
@@ -1910,7 +1910,7 @@ function OpenCommandPaletteDialog(props: {
     ],
     icon: <BrushIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/settings/general", hash: "art-providers" });
+      await navigate({ to: "/settings/art" });
     },
   });
 

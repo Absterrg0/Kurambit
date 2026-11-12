@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { LayersIcon, PaletteIcon, WalletIcon } from "lucide-react";
+import { PaletteIcon, WalletIcon } from "lucide-react";
 import {
   GAME_ART_PROVIDERS,
   type EnvironmentId,
@@ -24,9 +24,17 @@ import {
 } from "../game/gameGeneration.logic";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { StatusDot } from "../ui/status-dot";
 import { SettingsKeyRow } from "./SettingsKeyRow";
+import { InlineButton } from "../ui/button";
 import { Text } from "../ui/text";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { useSettingsScope } from "./SettingsScopeContext";
+import {
+  scrollToSettingsTarget,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 // The Kurambit plan is one more provider once it exists; until then it is not offered.
 const SHOWN_PROVIDERS = (
@@ -38,16 +46,36 @@ const lanesLine = (provider: GameArtProviderId) =>
     .map((lane) => GAME_ART_LANE_LABELS[lane].toLowerCase())
     .join(", ")}.`;
 
-// The lane picker is narrow; "Codex (ChatGPT plan)" inside "Auto (…)" truncated twice.
+// The lane picker is narrow; "Codex (ChatGPT plan)" inside it truncated.
 const shortProviderLabel = (provider: GameArtProviderId) =>
   provider === "codex" ? "Codex" : providerLabel(provider);
 
+const providerAnchor = (provider: GameArtProviderId) => `art-provider-${provider}`;
+
 const USD: Intl.NumberFormatOptions = { style: "currency", currency: "USD" };
 
+/** Settings → Art providers, for the one computer the settings are scoped to. */
+export function GameArtSettingsPanel() {
+  const { environment, scope } = useSettingsScope();
+  const environmentId =
+    scope.environmentIds.length === 1 ? (environment?.environmentId ?? null) : null;
+  return (
+    <SettingsPageContainer description="Who makes each kind of asset your agent asks for. Auto takes the first ready provider; the agent never switches it for you.">
+      {environmentId === null ? (
+        <Text variant="body" tone="muted" render={<p className="px-3 sm:px-4" />}>
+          Art providers belong to one computer. Choose it above.
+        </Text>
+      ) : (
+        <GameArtSettings key={environmentId} environmentId={environmentId} />
+      )}
+    </SettingsPageContainer>
+  );
+}
+
 /**
- * Settings → Art providers: the person's own keys per provider (Codex uses the
- * ChatGPT plan and needs none), which provider makes each lane, and the daily
- * spend limit every paid generation counts against.
+ * Readiness by kind of asset first, since that is what a game asks for; then the
+ * providers that kind waits on, each with its own terms; then the daily spend limit
+ * every paid generation counts against.
  */
 export function GameArtSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
@@ -73,87 +101,57 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
     void save({ gameArtLanes: { [lane]: choice } });
   };
   const spent = providers.data?.spentTodayUsd;
-  return (
-    <SettingsSection id="art-providers" title="Art providers">
-      <Text variant="meta" tone="muted" render={<p className="px-4 py-3 text-pretty" />}>
-        Each kind of asset goes to the provider that makes it best, on your own keys or your ChatGPT
-        plan through Codex. Keys stay in this environment&apos;s secret store. What they make is
-        yours on a paid plan; free plans do not allow commercial use, and ElevenLabs music has a
-        studio-size limit.
-      </Text>
-      {error ? (
-        <Text
-          variant="body"
-          tone="destructive"
-          render={<p role="alert" className="px-4 whitespace-pre-wrap" />}
+  // The providers a waiting lane could use, each a link to its row below.
+  const providerLinks = (options: ReadonlyArray<GameArtProviderId>) =>
+    options.map((provider, index) => (
+      <span key={provider}>
+        {index === 0 ? null : index === options.length - 1 ? " or " : ", "}
+        <InlineButton
+          tone="muted"
+          className="inline align-baseline"
+          onClick={() => scrollToSettingsTarget(providerAnchor(provider))}
         >
-          {error}
-        </Text>
-      ) : null}
-      {SHOWN_PROVIDERS.map((provider) => {
-        const info = GAME_ART_PROVIDERS[provider];
-        const status = statusOf(provider);
-        const keySetting = info.keySetting;
-        const configured = keySetting === null ? null : settings[keySetting].length > 0;
-        // A missing key is the ordinary state, not a fault: a grey dot, and the server's
-        // "No key saved." is left out because the label already says it.
-        const state =
-          status === null
-            ? { tone: "neutral" as const, label: "Checking…" }
-            : status.ready
-              ? { tone: "success" as const, label: "Ready" }
-              : configured === false
-                ? { tone: "neutral" as const, label: "No key" }
-                : { tone: "warning" as const, label: "Not ready" };
-        return (
-          <SettingsKeyRow
-            key={provider}
-            icon={<PaletteIcon />}
-            title={info.label}
-            description={
-              keySetting === null
-                ? `${lanesLine(provider)} Uses your ChatGPT plan through Codex; no key needed.`
-                : info.note === undefined
-                  ? lanesLine(provider)
-                  : `${lanesLine(provider)} ${info.note}`
-            }
-            link={{ href: info.site, label: keySetting === null ? "About Codex" : "Get a key" }}
-            status={state}
-            message={
-              status !== null && !status.ready && configured !== false ? status.message : null
-            }
-            configured={configured}
-            canWrite={canWrite}
-            onSave={(next) => {
-              if (keySetting !== null) void save({ [keySetting]: next });
-            }}
-            onClear={() => {
-              if (keySetting !== null) void save({ [keySetting]: "" });
-            }}
-          />
-        );
-      })}
-      <SettingsRow
-        icon={<LayersIcon />}
-        title="Provider per kind of asset"
-        description="Auto uses the first ready provider in Kurambit's order. The agent never switches it for you."
-      >
-        <div className="grid grid-cols-1 gap-x-6 gap-y-2 ps-7 pb-2 @min-[40rem]/settings-row:grid-cols-2">
-          {GAME_ART_LANES.map((lane) => {
-            const choice = settings.gameArtLanes[lane] ?? "auto";
-            const auto = providers.data?.lanes[lane];
-            const autoLabel =
-              auto === undefined
-                ? "Auto"
-                : auto === null
-                  ? "Auto · none ready"
-                  : `Auto · ${shortProviderLabel(auto)}`;
-            const options = SHOWN_PROVIDERS.filter((provider) =>
-              GAME_ART_PROVIDERS[provider].lanes.includes(lane),
+          {shortProviderLabel(provider)}
+        </InlineButton>
+      </span>
+    ));
+  return (
+    <>
+      <SettingsSection id="art-lanes" title="Each kind of asset">
+        {GAME_ART_LANES.map((lane) => {
+          const choice = settings.gameArtLanes[lane] ?? "auto";
+          const auto = providers.data?.lanes[lane];
+          const options = SHOWN_PROVIDERS.filter((provider) =>
+            GAME_ART_PROVIDERS[provider].lanes.includes(lane),
+          );
+          const waiting = options.filter((provider) => statusOf(provider)?.ready !== true);
+          const description =
+            choice !== "auto" ? (
+              statusOf(choice)?.ready === true ? (
+                `Always ${shortProviderLabel(choice)}.`
+              ) : (
+                <>Always {providerLinks([choice])}, which is not ready yet.</>
+              )
+            ) : auto === undefined ? (
+              "Checking…"
+            ) : auto === null ? (
+              <>Needs a key from {providerLinks(waiting)}.</>
+            ) : (
+              `${shortProviderLabel(auto)} makes it.`
             );
-            return (
-              <label key={lane} className="flex items-center justify-between gap-2">
-                <Text variant="body">{GAME_ART_LANE_LABELS[lane]}</Text>
+          const ready = choice === "auto" ? auto != null : statusOf(choice)?.ready === true;
+          return (
+            <SettingsRow
+              key={lane}
+              inlineControl
+              title={GAME_ART_LANE_LABELS[lane]}
+              description={
+                <span className="flex items-center gap-1.5">
+                  <StatusDot framed tone={ready ? "success" : "neutral"} />
+                  <span className="min-w-0">{description}</span>
+                </span>
+              }
+              control={
                 <Select
                   value={choice}
                   disabled={!canWrite}
@@ -165,16 +163,16 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                 >
                   <SelectTrigger
                     size="sm"
-                    className="w-44"
+                    className="w-36"
                     aria-label={`Provider for ${GAME_ART_LANE_LABELS[lane]}`}
                   >
                     <SelectValue>
-                      {choice === "auto" ? autoLabel : shortProviderLabel(choice)}
+                      {choice === "auto" ? "Auto" : shortProviderLabel(choice)}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>
                     <SelectItem hideIndicator value="auto">
-                      {autoLabel}
+                      Auto
                     </SelectItem>
                     {options.map((provider) => (
                       <SelectItem hideIndicator key={provider} value={provider}>
@@ -183,40 +181,102 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                     ))}
                   </SelectPopup>
                 </Select>
-              </label>
-            );
-          })}
-        </div>
-      </SettingsRow>
-      <SettingsRow
-        icon={<WalletIcon />}
-        title="Daily limit"
-        description={
-          spent === undefined
-            ? "What generated art may cost per day across every game. A paid generation over it is refused, with the number."
-            : `What generated art may cost per day across every game. Spent today: ${formatUsd(spent)}.`
-        }
-        control={
-          <NumberField
-            value={settings.gameArtDailyLimitUsd}
-            min={0}
-            max={1000}
-            step={1}
-            format={USD}
-            size="sm"
-            className="w-28"
-            disabled={!canWrite}
-            onValueCommitted={(value) => {
-              if (value !== null && value !== settings.gameArtDailyLimitUsd)
-                void save({ gameArtDailyLimitUsd: value });
-            }}
+              }
+            />
+          );
+        })}
+      </SettingsSection>
+      <SettingsSection id="art-providers" title="Providers">
+        <Text variant="meta" tone="muted" render={<p className="px-4 py-3 text-pretty" />}>
+          What a provider makes is yours on its paid plan; free plans do not allow commercial use.
+          Keys stay in this computer&apos;s secret store.
+        </Text>
+        {error ? (
+          <Text
+            variant="body"
+            tone="destructive"
+            render={<p role="alert" className="px-4 whitespace-pre-wrap" />}
           >
-            <NumberFieldGroup>
-              <NumberFieldInput aria-label="Daily limit in US dollars" />
-            </NumberFieldGroup>
-          </NumberField>
-        }
-      />
-    </SettingsSection>
+            {error}
+          </Text>
+        ) : null}
+        {SHOWN_PROVIDERS.map((provider) => {
+          const info = GAME_ART_PROVIDERS[provider];
+          const status = statusOf(provider);
+          const keySetting = info.keySetting;
+          const configured = keySetting === null ? null : settings[keySetting].length > 0;
+          // A missing key is the ordinary state, not a fault: a grey dot, and the server's
+          // "No key saved." is left out because the label already says it.
+          const state =
+            status === null
+              ? { tone: "neutral" as const, label: "Checking…" }
+              : status.ready
+                ? { tone: "success" as const, label: "Ready" }
+                : configured === false
+                  ? { tone: "neutral" as const, label: "No key" }
+                  : { tone: "warning" as const, label: "Not ready" };
+          return (
+            <SettingsKeyRow
+              key={provider}
+              id={providerAnchor(provider)}
+              icon={<PaletteIcon />}
+              title={info.label}
+              description={
+                keySetting === null
+                  ? `${lanesLine(provider)} Uses your ChatGPT plan through Codex; no key needed.`
+                  : info.note === undefined
+                    ? lanesLine(provider)
+                    : `${lanesLine(provider)} ${info.note}`
+              }
+              link={{ href: info.site, label: keySetting === null ? "About Codex" : "Get a key" }}
+              status={state}
+              message={
+                status !== null && !status.ready && configured !== false ? status.message : null
+              }
+              configured={configured}
+              canWrite={canWrite}
+              onSave={(next) => {
+                if (keySetting !== null) void save({ [keySetting]: next });
+              }}
+              onClear={() => {
+                if (keySetting !== null) void save({ [keySetting]: "" });
+              }}
+            />
+          );
+        })}
+      </SettingsSection>
+      <SettingsSection id="art-spending" title="Spending">
+        <SettingsRow
+          id="art-daily-limit"
+          icon={<WalletIcon />}
+          title="Daily limit"
+          description={
+            spent === undefined
+              ? "What generated art may cost per day across every game. A paid generation over it is refused, with the number."
+              : `What generated art may cost per day across every game. Spent today: ${formatUsd(spent)}.`
+          }
+          control={
+            <NumberField
+              value={settings.gameArtDailyLimitUsd}
+              min={0}
+              max={1000}
+              step={1}
+              format={USD}
+              size="sm"
+              className="w-28"
+              disabled={!canWrite}
+              onValueCommitted={(value) => {
+                if (value !== null && value !== settings.gameArtDailyLimitUsd)
+                  void save({ gameArtDailyLimitUsd: value });
+              }}
+            >
+              <NumberFieldGroup>
+                <NumberFieldInput aria-label="Daily limit in US dollars" />
+              </NumberFieldGroup>
+            </NumberField>
+          }
+        />
+      </SettingsSection>
+    </>
   );
 }

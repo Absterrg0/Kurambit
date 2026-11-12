@@ -492,7 +492,8 @@ export function SettingsRow({
               <Text
                 variant="body"
                 tone="muted"
-                render={<p className="text-pretty [--type-body:var(--type-meta)]" />}
+                // A reading measure: a sentence that runs the panel's full width is hard to follow.
+                render={<p className="max-w-[72ch] text-pretty [--type-body:var(--type-meta)]" />}
               >
                 {description}
               </Text>
@@ -629,7 +630,11 @@ export function SettingsPageContainer({
                   {pageTitle}
                 </Text>
                 {description ? (
-                  <Text variant="body" tone="muted" render={<p />}>
+                  <Text
+                    variant="body"
+                    tone="muted"
+                    render={<p className="max-w-[72ch] text-pretty" />}
+                  >
                     {description}
                   </Text>
                 ) : null}

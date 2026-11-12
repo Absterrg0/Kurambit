@@ -96,7 +96,7 @@ export function GameGeneratedArt({ threadRef }: { threadRef: ScopedThreadRef }) 
           size="xs"
           variant="ghost"
           className="ml-auto"
-          onClick={() => void navigate({ to: "/settings/general", hash: "art-providers" })}
+          onClick={() => void navigate({ to: "/settings/art" })}
         >
           Art providers settings
         </Button>

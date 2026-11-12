@@ -1,5 +1,3 @@
-import { GameToolsSettings } from "./GameToolsSettings";
-import { GameArtSettings } from "./GameArtSettings";
 import {
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
@@ -902,6 +900,48 @@ export function AppearanceSettingsPanel() {
 
       <SettingsSection id="appearance-interface" title="Interface">
         <SettingsRow
+          {...searchableSetting("time-format")}
+          description="System default follows your browser or OS clock preference."
+          resetAction={
+            settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
+              <SettingResetButton
+                label="time format"
+                onClick={() =>
+                  updateSettings({
+                    timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.timestampFormat}
+              onValueChange={(value) => {
+                if (value === "locale" || value === "12-hour" || value === "24-hour") {
+                  updateSettings({ timestampFormat: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Timestamp format">
+                <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="locale">
+                  {TIMESTAMP_FORMAT_LABELS.locale}
+                </SelectItem>
+                <SelectItem hideIndicator value="12-hour">
+                  {TIMESTAMP_FORMAT_LABELS["12-hour"]}
+                </SelectItem>
+                <SelectItem hideIndicator value="24-hour">
+                  {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
           {...searchableSetting("setting-appearance-contrast")}
           description="Adjust the contrast of colours and borders across the interface."
           resetAction={
@@ -1801,8 +1841,8 @@ function AdvancedSettingsFold({ children }: { children: ReactNode }) {
             />
           </CollapsibleTrigger>
           <Text variant="meta" tone="muted" render={<p />}>
-            Threads, diffs, worktrees, confirmations and the sidebar, from the code-chat app
-            Kurambit is built on.
+            Settings for the agent&apos;s chat history, side copies, confirmations and the sidebar.
+            Most games never need them.
           </Text>
         </div>
         <CollapsiblePanel>
@@ -1955,26 +1995,6 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
-      {isEnvironmentScope ? (
-        <>
-          <GameToolsSettings key={environmentId} environmentId={environmentId} />
-          <GameArtSettings key={`art:${environmentId}`} environmentId={environmentId} />
-        </>
-      ) : null}
-      <SettingsSection id="notifications" title="Notifications">
-        <NotificationSettings />
-        <SettingsRow
-          {...searchableSetting("in-app-notifications")}
-          description="A toast when another game's agent finishes, fails, or needs your answer while Kurambit is in front."
-          control={
-            <Switch
-              checked={settings.inAppNotificationsEnabled}
-              onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
-              aria-label="In-app alerts"
-            />
-          }
-        />
-      </SettingsSection>
 
       {/* The few code-chat preferences the game composer still reads. */}
       <SettingsSection id="composer" title="Composer">
@@ -2065,45 +2085,19 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+      </SettingsSection>
+
+      <SettingsSection id="notifications" title="Notifications">
+        <NotificationSettings />
         <SettingsRow
-          {...searchableSetting("time-format")}
-          description="System default follows your browser or OS clock preference."
-          resetAction={
-            settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
-              <SettingResetButton
-                label="time format"
-                onClick={() =>
-                  updateSettings({
-                    timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
-                  })
-                }
-              />
-            ) : null
-          }
+          {...searchableSetting("in-app-notifications")}
+          description="A toast when another game's agent finishes, fails, or needs your answer while Kurambit is in front."
           control={
-            <Select
-              value={settings.timestampFormat}
-              onValueChange={(value) => {
-                if (value === "locale" || value === "12-hour" || value === "24-hour") {
-                  updateSettings({ timestampFormat: value });
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Timestamp format">
-                <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="locale">
-                  {TIMESTAMP_FORMAT_LABELS.locale}
-                </SelectItem>
-                <SelectItem hideIndicator value="12-hour">
-                  {TIMESTAMP_FORMAT_LABELS["12-hour"]}
-                </SelectItem>
-                <SelectItem hideIndicator value="24-hour">
-                  {TIMESTAMP_FORMAT_LABELS["24-hour"]}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
+            <Switch
+              checked={settings.inAppNotificationsEnabled}
+              onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
+              aria-label="In-app alerts"
+            />
           }
         />
       </SettingsSection>

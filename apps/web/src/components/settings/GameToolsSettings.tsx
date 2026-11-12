@@ -32,17 +32,27 @@ import { DraftInput } from "../ui/draft-input";
 import { SettingsKeyRow } from "./SettingsKeyRow";
 import { StatusLabel } from "../ui/status-dot";
 import { Text } from "../ui/text";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { useSettingsScope } from "./SettingsScopeContext";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 // One line each; requirements and where a tool comes from sit behind the row's About.
 const TOOL_PURPOSE = {
   godot: "The engine for native games.",
   unity: "The engine for Unity games.",
   blender: "Models, rigs and renders game art.",
-  uv: "Runs the live Blender view's helper.",
-  mpfb: "Makes human bodies for characters built in Blender.",
+  uv: "Lets the agent work in a running Blender.",
+  mpfb: "Makes human bodies for characters.",
   ffmpeg: "Records each bot play.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
+
+// Helpers that only matter through Blender sit under it, named by what they let a game do;
+// the program's own name stays on the row's meta line for troubleshooting.
+const BLENDER_HELPERS = {
+  uv: "Live Blender",
+  mpfb: "Human bodies",
+} as const satisfies Partial<Record<GameToolStatus["tool"], string>>;
+const isBlenderHelper = (tool: GameToolStatus["tool"]): tool is keyof typeof BLENDER_HELPERS =>
+  tool in BLENDER_HELPERS;
 
 const TOOL_ABOUT = {
   godot: "Godot 4.7.x with its export templates.",
@@ -91,6 +101,27 @@ const PATH_ROWS = [
 ] as const;
 type PathKey = (typeof PATH_ROWS)[number]["key"];
 
+/** Settings → Game tools, for the one computer the settings are scoped to. */
+export function GameToolsSettingsPanel() {
+  const { environment, scope } = useSettingsScope();
+  const environmentId =
+    scope.environmentIds.length === 1 ? (environment?.environmentId ?? null) : null;
+  return (
+    <SettingsPageContainer description="The programs this computer builds, renders and records your games with.">
+      {environmentId === null ? (
+        <Text variant="body" tone="muted" render={<p className="px-3 sm:px-4" />}>
+          Game tools belong to one computer. Choose it above.
+        </Text>
+      ) : (
+        <>
+          <GameToolsSettings key={environmentId} environmentId={environmentId} />
+          <GameToolsKeys key={`keys:${environmentId}`} environmentId={environmentId} />
+        </>
+      )}
+    </SettingsPageContainer>
+  );
+}
+
 export function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
@@ -108,7 +139,7 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
   return (
     <SettingsSection
       id="game-tools"
-      title="Game tools"
+      title="Programs"
       headerAction={
         <Button
           size="sm"
@@ -121,11 +152,12 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
         </Button>
       }
     >
-      {query.data?.tools.map((tool) => (
+      {orderTools(query.data?.tools ?? []).map((tool) => (
         <GameToolRow
           key={tool.tool}
           environmentId={environmentId}
           tool={tool}
+          blender={query.data?.tools.find((entry) => entry.tool === "blender") ?? null}
           onChanged={() => query.refresh()}
         />
       ))}
@@ -169,8 +201,15 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           </Text>
         </div>
       ) : null}
-      <GameToolsKeys environmentId={environmentId} />
     </SettingsSection>
+  );
+}
+
+// Blender's helpers follow Blender, whatever order the server lists them in.
+function orderTools(tools: ReadonlyArray<GameToolStatus>): ReadonlyArray<GameToolStatus> {
+  const helpers = tools.filter((tool) => isBlenderHelper(tool.tool));
+  return tools.flatMap((tool) =>
+    isBlenderHelper(tool.tool) ? [] : tool.tool === "blender" ? [tool, ...helpers] : [tool],
   );
 }
 
@@ -182,10 +221,12 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
 function GameToolRow({
   environmentId,
   tool,
+  blender,
   onChanged,
 }: {
   environmentId: EnvironmentId;
   tool: GameToolStatus;
+  blender: GameToolStatus | null;
   onChanged: () => void;
 }) {
   const install = useAtomCommand(gameEnvironment.toolchainInstall, { reportFailure: false });
@@ -206,18 +247,28 @@ function GameToolRow({
     setPending(null);
     onChanged();
   };
-  const status = STATUS_LABELS[tool.status];
+  const helper = isBlenderHelper(tool.tool);
+  // A helper cannot be installed into a Blender that is not there yet: it waits on Blender
+  // instead of offering a button that cannot work.
+  const waitsOnBlender =
+    helper && !tool.installed && blender !== null && blender.status !== "ready";
+  const status = waitsOnBlender
+    ? ({ tone: "neutral", label: "Needs Blender" } as const)
+    : STATUS_LABELS[tool.status];
   const ToolIcon = TOOL_ICONS[tool.tool];
-  const found =
+  const where =
     [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
       .filter((part) => part !== null)
       .join(" · ") || (tool.installed ? "" : "Not installed");
+  const found = [helper ? GAME_TOOL_NAMES[tool.tool] : "", where]
+    .filter((part) => part !== "")
+    .join(" · ");
   // Installed but not ready: the message is the fix, so it stays in view. A missing
   // tool's message is the long story of where it was looked for, so it waits in About.
   const showMessage = tool.status !== "ready" && tool.installed;
   // One action per row, in one style: Install or Remove for what Kurambit fetches,
   // otherwise the vendor's page while the tool is not ready.
-  const action = INSTALLABLE.has(tool.tool) ? (
+  const action = waitsOnBlender ? null : INSTALLABLE.has(tool.tool) ? (
     tool.installed ? (
       <Button
         size="sm"
@@ -246,8 +297,9 @@ function GameToolRow({
       <SettingsRow
         inlineControl
         controlAlign="title"
+        className={helper ? "ps-10 sm:ps-11" : undefined}
         icon={<ToolIcon />}
-        title={GAME_TOOL_NAMES[tool.tool]}
+        title={helper ? BLENDER_HELPERS[tool.tool] : GAME_TOOL_NAMES[tool.tool]}
         description={TOOL_PURPOSE[tool.tool]}
         status={
           <span className="flex flex-wrap items-center gap-x-1.5">
@@ -354,7 +406,7 @@ function GameToolsKeys({ environmentId }: { environmentId: EnvironmentId }) {
     if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
   };
   return (
-    <>
+    <SettingsSection id="game-tool-keys" title="Optional services">
       {KEY_ROWS.map((row) => {
         const configured = settings[row.key].length > 0;
         return (
@@ -385,6 +437,6 @@ function GameToolsKeys({ environmentId }: { environmentId: EnvironmentId }) {
           </Text>
         </div>
       ) : null}
-    </>
+    </SettingsSection>
   );
 }

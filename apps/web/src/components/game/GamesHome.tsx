@@ -487,9 +487,7 @@ function BriefOptions({
         {blocker("generated") !== null ? (
           <>
             <MenuSeparator />
-            <MenuItem
-              onClick={() => void navigate({ to: "/settings/general", hash: "art-providers" })}
-            >
+            <MenuItem onClick={() => void navigate({ to: "/settings/art" })}>
               Set up an art provider…
             </MenuItem>
           </>
