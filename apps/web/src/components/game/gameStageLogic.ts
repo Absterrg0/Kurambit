@@ -248,12 +248,21 @@ const showing = (serve: GamePreviewServe, intoPlay: boolean): GameFrameFold => (
 export function remountOrHold(
   previous: GameFrameFold | null,
   next: GamePreviewServe,
-  view: { readonly focused: boolean; readonly hidden: boolean },
+  view: {
+    readonly focused: boolean;
+    readonly hidden: boolean;
+    /**
+     * The folder holds another build than the frame was mounted for (a turn landed, an Undo):
+     * it starts from its title, so the switch is seen, rather than dropping into play.
+     */
+    readonly newBuild?: boolean;
+  },
 ): GameFrameFold {
+  const intoPlay = view.newBuild !== true;
   if (previous === null) return showing(next, false);
   if (previous.held !== null && frameKeyOf(previous.held) === frameKeyOf(next)) {
     if (previous.heldFor !== "hidden" || view.hidden) return previous;
-    return view.focused ? { ...previous, heldFor: "focus" } : showing(next, true);
+    return view.focused ? { ...previous, heldFor: "focus" } : showing(next, intoPlay);
   }
   const shown = nextGamePreviewFrame(previous, next);
   if (shown === previous) {
@@ -267,7 +276,7 @@ export function remountOrHold(
   if (shown.serve.previewUrl !== previous.serve.previewUrl) return showing(next, false);
   if (view.hidden) return { ...previous, held: next, heldFor: "hidden" };
   if (view.focused) return { ...previous, held: next, heldFor: "focus" };
-  return showing(next, true);
+  return showing(next, intoPlay);
 }
 
 /** PURE. Loads what is held: the one remount the person asked for, back into play. */

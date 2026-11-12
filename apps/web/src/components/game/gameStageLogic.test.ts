@@ -388,3 +388,13 @@ it("counts only the engine the game needs", () => {
   expect(toolchainReadyFor(withoutGodot, "godot")).toBe(false);
   expect(toolchainReadyFor(withoutGodot, "unity")).toBe(true);
 });
+
+// A new build is seen to start: from its title, not dropped into play like a live edit.
+it("starts a new build from its title, and keeps a live edit of the same build in play", () => {
+  const URL = "http://127.0.0.1:9/";
+  const first = remountOrHold(null, liveServe(URL, 0), WATCHING);
+  expect(remountOrHold(first, liveServe(URL, 1), WATCHING).intoPlay).toBe(true);
+  expect(remountOrHold(first, liveServe(URL, 1), { ...WATCHING, newBuild: true }).intoPlay).toBe(
+    false,
+  );
+});

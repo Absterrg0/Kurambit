@@ -105,7 +105,10 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                   <td
                     className={cn(
                       "py-2 text-right",
-                      row.tone === null ? "text-muted-foreground" : DELTA_TEXT[row.tone],
+                      // Colour only for a verdict; a number that moved reads plain.
+                      row.tone === null || !["Better", "Worse"].includes(changeWord(row) ?? "")
+                        ? "text-muted-foreground"
+                        : DELTA_TEXT[row.tone],
                     )}
                   />
                 }

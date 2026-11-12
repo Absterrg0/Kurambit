@@ -98,6 +98,7 @@ import {
   buildPhrase,
   compareRows,
   factsSettled,
+  VARIES_BY_ITSELF,
   formatBuildTime,
   plainWhy,
 } from "./gameBuilds.logic";
@@ -641,7 +642,9 @@ function SinceBase({
     compared.deltas,
     gameFactsView(compared.factsA),
     gameFactsView(compared.factsB),
-  ).rows.filter((row) => row.mark !== null && row.mark !== "=").length;
+  ).rows.filter(
+    (row) => row.mark !== null && row.mark !== "=" && !VARIES_BY_ITSELF.has(row.id),
+  ).length;
   const from = buildPhrase(buildName(base));
   return (
     <div className="flex items-center gap-2 px-1">
@@ -712,13 +715,18 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
   const toJudge = view.checks.filter(
     (check) => check.reading._tag === "measured" && check.reading.tone === "neutral",
   ).length;
+  const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
   return [
-    ...(shownPass > 0 || view.toLook > 0 || !busy
-      ? [`${shownPass} of ${view.checks.length} pass`]
-      : []),
+    // While measuring, the count is what has landed so far, never a verdict out of all of them.
+    ...(busy
+      ? shownPass > 0
+        ? [`${shownPass} ${shownPass === 1 ? "passes" : "pass"} so far`]
+        : []
+      : [`${shownPass} of ${view.checks.length} pass`]),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
     ...(toJudge > 0 ? [`${toJudge} for you to judge`] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
+    ...(busy && pending > 0 ? [`${pending} to measure`] : []),
     // The step line under it already says it is measuring, and which step.
     ...(busy && !stepLine ? ["measuring"] : []),
   ].join(" · ");
@@ -1260,7 +1268,7 @@ function Recordings({
                     threadRef,
                     root,
                     open,
-                    `${fact} recording`,
+                    `${fact} recording · ${buildName(build)}`,
                     proves.get(fact) ?? null,
                   );
               }}

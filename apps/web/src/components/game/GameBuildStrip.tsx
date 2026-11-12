@@ -510,7 +510,9 @@ function BuildCard({
             className={cn(
               "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
               NEW_CARD_MOTION,
-              (undone || !build.available) && "opacity-40",
+              // An undone build stays readable, its word and strike saying what it is; a pruned
+              // one has nothing to open and steps further back.
+              !build.available ? "opacity-40" : undone && "opacity-65",
             )}
           />
         }
@@ -565,9 +567,9 @@ function BuildCard({
           }
         />
       </TooltipTrigger>
-      {/* Over the picture, clear of the composer under the strip: the whole caption, and how
-          the build measured, which the card does not say. */}
-      <TooltipPopup side="top" className="max-w-xs">
+      {/* Under the card, so it never covers the strip's own row above: the whole caption, its
+          time, and how the build measured, which the card does not say. */}
+      <TooltipPopup side="bottom" className="max-w-xs">
         <span className="flex flex-col gap-0.5">
           <span>{caption}</span>
           <span className="text-muted-foreground">
@@ -694,7 +696,7 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
  */
 function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: string }) {
   return (
-    <div className="flex w-40 shrink-0 flex-col gap-1.5">
+    <div className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
       <GameNowPicture
         still={still}
         gameName={gameName}
@@ -808,7 +810,7 @@ function NowCard({
         </GameNowPicture>
         <CardCaption strong={active} title="Now" meta={meta} />
       </TooltipTrigger>
-      <TooltipPopup side="top" align="end" className="max-w-xs">
+      <TooltipPopup side="bottom" align="end" className="max-w-xs">
         {changed
           ? borrowed && current !== null
             ? `The game as it is now, changed since ${buildName(current)}. Picture from ${buildName(current)}.`

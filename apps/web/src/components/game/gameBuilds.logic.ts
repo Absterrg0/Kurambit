@@ -227,6 +227,16 @@ const runEvent = (sentence: string): string =>
         : /answering/i.test(sentence)
           ? "Stopped answering"
           : "No ending";
+/** What a row's reading means, said under it when it differs: a scale or how much it varies. */
+const ROW_NOTES: Partial<Record<GameFactId, string>> = {
+  masher: "Random input plays differently every run, so this reading varies by itself.",
+  motion:
+    "How much the picture changes from frame to frame (temporal information, ITU-T P.910): a still picture is 0.",
+};
+
+/** Rows that vary between runs of the same build: not counted as a difference a change made. */
+export const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher"]);
+
 /** Rows Compare names by what they measure, since their readings are numbers. */
 const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {
   colour: "Largest single colour",
@@ -268,12 +278,14 @@ export const compareHeadline = (compared: CompareRows): string => {
   const pending = compared.oneSided.find((entry) => entry.why === "still being measured");
   if (pending !== undefined)
     return `${pending.side} is still being measured: the comparison fills in as its checks land.`;
-  const differ = compared.rows.filter((row) => row.mark !== null && row.mark !== "=").length;
+  const moved = compared.rows.filter((row) => row.mark !== null && row.mark !== "=");
+  const differ = moved.filter((row) => !VARIES_BY_ITSELF.has(row.id)).length;
+  const varies = moved.length - differ;
   const same = compared.rows.filter((row) => row.mark === "=").length;
+  const alsoVaries = varies > 0 ? "; random input's reading varies by itself" : "";
   if (differ === 0 && same === 0) return "Nothing measured on both builds to compare yet.";
-  if (differ === 0)
-    return `No measured difference: ${same === 1 ? "the one reading both have is" : `all ${same} readings both have are`} the same.`;
-  return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}.`;
+  if (differ === 0) return `No measured difference${alsoVaries}.`;
+  return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}${alsoVaries}.`;
 };
 
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;
@@ -383,7 +395,7 @@ export const compareRows = (
       ...cells(delta, name, line.mark === "="),
       mark: line.mark,
       tone: line.tone,
-      note: null,
+      note: line.mark === "=" ? null : (ROW_NOTES[delta.id] ?? null),
     });
   }
   // What differs leads; readings that are the same follow, so the answer is read first.
@@ -401,8 +413,11 @@ export const compareRows = (
  */
 export const changeWord = (row: Pick<CompareRow, "id" | "mark" | "tone">): string | null => {
   if (row.mark === null || row.mark === "=") return null;
-  if (row.tone === "better") return "Better";
-  if (row.tone === "worse") return "Worse";
+  // A share of colour or an amount of motion is a number that moved, not a verdict: whether the
+  // check passes is its own row's state on each side.
+  const verdict = row.id !== "colour" && row.id !== "motion";
+  if (verdict && row.tone === "better") return "Better";
+  if (verdict && row.tone === "worse") return "Worse";
   if (row.mark === "≠") return "Changed";
   const up = row.mark === "↑";
   // A time moves later or earlier; an amount is more or less.

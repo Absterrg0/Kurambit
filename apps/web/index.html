@@ -441,10 +441,21 @@
         position: relative;
         z-index: 1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        width: 96px;
-        height: 96px;
+        gap: 12px;
+        min-width: 96px;
+        min-height: 96px;
+      }
+
+      /* Says what the wait is, with no progress it cannot know. */
+      #boot-shell-label {
+        margin: 0;
+        font:
+          500 12px/1.4 system-ui,
+          sans-serif;
+        opacity: 0.6;
       }
 
       #boot-shell-logo {
@@ -484,6 +495,7 @@
       <div id="boot-shell">
         <div id="boot-shell-card" aria-label="Kurambit splash screen">
           <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Kurambit" />
+          <p id="boot-shell-label">Opening Kurambit…</p>
         </div>
       </div>
     </div>

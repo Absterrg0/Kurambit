@@ -409,6 +409,8 @@ function ThreadGameStage({
   // The fold of what the play surface runs across reads; state, so the render
   // below can pin this serve without touching refs.
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
+  // The build the mounted frame plays, for telling a new build from a live edit of the same one.
+  const [frameBuild, setFrameBuild] = useState<string | null>(null);
   // The person is in the game: its frame is the document's focused element.
   const [gameFocused, setGameFocused] = useState(false);
   const [stageFocused, setStageFocused] = useState(false);
@@ -910,9 +912,19 @@ function ThreadGameStage({
             webBuild === undefined ? null : `${webBuild.path}#${webBuild.updatedAt}`,
         },
     // A frame hidden by another view or pane may keep focus without a blur.
-    { focused: gameFocused && !frameHidden, hidden: frameHidden },
+    {
+      focused: gameFocused && !frameHidden,
+      hidden: frameHidden,
+      // An Undo or Redo changes the folder before its build list says so.
+      newBuild:
+        turnUndo.restoring ||
+        (frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild),
+    },
   );
-  if (frame !== frameFold) setFrameFold(frame);
+  if (frame !== frameFold) {
+    setFrameFold(frame);
+    if (frame.key !== frameFold?.key) setFrameBuild(folderBuild);
+  } else if (frameBuild === null && folderBuild !== null) setFrameBuild(folderBuild);
   const frameKey = frame.key;
   // A reload clears what the old page threw; a later error sets it again.
   const liveError = studioError !== null && studioError.key === frameKey ? studioError.text : null;
