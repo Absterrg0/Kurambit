@@ -1,5 +1,6 @@
 import { PROVIDER_DISPLAY_NAMES } from "@kurambit/contracts";
 import { settlePromise } from "@kurambit/client-runtime/state/runtime";
+import { ArrowUpCircleIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { useEnvironmentProviders, useEnvironments } from "~/state/environments";
@@ -12,6 +13,7 @@ import {
   type ProviderUpdateRun,
 } from "./ProviderUpdateLaunchNotification.logic";
 import { Button } from "./ui/button";
+import { Spinner } from "./ui/spinner";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -87,10 +89,11 @@ export function ProviderUpdatesAction() {
         render={
           <Button
             size="xs"
-            variant="ghost-muted"
+            variant="outline"
             disabled={isPending}
             onClick={() => void handleUpdate()}
           >
+            {isPending ? <Spinner /> : <ArrowUpCircleIcon />}
             {isPending ? "Updating…" : "Update all"}
           </Button>
         }

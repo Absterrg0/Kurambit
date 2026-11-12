@@ -388,8 +388,8 @@ export function ProviderEnvironmentSection(props: {
       title="Variables"
       description="API keys, base URLs, and other per-instance CLI settings."
       control={
-        <Button type="button" size="sm" variant="outline" onClick={addVariable}>
-          <PlusIcon className="size-3" />
+        <Button type="button" variant="outline" onClick={addVariable}>
+          <PlusIcon />
           Add variable
         </Button>
       }
@@ -883,8 +883,8 @@ export function ProviderInstanceCard({
               render={
                 <Button
                   type="button"
-                  size={mode === "list" ? "icon-micro" : "xs"}
-                  variant={mode === "list" ? "ghost-muted" : "outline"}
+                  size={mode === "list" ? "micro" : "xs"}
+                  variant="ghost-muted"
                   className={mode === "list" ? "pointer-events-auto relative shrink-0" : undefined}
                   aria-label={`${updateProgress ? "Updating" : versionAdvisory.title} — view details`}
                 >
@@ -892,22 +892,19 @@ export function ProviderInstanceCard({
                     <Spinner tone="muted" {...(mode === "list" ? { size: "sm" as const } : {})} />
                   ) : (
                     <VersionAdvisoryIcon
-                      className={cn(
-                        mode === "list" && "size-3.5",
-                        hasCompatibilityWarning && "text-warning",
-                      )}
+                      className={cn(hasCompatibilityWarning && "text-warning")}
                     />
                   )}
-                  {/* The detail pane has room to say what the button does. */}
-                  {mode === "list"
-                    ? null
-                    : updateProgress
-                      ? "Updating"
-                      : hasCompatibilityWarning
-                        ? "Version issue"
-                        : updateTargetLabel
-                          ? `Update to ${updateTargetLabel}`
-                          : "Update"}
+                  {/* Every advisory says what it is: an icon alone read as an unlabelled
+                      "add" button. The detail follows the installed version, so it names
+                      only the target ("v0.1 · Update to 0.2"), never the version twice. */}
+                  {updateProgress
+                    ? "Updating"
+                    : hasCompatibilityWarning
+                      ? "Version issue"
+                      : mode === "list" || !updateTargetLabel
+                        ? "Update"
+                        : `Update to ${updateTargetLabel.replace(/^v/, "")}`}
                 </Button>
               }
             />
@@ -1037,7 +1034,7 @@ export function ProviderInstanceCard({
                 <span
                   tabIndex={statusDiagnostic ? 0 : undefined}
                   aria-live="polite"
-                  className="pointer-events-auto block min-w-0 truncate"
+                  className="pointer-events-auto line-clamp-2 min-w-0 [overflow-wrap:anywhere]"
                 >
                   {updateProgress ? (
                     `Updating · ${updateProgress}`
@@ -1088,6 +1085,11 @@ export function ProviderInstanceCard({
         </Badge>
       ) : null}
       {versionCodeNode}
+      {versionCodeNode && versionAdvisoryNode ? (
+        <span aria-hidden className="text-meta text-muted-foreground">
+          ·
+        </span>
+      ) : null}
       {versionAdvisoryNode}
       <span
         inert={readOnly}
@@ -1274,10 +1276,6 @@ export function ProviderInstanceCard({
       {driverOption !== undefined ? (
         <SettingsSection title="Models">
           <div className="px-3 py-3 sm:px-4">
-            <p className="mb-3 text-xs text-muted-foreground">
-              Model preferences and custom models are saved on the selected environment and shared
-              across connected devices.
-            </p>
             <ProviderModelsSection
               canManageCustomModels={!readOnly}
               canWritePreferences={canWriteSettings}

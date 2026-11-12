@@ -987,7 +987,7 @@ export function EnvironmentProviderSettings({
       >
         <div className="flex min-h-7 min-w-0 items-center justify-between gap-2 px-3 pb-1.5 sm:px-4">
           {!readOnly ? (
-            <Button size="xs" variant="outline" onClick={() => setIsAddInstanceDialogOpen(true)}>
+            <Button variant="outline" onClick={() => setIsAddInstanceDialogOpen(true)}>
               <PlusIcon />
               Add provider
             </Button>
