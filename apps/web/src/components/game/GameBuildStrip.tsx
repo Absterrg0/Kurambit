@@ -506,7 +506,7 @@ function BuildCard({
           />
           {picked ? <PickBadge /> : null}
         </GameBuildStill>
-        <span className="flex min-h-12 min-w-0 flex-col gap-0.5 px-0.5">
+        <span className="flex min-h-12 min-w-0 flex-col gap-0.5">
           <Text
             variant="caption"
             tone={onStage ? "strong" : "default"}
@@ -628,7 +628,7 @@ function FirstBuildSlot() {
   return (
     <div className="flex w-40 shrink-0 flex-col gap-1.5">
       <div className="surface-well aspect-video w-full rounded-md" />
-      <Text variant="caption" tone="muted" render={<span className="px-0.5" />}>
+      <Text variant="caption" tone="muted">
         Not measured yet
       </Text>
     </div>
@@ -648,7 +648,7 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
           {slot.label}
         </Text>
       </div>
-      <span className="flex min-h-12 min-w-0 flex-col gap-0.5 px-0.5">
+      <span className="flex min-h-12 min-w-0 flex-col gap-0.5">
         <Text variant="caption" tone="default" render={<span className="line-clamp-2" />}>
           {slot.caption ?? "\u00a0"}
         </Text>
@@ -722,7 +722,7 @@ function NowCard({
       <Text
         variant="caption"
         tone={active ? "strong" : "default"}
-        render={<span className="line-clamp-2 px-0.5" />}
+        render={<span className="line-clamp-2" />}
       >
         {since}
       </Text>

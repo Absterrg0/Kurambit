@@ -7955,7 +7955,9 @@ export default function ChatView(props: ChatViewProps) {
             // Under window controls the header's own inset covers those.
             <div
               className={cn(
-                "flex h-full min-w-0 flex-1 items-center wco:pr-10",
+                // The header's gutters are 4px wider than the panel's padding: the tab track
+                // reaches out to the content's edges instead.
+                "-mx-1 flex h-full min-w-0 flex-1 items-center wco:pr-10",
                 // The fixed panel toggles only show for a game while its side panel is open.
                 rightPanelOpen && "pr-24",
               )}

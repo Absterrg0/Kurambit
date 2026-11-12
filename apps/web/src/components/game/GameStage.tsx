@@ -946,7 +946,9 @@ function ThreadGameStage({
       <header className="@container/stage-header flex shrink-0 flex-col bg-background">
         <div
           className={cn(
-            "flex h-(--workspace-topbar-height) min-w-0 items-center gap-1.5 px-2 pl-4",
+            // The name's text, not its button, starts on the column's one text edge (the
+            // Stage, the strip's label and captions, the tray), so the button hangs left.
+            "flex h-(--workspace-topbar-height) min-w-0 items-center gap-1.5 px-2 pl-3",
             // The window is dragged by its top bar; its buttons stay clickable.
             isElectron && "drag-region",
             // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this corner.
@@ -960,7 +962,7 @@ function ThreadGameStage({
               name={gameName}
               onRename={(name) => void renameGame(quietShell.projectId, name)}
               onDone={() => setRenamingGame(false)}
-              className="-ms-2 w-56"
+              className="-ms-2.5 w-56"
             />
           ) : (
             <Menu>
@@ -970,7 +972,7 @@ function ThreadGameStage({
                     size="sm"
                     variant="ghost"
                     aria-label={`${gameName}, game menu`}
-                    className="-ms-2 min-w-0 shrink"
+                    className="-ms-2.5 min-w-0 shrink"
                   />
                 }
               >

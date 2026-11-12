@@ -55,7 +55,7 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
   const canKeepGoing =
     GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null;
   return (
-    <div className="flex min-h-8 items-center gap-2 px-1 pt-1.5" data-game-composer-tray="">
+    <div className="flex min-h-8 items-center gap-2 pt-1.5" data-game-composer-tray="">
       {picking !== null ? (
         // While the strip picks a compare, the tray says what it waits for: the composer is
         // not what the next click changes.
