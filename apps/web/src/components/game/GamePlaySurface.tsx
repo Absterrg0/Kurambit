@@ -124,8 +124,15 @@ export function GamePlaySurface({
   onStudioMessage: (message: StudioMessage) => void;
   /** Changes when something asks for the game to have the keyboard. */
   focusRequest: number;
-  /** The Stage bridge this frame owns while it plays: its thread's key, and whether its engine speaks it. */
-  bridge: { readonly threadKey: string; readonly enabled: boolean };
+  /**
+   * The Stage bridge this frame owns while it plays: its thread's key, whether its engine speaks
+   * it, and the key that freezes the game, for the Stage's hint.
+   */
+  bridge: {
+    readonly threadKey: string;
+    readonly enabled: boolean;
+    readonly freezeKey: string | null;
+  };
   /** Drawn over the playing game: the frozen game's pointer layer, names and path. */
   overlay?: ReactNode;
   /** The agent's live note, shown while the first build is made. */
@@ -138,6 +145,11 @@ export function GamePlaySurface({
   const frozen = useThreadStageBridge(
     bridge.threadKey,
     (state) => state.frozen && !state.autoFrozen,
+    false,
+  );
+  const away = useThreadStageBridge(
+    bridge.threadKey,
+    (state) => state.frozen && state.autoFrozen,
     false,
   );
   useStageBridgeFrame(`${bridge.threadKey}\0${frameKey}`, playing ? frame : null, bridge.enabled);
@@ -159,7 +171,8 @@ export function GamePlaySurface({
             focusRequest={focusRequest}
             onFrame={setFrame}
             frozen={frozen}
-            freezeHint={bridge.enabled}
+            away={away}
+            freezeKey={bridge.enabled ? bridge.freezeKey : null}
           />
         ) : (
           <StageStateCard
@@ -244,7 +257,8 @@ export function GameFrame({
   focusRequest = 0,
   onFrame,
   frozen = false,
-  freezeHint = false,
+  away = false,
+  freezeKey = null,
   gameName,
   poster = null,
 }: {
@@ -263,8 +277,10 @@ export function GameFrame({
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
   /** The Stage froze the game to point at it: its hint says how to point instead. */
   frozen?: boolean;
-  /** The Stage can freeze this game: its hint says Tab does. */
-  freezeHint?: boolean;
+  /** Held because the Stage lost focus: it waits, quietly, for a click. */
+  away?: boolean;
+  /** The key that freezes this game, for its hint; null when it cannot be frozen. */
+  freezeKey?: string | null;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const setFrameRef = (node: HTMLIFrameElement | null) => {
@@ -272,6 +288,57 @@ export function GameFrame({
     onFrame?.(node);
   };
   const [frameFocused, setFrameFocused] = useState(false);
+  // Reached by Tab: the game shows the app's focus ring, which an iframe's own outline cannot.
+  const [keyboardFocused, setKeyboardFocused] = useState(false);
+  // The game has the keyboard only when the person gave it: a click on it (the pointer is over
+  // it), a Tab into it, or Focus game. A page that focuses itself as it loads (a title screen
+  // focusing its first button) would otherwise take the keyboard from wherever the person is.
+  const pointerOver = useRef(false);
+  const invitedAt = useRef(0);
+  useEffect(() => {
+    // Where the keyboard was before the game took it, to hand it back.
+    let before: HTMLElement | null =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && event.target !== frameRef.current)
+        before = event.target;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Tab") invitedAt.current = performance.now();
+    };
+    // A page that focuses itself sends no focus event to its frame: the app's window only blurs.
+    let check = 0;
+    const onBlur = () => {
+      window.clearTimeout(check);
+      check = window.setTimeout(() => {
+        const frame = frameRef.current;
+        if (frame === null || document.activeElement !== frame) return;
+        if (performance.now() - invitedAt.current < 1000) {
+          setKeyboardFocused(true);
+          return;
+        }
+        if (pointerOver.current) return;
+        // Nothing held it (the page had just loaded): the Stage itself takes it, as a click would.
+        const back =
+          before !== null && before.isConnected && before !== document.body
+            ? before
+            : frame.closest<HTMLElement>("[data-game-stage]");
+        back?.focus({ preventScroll: true });
+      });
+    };
+    const onFocus = () => setKeyboardFocused(false);
+    document.addEventListener("focusin", onFocusIn, true);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearTimeout(check);
+      document.removeEventListener("focusin", onFocusIn, true);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
   // Until the game's page loads the frame is blank; it says the game is starting instead.
   const [loaded, setLoaded] = useState(false);
   // A reload remounts the iframe in place, for a start that is taking too long.
@@ -323,6 +390,7 @@ export function GameFrame({
   useEffect(() => {
     if (focusRequest === 0 || focusRequest === mountFocusRequest) return;
     // The frame's own focus event takes the "Click to play" cover down.
+    invitedAt.current = performance.now();
     frameRef.current?.focus();
     frameRef.current?.contentWindow?.focus();
   }, [focusRequest, mountFocusRequest]);
@@ -352,7 +420,15 @@ export function GameFrame({
         // pointer lock so 3D games can capture the pointer.
         // oxlint-disable-next-line react/iframe-missing-sandbox -- allow-same-origin is this iframe's own loopback origin, not the app's.
         sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-downloads"
-        className="size-full border-0 bg-black"
+        // A game page that sets no colour scheme is light: the frame says so too, so its canvas
+        // stays transparent over the black instead of painting white in the dark theme.
+        className="size-full border-0 bg-black [color-scheme:light]"
+        onPointerEnter={() => {
+          pointerOver.current = true;
+        }}
+        onPointerLeave={() => {
+          pointerOver.current = false;
+        }}
         onLoad={() => {
           setLoaded(true);
           setFrameFocused(false);
@@ -372,6 +448,12 @@ export function GameFrame({
         onBlur={() => setFrameFocused(false)}
       />
       {loaded ? null : <StartingCard name={gameName} poster={poster} onReload={reload} />}
+      {keyboardFocused ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-30 ring-2 ring-ring ring-inset"
+        />
+      ) : null}
       {/* One quiet line in a corner that lets every click through. The frame belongs to the
           game, so the click hint shows only while the pointer is over it; a warning or a
           freeze always shows. */}
@@ -397,15 +479,15 @@ export function GameFrame({
           {frozen ? (
             <StageHint>
               <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
-              Frozen · click a thing to point at it
+              Paused · click something to point at it
             </StageHint>
           ) : frameFocused ? null : (
             <>
               <StageHint>
                 <MousePointerClickIcon className="size-3 shrink-0" aria-hidden="true" />
-                Click to play
+                {away ? "Paused · click to play" : "Click to play"}
               </StageHint>
-              {freezeHint ? <StageHint muted>Tab freezes</StageHint> : null}
+              {freezeKey === null ? null : <StageHint muted>{freezeKey} freezes</StageHint>}
             </>
           )}
         </Text>

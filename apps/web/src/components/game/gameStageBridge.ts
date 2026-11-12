@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { create } from "zustand";
 import {
@@ -9,6 +10,9 @@ import {
   type GameStageTrace,
   type GameThing,
 } from "@kurambit/contracts";
+
+import { shortcutLabelForCommand } from "../../keybindings";
+import { primaryServerKeybindingsAtom } from "../../state/server";
 
 /**
  * The Stage end of the bridge (packages/contracts/src/gameStageBridge.ts):
@@ -190,8 +194,10 @@ export function useStageBridgeFrame(
           keepStill(owner, message.png);
           return;
         case "studio-key":
-          // The same keys as on the Stage itself, from a game that has focus.
-          if (message.key === "Tab") toggleStageFreeze();
+          // A focused game keeps every key from the app, so the shell sends Tab up: it moves
+          // on past the Stage, as Tab does everywhere else. Escape clears what was pointed at,
+          // else plays on. Freezing is its own key, so Tab never traps anyone in the game.
+          if (message.key === "Tab") focusPastFrame(frame);
           else if (useStageBridge.getState().selected !== null) clearStageSelection();
           else toggleStageFreeze();
           return;
@@ -205,6 +211,32 @@ export function useStageBridgeFrame(
         useStageBridge.setState({ ...EMPTY, owner: null, post: null, hold: null });
     };
   }, [owner, frame, enabled]);
+}
+
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),iframe,[contenteditable="true"],[tabindex]:not([tabindex="-1"])';
+
+/**
+ * Moves focus to the first stop after the game's frame in the document, as the browser's own
+ * Tab would had the game not kept the key. Positive tab indexes are not used in this app.
+ */
+function focusPastFrame(frame: HTMLIFrameElement) {
+  const next = [...document.querySelectorAll<HTMLElement>(FOCUSABLE)].find(
+    (element) =>
+      element !== frame &&
+      frame.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING &&
+      !frame.contains(element) &&
+      element.closest("[inert]") === null &&
+      element.checkVisibility(),
+  );
+  if (next === undefined) frame.blur();
+  else next.focus();
+}
+
+/** The key that freezes the game to point at things, as the person's keybindings say it. */
+export function useGameFreezeKey(): string | null {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  return shortcutLabelForCommand(keybindings, "game.freeze", { context: { gameThread: true } });
 }
 
 /** The folder's game's last frame on this thread's Stage, or null before it has shown one. */

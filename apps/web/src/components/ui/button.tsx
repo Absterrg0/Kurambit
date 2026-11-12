@@ -12,10 +12,9 @@ import { cn } from "~/lib/utils";
 const RAISED_VARIANT =
   "surface-raised [--control-icon-color:var(--contrast-muted-foreground)] text-foreground focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-raised-hover [&:active:not(:disabled)]:surface-raised-pressed";
 
-// Chrome-less buttons sit in toolbars, where focus returns to them each time a
-// menu closes: a 1px ring with the hover fill, like a focused field, instead of
-// the 2px outline that marks a framed control.
-const SOFT_FOCUS = "focus-visible:outline-1 focus-visible:surface-ghost-hover";
+// Chrome-less buttons take the hover fill under the app's one focus ring (the
+// base 2px outline), so a keyboard stop looks the same on every control.
+const SOFT_FOCUS = "focus-visible:surface-ghost-hover";
 
 const buttonVariants = cva(
   // kbd-in-control and the trailing-Kbd padding let a key hint sit inside the

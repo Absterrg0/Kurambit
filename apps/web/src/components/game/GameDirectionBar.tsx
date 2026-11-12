@@ -119,7 +119,7 @@ export function GameInspectorResize() {
       tabIndex={0}
       data-dragging={dragging ? "true" : "false"}
       className={cn(
-        "absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none select-none outline-none",
+        "absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none select-none",
         "hover:bg-primary/40 focus-visible:bg-primary/40 data-[dragging=true]:bg-primary/60",
       )}
       onPointerDown={start}

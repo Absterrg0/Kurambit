@@ -1192,10 +1192,16 @@ export function hasServerAcknowledgedLocalDispatch(input: {
 
 export function shouldRefocusComposerOnWindowFocus(
   activeElement:
-    | (Pick<Element, "tagName" | "closest" | "getAttribute"> & { isContentEditable?: boolean })
+    | (Pick<Element, "tagName" | "closest" | "getAttribute"> & {
+        isContentEditable?: boolean;
+        matches?: (selector: string) => boolean;
+      })
     | null,
 ): boolean {
   if (activeElement === null || activeElement.tagName === "BODY") return true;
+  // A stop the keyboard reached is the person's: Tab past the page's end leaves the window and
+  // the next Tab comes back to its first control, which the composer must not take.
+  if (activeElement.matches?.(":focus-visible") === true) return false;
   if (
     activeElement.tagName === "INPUT" ||
     activeElement.tagName === "TEXTAREA" ||

@@ -372,6 +372,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         style={sidebarProviderStyle}
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+        {/* Fixed over the top-left corner, and first in the document so Tab reaches it first,
+            where it is drawn. */}
+        <SidebarControl />
         <Sidebar
           side="left"
           variant="inset"
@@ -394,7 +397,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
         {children}
-        <SidebarControl />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
       </SidebarProvider>

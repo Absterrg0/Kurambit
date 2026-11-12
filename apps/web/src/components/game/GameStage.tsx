@@ -93,6 +93,7 @@ import {
   useStageAwayFreeze,
   useStageBridge,
   useStageStill,
+  useGameFreezeKey,
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
@@ -422,6 +423,7 @@ function ThreadGameStage({
   const stageStill = useStageStill(threadKey);
   const stageRef = useRef<HTMLElement | null>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const freezeKey = useGameFreezeKey();
   // A compact switch unmounts nothing, but focus would die with the hidden
   // pane's button. Move it to the stage when the stage comes back.
   const stageWasHidden = useRef(hidden);
@@ -955,19 +957,11 @@ function ThreadGameStage({
           setStageFocused(false);
       }}
       onKeyDown={(event) => {
-        // Tab freezes and plays on, and Esc clears the selection, when the Stage itself
-        // has focus; a focused game sends both up as studio-key. Controls keep their keys.
+        // Esc clears the selection when the Stage itself has focus; a focused game sends it up
+        // as studio-key. Tab is never kept here: it moves on, like everywhere else.
         if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey)
           return;
-        if (
-          event.key === "Tab" &&
-          !event.shiftKey &&
-          engine.stageBridge &&
-          phase.kind === "playing"
-        ) {
-          event.preventDefault();
-          toggleStageFreeze();
-        } else if (event.key === "Escape" && useStageBridge.getState().selected !== null) {
+        if (event.key === "Escape" && useStageBridge.getState().selected !== null) {
           event.preventDefault();
           clearStageSelection();
         }
@@ -1087,13 +1081,13 @@ function ThreadGameStage({
                     disabled={phase.kind !== "playing" || bridgeStatus === null}
                     onClick={() => {
                       toggleStageFreeze();
-                      // Focus the Stage, so Tab and Esc work here for a game without the bridge's keys.
+                      // Focus the Stage, so Esc works here for a game without the bridge's keys.
                       stageRef.current?.focus({ preventScroll: true });
                     }}
                   >
                     <CrosshairIcon />
                     {frozen ? "Play on" : "Freeze to point at things"}
-                    <MenuShortcut>Tab</MenuShortcut>
+                    {freezeKey === null ? null : <MenuShortcut>{freezeKey}</MenuShortcut>}
                   </MenuItem>
                 ) : null}
                 {stageKind === "live" ? (
@@ -1269,7 +1263,7 @@ function ThreadGameStage({
           onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
           onStudioMessage={onStudioMessage}
           focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
-          bridge={{ threadKey, enabled: engine.stageBridge }}
+          bridge={{ threadKey, enabled: engine.stageBridge, freezeKey }}
           overlay={<GameStageOverlay threadKey={threadKey} />}
           note={note}
           poster={

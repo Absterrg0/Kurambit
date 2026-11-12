@@ -772,6 +772,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   ::after {
     outline-offset: -2px;
   }
+  /* One focus ring for every keyboard stop: a control, card or row that draws no ring of its
+     own gets the one Button draws, never the browser's default. */
+  :where(:focus-visible) {
+    outline: 2px solid var(--ring);
+  }
   :where([data-slot="menu-popup"], [data-slot="select-popup"], [data-slot="popover-popup"]):focus,
   :where(
     [data-slot="menu-popup"],

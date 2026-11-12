@@ -101,6 +101,7 @@ import {
   resetStageValues,
   selectStageThing,
   tuneStageValue,
+  useGameFreezeKey,
   useStageStill,
   useThreadStageBridge,
 } from "./gameStageBridge";
@@ -602,7 +603,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
       {view.more.length > 0 ? (
         <Rows>
           <Collapsible>
-            <CollapsibleTrigger className="group flex min-h-9 w-full items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent">
+            <CollapsibleTrigger className="group flex min-h-9 w-full items-center gap-2.5 px-3 text-left hover:bg-accent focus-visible:bg-accent">
               <ChevronRightIcon
                 className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
                 aria-hidden="true"
@@ -937,7 +938,7 @@ function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: Game
           aria-expanded={runId === null ? open : undefined}
           onClick={openDiff}
           disabled={count === 0}
-          className="flex items-center gap-2.5 px-3 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent disabled:hover:bg-transparent"
+          className="flex items-center gap-2.5 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent disabled:hover:bg-transparent"
         >
           <FileIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <Text variant="meta" tone="default">
@@ -1456,7 +1457,7 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
           type="button"
           aria-expanded={artOpen}
           onClick={() => setArtOpen(!artOpen)}
-          className="flex min-h-9 items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+          className="flex min-h-9 items-center gap-2.5 px-3 text-left hover:bg-accent focus-visible:bg-accent"
         >
           <Text variant="meta" tone="default" render={<span className="flex-1" />}>
             Generated art
@@ -1506,6 +1507,7 @@ const NO_THINGS: ReadonlyArray<GameThing> = [];
 /** Everything the game registered, on screen or not; choosing one points at it. */
 function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
+  const freezeKey = useGameFreezeKey();
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
   const selectedId = useThreadStageBridge(
     threadKey,
@@ -1550,7 +1552,14 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
             <EmptyTitle>Nothing named in this scene</EmptyTitle>
             <EmptyDescription>
               A title or menu often names nothing. Start playing and the characters, props and rules
-              the game names show here; <Kbd>Tab</Kbd> on the Stage freezes it to point at one.
+              the game names show here; freeze the game
+              {freezeKey === null ? null : (
+                <>
+                  {" "}
+                  (<Kbd>{freezeKey}</Kbd>)
+                </>
+              )}{" "}
+              to point at one.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -1574,7 +1583,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
                   onPointerEnter={() => hoverStageThing(thing.id)}
                   onPointerLeave={() => hoverStageThing(null)}
                   className={cn(
-                    "flex h-8 items-center gap-2.5 rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:bg-accent",
+                    "flex h-8 items-center gap-2.5 rounded-md px-2 text-left hover:bg-accent focus-visible:bg-accent",
                     selectedId === thing.id && "bg-accent text-strong-foreground",
                   )}
                 >

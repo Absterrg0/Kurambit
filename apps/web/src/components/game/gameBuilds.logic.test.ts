@@ -1,3 +1,4 @@
+import type { GameFactView } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { FAKE_DELTAS, FAKE_FACT_VIEWS } from "./gameBuilds.fixtures";
@@ -30,16 +31,15 @@ describe("a compare's rows", () => {
   it("says a reason neither side was measured for once, by the Inspector's names", () => {
     const busy =
       "the picture stood still while the machine was busy (load 10.8 on 8 cores), so it says nothing about the game";
-    const view = (id: "freeze" | "colour" | "boots") =>
-      ({
-        id,
-        label: id,
-        reading:
-          id === "boots"
-            ? { _tag: "measured", text: "Boots clean", value: null, tone: "good" }
-            : { _tag: "not-measured", why: busy },
-        evidence: [],
-      }) as const;
+    const view = (id: "freeze" | "colour" | "boots"): GameFactView => ({
+      id,
+      label: id,
+      reading:
+        id === "boots"
+          ? { _tag: "measured" as const, text: "Boots clean", value: null, tone: "good" as const }
+          : { _tag: "not-measured" as const, why: busy },
+      evidence: [],
+    });
     const views = [view("boots"), view("freeze"), view("colour")];
     const unmeasured = (id: "freeze" | "colour") =>
       ({

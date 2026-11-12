@@ -47,6 +47,8 @@ function Host({ className, ...props }: ComponentProps<"div">) {
       className={cn(
         "relative z-10 w-full rounded-3xl shadow-composer after:z-1 dark:shadow-none",
         outlineClasses,
+        // Typing here reads like any focused field: its rim takes the focus colour.
+        "has-[[contenteditable=true]:focus-visible]:after:border-ring",
         contextSeamClasses,
         "group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-none group-has-data-[composer-banner-surface=attached]/composer-surface:after:hidden",
         className,

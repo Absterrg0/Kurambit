@@ -1798,6 +1798,15 @@ describe("shouldRefocusComposerOnWindowFocus", () => {
     };
   }
 
+  it("leaves a control the keyboard reached alone", () => {
+    expect(
+      shouldRefocusComposerOnWindowFocus({
+        ...element("BUTTON"),
+        matches: (selector: string) => selector === ":focus-visible",
+      }),
+    ).toBe(false);
+  });
+
   it("refocuses when nothing or the body holds focus", () => {
     expect(shouldRefocusComposerOnWindowFocus(null)).toBe(true);
     expect(shouldRefocusComposerOnWindowFocus(element("BODY"))).toBe(true);
