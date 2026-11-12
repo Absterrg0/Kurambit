@@ -359,10 +359,6 @@ function ThreadGameStage({
     turnUndo.canRestore &&
     !turnUndo.pending;
   const live = useAtomValue(liveSignal(threadRef));
-  // Which live change the frame shows: held while this chat's turn runs, the latest otherwise.
-  const [liveShown, setLiveShown] = useState<number | null>(null);
-  const liveRevision = liveToShow({ latest: live.revision, shown: liveShown, turnRunning });
-  if (liveRevision !== liveShown) setLiveShown(liveRevision);
   const stageRequest = useGameWorkspaceStore((state) => state.stageRequest);
   // A request made before this stage mounted was for another one.
   const [mountRequestN] = useState(stageRequest?.n ?? 0);
@@ -474,6 +470,15 @@ function ThreadGameStage({
     return () => window.clearTimeout(timeout);
   }, [landingRun]);
   const landing = landingRun !== null;
+  // Which live change the frame shows: held while this chat's turn runs and its build is saved,
+  // so the Stage switches games together with its label; the latest otherwise.
+  const [liveShown, setLiveShown] = useState<number | null>(null);
+  const liveRevision = liveToShow({
+    latest: live.revision,
+    shown: liveShown,
+    turnRunning: turnRunning || landing,
+  });
+  if (liveRevision !== liveShown) setLiveShown(liveRevision);
   // The request that made the slot, kept past the turn's end for the slot's last moments.
   const [slotRequest, setSlotRequest] = useState(turnRequest);
   if (turnRequest !== null && turnRequest !== slotRequest) setSlotRequest(turnRequest);
