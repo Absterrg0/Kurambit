@@ -75,7 +75,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   const providers = useProviderUpdates();
   const updateServer = useServerUpdate();
 
-  const { summary, lines } = describeUpdateEverything({
+  const { summary, label, lines } = describeUpdateEverything({
     localVersion: localUpdateVersion,
     servers,
     providerMachines: providers.machines.map((machine) => ({
@@ -90,6 +90,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   return {
     hasUpdates: servers.length > 0 || providers.machines.length > 0,
     summary,
+    label,
     lines,
     restarts,
     skipped,

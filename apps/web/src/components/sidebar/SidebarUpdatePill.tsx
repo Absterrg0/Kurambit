@@ -494,7 +494,7 @@ function SidebarUpdateControl() {
             ? "Update available"
             : // App, server and agent updates share this one pill; its tooltip and dialog list them.
               iconStatus === "everything"
-              ? "Updates ready"
+              ? everything.label
               : "Update ready"}
       </span>
     </button>

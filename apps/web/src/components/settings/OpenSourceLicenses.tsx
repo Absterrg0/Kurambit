@@ -13,7 +13,6 @@ import {
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
 type LicenseManifestState =
@@ -123,70 +122,39 @@ function LicenseCount({
   );
 }
 
+// Always a field, as Settings and Keybindings search are: a list this long is searched first.
 function LicenseHeaderAction({
   query,
   onQueryChange,
-  searchOpen,
-  onSearchOpenChange,
   filteredCount,
   totalCount,
 }: {
   query: string;
   onQueryChange: (value: string) => void;
-  searchOpen: boolean;
-  onSearchOpenChange: (open: boolean) => void;
   filteredCount: number;
   totalCount: number;
 }) {
-  if (!searchOpen) {
-    return (
-      <div className="flex items-center gap-1.5">
-        <LicenseCount filteredCount={filteredCount} totalCount={totalCount} />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                aria-label="Search open-source licenses"
-                onClick={() => onSearchOpenChange(true)}
-                size="icon-micro"
-                type="button"
-                variant="ghost-muted"
-              >
-                <SearchIcon className="size-3" />
-              </Button>
-            }
-          />
-          <TooltipPopup side="top">Search licenses</TooltipPopup>
-        </Tooltip>
-      </div>
-    );
-  }
-
   return (
     <div className="flex items-center gap-2">
       <div className="hidden sm:block">
         <LicenseCount filteredCount={filteredCount} totalCount={totalCount} />
       </div>
-      <InputGroup className="w-36 sm:w-44">
+      <InputGroup className="w-44 sm:w-56">
         <InputGroupAddon>
-          <SearchIcon aria-hidden className="size-3" />
+          <SearchIcon aria-hidden className="size-3.5" />
         </InputGroupAddon>
         <InputGroupInput
-          aria-label="Search open-source licenses"
-          autoFocus
-          onBlur={() => {
-            if (query.length === 0) onSearchOpenChange(false);
-          }}
+          aria-label="Search notices"
           onChange={(event) => onQueryChange(event.currentTarget.value)}
           onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
+            if (event.key !== "Escape" || query.length === 0) return;
             event.preventDefault();
+            event.stopPropagation();
             onQueryChange("");
-            onSearchOpenChange(false);
           }}
-          placeholder="Search licenses"
+          placeholder="Search notices"
           size="sm"
-          type="search"
+          type="text"
           value={query}
         />
       </InputGroup>
@@ -213,7 +181,6 @@ function LicenseManifestError({ message, onRetry }: { message: string; onRetry: 
 export function OpenSourceLicensesPanel() {
   const [state, setState] = useState<LicenseManifestState>({ status: "loading" });
   const [query, setQuery] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
   const [openEntryKey, setOpenEntryKey] = useState<string | null>(null);
   const loading = state.status === "loading";
 
@@ -250,8 +217,6 @@ export function OpenSourceLicensesPanel() {
             <LicenseHeaderAction
               query={query}
               onQueryChange={setQuery}
-              searchOpen={searchOpen}
-              onSearchOpenChange={setSearchOpen}
               filteredCount={filteredEntries.length}
               totalCount={entries.length}
             />

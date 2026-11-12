@@ -136,7 +136,7 @@ function TaskRow({
             {RUN_STATUS[task.lastRunStatus]}
             {task.enabled ? "" : " · paused"}
           </span>
-          <span className="mt-0.5 line-clamp-2 block text-dim-foreground">{task.prompt}</span>
+          <span className="mt-0.5 line-clamp-2 block text-muted-foreground">{task.prompt}</span>
         </>
       }
       control={
@@ -520,7 +520,8 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
           <EmptyHeader>
             <EmptyTitle>No scheduled tasks</EmptyTitle>
             <EmptyDescription>
-              A task sends your agent the same message on a timer, in its game's chat.
+              Keep going picks each next step from the build&apos;s evidence. A task sends the
+              message you write, on its schedule, such as a morning check that the game still plays.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

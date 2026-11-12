@@ -122,7 +122,7 @@ const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
 
 // Quieter than the selected row's check: "Default" is a fact about the option, not a state.
 function DefaultNote() {
-  return <span className="text-meta text-muted-foreground">Default</span>;
+  return <span className="shrink-0 text-meta text-muted-foreground">Default</span>;
 }
 
 // Providers describe some levels in their own terms ("xhigh effort plus multi-agent workflow
@@ -523,6 +523,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   ) => (
     <MenuGroup key={descriptor.id}>
       {showLabel ? <MenuGroupLabel>{traitGroupLabel(descriptor)}</MenuGroupLabel> : null}
+      {/* What the scale trades, once for the group, instead of a sentence on each level. */}
+      {showLabel && EFFORT_OPTION_IDS.has(descriptor.id) && !effortLocked(descriptor) ? (
+        <div className="max-w-60 px-2 pb-1.5 text-meta text-muted-foreground">
+          Higher levels think longer: slower turns that use more of your plan.
+        </div>
+      ) : null}
       {effortLocked(descriptor) && !showDescriptions ? (
         <div className="px-2 pb-1.5 text-meta text-muted-foreground">
           Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this option.
@@ -543,21 +549,15 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           >
             <span className="flex w-full min-w-0 items-center gap-2">
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="min-w-0 truncate">
-                  {sentenceCaseLabel(option.label)}
-                  {option.isDefault ? (
-                    <>
-                      {" "}
-                      <DefaultNote />
-                    </>
-                  ) : null}
-                </span>
+                <span className="min-w-0 truncate">{sentenceCaseLabel(option.label)}</span>
                 {showDescriptions && option.description ? (
                   <span className="max-w-56 text-pretty text-meta text-muted-foreground">
                     {PLAIN_OPTION_DESCRIPTIONS[option.id] ?? option.description}
                   </span>
                 ) : null}
               </span>
+              {/* Default sits apart from the name, on the right, before the selected check. */}
+              {option.isDefault ? <DefaultNote /> : null}
               {/* The selected level carries a check: its fill alone matches the hover fill. */}
               <MenuRadioItemIndicator />
             </span>

@@ -405,6 +405,7 @@ describe("describeUpdateEverything", () => {
       }),
     ).toEqual({
       summary: "Update this app, 2 servers, and 3 providers",
+      label: "Updates ready",
       lines: [
         "This app: 0.0.50, restarts last",
         "alvin: server to 0.0.50, Codex, Claude",
@@ -424,5 +425,17 @@ describe("describeUpdateEverything", () => {
         ],
       }).summary,
     ).toBe("Update 1 provider");
+  });
+
+  it("names the one kind of update waiting", () => {
+    expect(
+      describeUpdateEverything({
+        localVersion: null,
+        servers: [],
+        providerMachines: [
+          { environmentId: EnvironmentId.make("alvin"), label: "alvin", providers: ["Codex"] },
+        ],
+      }).label,
+    ).toBe("Provider update");
   });
 });

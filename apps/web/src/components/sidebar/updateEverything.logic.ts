@@ -383,6 +383,8 @@ function joinList(parts: ReadonlyArray<string>): string {
 
 export function describeUpdateEverything(plan: UpdateEverythingPlan): {
   readonly summary: string;
+  /** The footer's few words: which kind of update waits, when there is one kind. */
+  readonly label: string;
   readonly lines: ReadonlyArray<string>;
 } {
   const providerCount = plan.providerMachines.reduce(
@@ -416,8 +418,27 @@ export function describeUpdateEverything(plan: UpdateEverythingPlan): {
     itemsFor(machine.environmentId, machine.label).push(...machine.providers);
   }
 
+  const kinds = [
+    plan.localVersion ? "app" : null,
+    plan.servers.length > 0 ? "server" : null,
+    providerCount > 0 ? "provider" : null,
+  ].filter((kind) => kind !== null);
+  const label =
+    kinds.length !== 1
+      ? "Updates ready"
+      : kinds[0] === "app"
+        ? "App update"
+        : kinds[0] === "server"
+          ? plan.servers.length === 1
+            ? "Server update"
+            : `${plan.servers.length} server updates`
+          : providerCount === 1
+            ? "Provider update"
+            : `${providerCount} provider updates`;
+
   return {
     summary,
+    label,
     lines: [
       ...(plan.localVersion ? [`This app: ${plan.localVersion}, restarts last`] : []),
       ...Array.from(machines.values(), ({ label, items }) => `${label}: ${items.join(", ")}`),
