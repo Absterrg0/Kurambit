@@ -157,9 +157,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --type-prompt: 0.875rem;
     --type-label: 0.875rem;
     --type-body: 0.875rem;
-    --type-meta: 0.75rem;
-    --type-caption: 0.6875rem;
-    --type-micro: 0.625rem;
+    /* The small sizes stay readable on a desktop: 13, 12 and 11 px. */
+    --type-meta: 0.8125rem;
+    --type-caption: 0.75rem;
+    --type-micro: 0.6875rem;
   }
 
   @variant dark {

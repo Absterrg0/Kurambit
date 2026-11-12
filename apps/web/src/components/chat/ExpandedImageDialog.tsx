@@ -215,7 +215,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
           </Button>
         )}
         <MediaActions source={actionsSource}>
-          <div className="relative isolate z-10 flex max-h-full max-w-[var(--media-width)] flex-col items-center">
+          <div className="relative isolate z-10 flex max-h-full w-fit max-w-[var(--media-width)] flex-col items-stretch">
             {/* Close sits on the media's own corner, where the eye already is, not the window's. */}
             <Button
               type="button"
@@ -257,8 +257,9 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                 onError={() => setFailedImageSrc(item.src)}
               />
             )}
-            {/* The caption sits on its own opaque bar under the media, never on the page behind. */}
-            <div className="mt-2 flex max-w-[var(--media-width)] items-center justify-center gap-2 rounded-md bg-stage-well px-3 py-1.5 text-xs text-white/85 max-sm:mx-10">
+            {/* The caption is a bar as wide as the media under it (its own width adds nothing to
+                the column's), opaque, never text on the page behind. */}
+            <div className="mt-1.5 flex w-0 min-w-full items-center justify-center gap-2 rounded-md bg-stage-well px-3 py-1.5 text-xs text-white/85">
               <span
                 className="flex min-w-0 flex-col items-center"
                 aria-live="polite"

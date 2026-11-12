@@ -80,6 +80,7 @@ import {
 } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
 import { StatusDot } from "../ui/status-dot";
+import { KbdShortcut } from "../ui/kbd";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
@@ -1563,7 +1564,7 @@ function IconAction({
   children,
 }: {
   label: string;
-  /** Its key, said in the tooltip as every icon button's is: "Label (Ctrl+Z)". */
+  /** Its key, shown in the tooltip beside the label. */
   shortcut?: string | null;
   disabled?: boolean;
   onClick: () => void;
@@ -1585,7 +1586,15 @@ function IconAction({
         {children}
       </TooltipTrigger>
       <TooltipPopup side="bottom">
-        {shortcut === null ? label : `${label} (${shortcut})`}
+        {shortcut === null ? (
+          label
+        ) : (
+          // Keys as chips, as the menus show them.
+          <span className="flex items-center gap-2">
+            {label}
+            <KbdShortcut>{shortcut}</KbdShortcut>
+          </span>
+        )}
       </TooltipPopup>
     </Tooltip>
   );
