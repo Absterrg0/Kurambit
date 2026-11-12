@@ -15,6 +15,7 @@ import { cn } from "../../lib/utils";
 import { gameEnvironment, olderBuildPages } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { observeResize } from "../../lib/observeResize";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
@@ -161,6 +162,22 @@ export function GameBuildStrip({
     if (row !== null && newest !== "") row.scrollLeft = row.scrollWidth;
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the slot appearing adds a card at the end, which must scroll into view too.
   }, [newest, slotShown]);
+  // Which ends of the row have cards scrolled past them, for a fade on that edge only.
+  const [clipped, setClipped] = useState<"none" | "start" | "end" | "both">("none");
+  const readClipped = useStableCallback(() => {
+    const row = cardsRef.current;
+    if (row === null) return;
+    const start = row.scrollLeft > 1;
+    const end = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
+    setClipped(start && end ? "both" : start ? "start" : end ? "end" : "none");
+  });
+  useEffect(() => {
+    const row = cardsRef.current;
+    if (row === null) return;
+    readClipped();
+    return observeResize([row, ...row.children], readClipped);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the cards in the row change its scroll width.
+  }, [readClipped, newest, slotShown, cardWidth, marks.length]);
 
   const pick = (build: GameBuild) => {
     if (picking === "any") setPicking(refOf(build));
@@ -242,7 +259,7 @@ export function GameBuildStrip({
     <section
       aria-label="Builds"
       data-game-build-strip=""
-      className="flex shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
+      className="flex max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
       style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}
     >
@@ -302,7 +319,12 @@ export function GameBuildStrip({
       )}
       {/* A fixed height (a picture and two caption lines), so the Stage above never jumps
           between games whose captions wrap differently. */}
-      <div ref={cardsRef} className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1">
+      <div
+        ref={cardsRef}
+        onScroll={readClipped}
+        className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1"
+        style={clipped === "none" ? undefined : { maskImage: edgeFade(clipped) }}
+      >
         {list === null ? (
           first.error !== null ? (
             <Text variant="caption" tone="muted" render={<p className="py-6" />}>
@@ -340,6 +362,10 @@ export function GameBuildStrip({
     </section>
   );
 }
+
+/** A 24px fade on each edge the row has scrolled cards past, so a cut card reads as more. */
+const edgeFade = (clipped: "start" | "end" | "both") =>
+  `linear-gradient(to right, ${clipped === "end" ? "black" : "transparent"}, black 24px, black calc(100% - 24px), ${clipped === "start" ? "black" : "transparent"})`;
 
 /** One run of keep going: its builds under a labelled bracket. */
 function KeepGoingBracket({ children }: { children: ReactNode }) {
@@ -525,10 +551,11 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
   );
 }
 
-/** Before the first build: the shape it will take, said once. */
+/** Before the first build: the shape it will take, said once, at the smallest card size so an
+ *  empty well is never the largest thing under the Stage. */
 function FirstBuildSlot() {
   return (
-    <div className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
+    <div className="flex w-40 shrink-0 flex-col gap-1.5">
       <div className="surface-well aspect-video w-full rounded-md" />
       <Text variant="caption" tone="muted" render={<span className="px-0.5" />}>
         Not measured yet

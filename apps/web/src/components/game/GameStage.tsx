@@ -149,6 +149,10 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
 
 /** A build card's picture height bounds: its 160px floor and the most leftover height it takes. */
 const BUILD_CARD_PICTURE = { min: 90, max: 144 } as const;
+/** The strip's gap between cards (gap-3), so three cards are sized to fit side by side. */
+const BUILD_CARD_GAP = 12;
+/** A wide column gives the cards a share of its width before any leftover height: a sixth. */
+const BUILD_CARD_WIDTH_SHARE = 0.16;
 
 const buildPhrase = (name: string) => name.replace(/^Build /, "build ").replace(/^Step /, "step ");
 
@@ -427,19 +431,35 @@ function ThreadGameStage({
       const stripChrome = strip === null ? 0 : Math.max(0, strip.offsetHeight - picture);
       // The surface's side insets (mx-3) and a breath above the strip.
       const width = section.clientWidth - 24;
-      const available = section.clientHeight - taken - stripChrome - BUILD_CARD_PICTURE.min - 8;
+      // A wide column's cards start from a share of its width, not the 160px floor, so the
+      // largest window never has the smallest pictures; the Stage gives up that height.
+      const floorWidth = Math.min(
+        (BUILD_CARD_PICTURE.max * 16) / 9,
+        Math.max((BUILD_CARD_PICTURE.min * 16) / 9, width * BUILD_CARD_WIDTH_SHARE),
+      );
+      const floor = (floorWidth * 9) / 16;
+      const available = section.clientHeight - taken - stripChrome - floor - 8;
       const height = Math.floor(
         Math.max(0, Math.min(available, (width * viewportHeight) / viewportWidth)),
       );
-      // What the game's shape leaves over goes to bigger build pictures, up to a cap.
+      const stageWidth = Math.floor((height * viewportWidth) / viewportHeight);
+      // What the game's shape leaves over goes to bigger build pictures, up to a cap, and
+      // never wider than three cards side by side under the Stage: the first card is never
+      // scrolled out of a strip that holds only three.
       const pictureHeight = Math.min(
         BUILD_CARD_PICTURE.max,
-        BUILD_CARD_PICTURE.min + Math.max(0, available - height),
+        floor + Math.max(0, available - height),
       );
       const next = {
-        width: Math.floor((height * viewportWidth) / viewportHeight),
+        width: stageWidth,
         height,
-        cardWidth: Math.floor((pictureHeight * 16) / 9),
+        cardWidth: Math.max(
+          0,
+          Math.min(
+            Math.floor((pictureHeight * 16) / 9),
+            Math.floor((stageWidth - 2 * BUILD_CARD_GAP) / 3),
+          ),
+        ),
       };
       setStageFit((previous) =>
         previous?.width === next.width &&
@@ -462,6 +482,18 @@ function ThreadGameStage({
   }, [viewportWidth, viewportHeight]);
   const stageFitStyle =
     stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width + 24 };
+  // The strip and the composer under it end where the fitted Stage ends, so a height-bound
+  // game on a wide window has one right edge. They live in other components, so the
+  // column's width goes up as a CSS variable on the centre they share.
+  const stageColumn = compare === null && stageFit !== null ? stageFit.width + 24 : null;
+  useLayoutEffect(() => {
+    const centre = stageRef.current?.closest<HTMLElement>("[data-game-centre]");
+    if (centre == null || stageColumn === null) return;
+    centre.style.setProperty("--game-stage-column", `${stageColumn}px`);
+    return () => {
+      centre.style.removeProperty("--game-stage-column");
+    };
+  }, [stageColumn]);
   if (seenRevision === null && data) setSeenRevision(data.operation?.revision ?? 0);
   // Operation pushes reread the status (statusSignal in state/game), so nothing polls it.
   const operationState = data?.operation?.state ?? null;

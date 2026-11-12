@@ -7886,7 +7886,11 @@ export default function ChatView(props: ChatViewProps) {
             turnRequest={gameTurnRequest}
             note={gameAgentNote?.text ?? null}
           />
-          <div data-game-direction-bar="" className="flex shrink-0 flex-col">
+          <div
+            data-game-direction-bar=""
+            // The Stage's fitted column (set by GameStage), so the composer ends with it.
+            className="flex max-w-(--game-stage-column) shrink-0 flex-col"
+          >
             {activePendingApproval === null && activePendingUserInput === null ? (
               <GameDirectionNote
                 note={gameAgentNote}
