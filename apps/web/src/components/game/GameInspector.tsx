@@ -590,7 +590,7 @@ function checksSummary(facts: GameBuildFacts): string {
       : []),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
-    ...(busy ? ["measuring again"] : []),
+    ...(busy ? ["measuring"] : []),
   ].join(" · ");
 }
 
