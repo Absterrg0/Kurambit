@@ -233,7 +233,7 @@ Keep going stops by itself when two steps in a row are undone or change nothing,
 up, or when your agent says `Next: none`. The banner above the composer says why in one line, and
 **Resume** (or choosing a mode again) carries on with the same run. After the agent says the game is
 done, ask it for more and turn keep going on again. The command palette has **Keep going: Guided**,
-**Keep going: Autopilot**, **Stop keep going**, and the proposal's **Start the proposed step now** and
+**Keep going: Autopilot**, **Stop Keep going**, and the proposal's **Start the proposed step now** and
 **Skip the proposed step**. Your agent can turn keep going on or off and leave it notes itself.
 
 ## Play and revise
