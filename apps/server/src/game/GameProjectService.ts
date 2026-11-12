@@ -50,6 +50,7 @@ import { gameRelative, insideGame } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
+import * as GamePreview from "./GamePreview.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 
 /**
@@ -146,6 +147,7 @@ const decodeManifestObject = Schema.decodeUnknownEffect(
 );
 
 const make = Effect.gen(function* () {
+  const preview = yield* GamePreview.GamePreview;
   const projects = yield* ProjectService.ProjectService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const launches = yield* ThreadLaunchService.ThreadLaunchService;
@@ -452,6 +454,9 @@ const make = Effect.gen(function* () {
             new GameOperationError({ operation: "create-game", path: root, reason: "io", cause }),
         });
         // No run starts: the chat's first turn makes the first playable build.
+        // A game removed from Kurambit leaves its serve and watch on the folder's path; this game
+        // is new there, so it starts with none of them.
+        yield* preview.forget(root);
         return yield* register(root, input, { firstTurn: true });
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder behind.

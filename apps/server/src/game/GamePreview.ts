@@ -56,6 +56,11 @@ export class GamePreview extends Context.Service<
     /** The URL of the game's live-served folder, or null when it is not served. */
     readonly liveUrl: (root: string) => string | null;
     /**
+     * Ends the folder's serve and watch and forgets them, as if never opened: a new game made
+     * in a folder an earlier game used starts with no serve or watch of the old one.
+     */
+    readonly forget: (root: string) => Effect.Effect<void>;
+    /**
      * The live serve as every client sees it: "serving", "stopped" (stopped
      * until Play opens it again), or "off" (not opened since this server started).
      */
@@ -283,6 +288,15 @@ const make = Effect.gen(function* () {
         ),
       ),
     stop: stopRoot,
+    forget: (root) =>
+      liveLocks.withLock(
+        root,
+        Effect.gen(function* () {
+          yield* closeWatch(root);
+          yield* Effect.promise(() => closeWhere(root));
+          states.delete(root);
+        }).pipe(Effect.uninterruptible),
+      ),
     retain: (root, directories) => Effect.promise(() => retain(root, directories)),
     // A window opened before a new selection keeps loading the build it was
     // opened on, because each directory keeps its own server. Selecting only
