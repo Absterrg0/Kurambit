@@ -24,7 +24,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
@@ -155,7 +155,7 @@ function SidebarUtilityItem({
           }
         />
         <TooltipPopup side="top">
-          {shortcut === null ? label : `${label} (${shortcut})`}
+          <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
         </TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>

@@ -493,8 +493,9 @@ function BuildDetail({
             {buildName(build)}
           </Text>
           <Text variant="meta" tone="muted" truncate>
+            {/* Where it is before when it was made: if the line is cut, the date goes. */}
+            {onStage ? "On the Stage · " : ""}
             {formatBuildTime(build.at)}
-            {onStage ? " · on the Stage" : ""}
           </Text>
         </div>
       </BuildActions>

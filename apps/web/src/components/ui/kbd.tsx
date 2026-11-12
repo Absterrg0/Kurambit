@@ -20,7 +20,11 @@ function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
 function KbdGroup({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd
-      className={cn("inline-flex items-center gap-1", className)}
+      // A key never breaks inside its chip, whatever wrapping its surface allows.
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap wrap-normal",
+        className,
+      )}
       data-slot="kbd-group"
       {...props}
     />

@@ -10,7 +10,7 @@ import { memo, type ReactElement } from "react";
 import type { ThreadPanelPresentation } from "../../rightPanelLayout";
 import { PopoverCreateHandle, PopoverTrigger } from "../ui/popover";
 import { Toggle } from "../ui/toggle";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface PanelLayoutControlsProps {
   showThreadPanelControl?: boolean;
@@ -69,8 +69,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         {...(threadPanelPresentation === "popover" ? {} : { onClick: onToggleThreadPanel })}
       />
       <TooltipPopup side="bottom">
-        Toggle thread details
-        {threadPanelShortcutLabel ? ` (${threadPanelShortcutLabel})` : ""}
+        <TooltipLabel shortcut={threadPanelShortcutLabel}>Toggle thread details</TooltipLabel>
       </TooltipPopup>
     </Tooltip>
   );
@@ -103,9 +102,11 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
             </Toggle>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
-            {terminalAvailable
-              ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-              : "Terminal drawer is unavailable"}
+            {terminalAvailable ? (
+              <TooltipLabel shortcut={terminalShortcutLabel}>Toggle terminal drawer</TooltipLabel>
+            ) : (
+              "Terminal drawer is unavailable"
+            )}
           </TooltipPopup>
         </Tooltip>
       ) : null}
@@ -126,9 +127,11 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
             </Toggle>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
-            {rightPanelAvailable
-              ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}`
-              : rightPanelUnavailableLabel}
+            {rightPanelAvailable ? (
+              <TooltipLabel shortcut={rightPanelShortcutLabel}>Toggle right panel</TooltipLabel>
+            ) : (
+              rightPanelUnavailableLabel
+            )}
           </TooltipPopup>
         </Tooltip>
       ) : null}

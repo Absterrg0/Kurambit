@@ -53,7 +53,7 @@ import {
   useSidebar,
   useSidebarVisibility,
 } from "./ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
 import {
   navigateHistory,
@@ -200,7 +200,7 @@ function SidebarControl() {
           }
         />
         <TooltipPopup side="bottom">
-          Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
+          <TooltipLabel shortcut={shortcutLabel}>Toggle main sidebar</TooltipLabel>
         </TooltipPopup>
       </Tooltip>
       {/* Phones keep the system back gesture; the buttons start at md. */}
@@ -253,8 +253,7 @@ function NavigationHistoryButton({
         <Icon />
       </TooltipTrigger>
       <TooltipPopup side="bottom">
-        {label}
-        {shortcutLabel ? ` (${shortcutLabel})` : ""}
+        <TooltipLabel shortcut={shortcutLabel}>{label}</TooltipLabel>
       </TooltipPopup>
     </Tooltip>
   );

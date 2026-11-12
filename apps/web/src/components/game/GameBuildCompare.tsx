@@ -50,6 +50,7 @@ export function GameBuildCompare({
   viewport,
   gameName,
   hidden,
+  inspectorOpen,
   onPair,
   onClose,
 }: {
@@ -59,6 +60,8 @@ export function GameBuildCompare({
   gameName: string;
   /** The Stage is not shown: both sides pause. */
   hidden: boolean;
+  /** The Inspector is beside the compare, so its side can say "in the Inspector". */
+  inspectorOpen: boolean;
   /** Another build picked for a side. */
   onPair: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
   onClose: () => void;
@@ -196,6 +199,7 @@ export function GameBuildCompare({
                     viewport={viewport}
                     gameName={gameName}
                     shown={focused === index}
+                    inspectorOpen={inspectorOpen}
                     undone={builds !== null && isUndone(side, builds)}
                     playing={!hidden && focused === index}
                     onFocus={() => setFocused(index === 0 ? 0 : 1)}
@@ -225,6 +229,7 @@ function ComparePane({
   viewport,
   gameName,
   shown,
+  inspectorOpen,
   playing,
   undone,
   onFocus,
@@ -236,6 +241,7 @@ function ComparePane({
   gameName: string;
   /** The side the Inspector shows, outlined as the strip outlines the build on the Stage. */
   shown: boolean;
+  inspectorOpen: boolean;
   /** Its copy plays; the other side's is paused and muted. */
   playing: boolean;
   /** An Undo took it out of the game; it is compared all the same. */
@@ -337,7 +343,7 @@ function ComparePane({
           buildName(build),
           undone ? "undone" : null,
           formatBuildTime(build.at),
-          shown ? "in the Inspector" : null,
+          shown && inspectorOpen ? "in the Inspector" : null,
         ]
           .filter((part) => part !== null)
           .join(" · ")}

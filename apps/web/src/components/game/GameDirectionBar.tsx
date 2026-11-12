@@ -43,7 +43,8 @@ export function GameDirectionNote({
       <Text
         variant="body"
         tone={note.live ? "strong" : "default"}
-        render={<p className="line-clamp-2 min-w-0 flex-1" aria-live="polite" />}
+        // One line, so the room above the composer is one height; the whole reply is in the Log.
+        render={<p className="min-w-0 flex-1 truncate" aria-live="polite" />}
       >
         {note.text}
       </Text>

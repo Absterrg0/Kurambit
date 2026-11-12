@@ -210,7 +210,7 @@ export const plainWhy = (why: string): string =>
     )
     .replace(/\btier bot\b/g, "bot")
     .replace(
-      "this game has no play bot yet (keep going writes one once, or ask your agent for one)",
+      "this game has no play bot yet (Keep going writes one once, or ask your agent for one)",
       "no play bot yet; Keep going writes one, or ask your agent",
     );
 
@@ -227,11 +227,12 @@ const runEvent = (sentence: string): string =>
         : /answering/i.test(sentence)
           ? "Stopped answering"
           : "No ending";
-/** What a row's reading means, said under it when it differs: a scale or how much it varies. */
+/**
+ * What a row's reading means, said under it when it differs: its scale. That a reading varies
+ * by itself is said once, by the headline and the row's "Varies".
+ */
 const ROW_NOTES: Partial<Record<GameFactId, string>> = {
-  masher: "Varies from run to run by itself.",
-  motion:
-    "How much the picture changes from frame to frame (a still picture is 0); it varies from run to run by itself.",
+  motion: "How much the picture changes from frame to frame; a still picture is 0.",
 };
 
 /** Rows that vary between runs of the same build: not counted as a difference a change made. */

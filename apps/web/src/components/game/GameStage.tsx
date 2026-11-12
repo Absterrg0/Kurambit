@@ -80,9 +80,8 @@ import {
 } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
 import { StatusDot } from "../ui/status-dot";
-import { KbdShortcut } from "../ui/kbd";
 import { Text } from "../ui/text";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
 import { GameBuildStill } from "./GameBuildStill";
 import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
@@ -213,10 +212,11 @@ const BUILD_CARD_PICTURE = { min: 90, max: 150 } as const;
 const BUILD_CARD_GAP = 12;
 /**
  * The height kept under the strip for the rows that come and go above the composer: the
- * agent's note (two lines) and one suggestion. They appear as a turn runs and lands, and the
+ * agent's one-line note and one suggestion. They appear as a turn runs and lands, and the
  * Stage must not shrink and re-centre each time; only rows past this budget take its height.
+ * Every game keeps it, so a game's Stage does not step at its first message either.
  */
-const TRANSIENT_ROWS_RESERVE = 90;
+const TRANSIENT_ROWS_RESERVE = 72;
 /** The loading skeleton's strip label, captions and gaps, around its Stage and cards. */
 const SKELETON_STRIP_CHROME = 80;
 
@@ -548,7 +548,6 @@ function ThreadGameStage({
   // being written, so a longer message shrinks the Stage but never the composer under it.
   const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
-  const hasTurn = latestRun !== null;
   const [titleUnderControls, setTitleUnderControls] = useState(true);
   const hasStatus = data != null;
   useLayoutEffect(() => {
@@ -599,8 +598,7 @@ function ThreadGameStage({
         bar == null || composer == null
           ? 0
           : Math.max(0, composer.getBoundingClientRect().top - bar.getBoundingClientRect().top);
-      // A game that has had no turn has no note or suggestion to make room for.
-      const height = section.clientHeight + transient - (hasTurn ? TRANSIENT_ROWS_RESERVE : 0);
+      const height = section.clientHeight + transient - TRANSIENT_ROWS_RESERVE;
       // The surface's side insets (mx-3) and a breath above the strip.
       const next = fitStage(
         section.clientWidth - 24,
@@ -655,7 +653,7 @@ function ThreadGameStage({
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight, comparing, hasTurn]);
+  }, [viewportWidth, viewportHeight, comparing]);
   const stageFitStyle =
     stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width + 24 };
   // The strip and the composer under it end where the fitted Stage ends, so a height-bound
@@ -1373,8 +1371,9 @@ function ThreadGameStage({
               {compact ? (playTarget === null ? (folderChecks ?? "Inspector") : "Inspector") : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
-              {compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"}
-              {inspectorKey === null ? null : ` (${inspectorKey})`}
+              <TooltipLabel shortcut={inspectorKey}>
+                {compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"}
+              </TooltipLabel>
             </TooltipPopup>
           </Tooltip>
         </div>
@@ -1387,6 +1386,7 @@ function ThreadGameStage({
           viewport={data.viewport}
           gameName={gameName}
           hidden={hidden}
+          inspectorOpen={!compact && !inspectorCollapsed}
           onPair={setCompare}
           onClose={() => setCompare(null)}
         />
@@ -1586,15 +1586,7 @@ function IconAction({
         {children}
       </TooltipTrigger>
       <TooltipPopup side="bottom">
-        {shortcut === null ? (
-          label
-        ) : (
-          // Keys as chips, as the menus show them.
-          <span className="flex items-center gap-2">
-            {label}
-            <KbdShortcut>{shortcut}</KbdShortcut>
-          </span>
-        )}
+        <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
       </TooltipPopup>
     </Tooltip>
   );

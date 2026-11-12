@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type ReactNode,
   type RefObject,
 } from "react";
 
@@ -13,6 +14,7 @@ import { cn } from "~/lib/utils";
 import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
 import { POPUP_COLLISION_PADDING } from "./closing-positioner";
 import { isReturningFocus } from "./focus-return";
+import { KbdShortcut } from "./kbd";
 
 const TooltipProvider = TooltipPrimitive.Provider;
 
@@ -169,4 +171,28 @@ function TooltipPopup({
   );
 }
 
-export { TooltipProvider, Tooltip, TooltipTrigger, TooltipPopup, TooltipScrollDismissArea };
+/** A tooltip's label with its keyboard shortcut as key chips, as menus show them. */
+function TooltipLabel({
+  children,
+  shortcut,
+}: {
+  children: ReactNode;
+  shortcut?: string | null | undefined;
+}) {
+  if (!shortcut) return children;
+  return (
+    <span className="flex items-center gap-2">
+      <span className="min-w-0">{children}</span>
+      <KbdShortcut>{shortcut}</KbdShortcut>
+    </span>
+  );
+}
+
+export {
+  TooltipProvider,
+  Tooltip,
+  TooltipTrigger,
+  TooltipPopup,
+  TooltipLabel,
+  TooltipScrollDismissArea,
+};
