@@ -107,7 +107,7 @@ appear in every open client without requiring the originating browser to remain 
 
 ### Fold working threads (beta)
 
-Turn on **Settings → General → Working section (beta)** to move threads that are working or
+Turn on **Settings → General → Advanced → Working section (beta)** to move threads that are working or
 monitoring into a collapsed **Working** section below the active list. A thread returns to the top
 of the active list when it finishes, fails, or needs an approval or answer. The Working section
 lists the thread you last sent work to first. Pinned threads stay in the pinned section. Each
@@ -142,7 +142,7 @@ By default, environments settle inactive threads after three days and settle
 threads whose pull request merged. A closed pull request can also settle an idle
 thread. Work in progress, pending questions or approvals, and live background work
 prevent automatic settlement. An open pull request does not prevent inactivity
-settlement unless you turn on **Keep threads with a PR** in **Settings → General**,
+settlement unless you turn on **Keep threads with a PR** in **Settings → General → Advanced**,
 but an old closed or merged pull request does not settle work you
 resumed after it closed. Only your own messages count as resuming. A turn that
 finished background work or a pull request watch starts on its own does not.
@@ -152,7 +152,7 @@ choose **Auto-settle behavior**, and pick **Disabled**. The current option is ch
 **Enabled** to return to the usual rules. Manual settle, snooze, and archive still work while it
 is disabled.
 
-Change these rules in **Settings → General**. They continue to run when your apps are closed.
+Change these rules in **Settings → General → Advanced**. They continue to run when your apps are closed.
 Changing a rule does not reopen already settled threads.
 
 ## Link a pull request
@@ -189,7 +189,7 @@ the continuation finishes. If the queue was held by a restart, resume it then.
 
 When the provider reports a reset time, choose **Resume at reset** to schedule a
 continuation. You can cancel it from the thread. Enable **Auto-resume limited
-threads** in **Settings → General** to schedule limit stops by default.
+threads** in **Settings → General → Advanced** to schedule limit stops by default.
 The environment must be running when the reset arrives; it resumes overdue
 continuations after a restart. Sending a new message, archiving, or settling the
 thread prevents a pending continuation from starting.

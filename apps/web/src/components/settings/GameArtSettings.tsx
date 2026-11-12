@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { ExternalLinkIcon, LayersIcon, PaletteIcon, WalletIcon } from "lucide-react";
+import { LayersIcon, PaletteIcon, WalletIcon } from "lucide-react";
 import {
   GAME_ART_PROVIDERS,
   type EnvironmentId,
@@ -22,11 +22,9 @@ import {
   formatUsd,
   providerLabel,
 } from "../game/gameGeneration.logic";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { SecretInput } from "./SecretInput";
+import { SettingsKeyRow } from "./SettingsKeyRow";
 import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -39,6 +37,10 @@ const lanesLine = (provider: GameArtProviderId) =>
   `Makes ${GAME_ART_PROVIDERS[provider].lanes
     .map((lane) => GAME_ART_LANE_LABELS[lane].toLowerCase())
     .join(", ")}.`;
+
+// The lane picker is narrow; "Codex (ChatGPT plan)" inside "Auto (…)" truncated twice.
+const shortProviderLabel = (provider: GameArtProviderId) =>
+  provider === "codex" ? "Codex" : providerLabel(provider);
 
 const USD: Intl.NumberFormatOptions = { style: "currency", currency: "USD" };
 
@@ -73,16 +75,11 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
   const spent = providers.data?.spentTodayUsd;
   return (
     <SettingsSection id="art-providers" title="Art providers">
-      <Text variant="meta" tone="muted" render={<div className="space-y-1 px-4 py-3" />}>
-        <p>
-          Each kind of asset goes to the provider that makes it best, on your own keys or your
-          ChatGPT plan through Codex. Keys are kept in this environment&apos;s secret store and are
-          never shown.
-        </p>
-        <p>
-          Generated assets are yours on a paid plan; free plans do not allow commercial use.
-          ElevenLabs music has a studio-size limit; read its terms before you ship.
-        </p>
+      <Text variant="meta" tone="muted" render={<p className="px-4 py-3 text-pretty" />}>
+        Each kind of asset goes to the provider that makes it best, on your own keys or your ChatGPT
+        plan through Codex. Keys stay in this environment&apos;s secret store. What they make is
+        yours on a paid plan; free plans do not allow commercial use, and ElevenLabs music has a
+        studio-size limit.
       </Text>
       {error ? (
         <Text
@@ -97,9 +94,19 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
         const info = GAME_ART_PROVIDERS[provider];
         const status = statusOf(provider);
         const keySetting = info.keySetting;
-        const configured = keySetting === null ? false : settings[keySetting].length > 0;
+        const configured = keySetting === null ? null : settings[keySetting].length > 0;
+        // A missing key is the ordinary state, not a fault: a grey dot, and the server's
+        // "No key saved." is left out because the label already says it.
+        const state =
+          status === null
+            ? { tone: "neutral" as const, label: "Checking…" }
+            : status.ready
+              ? { tone: "success" as const, label: "Ready" }
+              : configured === false
+                ? { tone: "neutral" as const, label: "No key" }
+                : { tone: "warning" as const, label: "Not ready" };
         return (
-          <SettingsRow
+          <SettingsKeyRow
             key={provider}
             icon={<PaletteIcon />}
             title={info.label}
@@ -110,54 +117,20 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                   ? lanesLine(provider)
                   : `${lanesLine(provider)} ${info.note}`
             }
-            status={
-              status === null ? null : (
-                <Badge variant={status.ready ? "success" : "outline"} size="sm">
-                  {status.ready ? "Ready" : "Not set up"}
-                </Badge>
-              )
+            link={{ href: info.site, label: keySetting === null ? "About Codex" : "Get a key" }}
+            status={state}
+            message={
+              status !== null && !status.ready && configured !== false ? status.message : null
             }
-          >
-            <div className="flex min-w-0 flex-col gap-1.5 ps-7">
-              {keySetting === null ? null : (
-                <div className="flex flex-wrap gap-2">
-                  <SecretInput
-                    aria-label={`${info.label} key`}
-                    configured={configured}
-                    value=""
-                    disabled={!canWrite}
-                    placeholder="Paste the key"
-                    onCommit={(next) => {
-                      if (next !== "") void save({ [keySetting]: next });
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!canWrite || !configured}
-                    onClick={() => void save({ [keySetting]: "" })}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              )}
-              {status === null || status.message === "" ? null : (
-                <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
-                  {status.message}
-                </Text>
-              )}
-              <div>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  render={<a href={info.site} target="_blank" rel="noreferrer" />}
-                >
-                  {keySetting === null ? "About Codex" : "Get a key"}
-                  <ExternalLinkIcon aria-hidden />
-                </Button>
-              </div>
-            </div>
-          </SettingsRow>
+            configured={configured}
+            canWrite={canWrite}
+            onSave={(next) => {
+              if (keySetting !== null) void save({ [keySetting]: next });
+            }}
+            onClear={() => {
+              if (keySetting !== null) void save({ [keySetting]: "" });
+            }}
+          />
         );
       })}
       <SettingsRow
@@ -165,7 +138,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
         title="Provider per kind of asset"
         description="Auto uses the first ready provider in Kurambit's order. The agent never switches it for you."
       >
-        <div className="grid grid-cols-1 gap-x-4 gap-y-2 ps-7 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-2 ps-7 pb-2 @min-[40rem]/settings-row:grid-cols-2">
           {GAME_ART_LANES.map((lane) => {
             const choice = settings.gameArtLanes[lane] ?? "auto";
             const auto = providers.data?.lanes[lane];
@@ -173,8 +146,8 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
               auto === undefined
                 ? "Auto"
                 : auto === null
-                  ? "Auto (none ready)"
-                  : `Auto (${providerLabel(auto)})`;
+                  ? "Auto · none ready"
+                  : `Auto · ${shortProviderLabel(auto)}`;
             const options = SHOWN_PROVIDERS.filter((provider) =>
               GAME_ART_PROVIDERS[provider].lanes.includes(lane),
             );
@@ -196,7 +169,7 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
                     aria-label={`Provider for ${GAME_ART_LANE_LABELS[lane]}`}
                   >
                     <SelectValue>
-                      {choice === "auto" ? autoLabel : providerLabel(choice)}
+                      {choice === "auto" ? autoLabel : shortProviderLabel(choice)}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>

@@ -277,6 +277,7 @@ export function SettingsRow({
   settingKeys = EMPTY_SETTING_KEYS,
   mixed: mixedOverride,
   inlineControl = false,
+  controlAlign = "center",
   children,
   className,
   ...rowProps
@@ -295,6 +296,9 @@ export function SettingsRow({
   /** Keep a small control (a status, a short button) beside the text at every width,
    *  instead of dropping it to its own line when the row is narrow. */
   inlineControl?: boolean;
+  /** With `inlineControl`: "title" centres the control on the title line, so a status
+   *  reads beside the name it belongs to when the text runs to several lines. */
+  controlAlign?: "center" | "title";
   children?: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id);
@@ -454,7 +458,10 @@ export function SettingsRow({
       <div
         className={cn(
           inlineControl
-            ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 @min-[32rem]/settings-row:gap-8"
+            ? cn(
+                "grid grid-cols-[minmax(0,1fr)_auto] gap-4 @min-[32rem]/settings-row:gap-8",
+                controlAlign === "title" ? "items-start" : "items-center",
+              )
             : "flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8",
         )}
       >
@@ -506,7 +513,8 @@ export function SettingsRow({
             className={cn(
               "flex min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:[&_[data-slot=select-trigger]]:min-w-40",
               inlineControl
-                ? "justify-end"
+                ? // A 20px box on the title line; a taller button overflows it evenly.
+                  cn("justify-end", controlAlign === "title" && "h-5")
                 : "w-full @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end",
             )}
           >

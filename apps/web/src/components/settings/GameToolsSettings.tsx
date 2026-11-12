@@ -1,14 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useId, useState } from "react";
+import { useState } from "react";
 import {
   BoxIcon,
   CheckIcon,
+  ChevronRightIcon,
   CopyIcon,
   RefreshCwIcon,
   FilmIcon,
   FolderIcon,
   Gamepad2Icon,
-  KeyRoundIcon,
   PersonStandingIcon,
   TerminalIcon,
 } from "lucide-react";
@@ -27,8 +27,9 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { GAME_TOOL_NAMES, GameToolLink } from "../game/GameToolLink";
 import { Button, InlineButton } from "../ui/button";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { Input } from "../ui/input";
-import { SecretInput } from "./SecretInput";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { DraftInput } from "../ui/draft-input";
+import { SettingsKeyRow } from "./SettingsKeyRow";
 import { StatusLabel } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -95,24 +96,14 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
   const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
-  const [paths, setPaths] = useState<Partial<Record<PathKey, string>>>({});
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const savePaths = async () => {
-    if (saving) return;
-    setSaving(true);
+  // Each field saves itself when it is left, like every other settings field; a path
+  // changes which tool is found, so the rows above are checked again after it.
+  const savePath = async (key: PathKey, value: string) => {
     setError(null);
-    // A promise chain, not try/finally: React Compiler skips a component whose
-    // handler has a finally clause.
-    await update({ environmentId, input: { patch: paths } })
-      .then((saved) => {
-        if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
-        else setPaths({});
-      })
-      .finally(() => {
-        setSaving(false);
-        query.refresh();
-      });
+    const saved = await update({ environmentId, input: { patch: { [key]: value } } });
+    if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
+    query.refresh();
   };
   return (
     <SettingsSection
@@ -153,18 +144,22 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           icon={<FolderIcon />}
           title={row.title}
           description="Leave blank to find it automatically."
-        >
-          <Input
-            aria-label={row.title}
-            value={paths[row.key] ?? settings[row.key]}
-            disabled={!canWrite || saving}
-            onChange={(event) => setPaths({ ...paths, [row.key]: event.target.value })}
-            placeholder="Automatic"
-          />
-        </SettingsRow>
+          control={
+            <DraftInput
+              size="sm"
+              className="w-full sm:w-72"
+              aria-label={row.title}
+              value={settings[row.key]}
+              disabled={!canWrite}
+              spellCheck={false}
+              onCommit={(next) => void savePath(row.key, next.trim())}
+              placeholder="Automatic"
+            />
+          }
+        />
       ))}
-      <div className="space-y-2 px-4 py-3">
-        {error ? (
+      {error ? (
+        <div className="px-4 py-3">
           <Text
             variant="body"
             tone="destructive"
@@ -172,16 +167,9 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
           >
             {error}
           </Text>
-        ) : null}
-        <Button
-          size="sm"
-          disabled={!canWrite || saving || Object.keys(paths).length === 0}
-          onClick={() => void savePaths()}
-        >
-          {saving ? "Saving…" : "Save paths"}
-        </Button>
-      </div>
-      <GameToolsKeysSection environmentId={environmentId} />
+        </div>
+      ) : null}
+      <GameToolsKeys environmentId={environmentId} />
     </SettingsSection>
   );
 }
@@ -208,7 +196,6 @@ function GameToolRow({
   const [pending, setPending] = useState<"install" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const aboutId = useId();
   const change = async (kind: "install" | "remove") => {
     if (pending !== null || tool.tool !== "mpfb") return;
     setPending(kind);
@@ -221,66 +208,91 @@ function GameToolRow({
   };
   const status = STATUS_LABELS[tool.status];
   const ToolIcon = TOOL_ICONS[tool.tool];
-  const found = [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
-    .filter((part) => part !== null)
-    .join(" · ");
-  // A ready tool's dot and its purpose already say it all; its message only repeats them.
-  const showMessage = tool.status !== "ready";
-  const changeButton = !INSTALLABLE.has(tool.tool) ? null : tool.installed ? (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={!canRemove || pending !== null}
-      onClick={() => void change("remove")}
-    >
-      {pending === "remove" ? "Removing…" : "Remove"}
-    </Button>
-  ) : (
-    <Button
-      size="sm"
-      // Blender missing or too old: the message says what to fix first.
-      disabled={!canInstall || pending !== null || tool.status === "error"}
-      onClick={() => void change("install")}
-    >
-      {pending === "install" ? "Installing…" : "Install"}
-    </Button>
+  const found =
+    [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
+      .filter((part) => part !== null)
+      .join(" · ") || (tool.installed ? "" : "Not installed");
+  // Installed but not ready: the message is the fix, so it stays in view. A missing
+  // tool's message is the long story of where it was looked for, so it waits in About.
+  const showMessage = tool.status !== "ready" && tool.installed;
+  // One action per row, in one style: Install or Remove for what Kurambit fetches,
+  // otherwise the vendor's page while the tool is not ready.
+  const action = INSTALLABLE.has(tool.tool) ? (
+    tool.installed ? (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!canRemove || pending !== null}
+        onClick={() => void change("remove")}
+      >
+        {pending === "remove" ? "Removing…" : "Remove"}
+      </Button>
+    ) : (
+      <Button
+        size="sm"
+        variant="outline"
+        // Blender missing or too old: the message says what to fix first.
+        disabled={!canInstall || pending !== null || tool.status === "error"}
+        onClick={() => void change("install")}
+      >
+        {pending === "install" ? "Installing…" : "Install"}
+      </Button>
+    )
+  ) : tool.status === "ready" ? null : (
+    <GameToolLink tool={tool} />
   );
-  const details = showMessage || error !== null || aboutOpen;
   return (
-    <SettingsRow
-      inlineControl
-      icon={<ToolIcon />}
-      title={GAME_TOOL_NAMES[tool.tool]}
-      description={TOOL_PURPOSE[tool.tool]}
-      status={
-        <span className="flex flex-wrap items-center gap-x-1.5">
-          {found === "" ? null : <span>{found} ·</span>}
-          <InlineButton
-            tone="muted"
-            aria-expanded={aboutOpen}
-            aria-controls={aboutId}
-            onClick={() => setAboutOpen((open) => !open)}
-          >
-            {aboutOpen ? "Hide" : "About"}
-          </InlineButton>
-        </span>
-      }
-      control={
-        <span className="flex items-center gap-3">
-          <StatusLabel tone={status.tone}>{status.label}</StatusLabel>
-          {changeButton}
-        </span>
-      }
-    >
-      {details ? (
-        <div className="flex min-w-0 flex-col gap-1 break-words ps-7 pb-2">
-          {aboutOpen ? (
-            <div id={aboutId} className="grid gap-1">
+    <Collapsible open={aboutOpen} onOpenChange={setAboutOpen}>
+      <SettingsRow
+        inlineControl
+        controlAlign="title"
+        icon={<ToolIcon />}
+        title={GAME_TOOL_NAMES[tool.tool]}
+        description={TOOL_PURPOSE[tool.tool]}
+        status={
+          <span className="flex flex-wrap items-center gap-x-1.5">
+            {found === "" ? null : <span>{found} ·</span>}
+            <CollapsibleTrigger className="group" render={<InlineButton tone="muted" />}>
+              About
+              <ChevronRightIcon
+                aria-hidden
+                className="size-3.5 transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none"
+              />
+            </CollapsibleTrigger>
+          </span>
+        }
+        control={
+          <span className="flex items-center gap-3">
+            <StatusLabel tone={status.tone}>{status.label}</StatusLabel>
+            {action}
+          </span>
+        }
+      >
+        <div className="flex min-w-0 flex-col break-words ps-7">
+          {showMessage ? (
+            <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap pb-2" />}>
+              {tool.message}
+            </Text>
+          ) : null}
+          {error === null ? null : (
+            <Text
+              variant="meta"
+              tone="destructive"
+              render={<p role="alert" className="whitespace-pre-wrap pb-2" />}
+            >
+              {error}
+            </Text>
+          )}
+          <CollapsiblePanel>
+            <div className="grid gap-1 pb-2">
               <Text variant="meta" tone="muted" render={<p className="text-pretty" />}>
                 {TOOL_ABOUT[tool.tool]}
               </Text>
-              {/* The path lives with the About text, so the status line's only control is
-                  About and no icon reads as part of it. */}
+              {tool.installed || tool.status === "ready" ? null : (
+                <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
+                  {tool.message}
+                </Text>
+              )}
               {tool.path === null ? null : (
                 <Text variant="meta" tone="muted" render={<p className="flex min-w-0 gap-2" />}>
                   <span className="min-w-0 break-all">{tool.path}</span>
@@ -301,59 +313,35 @@ function GameToolRow({
                 </Text>
               )}
             </div>
-          ) : null}
-          {/* The status in the control column already says a ready tool is ready. */}
-          {!showMessage ? null : tool.installed ? (
-            <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
-              {tool.message}
-            </Text>
-          ) : (
-            <Text variant="meta" tone="muted" render={<details />}>
-              <summary className="cursor-pointer">Not installed · Details</summary>
-              <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
-            </Text>
-          )}
-          {error === null ? null : (
-            <Text
-              variant="meta"
-              tone="destructive"
-              render={<p role="alert" className="whitespace-pre-wrap" />}
-            >
-              {error}
-            </Text>
-          )}
-          {tool.status === "ready" ? null : (
-            <div>
-              <GameToolLink tool={tool} />
-            </div>
-          )}
+          </CollapsiblePanel>
         </div>
-      ) : null}
-    </SettingsRow>
+      </SettingsRow>
+    </Collapsible>
   );
 }
 
+// Plain words first: what each key changes in a game, not the service's name.
 const KEY_ROWS = [
   {
     key: "gameJevApiKey",
-    title: "Jev key",
+    title: "Smarter play bot",
     description:
-      "Optional playtest route: Jev picks exploration options at play speed. Unset means the policy fallback.",
+      "Optional. With a Jev key the play bot asks Jev which way to explore; without one it uses its own rules.",
   },
   {
     key: "gameSketchfabApiKey",
-    title: "Sketchfab key",
-    description: "Passed to the pinned Blender addon for Sketchfab search and import.",
+    title: "Sketchfab models",
+    description: "Lets Blender search and import Sketchfab models for your games.",
   },
   {
     key: "gamePolyPizzaApiKey",
-    title: "Poly Pizza key",
-    description: "Passed to the pinned Blender addon for Poly Pizza search and import.",
+    title: "Poly Pizza models",
+    description: "Lets Blender search and import Poly Pizza models for your games.",
   },
 ] as const;
 type KeyField = (typeof KEY_ROWS)[number]["key"];
 
-function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId }) {
+function GameToolsKeys({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const canWrite = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
@@ -366,55 +354,37 @@ function GameToolsKeysSection({ environmentId }: { environmentId: EnvironmentId 
     if (saved._tag === "Failure") setError(String(squashAtomCommandFailure(saved)));
   };
   return (
-    <div className="space-y-3 px-4 py-3">
-      <Text variant="label" render={<p />}>
-        Keys
-      </Text>
-      <Text variant="meta" tone="muted" render={<p />}>
-        Stored in this environment&apos;s secret store. Settings only show whether a key is set,
-        never the value.
-      </Text>
-      {error ? (
-        <Text
-          variant="body"
-          tone="destructive"
-          render={<p role="alert" className="whitespace-pre-wrap" />}
-        >
-          {error}
-        </Text>
-      ) : null}
+    <>
       {KEY_ROWS.map((row) => {
         const configured = settings[row.key].length > 0;
         return (
-          <SettingsRow
+          <SettingsKeyRow
             key={row.key}
-            icon={<KeyRoundIcon />}
             title={row.title}
             description={row.description}
-          >
-            <div className="flex flex-wrap gap-2">
-              <SecretInput
-                aria-label={`${row.title} value`}
-                configured={configured}
-                value=""
-                disabled={!canWrite}
-                placeholder="Paste the key"
-                onCommit={(next) => {
-                  if (next !== "") void saveKey(row.key, next);
-                }}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!canWrite || !configured}
-                onClick={() => void saveKey(row.key, "")}
-              >
-                Clear
-              </Button>
-            </div>
-          </SettingsRow>
+            status={
+              configured
+                ? { tone: "success", label: "Key saved" }
+                : { tone: "neutral", label: "No key" }
+            }
+            configured={configured}
+            canWrite={canWrite}
+            onSave={(next) => void saveKey(row.key, next)}
+            onClear={() => void saveKey(row.key, "")}
+          />
         );
       })}
-    </div>
+      {error ? (
+        <div className="px-4 py-3">
+          <Text
+            variant="body"
+            tone="destructive"
+            render={<p role="alert" className="whitespace-pre-wrap" />}
+          >
+            {error}
+          </Text>
+        </div>
+      ) : null}
+    </>
   );
 }

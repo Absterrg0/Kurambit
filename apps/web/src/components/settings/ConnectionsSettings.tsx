@@ -23,7 +23,7 @@ export function LocalServerRow() {
     <SettingsRow
       {...searchableSetting("connections-environment")}
       description={`Runs your agents and game tools on ${environment?.label ?? "this computer"}.`}
-      status={<StatusLabel tone={status.tone}>{status.label}</StatusLabel>}
+      control={<StatusLabel tone={status.tone}>{status.label}</StatusLabel>}
       inlineControl
     />
   );

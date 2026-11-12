@@ -14,7 +14,7 @@ recordings. Without ffmpeg a build is only checked for booting, and Keep going s
 since it could not judge a step; once ffmpeg is installed, measure the build again. Art tools are programs you install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
 **Settings → General → Game tools** shows each one's status, where it was found, and a **Get**
-link to the vendor's download page when it is missing or the wrong version. After installing
+button for the vendor's download page when it is missing or the wrong version. After installing
 something, press **Check again**.
 
 - **Blender** makes game art. Use Blender 4.2 or later from
@@ -137,8 +137,8 @@ characters are made with **Generated**, so nothing is spent on one the game coul
 props, textures, sound and moves can be generated on every game.
 
 Set it up in **Settings → General → Art providers**. Codex needs no key: it uses your ChatGPT plan
-through the Codex you already run in Kurambit. Every other provider takes your own API key; each row
-links to where you get one and shows whether it is ready. **Provider per kind of asset** picks one
+through the Codex you already run in Kurambit. Every other provider takes your own API key: choose **Add key…** on its row, which
+also links to where you get one and shows whether it is ready. **Provider per kind of asset** picks one
 provider for a kind or leaves it on **Auto**, the first ready one. The agent never switches provider
 or route to get past a refusal; it tells you what is missing.
 

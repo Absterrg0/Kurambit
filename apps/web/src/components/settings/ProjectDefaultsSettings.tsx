@@ -275,7 +275,7 @@ export function ProjectDefaultsSettings({
           : category === "project"
             ? "New threads"
             : category === "general-advanced"
-              ? "Advanced"
+              ? "New threads"
               : category === "integrations"
                 ? "Browser"
                 : "Repositories"
