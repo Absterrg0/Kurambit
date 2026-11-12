@@ -111,7 +111,8 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
             : [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source], tool.path]
                 .filter((part) => part !== null)
                 .join(" · ");
-        const showMessage = !(tool.status === "ready" && /^ready\.?$/i.test(tool.message.trim()));
+        // A ready tool's dot and its purpose already say it all; its message only repeats them.
+        const showMessage = tool.status !== "ready";
         const details = showMessage || INSTALLABLE.has(tool.tool) || tool.status !== "ready";
         return (
           <SettingsRow
