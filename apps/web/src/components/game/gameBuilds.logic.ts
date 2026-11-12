@@ -170,9 +170,15 @@ export const checksPhrase = (
   facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">,
 ): string | null => {
   if (facts.good + facts.bad === 0) return null;
-  const pass =
-    facts.lead === undefined ? `${facts.good} pass` : `${facts.lead.pass} of ${facts.lead.of} pass`;
-  return facts.bad > 0 ? `${pass} · ${facts.bad} to look at` : pass;
+  const lead = facts.lead;
+  const pass = lead === undefined ? `${facts.good} pass` : `${lead.pass} of ${lead.of} pass`;
+  // Every lead check is accounted for: one with no reading is said, never left out of the count.
+  const notMeasured = lead?.measured === undefined ? 0 : lead.of - lead.measured.length;
+  return [
+    pass,
+    ...(facts.bad > 0 ? [`${facts.bad} to look at`] : []),
+    ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
+  ].join(" · ");
 };
 
 /**
@@ -207,6 +213,25 @@ export const plainWhy = (why: string): string =>
       "this game has no play bot yet (keep going writes one once, or ask your agent for one)",
       "no play bot yet; Keep going writes one, or ask your agent",
     );
+
+/** The bot runs, whose readings are an event and its time. */
+const RUN_FACTS: ReadonlySet<GameFactId> = new Set(["idle", "masher", "skilled"]);
+/** A run's event in a word, from its check's sentence: "Random input loses" is "Lost". */
+const runEvent = (sentence: string): string =>
+  /\blos[est]/i.test(sentence)
+    ? "Lost"
+    : /\bwin|\bwon/i.test(sentence)
+      ? "Won"
+      : /crash/i.test(sentence)
+        ? "Crashed"
+        : /answering/i.test(sentence)
+          ? "Stopped answering"
+          : "No ending";
+/** Rows Compare names by what they measure, since their readings are numbers. */
+const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {
+  colour: "Largest single colour",
+  motion: "Picture change (motion)",
+};
 
 export interface CompareRow {
   readonly id: GameFactId;
@@ -285,6 +310,12 @@ export const compareRows = (
     if (fallback === null) return null;
     const check = checks?.[side].find((entry) => entry.id === id);
     if (check === undefined) return fallback;
+    // A bot run's reading names what happened, not only when: "Lost at 4.8 s".
+    if (RUN_FACTS.has(id) && check.value !== null)
+      return `${runEvent(check.sentence)} ${check.value}`;
+    // Colour and motion are numbers, named by the row: just the number.
+    if (id === "colour") return check.value?.replace(/^largest /, "") ?? fallback;
+    if (id === "motion") return fallback.replace(/^Motion |^Almost no motion \(|\)$/g, "");
     const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
     if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;
     return check.sentence.toLowerCase() === name.toLowerCase() ? "Yes" : check.sentence;
@@ -315,7 +346,7 @@ export const compareRows = (
     // Picture detail is kept to tell builds apart, a fingerprint rather than a reading: its
     // numbers mean nothing to read side by side.
     if (delta.id === "detail") continue;
-    const name = gameFactName(delta.id);
+    const name = COMPARE_NAMES[delta.id] ?? gameFactName(delta.id);
     const whyA = sideWhy(viewsA.find((view) => view.id === delta.id));
     const whyB = sideWhy(viewsB.find((view) => view.id === delta.id));
     if (delta.change === "not-comparable" && delta.a === null && delta.b === null) {
@@ -368,11 +399,20 @@ export const compareRows = (
  * PURE. A row's change in words: better or worse where the check has a better, else which
  * way the number moved. Null when the readings are the same or cannot be compared.
  */
-export const changeWord = (row: Pick<CompareRow, "mark" | "tone">): string | null => {
+export const changeWord = (row: Pick<CompareRow, "id" | "mark" | "tone">): string | null => {
   if (row.mark === null || row.mark === "=") return null;
   if (row.tone === "better") return "Better";
   if (row.tone === "worse") return "Worse";
-  return row.mark === "↑" ? "Higher" : row.mark === "↓" ? "Lower" : "Changed";
+  if (row.mark === "≠") return "Changed";
+  const up = row.mark === "↑";
+  // A time moves later or earlier; an amount is more or less.
+  return RUN_FACTS.has(row.id) || row.id === "first-response"
+    ? up
+      ? "Later"
+      : "Earlier"
+    : up
+      ? "More"
+      : "Less";
 };
 
 /** PURE. A build's checks have settled: measured, with or without some not measured. */

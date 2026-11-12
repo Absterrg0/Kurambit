@@ -265,7 +265,7 @@ function ComparePane({
           </GameFrameBox>
         ) : (
           <>
-            {/* The build's own picture is its poster, dimmed under what plays it. */}
+            {/* The build's own picture is its poster. */}
             <GameBuildStill
               threadRef={threadRef}
               gameName={gameName}
@@ -275,12 +275,13 @@ function ComparePane({
               mark="none"
               className="absolute inset-0"
             />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/35 p-3 text-center">
+            {/* Play waits in a corner, off the picture being compared. */}
+            <div className="absolute inset-0 flex flex-col items-start justify-end gap-2 p-2 text-left">
               {result?._tag === "window" ? (
                 <Text
                   variant="meta"
                   tone="inherit"
-                  render={<p className="text-stage-foreground" />}
+                  render={<p className="rounded-md bg-black/70 px-2 py-1 text-stage-foreground" />}
                 >
                   {result.message}
                 </Text>
@@ -288,7 +289,7 @@ function ComparePane({
                 <Text
                   variant="meta"
                   tone="inherit"
-                  render={<p className="text-stage-foreground" />}
+                  render={<p className="rounded-md bg-black/70 px-2 py-1 text-stage-foreground" />}
                 >
                   {build.noPlay}
                 </Text>
@@ -307,7 +308,12 @@ function ComparePane({
                 <Text
                   variant="caption"
                   tone="inherit"
-                  render={<p role="alert" className="text-stage-foreground" />}
+                  render={
+                    <p
+                      role="alert"
+                      className="rounded-md bg-black/70 px-2 py-1 text-stage-foreground"
+                    />
+                  }
                 >
                   {plays.error(ref)}
                 </Text>

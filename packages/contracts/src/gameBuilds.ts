@@ -636,7 +636,9 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
       return liveness(facts, (live) => ({
         text: `One colour fills ${Math.round(live.dominantColour * 100)}%`,
         value: live.dominantColour,
-        tone: live.dominantColour > 0.6 ? "bad" : "neutral",
+        // The check flags one colour filling the screen; a varied picture passes it, as a game
+        // that keeps moving passes the freeze check. Which colours is the person's to judge.
+        tone: live.dominantColour > 0.6 ? "bad" : "good",
         kind: "colour",
       }));
     case "first-response":

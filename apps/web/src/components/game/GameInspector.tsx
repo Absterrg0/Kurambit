@@ -95,6 +95,9 @@ import {
   assetUseLines,
   buildCaption,
   buildName,
+  buildPhrase,
+  compareRows,
+  factsSettled,
   formatBuildTime,
   plainWhy,
 } from "./gameBuilds.logic";
@@ -226,7 +229,7 @@ function Section({
           {aside === undefined ? null : <span className="ml-auto flex items-center">{aside}</span>}
         </div>
         {/* The summary has its own line and wraps: no count is ever cut off. */}
-        {detail === undefined || detail === null ? null : (
+        {detail === undefined || detail === null || detail === "" ? null : (
           <Text variant="meta" tone="muted" numeric render={<p />}>
             {detail}
           </Text>
@@ -261,6 +264,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     state.inspectedBuild?.threadKey === threadKey ? state.inspectedBuild : null,
   );
   const asked = useAtomValue(stagePlayTarget(threadRef));
+  const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   const shell = useQuietThreadShell(threadRef);
   const gameName = useGameName(
     threadRef.environmentId,
@@ -369,8 +373,15 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         inspected?.side !== undefined
           ? `Compare · side ${inspected.side}`
           : nowOnStage
-            ? "Last measured build"
-            : null
+            ? "The build it changed from"
+            : build.id !== onStageId
+              ? "Not on the Stage"
+              : null
+      }
+      onBackToStage={
+        inspected !== null && inspected.side === undefined && build.id !== onStageId && !nowOnStage
+          ? () => inspectBuild(null)
+          : null
       }
     />
   );
@@ -399,6 +410,7 @@ function BuildDetail({
   list,
   onStage,
   heading,
+  onBackToStage,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
@@ -407,6 +419,8 @@ function BuildDetail({
   onStage: boolean;
   /** Said over the build when it is shown for a reason other than being picked. */
   heading: string | null;
+  /** Shows the build on the Stage again, when this one was picked and is not on it. */
+  onBackToStage: (() => void) | null;
 }) {
   const facts = useEnvironmentQuery(
     build.available
@@ -446,9 +460,16 @@ function BuildDetail({
   return (
     <div className="flex flex-col gap-5 p-4">
       {heading === null ? null : (
-        <Text variant="meta" tone="strong" emphasis render={<h3 className="-mb-3" />}>
-          {heading}
-        </Text>
+        <div className="-mb-3 flex min-h-6 items-center gap-2">
+          <Text variant="meta" tone="strong" emphasis render={<h3 className="min-w-0 flex-1" />}>
+            {heading}
+          </Text>
+          {onBackToStage === null ? null : (
+            <Button size="xs" variant="ghost" onClick={onBackToStage}>
+              Show the Stage's build
+            </Button>
+          )}
+        </div>
       )}
       <BuildActions
         threadRef={threadRef}
@@ -460,6 +481,9 @@ function BuildDetail({
           threadRef={threadRef}
           gameName={gameName}
           build={build}
+          // The strip's stand-in for a build with no picture yet, so it looks one way everywhere.
+          title={buildName(build)}
+          mark="name"
           className="h-12 w-20 shrink-0 rounded-md ring-1 ring-border ring-inset"
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -492,7 +516,7 @@ function BuildDetail({
         title="Checks"
         detail={
           factsData !== null && factsData.state !== "never" && build.available
-            ? checksSummary(factsData)
+            ? checksSummary(factsData, busy && factsData.message.trim() !== "")
             : null
         }
         aside={
@@ -564,6 +588,7 @@ function BuildDetail({
               </Text>
             ) : null}
             <Checks threadRef={threadRef} facts={factsData} />
+            <SinceBase threadRef={threadRef} build={build} list={list} />
           </>
         )}
         {measureAnswer !== null && measureAnswer.text !== factsData?.message ? (
@@ -580,6 +605,61 @@ function BuildDetail({
       {factsData !== null && factsData.state !== "never" ? (
         <Recordings threadRef={threadRef} build={build} facts={factsData} />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * What the build changed in the readings since the build it was made from, in a line, with
+ * the way to see them side by side: the change a turn made, without opening Compare. Only
+ * once both are measured, so nothing being measured is ever said to differ.
+ */
+function SinceBase({
+  threadRef,
+  build,
+  list,
+}: {
+  threadRef: ScopedThreadRef;
+  build: GameBuild;
+  list: GameBuildsResult;
+}) {
+  const requestStage = useGameWorkspaceStore((state) => state.requestStage);
+  const base =
+    build.base === null ? null : (list.builds.find((each) => each.id === build.base) ?? null);
+  const ready =
+    base !== null && base.available && factsSettled(base.facts) && factsSettled(build.facts);
+  const compared = useEnvironmentQuery(
+    ready
+      ? gameEnvironment.buildCompare({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, a: refOf(base), b: refOf(build) },
+        })
+      : null,
+  ).data;
+  if (!ready || compared === null) return null;
+  const differ = compareRows(
+    compared.deltas,
+    gameFactsView(compared.factsA),
+    gameFactsView(compared.factsB),
+  ).rows.filter((row) => row.mark !== null && row.mark !== "=").length;
+  const from = buildPhrase(buildName(base));
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <Text variant="meta" tone="muted" render={<p className="min-w-0 flex-1" />}>
+        {differ === 0
+          ? `No reading differs from ${from}.`
+          : `${differ} ${differ === 1 ? "reading differs" : "readings differ"} from ${from}.`}
+      </Text>
+      {differ === 0 ? null : (
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() => requestStage({ kind: "compare", pair: [refOf(base), refOf(build)] })}
+        >
+          <GitCompareIcon aria-hidden="true" />
+          Compare
+        </Button>
+      )}
     </div>
   );
 }
@@ -620,7 +700,7 @@ function withLastReadings(facts: GameBuildFacts, last: GameBuildFacts | null): G
   return { ...facts, ...(merged as Pick<GameBuildFacts, (typeof FACT_KEYS)[number]>) };
 }
 
-function checksSummary(facts: GameBuildFacts): string {
+function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
   const view = gameChecksView(facts);
   const busy = facts.state === "measuring" || facts.state === "queued";
   const shownPass = view.checks.filter(
@@ -639,7 +719,8 @@ function checksSummary(facts: GameBuildFacts): string {
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
     ...(toJudge > 0 ? [`${toJudge} for you to judge`] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
-    ...(busy ? ["measuring"] : []),
+    // The step line under it already says it is measuring, and which step.
+    ...(busy && !stepLine ? ["measuring"] : []),
   ].join(" · ");
 }
 

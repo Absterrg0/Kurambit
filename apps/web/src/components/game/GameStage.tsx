@@ -1196,12 +1196,7 @@ function ThreadGameStage({
           {/* An earlier build on the Stage says so in the line it already has, and its way back
               sits beside it: nothing is inserted over the Stage, so the column never moves. */}
           {playTarget !== null ? (
-            <Button
-              size="xs"
-              variant="outline"
-              className="shrink-0"
-              onClick={() => void stopBuild(playTarget.build)}
-            >
+            <Button size="xs" variant="outline" className="shrink-0" onClick={backToLive}>
               <HistoryIcon aria-hidden="true" />
               Back to the current game
             </Button>

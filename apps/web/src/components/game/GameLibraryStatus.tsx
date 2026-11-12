@@ -11,6 +11,7 @@ import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { GamePicture } from "./GameBuildStill";
+import { useBuildFrame } from "./gameStageBridge";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarThreadStatus } from "../Sidebar.logic";
 import { buildName } from "./gameBuilds.logic";
@@ -23,6 +24,16 @@ const latestBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown
   if (!AsyncResult.isSuccess(result)) return null;
   const { builds, current } = result.value;
   return builds.find((build) => build.id === current) ?? builds[0] ?? null;
+};
+
+/**
+ * The picture a game's library row shows: its latest build's, else the newest build that has
+ * one, so a new build with no picture yet never turns the row back into a letter.
+ */
+const latestStillOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result)) return null;
+  const latest = latestBuildOf(result);
+  return latest?.still ?? result.value.builds.find((build) => build.still !== null)?.still ?? null;
 };
 
 /**
@@ -141,12 +152,29 @@ export function GameLibraryPicture(props: {
     chats: props.chats,
     read: true,
   });
+  const still = useEnvironmentQuerySelector(
+    props.main === null
+      ? null
+      : gameEnvironment.builds({
+          environmentId: props.game.environmentId,
+          input: { threadId: props.main.id },
+        }),
+    latestStillOf,
+  );
+  // The Stage's frame of the latest build, once taken, as its card and the Inspector show.
+  const frame = useBuildFrame(build?.id ?? null);
   if (pending) return <Skeleton shape="card" className={props.className} />;
+  if (frame !== null)
+    return (
+      <span className={cn("relative block overflow-hidden rounded-md", props.className)}>
+        <img src={frame} alt="" className="absolute inset-0 size-full object-cover" />
+      </span>
+    );
   return (
     <GamePicture
       environmentId={props.game.environmentId}
       root={props.game.root}
-      path={build?.still ?? props.game.keyArt}
+      path={still ?? props.game.keyArt}
       gameName={props.gameName}
       className={cn(props.className, "rounded-md")}
     />

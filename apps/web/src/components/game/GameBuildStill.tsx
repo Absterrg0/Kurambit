@@ -99,7 +99,7 @@ export function GameTitleMark({
       style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
     >
       {mark === "none" || name === "" ? null : mark === "name" ? (
-        <span className="line-clamp-2 font-display text-xl/tight text-balance text-white/85 @3xs:text-2xl/tight @sm:text-3xl/tight">
+        <span className="line-clamp-2 font-display text-sm/tight text-balance text-white/85 @[7rem]:text-xl/tight @3xs:text-2xl/tight @sm:text-3xl/tight">
           {name}
         </span>
       ) : (

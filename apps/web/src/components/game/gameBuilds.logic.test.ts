@@ -71,7 +71,7 @@ describe("a compare's rows", () => {
     expect(rows.map((row) => row.name)).toEqual(["Starts"]);
     expect(groups).toEqual([
       {
-        names: ["Keeps moving", "Colour is varied"],
+        names: ["Keeps moving", "Largest single colour"],
         why: "the picture stood still while the machine was busy, so it says nothing about the game",
       },
     ]);
