@@ -128,7 +128,9 @@ export function GamesHome() {
           <div
             className={cn(
               "mx-auto flex w-full max-w-200 flex-col px-8",
-              firstRun ? "min-h-full justify-center pb-32" : "gap-14 pt-16 pb-16 lg:pt-24",
+              // The stack sits in the middle of the page, so a short shelf leaves no void below.
+              "min-h-full justify-center",
+              firstRun ? "pb-32" : "gap-14 py-16",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -265,9 +267,10 @@ function BriefBox({
 
   return (
     <section className="flex w-full flex-col gap-3">
-      <Text variant="title" tone="strong" render={<h1 className="mb-2 px-1" />}>
+      {/* The page's one display line, in the same face as the covers below. */}
+      <h1 className="mb-2 font-display text-4xl/10 text-strong-foreground">
         {firstRun ? "Make a game you want to play" : "What should we make next?"}
-      </Text>
+      </h1>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -333,7 +336,7 @@ function BriefBox({
       </form>
 
       {notes.length > 0 ? (
-        <ul className="flex flex-col gap-1.5 px-1">
+        <ul className="flex flex-col gap-1.5">
           {notes.map((note) => (
             <li key={note.text} className="flex flex-wrap items-center gap-2">
               <Text
@@ -350,13 +353,13 @@ function BriefBox({
           ))}
         </ul>
       ) : (
-        <Text variant="meta" tone="dim" render={<p className="px-1" />}>
+        <Text variant="meta" tone="dim" render={<p />}>
           A playable first version in a few minutes. Rename, restyle and change it any time.
         </Text>
       )}
 
       {firstRun ? (
-        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
+        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
           <Text variant="meta" tone="dim">
             Try
           </Text>
@@ -484,7 +487,7 @@ function ContinueShelf({
   const shown = covers.slice(0, SHELF_CARDS);
   return (
     <section aria-labelledby="games" className="@container flex flex-col gap-4">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between">
         <Text variant="label" tone="muted" render={<h2 id="games" />}>
           Continue
         </Text>

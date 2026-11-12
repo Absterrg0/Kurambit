@@ -21,7 +21,6 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
-import { gamePigment } from "./gameLibrary.logic";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
 import { buildCaption, buildName, formatBuildTime } from "./gameBuilds.logic";
@@ -237,7 +236,7 @@ export function GameBuildStrip({
   const slotInBracket = slot?.keepGoing === true && groups.at(-1)?.steps === true;
   const nowCard =
     slot === null && list !== null && (list.folderEdited === true || playing !== null) ? (
-      <NowCard gameName={gameName} list={list} active={onStage === null} onClick={onLive} />
+      <NowCard list={list} active={onStage === null} onClick={onLive} />
     ) : null;
   return (
     <section
@@ -567,18 +566,15 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
 
 /** The game folder when it is no build: edited since, or another build plays from a copy. */
 function NowCard({
-  gameName,
   list,
   active,
   onClick,
 }: {
-  gameName: string;
   list: GameBuildsResult;
   active: boolean;
   onClick: () => void;
 }) {
   const current = list.builds.find((build) => build.id === list.current);
-  const [pigment, pigmentInk] = gamePigment(gameName);
   const since =
     list.folderEdited === true
       ? `Changed since ${current === undefined ? "an earlier build" : buildName(current)}`
@@ -591,14 +587,11 @@ function NowCard({
       onClick={onClick}
       className="group/card flex w-40 shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none"
     >
-      {/* No build holds the folder's game yet, so it has no picture of its own: the game's
-          colour stands in, never another build's still. */}
-      <span
-        className="relative flex aspect-video w-full items-center justify-center gap-1.5 overflow-hidden rounded-md"
-        style={{ background: `radial-gradient(120% 90% at 50% 30%, ${pigment}, ${pigmentInk})` }}
-      >
+      {/* No build holds the folder's game yet, so it has no picture of its own: a quiet
+          well stands in, never another build's still. */}
+      <span className="surface-well relative flex aspect-video w-full items-center justify-center rounded-md">
         <CardRing on={active} />
-        <Text variant="caption" tone="inherit" render={<span className="text-stage-foreground" />}>
+        <Text variant="caption" tone="muted">
           Now
         </Text>
       </span>
