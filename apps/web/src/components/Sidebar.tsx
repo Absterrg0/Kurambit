@@ -1562,7 +1562,7 @@ type SidebarThreadRowProps = {
 function GameDisclosureSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <>
-      <Text variant="caption" tone="dim" render={<p className="px-1.5 pb-0.5" />}>
+      <Text variant="meta" tone="muted" render={<p className="px-1.5 pb-0.5" />}>
         {title}
       </Text>
       <ul role="list" className="flex flex-col pb-1">
@@ -2194,7 +2194,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     chatsOpen && "flex",
                   )}
                 >
-                  <Text variant="micro" tone="inherit">
+                  <Text variant="meta" tone="inherit">
                     Logs
                   </Text>
                   <ChevronDownIcon

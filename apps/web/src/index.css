@@ -1533,7 +1533,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --surface-raised: #f2f0ec;
   --foreground: #2b2926;
   --strong-foreground: #141312;
-  --dim-foreground: #8a857e;
+  /* Dim is for incidental text, yet still read: about 4:1 on the panel in both themes. */
+  --dim-foreground: #7d7871;
   --card: #ffffff;
   --card-foreground: #2b2926;
   --popover: #ffffff;
@@ -1599,7 +1600,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --surface-raised: #191918;
     --foreground: #d8d5cf;
     --strong-foreground: #f5f3ef;
-    --dim-foreground: #6e6a64;
+    --dim-foreground: #77736c;
     --card: #141413;
     --card-foreground: #d8d5cf;
     --popover: #191918;
@@ -1829,7 +1830,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --accent-foreground: #f5f3ef;
     --muted: #111110;
     --muted-foreground: #8e8a83;
-    --dim-foreground: #6e6a64;
+    --dim-foreground: #77736c;
     --border: rgb(255 255 255 / 7.5%);
     --input: rgb(255 255 255 / 12%);
     --sidebar: var(--card);

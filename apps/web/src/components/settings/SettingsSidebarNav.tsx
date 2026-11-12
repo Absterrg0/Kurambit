@@ -317,11 +317,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     onClick={() => handleSearchResultClick(item)}
                   >
                     <SettingsSectionIcon to={item.to} />
+                    {/* Titles wrap rather than cut: a truncated result cannot be told apart. */}
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-label text-sidebar-foreground">
+                      <span className="block text-label text-pretty text-sidebar-foreground">
                         {item.title}
                       </span>
-                      <span className="block truncate text-micro text-sidebar-muted-foreground">
+                      <span className="block truncate text-meta text-sidebar-muted-foreground">
                         {SETTINGS_SECTION_LABELS[item.to]}
                       </span>
                     </span>
