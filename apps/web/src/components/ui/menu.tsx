@@ -10,6 +10,7 @@ import { buttonVariants } from "./button";
 import { POPUP_COLLISION_PADDING, renderClosingPositioner } from "./closing-positioner";
 import { tooltipSafeFinalFocus } from "./focus-return";
 import { MENU_ROW_TEXT_CLASS } from "./menu-row-text";
+import { KbdShortcut } from "./kbd";
 import { RELAXED_PICKER_CLASS } from "./picker-styles";
 
 // Rows are concentric with the popup: their radius is the popup's minus its 1px
@@ -270,14 +271,23 @@ function MenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
   );
 }
 
+// Key chords only, drawn with the shared Kbd chips. A trailing value that is not a
+// key (a snooze time, a count) is MenuItemDetail.
 function MenuShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
-    <kbd
-      className={cn(
-        "ms-auto shrink-0 ps-4 font-sans text-meta text-secondary-label tracking-wide",
-        className,
-      )}
+    <KbdShortcut
+      className={cn("ms-auto shrink-0 ps-4", className)}
       data-slot="menu-shortcut"
+      {...props}
+    />
+  );
+}
+
+function MenuItemDetail({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span
+      className={cn("ms-auto shrink-0 ps-4 text-meta text-secondary-label", className)}
+      data-slot="menu-item-detail"
       {...props}
     />
   );
@@ -371,6 +381,7 @@ export {
   MenuSeparator,
   MenuSeparator as DropdownMenuSeparator,
   MenuShortcut,
+  MenuItemDetail,
   MenuShortcut as DropdownMenuShortcut,
   MenuSub,
   MenuSub as DropdownMenuSub,

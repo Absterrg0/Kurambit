@@ -8,6 +8,7 @@ import {
 } from "../../pendingUserInput";
 import { CheckIcon } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { Kbd } from "../ui/kbd";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import ChatMarkdown from "../ChatMarkdown";
@@ -271,13 +272,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     {isSelected ? (
                       <CheckIcon className="size-3.5 shrink-0 text-primary" />
                     ) : shortcutKey !== null ? (
-                      <kbd
-                        className={cn(
-                          "flex size-5 shrink-0 items-center justify-center text-3xs font-medium text-muted-foreground tabular-nums",
-                        )}
-                      >
-                        {shortcutKey}
-                      </kbd>
+                      <Kbd>{shortcutKey}</Kbd>
                     ) : null}
                   </>
                 );

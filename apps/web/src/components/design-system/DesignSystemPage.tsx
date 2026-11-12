@@ -631,7 +631,7 @@ function OverlaysSection() {
             <MenuItem>
               <RotateCcwIcon />
               Reload
-              <MenuShortcut>Ctrl R</MenuShortcut>
+              <MenuShortcut>Ctrl+R</MenuShortcut>
             </MenuItem>
             <MenuSub>
               <MenuSubTrigger>
