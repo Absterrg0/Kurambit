@@ -130,6 +130,10 @@ function ThemeLibraryCard({
   };
 }) {
   const cardModes = theme.previews.map((preview) => preview.mode);
+  // A card that supplies any half of the scheme is the theme in use: it alone carries the
+  // selected ring and "In use". Its halves are marked only when it supplies one of two.
+  const inUse = isActive || activeModes.length > 0;
+  const suppliesEveryHalf = cardModes.every((mode) => activeModes.includes(mode));
   const [radialModeOpen, setRadialModeOpen] = useState<ThemeAppearance | null>(null);
   const radialModeGroups = (["light", "dark"] as const).map((mode) => {
     const options =
@@ -150,11 +154,13 @@ function ThemeLibraryCard({
           <div
             className={cn(
               "cursor-pointer overflow-hidden rounded-xl border border-border/70 bg-card/60 transition-colors hover:bg-accent/10",
-              isActive && "bg-accent/30",
+              inUse && "bg-accent/30",
             )}
             data-theme-library-card={theme.id}
             onClick={onUse}
-            style={isActive ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
+            // One selected mark per card: the card's ring. Its halves carry their own ring
+            // only when the card supplies just one of them (another theme has the other).
+            style={inUse ? { boxShadow: "inset 0 0 0 2px var(--ring)" } : undefined}
           >
             <div className="relative">
               {variantNavigation ? (
@@ -288,7 +294,7 @@ function ThemeLibraryCard({
               ) : (
                 <ThemePreviewCircles
                   label={theme.label}
-                  activeModes={activeModes}
+                  activeModes={suppliesEveryHalf ? [] : activeModes}
                   onSelectMode={onUseMode}
                   previews={theme.previews}
                 />
@@ -309,6 +315,12 @@ function ThemeLibraryCard({
                   >
                     {variantNavigation?.collectionLabel ?? theme.label}
                   </button>
+                  {inUse ? (
+                    <span className="flex shrink-0 items-center gap-1 text-meta text-muted-foreground">
+                      <CheckIcon aria-hidden className="size-3.5" />
+                      In use
+                    </span>
+                  ) : null}
                 </div>
               </div>
               {onEdit || onDuplicate || onDownload || onRemove ? (
@@ -319,18 +331,19 @@ function ThemeLibraryCard({
                         render={
                           <Button
                             aria-label={`Duplicate ${theme.label}`}
-                            size="icon-xs"
-                            variant="ghost"
+                            size="xs"
+                            variant="ghost-muted"
                             onClick={(event) => {
                               event.stopPropagation();
                               onDuplicate();
                             }}
                           >
                             <CopyPlusIcon />
+                            Duplicate
                           </Button>
                         }
                       />
-                      <TooltipPopup>Duplicate theme</TooltipPopup>
+                      <TooltipPopup>Make an editable copy</TooltipPopup>
                     </Tooltip>
                   ) : null}
                   {onEdit ? (

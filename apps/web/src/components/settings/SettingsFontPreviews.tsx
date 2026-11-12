@@ -11,10 +11,10 @@ import { GhosttyTerminalSurface } from "~/terminal/ghostty/surface";
 
 const EMPTY_SKILLS: ReadonlyArray<never> = [];
 
+// A game direction, as the composer reads it, with the file chips a reply links.
 const PROMPT_PREVIEW_TEXT =
-  "Use $frontend-design to fix the flaky test in " +
-  "[surface.test.ts](apps/web/src/terminal/ghostty/surface.test.ts) and align the header with " +
-  "[SettingsPanels.tsx](apps/web/src/components/settings/SettingsPanels.tsx) before shipping.";
+  "Make the fox jump a little higher in [player.ts](games/fox-dash/src/player.ts) and add " +
+  "a dash on Shift, but leave [title.ts](games/fox-dash/src/ui/title.ts) as it is.";
 
 function noop() {}
 
@@ -46,13 +46,13 @@ export function PromptFontPreview() {
 }
 
 const DIFF_PREVIEW_PATCH = [
-  "diff --git a/src/formatUser.ts b/src/formatUser.ts",
-  "--- a/src/formatUser.ts",
-  "+++ b/src/formatUser.ts",
+  "diff --git a/src/player.ts b/src/player.ts",
+  "--- a/src/player.ts",
+  "+++ b/src/player.ts",
   "@@ -1,3 +1,3 @@",
-  " export function formatUser(user: User) {",
-  "-  return user.name.toUpperCase();",
-  "+  return `${user.name} <${user.email}>`; // 0O 1lI",
+  " export function jump(fox: Player) {",
+  "-  fox.velocity.y = 8.0;",
+  "+  fox.velocity.y = 10.5; // 0O 1lI",
   " }",
   "",
 ].join("\n");
@@ -133,9 +133,9 @@ export function CodeFontPreview() {
 }
 
 const TERMINAL_PROMPT =
-  "\x1b[1;32m→\x1b[0m \x1b[1;36mkurambit\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
+  "\x1b[1;32m→\x1b[0m \x1b[1;36mfox-dash\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
 const TERMINAL_PREVIEW_TRANSCRIPT =
-  `${TERMINAL_PROMPT}vpr dev\r\n` +
+  `${TERMINAL_PROMPT}npm run dev\r\n` +
   "\r\n" +
   "  \x1b[1;32mVITE\x1b[0m \x1b[32mv7.1.1\x1b[0m  \x1b[2mready in\x1b[0m \x1b[1m1.24s\x1b[0m\r\n" +
   "\r\n" +

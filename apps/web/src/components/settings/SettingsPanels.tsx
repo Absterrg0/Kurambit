@@ -122,7 +122,6 @@ import {
   isMonospaceFamily,
   resolveDefaultFamilyLabel,
   resolveTerminalFontPreference,
-  resolveTerminalFontSizePreference,
   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../../appearanceFonts";
 import { CodeFontPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
@@ -1130,7 +1129,7 @@ export function AppearanceSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("composer-context")}
-          description="Keep branch and worktree controls below the composer after a thread starts."
+          description="Keep the side-copy controls below the composer after a chat starts."
           resetAction={
             settings.persistComposerContextStrip !==
             DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
@@ -1474,30 +1473,14 @@ function FontSettingsGroup() {
 }
 
 function SimpleFontRows() {
-  const settings = useScopedSettings();
   return (
     <>
       <InterfaceFontRow preview={<PromptFontPreview />} />
       <CodeFontRow
         title="Monospace font"
         description="Code blocks, diffs, file previews, and the terminal."
-        preview={
-          <>
-            <CodeFontPreview />
-            <TerminalFontPreview
-              family={resolveTerminalFontPreference({
-                advanced: false,
-                code: settings.fontFamilyCode,
-                terminal: settings.fontFamilyTerminal,
-              })}
-              size={resolveTerminalFontSizePreference({
-                advanced: false,
-                code: settings.fontSizeCode,
-                terminal: settings.fontSizeTerminal,
-              })}
-            />
-          </>
-        }
+        // One short sample: the monospace choice is secondary in a game studio.
+        preview={<CodeFontPreview />}
       />
     </>
   );
