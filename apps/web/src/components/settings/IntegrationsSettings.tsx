@@ -39,6 +39,7 @@ import { previewEnvironment } from "~/state/preview";
 import { useServerConfigs } from "~/state/entities";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { isElectron } from "../../env";
+import { Text } from "../ui/text";
 
 import { Badge } from "../ui/badge";
 import {
@@ -84,13 +85,7 @@ import {
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
 
-import {
-  SettingsUnavailableGroup,
-  SettingResetButton,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingResetButton, SettingsPageContainer, SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
@@ -981,7 +976,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     onCommit={(next) => renameProfile(profile.id, next)}
                   />
                 )}
-                {isDefault ? (
+                {/* The built-in profile is named Default; a badge would only repeat it. */}
+                {isDefault && profile.name !== "Default" ? (
                   <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
                     <Badge>Default</Badge>
                   </span>
@@ -1160,32 +1156,28 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
 }
 
 export function IntegrationsSettingsPanel() {
-  const previewDefaultsDisabled = !isElectron;
-  const previewDefaults = (
-    <>
-      <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
-      <BrowserViewportSetting disabled={previewDefaultsDisabled} />
-      <BrowserZoomSetting disabled={previewDefaultsDisabled} />
-      <BrowserAppearanceSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingFrameRateSetting disabled={previewDefaultsDisabled} />
-      <BrowserRecordingInputSettings disabled={previewDefaultsDisabled} />
-      <BrowserLinkTargetSetting disabled={previewDefaultsDisabled} />
-      <BrowserAutoShowFloatingPreviewSetting disabled={previewDefaultsDisabled} />
-    </>
-  );
-
   return (
     <SettingsPageContainer>
-      <ProjectDefaultsSettings category="integrations" />
-      <SettingsSection id="browser" title="Browser">
-        {previewDefaultsDisabled ? (
-          <SettingsUnavailableGroup message="Only available in the desktop app.">
-            {previewDefaults}
-          </SettingsUnavailableGroup>
+      <ProjectDefaultsSettings category="integrations">
+        {isElectron ? (
+          <>
+            <BrowserProfilesSetting disabled={false} />
+            <BrowserViewportSetting disabled={false} />
+            <BrowserZoomSetting disabled={false} />
+            <BrowserAppearanceSetting disabled={false} />
+            <BrowserRecordingFrameRateSetting disabled={false} />
+            <BrowserRecordingInputSettings disabled={false} />
+            <BrowserLinkTargetSetting disabled={false} />
+            <BrowserAutoShowFloatingPreviewSetting disabled={false} />
+          </>
         ) : (
-          previewDefaults
+          // The browser itself runs in the desktop app, so its profiles, sizes and
+          // recording options have nothing to act on here.
+          <Text variant="meta" tone="muted" render={<p className="px-3 py-3 sm:px-4" />}>
+            The browser's profiles, sizes and recording options are set in the desktop app.
+          </Text>
         )}
-      </SettingsSection>
+      </ProjectDefaultsSettings>
     </SettingsPageContainer>
   );
 }

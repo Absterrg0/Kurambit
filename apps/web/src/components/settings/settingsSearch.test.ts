@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { EnvironmentId } from "@kurambit/contracts";
 
 import {
@@ -261,6 +261,11 @@ describe("searchSettings", () => {
   });
 
   it("routes browser recording quality to integrations", () => {
+    // The browser rows exist only in the desktop app.
+    env.isElectron = true;
+    onTestFinished(() => {
+      env.isElectron = false;
+    });
     const result = searchSettings("recording frame rate")[0];
     expect(result).toMatchObject({
       id: "browser-recording-frame-rate",
@@ -270,6 +275,11 @@ describe("searchSettings", () => {
   });
 
   it("routes where links open to integrations", () => {
+    // The browser rows exist only in the desktop app.
+    env.isElectron = true;
+    onTestFinished(() => {
+      env.isElectron = false;
+    });
     expect(searchSettings("open links in")[0]).toMatchObject({
       id: "browser-link-target",
       to: "/settings/integrations",
@@ -278,6 +288,11 @@ describe("searchSettings", () => {
   });
 
   it("finds the default browser profile action in the profiles list", () => {
+    // The browser rows exist only in the desktop app.
+    env.isElectron = true;
+    onTestFinished(() => {
+      env.isElectron = false;
+    });
     expect(searchSettings("default profile")[0]).toMatchObject({
       id: "browser-default-profile",
       to: "/settings/integrations",

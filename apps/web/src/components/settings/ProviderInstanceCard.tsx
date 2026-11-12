@@ -896,13 +896,13 @@ export function ProviderInstanceCard({
                     />
                   )}
                   {/* Every advisory says what it is: an icon alone read as an unlabelled
-                      "add" button. The detail follows the installed version, so it names
-                      only the target ("v0.1 · Update to 0.2"), never the version twice. */}
+                      "add" button. Beside the installed version it is only "Update", so
+                      the header carries one version string; the target is in the popover. */}
                   {updateProgress
                     ? "Updating"
                     : hasCompatibilityWarning
                       ? "Version issue"
-                      : mode === "list" || !updateTargetLabel
+                      : mode === "list" || !updateTargetLabel || versionLabel
                         ? "Update"
                         : `Update to ${updateTargetLabel.replace(/^v/, "")}`}
                 </Button>
@@ -1019,7 +1019,9 @@ export function ProviderInstanceCard({
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-              {versionLabel ? (
+              {/* A pending update's badge stands in for the version in the list, so the
+                  name is never the part that gives way; the detail shows the version. */}
+              {versionLabel && !versionAdvisoryNode ? (
                 <span className="max-w-24 shrink-0 truncate text-meta text-muted-foreground tabular-nums">
                   {versionLabel}
                 </span>

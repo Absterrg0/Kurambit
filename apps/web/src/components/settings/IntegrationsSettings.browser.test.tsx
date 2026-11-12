@@ -5,7 +5,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, StrictMode } from "react";
+import { act, type ReactNode, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -38,7 +38,10 @@ vi.mock(import("../../hooks/useSettings"), async (original) => ({
 }));
 vi.mock(import("./ProjectDefaultsSettings"), async (original) => ({
   ...(await original()),
-  ProjectDefaultsSettings: (() => null) as never,
+  // The browser rows render inside this section; keep them, drop its own rows.
+  ProjectDefaultsSettings: (({ children }: { children?: ReactNode }) => (
+    <section id="browser">{children}</section>
+  )) as never,
 }));
 vi.mock(import("./SettingsScopeContext"), async (original) => ({
   ...(await original()),

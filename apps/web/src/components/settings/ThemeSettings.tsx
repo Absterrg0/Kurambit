@@ -1,10 +1,10 @@
 import {
   CheckIcon,
-  CopyIcon,
+  CopyPlusIcon,
+  DownloadIcon,
   MoonIcon,
   PaintbrushIcon,
   PenLineIcon,
-  PlusIcon,
   SunIcon,
   Trash2Icon,
   UploadIcon,
@@ -326,7 +326,7 @@ function ThemeLibraryCard({
                               onDuplicate();
                             }}
                           >
-                            <CopyIcon />
+                            <CopyPlusIcon />
                           </Button>
                         }
                       />
@@ -850,11 +850,11 @@ export function ThemeLibrary({
             }
           >
             <PaintbrushIcon />
-            Create theme
+            New theme…
           </Button>
           <Button size="xs" variant="outline" onClick={() => onImportOpenChange(true)}>
-            <PlusIcon />
-            Add theme
+            <DownloadIcon />
+            Import theme…
           </Button>
         </div>
       </div>

@@ -15,7 +15,8 @@ import type {
 import { codexAuthHandoffUrl } from "@kurambit/shared/codexAuthHandoff";
 import { providerAuthReturnUrl } from "@kurambit/shared/providerAuthReturnUrl";
 import { isLoopbackHost } from "@kurambit/shared/preview";
-import { CheckIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
+import { StatusLabel } from "../ui/status-dot";
 import {
   Children,
   useEffect,
@@ -1051,7 +1052,7 @@ function CodexSignInDescription({
 
 function ReadyWithAccount({ email }: { readonly email: string | undefined }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-3 text-xs">
+    <span className="inline-flex min-w-0 items-center gap-3 text-meta">
       {email ? (
         <RedactedSensitiveText
           value={email}
@@ -1061,10 +1062,7 @@ function ReadyWithAccount({ email }: { readonly email: string | undefined }) {
           className="min-w-0 truncate text-muted-foreground"
         />
       ) : null}
-      <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-success-foreground">
-        <CheckIcon className="size-3.5" />
-        Ready
-      </span>
+      <StatusLabel tone="success">Ready</StatusLabel>
     </span>
   );
 }

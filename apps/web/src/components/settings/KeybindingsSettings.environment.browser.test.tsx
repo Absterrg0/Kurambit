@@ -59,9 +59,10 @@ let container: HTMLDivElement;
 
 const render = () => act(async () => root.render(<KeybindingsSettingsPanel />));
 const openButton = () => {
-  const button = container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Open the keybindings file"]',
-  );
+  const button =
+    Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent === "Open keybindings.json",
+    ) ?? null;
   expect(button).not.toBeNull();
   return button!;
 };

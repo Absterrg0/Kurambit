@@ -273,7 +273,7 @@ function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
       <span>Version</span>
-      <code className="text-2xs font-medium text-muted-foreground">{APP_VERSION}</code>
+      <span className="text-meta text-muted-foreground tabular-nums">{APP_VERSION}</span>
     </span>
   );
 }
@@ -919,7 +919,7 @@ export function AppearanceSettingsPanel() {
           control={
             <div className="flex w-full items-center gap-3 sm:w-52">
               <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center text-meta font-medium tabular-nums text-foreground"
                 htmlFor="appearance-contrast"
               >
                 {settings.appearanceContrast}%
@@ -965,7 +965,7 @@ export function AppearanceSettingsPanel() {
           control={
             <div className="flex w-full items-center gap-3 sm:w-52">
               <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center text-meta font-medium tabular-nums text-foreground"
                 htmlFor="glass-opacity"
               >
                 {settings.glassOpacity}%
@@ -1159,7 +1159,7 @@ export function AppearanceSettingsPanel() {
               <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
               <div className="flex w-full items-center gap-3">
                 <output
-                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                  className="min-w-16 rounded-md bg-muted px-2 py-1 text-center text-meta font-medium tabular-nums text-foreground"
                   htmlFor="panel-animation-duration"
                 >
                   {settings.panelAnimationDurationMs} ms

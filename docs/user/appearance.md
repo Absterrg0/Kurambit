@@ -27,7 +27,7 @@ without replaying its transitions.
 
 ## Custom themes
 
-Choose **Create theme** to adjust a palette, or import a Kurambit or VS Code
+Choose **New theme…** to adjust a palette, or **Import theme…** to bring in a Kurambit or VS Code
 theme. The theme editor's color picker lets you select an area of the app to find the color to
 change. Export your theme as JSON to share it.
 
