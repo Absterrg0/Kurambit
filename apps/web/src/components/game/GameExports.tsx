@@ -234,7 +234,7 @@ export function GameExports({
           live && target === "Web"
             ? {
                 ...BUILD_META.Web,
-                body: "A copy of the game you can put on any website. The Stage keeps playing the game itself.",
+                body: "A copy of the game you can put on any website.",
                 play: false,
               }
             : BUILD_META[target];
@@ -293,107 +293,110 @@ export function GameExports({
               {notice?.status ? (
                 <p className="text-xs text-muted-foreground">{notice.status}</p>
               ) : null}
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-              {/* The target's state beside what changes it. */}
-              {build ? null : (
-                <span className="me-1 text-2xs text-muted-foreground">Never exported</span>
-              )}
-              {build ? (
-                <>
-                  {meta.play ? (
-                    <>
-                      <Button size="sm" disabled={!canOperate} onClick={onPlay}>
-                        <Gamepad2Icon className="size-3.5" aria-hidden="true" />
-                        Play
-                      </Button>
-                      {build.packageable ? (
+              {/* The actions on their own row under the words, so neither squeezes the other;
+                  the target's state beside what changes it. */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                {build ? null : (
+                  <span className="me-1 text-2xs text-muted-foreground">Never exported</span>
+                )}
+                {build ? (
+                  <>
+                    {meta.play ? (
+                      <>
+                        <Button size="sm" disabled={!canOperate} onClick={onPlay}>
+                          <Gamepad2Icon className="size-3.5" aria-hidden="true" />
+                          Play
+                        </Button>
+                        {build.packageable ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!canPackage || operationRunning || packaging !== null}
+                            aria-busy={packaging === "Web"}
+                            onClick={() => void downloadPackage("Web")}
+                          >
+                            <DownloadIcon className="size-3.5" aria-hidden="true" />
+                            {packaging === "Web" ? "Packaging…" : "Download package"}
+                          </Button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        {(target === "Windows" || target === "Web") && build.packageable ? (
+                          <Button
+                            size="sm"
+                            disabled={!canPackage || operationRunning || packaging !== null}
+                            aria-busy={packaging === target}
+                            onClick={() =>
+                              void downloadPackage(target === "Web" ? "Web" : "Windows")
+                            }
+                          >
+                            <DownloadIcon className="size-3.5" aria-hidden="true" />
+                            {packaging === target ? "Packaging…" : "Download package"}
+                          </Button>
+                        ) : null}
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={!canPackage || operationRunning || packaging !== null}
-                          aria-busy={packaging === "Web"}
-                          onClick={() => void downloadPackage("Web")}
+                          disabled={!canOperate || operationRunning || packaging !== null}
+                          onClick={() => {
+                            if (target === "Web") onExportWeb();
+                            else onExport(target);
+                          }}
                         >
                           <DownloadIcon className="size-3.5" aria-hidden="true" />
-                          {packaging === "Web" ? "Packaging…" : "Download package"}
+                          Export again
                         </Button>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      {(target === "Windows" || target === "Web") && build.packageable ? (
-                        <Button
-                          size="sm"
-                          disabled={!canPackage || operationRunning || packaging !== null}
-                          aria-busy={packaging === target}
-                          onClick={() => void downloadPackage(target === "Web" ? "Web" : "Windows")}
-                        >
-                          <DownloadIcon className="size-3.5" aria-hidden="true" />
-                          {packaging === target ? "Packaging…" : "Download package"}
-                        </Button>
-                      ) : null}
+                      </>
+                    )}
+                    {target === "Web" ? (
                       <Button
                         size="sm"
-                        variant="outline"
-                        disabled={!canOperate || operationRunning || packaging !== null}
-                        onClick={() => {
-                          if (target === "Web") onExportWeb();
-                          else onExport(target);
-                        }}
+                        variant="ghost"
+                        disabled={!canOpenWeb || operationRunning}
+                        onClick={() => void openWebExport()}
                       >
-                        <DownloadIcon className="size-3.5" aria-hidden="true" />
-                        Export again
+                        <ExternalLinkIcon className="size-3.5" aria-hidden="true" />
+                        Open in browser
                       </Button>
-                    </>
-                  )}
-                  {target === "Web" ? (
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={!canOpenWeb || operationRunning}
-                      onClick={() => void openWebExport()}
+                      onClick={() => reveal(build.path.replace(/\/[^/]+$/, ""))}
                     >
-                      <ExternalLinkIcon className="size-3.5" aria-hidden="true" />
-                      Open in browser
+                      <FolderOpenIcon className="size-3.5" aria-hidden="true" />
+                      Open folder
                     </Button>
-                  ) : null}
+                  </>
+                ) : meta.play ? (
                   <Button
                     size="sm"
-                    variant="ghost"
-                    onClick={() => reveal(build.path.replace(/\/[^/]+$/, ""))}
+                    variant="outline"
+                    disabled={!canOperate || operationRunning}
+                    onClick={onPlay}
                   >
-                    <FolderOpenIcon className="size-3.5" aria-hidden="true" />
-                    Open folder
+                    Build & play
                   </Button>
-                </>
-              ) : meta.play ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canOperate || operationRunning}
-                  onClick={onPlay}
-                >
-                  Build & play
+                ) : (
+                  // The card's one action before its first export, so it reads as the primary.
+                  <Button
+                    size="sm"
+                    disabled={!canOperate || operationRunning || packaging !== null}
+                    onClick={() => {
+                      if (target === "Web") onExportWeb();
+                      else onExport(target);
+                    }}
+                  >
+                    <DownloadIcon className="size-3.5" aria-hidden="true" />
+                    {target === "Web" ? "Export for web" : `Export for ${target}`}
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>
+                  <ScrollTextIcon className="size-3.5" aria-hidden="true" />
+                  Export log
                 </Button>
-              ) : (
-                // The card's one action before its first export, so it reads as the primary.
-                <Button
-                  size="sm"
-                  disabled={!canOperate || operationRunning || packaging !== null}
-                  onClick={() => {
-                    if (target === "Web") onExportWeb();
-                    else onExport(target);
-                  }}
-                >
-                  <DownloadIcon className="size-3.5" aria-hidden="true" />
-                  {target === "Web" ? "Export for web" : `Export for ${target}`}
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>
-                <ScrollTextIcon className="size-3.5" aria-hidden="true" />
-                Export log
-              </Button>
+              </div>
             </div>
           </section>
         );

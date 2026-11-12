@@ -33,6 +33,7 @@ import {
   type GameBuildFacts,
   type GameBuildsResult,
   type GameCheck,
+  type GameFactId,
   type GameFactView,
   type GameThing,
   type GameThingValue,
@@ -874,13 +875,22 @@ function Recordings({
     useQuietThreadShell(threadRef)?.projectId ?? null,
     "",
   );
-  const runs = new Map<string, { video: RunEvidence | null; frame: RunEvidence | null }>();
+  const runs = new Map<
+    string,
+    { video: RunEvidence | null; frame: RunEvidence | null; played: number | null }
+  >();
   const seen = new Set<string>();
+  // How long a bot played, in the game's own seconds: a recording's length at a glance.
+  const playedOf = (id: GameFactId): number | null => {
+    if (id !== "idle" && id !== "masher" && id !== "skilled") return null;
+    const tier = facts[id];
+    return tier.status === "measured" ? tier.value.played : null;
+  };
   for (const view of gameFactsView(facts))
     for (const item of view.evidence) {
       if (item.kind === "log" || seen.has(item.path)) continue;
       seen.add(item.path);
-      const run = runs.get(view.label) ?? { video: null, frame: null };
+      const run = runs.get(view.label) ?? { video: null, frame: null, played: playedOf(view.id) };
       runs.set(view.label, { ...run, [item.kind]: item });
     }
   if (runs.size === 0) return null;
@@ -905,6 +915,19 @@ function Recordings({
                 build={{ still: run.frame?.path ?? null }}
                 className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30 group-focus-visible/run:ring-2 group-focus-visible/run:ring-ring"
               >
+                {run.video === null || run.played === null ? null : (
+                  // How long the bot played, where a video's length is read.
+                  <Text
+                    variant="micro"
+                    tone="inherit"
+                    numeric
+                    render={
+                      <span className="absolute right-1.5 bottom-1.5 z-20 rounded-sm bg-black/65 px-1.5 py-px text-white" />
+                    }
+                  >
+                    {`${run.played < 10 ? run.played.toFixed(1) : Math.round(run.played)} s`}
+                  </Text>
+                )}
                 {run.video === null ? null : (
                   <span className="absolute inset-0 z-10 grid place-items-center">
                     <span className="grid size-7 place-items-center rounded-full bg-black/60 text-stage-foreground backdrop-blur-sm transition-transform group-hover/run:scale-105">
