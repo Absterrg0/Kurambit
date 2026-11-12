@@ -279,9 +279,7 @@ export function GameExports({
                   </summary>
                   <p className="mt-1 font-mono break-all">{build.path}</p>
                 </details>
-              ) : (
-                <p className="text-2xs text-muted-foreground">Never exported</p>
-              )}
+              ) : null}
               {target === "Web" && !live ? (
                 <p className="text-2xs text-muted-foreground">
                   Packages the export Play serves; later source edits are not included.
@@ -297,6 +295,10 @@ export function GameExports({
               ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {/* The target's state beside what changes it. */}
+              {build ? null : (
+                <span className="me-1 text-2xs text-muted-foreground">Never exported</span>
+              )}
               {build ? (
                 <>
                   {meta.play ? (
@@ -390,7 +392,7 @@ export function GameExports({
               )}
               <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>
                 <ScrollTextIcon className="size-3.5" aria-hidden="true" />
-                Logs
+                Export log
               </Button>
             </div>
           </section>
