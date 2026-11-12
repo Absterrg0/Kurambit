@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { FastForwardIcon, GitCompareIcon } from "lucide-react";
@@ -76,6 +76,7 @@ export function GameBuildStrip({
   onPlayUnlisted,
   onLive,
   onCompare,
+  cardWidth,
   onInspect,
 }: {
   threadRef: ScopedThreadRef;
@@ -92,6 +93,8 @@ export function GameBuildStrip({
   /** Back to the folder's own game. */
   onLive: () => void;
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
+  /** Each card's width, which the Stage sets from the height its game's shape leaves over. */
+  cardWidth: number;
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
 }) {
@@ -240,6 +243,8 @@ export function GameBuildStrip({
       aria-label="Builds"
       data-game-build-strip=""
       className="flex shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
+      // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
+      style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}
     >
       {reelOpen ? (
         <GameReel
@@ -297,7 +302,7 @@ export function GameBuildStrip({
       )}
       {/* A fixed height (a picture and two caption lines), so the Stage above never jumps
           between games whose captions wrap differently. */}
-      <div ref={cardsRef} className="flex min-h-36 min-w-0 items-start gap-3 overflow-x-auto pb-1">
+      <div ref={cardsRef} className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1">
         {list === null ? (
           first.error !== null ? (
             <Text variant="caption" tone="muted" render={<p className="py-6" />}>
@@ -306,7 +311,7 @@ export function GameBuildStrip({
           ) : (
             // Cards at their final size, so the strip does not jump when the builds arrive.
             [0, 1, 2].map((n) => (
-              <div key={n} className="flex w-40 shrink-0 flex-col gap-1.5">
+              <div key={n} className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
                 <Skeleton shape="card" className="aspect-video w-full" />
                 <Skeleton className="h-3 w-24" />
               </div>
@@ -407,7 +412,7 @@ function BuildCard({
             disabled={!build.available && !picking}
             onClick={onClick}
             className={cn(
-              "group/card flex w-40 shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
+              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
               (undone || !build.available) && "opacity-40",
             )}
           />
@@ -422,7 +427,7 @@ function BuildCard({
           <CardRing on={onStage || picked} />
           {picked ? <PickBadge /> : null}
         </GameBuildStill>
-        <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
+        <span className="flex min-h-12 min-w-0 flex-col gap-0.5 px-0.5">
           <Text
             variant="caption"
             tone={onStage ? "strong" : "default"}
@@ -523,7 +528,7 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
 /** Before the first build: the shape it will take, said once. */
 function FirstBuildSlot() {
   return (
-    <div className="flex w-40 shrink-0 flex-col gap-1.5">
+    <div className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
       <div className="surface-well aspect-video w-full rounded-md" />
       <Text variant="caption" tone="muted" render={<span className="px-0.5" />}>
         Not measured yet
@@ -535,14 +540,14 @@ function FirstBuildSlot() {
 /** The build being made: a dashed slot with its elapsed time. */
 function SlotCard({ slot }: { slot: GameBuildSlot }) {
   return (
-    <div data-game-build-slot="" className="flex w-40 shrink-0 flex-col gap-1.5">
+    <div data-game-build-slot="" className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
       <div className="flex aspect-video w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
         <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
         <Text variant="caption" tone="default">
           {slot.label}
         </Text>
       </div>
-      <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
+      <span className="flex min-h-12 min-w-0 flex-col gap-0.5 px-0.5">
         <Text variant="caption" tone="default" render={<span className="line-clamp-2" />}>
           {slot.caption ?? "\u00a0"}
         </Text>
@@ -577,7 +582,7 @@ function NowCard({
       data-game-build-card="now"
       aria-current={active ? "true" : undefined}
       onClick={onClick}
-      className="group/card flex w-40 shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none"
+      className="group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none"
     >
       {/* No build holds the folder's game yet, so it has no picture of its own: a quiet
           well stands in, never another build's still. */}

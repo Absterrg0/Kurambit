@@ -147,6 +147,9 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
   AsyncResult.isSuccess(result) &&
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
+/** A build card's picture height bounds: its 160px floor and the most leftover height it takes. */
+const BUILD_CARD_PICTURE = { min: 90, max: 144 } as const;
+
 const buildPhrase = (name: string) => name.replace(/^Build /, "build ").replace(/^Step /, "step ");
 
 /** The folder's own game frame, not a build copy's. */
@@ -396,26 +399,54 @@ function ThreadGameStage({
   // Whatever height is left over collects below the strip, above the composer.
   const viewportWidth = data?.viewport.width ?? 16;
   const viewportHeight = data?.viewport.height ?? 9;
-  const [stageFit, setStageFit] = useState<{ width: number; height: number } | null>(null);
+  const [stageFit, setStageFit] = useState<{
+    width: number;
+    height: number;
+    cardWidth: number;
+  } | null>(null);
   useLayoutEffect(() => {
     const section = stageRef.current;
     if (section === null) return;
     const measure = () => {
+      const strip = section.querySelector<HTMLElement>("[data-game-build-strip]");
       let taken = 0;
       for (const child of section.children)
-        if (!(child instanceof HTMLElement) || child.dataset.stageFit !== undefined) continue;
-        else if (child.dataset.stageSpacer === undefined) taken += child.offsetHeight;
+        if (
+          child instanceof HTMLElement &&
+          child.dataset.stageFit === undefined &&
+          child.dataset.stageSpacer === undefined &&
+          child !== strip
+        )
+          taken += child.offsetHeight;
+      // The strip less its pictures: they grow with what the Stage leaves over,
+      // so measuring them in would chase their own growth.
+      const cardWidth = Number.parseFloat(
+        strip?.style.getPropertyValue("--build-card-width") ?? "",
+      );
+      const picture = Number.isFinite(cardWidth) ? (cardWidth * 9) / 16 : BUILD_CARD_PICTURE.min;
+      const stripChrome = strip === null ? 0 : Math.max(0, strip.offsetHeight - picture);
       // The surface's side insets (mx-3) and a breath above the strip.
       const width = section.clientWidth - 24;
+      const available = section.clientHeight - taken - stripChrome - BUILD_CARD_PICTURE.min - 8;
       const height = Math.floor(
-        Math.max(
-          0,
-          Math.min(section.clientHeight - taken - 8, (width * viewportHeight) / viewportWidth),
-        ),
+        Math.max(0, Math.min(available, (width * viewportHeight) / viewportWidth)),
       );
-      const next = { width: Math.floor((height * viewportWidth) / viewportHeight), height };
+      // What the game's shape leaves over goes to bigger build pictures, up to a cap.
+      const pictureHeight = Math.min(
+        BUILD_CARD_PICTURE.max,
+        BUILD_CARD_PICTURE.min + Math.max(0, available - height),
+      );
+      const next = {
+        width: Math.floor((height * viewportWidth) / viewportHeight),
+        height,
+        cardWidth: Math.floor((pictureHeight * 16) / 9),
+      };
       setStageFit((previous) =>
-        previous?.width === next.width && previous.height === next.height ? previous : next,
+        previous?.width === next.width &&
+        previous.height === next.height &&
+        previous.cardWidth === next.cardWidth
+          ? previous
+          : next,
       );
     };
     measure();
@@ -1073,7 +1104,7 @@ function ThreadGameStage({
           className={
             compare === null
               ? cn(
-                  "group/stage relative mx-3 flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
+                  "group/stage relative mx-3 flex min-h-0 items-center justify-center self-start overflow-hidden rounded-xl bg-stage-well [container-type:size]",
                   stageFit === null ? "flex-1" : "shrink-0",
                 )
               : "hidden"
@@ -1107,7 +1138,7 @@ function ThreadGameStage({
         className={
           playTarget === null && compare === null
             ? cn(
-                "relative flex min-h-0 flex-col self-center px-3",
+                "relative flex min-h-0 flex-col self-start px-3",
                 stageFit === null ? "flex-1 self-stretch" : "shrink-0",
               )
             : "hidden"
@@ -1153,6 +1184,7 @@ function ThreadGameStage({
         />
       </div>
       <GameBuildStrip
+        cardWidth={stageFit?.cardWidth ?? 160}
         threadRef={threadRef}
         gameName={gameName}
         playing={playTarget?.build ?? null}

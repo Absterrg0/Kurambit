@@ -1365,6 +1365,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     var(--popover-rim) border-box;
   box-shadow: var(--popover-shadow);
 }
+/* The inset pane's height: the window less its 8px margin above and below, so
+   its bottom edge and rounded corners are drawn instead of running off-screen. */
+@utility max-h-inset-pane {
+  max-height: calc(100dvh - 1rem);
+}
 @utility surface-tooltip {
   @apply surface-popover;
   --surface-shadow: var(--tooltip-shadow);
