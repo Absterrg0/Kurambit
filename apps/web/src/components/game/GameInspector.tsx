@@ -55,7 +55,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Kbd } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
@@ -390,6 +390,8 @@ function BuildDetail({
           measure.canMeasure &&
           build.available &&
           factsData !== null &&
+          // An unmeasured build's well carries its own Measure now.
+          factsData.state !== "never" &&
           factsData.state !== "measuring" &&
           factsData.state !== "queued" ? (
             <Tooltip>
@@ -398,16 +400,14 @@ function BuildDetail({
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    aria-label={factsData.state === "never" ? "Measure" : "Measure again"}
+                    aria-label="Measure again"
                     onClick={() => void measure.send(build.id, true)}
                   />
                 }
               >
                 <RefreshCwIcon aria-hidden="true" />
               </TooltipTrigger>
-              <TooltipPopup side="top">
-                {factsData.state === "never" ? "Measure" : "Measure again"}
-              </TooltipPopup>
+              <TooltipPopup side="top">Measure again</TooltipPopup>
             </Tooltip>
           ) : undefined
         }
@@ -425,9 +425,27 @@ function BuildDetail({
             </Text>
           )
         ) : factsData.state === "never" ? (
-          <Text variant="meta" tone="muted" render={<p />}>
-            {factsData.message.trim() === "" ? "Not measured yet." : factsData.message}
-          </Text>
+          <Empty variant="well">
+            <EmptyHeader>
+              <EmptyTitle>Not measured yet</EmptyTitle>
+              <EmptyDescription>
+                {factsData.message.trim() === ""
+                  ? "A bot plays this build and its checks land here."
+                  : factsData.message}
+              </EmptyDescription>
+            </EmptyHeader>
+            {measure.canMeasure ? (
+              <EmptyContent>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void measure.send(build.id, true)}
+                >
+                  Measure now
+                </Button>
+              </EmptyContent>
+            ) : null}
+          </Empty>
         ) : (
           <Checks threadRef={threadRef} facts={factsData} />
         )}
