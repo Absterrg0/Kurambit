@@ -7982,7 +7982,9 @@ export default function ChatView(props: ChatViewProps) {
             />
           )}
         </header>
-        {gameLayout ? <GameInspectorPanel threadRef={activeThreadRef} /> : null}
+        {gameLayout ? (
+          <GameInspectorPanel threadRef={activeThreadRef} compact={compactInspectorVisible} />
+        ) : null}
 
         <div
           className={cn(

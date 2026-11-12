@@ -2157,7 +2157,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 render={
                   <button
                     type="button"
-                    aria-label={`${chatsOpen ? "Hide" : "Show"} the other chats of ${game.name}`}
+                    aria-label={`${chatsOpen ? "Hide" : "Show"} the other Logs of ${game.name}`}
                     aria-expanded={chatsOpen}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
@@ -2187,27 +2187,37 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     {otherChats.length + 1}
                   </Text>
                 )}
-                <ChevronDownIcon
+                {/* Pointed at, the arrow says what it opens. */}
+                <span
                   className={cn(
-                    "hidden size-3.5 transition-transform group-hover/game-row:block group-focus-visible/chats:block",
-                    chatsOpen && "block rotate-180",
+                    "hidden items-center gap-0.5 group-hover/game-row:flex group-focus-visible/chats:flex",
+                    chatsOpen && "flex",
                   )}
-                  aria-hidden
-                />
+                >
+                  <Text variant="micro" tone="inherit">
+                    Logs
+                  </Text>
+                  <ChevronDownIcon
+                    className={cn("size-3.5 transition-transform", chatsOpen && "rotate-180")}
+                    aria-hidden
+                  />
+                </span>
               </TooltipTrigger>
               <TooltipPopup side="top">
-                {chatsOpen ? "Hide chats" : `Chats (${otherChats.length + 1})`}
+                {chatsOpen
+                  ? "Hide this game's Logs"
+                  : `This game's Logs (${otherChats.length + 1})`}
               </TooltipPopup>
             </Tooltip>
           ) : null}
           {chatsOpen ? (
             <div className="border-t border-border/60 bg-muted/20 px-2 py-1.5 pl-11">
               {otherChats.length > 0 ? (
-                <GameDisclosureSection title="Other chats">
+                <GameDisclosureSection title="Other Logs">
                   {otherChats.map((chat) => (
                     <GameDisclosureLine
                       key={chat.id}
-                      label={chat.title === game.name ? "Chat" : chat.title}
+                      label={chat.title === game.name ? "Log" : chat.title}
                       at={chat.updatedAt}
                       onOpen={() => openFromDisclosure(chat.id)}
                     />
@@ -2228,7 +2238,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 >
                   <PlusIcon className="size-3" aria-hidden />
                   <Text variant="meta" tone="inherit">
-                    New chat
+                    New Log
                   </Text>
                 </button>
               ) : null}

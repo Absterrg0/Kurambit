@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@kurambit/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
@@ -48,6 +52,7 @@ import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { GamePicture } from "./GameBuildStill";
+import { useStageStill } from "./gameStageBridge";
 import {
   CHARACTER_ROUTES,
   characterRouteLabel,
@@ -519,6 +524,13 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
   });
   const name = useGameName(cover.game.environmentId, cover.game.projectId, cover.game.name);
   const picture = build?.still ?? cover.game.keyArt;
+  // Before any build has a still, the frame the Stage last showed of this game, when it
+  // played in this session: the game's own title, not a stand-in.
+  const shown = useStageStill(
+    cover.main === null
+      ? ""
+      : scopedThreadKey(scopeThreadRef(cover.main.environmentId, cover.main.id)),
+  );
   return (
     <li className="min-w-0">
       <button
@@ -534,14 +546,13 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           gameName={name}
           className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/25 group-focus-visible:ring-2 group-focus-visible:ring-ring"
         >
-          {/* Without a picture of the game yet, its name on its own colour, like a cover. */}
-          {picture === null ? (
-            <span className="absolute inset-0 grid place-items-center px-4 text-center font-display text-2xl/7 text-white/80">
-              {name}
-            </span>
+          {/* Without a picture yet, the Stage's last frame, else the game's own colour alone:
+              its name is said once, under the cover. */}
+          {picture === null && shown !== null ? (
+            <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
           ) : null}
         </GamePicture>
-        <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
+        <span className="flex min-w-0 flex-col gap-0.5">
           <Text variant="label" tone="strong" truncate>
             {name}
           </Text>

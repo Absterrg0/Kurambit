@@ -471,14 +471,17 @@ function SidebarUpdateControl() {
     },
   };
   // At rest this is one more equal icon button in the footer row. Only a real update
-  // turns it into a labelled pill, so the footer says something only when it has news.
+  // gives it words, in the footer's muted voice like its other rows: news, never an alarm
+  // louder than the games above it.
   const updateButton = showUpdateIconState ? (
     <button
       type="button"
       {...updateButtonProps}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-meta text-sidebar-foreground outline-hidden surface-raised focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
-        isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer hover:surface-raised-hover",
+        "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-meta text-sidebar-muted-foreground outline-hidden focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        isInteractionDisabled
+          ? "cursor-not-allowed"
+          : "cursor-pointer hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
       )}
     >
       {statusIcon}

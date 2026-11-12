@@ -83,7 +83,7 @@ building, keep going's step, a question waiting for you, or its latest build and
 To continue a game, choose its card under **Your games** or its row in the sidebar, or use **Open a
 game** (on the home screen or in the command palette) and pick a folder that contains `game.json`.
 A game opens on its main chat: the first chat it was made in, or the next oldest if you archive that
-one. The arrow on the game's sidebar row lists its **Other chats** and starts a **New chat**.
+one. The **Logs** arrow on the game's sidebar row lists its **Other Logs** and starts a **New Log**.
 
 ## Style
 

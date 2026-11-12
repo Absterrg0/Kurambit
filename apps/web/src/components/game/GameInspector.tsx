@@ -66,6 +66,7 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
+import { GameComposerTray } from "./GameComposerTray";
 import {
   characterRouteLabel,
   GameCharacterRoutePicker,
@@ -137,29 +138,46 @@ export function GameInspectorTabs({ threadRef }: { threadRef: ScopedThreadRef })
   );
 }
 
-/** The open tab's panel, over the Log; nothing while the Log is open. */
-export function GameInspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
+/**
+ * The open tab's panel, over the Log; nothing while the Log is open. As the sheet of a
+ * narrow window it covers the composer, so the tray (what the next message changes, and
+ * Keep going) stays pinned under it.
+ */
+export function GameInspectorPanel({
+  threadRef,
+  compact,
+}: {
+  threadRef: ScopedThreadRef;
+  compact: boolean;
+}) {
   const tab = useGameWorkspaceStore((state) => state.inspectorTab);
   if (tab === "log") return null;
   return (
     <div
       role="tabpanel"
       aria-label={TABS.find((entry) => entry.tab === tab)?.label}
-      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col overflow-y-auto bg-background"
+      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col bg-background"
     >
-      {/* In the wide sheet of a narrow window, the panel keeps a reading width. Keyed by tab,
-          so a new tab fades in on the popup clock as the pill slides, like TabsPanel (the
-          tabs live in the column's header, outside this panel's tree). */}
-      <div
-        key={tab}
-        className="w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
-      >
-        {tab === "build" ? (
-          <BuildPanel threadRef={threadRef} />
-        ) : (
-          <ScenePanel threadRef={threadRef} />
-        )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {/* In the wide sheet of a narrow window, the panel keeps a reading width. Keyed by tab,
+            so a new tab fades in on the popup clock as the pill slides, like TabsPanel (the
+            tabs live in the column's header, outside this panel's tree). */}
+        <div
+          key={tab}
+          className="w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
+        >
+          {tab === "build" ? (
+            <BuildPanel threadRef={threadRef} />
+          ) : (
+            <ScenePanel threadRef={threadRef} />
+          )}
+        </div>
       </div>
+      {compact ? (
+        <div className="w-full max-w-160 shrink-0 border-t border-border px-4 pb-2">
+          <GameComposerTray threadRef={threadRef} />
+        </div>
+      ) : null}
     </div>
   );
 }
