@@ -4,7 +4,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { type RefObject, useEffect, useState } from "react";
 import { wholeRowHeight } from "~/lib/wholeRowHeight";
 import { cn } from "~/lib/utils";
-import { shortcutLabelForCommand } from "../keybindings";
+import { type ShortcutMatchContext, shortcutLabelForCommand } from "../keybindings";
 import {
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
@@ -30,6 +30,8 @@ interface CommandPaletteResultsProps {
   highlightedItemValue?: string | null;
   isActionsOnly: boolean;
   keybindings: ResolvedKeybindingsConfig;
+  /** The screen the palette opened over, so a binding scoped to it (a game's) shows its keys. */
+  shortcutContext?: Partial<ShortcutMatchContext> | undefined;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }
 
@@ -63,6 +65,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
                   item={item}
                   key={item.value}
                   keybindings={props.keybindings}
+                  shortcutContext={props.shortcutContext}
                   isActive={props.highlightedItemValue === item.value}
                   onExecuteItem={props.onExecuteItem}
                 />
@@ -158,6 +161,7 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
               index={row.itemIndex}
               item={row.item}
               keybindings={props.keybindings}
+              shortcutContext={props.shortcutContext}
               isActive={props.highlightedItemValue === row.item.value}
               onExecuteItem={props.onExecuteItem}
             />
@@ -218,10 +222,15 @@ function CommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
   isActive: boolean;
   keybindings: ResolvedKeybindingsConfig;
+  shortcutContext?: Partial<ShortcutMatchContext> | undefined;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
 }) {
   const shortcutLabel = props.item.shortcutCommand
-    ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand)
+    ? shortcutLabelForCommand(
+        props.keybindings,
+        props.item.shortcutCommand,
+        props.shortcutContext ? { context: props.shortcutContext } : undefined,
+      )
     : null;
 
   return (

@@ -655,6 +655,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   );
 }
 
+// A game's bindings apply only on its screen ("when": gameThread); over that screen the
+// palette shows their keys.
+const GAME_SHORTCUT_CONTEXT = { gameThread: true } as const;
+
 function CommandPaletteDialog(props: {
   readonly mode: SearchOverlayMode;
   readonly openIntent: CommandPaletteOpenIntent | null;
@@ -765,10 +769,14 @@ function OpenCommandPaletteDialog(props: {
     gameEngineActive && gameStatus != null
       ? GAME_ENGINES[gameStatus.manifest.engine.name].stage
       : null;
+  // Running is the live serve, or an export's preview, as the Stage reads them: the palette
+  // offers Play or Stop, whichever applies, never both.
+  const gameRunning = gameStatus?.live === "serving" || gameStatus?.previewUrl != null;
   const gameStageBridge =
     gameStatus !== null &&
     gameStatus !== undefined &&
     GAME_ENGINES[gameStatus.manifest.engine.name].stageBridge;
+  const inspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const canRestore = useAtomValue(
     activeThreadRef === null
@@ -1585,7 +1593,7 @@ function OpenCommandPaletteDialog(props: {
       if (!result.value.success) throw new Error(result.value.message);
       stageAfterGameAction(threadRef, action);
     };
-    if (canGameAction && gameWebBuild)
+    if (canGameAction && gameWebBuild && !gameRunning)
       actionItems.push({
         kind: "action",
         value: "action:game-play",
@@ -1603,7 +1611,7 @@ function OpenCommandPaletteDialog(props: {
         icon: <HammerIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("rebuild"),
       });
-    if (canGameAction)
+    if (canGameAction && gameRunning)
       actionItems.push({
         kind: "action",
         value: "action:game-stop",
@@ -1615,7 +1623,7 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-toggle-inspector",
-      title: "Show or hide the Inspector",
+      title: inspectorCollapsed ? "Show Inspector" : "Hide Inspector",
       searchTerms: ["inspector", "panel", "dock", "chat", "hide", "show", "stage", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.chat.toggle",
@@ -1629,7 +1637,7 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-focus",
-      title: "Focus the game",
+      title: "Focus game",
       searchTerms: ["focus", "play", "keyboard", "stage", "game"],
       icon: <Gamepad2Icon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.focus",
@@ -1639,7 +1647,7 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: "action:game-freeze",
-        title: "Freeze the game or play on",
+        title: "Freeze or resume game",
         searchTerms: ["freeze", "pause", "point", "select", "inspect", "stage", "game"],
         icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.freeze",
@@ -1648,7 +1656,7 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-fullscreen",
-      title: "Play the game fullscreen",
+      title: "Play fullscreen",
       searchTerms: ["fullscreen", "full screen", "maximize", "stage", "game"],
       icon: <MaximizeIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.fullscreen",
@@ -1657,19 +1665,19 @@ function OpenCommandPaletteDialog(props: {
     for (const [tab, title, terms, TabIcon] of [
       [
         "build",
-        "Show the build's checks",
+        "Show build checks",
         ["build", "checks", "facts", "measured", "changes"],
         ListChecksIcon,
       ],
       [
         "scene",
-        "Show the game's scene",
+        "Show scene",
         ["scene", "things", "look", "art", "selection", "values", "style"],
         ShapesIcon,
       ],
       [
         "log",
-        "Show the log",
+        "Show Log",
         ["log", "chat", "conversation", "transcript", "messages"],
         ScrollTextIcon,
       ],
@@ -1690,7 +1698,7 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: "action:game-play-previous",
-        title: "Play the previous build",
+        title: "Play previous build",
         searchTerms: ["previous", "back", "older", "build", "turn", "timeline", "game"],
         icon: <ChevronLeftIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.playPrevious",
@@ -1699,7 +1707,7 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: "action:game-play-next",
-        title: "Play the next build",
+        title: "Play next build",
         searchTerms: ["next", "forward", "newer", "live", "build", "turn", "timeline", "game"],
         icon: <ChevronRightIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.playNext",
@@ -1727,7 +1735,7 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: `action:game-turn-${turnRestore.kind}`,
-        title: turnRestore.kind === "undo" ? "Undo the last change" : "Redo the last change",
+        title: turnRestore.kind === "undo" ? "Undo last change" : "Redo last change",
         searchTerms: [turnRestore.kind, "turn", "change", "revert", "build", "game"],
         icon:
           turnRestore.kind === "undo" ? (
@@ -1844,7 +1852,7 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: "action:game-export",
-        title: "Export…",
+        title: "Export game…",
         searchTerms: [
           "export",
           "release",
@@ -1862,7 +1870,7 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-generated-art",
-      title: "Generated art…",
+      title: "Show generated art…",
       searchTerms: ["generated", "art", "assets", "images", "candidates", "pick", "cost", "game"],
       icon: <ImagesIcon className={ITEM_ICON_CLASS} />,
       run: requestStage({ kind: "generated-art" }),
@@ -1894,7 +1902,7 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:game-tools",
-    title: "Game tools",
+    title: "Open game tools",
     searchTerms: ["game tools", "blender godot unity install download executable paths"],
     icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
@@ -1904,7 +1912,7 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:game-art-providers",
-    title: "Art providers",
+    title: "Open art providers",
     searchTerms: [
       "art providers generated keys codex openai gemini tripo meshy elevenlabs daily limit",
     ],
@@ -2161,7 +2169,7 @@ function OpenCommandPaletteDialog(props: {
       "mode",
       "toggle",
     ],
-    title: "Appearance…",
+    title: "Change appearance…",
     icon: <PaletteIcon className={ITEM_ICON_CLASS} />,
     addonIcon: <PaletteIcon className={ADDON_ICON_CLASS} />,
     shortcutCommand: "theme.select",
@@ -2344,7 +2352,7 @@ function OpenCommandPaletteDialog(props: {
         "remove",
         "kurambit.json",
       ],
-      title: "Game settings",
+      title: "Open game settings",
       description: contextualProjectGroup.displayName,
       icon: <FolderIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
@@ -2374,26 +2382,35 @@ function OpenCommandPaletteDialog(props: {
           }
         : undefined,
   });
+  // A shortcut's settings row named exactly like an action listed here would only repeat
+  // it; the action runs the thing and shows the keys.
+  const actionTitles = new Set(
+    [...gameItems, ...actionItems].flatMap((item) =>
+      typeof item.title === "string" ? [item.title.toLowerCase()] : [],
+    ),
+  );
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
     availableSettingsSearchItems,
-  ).map((item) => ({
-    kind: "action",
-    value: `setting:${item.id}`,
-    searchTerms: [item.title, SETTINGS_SECTION_LABELS[item.to], ...(item.searchTerms ?? [])],
-    title: item.title,
-    description: `Settings · ${SETTINGS_SECTION_LABELS[item.to]}`,
-    ...(item.secondary ? { secondary: true } : {}),
-    icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
-    run: async () => {
-      await navigate({
-        to: item.to,
-        hash: item.targetId ?? item.id,
-        replace: pathname === item.to,
-        hashScrollIntoView: false,
-      });
-    },
-  }));
+  )
+    .filter((item) => !(item.secondary && actionTitles.has(item.title.toLowerCase())))
+    .map((item) => ({
+      kind: "action",
+      value: `setting:${item.id}`,
+      searchTerms: [item.title, SETTINGS_SECTION_LABELS[item.to], ...(item.searchTerms ?? [])],
+      title: item.title,
+      description: `Settings · ${SETTINGS_SECTION_LABELS[item.to]}`,
+      ...(item.secondary ? { secondary: true } : {}),
+      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({
+          to: item.to,
+          hash: item.targetId ?? item.id,
+          replace: pathname === item.to,
+          hashScrollIntoView: false,
+        });
+      },
+    }));
   const sourceSelectionViewValue =
     addProjectEnvironmentId === null ? null : `sources:${addProjectEnvironmentId}`;
   const activeGroups =
@@ -3063,22 +3080,6 @@ function OpenCommandPaletteDialog(props: {
 
     if (event.ctrlKey || event.shiftKey || event.altKey || event.metaKey) return;
     const firstItemValue = autoHighlightsFirstRow ? resultRows.itemValues[0] : undefined;
-    if (
-      event.key === "ArrowDown" &&
-      highlightClearedRef.current &&
-      firstItemValue &&
-      !event.nativeEvent.isComposing
-    ) {
-      (event as typeof event & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
-      event.preventDefault();
-      highlightClearedRef.current = false;
-      setHighlightedItemValue(firstItemValue);
-      scrollCommandPaletteRowIntoView(
-        resultListRef.current,
-        resultRows.rowIndexByItemIndex[0] ?? 0,
-      );
-      return;
-    }
 
     // Base UI clicks the highlighted row on Enter, which does nothing once the
     // virtualized list has unmounted it, so run the tracked highlight directly.
@@ -3375,9 +3376,15 @@ function OpenCommandPaletteDialog(props: {
       <CommandPaletteVirtualizedResults
         rows={resultRows.rows}
         listRef={resultListRef}
-        highlightedItemValue={highlightedItemValue}
+        // Typing clears the tracked highlight, but Enter still runs the first row, so the
+        // first row shows as active: what Enter will do is always visible.
+        highlightedItemValue={
+          highlightedItemValue ??
+          (autoHighlightsFirstRow ? (resultRows.itemValues[0] ?? null) : null)
+        }
         isActionsOnly={isActionsOnly}
         keybindings={keybindings}
+        shortcutContext={isGameThread ? GAME_SHORTCUT_CONTEXT : undefined}
         onExecuteItem={executeItem}
         {...(addProjectCloneFlow?.step === "repository"
           ? {
