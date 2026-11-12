@@ -2,7 +2,10 @@ import { useAtomValue } from "@effect/atom-react";
 import { GAME_ENGINES, type ScopedThreadRef } from "@kurambit/contracts";
 import { FastForwardIcon, CornerDownRightIcon } from "lucide-react";
 
+import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
+
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
+import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
@@ -27,6 +30,9 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     }),
   ).data;
   const copy = useAtomValue(stagePlayTarget(threadRef));
+  // While a turn runs the next message does not change the game yet, and Keep going waits:
+  // the tray says neither, rather than something untrue for the length of the turn.
+  const working = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
   const keepGoing = useKeepGoing(threadRef);
   const keepGoingView = keepGoingControlView({
     status: keepGoing.status,
@@ -46,11 +52,20 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
       ? "Your next message changes the current game, not the build you're playing."
       : "Your next message changes the current game.";
   const canKeepGoing =
-    GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null;
+    GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null && !working;
   return (
     <div className="flex min-h-9 items-center gap-2 pt-1.5" data-game-composer-tray="">
-      <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <TraySentence>{sentence}</TraySentence>
+      {working ? (
+        <span className="flex-1" />
+      ) : (
+        <>
+          <CornerDownRightIcon
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <TraySentence>{sentence}</TraySentence>
+        </>
+      )}
       {canKeepGoing ? (
         <Menu>
           <Tooltip>

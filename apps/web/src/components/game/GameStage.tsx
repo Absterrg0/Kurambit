@@ -143,6 +143,26 @@ const folderBuildStill = (result: AsyncResult.AsyncResult<GameBuildsResult, unkn
 const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) && result.value.builds.length > 0;
 
+/** One selector per build id, so a reader of one build's name keeps the same derived atom. */
+const buildPhraseSelectors = new Map<
+  string,
+  (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => string | null
+>();
+const NO_BUILD_PHRASE = () => null;
+const buildPhraseOf = (id: string | null) => {
+  if (id === null) return NO_BUILD_PHRASE;
+  let select = buildPhraseSelectors.get(id);
+  if (select === undefined) {
+    select = (result) => {
+      if (!AsyncResult.isSuccess(result)) return null;
+      const build = result.value.builds.find((each) => each.id === id);
+      return build === undefined ? null : buildPhrase(buildName(build));
+    };
+    buildPhraseSelectors.set(id, select);
+  }
+  return select;
+};
+
 /** The build the folder holds, unchanged since; null while it is edited or unknown. */
 const folderBuildIdOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) && result.value.folderEdited === false
@@ -318,6 +338,21 @@ function ThreadGameStage({
   const stopBuild = useBuildStop(threadRef);
   const plays = useBuildPlay(threadRef);
   const turnUndo = useTurnUndo(threadRef, null);
+  // Undo and Redo say where they go before they are pressed, in the words the note after uses.
+  const undoBase = turnUndo.view?.build.base ?? null;
+  const undoBaseName = useEnvironmentQuerySelector(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+    buildPhraseOf(undoBase),
+  );
+  const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
+  const undoLabel =
+    undoName === null
+      ? "Undo the last build"
+      : `Undo ${undoName}${undoBaseName == null ? "" : `, back to ${undoBaseName}`}`;
+  const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const turnUndoAllowed = (kind: "undo" | "redo") =>
     turnUndo.action?.kind === kind &&
     turnUndo.action.blocked === null &&
@@ -1187,7 +1222,7 @@ function ThreadGameStage({
           ) : null}
           <span className="min-w-2 flex-1" />
           <IconAction
-            label="Undo the last build"
+            label={undoLabel}
             shortcut={undoKey}
             disabled={!turnUndoAllowed("undo")}
             onClick={() => handleRequest({ kind: "undo" }, 0)}
@@ -1195,7 +1230,7 @@ function ThreadGameStage({
             <Undo2Icon className="size-3.5" aria-hidden="true" />
           </IconAction>
           <IconAction
-            label="Redo the build you undid"
+            label={redoLabel}
             shortcut={redoKey}
             disabled={!turnUndoAllowed("redo")}
             onClick={() => handleRequest({ kind: "redo" }, 0)}

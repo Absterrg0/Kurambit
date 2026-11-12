@@ -508,7 +508,7 @@ function BuildCard({
             disabled={!build.available && !picking}
             onClick={onClick}
             className={cn(
-              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left disabled:cursor-default",
+              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
               NEW_CARD_MOTION,
               (undone || !build.available) && "opacity-40",
             )}
@@ -606,7 +606,9 @@ function CardRing({
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
-        // The card's keyboard focus is the app's one outline, on the card itself.
+        // A card's keyboard focus is drawn on its picture, in the app's ring colour, so it
+        // never crosses the caption under it.
+        "group-focus-visible/card:ring-2! group-focus-visible/card:ring-ring!",
         pick === "picked"
           ? "ring-2 ring-strong-foreground"
           : pick === "pickable"
@@ -756,7 +758,7 @@ function NowCard({
             disabled={picking}
             onClick={onClick}
             className={cn(
-              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left disabled:cursor-default",
+              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
               NEW_CARD_MOTION,
               picking && "opacity-40",
             )}
