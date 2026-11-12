@@ -6,9 +6,14 @@ import { cn } from "~/lib/utils";
 
 export function ProviderPackageIcon({
   icon,
+  mono = false,
   className,
   ...props
-}: { readonly icon: ProviderIcon } & SVGProps<SVGSVGElement>) {
+}: {
+  readonly icon: ProviderIcon;
+  /** One colour, the text's, with knockout details left clear. */
+  readonly mono?: boolean;
+} & SVGProps<SVGSVGElement>) {
   const gradientId = useId();
   return (
     <svg
@@ -16,7 +21,10 @@ export function ProviderPackageIcon({
       viewBox={icon.viewBox}
       fill="none"
       data-provider-package-icon
-      className={cn("fill-(--icon-light) dark:fill-(--icon-dark)", className)}
+      className={cn(
+        mono ? "fill-current" : "fill-(--icon-light) dark:fill-(--icon-dark)",
+        className,
+      )}
       style={
         {
           "--icon-light": icon.fill.light,
@@ -50,9 +58,15 @@ export function ProviderPackageIcon({
           key={path.d}
           d={path.d}
           fillRule={path.fillRule}
-          fill={path.gradient ? `url(#${gradientId}-${index})` : undefined}
+          fill={path.gradient && !mono ? `url(#${gradientId}-${index})` : undefined}
           data-icon-detail={path.fill ? true : undefined}
-          className={path.fill ? "fill-(--path-light) dark:fill-(--path-dark)" : undefined}
+          className={
+            path.fill
+              ? mono
+                ? "fill-transparent"
+                : "fill-(--path-light) dark:fill-(--path-dark)"
+              : undefined
+          }
           style={
             path.fill
               ? ({

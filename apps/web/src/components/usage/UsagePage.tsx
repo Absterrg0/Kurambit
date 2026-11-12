@@ -1169,6 +1169,7 @@ function CursorEnableLimits({
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
         <ProviderInstanceIcon
+          tone="brand"
           driverKind={ProviderDriverKind.make("cursor")}
           displayName="Cursor"
           indicatorBackground="var(--background)"
@@ -1206,6 +1207,7 @@ function ProviderMark({
   const presentation = PROVIDER_PRESENTATION[provider];
   return (
     <ProviderInstanceIcon
+      tone="brand"
       driverKind={presentation.driverKind}
       displayName={presentation.label}
       iconClassName={className}

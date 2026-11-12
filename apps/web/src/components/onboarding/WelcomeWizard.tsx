@@ -476,6 +476,7 @@ function AgentCard({
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-4">
       <ProviderInstanceIcon
+        tone="brand"
         driverKind={ProviderDriverKind.make(driver)}
         displayName={displayName}
         iconClassName="size-5"
@@ -527,6 +528,7 @@ function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-4">
       <ProviderInstanceIcon
+        tone="brand"
         driverKind={provider.driver}
         displayName={displayName}
         iconClassName="size-5"

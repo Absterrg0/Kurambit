@@ -255,6 +255,7 @@ function UsageChartTooltip({
           <div key={provider} className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-1.5 text-muted-foreground">
               <ProviderInstanceIcon
+                tone="brand"
                 driverKind={driverKind}
                 displayName={providerLabel}
                 iconClassName="size-3"

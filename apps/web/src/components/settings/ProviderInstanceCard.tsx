@@ -806,6 +806,7 @@ export function ProviderInstanceCard({
 
   const titleIconNode = (
     <ProviderInstanceIcon
+      tone="brand"
       driverKind={driverKind ?? instance.driver}
       displayName={displayName}
       accentColor={accentColor}
