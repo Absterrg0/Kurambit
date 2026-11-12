@@ -69,14 +69,14 @@ function WorktreesDirectoryRow() {
     <SettingsRow
       {...searchableSetting("storage-worktrees-location")}
       description={
-        "Folder where new worktrees are created, on any drive, such as D:\\worktrees or ~/worktrees. Existing worktrees stay where they are. Leave empty to use the Kurambit home folder."
+        "Folder for new side copies of your games, on any drive, such as D:\\kurambit or ~/kurambit. Existing copies stay where they are. Leave empty to use Kurambit's home folder."
       }
       serverScoped
       settingKeys={["worktreesDirectory"]}
       resetAction={
         mixed || settings.worktreesDirectory !== "" ? (
           <SettingResetButton
-            label="worktree location"
+            label="side copy location"
             onClick={() => updateSettings({ worktreesDirectory: "" })}
           />
         ) : null
@@ -471,7 +471,7 @@ export function StorageSettingsPanel() {
   }
 
   return (
-    <SettingsPageContainer description="Where Kurambit keeps working copies and logs, and when it cleans them up.">
+    <SettingsPageContainer description="Where Kurambit keeps side copies of your games and their logs, and when it cleans them up.">
       {!isProjectScope &&
         connectedEnvironments
           .filter(
@@ -485,17 +485,17 @@ export function StorageSettingsPanel() {
               label={environment.label}
             />
           ))}
-      <SettingsSection id="storage-worktrees" title="Worktrees">
+      <SettingsSection id="storage-worktrees" title="Side copies">
         {!isProjectScope && <WorktreesDirectoryRow />}
         {isProjectScope && (
           <SettingsRow
-            title="Automatic worktree cleanup"
+            title="Automatic cleanup"
             description={
               mode === "off"
-                ? "Keep this project's worktrees until you delete them manually."
+                ? "Keep this game's side copies until you delete them."
                 : mode === "custom"
-                  ? "Use these rules for this project."
-                  : "Use each machine's worktree cleanup settings."
+                  ? "Use these rules for this game."
+                  : "Use each computer's cleanup settings."
             }
             serverScoped
             settingKeys={["worktreeCleanup"]}
@@ -510,7 +510,7 @@ export function StorageSettingsPanel() {
                     updateSettings({ worktreeCleanup: { mode: "custom", rules: {} } });
                 }}
               >
-                <SelectTrigger size="sm" aria-label="Automatic worktree cleanup">
+                <SelectTrigger size="sm" aria-label="Automatic cleanup">
                   <SelectValue>
                     {mixedModes
                       ? "Mixed"
@@ -533,26 +533,26 @@ export function StorageSettingsPanel() {
         {(!isProjectScope || (!mixedModes && mode === "custom")) && (
           <>
             <SettingsRow
-              title="Delete worktrees with deleted threads"
+              title="Delete with their Log"
               status={ruleStatus("worktreeOnDelete")}
-              description="Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept."
+              description="Remove a side copy when its Log is deleted. Copies with changes of their own are kept."
               serverScoped={!isProjectScope}
               control={
                 <Switch
-                  aria-label="Delete worktrees with deleted threads"
+                  aria-label="Delete with their Log"
                   checked={settings.worktreeOnDelete}
                   onCheckedChange={(worktreeOnDelete) => updateWorktree({ worktreeOnDelete })}
                 />
               }
             />
             <SettingsRow
-              title="Delete inactive worktrees"
+              title="Delete idle side copies"
               status={ruleStatus("worktreeAfterDays")}
-              description="Remove worktrees after their threads have been inactive for this many days. Branches and thread history are kept."
+              description="Remove side copies whose Log has been idle this many days. Their history is kept."
               serverScoped={!isProjectScope}
               control={
                 <RetentionControl
-                  label="Delete inactive worktrees"
+                  label="Delete idle side copies"
                   value={settings.worktreeAfterDays}
                   onChange={(worktreeAfterDays) => updateWorktree({ worktreeAfterDays })}
                 />
@@ -565,7 +565,7 @@ export function StorageSettingsPanel() {
                   true,
               ) && (
                 <SettingsRow
-                  title="Delete settled worktrees"
+                  title="Delete settled side copies"
                   status={[
                     ruleStatus("worktreeSettledAfterDays"),
                     environments.length > connectedEnvironments.length
@@ -574,11 +574,11 @@ export function StorageSettingsPanel() {
                   ]
                     .filter(Boolean)
                     .join(". ")}
-                  description="Remove worktrees this many days after their thread settles. Set 0 days to remove them at the next cleanup. Branches and thread history are kept."
+                  description="Remove side copies this many days after their Log settles; 0 removes them at the next cleanup. Their history is kept."
                   serverScoped={!isProjectScope}
                   control={
                     <RetentionControl
-                      label="Delete settled worktrees"
+                      label="Delete settled side copies"
                       value={settings.worktreeSettledAfterDays}
                       minimum={0}
                       onChange={(worktreeSettledAfterDays) =>
@@ -589,13 +589,13 @@ export function StorageSettingsPanel() {
                 />
               )}
             <SettingsRow
-              title="Delete unchanged worktrees"
+              title="Delete unchanged side copies"
               status={ruleStatus("worktreeUnchanged")}
-              description="Remove worktrees with no commits beyond the default branch."
+              description="Remove side copies with no saved changes of their own."
               serverScoped={!isProjectScope}
               control={
                 <Switch
-                  aria-label="Delete unchanged worktrees"
+                  aria-label="Delete unchanged side copies"
                   checked={settings.worktreeUnchanged}
                   onCheckedChange={(worktreeUnchanged) => updateWorktree({ worktreeUnchanged })}
                 />
@@ -628,7 +628,7 @@ export function StorageSettingsPanel() {
                         updateWorktree({ worktreeKeepWhen: next });
                     }}
                   >
-                    <SelectTrigger size="sm" aria-label="Keep worktrees with local changes">
+                    <SelectTrigger size="sm" aria-label="Keep a side copy that has">
                       <SelectValue>
                         {ruleStatus("worktreeKeepWhen")
                           ? "Mixed"
@@ -649,15 +649,15 @@ export function StorageSettingsPanel() {
       </SettingsSection>
 
       {!isProjectScope && (
-        <SettingsSection id="storage-artifacts" title="Artifacts and logs">
+        <SettingsSection id="storage-artifacts" title="Captures and logs">
           <SettingsRow
-            title="Delete old browser artifacts"
+            title="Delete old browser captures"
             status={ruleStatus("browserArtifactsAfterDays")}
             description="Delete saved browser captures after this many days. Older capture links will no longer open."
             serverScoped
             control={
               <RetentionControl
-                label="Delete old browser artifacts"
+                label="Delete old browser captures"
                 value={settings.browserArtifactsAfterDays}
                 onChange={(browserArtifactsAfterDays) => update({ browserArtifactsAfterDays })}
               />

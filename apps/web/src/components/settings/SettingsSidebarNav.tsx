@@ -8,7 +8,7 @@ import {
   createLucideIcon,
   GitBranchIcon,
   HardDriveIcon,
-  PanelsTopLeftIcon,
+  Gamepad2Icon,
   KeyboardIcon,
   PaletteIcon,
   SearchIcon,
@@ -32,7 +32,6 @@ import {
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
-  isSettingsOverviewVisible,
   SETTINGS_SECTION_LABELS,
   type SettingsPath,
   type SettingsSearchItem,
@@ -60,7 +59,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/art": BrushIcon,
   "/settings/diagnostics": Settings2Icon,
   "/settings/appearance": PaletteIcon,
-  "/settings/projects": PanelsTopLeftIcon,
+  "/settings/projects": Gamepad2Icon,
   "/settings/keybindings": KeyboardIcon,
   "/settings/snap-shot": SnapShotIcon,
   "/settings/providers": BotIcon,
@@ -93,11 +92,11 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   {
     heading: "Advanced",
     paths: [
+      "/settings/projects",
       "/settings/source-control",
       "/settings/storage",
       "/settings/scheduled-tasks",
       "/settings/archived",
-      "/settings/projects",
     ],
   },
 ];
@@ -124,7 +123,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = validateSettingsScopeSearch(currentSearch);
-  const projectPageVisible = isSettingsOverviewVisible(scopeSearch);
   const activePath = SETTINGS_DETAIL_PAGE_PARENTS[pathname] ?? pathname;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -348,7 +346,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   </h3>
                   <SidebarMenu>
                     {group.paths
-                      .filter((to) => to !== "/settings/projects" || projectPageVisible)
                       // Snapshots capture other windows, which only the desktop app can do.
                       .filter((to) => to !== "/settings/snap-shot" || isElectron)
                       .map((to) => {

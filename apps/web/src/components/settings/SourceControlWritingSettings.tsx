@@ -48,15 +48,15 @@ const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; descr
   {
     repo_conventions: {
       label: "Repository conventions",
-      description: "In each game, matches its recent commit messages and pull request titles.",
+      description: "In each game, matches its recent commit messages.",
     },
     conventional_commits: {
       label: "Conventional Commits",
-      description: "Use Conventional Commit prefixes and keep pull request text concise.",
+      description: "Use Conventional Commit prefixes, kept short.",
     },
     custom: {
       label: "Custom instructions",
-      description: "Use your instructions for commit messages and pull requests in every game.",
+      description: "Use your instructions for commit messages in every game.",
     },
   };
 
@@ -147,7 +147,7 @@ export function SourceControlWritingSettingsSection() {
   );
 
   return (
-    <SettingsSection id="source-control-text-generation" title="Text generation">
+    <SettingsSection id="source-control-text-generation" title="History">
       <BranchNamingSettings />
       <SettingsRow
         serverScoped
@@ -158,7 +158,7 @@ export function SourceControlWritingSettingsSection() {
         resetAction={
           isSourceControlWritingStyleDirty ? (
             <SettingResetButton
-              label="source control writing style"
+              label="commit message style"
               onClick={() =>
                 updateSettings({
                   sourceControlWritingStyle: {
@@ -183,11 +183,7 @@ export function SourceControlWritingSettingsSection() {
               });
             }}
           >
-            <SelectTrigger
-              size="sm"
-              className="w-full sm:w-56"
-              aria-label="Source control writing style"
-            >
+            <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Commit message style">
               <SelectValue>
                 {(value: SourceControlWritingStyleMode | null) =>
                   value === null ? "Mixed" : MODE_OPTIONS[value].label
@@ -270,11 +266,11 @@ export function SourceControlWritingSettingsSection() {
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
         {...searchableSetting("source-control-writer-model")}
-        description="The model that writes commit messages and branch names. Off uses the text generation model under General."
+        description="The model that writes commit messages and branch names. Off uses the one in General → Advanced → Text generation."
         control={
           !hasServerTargets ? (
             <span className="text-sm text-muted-foreground">
-              Connect an environment to choose its source control writer model.
+              Connect an environment to choose its commit message model.
             </span>
           ) : (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -292,7 +288,7 @@ export function SourceControlWritingSettingsSection() {
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  triggerAriaLabel="Source control writer model"
+                  triggerAriaLabel="Commit message model"
                   {...(mixedWriterModel ? { triggerLabel: "Mixed" } : {})}
                   {...(environmentId
                     ? {
@@ -310,7 +306,7 @@ export function SourceControlWritingSettingsSection() {
                     if (reason) {
                       toastManager.add({
                         type: "error",
-                        title: "Source control writer model not saved",
+                        title: "Commit message model not saved",
                         description: reason,
                       });
                       return;
@@ -362,7 +358,7 @@ export function SourceControlWritingSettingsSection() {
                       : null,
                   })
                 }
-                aria-label="Use a separate source control writer model"
+                aria-label="Use a separate commit message model"
               />
             </div>
           )

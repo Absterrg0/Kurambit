@@ -118,7 +118,7 @@ describe("mixed source control instructions", () => {
     state.styles[0] = { ...DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle };
     await render();
 
-    await userEvent.click(resetButton("source control writing style"));
+    await userEvent.click(resetButton("commit message style"));
 
     expect(state.updateSettings).toHaveBeenCalledTimes(1);
     expect(

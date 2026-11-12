@@ -148,11 +148,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
-    title: "Keep worktrees with local changes",
+    title: "Keep a side copy that has",
     to: "/settings/storage",
     scope: "project-defaults",
     searchTerms: [
-      "any local files uncommitted changes edited tracked files ignored env build output cleanup",
+      "keep worktrees local changes any local files uncommitted changes edited tracked files ignored env build output cleanup",
     ],
   },
   {
@@ -164,7 +164,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-worktrees",
-    title: "Worktree cleanup",
+    title: "Side copy cleanup",
     to: "/settings/storage",
     scope: "project-defaults",
     searchTerms: [
@@ -173,14 +173,14 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-worktrees-location",
-    title: "Worktree location",
+    title: "Side copy location",
     to: "/settings/storage",
     scope: "environment-defaults",
     searchTerms: ["worktree location folder directory path drive external disk"],
   },
   {
     id: "storage-artifacts",
-    title: "Artifacts and logs",
+    title: "Captures and logs",
     to: "/settings/storage",
     scope: "environment-defaults",
     searchTerms: ["disk storage browser screenshots captures rotated logs cleanup retention"],
@@ -786,19 +786,19 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "source-control-writing-style",
-    title: "Source control writing style",
+    title: "Commit message style",
     to: "/settings/source-control",
     searchTerms: [
-      "repository conventions conventional commits custom instructions change descriptions request titles",
+      "source control writing style repository conventions conventional commits custom instructions change descriptions request titles",
     ],
     environmentOnly: true,
   },
   {
     id: "source-control-writer-model",
-    title: "Source control writer model",
+    title: "Commit message model",
     to: "/settings/source-control",
     searchTerms: [
-      "override generated commit change request pr titles descriptions branch bookmark",
+      "source control writer override generated commit change request pr titles descriptions branch bookmark",
     ],
     environmentOnly: true,
     scope: "project-defaults",

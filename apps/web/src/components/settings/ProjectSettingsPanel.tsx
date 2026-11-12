@@ -131,8 +131,8 @@ export function ProjectSettingsPanel({
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
         {groups.length === 0
-          ? "Add a project from the sidebar to configure it here."
-          : "This project is no longer available."}
+          ? "Start a game from Home to set it up here."
+          : "This game is no longer available."}
       </div>
     );
   }
@@ -483,7 +483,7 @@ function ProjectDetail({
         <Alert variant="info">
           <InfoIcon aria-hidden />
           <AlertDescription>
-            Can't find a setting? Keep this project picked above and hop to any other settings page.
+            Can't find a setting? Keep this game picked above and open any other settings page.
           </AlertDescription>
         </Alert>
         <SettingsSection id="project-overview" title="Project" hideTitle>
@@ -491,12 +491,12 @@ function ProjectDetail({
             <p className="px-3 py-2 text-sm text-muted-foreground sm:px-4">
               {group.memberProjects.length > 1
                 ? "Shared settings require permission to change every checkout in this group."
-                : "This connection cannot change this project."}
+                : "This connection cannot change this game."}
             </p>
           ) : null}
           <SettingsRow
             title="Name"
-            description="The shared name for this project group in the sidebar and thread lists."
+            description="The game's name in the sidebar and on Home."
             control={
               <Input
                 key={`${group.projectKey}:${group.displayName}`}
@@ -520,7 +520,7 @@ function ProjectDetail({
             }
           />
           <SettingsRow
-            title="Project icon"
+            title="Icon"
             description={
               projectIcon?.kind === "lucide"
                 ? `${projectIcon.name} · ${projectIcon.color}`
@@ -585,14 +585,14 @@ function ProjectDetail({
                 ? "Remove checkout"
                 : group.memberProjects.length > 1
                   ? "Remove this project everywhere"
-                  : "Remove project"
+                  : "Remove game"
             }
             description={
               hasOtherMembers
                 ? "Deletes the selected machine's checkout entries and their threads. Other machines and files on disk are not touched."
                 : group.memberProjects.length > 1
                   ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
-                  : "Deletes the project entry and its threads. Files on disk are not touched."
+                  : "Removes the game and its Logs from Kurambit. Its folder on disk is not touched."
             }
             control={
               <Button
@@ -606,7 +606,7 @@ function ProjectDetail({
                   ? "Remove checkout"
                   : group.memberProjects.length > 1
                     ? "Remove all entries"
-                    : "Remove project"}
+                    : "Remove game"}
               </Button>
             }
           />
