@@ -95,6 +95,8 @@ import {
   useStageBridge,
   useStageStill,
   keepBuildFrame,
+  useBuildFrame,
+  captureStageFrame,
   useGameFreezeKey,
   useThreadStageBridge,
 } from "./gameStageBridge";
@@ -448,12 +450,21 @@ function ThreadGameStage({
   // turn is changing the folder under it. Only a new frame is kept, never one from before.
   const folderBuild = useEnvironmentQuerySelector(buildsAtom, folderBuildIdOf) ?? null;
   const keptStill = useRef(stageStill);
+  // The folder settling on a new build (a turn's end, an Undo) takes one frame of it, since the
+  // game may have come up mid-turn, before the build it now shows existed.
+  const framed = useBuildFrame(folderBuild) !== null;
+  useEffect(() => {
+    if (folderBuild === null || turnRunning || framed || asked !== null) return;
+    const timeout = window.setTimeout(() => void captureStageFrame(), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [folderBuild, turnRunning, framed, asked]);
   useEffect(() => {
     if (stageStill === keptStill.current) return;
     keptStill.current = stageStill;
-    if (stageStill !== null && folderBuild !== null && !turnRunning)
+    // A copy of an older build on the Stage is not the folder's build.
+    if (stageStill !== null && folderBuild !== null && !turnRunning && asked === null)
       keepBuildFrame(folderBuild, stageStill);
-  }, [stageStill, folderBuild, turnRunning]);
+  }, [stageStill, folderBuild, turnRunning, asked]);
   const stageRef = useRef<HTMLElement | null>(null);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const freezeKey = useGameFreezeKey();

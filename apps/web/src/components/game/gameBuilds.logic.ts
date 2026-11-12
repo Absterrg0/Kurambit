@@ -269,12 +269,13 @@ export const compareRows = (
   viewsB: ReadonlyArray<GameFactView>,
   /** Each side's checks as the Inspector words them, so a cell says its reading, not its row. */
   checks?: {
-    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value">>;
-    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value">>;
+    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading">>;
+    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading">>;
   },
 ): CompareRows => {
-  // A reading in the Inspector's words: its number when it has one ("at 7.9 s"), else its
-  // sentence unless that only repeats the row's name, where it is just "Yes".
+  // A reading in the Inspector's words: its number when it has one ("at 7.9 s"), with its
+  // sentence when it is one to look at; else its sentence unless that only repeats the row's
+  // name, where it is just "Yes".
   const cell = (
     side: "a" | "b",
     id: GameFactId,
@@ -284,8 +285,15 @@ export const compareRows = (
     if (fallback === null) return null;
     const check = checks?.[side].find((entry) => entry.id === id);
     if (check === undefined) return fallback;
-    if (check.value !== null) return check.value;
+    const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
+    if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;
     return check.sentence.toLowerCase() === name.toLowerCase() ? "Yes" : check.sentence;
+  };
+  // Two readings that differ never read alike: when their words match, the measured values show.
+  const cells = (delta: GameFactDelta, name: string, same: boolean) => {
+    const a = cell("a", delta.id, name, delta.a);
+    const b = cell("b", delta.id, name, delta.b);
+    return !same && a !== null && a === b ? { a: delta.a, b: delta.b } : { a, b };
   };
   const rows: Array<CompareRow> = [];
   const unmeasured = new Map<string, Array<string>>();
@@ -321,8 +329,7 @@ export const compareRows = (
       rows.push({
         id: delta.id,
         name,
-        a: cell("a", delta.id, name, delta.a),
-        b: cell("b", delta.id, name, delta.b),
+        ...cells(delta, name, false),
         mark: null,
         tone: null,
         // A side's missing reading is said once, with every row it applies to, above the table.
@@ -339,8 +346,7 @@ export const compareRows = (
     rows.push({
       id: delta.id,
       name,
-      a: cell("a", delta.id, name, delta.a),
-      b: cell("b", delta.id, name, delta.b),
+      ...cells(delta, name, line.mark === "="),
       mark: line.mark,
       tone: line.tone,
       note: null,

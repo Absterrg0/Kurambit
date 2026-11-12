@@ -279,10 +279,10 @@ const factsOf = (engine: GameEngineId | undefined): ReadonlyArray<FactName> =>
 /** Each tier's step as the measuring line names it. */
 const TIER_STEP: Readonly<Record<Tier, string>> = {
   assets: "reading its files",
-  boots: "starting it",
+  boots: "checking it starts",
   idle: "playing it with no input",
   masher: "playing it with random input",
-  skilled: "the play bot's run",
+  skilled: "letting the play bot play it",
 };
 
 /**
