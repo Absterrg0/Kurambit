@@ -588,8 +588,8 @@ function BuildDetail({
                 {factsData.message}
               </Text>
             ) : null}
-            <Checks threadRef={threadRef} facts={factsData} />
             <SinceBase threadRef={threadRef} build={build} list={list} />
+            <Checks threadRef={threadRef} facts={factsData} />
           </>
         )}
         {measureAnswer !== null && measureAnswer.text !== factsData?.message ? (

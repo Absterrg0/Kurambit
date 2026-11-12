@@ -787,13 +787,6 @@ function NowCard({
           threadRef={threadRef}
           className="aspect-video w-full rounded-md -outline-offset-4 group-focus-visible/card:outline-2 group-focus-visible/card:outline-ring group-focus-visible/card:outline-solid"
         >
-          {/* Now is a state, not a build: one chip on the picture says which card it is. */}
-          <PictureChip>
-            {changed ? (
-              <span aria-hidden="true" className="size-1.5 rounded-full bg-white/80" />
-            ) : null}
-            Now
-          </PictureChip>
           {borrowed ? (
             // The picture is the last build's until the Stage shows the game: it says so.
             <Text
