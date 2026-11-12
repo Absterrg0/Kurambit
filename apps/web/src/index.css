@@ -1489,8 +1489,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --input: rgb(0 0 0 / 14%);
   --ring: #86817a;
   --destructive-foreground: var(--error-foreground);
-  --info: #4767c9;
-  --info-foreground: #3653ad;
+  /* A slate barely cooler than the warm greys: info is a note, never a colour of its own. */
+  --info: #5d6672;
+  --info-foreground: #4b535e;
   --success: #2f8f55;
   --success-foreground: #23703f;
   --warning: #a7740f;
@@ -1548,8 +1549,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --border: rgb(255 255 255 / 7.5%);
     --input: rgb(255 255 255 / 12%);
     --ring: #77736c;
-    --info: #8aa2f2;
-    --info-foreground: #a5b8f5;
+    --info: #98a0aa;
+    --info-foreground: #b2b8c0;
     --success: #57b97c;
     --success-foreground: #7cc996;
     --warning: #d6a03c;
