@@ -183,6 +183,27 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   );
 }
 
+/* Motion tokens. Every transition is short and runs on a state change; nothing
+   loops. Popups (menus, selects, popovers, tooltips) and surfaces (dialogs,
+   sheets, the settings panel) leave faster than they arrive. fast is Tailwind's
+   default, named so that reduced motion can zero every transition at once. */
+:root {
+  --motion-fast: 150ms;
+  --motion-popup: 150ms;
+  --motion-popup-exit: 100ms;
+  --motion-surface: 200ms;
+  --motion-surface-exit: 150ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-popup: 0ms;
+    --motion-popup-exit: 0ms;
+    --motion-surface: 0ms;
+    --motion-surface-exit: 0ms;
+  }
+}
+
 /* The font tokens are declared outside the inline theme so utilities reference
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
@@ -194,6 +215,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     "Liberation Mono", monospace;
   /* Brand moments only: page titles, empty states and the wordmark. */
   --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  /* Read by every transition-* utility without its own duration. */
+  --default-transition-duration: var(--motion-fast);
 }
 
 @theme inline {
@@ -235,11 +258,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --text-micro: var(--type-micro);
   --text-micro--line-height: 1.4;
   --text-micro--font-weight: 500;
-  /* Motion. drawer is the decelerating curve for surfaces that slide or pop in
-     (composer context, pills). */
   --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
   --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
+  /* Motion curves; the durations are the --motion-* tokens on :root. drawer is the
+     decelerating curve for surfaces that slide or pop in (composer context, pills),
+     enter is how a popup or dialog arrives, exit how it leaves: it starts slow and
+     gets out of the way. */
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   /* The composer's elevation: a soft drop pulled in under the surface, shared
      by the composer, its context strip and attached banners. */
   --shadow-composer: 0 12px 28px -18px rgb(0 0 0 / 40%);
@@ -1385,6 +1412,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 @utility kbd-in-popover {
   --kbd-background: var(--kbd-popover-fill);
 }
+/* A tinted footer under a popover: the chip keeps the popover's own ground, so the
+   footer's hints read like the rows' instead of darker. */
+@utility kbd-in-footer {
+  --kbd-background: var(--kbd-popover-fill), linear-gradient(var(--popover), var(--popover));
+}
 @utility kbd-on-lit {
   --kbd-background: var(--kbd-lit-fill) !important;
   --kbd-foreground: var(--kbd-lit-foreground);
@@ -1394,6 +1426,27 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --kbd-background: var(--kbd-lit-fill) !important;
   --kbd-foreground: color-mix(in srgb, white 80%, transparent);
   --kbd-box-shadow: none;
+}
+
+/* Timing for popups and surfaces. They set the duration and curve that the
+   transition-* utilities read, so they compose with any property list, and a
+   [data-ending-style] element (or a wrapper whose popup is ending) takes the exit
+   timing. :where keeps them below data-instant:duration-0 (tooltip hand-offs). */
+@utility motion-popup {
+  --tw-duration: var(--motion-popup);
+  --tw-ease: var(--ease-enter);
+  &:where([data-ending-style], :has(> [data-ending-style])) {
+    --tw-duration: var(--motion-popup-exit);
+    --tw-ease: var(--ease-exit);
+  }
+}
+@utility motion-surface {
+  --tw-duration: var(--motion-surface);
+  --tw-ease: var(--ease-enter);
+  &:where([data-ending-style]) {
+    --tw-duration: var(--motion-surface-exit);
+    --tw-ease: var(--ease-exit);
+  }
 }
 
 /* Chrome-less fills: an icon button under the pointer, the current item of a

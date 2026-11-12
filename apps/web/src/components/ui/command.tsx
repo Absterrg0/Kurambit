@@ -188,7 +188,8 @@ function CommandItem({
   return (
     <AutocompleteItem
       className={cn(
-        "py-1.5",
+        // One pitch whether or not a row carries key chips (a chip row is 32px).
+        "py-1.5 sm:min-h-8",
         active !== undefined && "cursor-pointer",
         active && "surface-selected text-strong-foreground",
         className,
@@ -215,7 +216,7 @@ function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "kbd-in-popover relative flex items-center justify-between gap-2 rounded-b-[calc(var(--radius-2xl)-1px)] bg-foreground/[0.025] px-[var(--command-content-inset)] py-2.5 text-meta text-muted-foreground",
+        "kbd-in-footer relative flex items-center justify-between gap-2 rounded-b-[calc(var(--radius-2xl)-1px)] bg-foreground/[0.025] px-[var(--command-content-inset)] py-2.5 text-meta text-muted-foreground",
         className,
       )}
       data-slot="command-footer"

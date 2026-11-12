@@ -32,6 +32,11 @@ Style with Tailwind classes in the component that renders the element.
   A recipe paints with `background`, so `bg-transparent` does not cancel it; use a variant without
   a surface (`ghost`, `bare`) instead. The dev-only `/design-system` page shows every primitive in
   the current theme.
+- Motion is a handful of tokens in `index.css`: `--motion-*` durations and the `--ease-enter` /
+  `--ease-exit` curves. Popups take `motion-popup`, dialogs and sheets `motion-surface`, and plain
+  `transition-*` utilities default to `--motion-fast`. Don't hand-pick a `duration-*`: reduced
+  motion zeroes the tokens, and a backdrop on a different clock from its popup cuts out when Base
+  UI unmounts both at the popup's end.
 
 ## Composition
 

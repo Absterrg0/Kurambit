@@ -1506,7 +1506,13 @@ export function KeybindingsSettingsPanel() {
   };
 
   return (
-    <SettingsPageContainer>
+    <SettingsPageContainer
+      description={
+        isElectron
+          ? undefined
+          : "The browser keeps a few shortcuts for itself, such as new tab. The desktop app receives them all."
+      }
+    >
       {/* The page is already titled Keybindings; the toolbar needs no second heading. */}
       <SettingsSection {...searchableSetting("keybindings")} hideTitle>
         <div className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
@@ -1546,16 +1552,6 @@ export function KeybindingsSettingsPanel() {
             Advanced
           </Toggle>
         </div>
-        {!isElectron ? (
-          <Text
-            variant="body"
-            tone="muted"
-            render={<p className="px-3 pb-3 [--type-body:var(--type-meta)] sm:px-4" />}
-          >
-            The browser keeps a few shortcuts for itself, such as new tab. The desktop app receives
-            them all.
-          </Text>
-        ) : null}
       </SettingsSection>
 
       {!canWriteSettings ? (

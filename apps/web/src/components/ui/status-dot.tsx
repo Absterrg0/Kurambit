@@ -1,6 +1,9 @@
 // Adapted from T3 Code's redesign (MIT, Copyright (c) T3 Tools Inc.).
 import { cva, type VariantProps } from "class-variance-authority";
 
+import type { ReactNode } from "react";
+
+import { Text } from "~/components/ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 // Tones are the status hues. `neutral` is idle or unknown, `live` is vermilion
@@ -111,4 +114,22 @@ function StatusDot({
   return dot;
 }
 
-export { StatusDot, type StatusDotTone };
+/** A row's state in words: a dot and a short label, the one readiness recipe across the app. */
+function StatusLabel({
+  tone = "neutral",
+  children,
+}: {
+  tone?: StatusDotTone;
+  children: ReactNode;
+}) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-2" data-slot="status-label">
+      <StatusDot tone={tone} size="md" />
+      <Text variant="meta" tone="muted">
+        {children}
+      </Text>
+    </span>
+  );
+}
+
+export { StatusDot, StatusLabel, type StatusDotTone };

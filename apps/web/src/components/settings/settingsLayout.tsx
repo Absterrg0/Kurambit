@@ -276,6 +276,7 @@ export function SettingsRow({
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
   mixed: mixedOverride,
+  inlineControl = false,
   children,
   className,
   ...rowProps
@@ -291,6 +292,9 @@ export function SettingsRow({
   serverScoped?: boolean;
   settingKeys?: readonly (keyof ServerSettings)[];
   mixed?: boolean;
+  /** Keep a small control (a status, a short button) beside the text at every width,
+   *  instead of dropping it to its own line when the row is narrow. */
+  inlineControl?: boolean;
   children?: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id);
@@ -447,7 +451,13 @@ export function SettingsRow({
         className,
       )}
     >
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+      <div
+        className={cn(
+          inlineControl
+            ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 @min-[32rem]/settings-row:gap-8"
+            : "flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_auto] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8",
+        )}
+      >
         <div className="flex min-w-0 flex-1 gap-3">
           {icon ? (
             <span
@@ -492,7 +502,14 @@ export function SettingsRow({
           </div>
         </div>
         {renderedControl ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end @min-[32rem]/settings-row:[&_[data-slot=select-trigger]]:min-w-40">
+          <div
+            className={cn(
+              "flex min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:[&_[data-slot=select-trigger]]:min-w-40",
+              inlineControl
+                ? "justify-end"
+                : "w-full @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end",
+            )}
+          >
             {renderedControl}
           </div>
         ) : null}
@@ -552,16 +569,23 @@ export function SettingsPageContainer({
   children,
   className,
   width = "readable",
+  title,
+  description,
 }: {
   children: ReactNode;
   className?: string;
   width?: WorkspacePageWidth;
+  /** Overrides the title the address names, for pages with no address of their own. */
+  title?: string;
+  /** One line under the title for what the whole page covers, so it never sits in a toolbar. */
+  description?: ReactNode;
 }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
-  const pageTitle = useLocation({
+  const routeTitle = useLocation({
     select: (location) => settingsBreadcrumbLabel(location.pathname),
   });
+  const pageTitle = title ?? routeTitle;
   const highlightTarget = useLocation({
     select: (location) => location.state.settingsTargetHighlight !== false,
   });
@@ -588,9 +612,16 @@ export function SettingsPageContainer({
       >
         <WorkspacePageContainer width={width} className={cn("gap-8", className)}>
           {pageTitle === null ? null : (
-            <Text variant="title" tone="strong" render={<h1 className="-mb-5 px-3 sm:px-4" />}>
-              {pageTitle}
-            </Text>
+            <div className="-mb-5 grid gap-1 px-3 sm:px-4">
+              <Text variant="title" tone="strong" render={<h1 />}>
+                {pageTitle}
+              </Text>
+              {description ? (
+                <Text variant="body" tone="muted" render={<p />}>
+                  {description}
+                </Text>
+              ) : null}
+            </div>
           )}
           <SettingsScopeSentence />
           {children}

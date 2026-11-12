@@ -94,7 +94,7 @@ export function snapShotFeedbackUnavailableMessage(
 export function snapShotDescription(state: DesktopSnapShotState | null): string {
   return state?.mode === "portal" && captureSetupBackend(state) === "picker"
     ? "Automatic capture isn't available here. Choose a window instead."
-    : "Capture a window and attach it to your current draft.";
+    : "A shortcut attaches the window you're using as a picture.";
 }
 
 export function snapShotAccessibilityUnavailableMessage(

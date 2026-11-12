@@ -173,13 +173,16 @@ function ComboboxPopup({
       >
         <span
           className={cn(
-            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity] [--popup-item-radius:calc(var(--radius-lg)-5px)]",
+            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity] motion-popup has-[>[data-starting-style]]:scale-98 has-[>[data-starting-style]]:opacity-0 has-[>[data-ending-style]]:scale-98 has-[>[data-ending-style]]:opacity-0 [--popup-item-radius:calc(var(--radius-lg)-5px)]",
             spacing === "relaxed" && RELAXED_PICKER_CLASS,
             className,
           )}
         >
           <ComboboxPrimitive.Popup
-            className="flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-1 flex-col overflow-hidden text-foreground"
+            // The surface is the wrapper above, which fades from this popup's state. Base UI
+            // waits only for this element's own transitions before unmounting, so it runs a
+            // matching one that nobody sees.
+            className="flex min-w-0 max-h-[min(var(--available-height),23rem)] flex-1 flex-col overflow-hidden text-foreground transition-opacity motion-popup data-ending-style:opacity-[0.99]"
             data-slot="combobox-popup"
             {...props}
           >
@@ -202,7 +205,7 @@ function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        `flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-[var(--popup-item-radius,7px)] px-2 py-1 ${MENU_ROW_TEXT_CLASS} text-foreground outline-none not-data-disabled:hover:surface-selected-soft data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:surface-selected-soft data-selected:text-strong-foreground data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0`,
+        `flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-[var(--popup-item-radius,7px)] px-2 py-1 ${MENU_ROW_TEXT_CLASS} text-foreground outline-none not-data-disabled:hover:surface-selected-soft data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-selected:surface-selected-soft data-selected:text-strong-foreground data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-highlighted:active:not-data-disabled:surface-selected data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0`,
         className,
       )}
       data-slot="combobox-item"

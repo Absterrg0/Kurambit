@@ -13,6 +13,16 @@ import {
   type SettingsSearchItem,
 } from "./settingsSearch";
 
+const env = vi.hoisted(() => ({ isElectron: false }));
+vi.mock(import("~/env"), async (original) => ({
+  ...(await original()),
+  get isElectron() {
+    return env.isElectron;
+  },
+}));
+
+const isSnapShot = (item: SettingsSearchItem) => item.to === "/settings/snap-shot";
+
 const ITEMS: ReadonlyArray<SettingsSearchItem> = [
   {
     id: "word-wrap",
@@ -224,16 +234,22 @@ describe("searchSettings", () => {
   });
 
   it("routes conditional window capture settings to the stable toggle row", () => {
-    const targets = [
+    const queries = [
       "capture accessibility data",
       "capture shortcut",
       "capture sound",
       "capture flash",
       "capture animations",
-    ].map((query) => {
+    ];
+    // Window capture exists only in the desktop app; the web client never offers it.
+    expect(queries.flatMap((query) => searchSettings(query).filter(isSnapShot))).toEqual([]);
+
+    env.isElectron = true;
+    const targets = queries.map((query) => {
       const match = searchSettings(query)[0];
       return [match?.id, match?.targetId];
     });
+    env.isElectron = false;
 
     expect(targets).toEqual([
       ["snap-shot-accessibility", "snap-shot-enabled"],

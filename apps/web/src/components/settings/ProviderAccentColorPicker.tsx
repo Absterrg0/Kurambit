@@ -79,21 +79,22 @@ function ProviderCustomColorPicker(props: {
               render={
                 <Button
                   type="button"
-                  size="icon-sm"
+                  size="sm"
                   variant="ghost-muted"
                   aria-label={`${normalized ? "Change" : "Add"} accent colour for ${props.displayName}`}
                 >
-                  {/* A colour well, filled when set and an empty ring when not, so it reads as
-                the provider's colour rather than a stray "add" button. */}
+                  {/* A colour well with its name: a bare ring beside the name field
+                      read as a stray control. */}
                   <span
                     aria-hidden
                     className={
                       normalized
-                        ? "size-4 rounded-full ring-1 ring-strong-foreground/20 ring-inset"
-                        : "size-4 rounded-full border border-dashed border-muted-foreground"
+                        ? "size-3.5 rounded-full ring-1 ring-strong-foreground/20 ring-inset"
+                        : "size-3.5 rounded-full ring-1 ring-muted-foreground/60 ring-inset"
                     }
                     style={normalized ? { backgroundColor: normalized } : undefined}
                   />
+                  Colour
                 </Button>
               }
             />

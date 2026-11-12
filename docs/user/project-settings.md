@@ -2,9 +2,9 @@
 
 The "Applying settings for …" sentence at the top of Settings pages picks
 the game (project) and environment a change applies to. Only pages with a value a game can set for
-itself show it, such as General's **Model for new games**. Until some game has a value of its
-own, the page shows a quiet **Set for one game…** link in its place; Storage applies to every game
-and has none. It starts at **All games** and **All environments** and stays selected as you move
+itself show it, such as General's **Model for new games**, and only once some game has a value of
+its own. To give one game its own value, open **Game settings** from the game's menu in the sidebar
+or from the command palette. Storage applies to every game and has none. It starts at **All games** and **All environments** and stays selected as you move
 between categories or search for a setting.
 
 Preferences saved on this device, such as appearance, confirmations and browser profiles, always

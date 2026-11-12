@@ -104,12 +104,13 @@ function AutocompletePopup({
       >
         <span
           className={cn(
-            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity] [--popup-item-radius:calc(var(--radius-lg)-5px)]",
+            "surface-popover kbd-in-popover relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) rounded-lg transition-[scale,opacity] motion-popup has-[>[data-starting-style]]:scale-98 has-[>[data-starting-style]]:opacity-0 has-[>[data-ending-style]]:scale-98 has-[>[data-ending-style]]:opacity-0 [--popup-item-radius:calc(var(--radius-lg)-5px)]",
             className,
           )}
         >
           <AutocompletePrimitive.Popup
-            className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground"
+            // See ComboboxPopup: the wrapper is the surface; this runs the matching exit.
+            className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground transition-opacity motion-popup data-ending-style:opacity-[0.99]"
             data-slot="autocomplete-popup"
             {...props}
           >
@@ -127,7 +128,7 @@ function AutocompleteItem({ className, children, ...props }: AutocompletePrimiti
       className={cn(
         // A controlled list (CommandItem's `active`) paints its own current row,
         // so the primitive's hover and highlight stand down there.
-        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-[var(--popup-item-radius,7px)] px-2 py-1 text-label outline-none not-data-controlled:hover:surface-selected-soft not-data-controlled:data-highlighted:surface-selected-soft not-data-controlled:data-highlighted:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-[var(--popup-item-radius,7px)] px-2 py-1 text-label outline-none not-data-controlled:hover:surface-selected-soft not-data-controlled:data-highlighted:surface-selected-soft not-data-controlled:data-highlighted:text-strong-foreground not-data-controlled:data-highlighted:active:surface-selected data-disabled:pointer-events-none data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       data-slot="autocomplete-item"

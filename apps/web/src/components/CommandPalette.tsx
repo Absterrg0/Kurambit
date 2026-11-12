@@ -1717,10 +1717,7 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "action",
         value: `action:game-turn-${turnRestore.kind}`,
-        title:
-          turnRestore.kind === "undo"
-            ? "Undo the last turn's change"
-            : "Redo the last turn's change",
+        title: turnRestore.kind === "undo" ? "Undo the last change" : "Redo the last change",
         searchTerms: [turnRestore.kind, "turn", "change", "revert", "build", "game"],
         icon:
           turnRestore.kind === "undo" ? (
@@ -2137,18 +2134,49 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const changeThemeItem: CommandPaletteSubmenuItem = {
+  // Mode and theme are one decision about how the app looks, so the palette offers one entry
+  // for both instead of two near-synonyms.
+  const appearanceItem: CommandPaletteSubmenuItem = {
     kind: "submenu",
-    value: "action:change-theme",
-    searchTerms: ["change theme", "appearance", "colors", "palette"],
-    title: "Change theme",
+    value: "action:appearance",
+    searchTerms: [
+      "change theme",
+      "change appearance",
+      "appearance",
+      "colors",
+      "palette",
+      "light",
+      "dark",
+      "system",
+      "mode",
+      "toggle",
+    ],
+    title: "Appearance…",
     icon: <PaletteIcon className={ITEM_ICON_CLASS} />,
     addonIcon: <PaletteIcon className={ADDON_ICON_CLASS} />,
     shortcutCommand: "theme.select",
     groups: [
       {
+        value: "appearance",
+        label: "Mode",
+        items: APPEARANCE_OPTIONS.map(({ mode, label, icon: Icon }) => ({
+          kind: "action",
+          value: `appearance:${mode}`,
+          title: label,
+          searchTerms: [label, "appearance", "mode"],
+          icon: <Icon className={ITEM_ICON_CLASS} />,
+          titleTrailingContent:
+            appearanceMode === mode ? (
+              <span className="text-xs text-muted-foreground/70">Current</span>
+            ) : undefined,
+          run: async () => {
+            if (!setAppearanceMode(mode)) notifyThemeSaveFailure();
+          },
+        })),
+      },
+      {
         value: "themes",
-        label: "Change theme",
+        label: "Theme",
         items: themeCards.map(({ id, label, previews }) => ({
           kind: "action",
           value: id === null ? "theme:standard" : `theme:palette:${id}`,
@@ -2184,38 +2212,7 @@ function OpenCommandPaletteDialog(props: {
       },
     ],
   };
-  actionItems.push(changeThemeItem);
-
-  const changeAppearanceItem: CommandPaletteSubmenuItem = {
-    kind: "submenu",
-    value: "action:change-appearance",
-    searchTerms: ["change appearance", "light", "dark", "system", "mode", "toggle"],
-    title: "Change appearance",
-    icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
-    addonIcon: <MonitorIcon className={ADDON_ICON_CLASS} />,
-    shortcutCommand: "appearance.cycle",
-    groups: [
-      {
-        value: "appearance",
-        label: "Change appearance",
-        items: APPEARANCE_OPTIONS.map(({ mode, label, icon: Icon }) => ({
-          kind: "action",
-          value: `appearance:${mode}`,
-          title: label,
-          searchTerms: [label, "appearance", "mode"],
-          icon: <Icon className={ITEM_ICON_CLASS} />,
-          titleTrailingContent:
-            appearanceMode === mode ? (
-              <span className="text-xs text-muted-foreground/70">Current</span>
-            ) : undefined,
-          run: async () => {
-            if (!setAppearanceMode(mode)) notifyThemeSaveFailure();
-          },
-        })),
-      },
-    ],
-  };
-  actionItems.push(changeAppearanceItem);
+  actionItems.push(appearanceItem);
 
   // The parent pushes an intent into this mounted dialog; applying it clears the
   // parent's intent and may navigate, so it runs after commit but before paint.
@@ -2259,7 +2256,7 @@ function OpenCommandPaletteDialog(props: {
         setViewStack([]);
         pushPaletteView({
           addonIcon: <PaletteIcon className={ADDON_ICON_CLASS} />,
-          groups: [{ value: "themes", label: "Change theme", items: [] }],
+          groups: [{ value: "themes", label: "Appearance", items: [] }],
         });
         return;
     }
@@ -2272,7 +2269,8 @@ function OpenCommandPaletteDialog(props: {
     applyOpenIntent(openIntent);
   }, [openIntent, projectThreadItemCount]);
 
-  actionItems.push({
+  // A tool for making themes, not for choosing one: it sits with the other developer tools.
+  developerItems.push({
     kind: "action",
     value: "action:theme-editor",
     searchTerms: ["theme", "appearance", "colors", "palette", "customize"],
@@ -2336,7 +2334,7 @@ function OpenCommandPaletteDialog(props: {
         "remove",
         "kurambit.json",
       ],
-      title: "Project settings",
+      title: "Game settings",
       description: contextualProjectGroup.displayName,
       icon: <FolderIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
@@ -2396,11 +2394,9 @@ function OpenCommandPaletteDialog(props: {
           addProjectEnvironmentId,
           buildPaletteRemoteSourceReadiness(null),
         )
-      : currentView?.groups[0]?.value === "themes"
-        ? changeThemeItem.groups
-        : currentView?.groups[0]?.value === "appearance"
-          ? changeAppearanceItem.groups
-          : (currentView?.groups ?? rootGroups);
+      : currentView?.groups[0]?.value === "themes" || currentView?.groups[0]?.value === "appearance"
+        ? appearanceItem.groups
+        : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,

@@ -476,7 +476,7 @@ function ProviderModelRow({
     <div
       data-model-slug={model.slug}
       className={cn(
-        "grid h-7 grid-cols-[1.5rem_minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
+        "group/model grid h-7 grid-cols-[1.5rem_minmax(0,1fr)_auto_minmax(5.5rem,auto)_auto] items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted/30",
         isHidden && "opacity-50",
       )}
     >
@@ -502,8 +502,12 @@ function ProviderModelRow({
       </Tooltip>
       <span className="flex min-w-0 items-baseline gap-2">
         <span className={cn(nameClassName, "truncate")}>{model.name}</span>
+        {/* The slug is what a custom model or a CLI flag needs, not what a person
+            picks by; it waits for the pointer. */}
         {model.name !== model.slug ? (
-          <code className="truncate font-mono text-2xs text-muted-foreground/70">{model.slug}</code>
+          <code className="hidden truncate font-mono text-2xs text-muted-foreground/70 group-hover/model:inline">
+            {model.slug}
+          </code>
         ) : null}
         {model.isCustom ? <span className="text-2xs text-muted-foreground/70">custom</span> : null}
       </span>

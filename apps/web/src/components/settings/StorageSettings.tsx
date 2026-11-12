@@ -471,7 +471,7 @@ export function StorageSettingsPanel() {
   }
 
   return (
-    <SettingsPageContainer>
+    <SettingsPageContainer description="Where Kurambit keeps working copies and logs, and when it cleans them up.">
       {!isProjectScope &&
         connectedEnvironments
           .filter(
