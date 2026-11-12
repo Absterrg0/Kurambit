@@ -21,8 +21,9 @@ const lastGameModelSchema = Schema.NullOr(ModelSelection);
 
 /**
  * The agent and model a new or opened game starts with: the person's pick,
- * else the one their last game used while its provider is usable, else
- * Claude's own default, else the first ready provider's.
+ * else Settings' "Model for new games" while its provider is usable, else the
+ * one their last game used, else Claude's own default, else the first ready
+ * provider's.
  */
 export function useGameModelChoice(environmentId: EnvironmentId) {
   const settings = useEnvironmentSettings(environmentId);
@@ -42,6 +43,12 @@ export function useGameModelChoice(environmentId: EnvironmentId) {
     entries.some(
       (entry) => entry.instanceId === instanceId && isProviderInstancePickerReady(entry),
     );
+  const configured =
+    settings.defaultModelSelection !== null &&
+    settings.defaultModelSelection !== undefined &&
+    isReady(settings.defaultModelSelection.instanceId)
+      ? settings.defaultModelSelection
+      : null;
   const remembered =
     lastGameModel !== null && isReady(lastGameModel.instanceId) ? lastGameModel : null;
   // A game's first turn builds the whole game, so it gets the provider's own default (its
@@ -56,7 +63,7 @@ export function useGameModelChoice(environmentId: EnvironmentId) {
     instanceId: freshInstanceId,
     model: getDefaultProviderInstanceModel(providers, freshInstanceId) ?? textDefault.model,
   };
-  const model = selection ?? remembered ?? fresh;
+  const model = selection ?? configured ?? remembered ?? fresh;
   const modelEntry = entries.find((entry) => entry.instanceId === model.instanceId);
   return {
     entries,
