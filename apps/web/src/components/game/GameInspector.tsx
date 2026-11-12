@@ -1066,6 +1066,20 @@ function ScenePanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
+/**
+ * A style family's slug as a person would say the look, without the asset
+ * pack's vendor: "kenney-lowpoly" reads "Low-poly".
+ */
+const styleFamilyWords = (family: string) => {
+  const words = family
+    .toLowerCase()
+    .replace(/^(kenney|quaternius|kaykit|polyhaven|synty)[-_ ]?/, "")
+    .replace(/low[-_ ]?poly/, "low-poly")
+    .replaceAll("_", " ");
+  const spaced = words.includes("low-poly") ? words : words.replaceAll("-", " ");
+  return spaced.length === 0 ? family : `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+};
+
 /** STYLE.json's family and palette, then the generated art and its picks. */
 function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
@@ -1138,13 +1152,9 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
               ) : null}
               <Text variant="caption" tone="muted" truncate>
                 {[
-                  // A family's slug ("kenney-lowpoly") read as words.
                   style.family === undefined || style.family === null
                     ? null
-                    : `${style.family.charAt(0).toUpperCase()}${style.family.slice(1)}`.replaceAll(
-                        "-",
-                        " ",
-                      ),
+                    : styleFamilyWords(style.family),
                   style.mode === "pixel" ? "Pixel art" : "Smooth",
                   typeof style.palette === "string" ? style.palette : null,
                 ]
