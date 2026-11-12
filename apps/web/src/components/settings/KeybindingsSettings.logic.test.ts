@@ -296,8 +296,8 @@ describe("KeybindingsSettings.logic", () => {
   });
 
   it("formats static and project script command labels", () => {
-    expect(commandLabel("commandPalette.toggle")).toBe("Open the command palette");
-    expect(commandLabel("game.freeze")).toBe("Freeze the game or play on");
+    expect(commandLabel("commandPalette.toggle")).toBe("Open command palette");
+    expect(commandLabel("game.freeze")).toBe("Freeze or resume game");
     expect(commandLabel("thread.jump.3")).toBe("Jump to chat 3");
     expect(commandLabel("usage.period.week")).toBe("Show usage for 7 days");
     expect(commandLabel("script.setup-db.run")).toBe("Run script: setup-db");
@@ -431,13 +431,13 @@ describe("KeybindingsSettings.logic", () => {
       },
     ] satisfies ResolvedKeybindingsConfig);
 
-    expect(rows[0]?.conflicts).toEqual(["Start a fresh Log"]);
+    expect(rows[0]?.conflicts).toEqual(["New Log"]);
     expect(
       keybindingConflictLabels(rows, {
         rowId: rows[0]?.id ?? "",
         key: "mod+n",
         when: "",
       }),
-    ).toEqual(["Start a fresh Log"]);
+    ).toEqual(["New Log"]);
   });
 });

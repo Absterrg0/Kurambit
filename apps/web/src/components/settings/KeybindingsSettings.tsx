@@ -2,6 +2,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentsWithScope, readEnvironmentScope } from "../../state/session";
 import {
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleXIcon,
   EllipsisIcon,
   FileJsonIcon,
@@ -50,7 +51,9 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Text } from "../ui/text";
+import { Switch } from "../ui/switch";
 import { Toggle } from "../ui/toggle";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { toastManager } from "../ui/toast";
 import {
   buildKeybindingRows,
@@ -73,7 +76,12 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+  useSettingsSearchTargetId,
+} from "./settingsLayout";
 import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -1243,7 +1251,82 @@ interface KeybindingsGroupsProps extends KeybindingRowActions {
   savingCommand: KeybindingCommand | null;
 }
 
-function KeybindingsGroups(props: KeybindingsGroupsProps) {
+// The coding app's own areas: real shortcuts, but nothing on a game's screen uses them.
+const CODE_CHAT_GROUP_IDS: ReadonlySet<string> = new Set([
+  "threads",
+  "terminal",
+  "preview",
+  "scripts",
+]);
+
+function KeybindingsGroups(props: KeybindingsGroupsProps & { foldCodeChat: boolean }) {
+  const { groups, foldCodeChat, ...rest } = props;
+  if (!foldCodeChat) return <KeybindingsGroupList groups={groups} {...rest} />;
+  const codeChat = groups.filter((group) => CODE_CHAT_GROUP_IDS.has(group.id));
+  const studio = groups.filter((group) => !CODE_CHAT_GROUP_IDS.has(group.id));
+  return (
+    <>
+      <KeybindingsGroupList groups={studio} {...rest} />
+      {codeChat.length > 0 ? (
+        <CodeChatKeybindingsFold
+          anchors={codeChat.flatMap((group) =>
+            group.rows.flatMap((row) => props.anchorIds.get(row.id) ?? []),
+          )}
+        >
+          <KeybindingsGroupList groups={codeChat} {...rest} />
+        </CodeChatKeybindingsFold>
+      ) : null}
+    </>
+  );
+}
+
+function CodeChatKeybindingsFold({
+  anchors,
+  children,
+}: {
+  anchors: ReadonlyArray<string>;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const searchTargetId = useSettingsSearchTargetId();
+  // A search jump to one of these shortcuts opens the fold in the render its row arrives.
+  const [openedForTarget, setOpenedForTarget] = useState<string | null>(null);
+  if (
+    searchTargetId !== null &&
+    searchTargetId !== openedForTarget &&
+    anchors.includes(searchTargetId)
+  ) {
+    setOpenedForTarget(searchTargetId);
+    if (!open) setOpen(true);
+  }
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="px-3 sm:px-4">
+        <CollapsibleTrigger className="group flex min-h-7 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <Text
+            variant="title"
+            tone="muted"
+            render={<h2 className="[--type-title:1rem] group-hover:text-foreground" />}
+          >
+            Chats, terminal and preview
+          </Text>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none"
+          />
+        </CollapsibleTrigger>
+        <Text variant="meta" tone="muted" render={<p />}>
+          Shortcuts for the coding views a game&apos;s screen does not use.
+        </Text>
+      </div>
+      <CollapsiblePanel>
+        <div className="flex flex-col gap-8 pt-6">{children}</div>
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
+function KeybindingsGroupList(props: KeybindingsGroupsProps) {
   const { groups, anchorIds, savingCommand, ...rowActions } = props;
   return groups.map((group) => (
     <SettingsSection key={group.id} id={`keybindings-${group.id}`} title={group.title}>
@@ -1535,14 +1618,17 @@ export function KeybindingsSettingsPanel() {
             <FileJsonIcon aria-hidden className="size-4" />
             Open keybindings.json
           </Button>
-          <Toggle
-            variant="outline"
-            pressed={showConditions}
-            onPressedChange={setShowConditions}
-            aria-label="Advanced: show when each shortcut applies"
-          >
-            Advanced
-          </Toggle>
+          {/* The same "Advanced" switch Typography uses, not a third button style. */}
+          <label className="ms-auto flex items-center gap-2">
+            <Text variant="meta" tone="muted">
+              Advanced
+            </Text>
+            <Switch
+              checked={showConditions}
+              onCheckedChange={(checked) => setShowConditions(Boolean(checked))}
+              aria-label="Advanced: show when each shortcut applies"
+            />
+          </label>
         </div>
       </SettingsSection>
 
@@ -1570,6 +1656,7 @@ export function KeybindingsSettingsPanel() {
 
         {groups.length > 0 ? (
           <KeybindingsGroups
+            foldCodeChat={query.trim().length === 0}
             groups={groups}
             anchorIds={anchorIds}
             savingCommand={savingCommand}
