@@ -142,7 +142,7 @@ export const keepGoingControlView = (
         ? mode.description
         : status !== null && status.ending !== null
           ? status.message
-          : "Your agent takes the next step itself, in this chat."),
+          : "Your agent picks the next change, builds it and measures it, and stops when changes stop helping."),
   };
 };
 

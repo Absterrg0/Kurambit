@@ -444,14 +444,12 @@ function BuildCard({
         </span>
       </TooltipTrigger>
       <TooltipPopup side="top" className="max-w-xs">
-        {buildName(build)} · {formatBuildTime(build.at)}
+        {/* What the card doesn't already say: when, and how it measured. */}
+        {formatBuildTime(build.at)}
+        {build.facts.good + build.facts.bad > 0
+          ? ` · ${build.facts.good} pass${build.facts.bad > 0 ? ` · ${build.facts.bad} to look at` : ""}`
+          : ""}
         {undone ? " · undone" : ""}
-        {caption === buildName(build) ? null : (
-          <>
-            <br />
-            {caption}
-          </>
-        )}
       </TooltipPopup>
     </Tooltip>
   );

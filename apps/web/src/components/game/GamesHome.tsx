@@ -96,17 +96,20 @@ export function GamesHome() {
     if (list === undefined) threadsByProject.set(thread.projectId, [thread]);
     else list.push(thread);
   }
-  const covers = games.map((game) => {
-    const list = threadsByProject.get(game.projectId) ?? [];
-    const chats = partitionGameChats(list, liveThreadIds);
-    // A game opens on its main chat, as its sidebar row does.
-    const main = chats.main ?? gameMainThread(list) ?? sortGameThreadsByActivity(list)[0] ?? null;
-    return {
-      game,
-      main,
-      chats: list.length === 0 ? null : resolveGameSidebarStatus(chats),
-    } satisfies GameCover;
-  });
+  // Latest first: home continues what was touched most recently.
+  const covers = games
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((game) => {
+      const list = threadsByProject.get(game.projectId) ?? [];
+      const chats = partitionGameChats(list, liveThreadIds);
+      // A game opens on its main chat, as its sidebar row does.
+      const main = chats.main ?? gameMainThread(list) ?? sortGameThreadsByActivity(list)[0] ?? null;
+      return {
+        game,
+        main,
+        chats: list.length === 0 ? null : resolveGameSidebarStatus(chats),
+      } satisfies GameCover;
+    });
   const openGame = (cover: GameCover) => {
     if (cover.main !== null) {
       void navigate({

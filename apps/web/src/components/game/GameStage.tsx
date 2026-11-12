@@ -67,7 +67,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Kbd } from "../ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "../ui/menu";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -870,11 +870,12 @@ function ThreadGameStage({
                   <DownloadIcon />
                   Export…
                 </MenuItem>
+                <MenuSeparator />
                 <MenuItem
                   onClick={() => void navigate({ to: "/settings/general", hash: "game-tools" })}
                 >
                   <WrenchIcon />
-                  Game tools settings
+                  Game tools…
                 </MenuItem>
               </MenuPopup>
             </Menu>
