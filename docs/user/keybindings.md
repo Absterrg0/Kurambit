@@ -35,10 +35,11 @@ To change effort one step without opening the picker, bind
 Both are unbound by default. Increase wraps from the highest level to the
 lowest, and decrease wraps from the lowest level to the highest.
 
-In the model picker, press Left in an empty search field or Shift+Tab to reach
-the provider list. Use Up/Down to move and Enter to choose. Right returns to
-model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
-search. These provider shortcuts can also be changed in Settings.
+The model picker lists your favourites first, then each provider's models under
+its name. Type to search across all of them, use Up/Down to move and Enter to
+choose. `mod+shift+up` and `mod+shift+down` jump to the previous or next provider;
+while searching they clear the search first. These provider shortcuts can also be
+changed in Settings.
 
 These shortcuts run inside the focused web or desktop client. `mod` uses Command
 on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and

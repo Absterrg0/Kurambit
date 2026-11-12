@@ -82,11 +82,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 props.preferShortName ? { preferShortName: true } : undefined,
               )}
         </span>
+        {/* A quiet word, not a coloured badge: colour in chrome is kept for live states. */}
         {props.showNewBadge ? (
-          <span
-            className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
-            aria-label="New model"
-          >
+          <span className="shrink-0 text-meta text-muted-foreground" aria-label="New model">
             New
           </span>
         ) : null}
