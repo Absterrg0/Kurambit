@@ -6,6 +6,7 @@ import {
 } from "@kurambit/shared/themePreview";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ThemeWireframe } from "./ThemeWireframe";
 import {
   getThemeColorsForMode,
   getThemeModes,
@@ -148,6 +149,10 @@ export function ThemePreviewCircle({
   );
 }
 
+/**
+ * A theme card's light and dark halves as small pictures of the app in that theme,
+ * so picking one shows what the studio will look like rather than a colour blob.
+ */
 export function ThemePreviewCircles({
   label,
   activeModes,
@@ -160,7 +165,7 @@ export function ThemePreviewCircles({
   previews: ThemeCardDefinition["previews"];
 }) {
   return (
-    <div className="flex min-h-16 items-center justify-center gap-2.5 px-3 pt-3">
+    <div className={cn("grid gap-2 px-3 pt-3", previews.length > 1 && "grid-cols-2")}>
       {previews.map((preview) => {
         const mode = preview.mode;
         const isPicked = activeModes.includes(mode);
@@ -171,36 +176,31 @@ export function ThemePreviewCircles({
                 <button
                   aria-label={`Use ${label} ${mode} mode`}
                   aria-pressed={isPicked}
-                  className={cn(
-                    "relative flex size-[68px] shrink-0 transform-gpu cursor-pointer items-center justify-center rounded-full p-1 outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-                    isPicked && "hover:scale-100",
-                  )}
+                  className="group/mode relative block cursor-pointer rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   onClick={(event) => {
                     event.stopPropagation();
                     onSelectMode(mode);
                   }}
                   type="button"
                 >
-                  <ThemePreviewCircle colors={preview.colors} mode={mode} />
-                  {isPicked ? (
-                    <>
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute inset-0 rounded-full"
-                        style={{ boxShadow: "inset 0 0 0 2px var(--ring)" }}
-                      />
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute bottom-0.5 right-0.5 flex size-5 items-center justify-center rounded-full border border-border/70 bg-background text-foreground shadow-sm"
-                      >
-                        {mode === "light" ? (
-                          <SunIcon className="size-3" />
-                        ) : (
-                          <MoonIcon className="size-3" />
-                        )}
-                      </span>
-                    </>
-                  ) : null}
+                  <ThemeWireframe
+                    className="h-16"
+                    panes={[{ colors: preview.colors }]}
+                    selected={isPicked}
+                  />
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute right-1 bottom-1 flex size-4 items-center justify-center rounded-full bg-background/80",
+                      isPicked ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {mode === "light" ? (
+                      <SunIcon className="size-2.5" />
+                    ) : (
+                      <MoonIcon className="size-2.5" />
+                    )}
+                  </span>
                 </button>
               }
             />
