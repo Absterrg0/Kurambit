@@ -596,8 +596,12 @@ function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck>
       <span className="flex size-4 shrink-0 items-center justify-center">
         <MinusIcon className="size-4 text-dim-foreground" aria-hidden="true" />
       </span>
-      <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
-        {names.join(", ")} · not measured
+      <Text variant="meta" tone="muted" truncate render={<span className="min-w-0 flex-1" />}>
+        {names.join(", ")}
+      </Text>
+      {/* In the value column, like a reading. */}
+      <Text variant="caption" tone="dim" render={<span className="shrink-0" />}>
+        not measured
       </Text>
       <span className="flex w-6 shrink-0 items-center justify-end">
         <Tooltip>
