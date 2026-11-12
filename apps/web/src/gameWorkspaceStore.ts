@@ -65,6 +65,8 @@ export interface GameInspectedBuild {
   readonly build: GameBuildId;
   /** The row as the strip had it, for a build on an older page than the Inspector reads. */
   readonly snapshot: GameBuild;
+  /** Shown as a compare's side: the Inspector names it by its letter, and closing the compare hands it back. */
+  readonly side?: "A" | "B";
 }
 
 interface GameWorkspaceStoreState {

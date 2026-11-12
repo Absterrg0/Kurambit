@@ -865,7 +865,7 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
  * smoothly, does it keep moving, and is the picture not one colour. Every
  * other fact is a further measurement.
  */
-const GAME_LEAD_FACTS = [
+export const GAME_LEAD_FACTS = [
   "boots",
   "idle",
   "skilled",
@@ -903,6 +903,13 @@ const CHECK_LABELS: Readonly<
   freeze: "Keeps moving",
   colour: "Colour is varied",
 };
+
+/**
+ * A fact's one name for people, as the Inspector's checks call it: the lead
+ * checks by their check's words, every other fact by its label. The compare
+ * view names its rows with it, so a fact is never called two things.
+ */
+export const gameFactName = (id: GameFactId): string => CHECK_LABELS[id] ?? LABELS[id];
 
 const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.at)}`);
 
@@ -1216,12 +1223,7 @@ export const diffBuildFacts = (
       b.skilled.status === "measured" &&
       a.skilled.value.bot.hash !== b.skilled.value.bot.hash
     )
-      return notComparable(
-        id,
-        "the tester's bot changed between the two measurements",
-        textA,
-        textB,
-      );
+      return notComparable(id, "the play bot changed between the two measurements", textA, textB);
     const x = ra.reading;
     const y = rb.reading;
     const base = { id, label: LABELS[id], a: x.text, b: y.text, why: null };

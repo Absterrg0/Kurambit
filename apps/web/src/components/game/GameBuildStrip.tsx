@@ -92,6 +92,7 @@ export function GameBuildStrip({
   onCompare,
   cardWidth,
   onInspect,
+  hidden = false,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
@@ -111,6 +112,8 @@ export function GameBuildStrip({
   cardWidth: number;
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
+  /** Something else (a compare) has the strip's place: it stays mounted, out of sight. */
+  hidden?: boolean;
 }) {
   const still = useStageStill(scopedThreadKey(threadRef));
   const first = useEnvironmentQuery(
@@ -277,6 +280,7 @@ export function GameBuildStrip({
         previous={index > 0 ? (marks[index - 1] ?? null) : null}
         label={labels.get(build.id) ?? ""}
         onStage={onStage === build.id}
+        copy={playing === build.id}
         undone={list !== null && isUndone(build, list)}
         picking={picking !== null}
         picked={picking !== null && picking !== "any" && sameRef(picking, build)}
@@ -312,6 +316,7 @@ export function GameBuildStrip({
       data-game-build-strip=""
       // Composer menus (the model picker) stop at the strip's top rather than cover the Stage.
       data-composer-menu-ceiling=""
+      hidden={hidden}
       className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
       style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}
@@ -451,6 +456,7 @@ function BuildCard({
   previous,
   label,
   onStage,
+  copy,
   undone,
   picking,
   picked,
@@ -459,6 +465,8 @@ function BuildCard({
   threadRef: ScopedThreadRef;
   gameName: string;
   build: GameBuild;
+  /** It plays on the Stage from a copy, not the folder. */
+  copy: boolean;
   /** The build before it on the strip, which its checks are read against. */
   previous: GameBuild | null;
   label: string;
@@ -493,7 +501,7 @@ function BuildCard({
             disabled={!build.available && !picking}
             onClick={onClick}
             className={cn(
-              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
+              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left disabled:cursor-default",
               NEW_CARD_MOTION,
               (undone || !build.available) && "opacity-40",
             )}
@@ -512,6 +520,8 @@ function BuildCard({
             pick={picked ? "picked" : picking ? "pickable" : null}
           />
           {picked ? <PickBadge /> : null}
+          {/* Now stays Now; the build the Stage plays instead says so on its own picture. */}
+          {copy && !picking ? <PictureChip>Playing</PictureChip> : null}
         </GameBuildStill>
         {/* Two lines, always both used: what it was, then which one (its name and time), so
             two cards with the same picture still tell apart and no caption line sits empty. */}
@@ -588,13 +598,14 @@ function CardRing({
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
+        // The card's keyboard focus is the app's one outline, on the card itself.
         pick === "picked"
           ? "ring-2 ring-strong-foreground"
           : pick === "pickable"
-            ? "ring-1 ring-foreground/35 group-hover/card:ring-2 group-hover/card:ring-foreground/70 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring"
+            ? "ring-1 ring-foreground/35 group-hover/card:ring-2 group-hover/card:ring-foreground/70"
             : on
-              ? "ring-1 ring-foreground/45"
-              : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
+              ? "ring-2 ring-strong-foreground"
+              : "ring-1 ring-border group-hover/card:ring-foreground/30",
       )}
     />
   );
@@ -712,6 +723,7 @@ function NowCard({
   const changed = list.folderEdited === true;
   // The top bar names the build it changed since; the card says only what Now is.
   const meta = changed ? "Changed · not measured" : "The current game";
+  const borrowed = changed && still === null && current !== null;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -728,7 +740,7 @@ function NowCard({
             disabled={picking}
             onClick={onClick}
             className={cn(
-              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
+              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left disabled:cursor-default",
               NEW_CARD_MOTION,
               picking && "opacity-40",
             )}
@@ -743,29 +755,50 @@ function NowCard({
           className="aspect-video w-full rounded-md"
         >
           {/* Now is a state, not a build: one chip on the picture says which card it is. */}
-          <Text
-            variant="micro"
-            tone="inherit"
-            render={
-              <span className="absolute bottom-1.5 left-1.5 z-20 flex items-center gap-1 rounded-sm bg-black/70 px-1.5 py-px text-white" />
-            }
-          >
+          <PictureChip>
             {changed ? (
               <span aria-hidden="true" className="size-1.5 rounded-full bg-white/80" />
             ) : null}
             Now
-          </Text>
+          </PictureChip>
+          {borrowed ? (
+            // The picture is the last build's until the Stage shows the game: it says so.
+            <Text
+              variant="micro"
+              tone="inherit"
+              render={
+                <span className="absolute top-1.5 left-1.5 z-20 rounded-sm bg-black/55 px-1.5 py-px text-white/80" />
+              }
+            >
+              Last build's picture
+            </Text>
+          ) : null}
           <CardRing on={active && !picking} />
         </GameNowPicture>
         <CardCaption strong={active} title="Now" meta={meta} />
       </TooltipTrigger>
-      <TooltipPopup side="top" className="max-w-xs">
+      <TooltipPopup side="top" align="end" className="max-w-xs">
         {changed
-          ? still === null && current !== null
-            ? `The game as it is in its folder, changed since ${buildName(current)}. The picture is ${buildName(current)}'s until the Stage shows the game.`
-            : `The game as it is in its folder, changed since ${current === null ? "the last build" : buildName(current)}.`
-          : "Back to the game as it is in its folder."}
+          ? borrowed && current !== null
+            ? `The game as it is now, changed since ${buildName(current)}. Picture from ${buildName(current)}.`
+            : `The game as it is now, changed since ${current === null ? "the last build" : buildName(current)}.`
+          : "Back to the game as it is now."}
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** A chip at a card picture's foot: what this card is (Now) or does (Playing). */
+function PictureChip({ children }: { children: ReactNode }) {
+  return (
+    <Text
+      variant="micro"
+      tone="inherit"
+      render={
+        <span className="absolute bottom-1.5 left-1.5 z-20 flex items-center gap-1 rounded-sm bg-black/70 px-1.5 py-px text-white" />
+      }
+    >
+      {children}
+    </Text>
   );
 }

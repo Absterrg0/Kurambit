@@ -8,8 +8,6 @@ export interface GameStatusPart {
   readonly strong: boolean;
   /** Ticks an elapsed time after the text. */
   readonly since: number | null;
-  /** A key hint after the text, then its words: "Tab resumes". */
-  readonly key: { readonly key: string; readonly after: string } | null;
   /** The phrase in a full sentence, for its tooltip: the line itself is compressed. */
   readonly hint: string | null;
 }
@@ -19,7 +17,6 @@ const part = (text: string, more: Partial<Omit<GameStatusPart, "text">> = {}): G
   dot: null,
   strong: false,
   since: null,
-  key: null,
   hint: null,
   ...more,
 });
@@ -28,9 +25,10 @@ export interface GameStatusInput {
   readonly phase: GameStagePhase["kind"];
   /** The build on the Stage, as a sentence names it ("build 7"); null before one. */
   readonly onStage: string | null;
-  readonly frozen: boolean;
-  /** Held because the Stage lost focus, not by the person. */
-  readonly away: boolean;
+  /** The build on the Stage plays from a copy, not the game folder. */
+  readonly copy: boolean;
+  /** The game's builds have been read: before that, nothing is said about them. */
+  readonly known: boolean;
   readonly needsChoice: boolean;
   /** The step keep going is on, in this chat; null when it is not running here. */
   readonly keepGoingStep: number | null;
@@ -43,8 +41,6 @@ export interface GameStatusInput {
   readonly operation: { readonly text: string; readonly since: number | null } | null;
   /** The game is served live from its folder. */
   readonly live: boolean;
-  /** The game has the keyboard: the person is playing it, not just looking at it. */
-  readonly focused: boolean;
   /** The folder's last build, as a sentence names it, when the folder changed since it. */
   readonly changedSince: string | null;
   /** The game has at least one measured build. */
@@ -58,19 +54,15 @@ const sentence = (phrase: string) => `${phrase.charAt(0).toUpperCase()}${phrase.
  * Stage, then the work under way. Only states the app knows; nothing guessed.
  */
 export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatusPart> => {
-  const stage: GameStatusPart | null = input.frozen
-    ? part(`Frozen on ${input.onStage ?? "the game"}`, {
-        key: { key: "Tab", after: "resumes" },
-        hint: "The game is held still so you can point at things in it. Tab plays on.",
-      })
-    : input.phase === "playing"
-      ? input.away && input.onStage !== null
-        ? part(`Paused on ${input.onStage} while you're away`, {
-            hint: "The game holds while the Stage doesn't have the keyboard. Click it to play on.",
-          })
-        : input.focused
-          ? part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`, {
-              hint: "The game has the keyboard. Click outside it, or press Esc in its menu, to leave it.",
+  // The line always says which build plays and whether it was measured: pausing, freezing or
+  // playing the game changes the Stage, never this line.
+  const stage: GameStatusPart | null =
+    input.phase === "playing"
+      ? !input.known
+        ? null
+        : input.copy && input.onStage !== null
+          ? part(`Playing ${input.onStage} from a copy`, {
+              hint: "The game folder is untouched. Back to the current game puts it on the Stage again.",
             })
           : // At rest the line names what plays, in the words the Inspector and sidebar use.
             input.onStage !== null

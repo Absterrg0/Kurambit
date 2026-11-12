@@ -1,4 +1,6 @@
 import {
+  GAME_LEAD_FACTS,
+  gameFactName,
   type GameAssetFacts,
   type GameAssetUse,
   type GameBuild,
@@ -6,6 +8,7 @@ import {
   type GameBuildsResult,
   type GameFactDelta,
   type GameFactTone,
+  type GameFactId,
   type GameFactView,
 } from "@kurambit/contracts";
 
@@ -169,4 +172,113 @@ export const checksPhrase = (
   const pass =
     facts.lead === undefined ? `${facts.good} pass` : `${facts.lead.pass} of ${facts.lead.of} pass`;
   return facts.bad > 0 ? `${pass} · ${facts.bad} to look at` : pass;
+};
+
+/**
+ * PURE. A reason a fact was not measured, as a person reads it: the machine's load figures
+ * and the old play-bot wording stay in the stored reading, where agents read them.
+ */
+export const plainWhy = (why: string): string =>
+  why
+    .replace(/ \(load [\d.]+ on \d+ cores\)/g, "")
+    // The renderer probe's raw output is for agents and bug reports.
+    .replace(/ \([^()]*RENDERER=[^()]*\)/g, "")
+    .replace(
+      "this game has no play bot yet (keep going writes one once, or ask your agent for one)",
+      "no play bot yet; keep going writes one, or ask your agent",
+    );
+
+export interface CompareRow {
+  readonly id: GameFactId;
+  readonly name: string;
+  /** A side's reading; null when that side has none. */
+  readonly a: string | null;
+  readonly b: string | null;
+  readonly mark: DeltaLine["mark"];
+  readonly tone: GameFactDelta["tone"] | null;
+  /** Why the two readings cannot be compared, under the row; null when they can. */
+  readonly note: string | null;
+}
+
+export interface CompareRows {
+  readonly rows: ReadonlyArray<CompareRow>;
+  /** Facts neither build has a reading of, one entry per shared reason, so a reason is said once. */
+  readonly unmeasured: ReadonlyArray<{
+    readonly names: ReadonlyArray<string>;
+    readonly why: string;
+  }>;
+}
+
+const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;
+const sideWhy = (view: GameFactView | undefined): string | null =>
+  view === undefined || view.reading._tag === "measured"
+    ? null
+    : view.reading._tag === "pending"
+      ? "still being measured"
+      : plainWhy(view.reading.why);
+
+/**
+ * PURE. Two builds' facts as the compare view draws them: the lead checks first, by the
+ * Inspector's names, then the rest; a fact neither side measured joins one row per reason.
+ */
+export const compareRows = (
+  deltas: ReadonlyArray<GameFactDelta>,
+  viewsA: ReadonlyArray<GameFactView>,
+  viewsB: ReadonlyArray<GameFactView>,
+): CompareRows => {
+  const rows: Array<CompareRow> = [];
+  const unmeasured = new Map<string, Array<string>>();
+  const ordered = [...deltas].sort((x, y) => {
+    const rank = (id: GameFactId) => {
+      const at = LEAD_ORDER.indexOf(id);
+      return at === -1 ? LEAD_ORDER.length : at;
+    };
+    return rank(x.id) - rank(y.id);
+  });
+  for (const delta of ordered) {
+    const name = gameFactName(delta.id);
+    const whyA = sideWhy(viewsA.find((view) => view.id === delta.id));
+    const whyB = sideWhy(viewsB.find((view) => view.id === delta.id));
+    if (delta.change === "not-comparable" && delta.a === null && delta.b === null) {
+      const why =
+        whyA === whyB || whyB === null
+          ? (whyA ?? plainWhy(delta.why ?? "no reading"))
+          : whyA === null
+            ? whyB
+            : `A: ${whyA}; B: ${whyB}`;
+      unmeasured.set(why, [...(unmeasured.get(why) ?? []), name]);
+      continue;
+    }
+    if (delta.change === "not-comparable") {
+      rows.push({
+        id: delta.id,
+        name,
+        a: delta.a,
+        b: delta.b,
+        mark: null,
+        tone: null,
+        note:
+          delta.a === null
+            ? `A not measured: ${whyA ?? "no reading"}`
+            : delta.b === null
+              ? `B not measured: ${whyB ?? "no reading"}`
+              : `Not comparable: ${plainWhy(delta.why ?? "measured differently")}`,
+      });
+      continue;
+    }
+    const line = deltaLine(delta);
+    rows.push({
+      id: delta.id,
+      name,
+      a: delta.a,
+      b: delta.b,
+      mark: line.mark,
+      tone: line.tone,
+      note: null,
+    });
+  }
+  return {
+    rows,
+    unmeasured: [...unmeasured].map(([why, names]) => ({ names, why })),
+  };
 };

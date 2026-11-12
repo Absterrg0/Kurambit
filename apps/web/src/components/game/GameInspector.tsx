@@ -47,6 +47,7 @@ import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { useDiffPanelStore } from "../../diffPanelStore";
 import { type GameInspectorTab, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
+import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
 import { cn, randomUUID } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
@@ -91,6 +92,7 @@ import {
   buildCaption,
   buildName,
   formatBuildTime,
+  plainWhy,
 } from "./gameBuilds.logic";
 import {
   clearStageSelection,
@@ -316,8 +318,15 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       gameName={gameName}
       build={build}
       list={data}
-      onStage={build.id === onStageId}
-      heading={nowOnStage ? "Last measured build" : null}
+      // A compare's side is on the compare, not the Stage: it is named by its letter.
+      onStage={inspected?.side === undefined && build.id === onStageId}
+      heading={
+        inspected?.side !== undefined
+          ? `Compare · side ${inspected.side}`
+          : nowOnStage
+            ? "Last measured build"
+            : null
+      }
     />
   );
   if (!nowOnStage) return detail;
@@ -680,8 +689,9 @@ function NotMeasured({
         {/* The dash and the quieter tone say "not measured"; the words would take the
             sentence's room and wrap it. Why, and every name, open in a popover that stays. */}
         <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
-          {namesPhrase(names)}
-          <span className="sr-only"> (not measured)</span>
+          {/* A list of labels is no sentence: past two, the row counts them and its popover names them. */}
+          {names.length > 2 ? `${names.length} not measured` : namesPhrase(names)}
+          {names.length > 2 ? null : <span className="sr-only"> (not measured)</span>}
         </Text>
         <span className="flex w-6 shrink-0 items-center justify-end">
           <Popover>
@@ -701,7 +711,7 @@ function NotMeasured({
                   </Text>
                 ) : null}
                 <Text variant="meta" tone="muted" render={<span />}>
-                  {why.charAt(0).toUpperCase() + why.slice(1)}
+                  {plainWhy(why).charAt(0).toUpperCase() + plainWhy(why).slice(1)}
                 </Text>
                 {notes.map((line) => (
                   <Text key={line} variant="meta" tone="muted" render={<span />}>
@@ -717,8 +727,59 @@ function NotMeasured({
   });
 }
 
-function EvidenceButton({ threadRef, item }: { threadRef: ScopedThreadRef; item: RunEvidence }) {
+/**
+ * A recording or frame opens in a lightbox sized to it, over the game screen, with the check it
+ * proves; its files are one explicit "Show files" away. A log is a file, so it opens as one.
+ */
+function openEvidence(
+  threadRef: ScopedThreadRef,
+  root: string | null,
+  item: RunEvidence,
+  name: string,
+  detail: string | null,
+) {
+  const showFiles = () => useRightPanelStore.getState().openFile(threadRef, item.path);
+  if (item.kind === "log" || root === null) {
+    showFiles();
+    return;
+  }
+  const kind = item.kind === "video" ? "video" : "image";
+  openExpandedImagePreview(scopedThreadKey(threadRef), {
+    index: 0,
+    images: [
+      {
+        src: null,
+        name,
+        ...(kind === "video" ? { type: "video" as const } : {}),
+        ...(detail === null ? {} : { detail }),
+        fileAction: "Show files",
+        actionsSource: {
+          kind,
+          name,
+          src: null,
+          asset: {
+            environmentId: threadRef.environmentId,
+            resource: { _tag: "draft-workspace-file", cwd: root, path: item.path },
+          },
+          onOpenFile: showFiles,
+        },
+      },
+    ],
+  });
+}
+
+function EvidenceButton({
+  threadRef,
+  item,
+  check,
+}: {
+  threadRef: ScopedThreadRef;
+  item: RunEvidence;
+  /** The check the evidence proves, said under it. */
+  check: string;
+}) {
   const EvidenceIcon = EVIDENCE_ICON[item.kind];
+  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -727,7 +788,7 @@ function EvidenceButton({ threadRef, item }: { threadRef: ScopedThreadRef; item:
             size="icon-xs"
             variant="ghost"
             aria-label={item.label}
-            onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
+            onClick={() => openEvidence(threadRef, root, item, item.label, check)}
           />
         }
       >
@@ -755,15 +816,15 @@ function CheckRow({
   note: string | null;
 }) {
   const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
-  // A reading that is neither good nor bad gets a small solid dot: a hollow ring reads as an unticked option.
+  // A tick passes, a warning is to look at, a dash was not measured; a fact with no verdict
+  // (where the art comes from) has no glyph, so no mark stands for two things.
   const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : null;
+  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   return (
     <div className="flex flex-col gap-1 px-3 py-1.5">
       <div className="flex min-h-6 items-center gap-2.5">
         <span className="flex size-4 shrink-0 items-center justify-center">
-          {Icon === null ? (
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-muted-foreground" />
-          ) : (
+          {Icon === null ? null : (
             <Icon
               className={cn("size-4", tone === "good" ? "text-success" : "text-warning")}
               aria-hidden="true"
@@ -792,7 +853,11 @@ function CheckRow({
             room for one line; a row with several pieces of evidence opens them from a menu. */}
         <span className="flex w-6 shrink-0 items-center justify-end">
           {fact.evidence.length === 1 && fact.evidence[0] !== undefined ? (
-            <EvidenceButton threadRef={threadRef} item={fact.evidence[0]} />
+            <EvidenceButton
+              threadRef={threadRef}
+              item={fact.evidence[0]}
+              check={value === null ? text : `${text} ${value}`}
+            />
           ) : fact.evidence.length > 1 ? (
             <Menu>
               <MenuTrigger
@@ -808,7 +873,15 @@ function CheckRow({
                   return (
                     <MenuItem
                       key={item.path}
-                      onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
+                      onClick={() =>
+                        openEvidence(
+                          threadRef,
+                          root,
+                          item,
+                          item.label,
+                          value === null ? text : `${text} ${value}`,
+                        )
+                      }
                     >
                       <EvidenceIcon />
                       {item.label}
@@ -920,6 +993,7 @@ function Recordings({
   const name = buildName(build)
     .replace(/'s build$/, "")
     .toLowerCase();
+  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   const gameName = useGameName(
     threadRef.environmentId,
     useQuietThreadShell(threadRef)?.projectId ?? null,
@@ -927,21 +1001,40 @@ function Recordings({
   );
   const runs = new Map<
     string,
-    { video: RunEvidence | null; frame: RunEvidence | null; played: number | null }
+    { video: RunEvidence | null; frame: RunEvidence | null; ending: string | null }
   >();
   const seen = new Set<string>();
-  // How long a bot played, in the game's own seconds: a recording's length at a glance.
-  const playedOf = (id: GameFactId): number | null => {
+  // How the bot's play ended, in the game's own seconds. Said as an ending ("Lost at 3.6 s"),
+  // never a bare time, which would read as the video's length.
+  const endingOf = (id: GameFactId): string | null => {
     if (id !== "idle" && id !== "masher" && id !== "skilled") return null;
     const tier = facts[id];
-    return tier.status === "measured" ? tier.value.played : null;
+    if (tier.status !== "measured") return null;
+    const { ending, at, played } = tier.value;
+    const time = (seconds: number) =>
+      `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
+    return at !== null && (ending === "lost" || ending === "won")
+      ? `${ending === "lost" ? "Lost" : "Won"} at ${time(at)}`
+      : `Played ${time(played)}`;
   };
+  // The check a run proves, as its row in Checks says it.
+  const checks = gameChecksView(facts);
+  const checkOf = (id: GameFactId): string | null => {
+    const check = [...checks.checks, ...checks.more].find((entry) => entry.id === id);
+    return check === undefined
+      ? null
+      : check.value === null
+        ? check.sentence
+        : `${check.sentence} ${check.value}`;
+  };
+  const proves = new Map<string, string | null>();
   for (const view of gameFactsView(facts))
     for (const item of view.evidence) {
       if (item.kind === "log" || seen.has(item.path)) continue;
       seen.add(item.path);
-      const run = runs.get(view.label) ?? { video: null, frame: null, played: playedOf(view.id) };
+      const run = runs.get(view.label) ?? { video: null, frame: null, ending: endingOf(view.id) };
       runs.set(view.label, { ...run, [item.kind]: item });
+      if (!proves.has(view.label)) proves.set(view.label, checkOf(view.id));
     }
   if (runs.size === 0) return null;
   return (
@@ -952,12 +1045,19 @@ function Recordings({
           <li key={fact} className="flex min-w-0 flex-col gap-1.5">
             <button
               type="button"
-              aria-label={`${fact}: open the ${run.video === null ? "frame" : "video"}`}
+              aria-label={`${fact}: play the ${run.video === null ? "frame" : "recording"}`}
               onClick={() => {
                 const open = run.video ?? run.frame;
-                if (open !== null) useRightPanelStore.getState().openFile(threadRef, open.path);
+                if (open !== null)
+                  openEvidence(
+                    threadRef,
+                    root,
+                    open,
+                    `${fact} recording`,
+                    proves.get(fact) ?? null,
+                  );
               }}
-              className="group/run relative outline-none"
+              className="group/run relative rounded-md"
             >
               <GameBuildStill
                 threadRef={threadRef}
@@ -965,10 +1065,9 @@ function Recordings({
                 build={{ still: run.frame?.path ?? null }}
                 // A run with no frame says so, rather than pass its pigment off as a picture.
                 mark="absent"
-                className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30 group-focus-visible/run:ring-2 group-focus-visible/run:ring-ring"
+                className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30"
               >
-                {run.video === null || run.played === null ? null : (
-                  // How long the bot played, where a video's length is read.
+                {run.video === null || run.ending === null ? null : (
                   <Text
                     variant="micro"
                     tone="inherit"
@@ -977,7 +1076,7 @@ function Recordings({
                       <span className="absolute right-1.5 bottom-1.5 z-20 rounded-sm bg-black/65 px-1.5 py-px text-white" />
                     }
                   >
-                    {`${run.played < 10 ? run.played.toFixed(1) : Math.round(run.played)} s`}
+                    {run.ending}
                   </Text>
                 )}
                 {run.video === null ? null : (

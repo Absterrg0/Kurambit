@@ -63,6 +63,26 @@ function ExpandedVideo({ item }: { readonly item: ExpandedImageItem }) {
   );
 }
 
+/** An image the dialog reads through its asset, as ExpandedVideo does a video. */
+function ExpandedAssetImage({ item }: { readonly item: ExpandedImageItem }) {
+  const asset = item.actionsSource?.asset;
+  const assetUrl = useAssetUrlState(asset?.environmentId ?? null, asset?.resource ?? null);
+  if (assetUrl._tag === "Failure")
+    return (
+      <ExpandedMediaFailure>
+        <p>Image unavailable. The file may have been moved or deleted.</p>
+      </ExpandedMediaFailure>
+    );
+  if (assetUrl._tag !== "Success") return <div className={EXPANDED_MEDIA_STATE_CLASS_NAME} />;
+  return (
+    <img
+      src={assetUrl.url}
+      alt={item.name}
+      className="max-h-[var(--media-height)] w-auto max-w-[var(--media-width)] rounded-lg border border-border/70 shadow-2xl"
+    />
+  );
+}
+
 export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   preview,
   onClose,
@@ -216,6 +236,8 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
                   className="h-[min(var(--media-height),40rem)] w-[min(var(--media-width),42rem)] transition-opacity duration-140 ease-out starting:opacity-0 rounded-lg border border-border/70 bg-background p-4 text-xs leading-5 shadow-2xl motion-reduce:transition-none"
                 />
               ) : null
+            ) : item.src === null && item.actionsSource?.asset !== undefined ? (
+              <ExpandedAssetImage key={index} item={item} />
             ) : item.src === null || failedImageSrc === item.src ? (
               <ExpandedMediaFailure>
                 <p>
@@ -235,10 +257,24 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
               />
             )}
             <div className="mt-2 flex max-w-[var(--media-width)] items-center justify-center gap-1.5 text-xs text-white/80 max-sm:px-10">
-              <span className="truncate" aria-live="polite" aria-atomic="true">
-                {item.name}
-                {preview.images.length > 1 ? ` (${index + 1}/${preview.images.length})` : ""}
+              <span
+                className="flex min-w-0 flex-col items-center"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <span className="max-w-full truncate">
+                  {item.name}
+                  {preview.images.length > 1 ? ` (${index + 1}/${preview.images.length})` : ""}
+                </span>
+                {item.detail === undefined ? null : (
+                  <span className="max-w-full truncate text-white/60">{item.detail}</span>
+                )}
               </span>
+              {item.fileAction !== undefined && actionsSource.onOpenFile !== undefined ? (
+                <Button size="xs" variant="overlay" onClick={actionsSource.onOpenFile}>
+                  {item.fileAction}
+                </Button>
+              ) : null}
               {accessibilityDetails && item.source ? (
                 <Tooltip>
                   <TooltipTrigger

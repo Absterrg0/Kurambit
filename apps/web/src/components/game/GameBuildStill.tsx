@@ -52,15 +52,23 @@ export type GamePictureMark = "name" | "initial" | "absent" | "none";
 export function GameTitleMark({ gameName, mark }: { gameName: string; mark: GamePictureMark }) {
   const [pigment, ink] = gamePigment(gameName);
   const name = gameName.trim();
+  // Evidence with no frame is a neutral well, like a picture still coming: the game's pigment
+  // would read as a picture of something.
+  if (mark === "absent")
+    return (
+      <span aria-hidden="true" className="absolute inset-0 bg-muted">
+        <span className="absolute top-1.5 left-2 text-caption text-muted-foreground">
+          No picture
+        </span>
+      </span>
+    );
   return (
     <span
       aria-hidden="true"
       className="absolute inset-0 grid place-items-center p-3 text-center"
       style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
     >
-      {mark === "absent" ? (
-        <span className="absolute top-1.5 left-2 text-caption text-white/75">No picture</span>
-      ) : mark === "none" || name === "" ? null : mark === "name" ? (
+      {mark === "none" || name === "" ? null : mark === "name" ? (
         <span className="line-clamp-2 font-display text-xl/tight text-balance text-white/85 @3xs:text-2xl/tight @sm:text-3xl/tight">
           {name}
         </span>

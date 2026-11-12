@@ -9,6 +9,11 @@ export const PIERRE_TREE_UNSAFE_CSS = `
     --trees-font-family-override: var(--font-sans);
     --trees-font-size-override: 0.75rem;
   }
+  /* A truncated name's "…" covers the letters under it with the tree's background. The tree draws
+     none of its own (it sits on the panel), so the marker takes the panel's, or it overlaps them. */
+  :host, button[data-type='item'] {
+    --truncate-marker-background-color: var(--background);
+  }
   button[data-type='item'], button[data-type='item']::before { border-radius: var(--radius-md); }
   svg[data-icon-name='kurambit-tree-icon-loading'] { opacity: 0.6; }
   @media (prefers-reduced-motion: no-preference) {

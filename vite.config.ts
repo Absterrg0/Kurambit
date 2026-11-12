@@ -350,12 +350,8 @@ export default defineConfig({
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 3 }] },
       },
       {
-        files: ["apps/web/src/components/game/GameBuildCompare.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
-      },
-      {
         files: ["apps/web/src/components/game/GameBuildFacts.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 7 }] },
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 5 }] },
       },
       {
         files: ["apps/web/src/components/game/GameExports.tsx"],

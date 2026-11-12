@@ -1,7 +1,8 @@
-import { type GameFactDelta } from "@kurambit/contracts";
+import { MinusIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
-import { deltaLine } from "./gameBuilds.logic";
+import { Text } from "../ui/text";
+import type { CompareRows } from "./gameBuilds.logic";
 
 const DELTA_TEXT = {
   better: "text-success-foreground",
@@ -9,52 +10,121 @@ const DELTA_TEXT = {
   neutral: "text-muted-foreground",
 } as const;
 
-/** Two builds' facts side by side, with the shared diff's direction and tone. */
-export function GameBuildFactsDiff({
-  deltas,
-  labels,
-}: {
-  deltas: ReadonlyArray<GameFactDelta>;
-  labels: readonly [string, string];
-}) {
-  if (deltas.length === 0) return null;
+/** A compare side's letter, as its picture and the table's columns both show it. */
+export function CompareSideBadge({ side }: { side: "A" | "B" }) {
   return (
-    <table className="w-full table-fixed border-collapse text-xs">
+    <Text
+      variant="micro"
+      tone="inherit"
+      numeric
+      render={
+        <span
+          aria-hidden="true"
+          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-strong-foreground text-background"
+        />
+      }
+    >
+      {side}
+    </Text>
+  );
+}
+
+/**
+ * Two builds' facts side by side, named as the Inspector names them, with the shared diff's
+ * direction and tone. Facts neither build measured close the table, one row per reason.
+ */
+export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
+  if (compared.rows.length === 0 && compared.unmeasured.length === 0) return null;
+  return (
+    <table className="w-full table-fixed border-collapse">
       <thead>
-        <tr className="text-left text-2xs text-muted-foreground">
-          <th className="w-1/4 py-1 pr-2 font-normal">Fact</th>
-          <th className="py-1 pr-2 font-normal">{labels[0]}</th>
-          <th className="py-1 pr-2 font-normal">{labels[1]}</th>
-          <th className="w-8 py-1 font-normal" aria-label="Change" />
-        </tr>
+        <Text variant="caption" tone="muted" render={<tr className="text-left" />}>
+          <th className="w-[34%] py-1.5 pr-3 font-normal">Check</th>
+          <th className="py-1.5 pr-3 font-normal">
+            <span className="flex items-center gap-1.5">
+              <CompareSideBadge side="A" />
+              <span className="sr-only">A</span>
+            </span>
+          </th>
+          <th className="py-1.5 pr-3 font-normal">
+            <span className="flex items-center gap-1.5">
+              <CompareSideBadge side="B" />
+              <span className="sr-only">B</span>
+            </span>
+          </th>
+          <th className="w-8 py-1.5 font-normal">
+            <span className="sr-only">Change</span>
+          </th>
+        </Text>
       </thead>
       <tbody>
-        {deltas.map((delta) => {
-          const line = deltaLine(delta);
-          return (
-            <tr key={delta.id} className="border-t border-border align-baseline">
-              <td className="py-1.5 pr-2 text-muted-foreground">{line.label}</td>
-              {line.why === null ? (
-                <>
-                  <td className="py-1.5 pr-2">{line.a}</td>
-                  <td className="py-1.5 pr-2">{line.b}</td>
-                </>
-              ) : (
-                <td colSpan={2} className="py-1.5 pr-2 text-muted-foreground">
-                  {line.why}
-                </td>
-              )}
-              <td
-                className={cn(
-                  "py-1.5 text-center font-medium",
-                  line.tone === null ? "text-muted-foreground" : DELTA_TEXT[line.tone],
-                )}
+        {compared.rows.map((row) => [
+          <tr key={row.id} className="border-t border-border align-baseline">
+            <Text variant="meta" tone="muted" render={<td className="py-2 pr-3" />}>
+              {row.name}
+            </Text>
+            <Text
+              variant="meta"
+              tone={row.a === null ? "dim" : "default"}
+              render={<td className="py-2 pr-3" />}
+            >
+              {row.a ?? "Not measured"}
+            </Text>
+            <Text
+              variant="meta"
+              tone={row.b === null ? "dim" : "default"}
+              render={<td className="py-2 pr-3" />}
+            >
+              {row.b ?? "Not measured"}
+            </Text>
+            <Text
+              variant="meta"
+              tone="inherit"
+              render={
+                <td
+                  className={cn(
+                    "py-2 text-center font-medium",
+                    row.tone === null ? "text-muted-foreground" : DELTA_TEXT[row.tone],
+                  )}
+                />
+              }
+            >
+              {row.mark ?? ""}
+            </Text>
+          </tr>,
+          row.note === null ? null : (
+            <tr key={`${row.id}-note`}>
+              <td />
+              <Text
+                variant="caption"
+                tone="muted"
+                render={<td colSpan={3} className="pb-2 pr-3" />}
               >
-                {line.mark ?? ""}
-              </td>
+                {row.note}
+              </Text>
             </tr>
-          );
-        })}
+          ),
+        ])}
+        {compared.unmeasured.map((group) => (
+          <tr key={group.why} className="border-t border-border align-baseline">
+            <td colSpan={4} className="py-2">
+              <span className="flex items-baseline gap-2.5">
+                <MinusIcon
+                  className="size-3.5 shrink-0 translate-y-0.5 text-dim-foreground"
+                  aria-hidden="true"
+                />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <Text variant="meta" tone="muted">
+                    {group.names.join(", ")}
+                  </Text>
+                  <Text variant="caption" tone="dim">
+                    Not measured on either build: {group.why}
+                  </Text>
+                </span>
+              </span>
+            </td>
+          </tr>
+        ))}
       </tbody>
     </table>
   );

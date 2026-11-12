@@ -30,6 +30,10 @@ export interface ExpandedImageItem {
   originalUrl?: string;
   srcFragment?: string;
   actionsSource?: MediaActionSource;
+  /** A second caption line: what the media shows, such as the check a recording proves. */
+  detail?: string;
+  /** A visible button for actionsSource.onOpenFile, with this label ("Show files"). */
+  fileAction?: string;
 }
 
 export interface ExpandedImagePreview {

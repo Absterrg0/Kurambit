@@ -68,7 +68,6 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { Kbd } from "../ui/kbd";
 import {
   Menu,
   MenuGroup,
@@ -328,7 +327,6 @@ function ThreadGameStage({
     (state) => state.frozen && !state.autoFrozen,
     false,
   );
-  const away = useThreadStageBridge(threadKey, (state) => state.frozen && state.autoFrozen, false);
   const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
   const selectedId = useThreadStageBridge(
     threadKey,
@@ -453,9 +451,16 @@ function ThreadGameStage({
     height: number;
     cardWidth: number;
   } | null>(null);
+  // The column the strip and composer share. It follows the window and the pane's width, but
+  // not a composer growing under it: a longer message shrinks the Stage, never the column.
+  const [column, setColumn] = useState<{ readonly key: string; readonly width: number } | null>(
+    null,
+  );
+  const comparing = compare !== null;
   useLayoutEffect(() => {
     const section = stageRef.current;
-    if (section === null) return;
+    // A compare fills the Stage's place: the Stage keeps the fit it had, for when it closes.
+    if (section === null || comparing) return;
     const measure = () => {
       const strip = section.querySelector<HTMLElement>("[data-game-build-strip]");
       let taken = 0;
@@ -492,6 +497,14 @@ function ThreadGameStage({
           ? previous
           : next,
       );
+      const key = `${section.clientWidth}x${window.innerHeight}`;
+      setColumn((previous) =>
+        previous !== null &&
+        previous.key === key &&
+        (next.width < previous.width || Math.abs(next.width - previous.width) <= 1)
+          ? previous
+          : { key, width: next.width },
+      );
     };
     measure();
     return observeResize(
@@ -503,13 +516,13 @@ function ThreadGameStage({
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight]);
+  }, [viewportWidth, viewportHeight, comparing]);
   const stageFitStyle =
     stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width + 24 };
   // The strip and the composer under it end where the fitted Stage ends, so a height-bound
   // game on a wide window has one right edge. They live in other components, so the
   // column's width goes up as a CSS variable on the centre they share.
-  const stageColumn = compare === null && stageFit !== null ? stageFit.width + 24 : null;
+  const stageColumn = column === null ? null : column.width + 24;
   useLayoutEffect(() => {
     const centre = stageRef.current?.closest<HTMLElement>("[data-game-centre]");
     if (centre == null || stageColumn === null) return;
@@ -888,8 +901,8 @@ function ThreadGameStage({
   const statusLine = gameStatusLine({
     phase: shownPhase.kind,
     onStage: playTarget === null ? stageBuildName : buildPhrase(playTarget.label),
-    frozen,
-    away: away && hasBuild,
+    copy: playTarget !== null,
+    known: buildsRead,
     needsChoice:
       quietShell !== null && (quietShell.hasPendingApprovals || quietShell.hasPendingUserInput),
     keepGoingStep: keepGoingHere ? keepGoingStatus.step : null,
@@ -899,7 +912,6 @@ function ThreadGameStage({
     nextBuild: nextBuildNumber,
     operation: building ? { text: buildingMessage, since: buildingStartedAt } : null,
     live: stageKind === "live",
-    focused: gameFocused && !frameHidden,
     changedSince: playTarget === null ? (changedSince ?? null) : null,
     measured: hasBuild,
   });
@@ -1024,6 +1036,19 @@ function ThreadGameStage({
             </Menu>
           )}
           <GameStatusLine status={statusLine} />
+          {/* An earlier build on the Stage says so in the line it already has, and its way back
+              sits beside it: nothing is inserted over the Stage, so the column never moves. */}
+          {playTarget !== null ? (
+            <Button
+              size="xs"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => void stopBuild(playTarget.build)}
+            >
+              <HistoryIcon aria-hidden="true" />
+              Back to the current game
+            </Button>
+          ) : null}
           <span className="min-w-2 flex-1" />
           <IconAction
             label="Undo the last build"
@@ -1144,29 +1169,16 @@ function ThreadGameStage({
         </div>
         {statusBanner}
       </header>
-      {playTarget !== null && compare === null ? (
-        <div className="mx-auto mb-2 flex w-[calc(100%-24px)] max-w-[calc(var(--game-stage-column,100%)-24px)] items-center gap-2 rounded-lg bg-card py-1 ps-3 pe-1">
-          <HistoryIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <Text variant="meta" tone="muted" truncate render={<span className="flex-1" />}>
-            Playing {playTarget.label} from a copy. The game folder is untouched.
-          </Text>
-          <Button size="xs" variant="ghost" onClick={() => void stopBuild(playTarget.build)}>
-            Back to the current game
-          </Button>
-        </div>
-      ) : null}
       {compare !== null ? (
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <GameBuildCompare
-            threadRef={threadRef}
-            pair={compare}
-            viewport={data.viewport}
-            gameName={gameName}
-            compact={compact}
-            hidden={hidden}
-            onClose={() => setCompare(null)}
-          />
-        </div>
+        <GameBuildCompare
+          threadRef={threadRef}
+          pair={compare}
+          viewport={data.viewport}
+          gameName={gameName}
+          hidden={hidden}
+          onPair={setCompare}
+          onClose={() => setCompare(null)}
+        />
       ) : null}
       {/*
         The folder's game stays mounted under a copy or a compare, so it keeps
@@ -1276,6 +1288,8 @@ function ThreadGameStage({
         />
       </div>
       <GameBuildStrip
+        // A compare takes the strip's place too: hidden, never squeezed, so its picks and pages stay.
+        hidden={compare !== null}
         cardWidth={stageFit?.cardWidth ?? 160}
         threadRef={threadRef}
         gameName={gameName}
@@ -1398,14 +1412,6 @@ function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
             <Text variant="meta" tone="muted" numeric>
               <GameElapsed since={part.since} prefix="· " />
             </Text>
-          )}
-          {part.key === null ? null : (
-            <>
-              <Kbd>{part.key.key}</Kbd>
-              <Text variant="meta" tone="dim">
-                {part.key.after}
-              </Text>
-            </>
           )}
         </span>
       ))}
