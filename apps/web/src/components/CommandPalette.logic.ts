@@ -418,6 +418,9 @@ function rankCommandPaletteItemMatch(
   return 0;
 }
 
+// The groups that hold commands; ">" in the palette narrows to these.
+const ACTION_GROUP_VALUES: ReadonlySet<string> = new Set(["game", "actions", "developer"]);
+
 export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
   query: string;
@@ -432,7 +435,7 @@ export function filterCommandPaletteGroups(input: {
 
   if (normalizedQuery.length === 0) {
     if (isActionsFilter) {
-      return input.activeGroups.filter((group) => group.value === "actions");
+      return input.activeGroups.filter((group) => ACTION_GROUP_VALUES.has(group.value));
     }
     return [...input.activeGroups];
   }
@@ -440,7 +443,7 @@ export function filterCommandPaletteGroups(input: {
 
   let baseGroups = [...input.activeGroups];
   if (isActionsFilter) {
-    baseGroups = baseGroups.filter((group) => group.value === "actions");
+    baseGroups = baseGroups.filter((group) => ACTION_GROUP_VALUES.has(group.value));
   } else if (!input.isInSubmenu) {
     baseGroups = baseGroups.filter((group) => group.value !== "recent-threads");
   }
@@ -574,20 +577,32 @@ export function getCommandPaletteMode(input: {
   return input.isBrowsing ? "root-browse" : "root";
 }
 
+/**
+ * A game studio's order: the open game's commands, then the studio's, then recent
+ * chats. Coding commands (threads, files, projects) wait at the end under Developer.
+ */
 export function buildRootGroups(input: {
+  gameItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  developerItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
+  if (input.gameItems.length > 0) {
+    groups.push({ value: "game", label: "This game", items: input.gameItems });
+  }
   if (input.actionItems.length > 0) {
     groups.push({ value: "actions", label: "Actions", items: input.actionItems });
   }
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: "Recent threads",
       items: input.recentThreadItems,
     });
+  }
+  if (input.developerItems.length > 0) {
+    groups.push({ value: "developer", label: "Developer", items: input.developerItems });
   }
   return groups;
 }

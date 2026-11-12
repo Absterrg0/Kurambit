@@ -4,6 +4,7 @@ import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
   buildBrowseGroups,
+  buildRootGroups,
   buildCommandPaletteProjectMetadata,
   buildCommandPaletteRows,
   buildProjectActionItems,
@@ -923,5 +924,52 @@ describe("virtualized command palette rows", () => {
     expect(findHighlightedCommandPaletteItem(groups, "thread-b")?.value).toBe("thread-b");
     expect(findHighlightedCommandPaletteItem(groups, "offline")).toBeNull();
     expect(findHighlightedCommandPaletteItem(groups, null)).toBeNull();
+  });
+});
+
+describe("root command groups", () => {
+  const action = (value: string): CommandPaletteActionItem => ({
+    kind: "action",
+    value,
+    searchTerms: [value],
+    title: value,
+    icon: null,
+    run: async () => {},
+  });
+  const groups = buildRootGroups({
+    gameItems: [action("play")],
+    actionItems: [action("new-game")],
+    developerItems: [action("go-to-file")],
+    recentThreadItems: [action("recent-chat")],
+  });
+
+  it("puts the game first and coding commands last", () => {
+    expect(groups.map((group) => group.value)).toEqual([
+      "game",
+      "actions",
+      "recent-threads",
+      "developer",
+    ]);
+  });
+
+  it("keeps every command group, and no chats, under the > filter", () => {
+    const filtered = filterCommandPaletteGroups({
+      activeGroups: groups,
+      query: ">",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+    expect(filtered.map((group) => group.value)).toEqual(["game", "actions", "developer"]);
+    const searched = filterCommandPaletteGroups({
+      activeGroups: groups,
+      query: ">file",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+    expect(searched.flatMap((group) => group.items.map((item) => item.value))).toEqual([
+      "go-to-file",
+    ]);
   });
 });

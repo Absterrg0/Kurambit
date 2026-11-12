@@ -81,8 +81,6 @@ import {
   PlayIcon,
   Redo2Icon,
   PanelRightIcon,
-  ScanIcon,
-  SquareIcon,
   Undo2Icon,
   WrenchIcon,
   PaletteIcon,
@@ -91,6 +89,19 @@ import {
   SettingsIcon,
   SkipForwardIcon,
   SquarePenIcon,
+  ShapesIcon,
+  ScrollTextIcon,
+  ListChecksIcon,
+  SwatchBookIcon,
+  StepForwardIcon,
+  SquarePlusIcon,
+  SearchCodeIcon,
+  PauseIcon,
+  HashIcon,
+  HammerIcon,
+  CrosshairIcon,
+  CircleStopIcon,
+  BrushIcon,
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
@@ -1530,7 +1541,7 @@ function OpenCommandPaletteDialog(props: {
         value: "action:game-rebuild",
         title: "Rebuild game",
         searchTerms: ["rebuild", "build", "export", "game"],
-        icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
+        icon: <HammerIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("rebuild"),
       });
     if (canGameAction)
@@ -1539,7 +1550,7 @@ function OpenCommandPaletteDialog(props: {
         value: "action:game-stop",
         title: "Stop game",
         searchTerms: ["stop", "close", "quit", "game"],
-        icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+        icon: <CircleStopIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("stop"),
       });
     actionItems.push({
@@ -1571,25 +1582,36 @@ function OpenCommandPaletteDialog(props: {
         value: "action:game-freeze",
         title: "Freeze the game or play on",
         searchTerms: ["freeze", "pause", "point", "select", "inspect", "stage", "game"],
-        icon: <ScanIcon className={ITEM_ICON_CLASS} />,
+        icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.freeze",
         run: requestStage({ kind: "freeze" }),
       });
-    for (const [tab, title, terms] of [
-      ["build", "Show the build's checks", ["build", "checks", "facts", "measured", "changes"]],
+    for (const [tab, title, terms, TabIcon] of [
+      [
+        "build",
+        "Show the build's checks",
+        ["build", "checks", "facts", "measured", "changes"],
+        ListChecksIcon,
+      ],
       [
         "scene",
         "Show the game's scene",
         ["scene", "things", "look", "art", "selection", "values", "style"],
+        ShapesIcon,
       ],
-      ["log", "Show the log", ["log", "chat", "conversation", "transcript", "messages"]],
+      [
+        "log",
+        "Show the log",
+        ["log", "chat", "conversation", "transcript", "messages"],
+        ScrollTextIcon,
+      ],
     ] as const)
       actionItems.push({
         kind: "action",
         value: `action:game-inspector-${tab}`,
         title,
         searchTerms: [...terms, "inspector", "game"],
-        icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+        icon: <TabIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
           useGameWorkspaceStore.getState().showInspectorTab(tab);
         },
@@ -1728,7 +1750,7 @@ function OpenCommandPaletteDialog(props: {
           value: "action:game-keep-going-stop",
           title: "Stop keep going",
           searchTerms: ["keep going", "stop", "off", "pause", "game"],
-          icon: <SquareIcon className={ITEM_ICON_CLASS} />,
+          icon: <PauseIcon className={ITEM_ICON_CLASS} />,
           shortcutCommand: "game.keepGoing.stop",
           run: () => keepGoing.set({ mode: "off" }),
         });
@@ -1740,7 +1762,7 @@ function OpenCommandPaletteDialog(props: {
           title: "Start the proposed step now",
           description: proposal.text.split("\n")[0] ?? proposal.text,
           searchTerms: ["keep going", "start", "proposed", "step", "now", "game"],
-          icon: <PlayIcon className={ITEM_ICON_CLASS} />,
+          icon: <StepForwardIcon className={ITEM_ICON_CLASS} />,
           run: () => keepGoing.decide(proposal.stepId, "start"),
         });
         actionItems.push({
@@ -1781,12 +1803,15 @@ function OpenCommandPaletteDialog(props: {
       run: requestStage({ kind: "generated-art" }),
     });
   }
+  // Everything above is about the open game.
+  const gameItems = actionItems.splice(0);
+  const developerItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
   actionItems.push({
     kind: "action",
     value: "action:game-create",
     title: "New game",
     searchTerms: ["new game", "create", "start", "brief", "game studio"],
-    icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+    icon: <SquarePlusIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       newGame();
     },
@@ -1794,7 +1819,7 @@ function OpenCommandPaletteDialog(props: {
   actionItems.push({
     kind: "action",
     value: "action:game-open",
-    title: "Open a game…",
+    title: "Open a game folder…",
     searchTerms: ["open game", "folder", "existing", "game.json"],
     icon: <FolderOpenIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
@@ -1818,7 +1843,7 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: [
       "art providers generated keys codex openai gemini tripo meshy elevenlabs daily limit",
     ],
-    icon: <PaletteIcon className={ITEM_ICON_CLASS} />,
+    icon: <BrushIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/general", hash: "art-providers" });
     },
@@ -1830,7 +1855,7 @@ function OpenCommandPaletteDialog(props: {
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
     if (activeProjectTitle) {
-      actionItems.push({
+      developerItems.push({
         kind: "action",
         value: "action:new-thread",
         searchTerms: ["new thread", "chat", "create", "draft"],
@@ -1852,7 +1877,7 @@ function OpenCommandPaletteDialog(props: {
       });
     }
 
-    actionItems.push({
+    developerItems.push({
       kind: "submenu",
       value: "action:new-thread-in",
       searchTerms: ["new thread", "project", "pick", "choose", "select"],
@@ -1864,7 +1889,7 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (scratchTargetEnvironmentId !== null && !isGameThread) {
-    actionItems.push({
+    developerItems.push({
       kind: "action",
       value: "action:new-thread-without-project",
       searchTerms: ["new thread", "no project", "without project", "none", "chat"],
@@ -1915,7 +1940,7 @@ function OpenCommandPaletteDialog(props: {
     ? composerPromptLink({ ...promptLinkInput, withContext: false })
     : null;
   if (promptLinkInput !== null && plainPromptLink !== null) {
-    actionItems.push({
+    developerItems.push({
       kind: "action",
       value: "action:copy-prompt-link",
       searchTerms: ["copy", "share", "prompt", "link"],
@@ -1926,7 +1951,7 @@ function OpenCommandPaletteDialog(props: {
     if (promptLinkRepositoryOf(promptLinkInput.project) !== null) {
       const contextLink = composerPromptLink({ ...promptLinkInput, withContext: true });
       if (contextLink !== null) {
-        actionItems.push({
+        developerItems.push({
           kind: "action",
           value: "action:copy-prompt-link-with-context",
           searchTerms: ["copy", "share", "prompt", "link", "repository", "model"],
@@ -1939,13 +1964,13 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (activeThreadReferenceCopyTarget !== null && !isGameThread) {
-    actionItems.push({
+    developerItems.push({
       kind: "action",
       value: "action:copy-thread-reference",
       searchTerms: ["copy", "thread id", "reference"],
       title: "Copy thread ID",
       description: activeThreadReferenceCopyTarget.value,
-      icon: <LinkIcon className={ITEM_ICON_CLASS} />,
+      icon: <HashIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
     });
@@ -1988,7 +2013,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  actionItems.push({
+  developerItems.push({
     kind: "action",
     value: "action:open-file-picker",
     searchTerms: ["go to file", "open file", "file picker", "find file", "quick open"],
@@ -2001,12 +2026,12 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  actionItems.push({
+  developerItems.push({
     kind: "action",
     value: "action:search-project-contents",
     searchTerms: ["search project", "find in files", "grep", "content search", "text search"],
     title: "Search project contents",
-    icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+    icon: <SearchCodeIcon className={ITEM_ICON_CLASS} />,
     keepOpen: true,
     shortcutCommand: "projectSearch.toggle",
     run: async () => {
@@ -2015,7 +2040,7 @@ function OpenCommandPaletteDialog(props: {
   });
 
   if (!isGameThread && newProjectEnvironmentOptions.length > 0) {
-    actionItems.push({
+    developerItems.push({
       kind: "action",
       value: "action:new-project",
       searchTerms: ["new project", "create project", "empty", "repository", "repo", "git init"],
@@ -2029,7 +2054,7 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (!isGameThread) {
-    actionItems.push({
+    developerItems.push({
       kind: "action",
       value: "action:add-project",
       searchTerms: [
@@ -2194,7 +2219,7 @@ function OpenCommandPaletteDialog(props: {
     value: "action:theme-editor",
     searchTerms: ["theme", "appearance", "colors", "palette", "customize"],
     title: "Toggle theme editor",
-    icon: <PaletteIcon className={ITEM_ICON_CLASS} />,
+    icon: <SwatchBookIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "themeEditor.toggle",
     run: async () => {
       toggleThemeEditorForTheme({
@@ -2237,7 +2262,7 @@ function OpenCommandPaletteDialog(props: {
     projectGroups[0] ??
     null;
   if (contextualProjectGroup) {
-    actionItems.push({
+    developerItems.push({
       kind: "action",
       value: "action:project-settings",
       searchTerms: [
@@ -2265,7 +2290,12 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
+  const rootGroups = buildRootGroups({
+    gameItems,
+    actionItems,
+    developerItems,
+    recentThreadItems,
+  });
   const settingsSearchItems: CommandPaletteActionItem[] = searchSettings(
     deferredQuery,
     availableSettingsSearchItems,
