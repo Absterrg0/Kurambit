@@ -16,7 +16,7 @@ work through the same generic integration.
 ## Add an agent
 
 1. Open **Settings → Providers**.
-2. Select **Add provider** and search the ACP Registry.
+2. Select **Add provider**, then **More agents…**, and search the ACP Registry.
 3. Search for the agent and select **Add** on its result.
 4. Confirm the name and instance ID, then complete the agent's sign-in step.
 
@@ -25,7 +25,7 @@ code; review an agent's source and license before adding it.
 
 ## Add a local command
 
-In **Settings → Providers → Add provider**, select **Local ACP command**. Enter the executable
+In **Settings → Providers → Add provider**, select **More agents…**, then **Local ACP command**. Enter the executable
 name or path on the selected environment, add one literal argument per row, and choose a display
 name. For DeepSeek Harness, use `dsh` with arguments `--profile` and `acp`.
 

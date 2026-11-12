@@ -107,7 +107,7 @@ export function SidebarBrandWidthProbe({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
-      aria-label="Go to threads"
+      aria-label="Go to home"
       className={cn(
         "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
         onBackdrop ? "text-white" : "text-foreground",
@@ -119,11 +119,13 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
+// The wordmark stays modest: back and forward lead the row, and the brand is a quiet
+// way home rather than a heading.
 function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      <KurambitMark className="size-5 shrink-0" tone={onBackdrop ? "light" : "auto"} />
-      <Text variant="label" tone={onBackdrop ? "inherit" : "strong"} truncate>
+      <KurambitMark className="size-4 shrink-0" tone={onBackdrop ? "light" : "auto"} />
+      <Text variant="label" tone={onBackdrop ? "inherit" : "muted"} truncate>
         Kurambit
       </Text>
     </span>

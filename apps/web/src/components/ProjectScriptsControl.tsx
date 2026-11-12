@@ -38,6 +38,7 @@ import {
   MenuItemLabel,
   MenuPopup,
   MenuSeparator,
+  MenuItemDetail,
   MenuShortcut,
   MenuTrigger,
   MenuSub,
@@ -165,9 +166,9 @@ export default function ProjectScriptsControl({
           >
             <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4" />
             <MenuItemLabel>{fileScript.name}</MenuItemLabel>
-            <MenuShortcut>
+            <MenuItemDetail>
               <DownloadIcon className="size-3.5" aria-label="Import" />
-            </MenuShortcut>
+            </MenuItemDetail>
           </MenuItem>
         ))}
       </MenuGroup>

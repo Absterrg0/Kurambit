@@ -202,16 +202,26 @@ export interface KeybindingGroup {
   readonly rows: ReadonlyArray<KeybindingRow>;
 }
 
+// Game actions lead: they are what a game maker reaches for. The coding app's areas follow.
 const KEYBINDING_GROUPS = [
+  { id: "game", title: "Game", prefixes: ["game"], commands: ["chat.new", "chat.newLocal"] },
   {
     id: "navigation",
     title: "Navigation",
-    prefixes: ["sidebar", "rightPanel", "commandPalette", "filePicker", "projectSearch", "editor"],
+    prefixes: [
+      "sidebar",
+      "navigation",
+      "rightPanel",
+      "commandPalette",
+      "filePicker",
+      "projectSearch",
+      "editor",
+    ],
   },
-  { id: "threads", title: "Threads", prefixes: ["thread", "chat", "pullRequest"] },
   { id: "composer", title: "Composer", prefixes: ["composer", "modelPicker"] },
+  { id: "threads", title: "Chats", prefixes: ["thread", "chat", "pullRequest"] },
   { id: "terminal", title: "Terminal", prefixes: ["terminal"] },
-  { id: "preview", title: "Preview & diff", prefixes: ["preview", "diff"] },
+  { id: "preview", title: "Preview and diff", prefixes: ["preview", "diff"] },
   { id: "appearance", title: "Appearance", prefixes: ["theme", "appearance", "themeEditor"] },
   { id: "scripts", title: "Project scripts", prefixes: ["script"] },
 ] as const;
@@ -220,6 +230,9 @@ const OTHER_KEYBINDING_GROUP = { id: "other", title: "Other" } as const;
 function keybindingGroupFor(command: KeybindingCommand): { id: string; title: string } {
   const prefix = String(command).split(".")[0] ?? "";
   return (
+    KEYBINDING_GROUPS.find((group) =>
+      (group as { commands?: ReadonlyArray<string> }).commands?.includes(command),
+    ) ??
     KEYBINDING_GROUPS.find((group) => (group.prefixes as ReadonlyArray<string>).includes(prefix)) ??
     OTHER_KEYBINDING_GROUP
   );
@@ -356,39 +369,106 @@ export function buildKeybindingCommandOptions(
   return [...commands].toSorted((left, right) => compareCommands(left, right, commandLabel));
 }
 
+// Sentence case and verb first, so a label reads on its own in search results and in
+// conflict warnings, without its group heading beside it.
+const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
+  "game.chat.toggle": "Show or hide the Inspector",
+  "game.focus": "Focus the game",
+  "game.freeze": "Freeze the game or play on",
+  "game.playPrevious": "Play the previous build",
+  "game.playNext": "Play the next build",
+  "game.undoTurn": "Undo the last turn's change",
+  "game.redoTurn": "Redo the last turn's change",
+  "game.keepGoing.stop": "Stop keep going",
+  "chat.new": "New game",
+  "chat.newLocal": "New chat in this game",
+  "chat.newWithoutProject": "New chat without a game",
+  "chat.find": "Find in the chat",
+  "sidebar.toggle": "Show or hide the sidebar",
+  "navigation.back": "Go back",
+  "navigation.forward": "Go forward",
+  "commandPalette.toggle": "Open the command palette",
+  "filePicker.toggle": "Open the file picker",
+  "projectSearch.toggle": "Search the project's files",
+  "editor.openFavorite": "Open in your editor",
+  "rightPanel.toggle": "Show or hide the right panel",
+  "rightPanel.new": "New right panel tab",
+  "rightPanel.toggleMaximized": "Maximise or restore the right panel",
+  "rightPanel.close": "Close the right panel tab",
+  "threadPanel.toggle": "Show or hide the chat panel",
+  "view.reopenClosed": "Reopen the closed tab",
+  "terminal.toggle": "Show or hide the terminal",
+  "terminal.split": "Split the terminal",
+  "terminal.splitVertical": "Split the terminal vertically",
+  "terminal.new": "New terminal",
+  "terminal.close": "Close the terminal",
+  "diff.toggle": "Show or hide the diff",
+  "preview.toggle": "Show or hide the preview",
+  "preview.refresh": "Reload the preview",
+  "preview.focusUrl": "Focus the preview's URL",
+  "preview.zoomIn": "Zoom the preview in",
+  "preview.zoomOut": "Zoom the preview out",
+  "preview.resetZoom": "Reset the preview's zoom",
+  "theme.select": "Choose a theme",
+  "appearance.cycle": "Switch between light, dark and system",
+  "themeEditor.toggle": "Show or hide the theme editor",
+  "composer.stash": "Stash the draft",
+  "composer.sendAlternate": "Send with the other of queue or steer",
+  "composer.sendBackground": "Start in the background",
+  "composer.sendAndNewThread": "Send and start a new chat",
+  "composer.host": "Choose where the agent runs",
+  "composer.cycleHost": "Cycle where the agent runs",
+  "composer.effort": "Choose the effort",
+  "composer.increaseEffort": "Raise the effort",
+  "composer.decreaseEffort": "Lower the effort",
+  "composer.mode": "Choose the mode",
+  "composer.workspace": "Choose the workspace",
+  "composer.previousWorktree": "Use the previous worktree",
+  "composer.branch": "Choose the branch",
+  "modelPicker.toggle": "Open the model picker",
+  "modelPicker.previousProvider": "Previous provider in the model picker",
+  "modelPicker.nextProvider": "Next provider in the model picker",
+  "thread.stop": "Stop the agent",
+  "thread.steerQueuedMessage": "Send the first queued message as a steer",
+  "thread.editQueuedMessage": "Edit the last queued message",
+  "thread.previous": "Previous chat",
+  "thread.next": "Next chat",
+  "thread.copyReference": "Copy link to the pull request, or the thread ID",
+  "thread.settle": "Settle the chat",
+  "thread.pin": "Pin the chat",
+  "thread.undo": "Undo the last sidebar change",
+  "pullRequest.copyNumber": "Copy the pull request number",
+  "usage.open": "Open usage",
+};
+
 export function commandLabel(command: KeybindingCommand): string {
-  if (command === "composer.sendAlternate") return "Composer: Opposite Queue or Steer Action";
-  if (command === "composer.sendBackground") return "Composer: Start in Background";
-  if (command === "composer.sendAndNewThread") return "Composer: Send and Start New Thread";
-  if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message as Steer";
-  if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
-  if (command === "thread.copyReference") return "Pull Request: Copy Link or Thread ID";
+  const known = COMMAND_LABELS[command];
+  if (known) return known;
   const usageMetric = METRIC_OPTIONS.find((option) => option.command === command);
-  if (usageMetric) return `Usage: ${usageMetric.label}`;
+  if (usageMetric) return `Show usage by ${usageMetric.label.toLowerCase()}`;
   const usagePeriod = WINDOW_OPTIONS.find((option) => option.command === command);
-  if (usagePeriod) return `Usage: Period: ${usagePeriod.label}`;
-  if (command === "view.reopenClosed") return "Reopen Closed Tab";
-  if (command === "chat.new") return "New Game";
-  if (command === "chat.newLocal") return "Game: New Chat";
-  if (command === "game.chat.toggle") return "Game: Show or Hide the Inspector";
-  if (command === "game.freeze") return "Game: Freeze or Play On";
-  if (command === "game.keepGoing.stop") return "Game: Stop Keep Going";
-  if (command === "preview.focusUrl") return "Preview: Focus URL";
+  if (usagePeriod) return `Show usage for ${usagePeriod.label.toLowerCase()}`;
   const raw = String(command);
-  if (raw.startsWith("script.") && raw.endsWith(".run")) {
-    return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;
+  const jump = /^(thread|modelPicker)\.jump\.(\d)$/.exec(raw);
+  if (jump) {
+    return jump[1] === "thread"
+      ? `Jump to chat ${jump[2]}`
+      : `Pick model ${jump[2]} in the model picker`;
   }
-  return raw.split(".").map(titleCaseCommandSegment).join(": ");
+  if (raw.startsWith("script.") && raw.endsWith(".run")) {
+    return `Run script: ${raw.slice("script.".length, -".run".length)}`;
+  }
+  return sentenceCase(raw.split(".").join(" "));
 }
 
-function titleCaseCommandSegment(segment: string): string {
-  const words: Array<string> = [];
-  for (const part of segment.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[-_\s]+/)) {
-    if (part.length > 0) {
-      words.push(part.slice(0, 1).toUpperCase() + part.slice(1));
-    }
-  }
-  return words.join(" ");
+function sentenceCase(text: string): string {
+  const words = text
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[-_\s]+/)
+    .filter((word) => word.length > 0)
+    .map((word) => word.toLowerCase());
+  const sentence = words.join(" ");
+  return sentence.slice(0, 1).toUpperCase() + sentence.slice(1);
 }
 
 function normalizeShortcutKeyToken(key: string): string | null {

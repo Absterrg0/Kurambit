@@ -73,11 +73,12 @@ describe("KeybindingsSettings.logic", () => {
   it("groups rows by command area in page order and drops empty groups", () => {
     const groups = groupKeybindingRows(buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS));
     expect(groups.map((group) => group.title)).toEqual([
+      "Game",
       "Navigation",
-      "Threads",
       "Composer",
+      "Chats",
       "Terminal",
-      "Preview & diff",
+      "Preview and diff",
       "Appearance",
       "Other",
     ]);
@@ -295,11 +296,11 @@ describe("KeybindingsSettings.logic", () => {
   });
 
   it("formats static and project script command labels", () => {
-    expect(commandLabel("commandPalette.toggle")).toBe("Command Palette: Toggle");
-    expect(commandLabel("themeEditor.toggle")).toBe("Theme Editor: Toggle");
-    expect(commandLabel("view.reopenClosed")).toBe("Reopen Closed Tab");
-    expect(commandLabel("preview.focusUrl")).toBe("Preview: Focus URL");
-    expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
+    expect(commandLabel("commandPalette.toggle")).toBe("Open the command palette");
+    expect(commandLabel("game.freeze")).toBe("Freeze the game or play on");
+    expect(commandLabel("thread.jump.3")).toBe("Jump to chat 3");
+    expect(commandLabel("usage.period.week")).toBe("Show usage for 7 days");
+    expect(commandLabel("script.setup-db.run")).toBe("Run script: setup-db");
   });
 
   it("builds known when variable options from defaults without frontend labels", () => {
@@ -430,13 +431,13 @@ describe("KeybindingsSettings.logic", () => {
       },
     ] satisfies ResolvedKeybindingsConfig);
 
-    expect(rows[0]?.conflicts).toEqual(["Game: New Chat"]);
+    expect(rows[0]?.conflicts).toEqual(["New chat in this game"]);
     expect(
       keybindingConflictLabels(rows, {
         rowId: rows[0]?.id ?? "",
         key: "mod+n",
         when: "",
       }),
-    ).toEqual(["Game: New Chat"]);
+    ).toEqual(["New chat in this game"]);
   });
 });

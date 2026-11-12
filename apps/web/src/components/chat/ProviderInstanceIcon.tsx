@@ -53,8 +53,15 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
   );
 }
 
+/**
+ * One rule for provider marks: in chrome (pickers, triggers, rows, the sidebar) a mark
+ * is mono, in the text's colour, because colour on screen belongs to the games. Brand
+ * colour is for surfaces about the provider itself: Settings › Providers, Add provider,
+ * first-run sign-in and Usage charts.
+ */
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
+  tone?: "mono" | "brand";
   displayName: string;
   accentColor?: string | undefined;
   acpRegistryAgentId?: string | undefined;
@@ -74,6 +81,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
     : undefined;
   const badgeContent = props.badgeContent ?? "initials";
+  const mono = (props.tone ?? "mono") === "mono";
+  // Raster marks (Antigravity, registry agents) cannot take a fill, so they lose their colour.
+  const rasterMonoClass = mono ? "grayscale" : undefined;
   const isAcpRegistry = props.driverKind === "acpRegistry";
   const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
     driverKind: props.driverKind,
@@ -92,18 +102,26 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     >
       {isAcpRegistry ? (
         <AcpRegistryAgentIcon
-          className={cn("size-5 rounded-none bg-transparent", props.iconClassName)}
+          className={cn("size-5 rounded-none bg-transparent", rasterMonoClass, props.iconClassName)}
           fallbackClassName="size-full"
           icon={acpRegistryIconUrl}
         />
       ) : packageIcon ? (
         <ProviderPackageIcon
           icon={packageIcon}
+          mono={mono}
           className={cn("size-5 shrink-0", props.iconClassName)}
           aria-hidden
         />
       ) : Icon ? (
-        <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
+        <Icon
+          className={cn(
+            "size-5 shrink-0",
+            mono && (props.driverKind === "antigravity" ? rasterMonoClass : "fill-current"),
+            props.iconClassName,
+          )}
+          aria-hidden
+        />
       ) : (
         <span className={cn("text-3xs font-semibold leading-none", props.iconClassName)}>
           {providerInstanceInitials(props.displayName)}

@@ -180,10 +180,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "default-model",
-    title: "Default model",
+    title: "Model for new games",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["new thread project provider reasoning effort"],
+    searchTerms: ["default model new thread project provider reasoning effort"],
   },
   {
     id: "default-permissions",
@@ -196,7 +196,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "color-scheme",
-    title: "Color scheme",
+    title: "Colour scheme",
     to: "/settings/appearance",
     searchTerms: ["appearance light dark system mode"],
     targetId: "appearance",
@@ -205,7 +205,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "theme",
     title: "Themes",
     to: "/settings/appearance",
-    searchTerms: ["appearance colors palette custom import"],
+    searchTerms: ["appearance colours colors palette custom import"],
     targetId: "appearance",
   },
   {
@@ -213,7 +213,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "setting-appearance-contrast",
     title: "Contrast",
     to: "/settings/appearance",
-    searchTerms: ["colors borders interface"],
+    searchTerms: ["colours colors borders interface"],
   },
   {
     // Prefixed because the slider control already owns the `glass-opacity` id.
@@ -224,7 +224,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "diff-color-scheme",
-    title: "Diff colors",
+    title: "Diff colours",
     to: "/settings/appearance",
     searchTerms: ["red green blue orange additions deletions changes counts palette colorblind"],
   },
@@ -569,6 +569,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["project thread tree old flat list"],
   },
   {
+    id: "restore-defaults",
+    title: "Restore defaults",
+    to: "/settings/general",
+    searchTerms: ["reset device defaults preferences"],
+  },
+  {
     id: "keybindings",
     title: "Keybindings",
     to: "/settings/keybindings",
@@ -619,7 +625,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent colour color custom favorite hidden auto compact",
     ],
   },
   {
@@ -681,7 +687,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-default-appearance",
     title: "Default browser appearance",
     to: "/settings/integrations",
-    searchTerms: ["preview color scheme light dark system os"],
+    searchTerms: ["preview colour color scheme light dark system os"],
   },
   {
     id: "browser-recording-frame-rate",
@@ -813,6 +819,19 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
 };
+
+/**
+ * Pages holding at least one value a game (project) can set for itself. Only these
+ * offer the "Applying settings for" game picker; elsewhere it would choose nothing.
+ */
+export const SETTINGS_PER_GAME_PATHS: ReadonlySet<string> = new Set(
+  (SETTINGS_SEARCH_ITEMS as readonly SettingsSearchItem[])
+    .filter((item) => {
+      const scope = item.scope ?? SETTINGS_CATEGORY_SCOPES[item.to];
+      return scope === "project-defaults" || scope === "project" || scope === "checkout";
+    })
+    .map((item) => item.to),
+);
 
 export function getSettingsSearchTargetScope(targetId: string) {
   const items: readonly SettingsSearchItem[] = SETTINGS_SEARCH_ITEMS;

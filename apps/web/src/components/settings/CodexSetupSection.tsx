@@ -76,36 +76,19 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
       <CodexWelcomeCard
         title={props.displayName || props.provider?.displayName || "Codex"}
         description={
-          existingReady ? (
-            props.provider?.auth.email?.trim() ? (
-              <>
-                Signed in as{" "}
-                <RedactedSensitiveText
-                  value={props.provider.auth.email.trim()}
-                  ariaLabel="Toggle account email visibility"
-                  revealTooltip="Click to reveal email"
-                  hideTooltip="Click to hide email"
-                  className="break-all"
-                />
-                .
-              </>
-            ) : (
-              "Connected with your Codex CLI."
-            )
-          ) : existingChecking ? (
-            "Checking your Codex CLI..."
-          ) : props.provider?.installed ? (
-            existingSummary.headline
-          ) : (
-            "Code with your ChatGPT subscription."
-          )
+          existingReady
+            ? props.provider?.auth.email?.trim()
+              ? null
+              : "Connected with your Codex CLI."
+            : existingChecking
+              ? "Checking your Codex CLI..."
+              : props.provider?.installed
+                ? existingSummary.headline
+                : "Code with your ChatGPT subscription."
         }
         control={
           existingReady ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
-              <CheckIcon className="size-3.5" />
-              Ready
-            </span>
+            <ReadyWithAccount email={props.provider?.auth.email?.trim()} />
           ) : existingChecking ? (
             <span className="text-xs text-muted-foreground">Checking...</span>
           ) : existingAuthenticated ? (
@@ -746,19 +729,7 @@ function ManagedCodexSetup({
             installActive ? (
               runtimeDescription
             ) : authenticated ? (
-              provider?.auth.email?.trim() ? (
-                <>
-                  Signed in as{" "}
-                  <RedactedSensitiveText
-                    value={provider.auth.email.trim()}
-                    ariaLabel="Toggle account email visibility"
-                    revealTooltip="Click to reveal email"
-                    hideTooltip="Click to hide email"
-                    className="break-all"
-                  />
-                  .
-                </>
-              ) : (
+              provider?.auth.email?.trim() ? null : (
                 "Connected to ChatGPT."
               )
             ) : callbackCompletion && !needsManualCallback ? (
@@ -781,10 +752,7 @@ function ManagedCodexSetup({
           }
           control={
             authenticated && !busy ? (
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
-                <CheckIcon className="size-3.5" />
-                Ready
-              </span>
+              <ReadyWithAccount email={provider?.auth.email?.trim()} />
             ) : authActive ? (
               waitingControl
             ) : (
@@ -1081,6 +1049,26 @@ function CodexSignInDescription({
   );
 }
 
+function ReadyWithAccount({ email }: { readonly email: string | undefined }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-3 text-xs">
+      {email ? (
+        <RedactedSensitiveText
+          value={email}
+          ariaLabel="Toggle account email visibility"
+          revealTooltip="Click to reveal email"
+          hideTooltip="Click to hide email"
+          className="min-w-0 truncate text-muted-foreground"
+        />
+      ) : null}
+      <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-success-foreground">
+        <CheckIcon className="size-3.5" />
+        Ready
+      </span>
+    </span>
+  );
+}
+
 function CodexWelcomeCard({
   title,
   description,
@@ -1096,12 +1084,17 @@ function CodexWelcomeCard({
 }) {
   const footer = Children.toArray(children);
   return (
-    <div className="rounded-lg border border-border bg-background px-4 py-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="rounded-lg border border-border bg-background px-4 py-2">
+      {/* 56px like the other first-run rows; a ready account's email sits on the right. */}
+      <div className="flex min-h-10 flex-wrap items-center gap-3">
         <OpenAI className="size-5 shrink-0 fill-foreground" />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium">{title}</h3>
-          <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</div>
+          {description ? (
+            <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+              {description}
+            </div>
+          ) : null}
         </div>
         {control || secondaryControl ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 has-[button]:w-full has-[button]:flex-col-reverse has-[button]:items-end sm:has-[button]:w-auto sm:has-[button]:flex-row sm:has-[button]:items-center">

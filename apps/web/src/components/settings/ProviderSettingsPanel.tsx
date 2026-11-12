@@ -1175,7 +1175,6 @@ export function EnvironmentProviderSettings({
         <AddProviderInstanceDialog
           open
           environmentId={environmentId}
-          environmentLabel={environmentLabel}
           onOpenChange={setIsAddInstanceDialogOpen}
           onCreated={setSelectedInstanceId}
         />
@@ -1372,7 +1371,6 @@ function ProviderInstanceRow({
           <ProviderAuthenticationSection
             key={`${environmentId}:${instanceId}`}
             environmentId={environmentId}
-            environmentLabel={environmentLabel}
             instanceId={instanceId}
             provider={liveProvider}
             readOnly={readOnly}

@@ -399,7 +399,7 @@ export function SettingsRow({
   const inheritance: { state: SettingInheritanceState; summary: string } = mixed
     ? { state: "mixed", summary: "Mixed across selected environments" }
     : source === "project"
-      ? { state: "overridden", summary: "Overridden for this project" }
+      ? { state: "overridden", summary: "Set for this game" }
       : source === "kurambit.json"
         ? { state: "inherited", summary: "Inherited from the repository's kurambit.json" }
         : source === "environment" && scopedKeys.length > 0
@@ -407,8 +407,17 @@ export function SettingsRow({
           : customized
             ? { state: "environment", summary: "Set on the environment" }
             : { state: "default", summary: "Built-in default" };
+  // The layers button explains where a value comes from. A built-in default, or a value
+  // set once for everything, has nothing to explain, so it shows only when a game's own
+  // value, kurambit.json, or a mix is in play.
   const renderedInheritance =
-    context && serverScoped && settingKeys.length > 0 ? (
+    context &&
+    serverScoped &&
+    settingKeys.length > 0 &&
+    (inheritance.state === "overridden" ||
+      inheritance.state === "inherited" ||
+      inheritance.state === "mixed" ||
+      overridingProjects.length > 0) ? (
       <SettingInheritance
         state={inheritance.state}
         summary={inheritance.summary}
@@ -532,6 +541,12 @@ export function SettingResetButton({
     </Tooltip>
   );
 }
+
+/**
+ * Restoring defaults remounts the settings page, so rows holding a draft or a local
+ * copy re-read the restored values. The settings layout provides the remount.
+ */
+export const SettingsRestoredContext = createContext<() => void>(() => {});
 
 export function SettingsPageContainer({
   children,

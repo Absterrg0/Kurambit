@@ -134,11 +134,14 @@ function Specimen({
   label,
   source,
   stack = false,
+  grid = false,
   children,
 }: {
   label: string;
   source?: string;
   stack?: boolean;
+  /** Fixed 80px columns, so swatch spacing doesn't follow caption width. */
+  grid?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -154,7 +157,13 @@ function Specimen({
         ) : null}
       </div>
       <div
-        className={stack ? "flex flex-col items-start gap-3" : "flex flex-wrap items-center gap-3"}
+        className={
+          stack
+            ? "flex flex-col items-start gap-3"
+            : grid
+              ? "grid grid-cols-[repeat(auto-fill,5rem)] gap-x-3 gap-y-4"
+              : "flex flex-wrap items-center gap-3"
+        }
       >
         {children}
       </div>
@@ -230,10 +239,13 @@ function FoundationsSection() {
       title="Foundations"
       description="Palette tokens, the four text tiers and the seven type roles. Colour on screen belongs to the games; the interface stays grey."
     >
-      <Specimen label="Colour tokens" source="bg-{token}">
+      <Specimen label="Colour tokens" source="bg-{token}" grid>
         {COLOR_TOKENS.map(([name, className]) => (
           <Cell key={name} caption={name}>
-            <span className={`block size-12 rounded-lg border ${className}`} />
+            {/* An inset rim on every swatch, so one that matches the page still shows. */}
+            <span
+              className={`block size-12 rounded-lg ring-1 ring-strong-foreground/14 ring-inset ${className}`}
+            />
           </Cell>
         ))}
       </Specimen>
@@ -631,7 +643,7 @@ function OverlaysSection() {
             <MenuItem>
               <RotateCcwIcon />
               Reload
-              <MenuShortcut>Ctrl R</MenuShortcut>
+              <MenuShortcut>Ctrl+R</MenuShortcut>
             </MenuItem>
             <MenuSub>
               <MenuSubTrigger>

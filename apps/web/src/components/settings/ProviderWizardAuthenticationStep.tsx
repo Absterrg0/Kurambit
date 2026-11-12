@@ -11,12 +11,10 @@ import { SettingsRow } from "./settingsLayout";
 
 export function ProviderWizardAuthenticationStep({
   environmentId,
-  environmentLabel,
   instanceId,
   onFinish,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
   readonly instanceId: ProviderInstanceId;
   readonly onFinish: () => void;
 }) {
@@ -42,7 +40,6 @@ export function ProviderWizardAuthenticationStep({
           {provider && (canAuthenticate || signedIn) ? (
             <ProviderAuthenticationSection
               environmentId={environmentId}
-              environmentLabel={environmentLabel}
               instanceId={instanceId}
               provider={{
                 ...provider,

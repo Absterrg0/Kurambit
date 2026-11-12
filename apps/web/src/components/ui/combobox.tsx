@@ -109,22 +109,22 @@ function ComboboxInput({
   );
 }
 
+// The popup's header, as in the command palette: a search glyph and a borderless field,
+// with one hairline across the whole popup under it.
 function ComboboxSearchInput(props: React.ComponentProps<typeof ComboboxInput>) {
   return (
-    <div className="min-w-0 shrink-0 px-3 pt-2.5">
-      <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
-        <SearchIcon
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
-        />
-        <ComboboxInput
-          {...props}
-          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-          showTrigger={false}
-          size="sm"
-          unstyled
-        />
-      </div>
+    <div className="relative min-w-0 shrink-0 border-b border-border/70 px-3 py-1.5">
+      <SearchIcon
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-3 size-4 shrink-0 -translate-y-1/2 text-icon-muted"
+      />
+      <ComboboxInput
+        {...props}
+        className="[&_input]:h-7 [&_input]:ps-6 [&_input]:font-sans [&_input]:leading-7 [&_input]:placeholder:text-placeholder"
+        showTrigger={false}
+        size="sm"
+        unstyled
+      />
     </div>
   );
 }

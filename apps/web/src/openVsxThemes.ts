@@ -637,7 +637,7 @@ export async function importOpenVsxThemeExtension(
   const manifest = parseJsoncObject(new TextDecoder().decode(manifestBytes), "Extension manifest");
   const advertisedContributions = themeContributions(manifest);
   if (advertisedContributions.length === 0) {
-    throw new Error("That extension does not contain color themes.");
+    throw new Error("That extension does not contain colour themes.");
   }
   if (advertisedContributions.length > MAX_THEMES_PER_EXTENSION) {
     throw new Error("That extension contains too many color themes to import safely.");
@@ -698,7 +698,7 @@ export async function importOpenVsxThemeExtension(
     throw new Error("That extension package does not match its advertised license.");
   }
   const contributions = themeContributions(packagedManifest);
-  if (contributions.length === 0) throw new Error("That extension does not contain color themes.");
+  if (contributions.length === 0) throw new Error("That extension does not contain colour themes.");
   if (contributions.length > MAX_THEMES_PER_EXTENSION) {
     throw new Error("That extension contains too many color themes to import safely.");
   }
@@ -733,7 +733,7 @@ export async function importOpenVsxThemeExtension(
         displayName: label,
         ...(type ? { type } : {}),
       };
-      if (!isVsCodeThemeFile(decorated)) throw new Error("not a VS Code color theme");
+      if (!isVsCodeThemeFile(decorated)) throw new Error("not a VS Code colour theme");
       parsed.push({
         theme: parseVsCodeThemeFile(decorated),
         sourceName: path.split("/").at(-1)!,
@@ -745,10 +745,10 @@ export async function importOpenVsxThemeExtension(
     }
   }
   if (failures.length > 0) {
-    throw new Error("One or more color themes in that extension could not be imported safely.");
+    throw new Error("One or more colour themes in that extension could not be imported safely.");
   }
   if (parsed.length === 0) {
-    throw new Error("That extension has no compatible color themes.");
+    throw new Error("That extension has no compatible colour themes.");
   }
   const extensionId = extension.id.toLowerCase();
   const sourcePathCounts = new Map<string, number>();

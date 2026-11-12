@@ -48,6 +48,7 @@ import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Text } from "../ui/text";
 import { Toggle } from "../ui/toggle";
 import { toastManager } from "../ui/toast";
 import {
@@ -765,6 +766,8 @@ type KeybindingRowEditor = ReturnType<typeof useKeybindingRowEditor>;
 
 interface KeybindingRowActions {
   allRows: ReadonlyArray<KeybindingRow>;
+  /** Conditions ("when") and command ids are for people tuning shortcuts, behind Advanced. */
+  showConditions: boolean;
   variables: ReadonlyArray<WhenVariableOption>;
   onSave: (input: ServerUpsertKeybindingInput) => void;
   onReset: (row: KeybindingRow) => void;
@@ -932,7 +935,15 @@ function KeybindingSourceBadge({ source }: { source: KeybindingRow["source"] }) 
   );
 }
 
-function KeybindingRowTitle({ row }: { row: KeybindingRow }) {
+function KeybindingRowTitle({ row, showId }: { row: KeybindingRow; showId: boolean }) {
+  if (!showId) {
+    return (
+      <span className="flex items-center gap-2">
+        {commandLabel(row.command)}
+        <KeybindingSourceBadge source={row.source} />
+      </span>
+    );
+  }
   return (
     <Tooltip>
       <TooltipTrigger render={<span className="flex items-center gap-2" />}>
@@ -982,15 +993,20 @@ function KeybindingHoverRowMenu(props: {
 }
 
 function KeybindingSettingsRow(props: KeybindingRowProps) {
-  const { row, isSaving, anchorId, allRows, variables, onSave, onReset, onRemove } = props;
+  const { row, isSaving, anchorId, allRows, variables, showConditions, onSave, onReset, onRemove } =
+    props;
   const editor = useKeybindingRowEditor({ row, allRows, onSave });
 
   return (
     <SettingsRow
       id={anchorId}
       className="group/row rounded-none"
-      title={<KeybindingRowTitle row={row} />}
-      description={<KeybindingRowWhen row={row} editor={editor} variables={variables} />}
+      title={<KeybindingRowTitle row={row} showId={showConditions} />}
+      description={
+        showConditions ? (
+          <KeybindingRowWhen row={row} editor={editor} variables={variables} />
+        ) : undefined
+      }
       control={
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <KeybindingConflictWarning labels={editor.conflictLabels} />
@@ -1077,6 +1093,7 @@ type NewKeybindingDraft = ReturnType<typeof useNewKeybindingDraft>;
 
 interface NewKeybindingProps {
   commandOptions: ReadonlyArray<KeybindingCommandOption>;
+  showConditions: boolean;
   allRows: ReadonlyArray<KeybindingRow>;
   variables: ReadonlyArray<WhenVariableOption>;
   isSaving: boolean;
@@ -1187,7 +1204,7 @@ function NewKeybindingCancelIcon({
 }
 
 function NewKeybindingSettingsRow(props: NewKeybindingProps) {
-  const { commandOptions, allRows, variables, isSaving, onSave, onCancel } = props;
+  const { commandOptions, allRows, variables, showConditions, isSaving, onSave, onCancel } = props;
   const draft = useNewKeybindingDraft({ allRows, onSave });
 
   return (
@@ -1195,10 +1212,12 @@ function NewKeybindingSettingsRow(props: NewKeybindingProps) {
       className="bg-muted/15"
       title="New keybinding"
       description={
-        <span className="flex h-6 items-center gap-1.5">
-          <span className="text-xs leading-none text-muted-foreground/70">When</span>
-          <NewKeybindingWhen draft={draft} variables={variables} />
-        </span>
+        showConditions ? (
+          <span className="flex h-6 items-center gap-1.5">
+            <span className="text-xs leading-none text-muted-foreground/70">When</span>
+            <NewKeybindingWhen draft={draft} variables={variables} />
+          </span>
+        ) : undefined
       }
       control={
         <div className="flex flex-wrap items-center gap-2">
@@ -1240,25 +1259,6 @@ function KeybindingsGroups(props: KeybindingsGroupsProps) {
       ))}
     </SettingsSection>
   ));
-}
-
-function BrowserKeybindingNotice() {
-  const message = "The browser may claim some shortcuts first. The desktop app receives them all.";
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        delay={200}
-        render={
-          <Button size="icon-micro" variant="ghost-muted" aria-label={message}>
-            <TriangleAlertIcon className="size-3.5 text-warning" />
-          </Button>
-        }
-      />
-      <TooltipPopup side="top" className="max-w-72">
-        {message}
-      </TooltipPopup>
-    </Tooltip>
-  );
 }
 
 function keybindingAnchorIds(rows: ReturnType<typeof buildKeybindingRows>) {
@@ -1310,6 +1310,7 @@ export function KeybindingsSettingsPanel() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [savingCommand, setSavingCommand] = useState<KeybindingCommand | null>(null);
   const [isAddingBinding, setIsAddingBinding] = useState(false);
+  const [showConditions, setShowConditions] = useState(false);
   const searchTargetId = useLocation({ select: (location) => location.hash.replace(/^#/, "") });
   const [handledSearchTargetId, setHandledSearchTargetId] = useState(searchTargetId);
 
@@ -1432,6 +1433,7 @@ export function KeybindingsSettingsPanel() {
 
   const rowActions: KeybindingRowActions = {
     allRows,
+    showConditions,
     variables: whenVariables,
     onSave: saveKeybinding,
     onReset: resetKeybinding,
@@ -1440,10 +1442,8 @@ export function KeybindingsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection
-        {...searchableSetting("keybindings")}
-        headerAction={!isElectron ? <BrowserKeybindingNotice /> : null}
-      >
+      {/* The page is already titled Keybindings; the toolbar needs no second heading. */}
+      <SettingsSection {...searchableSetting("keybindings")} hideTitle>
         <div className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
           <KeybindingsSearchInput query={query} onChange={setQuery} inputRef={searchInputRef} />
           <Button
@@ -1472,7 +1472,25 @@ export function KeybindingsSettingsPanel() {
             />
             <TooltipPopup side="top">Open keybindings.json</TooltipPopup>
           </Tooltip>
+          <Toggle
+            variant="outline"
+            pressed={showConditions}
+            onPressedChange={setShowConditions}
+            aria-label="Advanced: show when each shortcut applies"
+          >
+            Advanced
+          </Toggle>
         </div>
+        {!isElectron ? (
+          <Text
+            variant="body"
+            tone="muted"
+            render={<p className="px-3 pb-3 [--type-body:var(--type-meta)] sm:px-4" />}
+          >
+            The browser keeps a few shortcuts for itself, such as new tab. The desktop app receives
+            them all.
+          </Text>
+        ) : null}
       </SettingsSection>
 
       {!canWriteSettings ? (
@@ -1487,6 +1505,7 @@ export function KeybindingsSettingsPanel() {
           <SettingsGroup>
             <NewKeybindingSettingsRow
               commandOptions={commandOptions}
+              showConditions={showConditions}
               allRows={allRows}
               variables={whenVariables}
               isSaving={savingCommand !== null}

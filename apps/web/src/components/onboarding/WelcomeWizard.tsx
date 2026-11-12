@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { KurambitMark, KurambitWordmark } from "../brand/KurambitBrand";
+import { KurambitMark } from "../brand/KurambitBrand";
+import { Text } from "../ui/text";
 import type {
   EnvironmentId,
   ProviderInstanceId,
@@ -111,14 +112,23 @@ export function WelcomeWizard({
         size="wide"
         bottomStickOnMobile={false}
         showCloseButton={false}
-        initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
+        // The panel takes focus, not its button, so no focus ring is drawn before any key.
+        initialFocus={() =>
+          document.getElementById("onboarding-pairing-url") ??
+          document.querySelector<HTMLElement>("[data-welcome-popup]") ??
+          true
+        }
+        data-welcome-popup=""
       >
         <WizardHeader
           title="Set up Kurambit"
           identity={
-            <div className="flex items-center gap-2.5" role="img" aria-label="Kurambit">
-              <KurambitMark className="size-9" />
-              <KurambitWordmark className="text-sm" />
+            // The same wordmark as the sidebar's: the mark and the name in plain type.
+            <div className="flex items-center gap-2" role="img" aria-label="Kurambit">
+              <KurambitMark className="size-6" />
+              <Text variant="label" tone="strong">
+                Kurambit
+              </Text>
             </div>
           }
         ></WizardHeader>
@@ -184,7 +194,7 @@ function AgentsStep({
         </div>
       </ScrollArea>
       <div className="mt-6 flex justify-end">
-        <Button autoFocus disabled={isFinishing} onClick={onContinue}>
+        <Button disabled={isFinishing} onClick={onContinue}>
           {isFinishing ? "Finishing setup…" : "Start making games"}
           <ArrowRightIcon className="size-3.5" />
         </Button>
@@ -474,8 +484,9 @@ function AgentCard({
   const providerState = getOnboardingProviderState(provider);
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-4">
+    <div className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-background px-4 py-2">
       <ProviderInstanceIcon
+        tone="brand"
         driverKind={ProviderDriverKind.make(driver)}
         displayName={displayName}
         iconClassName="size-5"
@@ -525,8 +536,9 @@ function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
   const summary = getProviderSummary(provider);
   const providerState = getOnboardingProviderState(provider);
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-4">
+    <div className="flex min-h-14 items-center gap-3 rounded-lg border border-border bg-background px-4 py-2">
       <ProviderInstanceIcon
+        tone="brand"
         driverKind={provider.driver}
         displayName={displayName}
         iconClassName="size-5"
@@ -727,7 +739,9 @@ function StepShell({
 }) {
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+      <Text variant="title" tone="strong" render={<h1 />}>
+        {title}
+      </Text>
       {description ? (
         <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
       ) : null}

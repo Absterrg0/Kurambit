@@ -597,7 +597,7 @@ export function buildRootGroups(input: {
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent threads",
+      label: "Recent",
       items: input.recentThreadItems,
     });
   }

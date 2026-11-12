@@ -1,7 +1,8 @@
 # Keybindings
 
-Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
-also lists the command IDs and defaults available in your version.
+Customize shortcuts in **Settings → Keybindings** on web and desktop. Game actions
+come first. Turn on **Advanced** there to see when each shortcut applies and its
+command ID.
 
 ## Composer controls
 
@@ -14,30 +15,31 @@ inserts a new line. This applies to the web and desktop composer at desktop widt
 requires a modifier. `mod+Alt+Enter` sends, keeps that thread running in the
 background, and opens a fresh new-thread composer. In a new thread, `mod+Enter`
 does the same. Change these shortcuts in **Settings → Keybindings** under
-**Composer: Opposite Queue or Steer Action**, **Composer: Start in Background**,
-or **Composer: Send and Start New Thread**. These bindings take priority over the
+**Send with the other of queue or steer**, **Start in the background**,
+or **Send and start a new chat**. These bindings take priority over the
 send shortcut. Click the send button to use the configured follow-up behavior.
 
 When an active turn has queued messages, `mod+Shift+Enter` sends the first as a
-steer. Change it under **Queue: Send First Queued Message as Steer** in Keybindings.
+steer. Change it under **Send the first queued message as a steer** in Keybindings.
 
 Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
 To step a new thread to the next machine instead of opening the menu, bind
-**Composer: Cycle Host** in Keybindings. It has no default shortcut.
+**Cycle where the agent runs** in Keybindings. It has no default shortcut.
 Use `mod+shift+e` for effort, `mod+shift+a` for access mode, `mod+shift+x` for the
 workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
 
 To change effort one step without opening the picker, bind
-**Composer: Increase Effort** and **Composer: Decrease Effort** in Keybindings.
+**Raise the effort** and **Lower the effort** in Keybindings.
 Both are unbound by default. Increase wraps from the highest level to the
 lowest, and decrease wraps from the lowest level to the highest.
 
-In the model picker, press Left in an empty search field or Shift+Tab to reach
-the provider list. Use Up/Down to move and Enter to choose. Right returns to
-model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
-search. These provider shortcuts can also be changed in Settings.
+The model picker lists your favourites first, then each provider's models under
+its name. Type to search across all of them, use Up/Down to move and Enter to
+choose. `mod+shift+up` and `mod+shift+down` jump to the previous or next provider;
+while searching they clear the search first. These provider shortcuts can also be
+changed in Settings.
 
 These shortcuts run inside the focused web or desktop client. `mod` uses Command
 on macOS and Ctrl on Windows and Linux, including GNOME, KDE Plasma, Niri, and
@@ -48,8 +50,8 @@ in Settings.
 
 With a PR open in the right panel or on the Pull Requests page, use `mod+shift+c`
 to copy its URL and `mod+shift+k` to copy its number with a `#` prefix.
-Both shortcuts can be changed in Settings. Search for “Copy Link or Thread ID”
-or “Copy Number”. They copy the selected PR and leave terminal input alone.
+Both shortcuts can be changed in Settings. Search for “Copy link”
+or “Copy the pull request number”. They copy the selected PR and leave terminal input alone.
 
 ## Find in a diff
 
@@ -154,7 +156,8 @@ seconds after the latest action. The default shortcut skips text fields and
 terminals so native undo keeps working there.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
-through the pages you have visited, like a browser's back and forward buttons.
+through the pages you have visited, as do the arrows beside the sidebar toggle. They
+stop at the first and last page you visited in Kurambit, so they never leave the app.
 
 `chat.new` (`mod+n`, or `mod+shift+o` in a browser, which keeps `mod+n` for new windows) goes to
 the home screen's brief box to start a new game; with the legacy

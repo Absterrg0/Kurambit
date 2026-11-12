@@ -20,6 +20,7 @@ import { Fragment, memo, type ReactNode } from "react";
 import { BrainIcon } from "lucide-react";
 import {
   Menu,
+  MenuCheckboxItem,
   MenuGroup,
   MenuGroupLabel,
   MenuPopup,
@@ -53,6 +54,15 @@ const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   reasoningEffort: "Reasoning effort",
   variant: "Reasoning",
 };
+
+// Providers report labels in Title Case ("Extra High", "Fast Mode"); menus read in
+// sentence case. Only plain capitalised words are lowered, so "1M" or "GPT" survive.
+function sentenceCaseLabel(label: string): string {
+  return label.replace(
+    /(\s)([A-Z][a-z]+)\b/g,
+    (_match, space: string, word: string) => `${space}${word.toLowerCase()}`,
+  );
+}
 
 function savedOptionLabel(id: string): string {
   return (
@@ -500,7 +510,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     showDescriptions: boolean,
   ) => (
     <MenuGroup key={descriptor.id}>
-      <MenuGroupLabel>{descriptor.label}</MenuGroupLabel>
+      <MenuGroupLabel>{sentenceCaseLabel(descriptor.label)}</MenuGroupLabel>
       {effortLocked(descriptor) && !showDescriptions ? (
         <div className="px-2 pb-1.5 text-meta text-muted-foreground">
           Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this option.
@@ -522,7 +532,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           >
             <span className="flex w-full min-w-0 flex-col">
               <span className="min-w-0 truncate">
-                {option.label}
+                {sentenceCaseLabel(option.label)}
                 {option.isDefault ? (
                   <>
                     {" "}
@@ -541,23 +551,18 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       </MenuRadioGroup>
     </MenuGroup>
   );
+  // An on/off option is one switch row, aligned with the radio rows around it.
   const renderBooleanGroup = (descriptor: BooleanDescriptor) => (
     <MenuGroup key={descriptor.id}>
-      <MenuGroupLabel>{descriptor.label}</MenuGroupLabel>
-      <MenuRadioGroup
-        value={descriptor.currentValue === true ? "on" : "off"}
-        onValueChange={(value) => {
-          updateDescriptors(
-            replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-          );
+      <MenuCheckboxItem
+        variant="switch"
+        checked={descriptor.currentValue === true}
+        onCheckedChange={(checked) => {
+          updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, checked));
         }}
       >
-        {(["on", "off"] as const).map((value) => (
-          <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
-            {value === "on" ? "On" : "Off"}
-          </MenuRadioItem>
-        ))}
-      </MenuRadioGroup>
+        {sentenceCaseLabel(descriptor.label)}
+      </MenuCheckboxItem>
     </MenuGroup>
   );
 
@@ -586,15 +591,16 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         node: renderSelectGroup(descriptor, advanced, true),
       });
       advancedValueLabel =
-        advanced.find((option) => option.id === selectedValueOf(descriptor))?.label ??
-        advancedValueLabel;
+        sentenceCaseLabel(
+          advanced.find((option) => option.id === selectedValueOf(descriptor))?.label ?? "",
+        ) || advancedValueLabel;
     }
   }
   for (const descriptor of booleanDescriptors) {
     if (isAdvancedDescriptor(descriptor)) {
       advancedGroups.push({ key: descriptor.id, node: renderBooleanGroup(descriptor) });
       if (descriptor.currentValue === true && advancedValueLabel === null)
-        advancedValueLabel = descriptor.label;
+        advancedValueLabel = sentenceCaseLabel(descriptor.label);
     } else {
       plainGroups.push({ key: descriptor.id, node: renderBooleanGroup(descriptor) });
     }

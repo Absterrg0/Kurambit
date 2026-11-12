@@ -17,6 +17,7 @@ import {
 } from "~/components/ui/autocomplete";
 import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 import { Button } from "~/components/ui/button";
+import { KbdShortcut } from "~/components/ui/kbd";
 
 const CommandDialog = CommandDialogPrimitive.Root;
 
@@ -202,11 +203,8 @@ function CommandItem({
 
 function CommandShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
-    <kbd
-      className={cn(
-        "ms-auto shrink-0 ps-4 font-sans text-meta text-secondary-label tracking-wide",
-        className,
-      )}
+    <KbdShortcut
+      className={cn("ms-auto shrink-0 ps-4", className)}
       data-slot="command-shortcut"
       {...props}
     />

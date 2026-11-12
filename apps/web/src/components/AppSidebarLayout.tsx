@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
@@ -53,6 +54,12 @@ import {
   useSidebarVisibility,
 } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Button } from "./ui/button";
+import {
+  navigateHistory,
+  useCanNavigateHistory,
+  type HistoryDirection,
+} from "../navigationHistory";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
@@ -193,7 +200,60 @@ function SidebarControl() {
           Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
         </TooltipPopup>
       </Tooltip>
+      {/* Phones keep the system back gesture; the buttons start at md. */}
+      <div className="pointer-events-auto hidden items-center [-webkit-app-region:no-drag] md:flex">
+        <NavigationHistoryButton
+          direction="back"
+          onStageBackdrop={isSidebarVisible && stageBackdropVariant !== null}
+        />
+        <NavigationHistoryButton
+          direction="forward"
+          onStageBackdrop={isSidebarVisible && stageBackdropVariant !== null}
+        />
+      </div>
     </div>
+  );
+}
+
+const NAVIGATION_HISTORY_BUTTONS = {
+  back: { label: "Back", command: "navigation.back", Icon: ArrowLeftIcon },
+  forward: { label: "Forward", command: "navigation.forward", Icon: ArrowRightIcon },
+} as const;
+
+// Beside the sidebar toggle, as in T3 rd: game ↔ game ↔ settings is a history a person
+// walks back through. On the web they share the tab's history with the browser's own
+// buttons but stop at the app's first and last entries, so they never leave the app.
+function NavigationHistoryButton({
+  direction,
+  onStageBackdrop,
+}: {
+  direction: HistoryDirection;
+  onStageBackdrop: boolean;
+}) {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const canNavigate = useCanNavigateHistory(direction);
+  const { label, command, Icon } = NAVIGATION_HISTORY_BUTTONS[direction];
+  const shortcutLabel = shortcutLabelForCommand(keybindings, command);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant={onStageBackdrop ? "media-navigation" : "ghost"}
+            size="icon-sm"
+            aria-label={label}
+            disabled={!canNavigate}
+            onClick={() => navigateHistory(direction)}
+          />
+        }
+      >
+        <Icon />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        {label}
+        {shortcutLabel ? ` (${shortcutLabel})` : ""}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -229,11 +289,11 @@ function NavigationHistoryShortcuts() {
         },
       });
       if (command !== "navigation.back" && command !== "navigation.forward") return;
+      // At the app's first or last entry the key does nothing, so the browser keeps it.
+      if (!navigateHistory(command === "navigation.back" ? "back" : "forward")) return;
 
       event.preventDefault();
       event.stopPropagation();
-      if (command === "navigation.back") window.history.back();
-      else window.history.forward();
     };
 
     window.addEventListener("keydown", onKeyDown);

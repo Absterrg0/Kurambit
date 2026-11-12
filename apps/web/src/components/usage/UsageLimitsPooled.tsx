@@ -72,6 +72,7 @@ function AccountAvatar({
   if (account.redeem) {
     return (
       <ProviderInstanceIcon
+        tone="brand"
         driverKind={account.driver}
         displayName={
           account.displayName ??
@@ -498,6 +499,7 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
     <section className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
         <ProviderInstanceIcon
+          tone="brand"
           driverKind={pool.driver}
           displayName={label}
           indicatorBackground="var(--background)"

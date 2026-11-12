@@ -5,6 +5,7 @@ import { sortGameThreadsByActivity } from "./game/gameLibrary.logic";
 import { openCommandPalette } from "../commandPaletteBus";
 import { isSettingsPage } from "./sidebar/mainAppLocation";
 import { Text } from "./ui/text";
+import { Skeleton } from "./ui/skeleton";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
 import { type EnvironmentId, type ScopedProjectRef } from "@kurambit/contracts";
 import type { EnvironmentServerConfig } from "@kurambit/client-runtime/connection";
@@ -248,7 +249,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuItemDetail, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import {
@@ -1078,7 +1079,7 @@ function SnoozeMenuButton(props: {
             }}
           >
             {preset.label}
-            <MenuShortcut>{preset.whenLabel}</MenuShortcut>
+            <MenuItemDetail>{preset.whenLabel}</MenuItemDetail>
           </MenuItem>
         ))}
         <MenuSeparator />
@@ -4700,9 +4701,24 @@ export default function Sidebar() {
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
-            <Text variant="meta" tone="dim" render={<p className="px-2 py-6 text-center" />}>
-              {gameLibrary.isLoading || !shellsBootstrapped ? "Loading games…" : "No games yet"}
-            </Text>
+            gameLibrary.isLoading || !shellsBootstrapped ? (
+              // Rows at their final size, so the list does not jump when the games arrive.
+              <div role="status" aria-label="Loading games">
+                {[0, 1, 2].map((row) => (
+                  <div key={row} className="flex items-center gap-2.5 px-2 py-1.5">
+                    <Skeleton shape="card" className="size-7.5 shrink-0" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <Skeleton className="h-3 w-24" />
+                      <Skeleton className="h-2.5 w-16" />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Text variant="meta" tone="dim" render={<p className="px-2 py-6 text-center" />}>
+                No games yet
+              </Text>
+            )
           ) : null}
         </SidebarGroup>
       </SidebarContent>
