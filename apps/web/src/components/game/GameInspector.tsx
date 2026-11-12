@@ -462,18 +462,24 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
  * once, with the reason, so a missing tool is named once with its fix.
  */
 /**
- * The Checks heading's count: every check this build passed, the same number
- * the strip, the Log and the sidebar give for it, so no two places disagree.
- * The rows below show the few that matter most; "more measurements" holds the
- * rest with their own pass count. Before any reading lands, "0 pass" would read
- * as a verdict.
+ * The Checks heading's count, of the rows it heads ("5 of 7 pass"), in the
+ * words the Log and the strip use for the same build (checksPhrase), so the
+ * first number read always matches the rows. Before any reading lands, "0
+ * pass" would read as a verdict.
  */
 function checksSummary(facts: GameBuildFacts): string {
   const view = gameChecksView(facts);
   const busy = facts.state === "measuring" || facts.state === "queued";
+  const shownPass = view.checks.filter(
+    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
+  ).length;
+  const notMeasured = view.checks.filter((check) => check.reading._tag === "not-measured").length;
   return [
-    ...(view.pass > 0 || view.toLook > 0 || !busy ? [`${view.pass} pass`] : []),
+    ...(shownPass > 0 || view.toLook > 0 || !busy
+      ? [`${shownPass} of ${view.checks.length} pass`]
+      : []),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
+    ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
     ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
   ].join(" · ");
 }

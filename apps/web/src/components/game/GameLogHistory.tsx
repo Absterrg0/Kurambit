@@ -8,7 +8,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { GameBuildStill } from "./GameBuildStill";
-import { buildCaption, buildName, formatBuildTime } from "./gameBuilds.logic";
+import { buildCaption, buildName, checksPhrase, formatBuildTime } from "./gameBuilds.logic";
 
 /**
  * A game's Log before its chat has any turns: the game's builds so far, newest
@@ -97,10 +97,7 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
                         files > 0
                           ? `${files === 1 ? "1 file" : `${files} files`} +${additions} −${deletions}`
                           : null,
-                        // The same count the Build tab's Checks heading gives.
-                        build.facts.good + build.facts.bad > 0
-                          ? `${build.facts.good} pass${build.facts.bad > 0 ? ` · ${build.facts.bad} to look at` : ""}`
-                          : null,
+                        checksPhrase(build.facts),
                       ]
                         .filter((part) => part !== null)
                         .join(" · ")}

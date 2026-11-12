@@ -380,6 +380,12 @@ export const summaryOf = (facts: Facts): GameBuildFactsSummary => {
     notMeasured: rows.filter((row) => row.reading._tag === "not-measured").length,
     good: checks.pass,
     bad: checks.toLook,
+    lead: {
+      pass: checks.checks.filter(
+        (check) => check.reading._tag === "measured" && check.reading.tone === "good",
+      ).length,
+      of: checks.checks.length,
+    },
   };
 };
 

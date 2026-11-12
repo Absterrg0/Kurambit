@@ -155,3 +155,17 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
     };
   return { label: delta.label, a, b, mark: MARK[delta.change], tone: delta.tone, why: null };
 };
+
+/**
+ * PURE. A build's checks in the words every surface uses ("5 of 7 pass · 1 to
+ * look at"): the lead checks a build's detail lists, so the Log, a card's
+ * tooltip and the Checks heading never disagree. Null before any reading.
+ */
+export const checksPhrase = (
+  facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">,
+): string | null => {
+  if (facts.good + facts.bad === 0) return null;
+  const pass =
+    facts.lead === undefined ? `${facts.good} pass` : `${facts.lead.pass} of ${facts.lead.of} pass`;
+  return facts.bad > 0 ? `${pass} · ${facts.bad} to look at` : pass;
+};

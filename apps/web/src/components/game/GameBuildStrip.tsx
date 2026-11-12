@@ -23,7 +23,7 @@ import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
-import { buildCaption, buildName, formatBuildTime } from "./gameBuilds.logic";
+import { buildCaption, buildName, checksPhrase, formatBuildTime } from "./gameBuilds.logic";
 import {
   isUndone,
   stageBuildId,
@@ -446,9 +446,7 @@ function BuildCard({
       <TooltipPopup side="top" className="max-w-xs">
         {/* What the card doesn't already say: when, and how it measured. */}
         {formatBuildTime(build.at)}
-        {build.facts.good + build.facts.bad > 0
-          ? ` · ${build.facts.good} pass${build.facts.bad > 0 ? ` · ${build.facts.bad} to look at` : ""}`
-          : ""}
+        {checksPhrase(build.facts) === null ? "" : ` · ${checksPhrase(build.facts)}`}
         {undone ? " · undone" : ""}
       </TooltipPopup>
     </Tooltip>

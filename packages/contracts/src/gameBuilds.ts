@@ -150,6 +150,12 @@ export const GameBuildFactsSummary = Schema.Struct({
   /** Measured facts that read good and bad: the build card's two marks. */
   good: NonNegativeInt,
   bad: NonNegativeInt,
+  /**
+   * The lead checks, the rows a build's detail shows first: how many pass, of
+   * how many. Every surface says a build's checks in these words, so none
+   * disagrees. Absent on summaries counted before it existed.
+   */
+  lead: Schema.optionalKey(Schema.Struct({ pass: NonNegativeInt, of: NonNegativeInt })),
 });
 export type GameBuildFactsSummary = typeof GameBuildFactsSummary.Type;
 
