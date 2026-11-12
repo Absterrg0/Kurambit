@@ -1427,10 +1427,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (hideEmptyPlaceholder) {
       return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
     }
-    // A game's Log sits beside its Stage and builds: before this chat has turns it
-    // reads the game's build history, top-aligned like the Inspector's other tabs.
+    // A game's Log sits beside its Stage and builds, top-aligned like the Inspector's other tabs.
     if (gameThread && citationThreadRef !== null) {
-      return <GameLogHistory threadRef={citationThreadRef} />;
+      return <GameLogHistory />;
     }
     return (
       <div
