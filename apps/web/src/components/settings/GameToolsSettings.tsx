@@ -30,7 +30,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
-import { StatusDot } from "../ui/status-dot";
+import { StatusLabel } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -249,6 +249,7 @@ function GameToolRow({
   const details = showMessage || error !== null || aboutOpen;
   return (
     <SettingsRow
+      inlineControl
       icon={<ToolIcon />}
       title={GAME_TOOL_NAMES[tool.tool]}
       description={TOOL_PURPOSE[tool.tool]}
@@ -272,7 +273,14 @@ function GameToolRow({
                 }
               />
               <TooltipPopup side="top" className="max-w-96 break-all">
-                {isCopied ? "Copied" : tool.path}
+                {isCopied ? (
+                  "Copied"
+                ) : (
+                  <span className="grid gap-0.5">
+                    <span>Copy path</span>
+                    <span className="text-muted-foreground">{tool.path}</span>
+                  </span>
+                )}
               </TooltipPopup>
             </Tooltip>
           )}
@@ -288,12 +296,7 @@ function GameToolRow({
       }
       control={
         <span className="flex items-center gap-3">
-          <span className="flex items-center gap-2">
-            <StatusDot tone={status.tone} size="md" />
-            <Text variant="meta" tone="muted">
-              {status.label}
-            </Text>
-          </span>
+          <StatusLabel tone={status.tone}>{status.label}</StatusLabel>
           {changeButton}
         </span>
       }

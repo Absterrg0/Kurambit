@@ -15,7 +15,7 @@ import {
   ThreadId,
 } from "@kurambit/contracts";
 import * as Schema from "effect/Schema";
-import { ArrowRightIcon, CheckIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ArrowRightIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
@@ -45,6 +45,7 @@ import { TerminalViewport } from "../ThreadTerminalDrawer";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 
 import { Button } from "../ui/button";
+import { StatusLabel } from "../ui/status-dot";
 
 import { ScrollArea } from "../ui/scroll-area";
 import { WizardPanel, WizardPopup, WizardHeader } from "../ui/wizard";
@@ -350,7 +351,7 @@ function ConnectedAgentsStep({
           <div className="px-2 py-1.5">
             <Button size="sm" variant="ghost-muted" onClick={() => setAddingAccount(true)}>
               <PlusIcon />
-              Connect another account
+              Connect another Codex account
             </Button>
           </div>
         ) : null}
@@ -494,7 +495,7 @@ function AgentCard({
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
         {/* Ready needs no line: the badge says it. */}
         {providerState === "ready" ? null : (
-          <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+          <p className="mt-0.5 text-meta font-normal break-words whitespace-pre-wrap text-muted-foreground">
             {summary.headline}
             {summary.detail ? ` · ${summary.detail}` : ""}
           </p>
@@ -502,16 +503,13 @@ function AgentCard({
       </div>
       <div className="shrink-0">
         {providerState === "ready" ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
-            <CheckIcon className="size-3.5" />
-            Ready
-          </span>
+          <StatusLabel tone="success">Ready</StatusLabel>
         ) : providerState === "checking" ? (
-          <span className="text-xs text-muted-foreground">Checking...</span>
+          <StatusLabel>Checking…</StatusLabel>
         ) : providerState === "disabled" ? (
-          <span className="text-xs text-muted-foreground">Disabled</span>
+          <StatusLabel>Disabled</StatusLabel>
         ) : providerState === "attention" ? (
-          <span className="text-xs text-muted-foreground">{summary.headline}</span>
+          <StatusLabel tone="warning">{summary.headline}</StatusLabel>
         ) : (
           <Button
             size="xs"
@@ -545,19 +543,14 @@ function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
         {providerState === "ready" ? null : (
-          <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+          <p className="mt-0.5 text-meta font-normal break-words whitespace-pre-wrap text-muted-foreground">
             {providerState === "checking"
               ? "Checking..."
               : `${summary.headline}${summary.detail ? ` · ${summary.detail}` : ""} Fix it in Settings → Providers.`}
           </p>
         )}
       </div>
-      {providerState === "ready" ? (
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-success-foreground">
-          <CheckIcon className="size-3.5" />
-          Ready
-        </span>
-      ) : null}
+      {providerState === "ready" ? <StatusLabel tone="success">Ready</StatusLabel> : null}
     </div>
   );
 }
