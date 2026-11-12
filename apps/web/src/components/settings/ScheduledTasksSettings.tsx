@@ -460,9 +460,8 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
   const [creating, setCreating] = useState(false);
 
   const query = useEnvironmentQuery(scheduledTaskListQuery({ environmentId, input: {} }));
-  const tasks = (query.data?.tasks ?? []).filter(
-    (task) => projectFilter === "" || task.projectId === projectFilter,
-  );
+  const allTasks = query.data?.tasks ?? [];
+  const tasks = allTasks.filter((task) => projectFilter === "" || task.projectId === projectFilter);
   const defaultProjectId = projectFilter || (projects[0]?.id ?? tasks[0]?.projectId ?? "");
   const loading = query.isPending && query.data === null;
   const projectTitle = (id: string) =>
@@ -516,14 +515,12 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
             <EmptyDescription>{query.error}</EmptyDescription>
           </EmptyHeader>
         </Empty>
-      ) : loading ? null : tasks.length === 0 ? (
+      ) : loading ? null : allTasks.length === 0 ? (
         <Empty variant="well">
           <EmptyHeader>
             <EmptyTitle>No scheduled tasks</EmptyTitle>
             <EmptyDescription>
-              {projectFilter === ""
-                ? "A task sends your agent the same message on a timer, in its game's chat."
-                : `Nothing is scheduled in ${projectTitle(projectFilter)}.`}
+              A task sends your agent the same message on a timer, in its game's chat.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -551,6 +548,11 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
             ) : null
           }
         >
+          {tasks.length === 0 ? (
+            <Text variant="meta" tone="muted" render={<p className="px-3 py-3 sm:px-4" />}>
+              Nothing is scheduled in {projectTitle(projectFilter)}.
+            </Text>
+          ) : null}
           {tasks.map((task) => (
             <TaskRow
               key={task.id}
