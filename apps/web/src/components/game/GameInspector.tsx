@@ -1060,8 +1060,9 @@ function BuildActions({
             >
               <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
-            {/* Upward: below, it would cover the Checks heading the build's actions are about. */}
-            <MenuPopup side="top" align="end" className="w-64">
+            {/* Beside the build's own header, centred on it: above has no room when the
+                header tops the panel, and below would cover the Checks heading. */}
+            <MenuPopup side="left" align="center" className="w-64">
               {canPlay ? (
                 <MenuItem onClick={() => requestStage({ kind: "play", build: refOf(build) })}>
                   <PlayIcon />
