@@ -39,6 +39,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ExpandableText } from "./ExpandableText";
+import { SettingsFold } from "./FoldedSettingsSection";
 import { ResourceTelemetryDiagnostics, unavailableReason } from "./ResourceTelemetryDiagnostics";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -87,12 +88,10 @@ function StatBlock({
   label,
   value,
   tooltip,
-  tone = "default",
 }: {
   label: string;
   value: string;
   tooltip?: ReactNode;
-  tone?: "default" | "warning" | "danger";
 }) {
   return (
     <div className="min-w-0 border-border/60 px-4 py-3 sm:px-5">
@@ -115,13 +114,8 @@ function StatBlock({
           </Tooltip>
         ) : null}
       </div>
-      <div
-        className={cn(
-          "mt-1 truncate font-mono text-lg font-semibold tabular-nums text-foreground",
-          tone === "warning" && "text-warning-foreground",
-          tone === "danger" && "text-destructive",
-        )}
-      >
+      {/* Counts stay neutral: a trace count is a record, not something to act on. */}
+      <div className="mt-1 truncate font-mono text-lg font-semibold tabular-nums text-foreground">
         {value}
       </div>
     </div>
@@ -965,8 +959,18 @@ export function DiagnosticsSettingsPanel() {
     );
   }
 
+  // One sentence first: whether anything needs the person, before any number.
+  const summary =
+    data === null || data === undefined
+      ? "How Kurambit is running on this computer."
+      : data.failureCount === 0
+        ? "Kurambit is running normally on this computer."
+        : `Kurambit is running. Its traces hold ${formatCount(data.failureCount)} failed ${
+            data.failureCount === 1 ? "operation" : "operations"
+          }, listed under Trace details.`;
+
   return (
-    <SettingsPageContainer width="expanded" className="gap-10">
+    <SettingsPageContainer width="expanded" className="gap-10" description={summary}>
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       {hideProcesses ? null : (
@@ -1127,275 +1131,276 @@ export function DiagnosticsSettingsPanel() {
         </SettingsSection>
       )}
 
-      <SettingsSection
-        title="Trace diagnostics"
-        headerAction={
-          <div className="flex items-center gap-1.5">
-            <DiagnosticsLastChecked checkedAt={data?.readAt ?? null} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost-muted"
-                    disabled={
-                      !canOpenHostEditor ||
-                      !observability?.logsDirectoryPath ||
-                      isOpeningLogsDirectory
-                    }
-                    onClick={openLogsDirectory}
-                    aria-label="Open logs folder"
-                  >
-                    <FolderOpenIcon />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Open logs folder</TooltipPopup>
-            </Tooltip>
-            <DiagnosticsRefreshButton
-              isPending={isPending}
-              label="Refresh trace diagnostics"
-              onClick={refresh}
-            />
-          </div>
-        }
+      <SettingsFold
+        title="Trace details"
+        description="What Kurambit's own operations recorded: failures, slow steps and their logs."
       >
-        <StatsGrid>
-          <StatBlock label="Spans" value={data ? formatCount(data.recordCount) : "..."} />
-          <StatBlock
-            label="Failures"
-            value={data ? formatCount(data.failureCount) : "..."}
-            tone={data && data.failureCount > 0 ? "danger" : "default"}
-          />
-          <StatBlock
-            label="Slow spans"
-            value={data ? formatCount(data.slowSpanCount) : "..."}
-            tooltip={
-              data
-                ? `Spans with a duration of ${formatDuration(data.slowSpanThresholdMs)} or longer.`
-                : "Spans at or above the configured slow-span threshold."
-            }
-            tone={data && data.slowSpanCount > 0 ? "warning" : "default"}
-          />
-          <StatBlock
-            label="Parse errors"
-            value={data ? formatCount(data.parseErrorCount) : "..."}
-            tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
-          />
-        </StatsGrid>
-        {openLogsDirectoryError || traceDiagnosticsError || error ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {openLogsDirectoryError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{openLogsDirectoryError}</span>
-              </div>
-            ) : null}
-            {traceDiagnosticsError ? (
-              <div
-                className={cn(
-                  "flex items-start gap-2",
-                  traceDiagnosticsPartialFailure ? "text-warning-foreground" : "text-destructive",
-                )}
-              >
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>
-                  {traceDiagnosticsPartialFailure
-                    ? `Some trace files could not be read, so diagnostics may be incomplete. ${traceDiagnosticsError.message}`
-                    : traceDiagnosticsError.message}
-                </span>
-              </div>
-            ) : null}
-            {error ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </SettingsSection>
+        <SettingsSection
+          title="Trace diagnostics"
+          headerAction={
+            <div className="flex items-center gap-1.5">
+              <DiagnosticsLastChecked checkedAt={data?.readAt ?? null} />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      disabled={
+                        !canOpenHostEditor ||
+                        !observability?.logsDirectoryPath ||
+                        isOpeningLogsDirectory
+                      }
+                      onClick={openLogsDirectory}
+                      aria-label="Open logs folder"
+                    >
+                      <FolderOpenIcon />
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="top">Open logs folder</TooltipPopup>
+              </Tooltip>
+              <DiagnosticsRefreshButton
+                isPending={isPending}
+                label="Refresh trace diagnostics"
+                onClick={refresh}
+              />
+            </div>
+          }
+        >
+          <StatsGrid>
+            <StatBlock label="Spans" value={data ? formatCount(data.recordCount) : "..."} />
+            <StatBlock label="Failures" value={data ? formatCount(data.failureCount) : "..."} />
+            <StatBlock
+              label="Slow spans"
+              value={data ? formatCount(data.slowSpanCount) : "..."}
+              tooltip={
+                data
+                  ? `Spans with a duration of ${formatDuration(data.slowSpanThresholdMs)} or longer.`
+                  : "Spans at or above the configured slow-span threshold."
+              }
+            />
+            <StatBlock
+              label="Parse errors"
+              value={data ? formatCount(data.parseErrorCount) : "..."}
+            />
+          </StatsGrid>
+          {openLogsDirectoryError || traceDiagnosticsError || error ? (
+            <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
+              {openLogsDirectoryError ? (
+                <div className="flex items-start gap-2 text-destructive">
+                  <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{openLogsDirectoryError}</span>
+                </div>
+              ) : null}
+              {traceDiagnosticsError ? (
+                <div
+                  className={cn(
+                    "flex items-start gap-2",
+                    traceDiagnosticsPartialFailure ? "text-warning-foreground" : "text-destructive",
+                  )}
+                >
+                  <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    {traceDiagnosticsPartialFailure
+                      ? `Some trace files could not be read, so diagnostics may be incomplete. ${traceDiagnosticsError.message}`
+                      : traceDiagnosticsError.message}
+                  </span>
+                </div>
+              ) : null}
+              {error ? (
+                <div className="flex items-start gap-2 text-destructive">
+                  <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </SettingsSection>
 
-      <SettingsSection title="Latest failures">
-        {data && data.latestFailures.length > 0 ? (
-          <DiagnosticsTable headers={["Span", "Cause", "Duration", "Ended"]}>
-            {data.latestFailures.map((failure) => (
-              <tr key={`${failure.traceId}:${failure.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {failure.name}
-                </td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
-                  <ExpandableText text={failure.cause} />
-                </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
-                  {formatDuration(failure.durationMs)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
-                  <RelativeTimeNoWrap value={failure.endedAt} />
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
-        ) : (
-          <EmptyRows label={isInitialLoading ? "Loading failures..." : "No failed spans found."} />
-        )}
-      </SettingsSection>
-
-      <SettingsSection title="Most Common Failures">
-        {data && data.commonFailures.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Count", "Cause", "Last Seen"]}
-            minTableWidth="min-w-[760px]"
-          >
-            {data.commonFailures.map((failure) => (
-              <tr key={`${failure.name}:${failure.cause}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {failure.name}
-                </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
-                  {formatCount(failure.count)}
-                </td>
-                <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
-                  <ExpandableText text={failure.cause} />
-                </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
-                  <RelativeTimeNoWrap value={failure.lastSeenAt} />
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
-        ) : (
-          <EmptyRows
-            label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
-          />
-        )}
-      </SettingsSection>
-
-      <SettingsSection title="Slowest Spans">
-        {data && data.slowestSpans.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Duration", "Ended", "Trace"]}
-            minTableWidth="min-w-[900px]"
-            columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
-          >
-            {data.slowestSpans.map((span) => (
-              <tr key={`${span.traceId}:${span.spanId}`}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {span.name}
-                </td>
-                <td className="px-4 py-3 align-top font-mono tabular-nums">
-                  {formatDuration(span.durationMs)}
-                </td>
-                <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
-                  <RelativeTimeNoWrap value={span.endedAt} />
-                </td>
-                <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
-                  <TraceIdCell traceId={span.traceId} />
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
-        ) : (
-          <EmptyRows label={isInitialLoading ? "Loading slow spans..." : "No spans found."} />
-        )}
-      </SettingsSection>
-
-      <SettingsSection title="Span Logs">
-        {data && data.latestWarningAndErrorLogs.length > 0 ? (
-          <ScrollArea
-            radius="none"
-            chainVerticalScroll
-            scrollFade
-            hideScrollbars
-            className="w-full max-w-full"
-          >
-            <table className="w-full min-w-[920px] table-fixed text-left text-xs">
-              <colgroup>
-                <col className="w-[11%]" />
-                <col className="w-[9%]" />
-                <col className="w-[24%]" />
-                <col className="w-[26%]" />
-                <col className="w-[30%]" />
-              </colgroup>
-              <thead className="border-b border-border/60 text-meta font-medium text-muted-foreground">
-                <tr>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pl-5">Time</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Level</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Span</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Message</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pr-5">Trace</th>
+        <SettingsSection title="Latest failures">
+          {data && data.latestFailures.length > 0 ? (
+            <DiagnosticsTable headers={["Span", "Cause", "Duration", "Ended"]}>
+              {data.latestFailures.map((failure) => (
+                <tr key={`${failure.traceId}:${failure.spanId}`}>
+                  <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                    {failure.name}
+                  </td>
+                  <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                    <ExpandableText text={failure.cause} />
+                  </td>
+                  <td className="px-4 py-3 align-top font-mono tabular-nums">
+                    {formatDuration(failure.durationMs)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
+                    <RelativeTimeNoWrap value={failure.endedAt} />
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {data.latestWarningAndErrorLogs.map((event) => (
-                  <tr
-                    key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
-                    className="hover:bg-muted/15"
-                  >
-                    <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground sm:pl-5">
-                      <RelativeTimeNoWrap value={event.seenAt} />
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <span className="inline-flex rounded bg-muted px-1.5 py-0.5 font-mono text-meta font-medium uppercase text-foreground/80">
-                        {event.level}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 align-top">
-                      <div className="truncate font-medium text-foreground">{event.spanName}</div>
-                    </td>
-                    <td className="px-4 py-3 align-top text-muted-foreground">
-                      <ExpandableText
-                        collapsedClassName="line-clamp-2"
-                        expandLabel="Show full message"
-                        text={event.message}
-                      />
-                    </td>
-                    <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pr-5">
-                      <TraceIdCell traceId={event.traceId} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollArea>
-        ) : (
-          <EmptyRows
-            label={isInitialLoading ? "Loading recent logs..." : "No warnings or errors found."}
-          />
-        )}
-      </SettingsSection>
+              ))}
+            </DiagnosticsTable>
+          ) : (
+            <EmptyRows
+              label={isInitialLoading ? "Loading failures..." : "No failed spans found."}
+            />
+          )}
+        </SettingsSection>
 
-      <SettingsSection title="Top Span Names">
-        {data && data.topSpansByCount.length > 0 ? (
-          <DiagnosticsTable
-            headers={["Span", "Count", "Failures", "Average", "Max"]}
-            minTableWidth="min-w-[760px]"
-            columnWidths={["w-[48%]", "w-[13%]", "w-[13%]", "w-[13%]", "w-[13%]"]}
-          >
-            {data.topSpansByCount.map((span) => (
-              <tr key={span.name}>
-                <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
-                  {span.name}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
-                  {formatCount(span.count)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
-                  {formatCount(span.failureCount)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
-                  {formatDuration(span.averageDurationMs)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums last:sm:pr-5">
-                  {formatDuration(span.maxDurationMs)}
-                </td>
-              </tr>
-            ))}
-          </DiagnosticsTable>
-        ) : (
-          <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
-        )}
-      </SettingsSection>
+        <SettingsSection title="Most common failures">
+          {data && data.commonFailures.length > 0 ? (
+            <DiagnosticsTable
+              headers={["Span", "Count", "Cause", "Last Seen"]}
+              minTableWidth="min-w-[760px]"
+            >
+              {data.commonFailures.map((failure) => (
+                <tr key={`${failure.name}:${failure.cause}`}>
+                  <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                    {failure.name}
+                  </td>
+                  <td className="px-4 py-3 align-top font-mono tabular-nums">
+                    {formatCount(failure.count)}
+                  </td>
+                  <td className="max-w-[360px] px-4 py-3 align-top text-muted-foreground">
+                    <ExpandableText text={failure.cause} />
+                  </td>
+                  <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground last:sm:pr-5">
+                    <RelativeTimeNoWrap value={failure.lastSeenAt} />
+                  </td>
+                </tr>
+              ))}
+            </DiagnosticsTable>
+          ) : (
+            <EmptyRows
+              label={isInitialLoading ? "Loading failure groups..." : "No repeated failures found."}
+            />
+          )}
+        </SettingsSection>
+
+        <SettingsSection title="Slowest spans">
+          {data && data.slowestSpans.length > 0 ? (
+            <DiagnosticsTable
+              headers={["Span", "Duration", "Ended", "Trace"]}
+              minTableWidth="min-w-[900px]"
+              columnWidths={["w-[44%]", "w-[14%]", "w-[12%]", "w-[30%]"]}
+            >
+              {data.slowestSpans.map((span) => (
+                <tr key={`${span.traceId}:${span.spanId}`}>
+                  <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                    {span.name}
+                  </td>
+                  <td className="px-4 py-3 align-top font-mono tabular-nums">
+                    {formatDuration(span.durationMs)}
+                  </td>
+                  <td className="w-px whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground">
+                    <RelativeTimeNoWrap value={span.endedAt} />
+                  </td>
+                  <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground last:sm:pr-5">
+                    <TraceIdCell traceId={span.traceId} />
+                  </td>
+                </tr>
+              ))}
+            </DiagnosticsTable>
+          ) : (
+            <EmptyRows label={isInitialLoading ? "Loading slow spans..." : "No spans found."} />
+          )}
+        </SettingsSection>
+
+        <SettingsSection title="Span logs">
+          {data && data.latestWarningAndErrorLogs.length > 0 ? (
+            <ScrollArea
+              radius="none"
+              chainVerticalScroll
+              scrollFade
+              hideScrollbars
+              className="w-full max-w-full"
+            >
+              <table className="w-full min-w-[920px] table-fixed text-left text-xs">
+                <colgroup>
+                  <col className="w-[11%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[26%]" />
+                  <col className="w-[30%]" />
+                </colgroup>
+                <thead className="border-b border-border/60 text-meta font-medium text-muted-foreground">
+                  <tr>
+                    <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pl-5">Time</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Level</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Span</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Message</th>
+                    <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pr-5">Trace</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {data.latestWarningAndErrorLogs.map((event) => (
+                    <tr
+                      key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
+                      className="hover:bg-muted/15"
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground sm:pl-5">
+                        <RelativeTimeNoWrap value={event.seenAt} />
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <span className="inline-flex rounded bg-muted px-1.5 py-0.5 font-mono text-meta font-medium uppercase text-foreground/80">
+                          {event.level}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="truncate font-medium text-foreground">{event.spanName}</div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground">
+                        <ExpandableText
+                          collapsedClassName="line-clamp-2"
+                          expandLabel="Show full message"
+                          text={event.message}
+                        />
+                      </td>
+                      <td className="min-w-0 whitespace-nowrap px-4 py-3 align-top text-muted-foreground sm:pr-5">
+                        <TraceIdCell traceId={event.traceId} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
+          ) : (
+            <EmptyRows
+              label={isInitialLoading ? "Loading recent logs..." : "No warnings or errors found."}
+            />
+          )}
+        </SettingsSection>
+
+        <SettingsSection title="Top span names">
+          {data && data.topSpansByCount.length > 0 ? (
+            <DiagnosticsTable
+              headers={["Span", "Count", "Failures", "Average", "Max"]}
+              minTableWidth="min-w-[760px]"
+              columnWidths={["w-[48%]", "w-[13%]", "w-[13%]", "w-[13%]", "w-[13%]"]}
+            >
+              {data.topSpansByCount.map((span) => (
+                <tr key={span.name}>
+                  <td className="px-4 py-3 align-top text-xs font-medium text-foreground first:sm:pl-5">
+                    {span.name}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
+                    {formatCount(span.count)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
+                    {formatCount(span.failureCount)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums">
+                    {formatDuration(span.averageDurationMs)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums last:sm:pr-5">
+                    {formatDuration(span.maxDurationMs)}
+                  </td>
+                </tr>
+              ))}
+            </DiagnosticsTable>
+          ) : (
+            <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
+          )}
+        </SettingsSection>
+      </SettingsFold>
       {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}
     </SettingsPageContainer>
   );

@@ -2,10 +2,10 @@ import { SettingsGroup } from "./SettingsGroup";
 import { AuthSettingsWriteScope } from "@kurambit/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
-import { InfoIcon, Undo2Icon } from "lucide-react";
+import { ChevronLeftIcon, InfoIcon, Undo2Icon } from "lucide-react";
 import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@kurambit/contracts";
 import * as Equal from "effect/Equal";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   createContext,
   type ComponentPropsWithoutRef,
@@ -21,10 +21,11 @@ import {
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { settingsBreadcrumbLabel } from "./SettingsBreadcrumb";
+import { SETTINGS_DETAIL_PAGE_PARENTS, SETTINGS_SECTION_LABELS } from "./settingsSearch";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { SettingsScopeSentence } from "./SettingsScopeSentence";
 import {
@@ -598,6 +599,9 @@ export function SettingsPageContainer({
     select: (location) => settingsBreadcrumbLabel(location.pathname),
   });
   const pageTitle = title ?? routeTitle;
+  const parentPath = useLocation({
+    select: (location) => SETTINGS_DETAIL_PAGE_PARENTS[location.pathname] ?? null,
+  });
   const highlightTarget = useLocation({
     select: (location) => location.state.settingsTargetHighlight !== false,
   });
@@ -626,6 +630,14 @@ export function SettingsPageContainer({
           {pageTitle === null ? null : (
             <div className="-mb-5 flex items-start justify-between gap-4 px-3 sm:px-4">
               <div className="grid min-w-0 gap-1">
+                {parentPath ? (
+                  <Text variant="meta" tone="inherit" render={<p className="justify-self-start" />}>
+                    <InlineButton tone="muted" render={<Link to={parentPath} />}>
+                      <ChevronLeftIcon aria-hidden className="size-3.5" />
+                      {SETTINGS_SECTION_LABELS[parentPath]}
+                    </InlineButton>
+                  </Text>
+                ) : null}
                 <Text variant="title" tone="strong" render={<h1 />}>
                   {pageTitle}
                 </Text>

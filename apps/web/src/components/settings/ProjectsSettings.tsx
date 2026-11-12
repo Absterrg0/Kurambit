@@ -2,8 +2,8 @@ import { EnvironmentId } from "@kurambit/contracts";
 import { ChevronRightIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
-import { GamePicture } from "../game/GameBuildStill";
-import { useGameLibrary } from "../game/useGameLibrary";
+import { GameLibraryPicture } from "../game/GameLibraryStatus";
+import { useGameCovers } from "../game/useGameCovers";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Text } from "../ui/text";
 import { ITEM_ROW_CLASSNAME } from "./itemRows";
@@ -38,17 +38,17 @@ export function ProjectsSettings() {
   );
 }
 
-/** The sidebar's games, in the sidebar's order and with its pictures, each opening its settings. */
+/** The library's games, latest first and with the sidebar's pictures, each opening its settings. */
 function GamePicker() {
   const { selectScope, groups } = useSettingsScope();
-  const { games, isLoading } = useGameLibrary();
-  const choices = games.flatMap((game) => {
+  const { covers, isLoading } = useGameCovers();
+  const choices = covers.flatMap(({ game, main, chats }) => {
     const group = groups.find((candidate) =>
       candidate.memberProjects.some(
         (member) => member.environmentId === game.environmentId && member.id === game.projectId,
       ),
     );
-    return group === undefined ? [] : [{ game, group }];
+    return group === undefined ? [] : [{ game, main, chats, group }];
   });
   return (
     <SettingsPageContainer description="Choose a game to change its name, icon, side copies and actions.">
@@ -63,7 +63,7 @@ function GamePicker() {
         )
       ) : (
         <SettingsGroup>
-          {choices.map(({ game, group }) => (
+          {choices.map(({ game, main, chats, group }) => (
             <button
               key={`${game.environmentId}:${game.projectId}`}
               type="button"
@@ -73,12 +73,12 @@ function GamePicker() {
               )}
               onClick={() => selectScope({ project: group.projectKey })}
             >
-              <GamePicture
-                environmentId={game.environmentId}
-                root={game.root}
-                path={game.keyArt}
+              <GameLibraryPicture
+                game={game}
+                main={main}
+                chats={chats}
                 gameName={group.displayName}
-                className="size-7.5 shrink-0 rounded-md"
+                className="size-7.5 shrink-0"
               />
               <span className="grid min-w-0 flex-1">
                 <Text variant="label" truncate>

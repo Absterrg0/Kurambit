@@ -38,6 +38,7 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Text } from "../ui/text";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { ThemeImportDialog } from "./ThemeImportDialog";
@@ -841,14 +842,23 @@ export function ThemeLibrary({
 
   return (
     <div className="space-y-3">
-      <h3 className="px-3 text-sm font-normal text-foreground/70 sm:px-4">
+      {/* The same heading as every other settings section (Interface, Motion). */}
+      <Text
+        variant="title"
+        tone="strong"
+        render={<h2 className="flex min-h-7 items-center px-3 [--type-title:1rem] sm:px-4" />}
+      >
         {searchableSetting("color-scheme").title}
-      </h3>
+      </Text>
       {renderModeTiles()}
       <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-3 pt-2 sm:px-4">
-        <h3 className="text-sm font-normal text-foreground/70">
+        <Text
+          variant="title"
+          tone="strong"
+          render={<h2 className="flex min-h-7 items-center [--type-title:1rem]" />}
+        >
           {searchableSetting("theme").title}
-        </h3>
+        </Text>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             size="xs"

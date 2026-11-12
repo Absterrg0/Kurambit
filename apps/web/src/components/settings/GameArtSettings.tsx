@@ -41,10 +41,23 @@ const SHOWN_PROVIDERS = (
   Object.keys(GAME_ART_PROVIDERS) as ReadonlyArray<GameArtProviderId>
 ).filter((provider) => provider !== "kurambit");
 
+const LANE_LIST = new Intl.ListFormat("en", { type: "conjunction" });
+// What a provider makes, as things in a sentence: "Makes images and textures."
+const GAME_ART_LANE_PLURALS = {
+  image: "images",
+  character: "characters",
+  creature: "creatures",
+  model: "models",
+  texture: "textures",
+  sfx: "sound effects",
+  music: "music",
+  voice: "voices",
+  motion: "motion",
+} as const satisfies Record<GameArtLane, string>;
 const lanesLine = (provider: GameArtProviderId) =>
-  `Makes ${GAME_ART_PROVIDERS[provider].lanes
-    .map((lane) => GAME_ART_LANE_LABELS[lane].toLowerCase())
-    .join(", ")}.`;
+  `Makes ${LANE_LIST.format(
+    GAME_ART_PROVIDERS[provider].lanes.map((lane) => GAME_ART_LANE_PLURALS[lane]),
+  )}.`;
 
 // The lane picker is narrow; "Codex (ChatGPT plan)" inside it truncated.
 const shortProviderLabel = (provider: GameArtProviderId) =>
@@ -109,8 +122,9 @@ export function GameArtSettings({ environmentId }: { environmentId: EnvironmentI
       <span key={provider}>
         {index === 0 ? null : index === options.length - 1 ? " or " : ", "}
         <InlineButton
-          tone="muted"
+          tone="link"
           className="inline align-baseline"
+          aria-label={`Set up ${providerLabel(provider)}`}
           onClick={() => scrollToSettingsTarget(providerAnchor(provider))}
         >
           {shortProviderLabel(provider)}

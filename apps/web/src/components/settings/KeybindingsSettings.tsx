@@ -2,7 +2,6 @@ import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentsWithScope, readEnvironmentScope } from "../../state/session";
 import {
   ChevronDownIcon,
-  ChevronRightIcon,
   CircleXIcon,
   EllipsisIcon,
   FileJsonIcon,
@@ -53,7 +52,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Text } from "../ui/text";
 import { Switch } from "../ui/switch";
 import { Toggle } from "../ui/toggle";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { SettingsFold } from "./FoldedSettingsSection";
 import { toastManager } from "../ui/toast";
 import {
   buildKeybindingRows,
@@ -76,12 +75,7 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
-import {
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-  useSettingsSearchTargetId,
-} from "./settingsLayout";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -1267,61 +1261,17 @@ function KeybindingsGroups(props: KeybindingsGroupsProps & { foldCodeChat: boole
     <>
       <KeybindingsGroupList groups={studio} {...rest} />
       {codeChat.length > 0 ? (
-        <CodeChatKeybindingsFold
-          anchors={codeChat.flatMap((group) =>
+        <SettingsFold
+          title="Code chat, terminal and preview"
+          description="Shortcuts for the coding views a game's screen does not use."
+          openFor={codeChat.flatMap((group) =>
             group.rows.flatMap((row) => props.anchorIds.get(row.id) ?? []),
           )}
         >
           <KeybindingsGroupList groups={codeChat} {...rest} />
-        </CodeChatKeybindingsFold>
+        </SettingsFold>
       ) : null}
     </>
-  );
-}
-
-function CodeChatKeybindingsFold({
-  anchors,
-  children,
-}: {
-  anchors: ReadonlyArray<string>;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const searchTargetId = useSettingsSearchTargetId();
-  // A search jump to one of these shortcuts opens the fold in the render its row arrives.
-  const [openedForTarget, setOpenedForTarget] = useState<string | null>(null);
-  if (
-    searchTargetId !== null &&
-    searchTargetId !== openedForTarget &&
-    anchors.includes(searchTargetId)
-  ) {
-    setOpenedForTarget(searchTargetId);
-    if (!open) setOpen(true);
-  }
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="px-3 sm:px-4">
-        <CollapsibleTrigger className="group flex min-h-7 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-          <Text
-            variant="title"
-            tone="muted"
-            render={<h2 className="[--type-title:1rem] group-hover:text-foreground" />}
-          >
-            Code chat, terminal and preview
-          </Text>
-          <ChevronRightIcon
-            aria-hidden
-            className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none"
-          />
-        </CollapsibleTrigger>
-        <Text variant="meta" tone="muted" render={<p />}>
-          Shortcuts for the coding views a game&apos;s screen does not use.
-        </Text>
-      </div>
-      <CollapsiblePanel>
-        <div className="flex flex-col gap-8 pt-6">{children}</div>
-      </CollapsiblePanel>
-    </Collapsible>
   );
 }
 

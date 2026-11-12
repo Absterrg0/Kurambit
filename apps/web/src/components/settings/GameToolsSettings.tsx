@@ -250,11 +250,13 @@ function GameToolRow({
     onChanged();
   };
   const helper = isBlenderHelper(tool.tool);
-  // A helper cannot be installed into a Blender that is not there yet: it waits on Blender
-  // instead of offering a button that cannot work.
-  const waitsOnBlender =
-    helper && !tool.installed && blender !== null && blender.status !== "ready";
-  const status = waitsOnBlender
+  // A helper works only through Blender, so without a ready Blender it is not ready either,
+  // even when its own program is in place.
+  const needsBlender = helper && blender !== null && blender.status !== "ready";
+  // One that is not installed cannot be installed into a missing Blender: it waits instead
+  // of offering a button that cannot work. An installed one can still be removed.
+  const waitsOnBlender = needsBlender && !tool.installed;
+  const status = needsBlender
     ? ({ tone: "neutral", label: "Needs Blender" } as const)
     : STATUS_LABELS[tool.status];
   const ToolIcon = TOOL_ICONS[tool.tool];
@@ -380,7 +382,7 @@ const KEY_ROWS = [
     key: "gameJevApiKey",
     title: "Smarter play bot",
     description:
-      "Optional. With a Jev key the play bot asks Jev which way to explore; without one it uses its own rules.",
+      "Optional. With a key for Jev, typesafe.ai's decision model, the play bot asks it which way to explore; without one it uses its own rules.",
   },
   {
     key: "gameSketchfabApiKey",

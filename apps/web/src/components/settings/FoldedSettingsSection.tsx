@@ -3,6 +3,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import { Text } from "../ui/text";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { useSettingsSearchTarget, useSettingsSearchTargetId } from "./settingsLayout";
 
@@ -89,5 +90,60 @@ export function FoldedSettingsSection({
         </CollapsiblePanel>
       </Collapsible>
     </section>
+  );
+}
+
+/**
+ * A page's second-tier block: one muted heading that opens it, with a line saying what is
+ * inside. A search jump to one of `openFor` opens it in the render the target arrives.
+ */
+const NO_TARGETS: ReadonlyArray<string> = [];
+
+export function SettingsFold({
+  title,
+  description,
+  openFor = NO_TARGETS,
+  children,
+}: {
+  readonly title: ReactNode;
+  readonly description: ReactNode;
+  readonly openFor?: ReadonlyArray<string>;
+  readonly children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const searchTargetId = useSettingsSearchTargetId();
+  const [openedForTarget, setOpenedForTarget] = useState<string | null>(null);
+  if (
+    searchTargetId !== null &&
+    searchTargetId !== openedForTarget &&
+    openFor.includes(searchTargetId)
+  ) {
+    setOpenedForTarget(searchTargetId);
+    if (!open) setOpen(true);
+  }
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="px-3 sm:px-4">
+        <CollapsibleTrigger className="group flex min-h-7 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <Text
+            variant="title"
+            tone="muted"
+            render={<h2 className="[--type-title:1rem] group-hover:text-foreground" />}
+          >
+            {title}
+          </Text>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none"
+          />
+        </CollapsibleTrigger>
+        <Text variant="meta" tone="muted" render={<p />}>
+          {description}
+        </Text>
+      </div>
+      <CollapsiblePanel>
+        <div className="flex flex-col gap-8 pt-6">{children}</div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }

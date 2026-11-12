@@ -32,6 +32,7 @@ import {
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
+  SETTINGS_DETAIL_PAGE_PARENTS,
   SETTINGS_SECTION_LABELS,
   settingsSearchLocation,
   type SettingsPath,
@@ -101,13 +102,6 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     ],
   },
 ];
-
-// Detail pages without a nav entry highlight the page that links to them.
-const SETTINGS_DETAIL_PAGE_PARENTS: Readonly<Record<string, SettingsPath>> = {
-  "/settings/diagnostics": "/settings/general",
-  "/settings/open-source-licenses": "/settings/general",
-  "/settings/connections": "/settings/general",
-};
 
 // Attached only to the highlighted result, so it runs whenever the highlight lands on a row.
 function scrollResultIntoView(row: HTMLElement | null) {

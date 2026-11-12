@@ -22,7 +22,8 @@ export function LocalServerRow() {
   return (
     <SettingsRow
       {...searchableSetting("connections-environment")}
-      description={`Runs your agents and game tools on ${environment?.label ?? "this computer"}.`}
+      // Kurambit runs one local server, so its host name only names this computer.
+      description="Runs your agents and game tools on this computer."
       control={<StatusLabel tone={status.tone}>{status.label}</StatusLabel>}
       inlineControl
     />

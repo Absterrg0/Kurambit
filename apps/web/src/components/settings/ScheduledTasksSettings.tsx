@@ -49,7 +49,7 @@ import {
   type DraftState,
 } from "./scheduledTasksSettings.logic";
 
-const PAGE_DESCRIPTION = "Messages your agent runs on a timer, each in its game's chat.";
+const PAGE_DESCRIPTION = "Messages your agent runs on a timer, each in its game's Log.";
 
 function describeSchedule(schedule: ScheduledTask["schedule"]): string {
   if (schedule.type === "interval") {
@@ -78,7 +78,7 @@ function describeSchedule(schedule: ScheduledTask["schedule"]): string {
 const RUN_STATUS: Record<ScheduledTask["lastRunStatus"], string> = {
   never: " · not run yet",
   running: " · sending now",
-  succeeded: " · last sent to its chat",
+  succeeded: " · last sent to its Log",
   failed: " · last could not be sent",
 };
 
@@ -409,9 +409,7 @@ function DraftForm({
           )}
           {isGame ? (
             <span>
-              {editing?.threadId
-                ? "· runs in its chat"
-                : "· runs in a new chat in the game's folder"}
+              {editing?.threadId ? "· runs in its Log" : "· runs in a new Log in the game's folder"}
             </span>
           ) : null}
         </div>
@@ -520,8 +518,9 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
           <EmptyHeader>
             <EmptyTitle>No scheduled tasks</EmptyTitle>
             <EmptyDescription>
-              Keep going picks each next step from the build&apos;s evidence. A task sends the
-              message you write, on its schedule, such as a morning check that the game still plays.
+              A task sends the message you write on its schedule, such as a morning check that the
+              game still plays. Keep going differs: it picks each next step from the build&apos;s
+              evidence.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

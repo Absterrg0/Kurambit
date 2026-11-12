@@ -45,7 +45,7 @@ export function TelemetryExportSettings() {
   if (scope.kind !== "environment" || !environment) {
     return (
       <SettingsSection title="OpenTelemetry export" id="telemetry-export">
-        <SettingsScopeNotice target="environment">
+        <SettingsScopeNotice target="environment" inline>
           Choose one environment to configure its telemetry exports.
         </SettingsScopeNotice>
       </SettingsSection>

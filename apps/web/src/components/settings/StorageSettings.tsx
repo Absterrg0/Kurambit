@@ -548,7 +548,11 @@ export function StorageSettingsPanel() {
             <SettingsRow
               title="Delete idle side copies"
               status={ruleStatus("worktreeAfterDays")}
-              description="Remove side copies whose Log has been idle this many days. Their history is kept."
+              description={
+                settings.worktreeAfterDays === null
+                  ? "Keeps idle side copies. Turn on to remove them after a number of idle days."
+                  : "Remove side copies whose Log has been idle this many days. Their history is kept."
+              }
               serverScoped={!isProjectScope}
               control={
                 <RetentionControl
@@ -574,7 +578,11 @@ export function StorageSettingsPanel() {
                   ]
                     .filter(Boolean)
                     .join(". ")}
-                  description="Remove side copies this many days after their Log settles; 0 removes them at the next cleanup. Their history is kept."
+                  description={
+                    settings.worktreeSettledAfterDays === null
+                      ? "Keeps settled side copies. Turn on to remove them a number of days after their Log settles."
+                      : "Remove side copies this many days after their Log settles; 0 removes them at the next cleanup. Their history is kept."
+                  }
                   serverScoped={!isProjectScope}
                   control={
                     <RetentionControl
@@ -653,7 +661,11 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old browser captures"
             status={ruleStatus("browserArtifactsAfterDays")}
-            description="Delete saved browser captures after this many days. Older capture links will no longer open."
+            description={
+              settings.browserArtifactsAfterDays === null
+                ? "Keeps saved browser captures. Turn on to delete them after a number of days."
+                : "Delete saved browser captures after this many days. Older capture links will no longer open."
+            }
             serverScoped
             control={
               <RetentionControl
@@ -666,7 +678,11 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old rotated logs"
             status={ruleStatus("logsAfterDays")}
-            description="Delete inactive rotated log files after this many days. Current logs are kept."
+            description={
+              settings.logsAfterDays === null
+                ? "Keeps rotated log files. Turn on to delete them after a number of days."
+                : "Delete inactive rotated log files after this many days. Current logs are kept."
+            }
             serverScoped
             control={
               <RetentionControl
@@ -679,7 +695,11 @@ export function StorageSettingsPanel() {
           <SettingsRow
             title="Delete old game logs"
             status={ruleStatus("gameLogsAfterDays")}
-            description="Delete each game's tool logs and bot, explore and check runs after this many days, and any game copies an earlier Kurambit version left behind. A game's oldest go first once they pass 2 GB."
+            description={
+              settings.gameLogsAfterDays === null
+                ? "Keeps each game's tool logs and bot, explore and check runs. Turn on to delete them after a number of days."
+                : "Delete each game's tool logs and bot, explore and check runs after this many days, and any game copies an earlier Kurambit version left behind. A game's oldest go first once they pass 2 GB."
+            }
             serverScoped
             control={
               <RetentionControl

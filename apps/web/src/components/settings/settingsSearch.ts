@@ -139,6 +139,14 @@ export function settingsSearchLocation(item: SettingsSearchPlace): string {
   return isAdvancedSetting(item) ? `${section} → Advanced` : section;
 }
 
+// Detail pages without a nav entry: the nav highlights the page that links to them, and
+// the page links back to it.
+export const SETTINGS_DETAIL_PAGE_PARENTS: Readonly<Record<string, SettingsPath>> = {
+  "/settings/diagnostics": "/settings/general",
+  "/settings/open-source-licenses": "/settings/general",
+  "/settings/connections": "/settings/general",
+};
+
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
   return `keybinding-${command}` as const;
 }
@@ -299,9 +307,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "chat-width",
-    title: "Chat width",
+    title: "Log width",
     to: "/settings/appearance",
-    searchTerms: ["wide full width column layout messages composer monitor"],
+    searchTerms: ["chat width wide full column layout messages composer monitor"],
   },
   {
     id: "panel-animations",
@@ -610,8 +618,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "open-source-licenses",
-    title: "Open source licenses",
+    title: "Open source licences",
     to: "/settings/general",
+    searchTerms: ["licenses notices third party dependencies"],
   },
   {
     id: "legacy-plan-mode",

@@ -315,7 +315,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
       ? ["Diff colours"]
       : []),
-    ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
+    ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Log width"] : []),
     ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
       ? ["Panel animations"]
       : []),
@@ -1129,7 +1129,7 @@ export function AppearanceSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("composer-context")}
-          description="Keep the side-copy controls below the composer after a chat starts."
+          description="Keep the side-copy controls below the composer after a Log starts."
           resetAction={
             settings.persistComposerContextStrip !==
             DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
@@ -1150,18 +1150,18 @@ export function AppearanceSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ persistComposerContextStrip: Boolean(checked) })
               }
-              aria-label="Keep composer context visible in active threads"
+              aria-label="Keep composer context visible in active Logs"
             />
           }
         />
 
         <SettingsRow
           {...searchableSetting("chat-width")}
-          description="Set how wide messages and the composer can grow on large screens."
+          description="Set how wide a Log's messages and the composer can grow on large screens."
           resetAction={
             settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? (
               <SettingResetButton
-                label="chat width"
+                label="Log width"
                 onClick={() => updateSettings({ chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth })}
               />
             ) : null
@@ -1175,7 +1175,7 @@ export function AppearanceSettingsPanel() {
                     updateSettings({ chatWidth: value });
                 }}
               >
-                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Chat width">
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Log width">
                   <SelectValue>{CHAT_WIDTH_LABELS[settings.chatWidth]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1968,11 +1968,7 @@ export function GeneralSettingsPanel() {
                 if (option) updateSettings({ sendShortcut: option.value });
               }}
             >
-              <SelectTrigger
-                size="sm"
-                className="w-auto min-w-0 max-w-full"
-                aria-label="Send shortcut"
-              >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Send shortcut">
                 <SelectValue>
                   {
                     sendShortcutOptions.find((option) => option.value === settings.sendShortcut)
@@ -2022,7 +2018,7 @@ export function GeneralSettingsPanel() {
                 }
               }}
             >
-              <SelectTrigger size="sm" className="w-auto min-w-0" aria-label="Follow-up behavior">
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Follow-up behavior">
                 <SelectValue>
                   {settings.followUpBehavior === "queue" ? "Queue" : "Steer"}
                 </SelectValue>
@@ -2059,22 +2055,18 @@ export function GeneralSettingsPanel() {
             <SettingsRow
               id={searchableSetting("app-version").id}
               title={<AboutVersionTitle />}
-              description="Current version of the application."
+              description="The version of Kurambit you are running."
             />
           </>
         )}
         <LocalServerRow />
         <SettingsRow
           title="Privacy"
-          description="Kurambit does not collect product usage analytics. Local diagnostics remain on this machine unless you configure an export."
+          description="Kurambit does not collect product usage analytics. Local diagnostics stay on this computer unless you set up an export."
         />
         <SettingsRow
           {...searchableSetting("diagnostics")}
-          description={
-            isEnvironmentScope
-              ? "Inspect processes, resource use, and logs on this environment."
-              : "Inspect processes, resource use, and logs on one environment at a time."
-          }
+          description="Inspect processes, resource use, and logs on this computer."
           control={
             <Button
               render={
@@ -2096,7 +2088,7 @@ export function GeneralSettingsPanel() {
               size="sm"
               variant="outline"
             >
-              View licenses
+              View licences
             </Button>
           }
         />
