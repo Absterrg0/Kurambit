@@ -357,7 +357,7 @@ describe("theme files", () => {
         appearance: "light",
         colors: { background: "#ffffff" },
       }),
-    ).toThrow('"background" is not a supported theme color role.');
+    ).toThrow('"background" is not a supported theme colour role.');
 
     expect(() =>
       parseThemeFile({
@@ -366,7 +366,7 @@ describe("theme files", () => {
         appearance: "light",
         colors: { accent: "var(--danger)" },
       }),
-    ).toThrow('The color for "accent" must be a literal CSS color');
+    ).toThrow('The colour for "accent" must be a literal CSS colour');
   });
 
   it("canonicalizes the explicitly exported theme", () => {

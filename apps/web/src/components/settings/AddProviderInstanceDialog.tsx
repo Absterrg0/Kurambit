@@ -613,7 +613,7 @@ export function AddProviderInstanceDialog({
                   }
                 />
                 <SettingsRow
-                  title="Accent color"
+                  title="Accent colour"
                   description="Optional marker shown in the picker."
                   control={
                     <ProviderAccentColorPicker

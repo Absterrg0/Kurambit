@@ -196,7 +196,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "color-scheme",
-    title: "Color scheme",
+    title: "Colour scheme",
     to: "/settings/appearance",
     searchTerms: ["appearance light dark system mode"],
     targetId: "appearance",
@@ -205,7 +205,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "theme",
     title: "Themes",
     to: "/settings/appearance",
-    searchTerms: ["appearance colors palette custom import"],
+    searchTerms: ["appearance colours colors palette custom import"],
     targetId: "appearance",
   },
   {
@@ -213,7 +213,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "setting-appearance-contrast",
     title: "Contrast",
     to: "/settings/appearance",
-    searchTerms: ["colors borders interface"],
+    searchTerms: ["colours colors borders interface"],
   },
   {
     // Prefixed because the slider control already owns the `glass-opacity` id.
@@ -224,7 +224,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "diff-color-scheme",
-    title: "Diff colors",
+    title: "Diff colours",
     to: "/settings/appearance",
     searchTerms: ["red green blue orange additions deletions changes counts palette colorblind"],
   },
@@ -619,7 +619,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent colour color custom favorite hidden auto compact",
     ],
   },
   {
@@ -681,7 +681,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-default-appearance",
     title: "Default browser appearance",
     to: "/settings/integrations",
-    searchTerms: ["preview color scheme light dark system os"],
+    searchTerms: ["preview colour color scheme light dark system os"],
   },
   {
     id: "browser-recording-frame-rate",

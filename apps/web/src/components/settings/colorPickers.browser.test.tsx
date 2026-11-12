@@ -6,10 +6,10 @@ import { userEvent } from "vite-plus/test/browser";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { ThemeColorField } from "./ThemeColorPicker";
 
-const HUE = "Accent color hue";
-const SATURATION = "Accent color saturation";
-const BRIGHTNESS = "Accent color brightness";
-const PLANE = "Accent color saturation and brightness";
+const HUE = "Accent colour hue";
+const SATURATION = "Accent colour saturation";
+const BRIGHTNESS = "Accent colour brightness";
+const PLANE = "Accent colour saturation and brightness";
 
 let root: Root;
 let container: HTMLDivElement;
@@ -87,7 +87,7 @@ async function renderAccent(value: string | undefined, commitDelayMs?: number) {
       />,
     ),
   );
-  await open(`${value ? "Change" : "Add"} accent color for Codex`);
+  await open(`${value ? "Change" : "Add"} accent colour for Codex`);
   return onCommit;
 }
 
@@ -96,7 +96,7 @@ async function renderThemeField(value: string) {
   const render = (current: string) =>
     root.render(<ThemeColorField role="accent" value={current} onChange={onChange} />);
   await act(async () => render(value));
-  await open("Choose Accent color color");
+  await open("Choose Accent colour colour");
   return { onChange, echo: (next: string) => act(async () => render(next)) };
 }
 

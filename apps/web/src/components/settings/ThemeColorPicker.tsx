@@ -16,7 +16,7 @@ export function getThemeRoleLabel(role: ThemeColorRole): string {
     toolbarControl: "Toolbar control",
     toolbarControlForeground: "Toolbar control text",
     toolbarControlHover: "Toolbar control hover",
-    accent: "Accent color",
+    accent: "Accent colour",
     errorForeground: "Error text",
     errorSurface: "Error background",
     warningForeground: "Warning text",
@@ -256,7 +256,7 @@ function ThemeColorPicker({
             <PopoverTrigger
               render={
                 <button
-                  aria-label={`Choose ${label} color`}
+                  aria-label={`Choose ${label} colour`}
                   className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-foreground/30 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   onFocus={onInteract}
                   onPointerDown={onInteract}
@@ -271,7 +271,7 @@ function ThemeColorPicker({
             />
           }
         />
-        <TooltipPopup side="top">{`Choose ${label} color`}</TooltipPopup>
+        <TooltipPopup side="top">{`Choose ${label} colour`}</TooltipPopup>
       </Tooltip>
       <PopoverPopup
         align="end"

@@ -945,10 +945,10 @@ export function ThemeEditorPanel({
       <div className="flex min-w-0 items-start gap-3">
         {isAdvanced ? (
           <Input
-            aria-label="Filter colors"
+            aria-label="Filter colours"
             className="min-w-0 flex-1"
             onChange={(event) => setRoleQuery(event.currentTarget.value)}
-            placeholder="Filter colors"
+            placeholder="Filter colours"
             size="sm"
             value={roleQuery}
           />
@@ -956,7 +956,7 @@ export function ThemeEditorPanel({
         <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 pt-0.5 text-sm font-medium">
           <span>Advanced</span>
           <Switch
-            aria-label="Use advanced theme colors"
+            aria-label="Use advanced theme colours"
             checked={isAdvanced}
             onCheckedChange={(checked) => handleAdvancedChange(Boolean(checked))}
           />
@@ -1120,7 +1120,7 @@ export function ThemeEditorPanel({
                 ? "Select an element · Esc to cancel"
                 : selectedRole
                   ? `${isAdvanced ? (getThemeEditorColorFamily(selectedRole)?.label ?? getThemeRoleLabel(selectedRole)) : getThemeRoleLabel(selectedRole)} · ${usageCount ?? 0} ${usageCount === 1 ? "use" : "uses"}`
-                  : "Select a color below"}
+                  : "Select a colour below"}
             </p>
           )}
         </div>
@@ -1128,7 +1128,7 @@ export function ThemeEditorPanel({
           <TooltipTrigger
             render={
               <Button
-                aria-label={isInspecting ? "Cancel inspecting app colors" : "Inspect app colors"}
+                aria-label={isInspecting ? "Cancel inspecting app colours" : "Inspect app colours"}
                 aria-pressed={isInspecting}
                 size="xs"
                 variant={isInspecting ? "secondary" : "ghost"}
@@ -1146,7 +1146,7 @@ export function ThemeEditorPanel({
             }
           />
           <TooltipPopup data-theme-editor-panel="">
-            {isInspecting ? "Cancel and clear the selection" : "Pick a color from the app"}
+            {isInspecting ? "Cancel and clear the selection" : "Pick a colour from the app"}
           </TooltipPopup>
         </Tooltip>
         <Button
