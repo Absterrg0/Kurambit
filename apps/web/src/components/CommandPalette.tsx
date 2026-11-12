@@ -52,6 +52,7 @@ import {
   type ProjectId,
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
+  type ThreadId,
   resolveEnvironmentMachineKind,
 } from "@kurambit/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -218,7 +219,14 @@ import {
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
-import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
+import {
+  orderItemsByPreferredIds,
+  partitionGameChats,
+  resolveGameSidebarStatus,
+  sortLogicalProjectsForSidebar,
+} from "./Sidebar.logic";
+import { PaletteGameIcon, PaletteGameStatus } from "./CommandPaletteGameRow";
+import { useGameLibrary } from "./game/useGameLibrary";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import {
@@ -808,6 +816,10 @@ function OpenCommandPaletteDialog(props: {
     }
   };
   const threads = useThreadShells();
+  const { games } = useGameLibrary();
+  const gameByProjectKey = new Map<string, (typeof games)[number]>(
+    games.map((game) => [`${game.environmentId}:${game.projectId}`, game]),
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
     theme,
@@ -1242,7 +1254,52 @@ function OpenCommandPaletteDialog(props: {
       });
     },
   });
-  const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  // Recent lists games, not threads: a game's chats fold into one row that opens its
+  // main chat and reads like the sidebar's (still, name, latest status). Threads of
+  // projects that are not games keep their thread rows.
+  const recentThreadItems: CommandPaletteActionItem[] = [];
+  {
+    const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
+    const liveThreadIds = new Set<string>(
+      threads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
+    );
+    const seenGames = new Set<string>();
+    for (const item of allThreadItems) {
+      if (recentThreadItems.length >= RECENT_THREAD_LIMIT) break;
+      const thread = threadById.get(item.value.slice("thread:".length) as ThreadId);
+      const gameKey = thread ? `${thread.environmentId}:${thread.projectId}` : null;
+      const game = gameKey === null ? undefined : gameByProjectKey.get(gameKey);
+      if (thread === undefined || gameKey === null || game === undefined) {
+        recentThreadItems.push(item);
+        continue;
+      }
+      if (seenGames.has(gameKey)) continue;
+      seenGames.add(gameKey);
+      const chats = partitionGameChats(
+        threads.filter(
+          (candidate) => `${candidate.environmentId}:${candidate.projectId}` === gameKey,
+        ),
+        liveThreadIds,
+      );
+      const main = chats.main ?? thread;
+      const chatsStatus = resolveGameSidebarStatus(chats);
+      recentThreadItems.push({
+        kind: "action",
+        value: `game:${gameKey}`,
+        searchTerms: [game.name, "game"],
+        title: game.name,
+        description: <PaletteGameStatus game={game} main={main} chats={chatsStatus} />,
+        icon: <PaletteGameIcon game={game} main={main} chats={chatsStatus} />,
+        ...(item.searchRecency === undefined ? {} : { searchRecency: item.searchRecency }),
+        run: async () => {
+          await navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(scopeThreadRef(main.environmentId, main.id)),
+          });
+        },
+      });
+    }
+  }
 
   // Stable so the item builders that capture it during render never see the
   // highlight ref it writes.
