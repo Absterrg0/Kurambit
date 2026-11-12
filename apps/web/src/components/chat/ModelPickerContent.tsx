@@ -982,7 +982,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         : modelKey === activeModelKey
                     }
                     showSelection={selectedModelKeys !== undefined}
-                    showProvider
+                    // Under one provider's tab every row would repeat its name.
+                    showProvider={isSearching || selectedInstanceId === "favorites"}
                     preferShortName={!isLocked}
                     useTriggerLabel={false}
                     showNewBadge={model.badge === "new"}
