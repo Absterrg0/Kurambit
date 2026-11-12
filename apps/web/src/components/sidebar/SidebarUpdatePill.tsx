@@ -1,6 +1,14 @@
 import type { DesktopBridge, DesktopUpdateState } from "@kurambit/contracts";
 import { TriangleAlertIcon } from "lucide-react";
-import { type ComponentProps, useEffect, useId, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type FocusEvent,
+  type KeyboardEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
 import { settlePromise, squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { isElectron } from "../../env";
@@ -24,7 +32,7 @@ import {
 import { showDesktopUpdateDownloadedToast } from "../desktopUpdate.toast";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { SidebarMenuItem } from "../ui/sidebar";
+import { SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   DesktopUpdateStatusIcon,
@@ -438,52 +446,60 @@ function SidebarUpdateControl() {
     );
   }
 
-  const updateButton = (
+  const updateButtonProps = {
+    "aria-label": tooltip,
+    "aria-disabled": isInteractionDisabled || undefined,
+    onClick: handleAction,
+    onBlur: () => {
+      suppressReleaseNotesFocusOpen.current = false;
+    },
+    onFocus: (event: FocusEvent<HTMLButtonElement>) => {
+      if (!showReleaseNotesPopover || !event.currentTarget.matches(":focus-visible")) return;
+      if (suppressReleaseNotesFocusOpen.current) {
+        suppressReleaseNotesFocusOpen.current = false;
+        return;
+      }
+      flushSync(() => releaseNotesPopoverHandle.open(releaseNotesTriggerId));
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (!showReleaseNotesPopover) return;
+      openSidebarUpdateReleaseNotesPopoverOnForwardTab(
+        event,
+        releaseNotesPopoverHandle,
+        releaseNotesTriggerId,
+      );
+    },
+  };
+  // At rest this is one more equal icon button in the footer row. Only a real update
+  // turns it into a labelled pill, so the footer says something only when it has news.
+  const updateButton = showUpdateIconState ? (
     <button
       type="button"
-      aria-label={tooltip}
-      aria-disabled={isInteractionDisabled || undefined}
+      {...updateButtonProps}
       className={cn(
-        "inline-flex size-8 items-center justify-center rounded-full outline-hidden ring-ring transition-colors focus-visible:ring-2 focus-visible:ring-inset",
-        isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer",
-        showUpdateIconState
-          ? cn(
-              "bg-sidebar-control-surface text-sidebar-foreground",
-              !isInteractionDisabled && "hover:bg-sidebar-row-hover",
-            )
-          : cn(
-              "text-(--sidebar-icon-color)",
-              !isInteractionDisabled && "hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-            ),
-        disabled && !showUpdateIconState && "opacity-60",
+        "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-meta text-sidebar-foreground outline-hidden surface-raised focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring",
+        isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer hover:surface-raised-hover",
       )}
-      onClick={handleAction}
-      onBlur={() => {
-        suppressReleaseNotesFocusOpen.current = false;
-      }}
-      onFocus={(event) => {
-        if (!showReleaseNotesPopover || !event.currentTarget.matches(":focus-visible")) return;
-        if (suppressReleaseNotesFocusOpen.current) {
-          suppressReleaseNotesFocusOpen.current = false;
-          return;
-        }
-        flushSync(() => releaseNotesPopoverHandle.open(releaseNotesTriggerId));
-      }}
-      onKeyDown={(event) => {
-        if (!showReleaseNotesPopover) return;
-        openSidebarUpdateReleaseNotesPopoverOnForwardTab(
-          event,
-          releaseNotesPopoverHandle,
-          releaseNotesTriggerId,
-        );
-      }}
     >
       {statusIcon}
+      <span className="whitespace-nowrap">
+        {iconStatus === "downloading"
+          ? state?.downloadPercent != null
+            ? `Downloading ${Math.round(state.downloadPercent)}%`
+            : "Downloading…"
+          : iconStatus === "available"
+            ? "Update available"
+            : "Update ready"}
+      </span>
     </button>
+  ) : (
+    <SidebarMenuButton size="icon" {...updateButtonProps}>
+      {statusIcon}
+    </SidebarMenuButton>
   );
 
   return (
-    <SidebarMenuItem className="ml-auto shrink-0">
+    <SidebarMenuItem className={cn("shrink-0", showUpdateIconState && "ml-auto")}>
       <Popover
         handle={releaseNotesPopoverHandle}
         onOpenChange={(open, details) => {

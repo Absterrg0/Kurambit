@@ -155,7 +155,8 @@ seconds after the latest action. The default shortcut skips text fields and
 terminals so native undo keeps working there.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
-through the pages you have visited, like a browser's back and forward buttons.
+through the pages you have visited, as do the arrows beside the sidebar toggle. They
+stop at the first and last page you visited in Kurambit, so they never leave the app.
 
 `chat.new` (`mod+n`, or `mod+shift+o` in a browser, which keeps `mod+n` for new windows) goes to
 the home screen's brief box to start a new game; with the legacy

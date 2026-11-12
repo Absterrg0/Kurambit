@@ -124,6 +124,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --workspace-native-controls-inset: 0px;
   --workspace-titlebar-control-size: 1.75rem;
   --workspace-titlebar-control-gap: 0.75rem;
+  /* Back and forward sit beside the sidebar toggle from md up. */
+  --workspace-titlebar-history-width: 0px;
+  @media (width >= 48rem) {
+    --workspace-titlebar-history-width: calc(var(--workspace-titlebar-control-size) * 2);
+  }
   --workspace-titlebar-scroll-fade-height: 1.5rem;
   --chat-content-max-width: 46rem;
   --thread-details-panel-width: 17.5rem;

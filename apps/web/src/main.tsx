@@ -16,6 +16,7 @@ import {
   syncDocumentWindowControlsOverlayClass,
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
+import { trackNavigationHistory } from "./navigationHistory";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
 prepareProviderAuthDelivery();
@@ -24,6 +25,7 @@ prepareProviderAuthDelivery();
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+trackNavigationHistory(router.history);
 
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);
