@@ -1,9 +1,21 @@
 import {
   RESTORE_BEFORE_LABEL,
   type GameBuild,
+  type GameBuildId,
   type GameBuildsResult,
   type GameFactTone,
 } from "@kurambit/contracts";
+
+/**
+ * PURE. What the Stage shows, as every part of the game screen must say it: the
+ * build a copy plays, else the build the folder holds, else null for "Now",
+ * the folder changed since its last build. The strip's ring and the
+ * Inspector's "on the Stage" both read this, so they never disagree.
+ */
+export const stageBuildId = (
+  list: Pick<GameBuildsResult, "current" | "folderEdited"> | null,
+  playing: GameBuildId | null,
+): GameBuildId | null => playing ?? (list?.folderEdited === true ? null : (list?.current ?? null));
 
 const isRestoreBefore = (build: GameBuild) =>
   build.source._tag === "saved" && build.source.label === RESTORE_BEFORE_LABEL;

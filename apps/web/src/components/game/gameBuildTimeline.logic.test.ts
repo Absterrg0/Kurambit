@@ -7,7 +7,14 @@ import {
   FAKE_BUILDS_RESULT,
   FAKE_UNDONE_RESULT,
 } from "./gameBuilds.fixtures";
-import { isUndone, markLabels, markTone, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
+import {
+  isUndone,
+  markLabels,
+  markTone,
+  stageBuildId,
+  stepMark,
+  timelineMarks,
+} from "./gameBuildTimeline.logic";
 
 const build = (list: typeof FAKE_BUILDS_RESULT, id: string) => {
   const found = list.builds.find((entry) => entry.id === id);
@@ -52,5 +59,14 @@ describe("the build timeline", () => {
     expect(stepMark(order, "a", -1)).toBe("a");
     expect(stepMark(order, "b", 1)).toBe("c");
     expect(stepMark([], null, -1)).toBe("now");
+  });
+
+  // The strip's ring and the Inspector's "on the Stage" read this one answer.
+  it("says what the Stage shows: a copy, the folder's build, or Now", () => {
+    const list = { current: BUILD_C, folderEdited: false };
+    expect(stageBuildId(list, BUILD_B)).toBe(BUILD_B);
+    expect(stageBuildId(list, null)).toBe(BUILD_C);
+    expect(stageBuildId({ ...list, folderEdited: true }, null)).toBeNull();
+    expect(stageBuildId({ ...list, folderEdited: true }, BUILD_B)).toBe(BUILD_B);
   });
 });

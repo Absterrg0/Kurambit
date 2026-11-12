@@ -21,10 +21,17 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill } from "./GameBuildStill";
+import { gamePigment } from "./gameLibrary.logic";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
 import { buildCaption, buildName, formatBuildTime } from "./gameBuilds.logic";
-import { isUndone, markLabels, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
+import {
+  isUndone,
+  stageBuildId,
+  markLabels,
+  stepMark,
+  timelineMarks,
+} from "./gameBuildTimeline.logic";
 
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
@@ -200,7 +207,7 @@ export function GameBuildStrip({
   }, [requestN, asked, mountRequest, answer]);
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
-  const onStage = playing ?? (list?.folderEdited === true ? null : (list?.current ?? null));
+  const onStage = stageBuildId(list, playing);
   const card = (build: GameBuild) => {
     const index = marks.indexOf(build);
     return (
@@ -230,13 +237,7 @@ export function GameBuildStrip({
   const slotInBracket = slot?.keepGoing === true && groups.at(-1)?.steps === true;
   const nowCard =
     slot === null && list !== null && (list.folderEdited === true || playing !== null) ? (
-      <NowCard
-        threadRef={threadRef}
-        gameName={gameName}
-        list={list}
-        active={onStage === null}
-        onClick={onLive}
-      />
+      <NowCard gameName={gameName} list={list} active={onStage === null} onClick={onLive} />
     ) : null;
   return (
     <section
@@ -463,7 +464,7 @@ function CardRing({ on }: { on: boolean }) {
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
         on
-          ? "ring-2 ring-strong-foreground/80"
+          ? "ring-2 ring-foreground/55"
           : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
       )}
     />
@@ -560,19 +561,18 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
 
 /** The game folder when it is no build: edited since, or another build plays from a copy. */
 function NowCard({
-  threadRef,
   gameName,
   list,
   active,
   onClick,
 }: {
-  threadRef: ScopedThreadRef;
   gameName: string;
   list: GameBuildsResult;
   active: boolean;
   onClick: () => void;
 }) {
   const current = list.builds.find((build) => build.id === list.current);
+  const [pigment, pigmentInk] = gamePigment(gameName);
   const since =
     list.folderEdited === true
       ? `Changed since ${current === undefined ? "an earlier build" : buildName(current)}`
@@ -585,24 +585,17 @@ function NowCard({
       onClick={onClick}
       className="group/card flex w-40 shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none"
     >
-      {/* The folder's game, pictured by the build it grew from. */}
-      <GameBuildStill
-        threadRef={threadRef}
-        gameName={gameName}
-        build={{ still: current?.still ?? null }}
-        className="aspect-video w-full rounded-md"
+      {/* No build holds the folder's game yet, so it has no picture of its own: the game's
+          colour stands in, never another build's still. */}
+      <span
+        className="relative flex aspect-video w-full items-center justify-center gap-1.5 overflow-hidden rounded-md"
+        style={{ background: `radial-gradient(120% 90% at 50% 30%, ${pigment}, ${pigmentInk})` }}
       >
         <CardRing on={active} />
-        <Text
-          variant="micro"
-          tone="inherit"
-          render={
-            <span className="absolute bottom-1.5 left-1.5 z-20 flex items-center gap-1 rounded bg-black/65 px-1.5 py-0.5 text-stage-foreground" />
-          }
-        >
+        <Text variant="caption" tone="inherit" render={<span className="text-stage-foreground" />}>
           Now
         </Text>
-      </GameBuildStill>
+      </span>
       <Text
         variant="caption"
         tone={active ? "strong" : "default"}

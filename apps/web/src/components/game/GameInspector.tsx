@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -218,13 +219,15 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const working = threadRuntimeIsActive(shell?.runtime);
   const data = list.data;
   if (data === null) return <Notice>{list.error ?? "Reading the builds…"}</Notice>;
-  const onStageId = asked?.build ?? data.current;
+  const onStageId = stageBuildId(data, asked?.build ?? null);
+  // The folder changed since its last build: the Stage plays something no build holds yet.
+  const nowOnStage = onStageId === null && inspected === null;
   // The list's own row when it holds it, so the facts it shows stay current.
   const build =
     (inspected === null
       ? undefined
       : (data.builds.find((entry) => entry.id === inspected.build) ?? inspected.snapshot)) ??
-    data.builds.find((entry) => entry.id === onStageId) ??
+    data.builds.find((entry) => entry.id === (onStageId ?? data.current)) ??
     data.builds[0] ??
     null;
   if (build === null)
@@ -247,7 +250,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Text>
       </div>
     );
-  return (
+  const detail = (
     <BuildDetail
       key={build.id}
       threadRef={threadRef}
@@ -255,7 +258,23 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       build={build}
       list={data}
       onStage={build.id === onStageId}
+      note={nowOnStage ? "last measured" : null}
     />
+  );
+  if (!nowOnStage) return detail;
+  return (
+    <>
+      <div className="flex flex-col gap-0.5 px-4 pt-4">
+        <Text variant="label" tone="strong" render={<h2 />}>
+          Now on the Stage
+        </Text>
+        <Text variant="caption" tone="muted" render={<p />}>
+          The game changed since {buildName(build)}, and isn't measured yet. Its checks below are
+          the last measured.
+        </Text>
+      </div>
+      {detail}
+    </>
   );
 }
 
@@ -265,12 +284,15 @@ function BuildDetail({
   build,
   list,
   onStage,
+  note,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
   build: GameBuild;
   list: GameBuildsResult;
   onStage: boolean;
+  /** Said after the build's time, when it is shown for a reason other than being picked. */
+  note: string | null;
 }) {
   const facts = useEnvironmentQuery(
     build.available
@@ -317,7 +339,7 @@ function BuildDetail({
           </Text>
           <Text variant="meta" tone="muted" truncate>
             {formatBuildTime(build.at)}
-            {onStage ? " · on the Stage" : ""}
+            {onStage ? " · on the Stage" : note === null ? "" : ` · ${note}`}
           </Text>
         </div>
       </header>
