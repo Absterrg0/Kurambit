@@ -8,6 +8,7 @@ import {
   GameDirectionNote,
   GameInspectorResize,
   GamePointedChip,
+  GameFirstChangeNote,
   GameUndoneNote,
   useGameMakingFirstBuild,
   useLatestTurnUndone,
@@ -4255,14 +4256,16 @@ export default function ChatView(props: ChatViewProps) {
   }, [timelineThreadReset]);
 
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    // A game opens on its Stage, which takes the keys; a composer focused on open would grow
+    // into its focused shape and shrink back when the game takes focus.
+    if (!activeThread?.id || terminalUiState.terminalOpen || isGameThread) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposerStable();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposerStable, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, focusComposerStable, terminalUiState.terminalOpen, isGameThread]);
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
@@ -7931,6 +7934,9 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenLog={() => useGameWorkspaceStore.getState().showInspectorTab("log")}
               />
             )}
+            {gameWorkspace.compact && gameAgentNote === null ? (
+              <GameFirstChangeNote threadRef={activeThreadRef} />
+            ) : null}
             <GamePointedChip threadRef={activeThreadRef} />
             {composerLane}
           </div>

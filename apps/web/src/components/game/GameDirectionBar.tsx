@@ -19,6 +19,8 @@ import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
 
 import { useTurnUndo } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
+import { useGameLatestBuild } from "./GameLibraryStatus";
+import { useQuietThreadShell } from "../../state/entities";
 
 /**
  * The agent's latest words above the box where the person directs the game:
@@ -57,6 +59,27 @@ export function GameDirectionNote({
 }
 
 /**
+ * A game with no build and no turn yet, where the Inspector (which says this) is folded away:
+ * what the first message does, in the room the agent's note takes later.
+ */
+export function GameFirstChangeNote({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
+  const build = useGameLatestBuild(threadRef);
+  if (latestRun !== null || build !== null) return null;
+  return (
+    <div className="flex items-start gap-2.5 px-4 pt-2 pb-1.5" data-game-agent-note="first">
+      <span
+        aria-hidden="true"
+        className="mt-1.5 size-1.5 shrink-0 rounded-full bg-dim-foreground"
+      />
+      <Text variant="body" tone="muted" render={<p className="min-w-0 flex-1 truncate" />}>
+        Build 1 comes from your first change, and a bot plays it to measure its checks.
+      </Text>
+    </div>
+  );
+}
+
+/**
  * The note once the latest turn's build has been undone: the agent's reply describes a game
  * that is no longer on the Stage, so this says what happened instead, with the way back.
  */
@@ -84,7 +107,7 @@ export function GameUndoneNote({
       <Text
         variant="body"
         tone="default"
-        render={<p className="min-w-0 flex-1" aria-live="polite" />}
+        render={<p className="min-w-0 flex-1 truncate" aria-live="polite" />}
       >
         {base === null
           ? `${name} undone: the game is back to how it was before it.`

@@ -43,7 +43,9 @@ const latestStillOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown
  * screen reads, so an open game and its library row share one read. Pass null
  * to read nothing (a row scrolled out of view).
  */
-function useGameLatestBuild(threadRef: ScopedThreadRef | null): GameBuild | null | undefined {
+export function useGameLatestBuild(
+  threadRef: ScopedThreadRef | null,
+): GameBuild | null | undefined {
   return useEnvironmentQuerySelector(
     threadRef === null
       ? null
