@@ -1,11 +1,4 @@
-import {
-  Suspense,
-  useEffect,
-  useRef,
-  useState,
-  type ComponentType,
-  type KeyboardEvent,
-} from "react";
+import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import {
   ArchiveIcon,
   BlocksIcon,
@@ -25,18 +18,15 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../ui/button";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Kbd } from "../ui/kbd";
 import {
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
-  SidebarInput,
 } from "../ui/sidebar";
-import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
@@ -78,21 +68,49 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/archived": ArchiveIcon,
 };
 
-const SETTINGS_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[])
-  .filter((to) => to !== "/settings/diagnostics")
-  .map((to) => ({
-    to,
-    label: SETTINGS_SECTION_LABELS[to],
-    icon: SETTINGS_SECTION_ICONS[to],
-  }));
+// A game studio's order: what a game maker changes first, then the agents, then
+// the coding and machine settings most never open.
+const SETTINGS_NAV_GROUPS: ReadonlyArray<{
+  readonly heading: string;
+  readonly paths: ReadonlyArray<SettingsPath>;
+}> = [
+  {
+    heading: "Studio",
+    paths: [
+      "/settings/general",
+      "/settings/appearance",
+      "/settings/keybindings",
+      "/settings/snap-shot",
+    ],
+  },
+  { heading: "Agents", paths: ["/settings/providers", "/settings/integrations"] },
+  {
+    heading: "Advanced",
+    paths: [
+      "/settings/source-control",
+      "/settings/storage",
+      "/settings/scheduled-tasks",
+      "/settings/connections",
+      "/settings/archived",
+      "/settings/projects",
+    ],
+  },
+];
+
+// Detail pages without a nav entry highlight the page that links to them.
+const SETTINGS_DETAIL_PAGE_PARENTS: Readonly<Record<string, SettingsPath>> = {
+  "/settings/diagnostics": "/settings/general",
+  "/settings/open-source-licenses": "/settings/general",
+};
+
+// Attached only to the highlighted result, so it runs whenever the highlight lands on a row.
+function scrollResultIntoView(row: HTMLElement | null) {
+  row?.scrollIntoView({ block: "nearest" });
+}
 
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
-  return <Icon className="mt-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground/60" />;
+  return <Icon className="mt-0.5 size-3.5 shrink-0" />;
 }
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
@@ -100,10 +118,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = validateSettingsScopeSearch(currentSearch);
-  const navItems = SETTINGS_NAV_ITEMS.filter(
-    (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
-  );
-  const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
+  const projectPageVisible = isSettingsOverviewVisible(scopeSearch);
+  const activePath = SETTINGS_DETAIL_PAGE_PARENTS[pathname] ?? pathname;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -118,14 +134,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   }
 
   useEffect(() => {
-    const result = results[activeResultIndex];
-    if (!result) return;
-    document
-      .getElementById(`settings-search-result-${result.id}`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [activeResultIndex, results]);
-
-  useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
       const isFindShortcut =
@@ -138,6 +146,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       if (!isFindShortcut && !isSlashShortcut) return;
 
       const target = event.target;
+      // The settings panel is itself a dialog; only layers opened inside it keep these keys.
       if (
         target instanceof HTMLElement &&
         ((isSlashShortcut &&
@@ -145,31 +154,21 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             target.tagName === "TEXTAREA" ||
             target.isContentEditable)) ||
           target.closest(
-            '[role="dialog"], [aria-modal="true"], [data-slot$="popup"], [data-keybinding-capture]',
+            '[role="dialog"]:not([data-settings-dialog]), [aria-modal="true"]:not([data-settings-dialog]), [data-slot$="popup"]:not([data-settings-dialog]), [data-keybinding-capture]',
           ) !== null)
       ) {
         return;
       }
 
       event.preventDefault();
-      if (isMobile) {
-        setOpenMobile(true);
-      } else if (!open) {
-        setOpen(true);
-      }
-      requestAnimationFrame(() => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      });
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isMobile, open, setOpen, setOpenMobile]);
+  }, []);
 
   const handleSectionClick = (to: SettingsPath) => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
     void navigate({
       to,
       hash: "",
@@ -184,9 +183,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   };
   const handleSearchResultClick = (item: SettingsSearchItem) => {
     clearSearch();
-    if (isMobile) {
-      setOpenMobile(false);
-    }
     const targetId = item.targetId ?? item.id;
     if (pathname === item.to && currentHash.replace(/^#/, "") === targetId) {
       scrollToSettingsTarget(targetId);
@@ -202,7 +198,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   };
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "Escape" && isSearching) {
+      // The first Escape clears the search; the next one closes the panel.
       event.preventDefault();
       event.stopPropagation();
       clearSearch();
@@ -227,23 +225,32 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   };
 
   return (
-    <>
-      <SidebarContent className="overflow-x-hidden">
-        <SidebarGroup>
-          <div className="flex flex-col gap-2">
-            <div className="flex h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
-              <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
-              <SidebarInput
+    <nav
+      aria-label="Settings sections"
+      className="flex w-56 shrink-0 flex-col border-e max-md:w-48"
+    >
+      <SidebarContent
+        className="overflow-x-hidden"
+        fixedHeader={
+          <div className="px-3 pt-3 pb-2">
+            <InputGroup>
+              <InputGroupAddon>
+                <SearchIcon className="size-3.5" />
+              </InputGroupAddon>
+              <InputGroupInput
                 ref={searchInputRef}
                 nativeInput
-                type="search"
+                size="compact"
+                // Not type="search": a native search field clears itself on Escape,
+                // which would swallow the Escape that closes the panel.
+                type="text"
                 value={query}
                 onChange={(event) => {
                   setQuery(event.currentTarget.value);
                   setActiveResultIndex(0);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search"
+                placeholder="Search settings"
                 aria-label="Search settings"
                 role="combobox"
                 aria-autocomplete="list"
@@ -254,103 +261,110 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     ? `settings-search-result-${results[activeResultIndex].id}`
                     : undefined
                 }
-                className="min-w-0 flex-1"
               />
-              {isSearching ? (
-                <Button
-                  type="button"
-                  size="icon-micro"
-                  variant="ghost-muted"
-                  className="shrink-0"
-                  aria-label="Clear settings search"
-                  onClick={() => {
-                    clearSearch();
-                    searchInputRef.current?.focus();
-                  }}
-                >
-                  <XIcon className="size-3" />
-                </Button>
-              ) : (
-                <Kbd>/</Kbd>
-              )}
-            </div>
-            {isSearching && results.length === 0 ? (
-              <p
-                role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
-              >
-                No settings found
-              </p>
-            ) : null}
-            {isSearching ? (
-              <SidebarMenu
-                id={hasResults ? "settings-search-results" : undefined}
-                role={hasResults ? "listbox" : undefined}
-                aria-label={hasResults ? "Settings search results" : undefined}
-              >
-                {results.map((item, index) => (
-                  <SidebarMenuItem key={item.id} role="presentation">
-                    <SidebarMenuButton
-                      id={`settings-search-result-${item.id}`}
-                      role="option"
-                      aria-selected={index === activeResultIndex}
-                      tabIndex={-1}
-                      size="sm"
-                      isActive={index === activeResultIndex}
-                      className="h-auto min-h-10 items-start"
-                      onMouseMove={() => setActiveResultIndex(index)}
-                      onClick={() => handleSearchResultClick(item)}
-                    >
-                      <SettingsSectionIcon to={item.to} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-sidebar-foreground">
-                          {item.title}
-                        </span>
-                        <span className="block truncate text-2xs text-sidebar-muted-foreground/75">
-                          {SETTINGS_SECTION_LABELS[item.to]}
-                        </span>
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            ) : (
-              <SidebarMenu>
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isGeneralDetailPage =
-                    item.to === "/settings/general" &&
-                    pathname === "/settings/open-source-licenses";
-                  const isActive =
-                    isGeneralDetailPage ||
-                    pathname === item.to ||
-                    pathname.startsWith(`${item.to}/`);
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            )}
+              <InputGroupAddon align="inline-end">
+                {isSearching ? (
+                  <Button
+                    type="button"
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    aria-label="Clear settings search"
+                    onClick={() => {
+                      clearSearch();
+                      searchInputRef.current?.focus();
+                    }}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                ) : (
+                  <Kbd>/</Kbd>
+                )}
+              </InputGroupAddon>
+            </InputGroup>
           </div>
+        }
+      >
+        <SidebarGroup>
+          {isSearching && results.length === 0 ? (
+            <p role="status" className="px-2 py-6 text-center text-meta text-muted-foreground">
+              No settings found
+            </p>
+          ) : null}
+          {isSearching ? (
+            <SidebarMenu
+              id={hasResults ? "settings-search-results" : undefined}
+              role={hasResults ? "listbox" : undefined}
+              aria-label={hasResults ? "Settings search results" : undefined}
+            >
+              {results.map((item, index) => (
+                <SidebarMenuItem
+                  key={item.id}
+                  role="presentation"
+                  ref={index === activeResultIndex ? scrollResultIntoView : undefined}
+                >
+                  <SidebarMenuButton
+                    id={`settings-search-result-${item.id}`}
+                    role="option"
+                    aria-selected={index === activeResultIndex}
+                    tabIndex={-1}
+                    isActive={index === activeResultIndex}
+                    className="h-auto min-h-10 items-start"
+                    onMouseMove={() => setActiveResultIndex(index)}
+                    onClick={() => handleSearchResultClick(item)}
+                  >
+                    <SettingsSectionIcon to={item.to} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-label text-sidebar-foreground">
+                        {item.title}
+                      </span>
+                      <span className="block truncate text-micro text-sidebar-muted-foreground">
+                        {SETTINGS_SECTION_LABELS[item.to]}
+                      </span>
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {SETTINGS_NAV_GROUPS.map((group) => (
+                <div
+                  key={group.heading}
+                  role="group"
+                  aria-labelledby={`settings-nav-${group.heading}`}
+                >
+                  <h3
+                    id={`settings-nav-${group.heading}`}
+                    className="px-(--sidebar-row-content-inset) pb-1 text-meta text-muted-foreground"
+                  >
+                    {group.heading}
+                  </h3>
+                  <SidebarMenu>
+                    {group.paths
+                      .filter((to) => to !== "/settings/projects" || projectPageVisible)
+                      .map((to) => {
+                        const Icon = SETTINGS_SECTION_ICONS[to];
+                        const isActive = activePath === to || activePath.startsWith(`${to}/`);
+                        return (
+                          <SidebarMenuItem key={to}>
+                            <SidebarMenuButton
+                              isActive={isActive}
+                              aria-current={isActive ? "page" : undefined}
+                              onClick={() => handleSectionClick(to)}
+                            >
+                              <Icon />
+                              <span className="truncate">{SETTINGS_SECTION_LABELS[to]}</span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                  </SidebarMenu>
+                </div>
+              ))}
+            </div>
+          )}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <Suspense fallback={null}></Suspense>
-        <div className="flex items-center gap-1">
-          <div className="min-w-0 flex-1">
-            <SidebarUtilityMenu />
-          </div>
-          <Suspense fallback={null}></Suspense>
-        </div>
-      </SidebarFooter>
-    </>
+    </nav>
   );
 }

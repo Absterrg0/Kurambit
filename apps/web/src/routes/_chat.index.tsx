@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { GamesHome } from "../components/game/GamesHome";
-
+// Home lives in the `_chat` layout so Settings can open over it without unmounting it.
 export const Route = createFileRoute("/_chat/")({
-  component: GamesHome,
+  component: () => null,
 });

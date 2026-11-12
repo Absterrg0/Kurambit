@@ -46,7 +46,15 @@ function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules
   return value !== null && (WORKTREE_SUBMODULES_OPTIONS as readonly string[]).includes(value);
 }
 
-export function ProjectDefaultsSettings({ category }: { category: ProjectSettingsCategory }) {
+/**
+ * `general` holds what a game maker picks (the agent's model); `general-advanced`
+ * holds the coding defaults most never touch, lower on the same page.
+ */
+export function ProjectDefaultsSettings({
+  category,
+}: {
+  category: ProjectSettingsCategory | "general-advanced";
+}) {
   const { scope, target, targets, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -251,16 +259,22 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       id={
         category === "general" || category === "project"
           ? "project-defaults"
-          : category === "integrations"
-            ? "browser-access"
-            : "source-control-defaults"
+          : category === "general-advanced"
+            ? "advanced-defaults"
+            : category === "integrations"
+              ? "browser-access"
+              : "source-control-defaults"
       }
       title={
-        category === "general" || category === "project"
-          ? "New threads"
-          : category === "integrations"
-            ? "Browser"
-            : "Repositories"
+        category === "general"
+          ? "Agent"
+          : category === "project"
+            ? "New threads"
+            : category === "general-advanced"
+              ? "Advanced"
+              : category === "integrations"
+                ? "Browser"
+                : "Repositories"
       }
     >
       {category === "project" ? (
@@ -269,8 +283,9 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
           {workspaceRow}
         </>
       ) : category === "general" ? (
+        modelRow
+      ) : category === "general-advanced" ? (
         <>
-          {modelRow}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}

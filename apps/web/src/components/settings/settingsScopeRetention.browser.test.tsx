@@ -49,32 +49,25 @@ vi.mock(import("../../state/environments"), async (original) => ({
   ...(await original()),
   useEnvironments: (() => ({ environments: [] })) as never,
 }));
-vi.mock(import("../ui/sidebar"), async (original) => ({
+vi.mock(import("./SettingsDialog"), async (original) => ({
   ...(await original()),
-  SidebarInset: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  SettingsDialog: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  SettingsDialogClose: (() => null) as never,
 }));
-vi.mock(import("../WorkspacePageHeader"), async (original) => ({
+vi.mock(import("./SettingsSidebarNav"), async (original) => ({
   ...(await original()),
-  WorkspacePageHeader: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  SettingsSidebarNav: (() => null) as never,
 }));
 vi.mock(import("./SettingsBreadcrumb"), async (original) => ({
   ...(await original()),
   SettingsBreadcrumb: (() => null) as never,
-}));
-vi.mock(import("../sidebar/mainAppLocation"), async (original) => ({
-  ...(await original()),
-  useNavigateToMainApp: () => vi.fn(),
-}));
-vi.mock(import("../../hooks/useNavigateBack"), async (original) => ({
-  ...(await original()),
-  useEscapeToGoBack: () => undefined,
 }));
 vi.mock(import("./SettingsPanels"), async (original) => ({
   ...(await original()),
   useSettingsRestore: (() => ({ changedSettingLabels: [] })) as never,
 }));
 
-import { Route } from "../../routes/settings";
+import { Route } from "../../routes/_chat.settings";
 
 function StatefulContent() {
   const [value, setValue] = useState(0);

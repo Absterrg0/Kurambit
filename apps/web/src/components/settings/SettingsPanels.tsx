@@ -2953,6 +2953,8 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
+      <ProjectDefaultsSettings category="general-advanced" />
+
       <SettingsSection id="about" title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />

@@ -1,10 +1,13 @@
 import { AuthPreviewOperateScope } from "@kurambit/contracts";
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { ThreadRouteView } from "../components/ThreadRouteView";
+import { GamesHome } from "../components/game/GamesHome";
+import { isSettingsPage } from "../components/sidebar/mainAppLocation";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { useLegacySidebarEnabled } from "../hooks/useSettings";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
@@ -27,6 +30,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import type { ThreadRouteTarget } from "../threadRoutes";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -196,17 +200,51 @@ function ChatRouteGlobalShortcuts() {
   return null;
 }
 
+type MainView = { kind: "home" } | { kind: "thread"; target: ThreadRouteTarget };
+
+const HOME_VIEW: MainView = { kind: "home" };
+
+function mainViewKey(view: MainView | null): string | null {
+  if (view === null) return null;
+  if (view.kind === "home") return "home";
+  return view.target.kind === "server"
+    ? `thread:${scopedThreadKey(view.target.threadRef)}`
+    : `draft:${view.target.draftId}`;
+}
+
 function ChatRouteLayout() {
-  // Both thread routes render here, not in their own leaf components, so the
-  // draft-to-thread promotion keeps one ChatView mounted across the swap.
+  // Home and both thread routes render here, not in their own leaf components, so the
+  // draft-to-thread promotion keeps one ChatView mounted across the swap, and Settings
+  // can open over whichever of them was showing without unmounting it.
   const threadTarget = useThreadRouteTarget();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const settingsOpen = isSettingsPage(pathname);
+  const routeView: MainView | null = settingsOpen
+    ? null
+    : threadTarget
+      ? { kind: "thread", target: threadTarget }
+      : pathname === "/"
+        ? HOME_VIEW
+        : null;
+  // The view Settings opens over: the last one shown, so a game keeps playing behind it.
+  // A settings link opened cold has none, and Home stands in.
+  const [lastView, setLastView] = useState<MainView | null>(routeView);
+  if (!settingsOpen && mainViewKey(routeView) !== mainViewKey(lastView)) {
+    setLastView(routeView);
+  }
+  const view = settingsOpen ? (lastView ?? HOME_VIEW) : routeView;
   return (
     <>
-      <ChatRouteGlobalShortcuts />
-      {threadTarget?.kind === "server" ? (
-        <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
+      {settingsOpen ? null : <ChatRouteGlobalShortcuts />}
+      {!settingsOpen && view?.kind === "thread" && view.target.kind === "server" ? (
+        <ThreadLinkPrompt threadRef={view.target.threadRef} />
       ) : null}
-      {threadTarget ? <ThreadRouteView target={threadTarget} /> : <Outlet />}
+      {view?.kind === "thread" ? (
+        <ThreadRouteView target={view.target} behindSettings={settingsOpen} />
+      ) : view?.kind === "home" ? (
+        <GamesHome />
+      ) : null}
+      {view === null || settingsOpen ? <Outlet /> : null}
     </>
   );
 }

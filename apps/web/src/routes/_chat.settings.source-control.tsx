@@ -3,7 +3,7 @@ import { SourceControlWritingSettingsSection } from "../components/settings/Sour
 import { SettingsPageContainer } from "../components/settings/settingsLayout";
 import { ProjectDefaultsSettings } from "../components/settings/ProjectDefaultsSettings";
 
-export const Route = createFileRoute("/settings/source-control")({
+export const Route = createFileRoute("/_chat/settings/source-control")({
   component: () => (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="source-control" />

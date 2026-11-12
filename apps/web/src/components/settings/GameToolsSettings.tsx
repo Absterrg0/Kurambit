@@ -22,10 +22,10 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { GAME_TOOL_NAMES, GameToolLink } from "../game/GameToolLink";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
+import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -57,10 +57,10 @@ const SOURCE_LABELS = {
   path: "PATH",
 } as const satisfies Record<NonNullable<GameToolStatus["source"]>, string>;
 
-const STATUS_BADGES = {
-  ready: { variant: "success", label: "Ready" },
-  warning: { variant: "warning", label: "Needs attention" },
-  error: { variant: "error", label: "Not ready" },
+const STATUS_LABELS = {
+  ready: { tone: "success", label: "Ready" },
+  warning: { tone: "warning", label: "Needs attention" },
+  error: { tone: "danger", label: "Not ready" },
 } as const;
 
 // The tools only the person installs and removes, here: the agent cannot.
@@ -103,61 +103,59 @@ export function GameToolsSettings({ environmentId }: { environmentId: Environmen
   return (
     <SettingsSection id="game-tools" title="Game tools">
       {query.data?.tools.map((tool) => {
-        const badge = STATUS_BADGES[tool.status];
+        const status = STATUS_LABELS[tool.status];
         const ToolIcon = TOOL_ICONS[tool.tool];
+        const found =
+          tool.path === null
+            ? null
+            : [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source], tool.path]
+                .filter((part) => part !== null)
+                .join(" · ");
+        const showMessage = !(tool.status === "ready" && /^ready\.?$/i.test(tool.message.trim()));
+        const details = showMessage || INSTALLABLE.has(tool.tool) || tool.status !== "ready";
         return (
           <SettingsRow
             key={tool.tool}
             icon={<ToolIcon />}
             title={GAME_TOOL_NAMES[tool.tool]}
             description={TOOL_PURPOSE[tool.tool]}
-            status={
-              <Badge variant={badge.variant} size="sm">
-                {badge.label}
-              </Badge>
+            status={found === null ? null : <span className="wrap-anywhere">{found}</span>}
+            control={
+              <span className="flex items-center gap-2">
+                <StatusDot tone={status.tone} size="md" />
+                <Text variant="meta" tone="muted">
+                  {status.label}
+                </Text>
+              </span>
             }
           >
-            <div className="flex min-w-0 flex-col gap-1 break-words ps-7">
-              {tool.path === null ? null : (
-                <>
-                  {tool.version === null && tool.source === null ? null : (
-                    <Text variant="meta" tone="muted" render={<p />}>
-                      {[tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
-                        .filter((part) => part !== null)
-                        .join(" · ")}
-                    </Text>
-                  )}
-                  <Text variant="caption" tone="dim" mono render={<p className="break-all" />}>
-                    {tool.path}
+            {details ? (
+              <div className="flex min-w-0 flex-col gap-1 break-words ps-7">
+                {/* The status in the control column already says a ready tool is ready. */}
+                {!showMessage ? null : tool.installed || tool.status === "ready" ? (
+                  <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
+                    {tool.message}
                   </Text>
-                </>
-              )}
-              {/* The badge already says a ready tool is ready. */}
-              {tool.status === "ready" &&
-              /^ready\.?$/i.test(tool.message.trim()) ? null : tool.installed ||
-                tool.status === "ready" ? (
-                <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
-                  {tool.message}
-                </Text>
-              ) : (
-                <Text variant="meta" tone="muted" render={<details />}>
-                  <summary className="cursor-pointer">Not installed · Details</summary>
-                  <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
-                </Text>
-              )}
-              {INSTALLABLE.has(tool.tool) ? (
-                <GameToolChange
-                  environmentId={environmentId}
-                  tool={tool}
-                  onChanged={() => query.refresh()}
-                />
-              ) : null}
-              {tool.status === "ready" ? null : (
-                <div>
-                  <GameToolLink tool={tool} />
-                </div>
-              )}
-            </div>
+                ) : (
+                  <Text variant="meta" tone="muted" render={<details />}>
+                    <summary className="cursor-pointer">Not installed · Details</summary>
+                    <p className="mt-1 whitespace-pre-wrap">{tool.message}</p>
+                  </Text>
+                )}
+                {INSTALLABLE.has(tool.tool) ? (
+                  <GameToolChange
+                    environmentId={environmentId}
+                    tool={tool}
+                    onChanged={() => query.refresh()}
+                  />
+                ) : null}
+                {tool.status === "ready" ? null : (
+                  <div>
+                    <GameToolLink tool={tool} />
+                  </div>
+                )}
+              </div>
+            ) : null}
           </SettingsRow>
         );
       })}

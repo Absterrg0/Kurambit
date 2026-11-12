@@ -33,11 +33,9 @@ import {
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
-import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
-import { MainAppLocationTracker } from "./sidebar/mainAppLocation";
+import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
+import { isSettingsPage, MainAppLocationTracker } from "./sidebar/mainAppLocation";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
-import { useProjects } from "../state/entities";
 import {
   clampThreadSidebarWidth,
   resolveInitialThreadSidebarWidth,
@@ -245,14 +243,6 @@ function NavigationHistoryShortcuts() {
   return null;
 }
 
-// Settings swaps the thread sidebar out of the tree. Keep the lightweight
-// project projection subscribed so returning to a draft never renders the
-// zero-project state while the environment snapshot reconnects.
-function ProjectProjectionRetention() {
-  useProjects();
-  return null;
-}
-
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
@@ -262,7 +252,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const pathname = useLocation({ select: (location) => location.pathname });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
-  const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
@@ -303,8 +292,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
     const unsubscribe = onMenuAction((action) => {
       if (action === "open-settings") {
-        const isSettingsRoute = /^\/settings(\/|$)/.test(pathname);
-        if (!isSettingsRoute) {
+        if (!isSettingsPage(pathname)) {
           void navigate({ to: "/settings" });
         }
       }
@@ -324,14 +312,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         style={sidebarProviderStyle}
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
-        <ProjectProjectionRetention />
         <Sidebar
           side="left"
           variant="inset"
           collapsible="offcanvas"
           data-app-sidebar=""
           role="navigation"
-          aria-label={isOnSettings ? "Settings" : "Threads"}
+          aria-label="Threads"
           resizable={{
             maxWidth: sidebarMaximumWidth,
             minWidth: sidebarMinimumWidth,
@@ -343,16 +330,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           }}
           style={windowControlsInsetStyle}
         >
-          {isOnSettings ? (
-            <>
-              <SidebarChromeHeader isElectron={isElectron} />
-              <SettingsSidebarNav pathname={pathname} />
-            </>
-          ) : legacySidebarEnabled ? (
-            <LegacyThreadSidebar />
-          ) : (
-            <ThreadSidebar />
-          )}
+          {legacySidebarEnabled ? <LegacyThreadSidebar /> : <ThreadSidebar />}
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
         {children}
