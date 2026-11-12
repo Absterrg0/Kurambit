@@ -739,7 +739,8 @@ function NotMeasured({
             >
               <InfoIcon aria-hidden="true" />
             </PopoverTrigger>
-            <PopoverPopup side="left" align="start" width="sm" padding="compact">
+            {/* Under its row, ending at the button: the row it explains stays readable. */}
+            <PopoverPopup side="bottom" align="end" width="sm" padding="compact">
               <span className="flex flex-col gap-1.5">
                 <Text variant="meta" tone="strong">
                   Not measured
@@ -1256,7 +1257,8 @@ function BuildActions({
               ) : null}
               {canCompare && previous !== undefined ? (
                 <MenuItem onClick={() => onCompare(previous)}>
-                  <ColumnsIcon />
+                  {/* Two-line items keep their icon on the title's line, like one-line ones. */}
+                  <ColumnsIcon className="mt-0.5 self-start" />
                   <span className="flex min-w-0 flex-col">
                     Compare with the build before
                     <Text variant="caption" tone="muted" truncate>
@@ -1284,7 +1286,7 @@ function BuildActions({
                     )
                   }
                 >
-                  <Undo2Icon />
+                  <Undo2Icon className="mt-0.5 self-start" />
                   <span className="flex min-w-0 flex-col">
                     {restores.restoring(action.target) ? kind.busy : kind.label}
                     <Text variant="caption" tone="muted">

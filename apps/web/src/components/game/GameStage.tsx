@@ -482,6 +482,7 @@ function ThreadGameStage({
     };
     check();
     return observeResize([section, row], check);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the top bar mounts once the status is read; before that there is no row to measure.
   }, [hasStatus]);
   useLayoutEffect(() => {
     const section = stageRef.current;

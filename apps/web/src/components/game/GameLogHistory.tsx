@@ -90,16 +90,13 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
                 </li>
               )}
               {builds.map((build) => {
-                const additions = build.files.reduce((sum, file) => sum + file.additions, 0);
-                const deletions = build.files.reduce((sum, file) => sum + file.deletions, 0);
-                const files = build.fileCount ?? build.files.length;
                 const caption = buildCaption(build);
                 return (
                   <li key={build.id}>
                     <button
                       type="button"
                       onClick={() => open(build)}
-                      className="flex w-full items-center gap-3 px-3 py-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent"
                     >
                       <GameBuildStill
                         threadRef={threadRef}
@@ -114,13 +111,9 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
                             : `${buildName(build)} · ${caption}`}
                         </Text>
                         <Text variant="meta" tone="muted" numeric truncate>
-                          {[
-                            formatBuildTime(build.at),
-                            files > 0
-                              ? `${files === 1 ? "1 file" : `${files} files`} +${additions} −${deletions}`
-                              : null,
-                            checksPhrase(build.facts),
-                          ]
+                          {/* When and how it measured: what tells builds apart. Its files are
+                              in the build itself, one click away. */}
+                          {[formatBuildTime(build.at), checksPhrase(build.facts) ?? "Not measured"]
                             .filter((part) => part !== null)
                             .join(" · ")}
                         </Text>
