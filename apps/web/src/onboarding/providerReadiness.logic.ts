@@ -40,6 +40,11 @@ export function getOnboardingProviderState(provider: ServerProvider | undefined)
     return "checking";
   if (!provider.installed) return "install";
   if (provider.auth.status === "unauthenticated") return "signIn";
+  // Signed in is not the same as fully usable: an installed version Kurambit does not fully
+  // support reads "Version issue" here, as Settings → Providers says of the same provider.
+  const compatibility = provider.compatibilityAdvisory?.status;
+  if (compatibility === "graceful" || compatibility === "unsupported" || compatibility === "broken")
+    return "version";
   if (provider.status === "ready") return "ready";
   return "attention";
 }
@@ -50,7 +55,8 @@ const PROVIDER_STATE_PRIORITY = {
   install: 2,
   attention: 3,
   signIn: 4,
-  ready: 5,
+  version: 5,
+  ready: 6,
 } as const;
 
 export function selectOnboardingProvidersByDriver(

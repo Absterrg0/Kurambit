@@ -34,7 +34,10 @@ import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { getProviderSummary } from "../settings/providerStatus";
+import {
+  getProviderSummary,
+  getProviderVersionAdvisoryPresentation,
+} from "../settings/providerStatus";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator";
 import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/CodexSetupSection";
@@ -351,7 +354,7 @@ function ConnectedAgentsStep({
           <div className="px-2 py-1.5">
             <Button size="sm" variant="ghost-muted" onClick={() => setAddingAccount(true)}>
               <PlusIcon />
-              Connect another Codex account
+              Add a Codex account
             </Button>
           </div>
         ) : null}
@@ -496,8 +499,14 @@ function AgentCard({
         {/* Ready needs no line: the badge says it. */}
         {providerState === "ready" ? null : (
           <p className="mt-0.5 text-meta font-normal break-words whitespace-pre-wrap text-muted-foreground">
-            {summary.headline}
-            {summary.detail ? ` · ${summary.detail}` : ""}
+            {providerState === "version" ? (
+              versionIssueLine(provider)
+            ) : (
+              <>
+                {summary.headline}
+                {summary.detail ? ` · ${summary.detail}` : ""}
+              </>
+            )}
           </p>
         )}
       </div>
@@ -508,6 +517,8 @@ function AgentCard({
           <StatusLabel>Checking…</StatusLabel>
         ) : providerState === "disabled" ? (
           <StatusLabel>Disabled</StatusLabel>
+        ) : providerState === "version" ? (
+          <StatusLabel tone="warning">Version issue</StatusLabel>
         ) : providerState === "attention" ? (
           <StatusLabel tone="warning">{summary.headline}</StatusLabel>
         ) : (
@@ -524,6 +535,15 @@ function AgentCard({
       </div>
     </div>
   );
+}
+
+/** Signed in, but on a version Kurambit does not fully support: what to do, in Settings' words. */
+function versionIssueLine(provider: ServerProvider | undefined): string {
+  const advisory = getProviderVersionAdvisoryPresentation(
+    provider?.versionAdvisory,
+    provider?.compatibilityAdvisory,
+  );
+  return `Signed in. ${advisory?.detail ?? "Update it for full support."} Update it in Settings → Providers.`;
 }
 
 /** An agent with no sign-in flow here: its status, and where to fix it. */
@@ -545,12 +565,18 @@ function OtherAgentCard({ provider }: { readonly provider: ServerProvider }) {
         {providerState === "ready" ? null : (
           <p className="mt-0.5 text-meta font-normal break-words whitespace-pre-wrap text-muted-foreground">
             {providerState === "checking"
-              ? "Checking..."
-              : `${summary.headline}${summary.detail ? ` · ${summary.detail}` : ""} Fix it in Settings → Providers.`}
+              ? "Checking…"
+              : providerState === "version"
+                ? versionIssueLine(provider)
+                : `${summary.headline}${summary.detail ? ` · ${summary.detail}` : ""} Fix it in Settings → Providers.`}
           </p>
         )}
       </div>
-      {providerState === "ready" ? <StatusLabel tone="success">Ready</StatusLabel> : null}
+      {providerState === "ready" ? (
+        <StatusLabel tone="success">Ready</StatusLabel>
+      ) : providerState === "version" ? (
+        <StatusLabel tone="warning">Version issue</StatusLabel>
+      ) : null}
     </div>
   );
 }

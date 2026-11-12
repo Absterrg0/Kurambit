@@ -1019,14 +1019,6 @@ export function ProviderInstanceCard({
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-              {/* A pending update's badge stands in for the version in the list, so the
-                  name is never the part that gives way; the detail shows the version. */}
-              {versionLabel && !versionAdvisoryNode ? (
-                <span className="max-w-24 shrink-0 truncate text-meta text-muted-foreground tabular-nums">
-                  {versionLabel}
-                </span>
-              ) : null}
-              {versionAdvisoryNode}
             </span>
             <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-meta text-muted-foreground">
               {statusDotNode && !updateProgress ? (
@@ -1048,6 +1040,16 @@ export function ProviderInstanceCard({
                       {needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : null}
                     </>
                   )}
+                  {/* The name keeps its whole line; the version or a pending update is a word
+                      on this one, and its details and actions live in the provider's pane. */}
+                  {updateProgress ? null : versionAdvisory ? (
+                    <span className={cn(hasCompatibilityWarning && "text-warning")}>
+                      {" · "}
+                      {hasCompatibilityWarning ? "Version issue" : "Update ready"}
+                    </span>
+                  ) : versionLabel ? (
+                    <span className="tabular-nums">{` · ${versionLabel}`}</span>
+                  ) : null}
                 </span>
               </ProviderStatusDiagnostic>
             </span>

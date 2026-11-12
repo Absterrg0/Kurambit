@@ -64,6 +64,20 @@ describe("getOnboardingProviderState", () => {
     expect(getOnboardingProviderState({ ...readyCodex, status: "warning" })).toBe("attention");
   });
 
+  it("separates a signed-in provider on an unsupported version from a ready one", () => {
+    expect(
+      getOnboardingProviderState({
+        ...readyCodex,
+        compatibilityAdvisory: {
+          status: "unsupported",
+          message: null,
+          recommendedVersion: null,
+          recommendedRange: null,
+        },
+      }),
+    ).toBe("version");
+  });
+
   it("does not offer installation or sign-in for disabled providers", () => {
     expect(getOnboardingProviderState({ ...readyCodex, enabled: false, installed: false })).toBe(
       "disabled",

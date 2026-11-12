@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { Switch } from "../ui/switch";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
 import { searchableSetting } from "./settingsSearch";
@@ -65,8 +66,8 @@ export function UsageProviderSettings({
         {...searchableSetting("usage-providers")}
         headerAction={
           !readOnly ? (
-            <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
-              <PlusIcon className="size-3" aria-hidden />
+            <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+              <PlusIcon aria-hidden />
               Add hub
             </Button>
           ) : null
@@ -88,7 +89,15 @@ export function UsageProviderSettings({
           />
         ) : null}
         {entries.length === 0 ? (
-          <SettingsRow title="No hubs configured." />
+          <Empty variant="well">
+            <EmptyHeader>
+              <EmptyTitle>No usage hubs</EmptyTitle>
+              <EmptyDescription>
+                A CLIProxyAPI hub pools several agent accounts. Add one to see each account&apos;s
+                quota beside its provider in Usage.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           entries.map(([id, source]) => {
             const label = source.label?.trim() || source.url;

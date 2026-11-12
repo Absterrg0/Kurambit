@@ -88,7 +88,7 @@ export function ProviderUpdatesAction() {
       <TooltipTrigger
         render={
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={isPending}
             onClick={() => void handleUpdate()}

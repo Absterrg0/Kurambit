@@ -82,16 +82,20 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
               ? null
               : "Connected with your Codex CLI."
             : existingChecking
-              ? "Checking your Codex CLI..."
-              : props.provider?.installed
-                ? existingSummary.headline
-                : "Code with your ChatGPT subscription."
+              ? "Checking your Codex CLI…"
+              : existingState === "version"
+                ? "Signed in. Update it in Settings → Providers for full support."
+                : props.provider?.installed
+                  ? existingSummary.headline
+                  : "Code with your ChatGPT subscription."
         }
         control={
           existingReady ? (
             <ReadyWithAccount email={props.provider?.auth.email?.trim()} />
           ) : existingChecking ? (
             <span className="text-xs text-muted-foreground">Checking...</span>
+          ) : existingState === "version" ? (
+            <StatusLabel tone="warning">Version issue</StatusLabel>
           ) : existingAuthenticated ? (
             <span className="text-xs text-muted-foreground">{existingSummary.headline}</span>
           ) : (

@@ -94,7 +94,8 @@ function ProviderCustomColorPicker(props: {
                     }
                     style={normalized ? { backgroundColor: normalized } : undefined}
                   />
-                  Colour
+                  {/* The row is already titled Colour; the button says which one. */}
+                  {normalized ? normalized.toUpperCase() : "None"}
                 </Button>
               }
             />

@@ -190,8 +190,9 @@ function ProviderLastChecked({ environmentId }: { environmentId: EnvironmentId }
   );
 }
 
-const providerCardHeightClassName =
-  "@min-[48rem]/providers:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/providers:min-h-[32rem]";
+// The card grows with the selected provider's detail, so the page is the one scroller;
+// a fixed height cut the model list mid-row inside a second one.
+const providerCardHeightClassName = "@min-[48rem]/providers:min-h-[32rem]";
 
 function ProviderSettingsPlaceholder({
   deviceTabs,
@@ -987,7 +988,7 @@ export function EnvironmentProviderSettings({
       >
         <div className="flex min-h-7 min-w-0 items-center justify-between gap-2 px-3 pb-1.5 sm:px-4">
           {!readOnly ? (
-            <Button variant="outline" onClick={() => setIsAddInstanceDialogOpen(true)}>
+            <Button size="sm" variant="outline" onClick={() => setIsAddInstanceDialogOpen(true)}>
               <PlusIcon />
               Add provider
             </Button>
@@ -1000,7 +1001,7 @@ export function EnvironmentProviderSettings({
               <TooltipTrigger
                 render={
                   <Button
-                    size="xs"
+                    size="sm"
                     variant="ghost-muted"
                     disabled={isRefreshingProviders || !canRefreshProviders}
                     aria-busy={isRefreshingProviders}
