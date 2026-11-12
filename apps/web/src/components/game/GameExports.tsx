@@ -32,19 +32,19 @@ const BUILD_META: Record<
   { title: string; body: string; icon: typeof Gamepad2Icon; play: boolean }
 > = {
   Web: {
-    title: "Web export",
+    title: "Web",
     body: "Runs in this window. This is what Play serves.",
     icon: Gamepad2Icon,
     play: true,
   },
   Windows: {
-    title: "Windows export",
+    title: "Windows",
     body: "A standalone 64-bit Windows release for Windows PCs. Download package zips this export, not later source edits. Play still serves the Web export.",
     icon: MonitorIcon,
     play: false,
   },
   Linux: {
-    title: "Linux export",
+    title: "Linux",
     body: "A standalone release for Linux desktops. Play still serves the Web export.",
     icon: LaptopIcon,
     play: false,
@@ -234,7 +234,7 @@ export function GameExports({
           live && target === "Web"
             ? {
                 ...BUILD_META.Web,
-                body: "A static copy of the game for any web host. The Stage plays the game folder live, not this export.",
+                body: "A copy of the game you can put on any website. The Stage keeps playing the game itself.",
                 play: false,
               }
             : BUILD_META[target];
@@ -280,7 +280,7 @@ export function GameExports({
                   <p className="mt-1 font-mono break-all">{build.path}</p>
                 </details>
               ) : (
-                <p className="text-2xs text-muted-foreground">Not built yet</p>
+                <p className="text-2xs text-muted-foreground">Never exported</p>
               )}
               {target === "Web" && !live ? (
                 <p className="text-2xs text-muted-foreground">
@@ -385,7 +385,7 @@ export function GameExports({
                   }}
                 >
                   <DownloadIcon className="size-3.5" aria-hidden="true" />
-                  Export {target}
+                  {target === "Web" ? "Export for web" : `Export for ${target}`}
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={() => reveal("builds/logs")}>

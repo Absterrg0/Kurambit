@@ -56,6 +56,7 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Kbd } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
@@ -222,7 +223,22 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
   const working = threadRuntimeIsActive(shell?.runtime);
   const data = list.data;
-  if (data === null) return <Notice>{list.error ?? "Reading the builds…"}</Notice>;
+  if (data === null)
+    return list.error === null ? (
+      // The build header and its check rows at their final size, so nothing jumps when they land.
+      <div className="flex flex-col gap-5 p-4">
+        <div className="flex items-center gap-3">
+          <Skeleton shape="card" className="h-12 w-20" />
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+        <Skeleton shape="card" className="h-40 w-full" />
+      </div>
+    ) : (
+      <Notice>{list.error}</Notice>
+    );
   const onStageId = stageBuildId(data, asked?.build ?? null);
   // The folder changed since its last build: the Stage plays something no build holds yet.
   const nowOnStage = onStageId === null && inspected === null;
@@ -404,9 +420,13 @@ function BuildDetail({
             This build's history was pruned; only what the strip shows is left.
           </Text>
         ) : factsData === null ? (
-          <Text variant="meta" tone="muted" render={<p />}>
-            {facts.error ?? "Reading the checks…"}
-          </Text>
+          facts.error === null ? (
+            <Skeleton shape="card" className="h-40 w-full" />
+          ) : (
+            <Text variant="meta" tone="muted" render={<p />}>
+              {facts.error}
+            </Text>
+          )
         ) : factsData.state === "never" ? (
           <Text variant="meta" tone="muted" render={<p />}>
             {factsData.message.trim() === "" ? "Not measured yet." : factsData.message}

@@ -1151,7 +1151,7 @@ function ThreadGameStage({
           <DialogHeader>
             <DialogTitle>Export</DialogTitle>
             <DialogDescription>
-              Releases of the game, written to builds/ (logs in builds/logs/), never committed.
+              Copies of the game you can share. They stay out of the game's history.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>

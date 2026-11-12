@@ -11,6 +11,7 @@ import type { GameGeneration, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { Button } from "../ui/button";
+import { Skeleton } from "../ui/skeleton";
 import {
   GameGenerationBody,
   GameImage,
@@ -70,10 +71,10 @@ export function GameGeneratedArt({ threadRef }: { threadRef: ScopedThreadRef }) 
   const [open, setOpen] = useState<ReadonlySet<string> | null>(null);
   const data = query.data;
   if (data === null)
-    return (
-      <p className="text-sm text-muted-foreground">
-        {query.error ?? "Reading the game's generated art…"}
-      </p>
+    return query.error === null ? (
+      <Skeleton shape="card" className="h-16 w-full" />
+    ) : (
+      <p className="text-sm text-muted-foreground">{query.error}</p>
     );
   const generations = data.generations.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
   const opened =

@@ -211,8 +211,8 @@ export function GameSavedList({ threadRef }: { threadRef: ScopedThreadRef }) {
         </p>
       ) : null}
       <p className="text-2xs text-muted-foreground">
-        Saved files live in <span className="font-mono">saved/</span>, which is not committed to the
-        game repository.
+        Saved files stay in the game's <span className="font-mono">saved/</span> folder, out of its
+        history.
       </p>
     </section>
   );
