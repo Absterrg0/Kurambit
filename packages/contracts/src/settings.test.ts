@@ -599,8 +599,8 @@ describe("ClientSettings appearance contrast", () => {
 });
 
 describe("ClientSettings panel animations", () => {
-  it("defaults to instant changes", () => {
-    expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(0);
+  it("defaults to a brief open and close", () => {
+    expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(125);
   });
 
   it.each([0, 400])("accepts a panel animation duration: %s", (value) => {

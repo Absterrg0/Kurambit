@@ -738,6 +738,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 }
 
 @layer base {
+  /* Selected text takes the theme's own selection tint, the one its terminal uses,
+     never the system blue (a game's name being renamed, a field, copied text). */
+  ::selection {
+    background-color: var(--terminal-selection-background);
+  }
   ::highlight(kurambit-assistant-citation) {
     background-color: color-mix(
       in oklab,

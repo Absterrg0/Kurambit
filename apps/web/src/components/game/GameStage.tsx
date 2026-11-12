@@ -885,6 +885,15 @@ function ThreadGameStage({
   const fullscreenKey = shortcutLabelForCommand(keybindings, "game.fullscreen", {
     context: { gameThread: true },
   });
+  const inspectorKey = shortcutLabelForCommand(keybindings, "game.chat.toggle", {
+    context: { gameThread: true },
+  });
+  const undoKey = shortcutLabelForCommand(keybindings, "game.undoTurn", {
+    context: { gameThread: true },
+  });
+  const redoKey = shortcutLabelForCommand(keybindings, "game.redoTurn", {
+    context: { gameThread: true },
+  });
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void stageRef.current?.requestFullscreen();
@@ -1059,7 +1068,7 @@ function ThreadGameStage({
               name={gameName}
               onRename={(name) => void renameGame(quietShell.projectId, name)}
               onDone={() => setRenamingGame(false)}
-              className="-ms-2.5 w-56"
+              className="-ms-2.5 me-1 w-56"
             />
           ) : (
             <Menu>
@@ -1114,6 +1123,7 @@ function ThreadGameStage({
           <span className="min-w-2 flex-1" />
           <IconAction
             label="Undo the last build"
+            shortcut={undoKey}
             disabled={!turnUndoAllowed("undo")}
             onClick={() => handleRequest({ kind: "undo" }, 0)}
           >
@@ -1121,24 +1131,32 @@ function ThreadGameStage({
           </IconAction>
           <IconAction
             label="Redo the build you undid"
+            shortcut={redoKey}
             disabled={!turnUndoAllowed("redo")}
             onClick={() => handleRequest({ kind: "redo" }, 0)}
           >
             <Redo2Icon className="size-3.5" aria-hidden="true" />
           </IconAction>
           <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Stage actions"
-                  data-game-stage-more=""
-                />
-              }
-            >
-              <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
-            </MenuTrigger>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <MenuTrigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label="Stage actions"
+                        data-game-stage-more=""
+                      />
+                    }
+                  />
+                }
+              >
+                <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">Stage actions</TooltipPopup>
+            </Tooltip>
             {/* The game's own things (name, folder, export, tools) live under its name; this
                 menu is only what plays on the Stage, and says so. */}
             <MenuPopup align="end">
@@ -1226,6 +1244,7 @@ function ThreadGameStage({
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               {compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"}
+              {inspectorKey === null ? null : ` (${inspectorKey})`}
             </TooltipPopup>
           </Tooltip>
         </div>
@@ -1409,11 +1428,14 @@ function ThreadGameStage({
 /** A header icon button with its name in a tooltip. */
 function IconAction({
   label,
+  shortcut = null,
   disabled = false,
   onClick,
   children,
 }: {
   label: string;
+  /** Its key, said in the tooltip as every icon button's is: "Label (Ctrl+Z)". */
+  shortcut?: string | null;
   disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
@@ -1433,7 +1455,9 @@ function IconAction({
       >
         {children}
       </TooltipTrigger>
-      <TooltipPopup side="bottom">{label}</TooltipPopup>
+      <TooltipPopup side="bottom">
+        {shortcut === null ? label : `${label} (${shortcut})`}
+      </TooltipPopup>
     </Tooltip>
   );
 }

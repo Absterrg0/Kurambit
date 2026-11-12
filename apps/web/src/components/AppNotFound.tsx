@@ -11,8 +11,10 @@ export function AppNotFound() {
       <Empty>
         <EmptyHeader>
           <EmptyTitle>Page not found</EmptyTitle>
+          {/* One sentence a line, so the second never breaks mid-phrase under the first. */}
           <EmptyDescription>
-            This link doesn't point to a page. Go home to pick a game or start a new one.
+            <p>This link doesn't point to a page.</p>
+            <p>Go home to pick a game or start a new one.</p>
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>

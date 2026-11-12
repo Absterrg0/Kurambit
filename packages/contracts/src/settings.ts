@@ -116,7 +116,9 @@ export const PanelAnimationDurationMs = Schema.Int.check(
   }),
 );
 export type PanelAnimationDurationMs = typeof PanelAnimationDurationMs.Type;
-const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 0;
+// Short, and only as a panel opens or closes, so a sidebar or panel toggle reads as a
+// move rather than a jump; nothing animates while it stays open. One slider step (25).
+const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 125;
 
 export const MIN_INTERFACE_FONT_SIZE = 12;
 export const MAX_INTERFACE_FONT_SIZE = 20;
@@ -298,8 +300,8 @@ export const ClientSettingsSchema = Schema.Struct({
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
   ),
-  // Panel motion defaults to zero because width and height transitions cause
-  // layout work on every frame, which is noticeable on lower-power clients.
+  // Width and height transitions cost layout on each of their frames, so the default
+  // stays brief; lower-power clients can set it to zero under Appearance → Motion.
   panelAnimationDurationMs: PanelAnimationDurationMs.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PANEL_ANIMATION_DURATION_MS)),
   ),

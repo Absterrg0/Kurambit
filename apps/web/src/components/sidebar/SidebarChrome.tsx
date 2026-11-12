@@ -1,10 +1,13 @@
 import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { useAtomValue } from "@effect/atom-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
+import { shortcutLabelForCommand } from "../../keybindings";
+import { primaryServerKeybindingsAtom } from "../../state/server";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -133,10 +136,12 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 function SidebarUtilityItem({
   icon,
   label,
+  shortcut = null,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  shortcut?: string | null;
   onClick: () => void;
 }) {
   return (
@@ -149,7 +154,9 @@ function SidebarUtilityItem({
             </SidebarMenuButton>
           }
         />
-        <TooltipPopup side="top">{label}</TooltipPopup>
+        <TooltipPopup side="top">
+          {shortcut === null ? label : `${label} (${shortcut})`}
+        </TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>
   );
@@ -162,6 +169,10 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const isOnUtilityPage = useLocation({
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
+  const usageKey = shortcutLabelForCommand(
+    useAtomValue(primaryServerKeybindingsAtom),
+    "usage.open",
+  );
   const closeMobileSidebar = () => {
     if (isMobile) {
       setOpenMobile(false);
@@ -204,6 +215,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
+            shortcut={usageKey}
             onClick={handleUsageClick}
           />
         </>
