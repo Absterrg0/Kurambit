@@ -1,7 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import { GAME_ENGINES, type ScopedThreadRef } from "@kurambit/contracts";
-import { FastForwardIcon, CornerDownRightIcon } from "lucide-react";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { FastForwardIcon, CornerDownRightIcon, GitCompareIcon } from "lucide-react";
 
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
@@ -37,6 +39,10 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     sending: keepGoing.sending,
     chosenBudget: keepGoing.chosenBudget,
   });
+  const threadKey = scopedThreadKey(threadRef);
+  const picking = useGameWorkspaceStore((state) =>
+    state.comparePicking?.threadKey === threadKey ? state.comparePicking : null,
+  );
   if (status === null || status === undefined) return null;
   const current = list?.builds.find((build) => build.id === list.current) ?? null;
   // The agent always changes the game folder: a copy on the Stage is only being looked at.
@@ -50,11 +56,39 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null;
   return (
     <div className="flex min-h-8 items-center gap-2 px-1 pt-1.5" data-game-composer-tray="">
-      <CornerDownRightIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
-      <Text variant="caption" tone="muted" truncate render={<span className="min-w-0 flex-1" />}>
-        {target}
-        {copy !== null ? " · the copy on the Stage stays as it is" : ""}
-      </Text>
+      {picking !== null ? (
+        // While the strip picks a compare, the tray says what it waits for: the composer is
+        // not what the next click changes.
+        <>
+          <GitCompareIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
+          <Text
+            variant="caption"
+            tone="muted"
+            truncate
+            render={<span className="min-w-0 flex-1" aria-live="polite" />}
+          >
+            {picking.first === null
+              ? "Comparing: pick the first build on the strip · Esc cancels"
+              : `Comparing with ${picking.first}: pick the other build · Esc cancels`}
+          </Text>
+        </>
+      ) : (
+        <>
+          <CornerDownRightIcon
+            className="size-3.5 shrink-0 text-dim-foreground"
+            aria-hidden="true"
+          />
+          <Text
+            variant="caption"
+            tone="muted"
+            truncate
+            render={<span className="min-w-0 flex-1" />}
+          >
+            {target}
+            {copy !== null ? " · the copy on the Stage stays as it is" : ""}
+          </Text>
+        </>
+      )}
       {canKeepGoing ? (
         <Menu>
           <Tooltip>

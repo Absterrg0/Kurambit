@@ -11,7 +11,7 @@ import type {
   ScopedThreadRef,
 } from "@kurambit/contracts";
 
-import type { GameStageRequest } from "../../gameWorkspaceStore";
+import { useGameWorkspaceStore, type GameStageRequest } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { gameEnvironment, olderBuildPages } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
@@ -217,13 +217,37 @@ export function GameBuildStrip({
         setSought(asked.build);
         setNotFound(false);
       }
-    } else setPicking(playing !== null ? { _tag: "build", build: playing } : "any");
+    } else
+      setPicking(asked.first ?? (playing !== null ? { _tag: "build", build: playing } : "any"));
   });
   const requestN = request?.n ?? 0;
   const asked = request?.request ?? null;
   useEffect(() => {
     if (asked !== null && requestN !== mountRequest) answer(asked);
   }, [requestN, asked, mountRequest, answer]);
+
+  // The tray under the composer narrates picking, and Escape gives it up.
+  const threadKey = scopedThreadKey(threadRef);
+  const firstPicked =
+    picking === null || picking === "any"
+      ? null
+      : (marks.find((entry) => sameRef(picking, entry)) ?? null);
+  const pickingFirstName = firstPicked === null ? null : buildName(firstPicked);
+  const pickingNow = picking !== null;
+  useEffect(() => {
+    if (!pickingNow) return;
+    const store = useGameWorkspaceStore.getState();
+    store.setComparePicking({ threadKey, first: pickingFirstName });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) setPicking(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (useGameWorkspaceStore.getState().comparePicking?.threadKey === threadKey)
+        useGameWorkspaceStore.getState().setComparePicking(null);
+    };
+  }, [pickingNow, pickingFirstName, threadKey]);
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
@@ -285,7 +309,9 @@ export function GameBuildStrip({
         <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-accent ps-2.5 pe-1">
           <GitCompareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <Text variant="meta" tone="strong" render={<span className="min-w-0 flex-1" />}>
-            {picking === "any" ? "Pick the first build to compare" : "Pick a build to compare with"}
+            {pickingFirstName === null
+              ? "Pick the first build to compare"
+              : `Pick a build to compare with ${pickingFirstName}`}
           </Text>
           <Button size="xs" variant="ghost" onClick={() => setPicking(null)}>
             Cancel
@@ -459,7 +485,10 @@ function BuildCard({
           build={build}
           className="aspect-video w-full rounded-md"
         >
-          <CardRing on={onStage || picked} />
+          <CardRing
+            on={picking ? false : onStage}
+            pick={picked ? "picked" : picking ? "pickable" : null}
+          />
           {picked ? <PickBadge /> : null}
         </GameBuildStill>
         <span className="flex min-h-12 min-w-0 flex-col gap-0.5 px-0.5">
@@ -497,17 +526,30 @@ function BuildCard({
  * The outline of the card on the Stage, drawn over the picture so it is never covered. Over an
  * empty well it is `quiet`: on a blank it would otherwise be the strongest line in the strip.
  */
-function CardRing({ on, quiet = false }: { on: boolean; quiet?: boolean }) {
+function CardRing({
+  on,
+  quiet = false,
+  pick = null,
+}: {
+  on: boolean;
+  quiet?: boolean;
+  /** While a compare is picked: the first build, or one that can be picked next. */
+  pick?: "picked" | "pickable" | null;
+}) {
   return (
     <span
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
-        on
-          ? quiet
-            ? "ring-1 ring-foreground/20"
-            : "ring-1 ring-foreground/45"
-          : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
+        pick === "picked"
+          ? "ring-2 ring-strong-foreground"
+          : pick === "pickable"
+            ? "ring-1 ring-foreground/35 group-hover/card:ring-2 group-hover/card:ring-foreground/70 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring"
+            : on
+              ? quiet
+                ? "ring-1 ring-foreground/20"
+                : "ring-1 ring-foreground/45"
+              : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
       )}
     />
   );

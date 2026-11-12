@@ -8,6 +8,7 @@ import {
   ChevronRightIcon,
   ClockIcon,
   ColumnsIcon,
+  GitCompareIcon,
   FileIcon,
   FileSearchIcon,
   FileVideoIcon,
@@ -956,11 +957,13 @@ function BuildActions({
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   const onStageNow = stageBuildId(list, useAtomValue(stagePlayTarget(threadRef))?.build ?? null);
   const canPlay = build.available && build.id !== onStageNow;
+  // Any other build can be its other side: the strip picks it, with this one already first.
+  const canPickCompare = build.available && list.builds.some((entry) => entry.id !== build.id);
   return (
     <div className="flex flex-col gap-1.5">
       <header className="flex items-center gap-3">
         {children}
-        {(action !== null && kind !== null) || canCompare || canPlay ? (
+        {(action !== null && kind !== null) || canCompare || canPickCompare || canPlay ? (
           <Menu>
             <MenuTrigger
               render={
@@ -969,7 +972,8 @@ function BuildActions({
             >
               <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
             </MenuTrigger>
-            <MenuPopup align="end" className="w-64">
+            {/* Upward: below, it would cover the Checks heading the build's actions are about. */}
+            <MenuPopup side="top" align="end" className="w-64">
               {canPlay ? (
                 <MenuItem onClick={() => requestStage({ kind: "play", build: refOf(build) })}>
                   <PlayIcon />
@@ -979,10 +983,21 @@ function BuildActions({
               {canCompare && previous !== undefined ? (
                 <MenuItem onClick={() => onCompare(previous)}>
                   <ColumnsIcon />
-                  Compare with {buildName(previous).replace(/^Build /, "")}
+                  <span className="flex min-w-0 flex-col">
+                    Compare with the build before
+                    <Text variant="caption" tone="muted" truncate>
+                      {buildName(previous)}
+                    </Text>
+                  </span>
                 </MenuItem>
               ) : null}
-              {(canPlay || canCompare) && action !== null && kind !== null ? (
+              {canPickCompare ? (
+                <MenuItem onClick={() => requestStage({ kind: "compare", first: refOf(build) })}>
+                  <GitCompareIcon />
+                  Compare with another build…
+                </MenuItem>
+              ) : null}
+              {(canPlay || canCompare || canPickCompare) && action !== null && kind !== null ? (
                 <MenuSeparator />
               ) : null}
               {action !== null && kind !== null ? (

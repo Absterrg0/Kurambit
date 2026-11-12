@@ -39,7 +39,12 @@ export type GameStageRequest =
   | { readonly kind: "live" }
   | { readonly kind: "play"; readonly build: GameBuildRef }
   | { readonly kind: "detail"; readonly build: GameBuildRef }
-  | { readonly kind: "compare"; readonly pair?: readonly [GameBuildRef, GameBuildRef] }
+  | {
+      readonly kind: "compare";
+      readonly pair?: readonly [GameBuildRef, GameBuildRef];
+      /** Start picking with this build already picked first. */
+      readonly first?: GameBuildRef;
+    }
   | { readonly kind: "step"; readonly by: -1 | 1 }
   | { readonly kind: "focus" }
   /** Freeze the game to point at things, or play on: Tab, the button, the palette and its key. */
@@ -79,6 +84,12 @@ interface GameWorkspaceStoreState {
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
   requestStage: (request: GameStageRequest) => void;
+  /** A compare being picked on a thread's strip, and the name of its first build once picked,
+   *  so the composer's tray can say what the strip is waiting for. Not persisted. */
+  comparePicking: { readonly threadKey: string; readonly first: string | null } | null;
+  setComparePicking: (
+    picking: { readonly threadKey: string; readonly first: string | null } | null,
+  ) => void;
 }
 
 /**
@@ -109,6 +120,8 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       stageRequest: null,
       requestStage: (request) =>
         set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
+      comparePicking: null,
+      setComparePicking: (picking) => set({ comparePicking: picking }),
     }),
     {
       name: "kurambit:game-workspace:v3",
