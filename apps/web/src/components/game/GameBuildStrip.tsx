@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNo
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { FastForwardIcon, GitCompareIcon } from "lucide-react";
+import { FastForwardIcon, GitCompareIcon, TriangleAlertIcon } from "lucide-react";
 import type {
   GameBuild,
   GameBuildId,
@@ -64,9 +64,10 @@ export interface GameBuildSlot {
   readonly label: string;
   /** What was asked for, when known. */
   readonly caption: string | null;
-  readonly since: number | null;
   /** Keep going is making it: the slot sits under the run's bracket. */
   readonly keepGoing: boolean;
+  /** The turn has ended and the build is being saved, a moment before its card replaces this. */
+  readonly saving?: boolean;
 }
 
 /**
@@ -654,12 +655,10 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
   return (
     <span className="flex shrink-0 items-center gap-1.5">
       {bad > 0 ? (
-        <span
-          className="flex items-center gap-1 text-warning-foreground"
-          aria-label={`${bad} to look at`}
-        >
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-warning" />
-          {bad}
+        // The Inspector's mark and words for it, so the strip's verdict reads without a key.
+        <span className="flex items-center gap-1 text-warning-foreground">
+          <TriangleAlertIcon aria-hidden="true" className="size-3 text-warning" />
+          {bad} to look at
         </span>
       ) : null}
       {gained !== 0 ? (
@@ -710,7 +709,7 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
         strong={false}
         title={slot.caption ?? slot.label}
         // The top bar holds the turn's clock; the slot says only what it is.
-        meta="Being made"
+        meta={slot.saving === true ? "Being saved" : "Being made"}
       />
     </div>
   );

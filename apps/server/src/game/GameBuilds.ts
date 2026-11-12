@@ -822,16 +822,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * A frame of the build playing, for its card: the random-input run's (it
-   * moves the most), else the no-input run's; an early grid frame before the
-   * run's last screen, which is often its ending. Only a file still there.
+   * A frame of the build playing, for its card: the earliest grid frame of the
+   * random-input run (it moves the most), else of the no-input run, before any
+   * later one or the run's last screen, which is often its ending. Only a file
+   * still there.
    */
   const stillOf = (root: string, read: GameBuildFacts | undefined) =>
     Effect.promise(async () => {
       if (read === undefined) return null;
-      for (const fact of [read.masher, read.idle]) {
-        if (fact.status !== "measured" || fact.value.evidence === null) continue;
-        for (const name of ["frame-002.png", "frame-001.png", END_FRAME]) {
+      // The earliest frame of play first: a bot's later frames are usually its loss, and every
+      // build's game-over screen looks alike, so builds could not be told apart by picture.
+      for (const name of ["frame-001.png", "frame-002.png", END_FRAME])
+        for (const fact of [read.masher, read.idle]) {
+          if (fact.status !== "measured" || fact.value.evidence === null) continue;
           const path = `${fact.value.evidence}/frames/${name}`;
           const there = await NodeFSP.access(NodePath.join(root, path)).then(
             () => true,
@@ -839,7 +842,6 @@ const make = Effect.gen(function* () {
           );
           if (there) return path;
         }
-      }
       return null;
     });
 

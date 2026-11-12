@@ -6,7 +6,6 @@ import {
   type GamePreviewServe,
   type GameStageInput,
   nextGamePreviewFrame,
-  LIVE_TURN_WINDOW_MS,
   liveServe,
   liveToShow,
   playHeldFrame,
@@ -346,33 +345,11 @@ it("lands a live remount in play, and a first load, new session or Reload on the
   );
 });
 
-// Thirty saves in a turn must not restart the game thirty times.
-it("applies live changes at most once a window while the turn runs, and at once after", () => {
-  const shown = { revision: 1, at: 1_000 };
-  const soon = { revision: 2, at: 4_000 };
-  // No turn: at once.
-  expect(liveToShow({ latest: soon, shown, turnRunning: false, now: 4_000 }).show.revision).toBe(2);
-  // In a turn, inside the window: it waits, with one wake at the window's end.
-  expect(liveToShow({ latest: soon, shown, turnRunning: true, now: 4_000 })).toEqual({
-    show: shown,
-    wakeAt: 1_000 + LIVE_TURN_WINDOW_MS,
-  });
-  // The latest wins at the wake, and a push past the window applies at once.
-  const later = { revision: 5, at: 9_000 };
-  expect(
-    liveToShow({ latest: later, shown, turnRunning: true, now: 1_000 + LIVE_TURN_WINDOW_MS }),
-  ).toEqual({ show: { revision: 5, at: 11_000 }, wakeAt: null });
-  expect(
-    liveToShow({ latest: { revision: 2, at: 12_000 }, shown, turnRunning: true, now: 12_000 }).show
-      .revision,
-  ).toBe(2);
-  // The turn ends: what waits applies.
-  expect(liveToShow({ latest: soon, shown, turnRunning: false, now: 5_000 }).wakeAt).toBeNull();
-  // Nothing new, nothing to wake for.
-  expect(liveToShow({ latest: shown, shown, turnRunning: true, now: 2_000 })).toEqual({
-    show: shown,
-    wakeAt: null,
-  });
+// The Stage plays the build its labels name: the agent's saves wait for the turn's end.
+it("holds live changes while the turn runs, and applies the latest when it ends", () => {
+  expect(liveToShow({ latest: 1, shown: null, turnRunning: true })).toBe(1);
+  expect(liveToShow({ latest: 5, shown: 1, turnRunning: true })).toBe(1);
+  expect(liveToShow({ latest: 5, shown: 1, turnRunning: false })).toBe(5);
 });
 
 it("describes unknown source freshness and preserves selected Play", () => {

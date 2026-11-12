@@ -8,6 +8,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CircleIcon,
   ClockIcon,
   ColumnsIcon,
   GitCompareIcon,
@@ -216,16 +217,19 @@ function Section({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <div className="flex min-h-6 items-center gap-2">
-        <Text variant="meta" tone="strong" emphasis render={<h3 />}>
-          {title}
-        </Text>
+      <div className="flex flex-col gap-0.5">
+        <div className="flex min-h-6 items-center gap-2">
+          <Text variant="meta" tone="strong" emphasis render={<h3 />}>
+            {title}
+          </Text>
+          {aside === undefined ? null : <span className="ml-auto flex items-center">{aside}</span>}
+        </div>
+        {/* The summary has its own line and wraps: no count is ever cut off. */}
         {detail === undefined || detail === null ? null : (
-          <Text variant="meta" tone="muted" numeric truncate>
+          <Text variant="meta" tone="muted" numeric render={<p />}>
             {detail}
           </Text>
         )}
-        {aside === undefined ? null : <span className="ml-auto flex items-center">{aside}</span>}
       </div>
       {children}
     </section>
@@ -456,10 +460,9 @@ function BuildDetail({
           className="h-12 w-20 shrink-0 rounded-md ring-1 ring-border ring-inset"
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {/* The build's name; what was asked is quoted whole under "You asked". */}
           <Text variant="label" tone="strong" truncate render={<h2 />}>
-            {buildCaption(build) === buildName(build)
-              ? buildName(build)
-              : `${buildName(build)} · ${buildCaption(build)}`}
+            {buildName(build)}
           </Text>
           <Text variant="meta" tone="muted" truncate>
             {formatBuildTime(build.at)}
@@ -621,11 +624,17 @@ function checksSummary(facts: GameBuildFacts): string {
     (check) => check.reading._tag === "measured" && check.reading.tone === "good",
   ).length;
   const notMeasured = view.checks.filter((check) => check.reading._tag === "not-measured").length;
+  // A reading with no verdict (colour that is varied) is counted, so the counts add up to all
+  // the checks: the bot measured it and the person judges it.
+  const toJudge = view.checks.filter(
+    (check) => check.reading._tag === "measured" && check.reading.tone === "neutral",
+  ).length;
   return [
     ...(shownPass > 0 || view.toLook > 0 || !busy
       ? [`${shownPass} of ${view.checks.length} pass`]
       : []),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
+    ...(toJudge > 0 ? [`${toJudge} for you to judge`] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
     ...(busy ? ["measuring"] : []),
   ].join(" · ");
@@ -670,6 +679,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             value={check.value}
             detail={[]}
             note={noteOf(check)}
+            lead
           />
         ))}
         {pending > 0 ? <PendingRow count={pending} /> : null}
@@ -883,6 +893,7 @@ function CheckRow({
   value,
   detail,
   note,
+  lead = false,
 }: {
   threadRef: ScopedThreadRef;
   fact: GameFactView;
@@ -891,11 +902,21 @@ function CheckRow({
   detail: ReadonlyArray<string>;
   /** Said on hover after the raw reading. */
   note: string | null;
+  /** One of the lead checks, which the summary counts: a reading with no verdict gets a glyph. */
+  lead?: boolean;
 }) {
   const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
-  // A tick passes, a warning is to look at, a dash was not measured; a fact with no verdict
+  // A tick passes, a warning is to look at, a dash was not measured. A lead check with no
+  // verdict is a hollow ring, counted as one for you to judge; a further fact with no verdict
   // (where the art comes from) has no glyph, so no mark stands for two things.
-  const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : null;
+  const Icon =
+    tone === "good"
+      ? CheckIcon
+      : tone === "bad"
+        ? TriangleAlertIcon
+        : tone === "neutral" && lead
+          ? CircleIcon
+          : null;
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   return (
     <div className="flex flex-col gap-1 px-3 py-1.5">
@@ -903,7 +924,10 @@ function CheckRow({
         <span className="flex size-4 shrink-0 items-center justify-center">
           {Icon === null ? null : (
             <Icon
-              className={cn("size-4", tone === "good" ? "text-success" : "text-warning")}
+              className={cn(
+                tone === "neutral" ? "size-3 text-muted-foreground" : "size-4",
+                tone === "good" ? "text-success" : tone === "bad" ? "text-warning" : null,
+              )}
               aria-hidden="true"
             />
           )}

@@ -8,8 +8,8 @@ import { GameKeyArt } from "./GameKeyArt";
 import { useBuildFrame } from "./gameStageBridge";
 
 /**
- * A build's picture, for a game screen that knows its thread rather than its folder: its
- * measured play's frame, else the frame the Stage showed while it played, else its `title`
+ * A build's picture, for a game screen that knows its thread rather than its folder: the frame
+ * the Stage showed while it played, else its measured play's frame, else its `title`
  * (the build's own name, so two builds without pictures never look alike).
  */
 export function GameBuildStill({
@@ -32,7 +32,9 @@ export function GameBuildStill({
   children?: ReactNode;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
-  const frame = useBuildFrame(build.still === null ? (build.id ?? null) : null);
+  // The Stage's frame, once a build has one, stays its picture this session: a picture never
+  // swaps under the person when a measured play's frame arrives later.
+  const frame = useBuildFrame(build.id ?? null);
   if (frame !== null)
     return (
       <div

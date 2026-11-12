@@ -279,38 +279,18 @@ export function reloadFrame(fold: GameFrameFold, at: number): GameFrameFold {
 /** The hash the three.js shell reads to skip its title and start the run. */
 export const LIVE_PLAY_HASH = "#kurambit-play";
 
-/** A live change the Stage has applied: its push count and when it applied it (ms). */
-export interface LiveShown {
-  readonly revision: number;
-  readonly at: number;
-}
-
-/** While this chat's turn runs, a live change applies at most this often. */
-export const LIVE_TURN_WINDOW_MS = 10_000;
-
 /**
- * PURE. Which live change the frame shows. With no turn running, the
- * latest at once. While this chat's turn runs, at most one change per window
- * (the latest wins); `wakeAt` is when the waiting one may apply, for one
- * timeout. A turn that ends applies what waits at once.
+ * PURE. Which live change (the server's push count) the frame shows. While this chat's turn
+ * runs the Stage holds the game it had, the build its labels name: the agent's half-made saves
+ * never play under another build's name. With no turn running, the latest at once, so a turn's
+ * end applies its last change.
  */
 export function liveToShow(input: {
-  readonly latest: LiveShown;
-  readonly shown: LiveShown | null;
+  readonly latest: number;
+  readonly shown: number | null;
   readonly turnRunning: boolean;
-  /** The latest moment this render knows of: a push's time or a wake's. */
-  readonly now: number;
-}): { readonly show: LiveShown; readonly wakeAt: number | null } {
-  const { latest, shown } = input;
-  if (shown === null) return { show: latest, wakeAt: null };
-  if (latest.revision === shown.revision) return { show: shown, wakeAt: null };
-  const due = shown.at + LIVE_TURN_WINDOW_MS;
-  if (!input.turnRunning || input.now >= due)
-    return {
-      show: { revision: latest.revision, at: Math.max(input.now, latest.at) },
-      wakeAt: null,
-    };
-  return { show: shown, wakeAt: due };
+}): number {
+  return input.shown === null || !input.turnRunning ? input.latest : input.shown;
 }
 
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {

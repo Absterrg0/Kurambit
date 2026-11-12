@@ -45,7 +45,7 @@ import {
   stagePlayTarget,
   turnBuild,
 } from "../../state/game";
-import { useQuietThreadShell } from "../../state/entities";
+import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { shellEnvironment } from "../../state/shell";
@@ -117,7 +117,6 @@ import {
   reloadFrame,
   remountOrHold,
   type GameFrameFold,
-  type LiveShown,
 } from "./gameStageLogic";
 
 const BUSY_LABELS: Record<GameAction, string> = {
@@ -189,6 +188,8 @@ const BUILD_CARD_GAP = 12;
  * Stage must not shrink and re-centre each time; only rows past this budget take its height.
  */
 const TRANSIENT_ROWS_RESERVE = 92;
+/** How long a turn's build may take to be listed before the strip stops saying it is saved. */
+const LANDING_CAP_MS = 30_000;
 const TRANSIENT_ROWS =
   "[data-game-agent-note], [data-game-pointed], [data-game-direction-bar] [data-composer-banner-drawer]";
 
@@ -316,28 +317,10 @@ function ThreadGameStage({
     turnUndo.canRestore &&
     !turnUndo.pending;
   const live = useAtomValue(liveSignal(threadRef));
-  // Which live change the frame shows: while this chat's turn runs, at
-  // most one per window, latest wins; at once otherwise and at the turn's end.
-  const [liveShown, setLiveShown] = useState<LiveShown | null>(null);
-  const [liveWokeAt, setLiveWokeAt] = useState(0);
-  const liveLatest = { revision: live.revision, at: live.at === "" ? 0 : Date.parse(live.at) };
-  const liveDecision = liveToShow({
-    latest: liveLatest,
-    shown: liveShown,
-    turnRunning,
-    now: Math.max(liveWokeAt, liveLatest.at),
-  });
-  if (liveDecision.show !== liveShown) setLiveShown(liveDecision.show);
-  const liveWakeAt = liveDecision.wakeAt;
-  // One timeout for the change that waits; none while nothing does.
-  useEffect(() => {
-    if (liveWakeAt === null) return;
-    const timeout = window.setTimeout(
-      () => setLiveWokeAt(Date.now()),
-      Math.max(0, liveWakeAt - Date.now()),
-    );
-    return () => window.clearTimeout(timeout);
-  }, [liveWakeAt]);
+  // Which live change the frame shows: held while this chat's turn runs, the latest otherwise.
+  const [liveShown, setLiveShown] = useState<number | null>(null);
+  const liveRevision = liveToShow({ latest: live.revision, shown: liveShown, turnRunning });
+  if (liveRevision !== liveShown) setLiveShown(liveRevision);
   const stageRequest = useGameWorkspaceStore((state) => state.stageRequest);
   // A request made before this stage mounted was for another one.
   const [mountRequestN] = useState(stageRequest?.n ?? 0);
@@ -423,6 +406,35 @@ function ThreadGameStage({
     useAtomValue(
       turnBuild(sawTurnEnd && latestRun !== null ? threadRef : null, latestRun?.runId ?? null),
     ) !== null;
+  // Between a turn's end and its build being listed, the build is being saved: the strip keeps
+  // its slot and the top bar says so, so nothing steps back to the build before. The turn's
+  // checkpoint settles it: one with no changed files makes no build. Capped, so a save that
+  // never reports cannot hold the slot for ever.
+  const checkpoints = useThreadCheckpointSummaries(threadRef);
+  const latestCheckpoint =
+    latestRun === null ? undefined : checkpoints.find((entry) => entry.runId === latestRun.runId);
+  const buildComing =
+    latestCheckpoint === undefined ||
+    (latestCheckpoint.status === "ready" && latestCheckpoint.files.length > 0);
+  const [landingGaveUp, setLandingGaveUp] = useState<string | null>(null);
+  const landingRun =
+    !turnRunning &&
+    sawTurnEnd &&
+    latestRun !== null &&
+    !endedTurnBuilt &&
+    buildComing &&
+    landingGaveUp !== latestRun.runId
+      ? latestRun.runId
+      : null;
+  useEffect(() => {
+    if (landingRun === null) return;
+    const timeout = window.setTimeout(() => setLandingGaveUp(landingRun), LANDING_CAP_MS);
+    return () => window.clearTimeout(timeout);
+  }, [landingRun]);
+  const landing = landingRun !== null;
+  // The request that made the slot, kept past the turn's end for the slot's last moments.
+  const [slotRequest, setSlotRequest] = useState(turnRequest);
+  if (turnRequest !== null && turnRequest !== slotRequest) setSlotRequest(turnRequest);
   // Read only while an export engine's build is held: the Builds list names it.
   const heldName = useEnvironmentQuerySelector(
     frameFold?.held == null || frameFold.serve.servedArtifactId?.startsWith("live:") === true
@@ -866,7 +878,7 @@ function ThreadGameStage({
   const frame = remountOrHold(
     frameFold,
     stageKind === "live"
-      ? liveServe(data.previewUrl, liveDecision.show.revision)
+      ? liveServe(data.previewUrl, liveRevision)
       : {
           previewUrl: data.previewUrl,
           servedArtifactId:
@@ -1029,6 +1041,7 @@ function ThreadGameStage({
     live: stageKind === "live",
     changedSince: playTarget === null ? (changedSince ?? null) : null,
     measured: hasBuild,
+    landing,
     restoring:
       turnUndo.restoring && turnUndo.view !== null && turnUndo.action !== null
         ? `${turnUndo.action.kind === "redo" ? "Redoing" : turnUndo.action.kind === "undo" ? "Undoing" : "Going back to"} ${buildPhrase(buildName(turnUndo.view.build))}…`
@@ -1040,15 +1053,14 @@ function ThreadGameStage({
     ? {
         label: keepGoingStatus.step === null ? "Next step" : `Step ${keepGoingStatus.step}`,
         caption: keepGoingStatus.proposal?.summary ?? null,
-        since: turnRunning && turnStartedAt !== null ? Date.parse(turnStartedAt) : null,
         keepGoing: true,
       }
-    : turnRunning
+    : turnRunning || landing
       ? {
-          label: `Making build ${nextBuildNumber}`,
-          caption: turnRequest,
-          since: turnStartedAt === null ? null : Date.parse(turnStartedAt),
+          label: landing ? `Saving build ${nextBuildNumber}` : `Making build ${nextBuildNumber}`,
+          caption: turnRequest ?? slotRequest,
           keepGoing: false,
+          saving: landing,
         }
       : null;
   return (

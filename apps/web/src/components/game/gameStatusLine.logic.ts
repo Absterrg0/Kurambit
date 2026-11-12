@@ -45,6 +45,8 @@ export interface GameStatusInput {
   readonly changedSince: string | null;
   /** The game has at least one measured build. */
   readonly measured: boolean;
+  /** The turn has ended and its build is being saved, before it is listed. */
+  readonly landing: boolean;
   /** An Undo or Redo the person asked for, while it restores: "Undoing build 2". */
   readonly restoring: string | null;
 }
@@ -115,16 +117,22 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
           })
         : input.restoring !== null
           ? part(input.restoring, { strong: true, dot: "live" })
-          : input.turnRunning
-            ? part(`Making build ${input.nextBuild}`, {
+          : input.landing
+            ? part(`Saving build ${input.nextBuild}…`, {
                 strong: true,
                 dot: "live",
-                since: input.turnStartedAt,
-                hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
+                hint: `The agent's turn has ended. Build ${input.nextBuild} is being saved, then it plays here and a bot measures it.`,
               })
-            : input.operation !== null && !input.live
-              ? part(input.operation.text, { dot: "live", since: input.operation.since })
-              : null;
+            : input.turnRunning
+              ? part(`Making build ${input.nextBuild}`, {
+                  strong: true,
+                  dot: "live",
+                  since: input.turnStartedAt,
+                  hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
+                })
+              : input.operation !== null && !input.live
+                ? part(input.operation.text, { dot: "live", since: input.operation.since })
+                : null;
   return [stage, work].filter((entry) => entry !== null);
 };
 
