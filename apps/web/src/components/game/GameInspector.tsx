@@ -931,6 +931,8 @@ function Recordings({
                 threadRef={threadRef}
                 gameName={gameName}
                 build={{ still: run.frame?.path ?? null }}
+                // A run with no frame says so, rather than pass its pigment off as a picture.
+                mark="absent"
                 className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30 group-focus-visible/run:ring-2 group-focus-visible/run:ring-ring"
               >
                 {run.video === null || run.played === null ? null : (

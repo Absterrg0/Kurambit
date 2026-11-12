@@ -86,12 +86,6 @@ interface GameWorkspaceStoreState {
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
   requestStage: (request: GameStageRequest) => void;
-  /** A compare being picked on a thread's strip, and the name of its first build once picked,
-   *  so the composer's tray can say what the strip is waiting for. Not persisted. */
-  comparePicking: { readonly threadKey: string; readonly first: string | null } | null;
-  setComparePicking: (
-    picking: { readonly threadKey: string; readonly first: string | null } | null,
-  ) => void;
 }
 
 /**
@@ -122,8 +116,6 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       stageRequest: null,
       requestStage: (request) =>
         set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
-      comparePicking: null,
-      setComparePicking: (picking) => set({ comparePicking: picking }),
     }),
     {
       name: "kurambit:game-workspace:v3",

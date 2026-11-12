@@ -148,12 +148,36 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
   AsyncResult.isSuccess(result) &&
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
-/** A build card's picture height bounds: its 160px floor and the most leftover height it takes. */
-const BUILD_CARD_PICTURE = { min: 90, max: 144 } as const;
+/** A build card's picture height bounds: its 160px floor, and a cap so the Stage stays the star. */
+const BUILD_CARD_PICTURE = { min: 90, max: 200 } as const;
 /** The strip's gap between cards (gap-3), so three cards are sized to fit side by side. */
 const BUILD_CARD_GAP = 12;
-/** A wide column gives the cards a share of its width before any leftover height: a sixth. */
-const BUILD_CARD_WIDTH_SHARE = 0.16;
+
+/**
+ * PURE. The Stage's width and its cards' picture height, in a column `width` wide with `height`
+ * for the Stage and one row of pictures. The game keeps its shape (`ratio`, height over width),
+ * and three cards always span the Stage's width: a height-bound Stage gives up a little height so
+ * the strip under it is one row as wide as the game, never a short row and a gap.
+ */
+const fitStage = (width: number, height: number, ratio: number) => {
+  const picture = (stage: number) => (((stage - 2 * BUILD_CARD_GAP) / 3) * 9) / 16;
+  const clamp = (value: number) =>
+    Math.min(BUILD_CARD_PICTURE.max, Math.max(BUILD_CARD_PICTURE.min, value));
+  let stage = width;
+  if (stage * ratio + clamp(picture(stage)) > height) {
+    // Where the game and three spanning cards exactly fill the height.
+    stage = (height + (2 * BUILD_CARD_GAP * 9) / (3 * 16)) / (ratio + 9 / (3 * 16));
+    const wanted = picture(stage);
+    if (wanted !== clamp(wanted)) stage = (height - clamp(wanted)) / ratio;
+  }
+  const stageHeight = Math.floor(Math.max(0, Math.min(stage, width) * ratio));
+  const stageWidth = Math.floor(stageHeight / ratio);
+  return {
+    width: stageWidth,
+    height: stageHeight,
+    cardWidth: Math.max(0, Math.floor((stageWidth - 2 * BUILD_CARD_GAP) / 3)),
+  };
+};
 
 const buildPhrase = (name: string) => name.replace(/^Build /, "build ").replace(/^Step /, "step ");
 
@@ -432,37 +456,11 @@ function ThreadGameStage({
       const picture = Number.isFinite(cardWidth) ? (cardWidth * 9) / 16 : BUILD_CARD_PICTURE.min;
       const stripChrome = strip === null ? 0 : Math.max(0, strip.offsetHeight - picture);
       // The surface's side insets (mx-3) and a breath above the strip.
-      const width = section.clientWidth - 24;
-      // A wide column's cards start from a share of its width, not the 160px floor, so the
-      // largest window never has the smallest pictures; the Stage gives up that height.
-      const floorWidth = Math.min(
-        (BUILD_CARD_PICTURE.max * 16) / 9,
-        Math.max((BUILD_CARD_PICTURE.min * 16) / 9, width * BUILD_CARD_WIDTH_SHARE),
+      const next = fitStage(
+        section.clientWidth - 24,
+        section.clientHeight - taken - stripChrome - 8,
+        viewportHeight / viewportWidth,
       );
-      const floor = (floorWidth * 9) / 16;
-      const available = section.clientHeight - taken - stripChrome - floor - 8;
-      const height = Math.floor(
-        Math.max(0, Math.min(available, (width * viewportHeight) / viewportWidth)),
-      );
-      const stageWidth = Math.floor((height * viewportWidth) / viewportHeight);
-      // What the game's shape leaves over goes to bigger build pictures, up to a cap, and
-      // never wider than three cards side by side under the Stage: the first card is never
-      // scrolled out of a strip that holds only three.
-      const pictureHeight = Math.min(
-        BUILD_CARD_PICTURE.max,
-        floor + Math.max(0, available - height),
-      );
-      const next = {
-        width: stageWidth,
-        height,
-        cardWidth: Math.max(
-          0,
-          Math.min(
-            Math.floor((pictureHeight * 16) / 9),
-            Math.floor((stageWidth - 2 * BUILD_CARD_GAP) / 3),
-          ),
-        ),
-      };
       setStageFit((previous) =>
         previous?.width === next.width &&
         previous.height === next.height &&
@@ -947,8 +945,10 @@ function ThreadGameStage({
         <div
           className={cn(
             // The name's text, not its button, starts on the column's one text edge (the
-            // Stage, the strip's label and captions, the tray), so the button hangs left.
-            "flex h-(--workspace-topbar-height) min-w-0 items-center gap-1.5 px-2 pl-3",
+            // Stage, the strip's label and captions, the tray), so the button hangs left. A
+            // height-bound Stage's column is centred, and the row spans it: its right group
+            // ends on the Stage's edge, over the game rather than an empty margin.
+            "mx-auto flex h-(--workspace-topbar-height) w-full max-w-(--game-stage-column) min-w-0 items-center gap-1.5 px-2 pl-3",
             // The window is dragged by its top bar; its buttons stay clickable.
             isElectron && "drag-region",
             // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this corner.
@@ -1116,7 +1116,7 @@ function ThreadGameStage({
         {statusBanner}
       </header>
       {playTarget !== null && compare === null ? (
-        <div className="mx-3 mb-2 flex items-center gap-2 rounded-lg bg-card py-1 ps-3 pe-1">
+        <div className="mx-auto mb-2 flex w-[calc(100%-24px)] max-w-[calc(var(--game-stage-column,100%)-24px)] items-center gap-2 rounded-lg bg-card py-1 ps-3 pe-1">
           <HistoryIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <Text variant="meta" tone="muted" truncate render={<span className="flex-1" />}>
             Playing {playTarget.label} from a copy. The game folder is untouched.
@@ -1153,7 +1153,7 @@ function ThreadGameStage({
           className={
             compare === null
               ? cn(
-                  "group/stage relative mx-3 flex min-h-0 items-center justify-center self-start overflow-hidden rounded-xl bg-stage-well [container-type:size]",
+                  "group/stage relative mx-3 flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
                   stageFit === null ? "flex-1" : "shrink-0",
                 )
               : "hidden"
@@ -1187,7 +1187,7 @@ function ThreadGameStage({
         className={
           playTarget === null && compare === null
             ? cn(
-                "relative flex min-h-0 flex-col self-start px-3",
+                "relative flex min-h-0 flex-col self-center px-3",
                 stageFit === null ? "flex-1 self-stretch" : "shrink-0",
               )
             : "hidden"

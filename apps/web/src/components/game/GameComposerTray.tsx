@@ -1,9 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { GAME_ENGINES, type ScopedThreadRef } from "@kurambit/contracts";
-import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { FastForwardIcon, CornerDownRightIcon, GitCompareIcon } from "lucide-react";
+import { FastForwardIcon, CornerDownRightIcon } from "lucide-react";
 
-import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
@@ -11,7 +9,6 @@ import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { buildName } from "./gameBuilds.logic";
 import { GameKeepGoingMenuContent } from "./GameKeepGoingControl";
 import { keepGoingControlView } from "./keepGoing.logic";
 import { useKeepGoing } from "./useKeepGoing";
@@ -39,45 +36,21 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     sending: keepGoing.sending,
     chosenBudget: keepGoing.chosenBudget,
   });
-  const threadKey = scopedThreadKey(threadRef);
-  const picking = useGameWorkspaceStore((state) =>
-    state.comparePicking?.threadKey === threadKey ? state.comparePicking : null,
-  );
   if (status === null || status === undefined) return null;
   const current = list?.builds.find((build) => build.id === list.current) ?? null;
-  // The agent always changes the game folder: a copy on the Stage is only being looked at.
-  const target =
-    current === null
-      ? "Your next message changes the game"
-      : list?.folderEdited === true
-        ? `Builds on Now, changed since ${buildName(current)}`
-        : `Builds on ${buildName(current)}`;
+  // What the next message does, plainly: the top bar already says what the game changed since.
+  // The agent always changes the game folder, so a copy on the Stage stays as it is, and that
+  // is the one qualification worth a second line.
+  const sentence =
+    copy !== null
+      ? "Your next message changes the current game, not the build you're playing."
+      : "Your next message changes the current game.";
   const canKeepGoing =
     GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null;
   return (
-    <div className="flex min-h-8 items-center gap-2 pt-1.5" data-game-composer-tray="">
-      {picking !== null ? (
-        // While the strip picks a compare, the tray says what it waits for: the composer is
-        // not what the next click changes.
-        <>
-          <GitCompareIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
-          <TraySentence live>
-            {picking.first === null
-              ? "Comparing: pick the first build on the strip · Esc cancels"
-              : `Comparing with ${picking.first}: pick the other build · Esc cancels`}
-          </TraySentence>
-        </>
-      ) : (
-        <>
-          <CornerDownRightIcon
-            className="size-3.5 shrink-0 text-dim-foreground"
-            aria-hidden="true"
-          />
-          <TraySentence>
-            {`${target}${copy !== null ? " · the copy on the Stage stays as it is" : ""}`}
-          </TraySentence>
-        </>
-      )}
+    <div className="flex min-h-9 items-center gap-2 pt-1.5" data-game-composer-tray="">
+      <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <TraySentence>{sentence}</TraySentence>
       {canKeepGoing ? (
         <Menu>
           <Tooltip>
@@ -86,7 +59,7 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
                 <MenuTrigger
                   render={
                     <Button
-                      size="xs"
+                      size="compact"
                       variant="secondary"
                       aria-label="Keep going"
                       aria-pressed={keepGoingView.pressed}
@@ -114,15 +87,16 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
 }
 
 /** The tray's sentence; a new one fades in on the popup clock instead of swapping in a frame. */
-function TraySentence({ live = false, children }: { live?: boolean; children: string }) {
+function TraySentence({ children }: { children: string }) {
   return (
-    <span className="min-w-0 flex-1" aria-live={live ? "polite" : undefined}>
+    <span className="min-w-0 flex-1">
       <Text
         key={children}
-        variant="caption"
+        variant="meta"
         tone="muted"
-        truncate
-        render={<span className="block motion-popup transition-opacity starting:opacity-0" />}
+        render={
+          <span className="line-clamp-2 motion-popup transition-opacity starting:opacity-0" />
+        }
       >
         {children}
       </Text>

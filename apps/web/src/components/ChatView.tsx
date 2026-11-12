@@ -7889,8 +7889,9 @@ export default function ChatView(props: ChatViewProps) {
           />
           <div
             data-game-direction-bar=""
-            // The Stage's fitted column (set by GameStage), so the composer ends with it.
-            className="flex max-w-(--game-stage-column) shrink-0 flex-col"
+            // The Stage's fitted column (set by GameStage), centred with it, so the composer
+            // shares both its edges.
+            className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col"
           >
             {activePendingApproval === null && activePendingUserInput === null ? (
               <GameDirectionNote

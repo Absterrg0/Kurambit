@@ -12,12 +12,15 @@ export function GameBuildStill({
   gameName,
   build,
   className,
+  mark,
   children,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
   build: Pick<GameBuild, "still">;
   className?: string;
+  /** What stands in for a build with no picture: see GamePicture. */
+  mark?: GamePictureMark;
   children?: ReactNode;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
@@ -28,6 +31,7 @@ export function GameBuildStill({
       path={build.still}
       gameName={gameName}
       className={className}
+      mark={mark}
     >
       {children}
     </GamePicture>
@@ -35,9 +39,49 @@ export function GameBuildStill({
 }
 
 /**
+ * What a picture that will not come shows on the game's pigment: its name as a title card
+ * (covers and build slots), its initial (icons), a plain "No picture" (evidence, where a
+ * name would pass for a frame), or nothing (a picture drawn over it anyway).
+ */
+export type GamePictureMark = "name" | "initial" | "absent" | "none";
+
+/**
+ * A game with no picture: its own pigment with its name as a title card, or its initial at icon
+ * size, so it is never a blank box nor mistaken for a picture still loading.
+ */
+export function GameTitleMark({ gameName, mark }: { gameName: string; mark: GamePictureMark }) {
+  const [pigment, ink] = gamePigment(gameName);
+  const name = gameName.trim();
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute inset-0 grid place-items-center p-3 text-center"
+      style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
+    >
+      {mark === "absent" ? (
+        <span className="absolute top-1.5 left-2 text-caption text-white/75">No picture</span>
+      ) : mark === "none" || name === "" ? null : mark === "name" ? (
+        <span className="line-clamp-2 font-display text-lg/tight text-balance text-white/85 @3xs:text-2xl/tight @sm:text-3xl/tight">
+          {name}
+        </span>
+      ) : (
+        // An SVG letter scales with its icon, from the palette's 20px to the sidebar's 30px.
+        <svg viewBox="0 0 10 10" className="absolute inset-0 size-full">
+          <text x="5" y="7.4" textAnchor="middle" className="fill-white/80 font-display text-5xs">
+            {name.charAt(0).toUpperCase()}
+          </text>
+        </svg>
+      )}
+    </span>
+  );
+}
+
+/**
  * A game-relative picture (a build's frame) over the game's pigment. Its
  * signed URL is asked for only once the picture scrolls into view, so a long
  * strip or library costs one request per picture the person actually sees.
+ * A neutral well means a picture is on its way; the game's pigment with
+ * its name or initial means there is none.
  */
 export function GamePicture({
   environmentId,
@@ -45,6 +89,7 @@ export function GamePicture({
   path,
   gameName,
   className,
+  mark = "initial",
   children,
 }: {
   environmentId: EnvironmentId;
@@ -52,6 +97,7 @@ export function GamePicture({
   path: string | null;
   gameName: string;
   className?: string | undefined;
+  mark?: GamePictureMark | undefined;
   children?: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -65,15 +111,21 @@ export function GamePicture({
     observer.observe(node);
     return () => observer.disconnect();
   }, [seen, path]);
-  const [pigment, ink] = gamePigment(gameName);
   return (
     <div
       ref={ref}
-      className={cn("relative overflow-hidden", className)}
-      style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
+      // A neutral well while a picture is on its way; the game's pigment only when there is none.
+      className={cn("relative overflow-hidden bg-muted [container-type:inline-size]", className)}
     >
-      {seen && root !== null ? (
-        <GameKeyArt environmentId={environmentId} root={root} path={path} />
+      {path === null ? (
+        <GameTitleMark gameName={gameName} mark={mark} />
+      ) : seen && root !== null ? (
+        <GameKeyArt
+          environmentId={environmentId}
+          root={root}
+          path={path}
+          missing={<GameTitleMark gameName={gameName} mark={mark} />}
+        />
       ) : null}
       {children}
     </div>

@@ -11,7 +11,7 @@ import type {
   ScopedThreadRef,
 } from "@kurambit/contracts";
 
-import { useGameWorkspaceStore, type GameStageRequest } from "../../gameWorkspaceStore";
+import type { GameStageRequest } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { gameEnvironment, olderBuildPages } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
@@ -22,7 +22,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
-import { GameBuildStill } from "./GameBuildStill";
+import { GameBuildStill, GameTitleMark } from "./GameBuildStill";
 import { GameElapsed } from "./GameElapsed";
 import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
@@ -193,6 +193,17 @@ export function GameBuildStrip({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the cards in the row change its scroll width.
   }, [readClipped, newest, slotShown, cardWidth, marks.length]);
 
+  // A compare with one possible other side needs no pick: it opens at once.
+  const startCompare = (first: GameBuildRef | "any") => {
+    const others = marks.filter(
+      (entry) => entry.available && (first === "any" || !sameRef(first, entry)),
+    );
+    const only =
+      first === "any" ? (others.length === 2 ? others : null) : others.length === 1 ? others : null;
+    if (only === null) setPicking(first);
+    else if (first === "any") onCompare([refOf(only[0]!), refOf(only[1]!)]);
+    else onCompare([first, refOf(only[0]!)]);
+  };
   const pick = (build: GameBuild) => {
     if (picking === "any") setPicking(refOf(build));
     else if (picking !== null && !sameRef(picking, build)) {
@@ -229,7 +240,7 @@ export function GameBuildStrip({
         setNotFound(false);
       }
     } else
-      setPicking(asked.first ?? (playing !== null ? { _tag: "build", build: playing } : "any"));
+      startCompare(asked.first ?? (playing !== null ? { _tag: "build", build: playing } : "any"));
   });
   const requestN = request?.n ?? 0;
   const asked = request?.request ?? null;
@@ -237,8 +248,7 @@ export function GameBuildStrip({
     if (asked !== null && requestN !== mountRequest) answer(asked);
   }, [requestN, asked, mountRequest, answer]);
 
-  // The tray under the composer narrates picking, and Escape gives it up.
-  const threadKey = scopedThreadKey(threadRef);
+  // Escape gives a pick up; the strip's own bar is the one place that says what it waits for.
   const firstPicked =
     picking === null || picking === "any"
       ? null
@@ -247,18 +257,12 @@ export function GameBuildStrip({
   const pickingNow = picking !== null;
   useEffect(() => {
     if (!pickingNow) return;
-    const store = useGameWorkspaceStore.getState();
-    store.setComparePicking({ threadKey, first: pickingFirstName });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) setPicking(null);
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      if (useGameWorkspaceStore.getState().comparePicking?.threadKey === threadKey)
-        useGameWorkspaceStore.getState().setComparePicking(null);
-    };
-  }, [pickingNow, pickingFirstName, threadKey]);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pickingNow]);
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
@@ -292,6 +296,8 @@ export function GameBuildStrip({
   const nowCard =
     slot === null && list !== null && (list.folderEdited === true || playing !== null) ? (
       <NowCard
+        threadRef={threadRef}
+        gameName={gameName}
         list={list}
         still={still}
         active={onStage === null}
@@ -306,7 +312,7 @@ export function GameBuildStrip({
       data-game-build-strip=""
       // Composer menus (the model picker) stop at the strip's top rather than cover the Stage.
       data-composer-menu-ceiling=""
-      className="flex max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
+      className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
       style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}
     >
@@ -320,7 +326,7 @@ export function GameBuildStrip({
       ) : null}
       {picking !== null ? (
         // Picking turns the header into one clear instruction, so the strip reads as a picker.
-        <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-accent ps-2.5 pe-1">
+        <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-accent ps-2.5 pe-1 motion-popup transition-[opacity,translate] starting:-translate-y-1 starting:opacity-0">
           <GitCompareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <Text variant="meta" tone="strong" render={<span className="min-w-0 flex-1" />}>
             {pickingFirstName === null
@@ -357,7 +363,7 @@ export function GameBuildStrip({
               size="xs"
               variant="ghost"
               onClick={() =>
-                setPicking(onStage === null ? "any" : { _tag: "build", build: onStage })
+                startCompare(onStage === null ? "any" : { _tag: "build", build: onStage })
               }
             >
               <GitCompareIcon aria-hidden="true" />
@@ -389,7 +395,7 @@ export function GameBuildStrip({
             ))
           )
         ) : marks.length === 0 && slot === null ? (
-          <FirstBuildSlot />
+          <FirstBuildSlot still={still} gameName={gameName} />
         ) : null}
         {groups.map((group, index) =>
           group.steps ? (
@@ -498,6 +504,7 @@ function BuildCard({
           threadRef={threadRef}
           gameName={gameName}
           build={build}
+          mark="name"
           className="aspect-video w-full rounded-md"
         >
           <CardRing
@@ -506,48 +513,73 @@ function BuildCard({
           />
           {picked ? <PickBadge /> : null}
         </GameBuildStill>
-        <span className="flex min-h-12 min-w-0 flex-col gap-0.5">
-          <Text
-            variant="caption"
-            tone={onStage ? "strong" : "default"}
-            render={<span className={cn("line-clamp-2", undone && "line-through")} />}
-          >
-            {caption}
-          </Text>
-          <span className="flex min-w-0 items-center gap-1.5">
-            {name === null ? null : (
-              <Text variant="micro" tone="muted" numeric>
-                {step === null ? null : (
-                  <FastForwardIcon className="me-0.5 inline size-2.5" aria-hidden="true" />
-                )}
-                {name}
-              </Text>
-            )}
-            <CheckDelta build={build} previous={previous} />
+        {/* Two lines, always both used: what it was, then which one (its name and time), so
+            two cards with the same picture still tell apart and no caption line sits empty. */}
+        <CardCaption
+          strong={onStage}
+          title={<span className={cn(undone && "line-through")}>{caption}</span>}
+          meta={
+            <>
+              {step === null ? null : (
+                <FastForwardIcon className="size-3 shrink-0" aria-hidden="true" />
+              )}
+              <span className="truncate">
+                {[name, formatBuildTime(build.at)].filter((part) => part !== null).join(" · ")}
+              </span>
+              <CheckDelta build={build} previous={previous} />
+            </>
+          }
+        />
+      </TooltipTrigger>
+      {/* Over the picture, clear of the composer under the strip: the whole caption, and how
+          the build measured, which the card does not say. */}
+      <TooltipPopup side="top" className="max-w-xs">
+        <span className="flex flex-col gap-0.5">
+          <span>{caption}</span>
+          <span className="text-muted-foreground">
+            {[checksPhrase(build.facts) ?? "Not measured", undone ? "undone" : null]
+              .filter((part) => part !== null)
+              .join(" · ")}
           </span>
         </span>
-      </TooltipTrigger>
-      <TooltipPopup side="bottom" className="max-w-xs">
-        {/* What the card doesn't already say: when, and how it measured. */}
-        {formatBuildTime(build.at)}
-        {checksPhrase(build.facts) === null ? "" : ` · ${checksPhrase(build.facts)}`}
-        {undone ? " · undone" : ""}
       </TooltipPopup>
     </Tooltip>
   );
 }
 
-/**
- * The outline of the card on the Stage, drawn over the picture so it is never covered. Over an
- * empty well it is `quiet`: on a blank it would otherwise be the strongest line in the strip.
- */
+/** A card's two caption lines, at the size a person reads a build by. */
+function CardCaption({
+  title,
+  meta,
+  strong,
+}: {
+  title: ReactNode;
+  meta: ReactNode;
+  strong: boolean;
+}) {
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <Text variant="meta" tone={strong ? "strong" : "default"} truncate render={<span />}>
+        {title}
+      </Text>
+      <Text
+        variant="meta"
+        tone="muted"
+        numeric
+        render={<span className="flex min-w-0 items-center gap-1.5" />}
+      >
+        {meta}
+      </Text>
+    </span>
+  );
+}
+
+/** The outline of the card on the Stage, drawn over the picture so it is never covered. */
 function CardRing({
   on,
-  quiet = false,
   pick = null,
 }: {
   on: boolean;
-  quiet?: boolean;
   /** While a compare is picked: the first build, or one that can be picked next. */
   pick?: "picked" | "pickable" | null;
 }) {
@@ -561,9 +593,7 @@ function CardRing({
           : pick === "pickable"
             ? "ring-1 ring-foreground/35 group-hover/card:ring-2 group-hover/card:ring-foreground/70 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring"
             : on
-              ? quiet
-                ? "ring-1 ring-foreground/20"
-                : "ring-1 ring-foreground/45"
+              ? "ring-1 ring-foreground/45"
               : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
       )}
     />
@@ -595,12 +625,7 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
   const gained = previous === null ? 0 : good - previous.facts.good;
   if (bad === 0 && gained === 0) return null;
   return (
-    <Text
-      variant="micro"
-      tone="muted"
-      numeric
-      render={<span className="flex items-center gap-1.5" />}
-    >
+    <span className="flex shrink-0 items-center gap-1.5">
       {bad > 0 ? (
         <span
           className="flex items-center gap-1 text-warning-foreground"
@@ -618,19 +643,19 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
           {gained > 0 ? `+${gained}` : `−${Math.abs(gained)}`} pass
         </span>
       ) : null}
-    </Text>
+    </span>
   );
 }
 
-/** Before the first build: the shape it will take, said once, at the smallest card size so an
- *  empty well is never the largest thing under the Stage. */
-function FirstBuildSlot() {
+/**
+ * Before the first build: the game as it looks so far (the Stage's last frame, else its name on
+ * its pigment), at the smallest card size, so an empty slot is never the largest thing here.
+ */
+function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: string }) {
   return (
     <div className="flex w-40 shrink-0 flex-col gap-1.5">
-      <div className="surface-well aspect-video w-full rounded-md" />
-      <Text variant="caption" tone="muted">
-        Not measured yet
-      </Text>
+      <NowPicture still={still} gameName={gameName} fallback={null} threadRef={null} />
+      <CardCaption strong={false} title="Now" meta="No build yet" />
     </div>
   );
 }
@@ -644,32 +669,69 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
     >
       <div className="flex aspect-video w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
         <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
-        <Text variant="caption" tone="default">
+        <Text variant="meta" tone="default">
           {slot.label}
         </Text>
       </div>
-      <span className="flex min-h-12 min-w-0 flex-col gap-0.5">
-        <Text variant="caption" tone="default" render={<span className="line-clamp-2" />}>
-          {slot.caption ?? "\u00a0"}
-        </Text>
-        {slot.since === null ? null : (
-          <Text variant="micro" tone="muted">
-            <GameElapsed since={slot.since} />
-          </Text>
-        )}
-      </span>
+      <CardCaption
+        strong={false}
+        title={slot.caption ?? slot.label}
+        meta={slot.since === null ? "\u00a0" : <GameElapsed since={slot.since} />}
+      />
     </div>
+  );
+}
+
+/**
+ * Now's picture: the frame the Stage last showed, taken from the game itself. Before it has
+ * shown one (a title drawn in the page, not its canvas, gives none), the last build's picture,
+ * dimmed, since the game has changed since it; with no build either, the game's name.
+ */
+function NowPicture({
+  still,
+  gameName,
+  fallback,
+  threadRef,
+  children,
+}: {
+  still: string | null;
+  gameName: string;
+  fallback: GameBuild | null;
+  threadRef: ScopedThreadRef | null;
+  children?: ReactNode;
+}) {
+  return (
+    <span className="relative block aspect-video w-full overflow-hidden rounded-md bg-muted [container-type:inline-size]">
+      {still !== null ? (
+        <img src={still} alt="" className="absolute inset-0 size-full object-cover" />
+      ) : fallback !== null && threadRef !== null ? (
+        <GameBuildStill
+          threadRef={threadRef}
+          gameName={gameName}
+          build={fallback}
+          mark="name"
+          className="absolute inset-0 opacity-45 saturate-50"
+        />
+      ) : (
+        <GameTitleMark gameName={gameName} mark="name" />
+      )}
+      {children}
+    </span>
   );
 }
 
 /** The game folder when it is no build: edited since, or another build plays from a copy. */
 function NowCard({
+  threadRef,
+  gameName,
   list,
   still,
   active,
   picking,
   onClick,
 }: {
+  threadRef: ScopedThreadRef;
+  gameName: string;
   list: GameBuildsResult;
   /** The folder's game's last frame on the Stage, once it has shown one. */
   still: string | null;
@@ -678,54 +740,63 @@ function NowCard({
   picking: boolean;
   onClick: () => void;
 }) {
-  const current = list.builds.find((build) => build.id === list.current);
-  const since =
-    list.folderEdited === true
-      ? `Changed since ${current === undefined ? "an earlier build" : buildName(current)}`
-      : "Back to the current game";
+  const current = list.builds.find((build) => build.id === list.current) ?? null;
+  const changed = list.folderEdited === true;
+  // The top bar names the build it changed since; the card says only what Now is.
+  const meta = changed ? "Changed · not measured" : "The current game";
   return (
-    <button
-      type="button"
-      data-game-build-card="now"
-      aria-current={active ? "true" : undefined}
-      disabled={picking}
-      onClick={onClick}
-      className={cn(
-        "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
-        NEW_CARD_MOTION,
-        picking && "opacity-40",
-      )}
-    >
-      {/* The frame the Stage last showed, taken from the game itself; before it has shown
-          one, a quiet well, never another build's still. */}
-      <span className="surface-well relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-md">
-        {still === null ? (
-          <Text variant="caption" tone="muted">
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            data-game-build-card="now"
+            aria-current={active ? "true" : undefined}
+            aria-label={`Now: ${
+              changed
+                ? `changed since ${current === null ? "the last build" : buildName(current)}, not measured`
+                : "the current game"
+            }`}
+            disabled={picking}
+            onClick={onClick}
+            className={cn(
+              "group/card flex w-(--build-card-width) shrink-0 flex-col gap-1.5 rounded-lg text-left outline-none disabled:cursor-default",
+              NEW_CARD_MOTION,
+              picking && "opacity-40",
+            )}
+          />
+        }
+      >
+        <NowPicture
+          still={still}
+          gameName={gameName}
+          fallback={changed ? current : null}
+          threadRef={threadRef}
+        >
+          {/* Now is a state, not a build: one chip on the picture says which card it is. */}
+          <Text
+            variant="micro"
+            tone="inherit"
+            render={
+              <span className="absolute bottom-1.5 left-1.5 z-20 flex items-center gap-1 rounded-sm bg-black/70 px-1.5 py-px text-white" />
+            }
+          >
+            {changed ? (
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-white/80" />
+            ) : null}
             Now
           </Text>
-        ) : (
-          <>
-            <img src={still} alt="" className="absolute inset-0 size-full object-cover" />
-            <Text
-              variant="micro"
-              tone="inherit"
-              render={
-                <span className="absolute bottom-1.5 left-1.5 z-20 rounded-sm bg-black/65 px-1.5 py-px text-white" />
-              }
-            >
-              Now
-            </Text>
-          </>
-        )}
-        <CardRing on={active && !picking} quiet={still === null} />
-      </span>
-      <Text
-        variant="caption"
-        tone={active ? "strong" : "default"}
-        render={<span className="line-clamp-2" />}
-      >
-        {since}
-      </Text>
-    </button>
+          <CardRing on={active && !picking} />
+        </NowPicture>
+        <CardCaption strong={active} title="Now" meta={meta} />
+      </TooltipTrigger>
+      <TooltipPopup side="top" className="max-w-xs">
+        {changed
+          ? still === null && current !== null
+            ? `The game as it is in its folder, changed since ${buildName(current)}. The picture is ${buildName(current)}'s until the Stage shows the game.`
+            : `The game as it is in its folder, changed since ${current === null ? "the last build" : buildName(current)}.`
+          : "Back to the game as it is in its folder."}
+      </TooltipPopup>
+    </Tooltip>
   );
 }

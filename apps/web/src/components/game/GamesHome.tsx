@@ -544,10 +544,11 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           root={cover.game.root}
           path={picture}
           gameName={name}
+          mark={shown === null ? "name" : "none"}
           className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/25 group-focus-visible:ring-2 group-focus-visible:ring-ring"
         >
-          {/* Without a picture yet, the Stage's last frame, else the game's own colour alone:
-              its name is said once, under the cover. */}
+          {/* Without a picture yet, the Stage's last frame, else the game's name as a title
+              card on its own colour. */}
           {picture === null && shown !== null ? (
             <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
           ) : null}
