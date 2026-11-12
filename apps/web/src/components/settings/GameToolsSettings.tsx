@@ -26,7 +26,6 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { GAME_TOOL_NAMES, GameToolLink } from "../game/GameToolLink";
 import { Button, InlineButton } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Input } from "../ui/input";
 import { SecretInput } from "./SecretInput";
@@ -255,35 +254,7 @@ function GameToolRow({
       description={TOOL_PURPOSE[tool.tool]}
       status={
         <span className="flex flex-wrap items-center gap-x-1.5">
-          {found === "" ? null : <span>{found}</span>}
-          {tool.path === null ? null : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-micro"
-                    variant="ghost-muted"
-                    aria-label={`Copy ${GAME_TOOL_NAMES[tool.tool]}'s path`}
-                    onClick={() => {
-                      if (tool.path !== null) copyToClipboard(tool.path);
-                    }}
-                  >
-                    {isCopied ? <CheckIcon /> : <CopyIcon />}
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top" className="max-w-96 break-all">
-                {isCopied ? (
-                  "Copied"
-                ) : (
-                  <span className="grid gap-0.5">
-                    <span>Copy path</span>
-                    <span className="text-muted-foreground">{tool.path}</span>
-                  </span>
-                )}
-              </TooltipPopup>
-            </Tooltip>
-          )}
+          {found === "" ? null : <span>{found} ·</span>}
           <InlineButton
             tone="muted"
             aria-expanded={aboutOpen}
@@ -304,9 +275,32 @@ function GameToolRow({
       {details ? (
         <div className="flex min-w-0 flex-col gap-1 break-words ps-7 pb-2">
           {aboutOpen ? (
-            <Text variant="meta" tone="muted" render={<p id={aboutId} className="text-pretty" />}>
-              {TOOL_ABOUT[tool.tool]}
-            </Text>
+            <div id={aboutId} className="grid gap-1">
+              <Text variant="meta" tone="muted" render={<p className="text-pretty" />}>
+                {TOOL_ABOUT[tool.tool]}
+              </Text>
+              {/* The path lives with the About text, so the status line's only control is
+                  About and no icon reads as part of it. */}
+              {tool.path === null ? null : (
+                <Text variant="meta" tone="muted" render={<p className="flex min-w-0 gap-2" />}>
+                  <span className="min-w-0 break-all">{tool.path}</span>
+                  <InlineButton
+                    tone="muted"
+                    aria-label={`Copy ${GAME_TOOL_NAMES[tool.tool]}'s path`}
+                    onClick={() => {
+                      if (tool.path !== null) copyToClipboard(tool.path);
+                    }}
+                  >
+                    {isCopied ? (
+                      <CheckIcon className="size-3.5" />
+                    ) : (
+                      <CopyIcon className="size-3.5" />
+                    )}
+                    {isCopied ? "Copied" : "Copy path"}
+                  </InlineButton>
+                </Text>
+              )}
+            </div>
           ) : null}
           {/* The status in the control column already says a ready tool is ready. */}
           {!showMessage ? null : tool.installed ? (

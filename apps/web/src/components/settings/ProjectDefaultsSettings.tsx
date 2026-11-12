@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { newGameFallback, useLastGameModel } from "../game/useGameModelChoice";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -52,8 +53,11 @@ function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules
  */
 export function ProjectDefaultsSettings({
   category,
+  children,
 }: {
   category: ProjectSettingsCategory | "general-advanced";
+  /** Rows of the page's own that belong in the same section, after these. */
+  children?: ReactNode;
 }) {
   const { scope, target, targets, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
@@ -262,7 +266,7 @@ export function ProjectDefaultsSettings({
           : category === "general-advanced"
             ? "advanced-defaults"
             : category === "integrations"
-              ? "browser-access"
+              ? "browser"
               : "source-control-defaults"
       }
       title={
@@ -464,6 +468,7 @@ export function ProjectDefaultsSettings({
           />
         </>
       )}
+      {children}
     </SettingsSection>
   );
 }

@@ -1526,23 +1526,15 @@ export function KeybindingsSettingsPanel() {
             <PlusIcon aria-hidden className="size-4" />
             Add keybinding
           </Button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  disabled={!keybindingsConfigPath || !canOpenKeybindingsFile}
-                  onClick={openKeybindingsFile}
-                  aria-label="Open the keybindings file"
-                >
-                  <FileJsonIcon aria-hidden className="size-4" />
-                </Button>
-              }
-            />
-            <TooltipPopup side="top">Open the keybindings file (keybindings.json)</TooltipPopup>
-          </Tooltip>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!keybindingsConfigPath || !canOpenKeybindingsFile}
+            onClick={openKeybindingsFile}
+          >
+            <FileJsonIcon aria-hidden className="size-4" />
+            Open keybindings.json
+          </Button>
           <Toggle
             variant="outline"
             pressed={showConditions}

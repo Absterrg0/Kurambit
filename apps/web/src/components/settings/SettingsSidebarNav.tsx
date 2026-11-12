@@ -9,7 +9,6 @@ import {
   HardDriveIcon,
   PanelsTopLeftIcon,
   KeyboardIcon,
-  Link2Icon,
   PaletteIcon,
   SearchIcon,
   Settings2Icon,
@@ -65,7 +64,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/scheduled-tasks": CalendarClockIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/storage": HardDriveIcon,
-  "/settings/connections": Link2Icon,
+  "/settings/connections": Settings2Icon,
   "/settings/archived": ArchiveIcon,
 };
 
@@ -91,7 +90,6 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
       "/settings/source-control",
       "/settings/storage",
       "/settings/scheduled-tasks",
-      "/settings/connections",
       "/settings/archived",
       "/settings/projects",
     ],
@@ -102,6 +100,7 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
 const SETTINGS_DETAIL_PAGE_PARENTS: Readonly<Record<string, SettingsPath>> = {
   "/settings/diagnostics": "/settings/general",
   "/settings/open-source-licenses": "/settings/general",
+  "/settings/connections": "/settings/general",
 };
 
 // Attached only to the highlighted result, so it runs whenever the highlight lands on a row.

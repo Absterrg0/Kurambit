@@ -571,6 +571,7 @@ export function SettingsPageContainer({
   width = "readable",
   title,
   description,
+  action,
 }: {
   children: ReactNode;
   className?: string;
@@ -579,6 +580,8 @@ export function SettingsPageContainer({
   title?: string;
   /** One line under the title for what the whole page covers, so it never sits in a toolbar. */
   description?: ReactNode;
+  /** The page's one creating action ("New task"), beside the title. */
+  action?: ReactNode;
 }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
@@ -612,15 +615,18 @@ export function SettingsPageContainer({
       >
         <WorkspacePageContainer width={width} className={cn("gap-8", className)}>
           {pageTitle === null ? null : (
-            <div className="-mb-5 grid gap-1 px-3 sm:px-4">
-              <Text variant="title" tone="strong" render={<h1 />}>
-                {pageTitle}
-              </Text>
-              {description ? (
-                <Text variant="body" tone="muted" render={<p />}>
-                  {description}
+            <div className="-mb-5 flex items-start justify-between gap-4 px-3 sm:px-4">
+              <div className="grid min-w-0 gap-1">
+                <Text variant="title" tone="strong" render={<h1 />}>
+                  {pageTitle}
                 </Text>
-              ) : null}
+                {description ? (
+                  <Text variant="body" tone="muted" render={<p />}>
+                    {description}
+                  </Text>
+                ) : null}
+              </div>
+              {action ? <div className="flex shrink-0 items-center pt-0.5">{action}</div> : null}
             </div>
           )}
           <SettingsScopeSentence />

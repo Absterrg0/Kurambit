@@ -1260,6 +1260,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --surface-shadow: var(--surface-base-shadow);
 }
 
+/* Pressed states of the recipes: swap the fill and drop the shadow. */
+@utility surface-raised-pressed {
+  --surface-fill: var(--raised-pressed-fill);
+  --surface-shadow: none;
+}
+@utility surface-lit-pressed {
+  --surface-fill: var(--lit-pressed-fill);
+  --surface-shadow: none;
+}
+@utility surface-destructive-pressed {
+  --surface-fill: var(--destructive-pressed-fill);
+  --surface-shadow: none;
+}
+
 /* Sunken: inputs, textareas, unchecked checkboxes and radios, tracks. */
 @utility surface-well {
   --surface-fill: var(--well-fill);
@@ -1458,6 +1472,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
    menu or nav, and the quieter current row of a picker. */
 @utility surface-ghost-hover {
   background: var(--ghost-hover-fill);
+}
+@utility surface-ghost-pressed {
+  background: var(--ghost-pressed-fill);
 }
 @utility surface-selected {
   background: var(--selected-fill);
@@ -1695,6 +1712,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --ghost-hover-fill: linear-gradient(180deg, rgb(0 0 0 / 7%), rgb(0 0 0 / 4%));
   --selected-fill: linear-gradient(180deg, rgb(0 0 0 / 8%), rgb(0 0 0 / 4.5%));
   --selected-soft-fill: linear-gradient(180deg, rgb(0 0 0 / 5.5%), rgb(0 0 0 / 3%));
+  /* Pressed (pointer down): a step past hover, with the drop shadow gone, so the
+     control reads as pushed in rather than lifted. */
+  --ghost-pressed-fill: linear-gradient(180deg, rgb(0 0 0 / 11%), rgb(0 0 0 / 7.5%));
+  --raised-pressed-fill: linear-gradient(
+    color-mix(in srgb, var(--popover), black 4%),
+    color-mix(in srgb, var(--popover), black 4%)
+  );
+  --lit-pressed-fill: linear-gradient(
+    color-mix(in srgb, var(--primary), var(--background) 18%),
+    color-mix(in srgb, var(--primary), var(--background) 18%)
+  );
+  --destructive-pressed-fill: linear-gradient(
+    color-mix(in srgb, var(--destructive), black 10%),
+    color-mix(in srgb, var(--destructive), black 10%)
+  );
   --sidebar-row-selected-rim: rgb(0 0 0 / 6%);
   --gloss-on-highlight: inset 0 1px 0 rgb(255 255 255 / 22%);
   --gloss-off-thumb-fill: linear-gradient(var(--card), var(--card));
@@ -1748,6 +1780,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --ghost-hover-fill: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
     --selected-fill: linear-gradient(180deg, rgb(255 255 255 / 8%), rgb(255 255 255 / 4.5%));
     --selected-soft-fill: linear-gradient(180deg, rgb(255 255 255 / 5.5%), rgb(255 255 255 / 3%));
+    --ghost-pressed-fill: linear-gradient(180deg, rgb(255 255 255 / 11%), rgb(255 255 255 / 7.5%));
+    /* Dark raised controls lift toward white, so pressing sinks them back below rest. */
+    --raised-pressed-fill: linear-gradient(
+      color-mix(in srgb, var(--popover), white 1%),
+      color-mix(in srgb, var(--popover), white 1%)
+    );
     --sidebar-row-selected-rim: transparent;
     --gloss-on-highlight: inset 0 1px 0 white;
     /* Off reads as off: a muted thumb on the sunken track, quieter than on. */

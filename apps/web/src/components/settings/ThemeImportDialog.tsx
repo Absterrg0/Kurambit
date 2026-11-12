@@ -1,4 +1,4 @@
-import { DownloadIcon, PlusIcon } from "lucide-react";
+import { DownloadIcon } from "lucide-react";
 import type { ChangeEvent, DragEvent, UIEvent } from "react";
 import { settlePromise } from "@kurambit/client-runtime/state/runtime";
 import { useEffect, useRef, useState } from "react";
@@ -507,8 +507,8 @@ export function ThemeImportDialog({
                     Cancel
                   </Button>
                   <Button disabled={!json.trim() || isReading} onClick={handleSubmit}>
-                    <PlusIcon />
-                    Add theme
+                    <DownloadIcon />
+                    Import theme
                   </Button>
                 </div>
               </div>

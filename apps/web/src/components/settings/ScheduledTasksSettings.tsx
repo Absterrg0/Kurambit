@@ -7,8 +7,15 @@ import {
   type ScheduledTask,
 } from "@kurambit/contracts";
 
+import { MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+
 import { requestConfirmDialog } from "~/confirmDialog";
 import { Button } from "../ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Text } from "../ui/text";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -41,6 +48,8 @@ import {
   taskToDraft,
   type DraftState,
 } from "./scheduledTasksSettings.logic";
+
+const PAGE_DESCRIPTION = "Messages your agent runs on a timer, each in its game's chat.";
 
 function describeSchedule(schedule: ScheduledTask["schedule"]): string {
   if (schedule.type === "interval") {
@@ -108,19 +117,38 @@ function TaskRow({
     await fn().finally(() => setBusy(null));
   };
 
+  const confirmDelete = async () => {
+    const question = `Delete the scheduled task "${task.title}"?\nIt stops running, and it cannot be brought back.`;
+    const confirmed =
+      (await requestConfirmDialog(question, { variant: "destructive" })) ??
+      window.confirm(question);
+    if (confirmed) await remove({ environmentId, input: { id: task.id } });
+  };
+
   return (
-    <div className="rounded-md border p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{task.title}</div>
-          <div className="text-xs text-muted-foreground">
+    <SettingsRow
+      title={task.title}
+      description={
+        <>
+          <span className="block">
             {describeSchedule(task.schedule)}
-            {task.nextRunAt ? ` · next ${localTime(task.nextRunAt)}` : ""}
+            {task.nextRunAt && task.enabled ? ` · next ${localTime(task.nextRunAt)}` : ""}
             {RUN_STATUS[task.lastRunStatus]}
             {task.enabled ? "" : " · paused"}
-          </div>
-        </div>
-        <div className="flex shrink-0 gap-1">
+          </span>
+          <span className="mt-0.5 line-clamp-2 block text-dim-foreground">{task.prompt}</span>
+        </>
+      }
+      control={
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={disabled || task.schedule.type === "webhook"}
+            onClick={() => void run("run", () => runNow({ environmentId, input: { id: task.id } }))}
+          >
+            Run now
+          </Button>
           <Button
             size="xs"
             variant="outline"
@@ -133,37 +161,34 @@ function TaskRow({
           >
             {task.enabled ? "Pause" : "Resume"}
           </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={disabled || task.schedule.type === "webhook"}
-            onClick={() => void run("run", () => runNow({ environmentId, input: { id: task.id } }))}
-          >
-            Run now
-          </Button>
-          <Button size="xs" variant="outline" disabled={disabled} onClick={() => onEdit(task)}>
-            Edit
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={disabled}
-            onClick={() =>
-              void run("delete", async () => {
-                const question = `Delete the scheduled task "${task.title}"?\nIt stops running, and it cannot be brought back.`;
-                const confirmed =
-                  (await requestConfirmDialog(question, { variant: "destructive" })) ??
-                  window.confirm(question);
-                if (confirmed) await remove({ environmentId, input: { id: task.id } });
-              })
-            }
-          >
-            Delete
-          </Button>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-label={`More actions for ${task.title}`}
+                />
+              }
+            >
+              <MoreHorizontalIcon aria-hidden="true" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem onClick={() => onEdit(task)}>
+                <PencilIcon />
+                Edit
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem variant="destructive" onClick={() => void run("delete", confirmDelete)}>
+                <Trash2Icon />
+                Delete…
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
         </div>
-      </div>
-      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.prompt}</div>
-    </div>
+      }
+    />
   );
 }
 
@@ -243,15 +268,15 @@ function DraftForm({
     const schedule = scheduleFromDraft(draft);
     const resolvedProjectId = draft.projectId || projectId;
     if (resolvedProjectId.trim().length === 0) {
-      setError("No project available. Create a project first.");
+      setError("No game to run it in. Make a game first.");
       return;
     }
     if (draft.prompt.trim().length === 0) {
-      setError("Prompt is required.");
+      setError("Write the message the agent gets.");
       return;
     }
     if (draft.title.trim().length === 0 && draft.prompt.trim().length === 0) {
-      setError("Title or prompt is required.");
+      setError("Give the task a name or a message.");
       return;
     }
     const modelSelection = model;
@@ -300,103 +325,111 @@ function DraftForm({
   };
 
   return (
-    <div className="space-y-2 rounded-md border p-3">
-      <Input
-        value={draft.title}
-        placeholder="Title (optional)"
-        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-      />
-      <Textarea
-        value={draft.prompt}
-        placeholder="Prompt run on schedule"
-        onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
-      />
-      <div className="flex flex-wrap items-center gap-4">
-        <RadioGroup
-          aria-label="Schedule"
-          className="flex-row"
-          value={draft.scheduleMode}
-          onValueChange={(value) =>
-            setDraft({ ...draft, scheduleMode: value === "fixed" ? "fixed" : "interval" })
-          }
-        >
-          <label className="flex items-center gap-2 text-xs">
-            <Radio value="interval" />
-            Interval
-          </label>
-          <label className="flex items-center gap-2 text-xs">
-            <Radio value="fixed" />
-            Fixed time
-          </label>
-        </RadioGroup>
-        <label className="flex items-center gap-2 text-xs">
-          <Checkbox
-            checked={draft.enabled}
-            onCheckedChange={(checked) => setDraft({ ...draft, enabled: checked === true })}
-          />
-          Enabled
-        </label>
-      </div>
-      {draft.scheduleMode === "interval" ? (
-        <label className="flex items-center gap-2 text-xs">
-          Every
-          <Input
-            value={draft.intervalMinutes}
-            placeholder="60"
-            onChange={(event) => setDraft({ ...draft, intervalMinutes: event.target.value })}
-          />
-          minutes
-        </label>
-      ) : (
+    <SettingsSection title={editing === null ? "New task" : "Edit task"}>
+      <div className="space-y-3 p-4">
         <Input
-          value={draft.timeOfDay}
-          placeholder="HH:MM (e.g. 09:00)"
-          onChange={(event) => setDraft({ ...draft, timeOfDay: event.target.value })}
+          value={draft.title}
+          placeholder="Title (optional)"
+          onChange={(event) => setDraft({ ...draft, title: event.target.value })}
         />
-      )}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        Agent
-        {model === null ? (
-          "none available"
-        ) : (
-          <ProviderModelPicker
-            environmentId={environmentId}
-            activeInstanceId={model.instanceId}
-            model={model.model}
-            lockedProvider={null}
-            instanceEntries={instanceEntries}
-            modelOptionsByInstance={getCustomModelOptionsByInstance(
-              settings,
-              providers,
-              model.instanceId,
-              model.model,
-            )}
-            disabled={saving}
-            onInstanceModelChange={(instanceId, selectedModel) =>
-              setPicked(
-                model.instanceId === instanceId && model.model === selectedModel
-                  ? model
-                  : { instanceId, model: selectedModel },
-              )
+        <Textarea
+          value={draft.prompt}
+          placeholder="The message your agent gets each time it runs"
+          onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
+        />
+        <div className="flex flex-wrap items-center gap-4">
+          <RadioGroup
+            aria-label="Schedule"
+            className="flex-row"
+            value={draft.scheduleMode}
+            onValueChange={(value) =>
+              setDraft({ ...draft, scheduleMode: value === "fixed" ? "fixed" : "interval" })
             }
+          >
+            <label className="flex items-center gap-2 text-meta">
+              <Radio value="interval" />
+              Interval
+            </label>
+            <label className="flex items-center gap-2 text-meta">
+              <Radio value="fixed" />
+              Fixed time
+            </label>
+          </RadioGroup>
+          <label className="flex items-center gap-2 text-meta">
+            <Checkbox
+              checked={draft.enabled}
+              onCheckedChange={(checked) => setDraft({ ...draft, enabled: checked === true })}
+            />
+            Enabled
+          </label>
+        </div>
+        {draft.scheduleMode === "interval" ? (
+          <label className="flex items-center gap-2 text-meta">
+            Every
+            <Input
+              value={draft.intervalMinutes}
+              placeholder="60"
+              onChange={(event) => setDraft({ ...draft, intervalMinutes: event.target.value })}
+            />
+            minutes
+          </label>
+        ) : (
+          <Input
+            value={draft.timeOfDay}
+            placeholder="HH:MM (e.g. 09:00)"
+            onChange={(event) => setDraft({ ...draft, timeOfDay: event.target.value })}
           />
         )}
-        {isGame ? (
-          <span>
-            {editing?.threadId ? "· runs in its chat" : "· runs in a new chat in the game's folder"}
-          </span>
+        <div className="flex flex-wrap items-center gap-2 text-meta text-muted-foreground">
+          Agent
+          {model === null ? (
+            "none available"
+          ) : (
+            <ProviderModelPicker
+              environmentId={environmentId}
+              activeInstanceId={model.instanceId}
+              model={model.model}
+              lockedProvider={null}
+              instanceEntries={instanceEntries}
+              modelOptionsByInstance={getCustomModelOptionsByInstance(
+                settings,
+                providers,
+                model.instanceId,
+                model.model,
+              )}
+              disabled={saving}
+              onInstanceModelChange={(instanceId, selectedModel) =>
+                setPicked(
+                  model.instanceId === instanceId && model.model === selectedModel
+                    ? model
+                    : { instanceId, model: selectedModel },
+                )
+              }
+            />
+          )}
+          {isGame ? (
+            <span>
+              {editing?.threadId
+                ? "· runs in its chat"
+                : "· runs in a new chat in the game's folder"}
+            </span>
+          ) : null}
+        </div>
+        {error !== null ? (
+          <Text variant="meta" tone="destructive" render={<p />}>
+            {error}
+          </Text>
         ) : null}
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="ghost" disabled={saving} onClick={onDone}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={saving || !canOperate} onClick={() => void save()}>
+            {draft.editingId === null ? "Create task" : "Save"}
+          </Button>
+        </div>
       </div>
-      {error !== null ? <p className="text-xs text-destructive">{error}</p> : null}
-      <div className="flex gap-2">
-        <Button size="xs" disabled={saving || !canOperate} onClick={() => void save()}>
-          {draft.editingId === null ? "Create" : "Save"}
-        </Button>
-        <Button size="xs" variant="ghost" disabled={saving} onClick={onDone}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -409,9 +442,11 @@ export function ScheduledTasksSettings(props: {
   const environmentId = props.environmentId ?? primaryId ?? environments[0]?.environmentId ?? null;
   if (environmentId === null) {
     return (
-      <p className="p-4 text-sm text-muted-foreground">
-        Connect an environment to manage scheduled tasks.
-      </p>
+      <SettingsPageContainer description={PAGE_DESCRIPTION}>
+        <Text variant="body" tone="muted" render={<p className="px-3 sm:px-4" />}>
+          Kurambit's server isn't connected yet.
+        </Text>
+      </SettingsPageContainer>
     );
   }
   return <ScheduledTasksPanel key={environmentId} environmentId={environmentId} />;
@@ -425,52 +460,36 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
   const [creating, setCreating] = useState(false);
 
   const query = useEnvironmentQuery(scheduledTaskListQuery({ environmentId, input: {} }));
-
-  if (query.isPending && query.data === null) {
-    return <p className="p-4 text-sm text-muted-foreground">Loading scheduled tasks…</p>;
-  }
-  if (query.error !== null) {
-    return <p className="p-4 text-sm text-destructive">{query.error}</p>;
-  }
-  const tasks = (query.data?.tasks ?? []).filter(
-    (task) => projectFilter === "" || task.projectId === projectFilter,
-  );
+  const allTasks = query.data?.tasks ?? [];
+  const tasks = allTasks.filter((task) => projectFilter === "" || task.projectId === projectFilter);
   const defaultProjectId = projectFilter || (projects[0]?.id ?? tasks[0]?.projectId ?? "");
+  const loading = query.isPending && query.data === null;
+  const projectTitle = (id: string) =>
+    id === "" ? "All games" : (projects.find((project) => project.id === id)?.title ?? "A game");
 
   return (
-    <div className="space-y-3 p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Scheduled tasks (local)</h2>
+    <SettingsPageContainer
+      description={PAGE_DESCRIPTION}
+      action={
         <Button
-          size="xs"
-          disabled={!canOperate}
+          size="sm"
+          variant="outline"
+          disabled={!canOperate || creating}
           onClick={() => {
             setEditing(null);
             setCreating(true);
           }}
         >
+          <PlusIcon />
           New task
         </Button>
-      </div>
+      }
+    >
       {canOperate ? null : (
-        <p className="text-xs text-muted-foreground">
-          Read-only access: task changes need an environment session with operate permission.
-        </p>
+        <Text variant="meta" tone="muted" render={<p className="px-3 sm:px-4" />}>
+          This window can see scheduled tasks but not change them.
+        </Text>
       )}
-      {projects.length > 1 ? (
-        <select
-          className="rounded-md border bg-transparent p-1 text-xs"
-          value={projectFilter}
-          onChange={(event) => setProjectFilter(event.target.value)}
-        >
-          <option value="">All projects</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.title}
-            </option>
-          ))}
-        </select>
-      ) : null}
       {creating ? (
         <DraftForm
           environmentId={environmentId}
@@ -489,24 +508,65 @@ function ScheduledTasksPanel({ environmentId }: { environmentId: EnvironmentId }
           onDone={() => setEditing(null)}
         />
       ) : null}
-      {tasks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No scheduled tasks yet. Create one to run a prompt on an interval or at a fixed time.
-        </p>
+      {query.error !== null ? (
+        <Empty variant="well">
+          <EmptyHeader>
+            <EmptyTitle>Could not load scheduled tasks</EmptyTitle>
+            <EmptyDescription>{query.error}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : loading ? null : allTasks.length === 0 ? (
+        <Empty variant="well">
+          <EmptyHeader>
+            <EmptyTitle>No scheduled tasks</EmptyTitle>
+            <EmptyDescription>
+              A task sends your agent the same message on a timer, in its game's chat.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        tasks.map((task) => (
-          <TaskRow
-            key={task.id}
-            environmentId={environmentId}
-            task={task}
-            canOperate={canOperate}
-            onEdit={(next) => {
-              setCreating(false);
-              setEditing(next);
-            }}
-          />
-        ))
+        <SettingsSection
+          title="Tasks"
+          headerAction={
+            projects.length > 1 ? (
+              <Select
+                value={projectFilter}
+                onValueChange={(value) => setProjectFilter(value ?? "")}
+              >
+                <SelectTrigger size="sm" className="w-44" aria-label="Show tasks for">
+                  <SelectValue>{projectTitle(projectFilter)}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="">All games</SelectItem>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.title}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            ) : null
+          }
+        >
+          {tasks.length === 0 ? (
+            <Text variant="meta" tone="muted" render={<p className="px-3 py-3 sm:px-4" />}>
+              Nothing is scheduled in {projectTitle(projectFilter)}.
+            </Text>
+          ) : null}
+          {tasks.map((task) => (
+            <TaskRow
+              key={task.id}
+              environmentId={environmentId}
+              task={task}
+              canOperate={canOperate}
+              onEdit={(next) => {
+                setCreating(false);
+                setEditing(next);
+              }}
+            />
+          ))}
+        </SettingsSection>
       )}
-    </div>
+    </SettingsPageContainer>
   );
 }

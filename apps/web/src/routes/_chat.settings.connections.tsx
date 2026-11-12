@@ -1,7 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ConnectionsSettings } from "../components/settings/ConnectionsSettings";
-
+// The local server is one row in General's About now; old links and the
+// desktop's settings deep link still land on it.
 export const Route = createFileRoute("/_chat/settings/connections")({
-  component: ConnectionsSettings,
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/general", hash: "connections-environment", replace: true });
+  },
 });

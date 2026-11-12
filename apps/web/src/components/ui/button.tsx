@@ -10,7 +10,12 @@ import { cn } from "~/lib/utils";
 // Secondary and outline are the same raised recipe: outline is the older name
 // most call sites use, secondary the one T3's redesign settled on.
 const RAISED_VARIANT =
-  "surface-raised [--control-icon-color:var(--contrast-muted-foreground)] text-foreground focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-raised-hover";
+  "surface-raised [--control-icon-color:var(--contrast-muted-foreground)] text-foreground focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-raised-hover [&:active:not(:disabled)]:surface-raised-pressed";
+
+// Chrome-less buttons sit in toolbars, where focus returns to them each time a
+// menu closes: a 1px ring with the hover fill, like a focused field, instead of
+// the 2px outline that marks a framed control.
+const SOFT_FOCUS = "focus-visible:outline-1 focus-visible:surface-ghost-hover";
 
 const buttonVariants = cva(
   // kbd-in-control and the trailing-Kbd padding let a key hint sit inside the
@@ -44,35 +49,33 @@ const buttonVariants = cva(
       variant: {
         // The primary action: the lit recipe.
         default:
-          "surface-lit kbd-on-lit text-primary-foreground focus-visible:[--surface-rim:var(--lit-fill)] [:hover,[data-pressed]]:surface-lit-hover",
+          "surface-lit kbd-on-lit text-primary-foreground focus-visible:[--surface-rim:var(--lit-fill)] [:hover,[data-pressed]]:surface-lit-hover [&:active:not(:disabled)]:surface-lit-pressed",
         destructive:
-          "surface-destructive kbd-on-destructive text-white focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-destructive-hover",
+          "surface-destructive kbd-on-destructive text-white focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-destructive-hover [&:active:not(:disabled)]:surface-destructive-pressed",
         // Raised, with a red label and a red rim on hover.
         "destructive-outline":
-          "surface-raised text-destructive-foreground focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-danger-hover",
+          "surface-raised text-destructive-foreground focus-visible:[--surface-rim:var(--surface-fill)] [:hover,[data-pressed]]:surface-danger-hover [&:active:not(:disabled)]:surface-raised-pressed",
         // Icon buttons and ghost rows stay chrome-less: a hover fill, and the
         // muted icon brightens to the label color.
-        ghost:
-          "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:[--control-icon-color:currentColor]",
-        "ghost-muted":
-          "[--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:text-foreground",
-        "ghost-destructive":
-          "[--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:text-destructive-foreground",
+        ghost: `${SOFT_FOCUS} [--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:[--control-icon-color:currentColor] [&:active:not(:disabled)]:surface-ghost-pressed`,
+        "ghost-muted": `${SOFT_FOCUS} [--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:text-foreground [&:active:not(:disabled)]:surface-ghost-pressed`,
+        "ghost-destructive": `${SOFT_FOCUS} [--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:text-destructive-foreground [&:active:not(:disabled)]:surface-ghost-pressed`,
         // No surface at any state: hover brightens the muted label. For controls
         // on a shape that already frames them.
-        bare: "[--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:text-foreground",
+        bare: "[--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:text-foreground [&:active:not(:disabled)]:text-strong-foreground",
         glass:
-          "surface-glass [--control-icon-color:var(--contrast-muted-foreground)] rounded-full border-border/60 text-foreground shadow-sm before:rounded-full [:hover,[data-pressed]]:border-border",
+          "surface-glass [--control-icon-color:var(--contrast-muted-foreground)] rounded-full border-border/60 text-foreground shadow-sm before:rounded-full [:hover,[data-pressed]]:border-border [&:active:not(:disabled)]:bg-foreground/8",
         link: "border-transparent underline-offset-4 [:hover,[data-pressed]]:underline",
         "media-close":
-          "[--control-icon-color:currentColor] border-transparent bg-black/65 text-white shadow-sm ring-1 ring-white/20 [:hover,[data-pressed]]:bg-black/80 focus-visible:outline-white",
+          "[--control-icon-color:currentColor] border-transparent bg-black/65 text-white shadow-sm ring-1 ring-white/20 [:hover,[data-pressed]]:bg-black/80 [&:active:not(:disabled)]:bg-black/90 focus-visible:outline-white",
         "media-navigation":
-          "[--control-icon-color:currentColor] absolute top-1/2 z-20 -translate-y-1/2 border-transparent text-white/90 [:hover,[data-pressed]]:bg-white/10 [:hover,[data-pressed]]:text-white focus-visible:outline-white",
+          "[--control-icon-color:currentColor] absolute top-1/2 z-20 -translate-y-1/2 border-transparent text-white/90 [:hover,[data-pressed]]:bg-white/10 [:hover,[data-pressed]]:text-white [&:active:not(:disabled)]:bg-white/16 focus-visible:outline-white",
         outline: RAISED_VARIANT,
-        overlay: "border-transparent bg-black/70 text-white/65 [:hover,[data-pressed]]:bg-black/90",
+        overlay:
+          "border-transparent bg-black/70 text-white/65 [:hover,[data-pressed]]:bg-black/90 [&:active:not(:disabled)]:bg-black",
         secondary: RAISED_VARIANT,
         "warning-outline":
-          "surface-tint [--surface-tint:var(--warning-foreground)] text-warning-foreground [:hover,[data-pressed]]:[--surface-tint:color-mix(in_srgb,var(--warning-foreground),var(--foreground)_20%)]",
+          "surface-tint [--surface-tint:var(--warning-foreground)] text-warning-foreground [:hover,[data-pressed]]:[--surface-tint:color-mix(in_srgb,var(--warning-foreground),var(--foreground)_20%)] [&:active:not(:disabled)]:[--surface-tint:color-mix(in_srgb,var(--warning-foreground),var(--foreground)_35%)]",
       },
     },
   },
