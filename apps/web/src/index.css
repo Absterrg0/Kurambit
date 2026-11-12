@@ -1224,8 +1224,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     var(--surface-fill) border-box;
   box-shadow: var(--surface-shadow);
 }
-/* The unchecked switch track: a shade deeper than a well, with a rim that
-   reads on cards in both themes. */
+/* The unchecked switch track: set apart from the card in both themes (deeper
+   on paper, lifted on near-black), with a rim that keeps its outline. */
 @utility surface-well-switch {
   --surface-fill: var(--well-switch-fill);
   --surface-rim: var(--well-switch-rim);
@@ -1591,8 +1591,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --well-shadow: 0 1px 0 rgb(255 255 255 / 60%);
   --well-switch-fill: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--background), black 16%),
-    color-mix(in srgb, var(--background), black 10%)
+    color-mix(in srgb, var(--background), black 20%),
+    color-mix(in srgb, var(--background), black 14%)
   );
   --well-switch-rim: linear-gradient(180deg, rgb(0 0 0 / 26%), rgb(0 0 0 / 12%));
   --popover-top: var(--popover);
@@ -1647,12 +1647,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     );
     --well-rim: linear-gradient(180deg, rgb(0 0 0 / 60%), rgb(255 255 255 / 14%));
     --well-shadow: 0 1px 2px rgb(0 0 0 / 38%);
+    /* Dark cards sit near black, so a track sunk below them vanishes: the off
+       track lifts toward white instead, with a rim that holds its outline. */
     --well-switch-fill: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--background), black 60%),
-      color-mix(in srgb, var(--background), black 30%)
+      color-mix(in srgb, var(--background), white 14%),
+      color-mix(in srgb, var(--background), white 18%)
     );
-    --well-switch-rim: linear-gradient(180deg, rgb(0 0 0 / 60%), rgb(255 255 255 / 22%));
+    --well-switch-rim: linear-gradient(180deg, rgb(255 255 255 / 16%), rgb(255 255 255 / 28%));
     --popover-top: color-mix(in srgb, var(--popover), white 1.5%);
     --popover-bottom: color-mix(in srgb, var(--popover), black 6%);
     --popover-rim: linear-gradient(180deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 3%));
