@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
+  ArrowDownIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -26,9 +27,11 @@ import {
 } from "lucide-react";
 import {
   GAME_ENGINES,
+  GAME_LEAD_FACTS,
   GAME_STYLE_FILE,
   GameStyle,
   gameChecksView,
+  gameFactName,
   gameFactsView,
   type GameBuild,
   type GameBuildFacts,
@@ -48,6 +51,7 @@ import { useDiffPanelStore } from "../../diffPanelStore";
 import { type GameInspectorTab, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
+import { dispatchComposerFocus } from "../../lib/desktopSnapShot";
 import { cn, randomUUID } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
@@ -299,7 +303,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Text>
       </div>
     ) : (
-      <div className="p-4">
+      <div className="flex flex-col gap-4 p-4">
         <Empty variant="well">
           {/* The top bar already says it is not measured: this says what comes next. */}
           <EmptyHeader>
@@ -309,7 +313,29 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               to measure its checks here.
             </EmptyDescription>
           </EmptyHeader>
+          <EmptyContent>
+            <Button size="sm" variant="outline" onClick={dispatchComposerFocus}>
+              Describe a change
+              <ArrowDownIcon aria-hidden />
+            </Button>
+          </EmptyContent>
         </Empty>
+        {/* The loop's next step, shown before it happens: the checks build 1 gets, unlit. */}
+        <section aria-labelledby="checks-to-come" className="flex flex-col gap-2 px-1">
+          <Text variant="meta" tone="muted" render={<h3 id="checks-to-come" />}>
+            What each build is measured on
+          </Text>
+          <ul className="flex flex-col gap-1.5">
+            {GAME_LEAD_FACTS.map((id) => (
+              <li key={id} className="flex items-center gap-2">
+                <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
+                <Text variant="meta" tone="dim">
+                  {gameFactName(id)}
+                </Text>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     );
   const detail = (
@@ -1511,10 +1537,11 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
               {choosing} to pick
             </Text>
           ) : null}
-          <ChevronRightIcon
+          {/* The same trailing ⌄ as Characters' picker: a row that opens more has one mark. */}
+          <ChevronDownIcon
             className={cn(
-              "size-4 shrink-0 text-muted-foreground transition-transform",
-              artOpen && "rotate-90",
+              "size-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
+              artOpen && "rotate-180",
             )}
             aria-hidden="true"
           />
@@ -1589,17 +1616,15 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
           {/* The game answered and names nothing in this scene: a title or menu often has
               nothing to point at, and play does. */}
           <EmptyHeader>
-            <EmptyTitle>Nothing named in this scene</EmptyTitle>
+            <EmptyTitle>Nothing named on screen yet</EmptyTitle>
             <EmptyDescription>
-              A title or menu often names nothing. Start playing and the characters, props and rules
-              the game names show here; freeze the game
-              {freezeKey === null ? null : (
+              {freezeKey === null ? (
+                "Play, then freeze the game to point at something."
+              ) : (
                 <>
-                  {" "}
-                  (<Kbd>{freezeKey}</Kbd>)
+                  Play, then press <Kbd>{freezeKey}</Kbd> to freeze and point at something.
                 </>
-              )}{" "}
-              to point at one.
+              )}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

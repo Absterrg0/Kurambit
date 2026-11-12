@@ -29,7 +29,7 @@ import {
 import { resizeSnapShotSource } from "../../lib/snapShotSource";
 import { playSnapShotSound } from "../../lib/snapShotSound";
 import {
-  dispatchSnapShotComposerFocus,
+  dispatchComposerFocus,
   getDesktopSnapShotBridge,
   type DesktopSnapShotBridge,
 } from "../../lib/desktopSnapShot";
@@ -197,7 +197,7 @@ export async function deliverSnapShot(
     await afterNextPaint();
   }
   await bridge.acknowledgeSnapShot(capture.id);
-  dispatchSnapShotComposerFocus();
+  dispatchComposerFocus();
 }
 
 export function SnapShotCoordinator() {

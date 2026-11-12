@@ -2,9 +2,9 @@ import type { DesktopBridge } from "@kurambit/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  dispatchSnapShotComposerFocus,
+  dispatchComposerFocus,
   getDesktopSnapShotBridge,
-  subscribeSnapShotComposerFocus,
+  subscribeComposerFocus,
 } from "./desktopSnapShot";
 
 beforeEach(() => {
@@ -45,13 +45,13 @@ describe("getDesktopSnapShotBridge", () => {
 describe("window capture composer focus", () => {
   it("notifies active subscribers", () => {
     const listener = vi.fn();
-    const unsubscribe = subscribeSnapShotComposerFocus(listener);
+    const unsubscribe = subscribeComposerFocus(listener);
 
-    dispatchSnapShotComposerFocus();
+    dispatchComposerFocus();
     expect(listener).toHaveBeenCalledOnce();
 
     unsubscribe();
-    dispatchSnapShotComposerFocus();
+    dispatchComposerFocus();
     expect(listener).toHaveBeenCalledOnce();
   });
 });

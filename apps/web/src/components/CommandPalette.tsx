@@ -1823,8 +1823,11 @@ function OpenCommandPaletteDialog(props: {
       run: requestStage({ kind: "generated-art" }),
     });
   }
-  // Everything above is about the open game.
+  // Everything above is about the open game. Stopping it ends the group: it is reached by
+  // name, not offered first to someone who opened the palette to go somewhere.
   const gameItems = actionItems.splice(0);
+  const stopIndex = gameItems.findIndex((item) => item.value === "action:game-stop");
+  if (stopIndex >= 0) gameItems.push(...gameItems.splice(stopIndex, 1));
   const developerItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
   actionItems.push({
     kind: "action",

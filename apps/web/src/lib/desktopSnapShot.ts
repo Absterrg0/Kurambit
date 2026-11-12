@@ -1,16 +1,18 @@
 import type { DesktopBridge } from "@kurambit/contracts";
 
-const SNAP_SHOT_FOCUS_EVENT = "kurambit:focus-composer";
+// Anything on screen (a SnapShot capture, the new game's Inspector) asks the open composer
+// to take focus; the chat view that owns the composer listens.
+const COMPOSER_FOCUS_EVENT = "kurambit:focus-composer";
 
-export function dispatchSnapShotComposerFocus(): void {
+export function dispatchComposerFocus(): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event(SNAP_SHOT_FOCUS_EVENT));
+  window.dispatchEvent(new Event(COMPOSER_FOCUS_EVENT));
 }
 
-export function subscribeSnapShotComposerFocus(listener: () => void): () => void {
+export function subscribeComposerFocus(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
-  window.addEventListener(SNAP_SHOT_FOCUS_EVENT, listener);
-  return () => window.removeEventListener(SNAP_SHOT_FOCUS_EVENT, listener);
+  window.addEventListener(COMPOSER_FOCUS_EVENT, listener);
+  return () => window.removeEventListener(COMPOSER_FOCUS_EVENT, listener);
 }
 
 type SnapShotMethods =
