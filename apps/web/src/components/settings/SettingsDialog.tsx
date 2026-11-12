@@ -37,8 +37,11 @@ export function SettingsDialog({ children }: { children: ReactNode }) {
       modal={!themeEditorOpen}
       // Portaled layers outside the panel (toasts, confirm dialogs) are not backdrop presses.
       disablePointerDismissal
-      onOpenChange={(nextOpen) => {
+      onOpenChange={(nextOpen, details) => {
         if (nextOpen) return;
+        // An Escape a field already handled (clearing a search, cancelling a shortcut
+        // recording) is not a request to leave; Base UI closes on it regardless.
+        if (details.reason === "escape-key" && details.event.defaultPrevented) return;
         // Closing unmounts a focused field without a blur, so rows that commit on
         // blur would drop what was typed. Blur first so they commit.
         const focused = document.activeElement;
