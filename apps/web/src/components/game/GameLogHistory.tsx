@@ -37,11 +37,11 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
       <div className="flex flex-col gap-1">
         <Text variant="label" tone="default" render={<h2 />}>
-          {builds.length > 0 ? "Before this chat" : "Nothing in the Log yet"}
+          {builds.length > 0 ? "Builds" : "Nothing in the Log yet"}
         </Text>
         <Text variant="caption" tone="muted" render={<p />}>
           {builds.length > 0
-            ? "Nothing in this Log has changed the game yet. Its builds so far:"
+            ? "Newest first. Your agent's turns in this Log show here as it works."
             : "Your agent's work on this game shows here, turn by turn. Tell it what to change below the game."}
         </Text>
       </div>
@@ -61,10 +61,10 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
               <span className="surface-well aspect-video w-16 shrink-0 rounded-sm" />
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <Text variant="meta" tone="default" truncate>
-                  Now
+                  Now · changed since {buildName(changedSince)}
                 </Text>
                 <Text variant="caption" tone="muted" truncate>
-                  Changed since {buildName(changedSince)} · not measured
+                  Not measured yet
                 </Text>
               </span>
             </li>

@@ -152,11 +152,14 @@ export function GameInspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }
       aria-label={TABS.find((entry) => entry.tab === tab)?.label}
       className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col overflow-y-auto bg-background"
     >
-      {tab === "build" ? (
-        <BuildPanel threadRef={threadRef} />
-      ) : (
-        <ScenePanel threadRef={threadRef} />
-      )}
+      {/* In the wide sheet of a narrow window, the panel keeps a reading width. */}
+      <div className="w-full max-w-160">
+        {tab === "build" ? (
+          <BuildPanel threadRef={threadRef} />
+        ) : (
+          <ScenePanel threadRef={threadRef} />
+        )}
+      </div>
     </div>
   );
 }
@@ -290,8 +293,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
           Now on the Stage
         </Text>
         <Text variant="meta" tone="muted" render={<p />}>
-          The game changed since {buildName(build)}, and isn't measured yet. Its checks below are
-          the last measured.
+          Not measured yet. The checks below are from {buildName(build)}.
         </Text>
       </div>
       {detail}
@@ -549,7 +551,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             </Text>
             {morePass > 0 ? (
               <Text variant="caption" tone="muted" numeric>
-                {morePass} pass
+                {morePass} of {moreMeasured.length} pass
               </Text>
             ) : null}
           </button>
@@ -1116,21 +1118,16 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
           gameName={gameName}
           build={{ still: lookStill }}
           className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset"
-        >
-          {swatches.length > 0 ? (
-            <span className="absolute right-2 bottom-2 z-10 flex gap-0.5 rounded-md bg-black/55 p-1 backdrop-blur-sm">
-              {swatches.slice(0, 6).map((hex) => (
-                <span
-                  key={hex}
-                  aria-label={hex}
-                  className="size-3 rounded-sm"
-                  style={{ background: hex }}
-                />
-              ))}
-            </span>
-          ) : null}
-        </GameBuildStill>
+        ></GameBuildStill>
       )}
+      {/* The look's colours under its picture, as a strip a person can read at a glance. */}
+      {lookStill !== null && swatches.length > 0 ? (
+        <div className="flex h-3 overflow-hidden rounded-sm ring-1 ring-border ring-inset">
+          {swatches.slice(0, 8).map((hex) => (
+            <span key={hex} aria-label={hex} className="flex-1" style={{ background: hex }} />
+          ))}
+        </div>
+      ) : null}
       <Rows>
         <div className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
           <Text variant="meta" tone="default" render={<span className="flex-1" />}>

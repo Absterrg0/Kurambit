@@ -250,6 +250,8 @@ export function GameFrame({
     onFrame?.(node);
   };
   const [frameFocused, setFrameFocused] = useState(false);
+  // Until the game's page loads the frame is blank; it says the game is starting instead.
+  const [loaded, setLoaded] = useState(false);
   // Track the hide request the game never answered: without StudioProbe or when
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
@@ -323,6 +325,7 @@ export function GameFrame({
         sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-downloads"
         className="size-full border-0 bg-black"
         onLoad={() => {
+          setLoaded(true);
           setFrameFocused(false);
           // The game's listener may have come up after the last message;
           // a fresh document needs the current state restated.
@@ -331,6 +334,17 @@ export function GameFrame({
         onFocus={() => setFrameFocused(true)}
         onBlur={() => setFrameFocused(false)}
       />
+      {loaded ? null : (
+        <Text
+          variant="meta"
+          tone="inherit"
+          render={
+            <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-stage text-stage-muted" />
+          }
+        >
+          Starting the game…
+        </Text>
+      )}
       {/* One quiet line in a corner that lets every click through. The frame belongs to the
           game, so the click hint shows only while the pointer is over it; a warning or a
           freeze always shows. */}
