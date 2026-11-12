@@ -51,7 +51,7 @@ type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   agent: "Agent",
   effort: "Effort",
-  reasoningEffort: "Reasoning effort",
+  reasoningEffort: "Effort",
   variant: "Reasoning",
 };
 
@@ -62,6 +62,13 @@ function sentenceCaseLabel(label: string): string {
     /(\s)([A-Z][a-z]+)\b/g,
     (_match, space: string, word: string) => `${space}${word.toLowerCase()}`,
   );
+}
+
+// Providers name how hard the model thinks "Reasoning", "Reasoning effort" or "Effort";
+// the composer, its menu and Settings all say Effort.
+const EFFORT_OPTION_IDS: ReadonlySet<string> = new Set(["effort", "reasoningEffort"]);
+function traitGroupLabel(descriptor: { readonly id: string; readonly label: string }): string {
+  return EFFORT_OPTION_IDS.has(descriptor.id) ? "Effort" : sentenceCaseLabel(descriptor.label);
 }
 
 function savedOptionLabel(id: string): string {
@@ -515,7 +522,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     showLabel = true,
   ) => (
     <MenuGroup key={descriptor.id}>
-      {showLabel ? <MenuGroupLabel>{sentenceCaseLabel(descriptor.label)}</MenuGroupLabel> : null}
+      {showLabel ? <MenuGroupLabel>{traitGroupLabel(descriptor)}</MenuGroupLabel> : null}
       {effortLocked(descriptor) && !showDescriptions ? (
         <div className="px-2 pb-1.5 text-meta text-muted-foreground">
           Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this option.

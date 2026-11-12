@@ -1,7 +1,8 @@
 import { type ResolvedKeybindingsConfig } from "@kurambit/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronRightIcon } from "lucide-react";
-import { type RefObject, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
+import { wholeRowHeight } from "~/lib/wholeRowHeight";
 import { cn } from "~/lib/utils";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
@@ -92,26 +93,6 @@ interface CommandPaletteVirtualizedResultsProps extends Omit<CommandPaletteResul
 const LIST_BOTTOM_PADDING_PX = 8;
 
 /**
- * The tallest height, at most the list's own, that ends on a whole row, so an
- * overflowing palette never stops mid-glyph above its footer. Null when the
- * list already ends on one.
- */
-function wholeRowHeight(scrollElement: HTMLElement): number | null {
-  const viewportTop = scrollElement.getBoundingClientRect().top;
-  const limit = scrollElement.clientHeight - LIST_BOTTOM_PADDING_PX;
-  let lastWholeRowBottom = 0;
-  for (const row of scrollElement.querySelectorAll(
-    "[data-slot=command-item], [data-slot=command-group-label], [data-palette-row]",
-  )) {
-    const bottom = row.getBoundingClientRect().bottom - viewportTop;
-    if (bottom <= limit + 0.5) lastWholeRowBottom = Math.max(lastWholeRowBottom, bottom);
-  }
-  if (lastWholeRowBottom === 0) return null;
-  const height = Math.ceil(lastWholeRowBottom + LIST_BOTTOM_PADDING_PX);
-  return height < scrollElement.clientHeight ? height : null;
-}
-
-/**
  * The parent passes the flat item order to the Command root as `items` with
  * `virtualized`, scrolls keyboard highlights into view through `listRef`, and
  * runs Enter itself since the row may be unmounted.
@@ -135,10 +116,23 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
       current.top === top && current.bottom === bottom ? current : { top, bottom },
     );
     if (snappedHeight === null && !top && bottom) {
-      const height = wholeRowHeight(scrollElement);
+      const height = wholeRowHeight(
+        scrollElement,
+        "[data-slot=command-item], [data-palette-row]",
+        LIST_BOTTOM_PADDING_PX,
+      );
       if (height !== null) setSnap({ rows: props.rows, height });
     }
   };
+
+  // The list lays itself out before its rows paint, and new results swap the rows without
+  // a layout event, so the snap is measured again two frames after every new set of rows.
+  useEffect(() => {
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(updateScrollFade);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [updateScrollFade]);
 
   if (props.rows.length === 0) {
     return <CommandPaletteEmptyState {...props} />;

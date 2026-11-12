@@ -99,7 +99,10 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
               <FastForwardIcon className="size-3.5" aria-hidden="true" />
               {keepGoingView.label}
             </TooltipTrigger>
-            <TooltipPopup side="left">{keepGoingView.tooltip}</TooltipPopup>
+            {/* Hangs from the button's top edge, so two lines never touch the composer above. */}
+            <TooltipPopup side="left" align="start" sideOffset={6}>
+              {keepGoingView.tooltip}
+            </TooltipPopup>
           </Tooltip>
           <MenuPopup align="end">
             <GameKeepGoingMenuContent threadRef={threadRef} />

@@ -46,7 +46,8 @@ import {
   turnBuild,
 } from "../../state/game";
 import { useQuietThreadShell } from "../../state/entities";
-import { serverEnvironment } from "../../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
+import { shortcutLabelForCommand } from "../../keybindings";
 import { shellEnvironment } from "../../state/shell";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentQuerySelector } from "../../state/query";
@@ -379,6 +380,7 @@ function ThreadGameStage({
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
   const stageRef = useRef<HTMLElement | null>(null);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   // A compact switch unmounts nothing, but focus would die with the hidden
   // pane's button. Move it to the stage when the stage comes back.
   const stageWasHidden = useRef(hidden);
@@ -580,6 +582,14 @@ function ThreadGameStage({
       case "freeze":
         toggleStageFreeze();
         return;
+      case "fullscreen": {
+        // Asked now, inside the key's own gesture, which fullscreen needs. The Stage marks
+        // itself when a game plays in it, the only time the menu offers fullscreen too.
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else if (stageRef.current?.hasAttribute("data-fullscreen-ready"))
+          void stageRef.current.requestFullscreen();
+        return;
+      }
       case "undo":
       case "redo":
         // The header, the palette and the keys restore here: a refusal (another chat at
@@ -771,6 +781,9 @@ function ThreadGameStage({
     operationState === "running" && data.operation !== null
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
+  const fullscreenKey = shortcutLabelForCommand(keybindings, "game.fullscreen", {
+    context: { gameThread: true },
+  });
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void stageRef.current?.requestFullscreen();
@@ -889,6 +902,7 @@ function ThreadGameStage({
     <section
       ref={stageRef}
       data-game-stage="true"
+      data-fullscreen-ready={stageKind !== "window" && phase.kind === "playing" ? "" : undefined}
       aria-label={`${gameName} game stage`}
       aria-hidden={hidden}
       inert={hidden}
@@ -1054,6 +1068,7 @@ function ThreadGameStage({
                 <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
                   {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
                   {fullscreen ? "Leave fullscreen" : "Fullscreen"}
+                  {fullscreenKey === null ? null : <MenuShortcut>{fullscreenKey}</MenuShortcut>}
                 </MenuItem>
               ) : null}
               {hasSteps ? (

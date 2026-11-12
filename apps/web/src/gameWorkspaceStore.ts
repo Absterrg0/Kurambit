@@ -49,6 +49,8 @@ export type GameStageRequest =
   | { readonly kind: "focus" }
   /** Freeze the game to point at things, or play on: Tab, the button, the palette and its key. */
   | { readonly kind: "freeze" }
+  /** The playing game fills the screen, or leaves it: the Stage's menu, the palette and its key. */
+  | { readonly kind: "fullscreen" }
   | { readonly kind: "undo" }
   | { readonly kind: "redo" }
   | { readonly kind: "export" }

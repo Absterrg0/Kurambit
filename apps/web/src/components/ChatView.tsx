@@ -5286,6 +5286,7 @@ export default function ChatView(props: ChatViewProps) {
       "game.redoTurn": () => requestGameStage({ kind: "redo" }),
       "game.focus": () => requestGameStage({ kind: "focus" }),
       "game.freeze": () => requestGameStage({ kind: "freeze" }),
+      "game.fullscreen": () => requestGameStage({ kind: "fullscreen" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),
       "game.keepGoing.stop": ({ event }) => {

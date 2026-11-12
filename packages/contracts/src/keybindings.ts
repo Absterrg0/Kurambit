@@ -73,6 +73,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "game.redoTurn",
   "game.focus",
   "game.freeze",
+  "game.fullscreen",
   "game.playPrevious",
   "game.playNext",
   "game.keepGoing.stop",

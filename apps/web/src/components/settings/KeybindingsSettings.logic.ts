@@ -375,6 +375,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "game.chat.toggle": "Show or hide the Inspector",
   "game.focus": "Focus the game",
   "game.freeze": "Freeze the game or play on",
+  "game.fullscreen": "Play the game fullscreen",
   "game.playPrevious": "Play the previous build",
   "game.playNext": "Play the next build",
   "game.undoTurn": "Undo the last change",

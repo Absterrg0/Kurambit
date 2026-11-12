@@ -304,6 +304,8 @@ export function GameBuildStrip({
       ref={settleAfterFirstPaint}
       aria-label="Builds"
       data-game-build-strip=""
+      // Composer menus (the model picker) stop at the strip's top rather than cover the Stage.
+      data-composer-menu-ceiling=""
       className="flex max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
       style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}

@@ -70,6 +70,7 @@ import {
   FolderOpenIcon,
   FolderPlusIcon,
   Gamepad2Icon,
+  MaximizeIcon,
   ColumnsIcon,
   PersonStandingIcon,
   FastForwardIcon,
@@ -1644,6 +1645,15 @@ function OpenCommandPaletteDialog(props: {
         shortcutCommand: "game.freeze",
         run: requestStage({ kind: "freeze" }),
       });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-fullscreen",
+      title: "Play the game fullscreen",
+      searchTerms: ["fullscreen", "full screen", "maximize", "stage", "game"],
+      icon: <MaximizeIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "game.fullscreen",
+      run: requestStage({ kind: "fullscreen" }),
+    });
     for (const [tab, title, terms, TabIcon] of [
       [
         "build",

@@ -52,6 +52,7 @@ import {
   useToggleEnvironmentModelFavorite,
 } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import { wholeRowHeight } from "~/lib/wholeRowHeight";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
@@ -227,6 +228,9 @@ const MODEL_LIST_LABEL_REACH = 6;
 
 // Owns the list's measured height and scroll fades, which change on every scroll and
 // resize without touching the picker's model lists.
+// Search, a group heading and three model rows: a ceiling never squeezes the picker below it.
+const MODEL_PICKER_MIN_HEIGHT_PX = 220;
+
 function ModelPickerList({
   listRef,
   itemKeys,
@@ -243,22 +247,33 @@ function ModelPickerList({
 }) {
   const [showTopScrollFade, setShowTopScrollFade] = useState(false);
   const [showBottomScrollFade, setShowBottomScrollFade] = useState(false);
+  // The height that ends an overflowing list on a whole row, for the list it was measured on.
+  const [snap, setSnap] = useState<{ readonly key: string; readonly height: number } | null>(null);
   const [contentSize, setContentSize] = useState(
     () => itemKeys.length * MODEL_LIST_ESTIMATED_ITEM_SIZE,
   );
   useLayoutEffect(() => listRef.current?.getState().listen("totalSize", setContentSize), [listRef]);
-  const updateScrollFades = () => {
+  // Keyed by content: a new disabled-reason closure rebuilds an identical key array.
+  const itemListKey = JSON.stringify(itemKeys);
+  const updateScrollFades = (snapRows = false) => {
     const scrollElement = listRef.current?.getScrollableNode();
     if (!(scrollElement instanceof HTMLElement)) {
       return;
     }
     const maxScrollOffset = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
-    setShowTopScrollFade(scrollElement.scrollTop > 1);
-    setShowBottomScrollFade(maxScrollOffset - scrollElement.scrollTop > 1);
+    const top = scrollElement.scrollTop > 1;
+    const bottom = maxScrollOffset - scrollElement.scrollTop > 1;
+    setShowTopScrollFade(top);
+    setShowBottomScrollFade(bottom);
+    // Snapped only as a list opens (it may open scrolled to the current model), so the
+    // height never jumps while someone scrolls.
+    if (snapRows && bottom) {
+      const height = wholeRowHeight(scrollElement, "[data-slot=combobox-item]", 6);
+      if (height !== null && (snap?.key !== itemListKey || snap.height !== height))
+        setSnap({ key: itemListKey, height });
+    }
   };
 
-  // Keyed by content: a new disabled-reason closure rebuilds an identical key array.
-  const itemListKey = JSON.stringify(itemKeys);
   // A new list starts from the top until the measurement below lands.
   const [fadesResetFor, setFadesResetFor] = useState(itemListKey);
   if (fadesResetFor !== itemListKey) {
@@ -266,7 +281,7 @@ function ModelPickerList({
     setShowTopScrollFade(false);
     setShowBottomScrollFade(itemKeys.length > 5);
   }
-  const measureScrollFades = useEffectEvent(updateScrollFades);
+  const measureScrollFades = useEffectEvent(() => updateScrollFades(true));
   useLayoutEffect(() => {
     let nestedFrame = 0;
     const frame = window.requestAnimationFrame(() => {
@@ -285,6 +300,7 @@ function ModelPickerList({
       className="relative min-h-0 overflow-hidden pr-px"
       style={{
         height: itemKeys.length === 0 ? 0 : `calc(${contentSize}px + var(--spacing) * 5)`,
+        ...(snap?.key === itemListKey ? { maxHeight: snap.height } : {}),
       }}
     >
       <ComboboxListVirtualized>
@@ -300,8 +316,8 @@ function ModelPickerList({
           recycleItems
           contentContainerClassName="pl-2 pr-px"
           ItemSeparatorComponent={ModelListSeparator}
-          onLayout={updateScrollFades}
-          onScroll={updateScrollFades}
+          onLayout={() => updateScrollFades()}
+          onScroll={() => updateScrollFades()}
           className={cn(
             "scrollbar-gutter-stable h-full overflow-x-hidden overscroll-y-contain py-1.5 [&::-webkit-scrollbar-track]:my-2",
             getVirtualizedScrollFadeClassName({
@@ -359,6 +375,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
   const pickerContentRef = useRef<HTMLDivElement>(null);
+  // A surface marked as the composer menus' ceiling (a game's build strip) is never
+  // covered past its top: the picker caps its height there once its popup is placed.
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const content = pickerContentRef.current;
+      const ceiling = document.querySelector("[data-composer-menu-ceiling]");
+      if (!content || !ceiling) return;
+      const bottom = content.getBoundingClientRect().bottom;
+      const ceilingTop = ceiling.getBoundingClientRect().top;
+      // Only a picker that opens upward past the ceiling, and never below a usable height.
+      if (bottom <= ceilingTop) return;
+      content.style.setProperty(
+        "--model-picker-ceiling",
+        `${Math.max(MODEL_PICKER_MIN_HEIGHT_PX, Math.floor(bottom - ceilingTop))}px`,
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const { favorites } = useEnvironmentModelPreferences(props.environmentId);
   const activeEntry = props.instanceEntries.find(
@@ -755,7 +789,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
       <div
         ref={pickerContentRef}
-        className="relative flex max-h-86.5 w-screen max-w-80 flex-row overflow-hidden"
+        className="relative flex max-h-[min(--spacing(86.5),var(--model-picker-ceiling,--spacing(86.5)))] w-screen max-w-80 flex-row overflow-hidden"
         style={isSearching ? { height: searchHeight } : undefined}
         data-model-picker-content="true"
       >
