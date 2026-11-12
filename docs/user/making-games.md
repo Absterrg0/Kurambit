@@ -299,7 +299,7 @@ step carries a step sign, and the build being made waits as a dashed card with i
 appears when the game folder is not any build (edited since, or another build plays from a copy).
 **Older** pages back. Clicking a picture plays that build (an older one from a copy; the game folder
 is never touched, and **Back to the current game** or the newest picture returns) and shows it in the Inspector's **Build**
-tab, which lists what you asked, how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won and does that take skill, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement under **more measurements**, the files it changed (opening the
+tab, which lists what you asked, how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won and does that take skill, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement, each in a plain sentence, under **More measurements**, the files it changed (opening the
 diff), its recordings, and in the **⋯** beside the build's name:
 
 - **Undo this build** on the latest turn, which puts back the build the turn started from. After an undo,

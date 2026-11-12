@@ -53,6 +53,7 @@ import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
@@ -80,11 +81,11 @@ import {
 } from "./GameGenerationCard";
 import { GameFileActions, SaveMediaButton } from "./GameSavedMedia";
 import {
+  assetLibraryNote,
   assetLines,
   assetUseLines,
   buildCaption,
   buildName,
-  factLine,
   formatBuildTime,
 } from "./gameBuilds.logic";
 import {
@@ -499,30 +500,31 @@ function checksSummary(facts: GameBuildFacts): string {
 
 function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
   const characters = useCharacterRoute(threadRef).route;
-  const [moreOpen, setMoreOpen] = useState(false);
   const view = gameChecksView(facts);
   const measured = view.checks.filter((check) => check.reading._tag === "measured");
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
   const moreMeasured = view.more.filter((more) => more.reading._tag === "measured");
+  const morePending = view.more.filter((more) => more.reading._tag === "pending").length;
   const detailOf = (fact: GameFactView): ReadonlyArray<string> =>
     fact.id === "assets" && facts.assets.status === "measured"
-      ? [
-          ...assetLines(facts.assets.value),
-          ...(characters === null
-            ? []
-            : [
-                `This game makes characters with ${characterRouteLabel(characters)}; change it in the Scene tab.`,
-              ]),
-        ]
+      ? assetLines(facts.assets.value)
       : fact.id === "use" && facts.use.status === "measured"
         ? assetUseLines(facts.use.value)
         : [];
-  const moreRows =
-    moreMeasured.length +
-    (view.more.some((fact) => fact.reading._tag === "pending") ? 1 : 0) +
-    new Set(
-      view.more.flatMap((fact) => (fact.reading._tag === "not-measured" ? [fact.reading.why] : [])),
-    ).size;
+  // Context that changes how to read a row, never a finding of its own: said on hover.
+  const noteOf = (fact: GameFactView): string | null =>
+    fact.id === "assets" && facts.assets.status === "measured"
+      ? [
+          assetLibraryNote(facts.assets.value),
+          characters === null
+            ? null
+            : `This game makes characters with ${characterRouteLabel(characters)}; change it in the Scene tab.`,
+        ]
+          .filter((line) => line !== null)
+          .join(" ") || null
+      : fact.id === "performance" && facts.renderer
+        ? `Played with ${facts.renderer}.`
+        : null;
   const morePass = moreMeasured.filter(
     (fact) => fact.reading._tag === "measured" && fact.reading.tone === "good",
   ).length;
@@ -537,60 +539,51 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             text={check.sentence}
             value={check.value}
             detail={[]}
+            note={noteOf(check)}
           />
         ))}
         {pending > 0 ? <PendingRow count={pending} /> : null}
-        <NotMeasured facts={view.checks} />
+        <NotMeasured facts={view.checks} note={noteOf} />
       </Rows>
       {view.more.length > 0 ? (
         <Rows>
-          <button
-            type="button"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen(!moreOpen)}
-            className="flex min-h-9 items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent"
-          >
-            <ChevronRightIcon
-              className={cn(
-                "size-4 shrink-0 text-muted-foreground transition-transform",
-                moreOpen && "rotate-90",
-              )}
-              aria-hidden="true"
-            />
-            <Text variant="meta" tone="default" render={<span className="flex-1" />}>
-              {/* The count of what opens below: not-measured facts sharing a reason are one row. */}
-              {moreRows} more measurements
-            </Text>
-            {morePass > 0 ? (
-              <Text variant="caption" tone="muted" numeric>
-                {morePass} of {moreMeasured.length} pass
+          <Collapsible>
+            <CollapsibleTrigger className="group flex min-h-9 items-center gap-2.5 px-3 text-left outline-none hover:bg-accent focus-visible:bg-accent">
+              <ChevronRightIcon
+                className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
+                aria-hidden="true"
+              />
+              <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+                More measurements
               </Text>
-            ) : null}
-          </button>
-          {moreOpen
-            ? moreMeasured.map((fact) => (
-                <CheckRow
-                  key={fact.id}
-                  threadRef={threadRef}
-                  fact={fact}
-                  text={factLine(fact).text}
-                  value={null}
-                  detail={detailOf(fact)}
-                />
-              ))
-            : null}
-          {moreOpen && view.more.some((fact) => fact.reading._tag === "pending") ? (
-            <PendingRow
-              count={view.more.filter((fact) => fact.reading._tag === "pending").length}
-            />
-          ) : null}
-          {moreOpen ? <NotMeasured facts={view.more} /> : null}
+              {/* One unit, measured facts, on both sides of the dot; the rows below say the rest. */}
+              <Text variant="caption" tone="muted" numeric>
+                {moreMeasured.length === 0
+                  ? morePending > 0
+                    ? `${morePending} to measure`
+                    : "None measured"
+                  : `${moreMeasured.length} measured · ${morePass} pass`}
+              </Text>
+            </CollapsibleTrigger>
+            <CollapsiblePanel>
+              <div className="flex flex-col divide-y divide-border border-t border-border">
+                {moreMeasured.map((fact) => (
+                  <CheckRow
+                    key={fact.id}
+                    threadRef={threadRef}
+                    fact={fact}
+                    text={fact.sentence}
+                    value={fact.value}
+                    detail={detailOf(fact)}
+                    note={noteOf(fact)}
+                  />
+                ))}
+                {morePending > 0 ? <PendingRow count={morePending} /> : null}
+                <NotMeasured facts={view.more} note={noteOf} />
+              </div>
+            </CollapsiblePanel>
+          </Collapsible>
         </Rows>
-      ) : null}
-      {moreOpen && facts.renderer ? (
-        <Text variant="caption" tone="dim" render={<p />}>
-          Played with {facts.renderer}.
-        </Text>
       ) : null}
     </div>
   );
@@ -607,42 +600,65 @@ function PendingRow({ count }: { count: number }) {
   );
 }
 
-/** Facts not measured, one notice per reason. */
-function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck> }) {
-  const folded = new Map<string, Array<string>>();
+/** A list of names as one phrase: the first two, then how many more. */
+function namesPhrase(names: ReadonlyArray<string>): string {
+  const lower = names.map((name, index) =>
+    index === 0 ? name : name.charAt(0).toLowerCase() + name.slice(1),
+  );
+  if (lower.length <= 2) return lower.join(" and ");
+  return `${lower.slice(0, 2).join(", ")} and ${lower.length - 2} more`;
+}
+
+/** Facts not measured, one row per reason. */
+function NotMeasured({
+  facts,
+  note,
+}: {
+  facts: ReadonlyArray<GameCheck>;
+  note: (fact: GameFactView) => string | null;
+}) {
+  const folded = new Map<string, Array<GameCheck>>();
   for (const fact of facts)
     if (fact.reading._tag === "not-measured")
-      folded.set(fact.reading.why, [
-        ...(folded.get(fact.reading.why) ?? []),
-        "sentence" in fact ? fact.sentence : fact.label,
-      ]);
-  // One 36px row like every check; why it was not measured waits behind its info button.
-  return [...folded].map(([why, names]) => (
-    <div key={why} className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        <MinusIcon className="size-4 text-dim-foreground" aria-hidden="true" />
-      </span>
-      <Text variant="meta" tone="muted" truncate render={<span className="min-w-0 flex-1" />}>
-        {names.join(", ")}
-      </Text>
-      {/* In the value column, like a reading. */}
-      <Text variant="caption" tone="dim" render={<span className="shrink-0" />}>
-        not measured
-      </Text>
-      <span className="flex w-6 shrink-0 items-center justify-end">
-        <Tooltip>
-          <TooltipTrigger
-            render={<Button size="icon-xs" variant="ghost" aria-label="Why not measured" />}
-          >
-            <InfoIcon aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipPopup side="left" className="max-w-sm">
-            {why.charAt(0).toUpperCase() + why.slice(1)}
-          </TooltipPopup>
-        </Tooltip>
-      </span>
-    </div>
-  ));
+      folded.set(fact.reading.why, [...(folded.get(fact.reading.why) ?? []), fact]);
+  // One row like every check, the names wrapping rather than cut; every name and
+  // why none was measured wait behind its info button.
+  return [...folded].map(([why, group]) => {
+    const names = group.map((fact) => fact.sentence);
+    const notes = group.map(note).filter((line) => line !== null);
+    return (
+      <div key={why} className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          <MinusIcon className="size-4 text-dim-foreground" aria-hidden="true" />
+        </span>
+        <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
+          {namesPhrase(names)}
+        </Text>
+        {/* In the value column, like a reading. */}
+        <Text variant="caption" tone="dim" render={<span className="shrink-0" />}>
+          not measured
+        </Text>
+        <span className="flex w-6 shrink-0 items-center justify-end">
+          <Tooltip>
+            <TooltipTrigger
+              render={<Button size="icon-xs" variant="ghost" aria-label="Why not measured" />}
+            >
+              <InfoIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup side="left" className="max-w-sm">
+              <span className="flex flex-col gap-1">
+                {names.length > 2 ? <span>{names.join(", ")}.</span> : null}
+                <span>{why.charAt(0).toUpperCase() + why.slice(1)}</span>
+                {notes.map((line) => (
+                  <span key={line}>{line}</span>
+                ))}
+              </span>
+            </TooltipPopup>
+          </Tooltip>
+        </span>
+      </div>
+    );
+  });
 }
 
 function EvidenceButton({ threadRef, item }: { threadRef: ScopedThreadRef; item: RunEvidence }) {
@@ -672,12 +688,15 @@ function CheckRow({
   text,
   value,
   detail,
+  note,
 }: {
   threadRef: ScopedThreadRef;
   fact: GameFactView;
   text: string;
   value: string | null;
   detail: ReadonlyArray<string>;
+  /** Said on hover after the raw reading. */
+  note: string | null;
 }) {
   const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
   // A reading that is neither good nor bad gets a small solid dot: a hollow ring reads as an unticked option.
@@ -699,7 +718,12 @@ function CheckRow({
           <Tooltip>
             <TooltipTrigger render={<span />}>{text}</TooltipTrigger>
             <TooltipPopup side="left" className="max-w-sm">
-              {fact.label}: {fact.reading._tag === "measured" ? fact.reading.text : text}
+              <span className="flex flex-col gap-1">
+                <span>
+                  {fact.label}: {fact.reading._tag === "measured" ? fact.reading.text : text}
+                </span>
+                {note === null ? null : <span>{note}</span>}
+              </span>
             </TooltipPopup>
           </Tooltip>
         </Text>

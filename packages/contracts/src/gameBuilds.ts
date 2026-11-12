@@ -884,14 +884,16 @@ export interface GameCheck extends GameFactView {
 
 export interface GameChecksView {
   readonly checks: ReadonlyArray<GameCheck>;
-  /** Every other fact, as the facts view words it. */
-  readonly more: ReadonlyArray<GameFactView>;
+  /** Every other fact, each as a judged sentence like a check; the raw reading stays on the view. */
+  readonly more: ReadonlyArray<GameCheck>;
   /** Measured facts reading good and bad, over every fact: the build card's two counts. */
   readonly pass: number;
   readonly toLook: number;
 }
 
-const CHECK_LABELS: Readonly<Record<(typeof GAME_LEAD_FACTS)[number], string>> = {
+const CHECK_LABELS: Readonly<
+  Record<(typeof GAME_LEAD_FACTS)[number], string> & Partial<Record<GameFactId, string>>
+> = {
   boots: "Starts",
   idle: "Can be lost with no input",
   skilled: "Can be won by the play bot",
@@ -905,22 +907,30 @@ const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.
 
 /** A bot tier's ending as a check: who played and what it came to. */
 const tierCheck = (
-  who: "with no input" | "by the play bot",
+  who: "with no input" | "with random input" | "by the play bot",
   tier: BotTier,
 ): { sentence: string; value: string | null } => {
   switch (tier.ending) {
     case "won":
       return who === "with no input"
         ? { sentence: "Wins itself with no input", value: atTime(tier) }
-        : { sentence: "Can be won by the play bot", value: atTime(tier) };
+        : who === "with random input"
+          ? { sentence: "Random input wins it", value: atTime(tier) }
+          : { sentence: "Can be won by the play bot", value: atTime(tier) };
     case "lost":
       return who === "with no input"
         ? { sentence: "Can be lost with no input", value: atTime(tier) }
-        : { sentence: "The play bot loses", value: atTime(tier) };
+        : who === "with random input"
+          ? { sentence: "Random input loses", value: atTime(tier) }
+          : { sentence: "The play bot loses", value: atTime(tier) };
     case "no-ending":
       return {
         sentence:
-          who === "with no input" ? "Not lost with no input" : "The play bot finds no ending",
+          who === "with no input"
+            ? "Not lost with no input"
+            : who === "with random input"
+              ? "Random input finds no ending"
+              : "The play bot finds no ending",
         value: `in ${seconds(tier.played)}`,
       };
     case "crashed":
@@ -932,9 +942,17 @@ const tierCheck = (
   }
 };
 
+const plural = (count: number, one: string, many = `${one}s`) =>
+  `${count} ${count === 1 ? one : many}`;
+
+/**
+ * A measured fact as a person judges it, in a sentence. Only the facts the
+ * readings already tone get a verdict; the rest say what was found, so a
+ * neutral number never reads as better or worse.
+ */
 const checkWords = (
   facts: GameBuildFacts,
-  id: (typeof GAME_LEAD_FACTS)[number],
+  id: GameFactId,
 ): { sentence: string; value: string | null } | null => {
   switch (id) {
     case "boots":
@@ -984,6 +1002,80 @@ const checkWords = (
         ? { sentence: "One colour fills the screen", value: `${share}%` }
         : { sentence: "Colour is varied", value: `largest ${share}%` };
     }
+    case "masher":
+      return facts.masher.status === "measured"
+        ? tierCheck("with random input", facts.masher.value)
+        : null;
+    case "motion": {
+      if (facts.liveness.status !== "measured") return null;
+      return facts.liveness.value.motion < 1
+        ? { sentence: "Almost nothing moves on screen", value: null }
+        : { sentence: "The picture moves in play", value: null };
+    }
+    case "detail":
+      return facts.liveness.status === "measured"
+        ? { sentence: "Picture detail, kept to compare builds", value: null }
+        : null;
+    case "first-response": {
+      if (facts.firstResponse.status !== "measured") return null;
+      const response = facts.firstResponse.value.seconds;
+      return response === null
+        ? { sentence: "Nothing moves when a key is held", value: null }
+        : response <= 0.2
+          ? { sentence: "Answers a held key at once", value: null }
+          : response > 0.5
+            ? { sentence: "Answers a held key late", value: `${response.toFixed(1)} s` }
+            : { sentence: "Answers a held key", value: `${response.toFixed(1)} s` };
+    }
+    case "assets": {
+      if (facts.assets.status !== "measured") return null;
+      const assets = facts.assets.value;
+      const made = assets.models.length + assets.more;
+      return made === 0
+        ? {
+            sentence:
+              assets.libraryFiles > 0 ? "Its art comes from the library" : "Has no made models",
+            value: null,
+          }
+        : { sentence: `Makes ${plural(made, "model")} of its own`, value: null };
+    }
+    case "use": {
+      if (facts.use.status !== "measured") return null;
+      const use = facts.use.value;
+      return use.unused.length === 0 && use.silent.length === 0
+        ? { sentence: "Every file it ships is used", value: null }
+        : use.unused.length > 0
+          ? { sentence: `Ships ${plural(use.unused.length, "file")} it never loads`, value: null }
+          : { sentence: `${plural(use.silent.length, "sound")} never played`, value: null };
+    }
+    case "player-view": {
+      if (facts.scene.status !== "measured") return null;
+      const player = facts.scene.value.player;
+      return player.kind === "body" && scenePlayerText(player) === null
+        ? { sentence: "The player stays in view", value: null }
+        : player.kind === "no-body" || player.kind === "first-person"
+          ? { sentence: "First person, with no body on screen", value: null }
+          : null;
+    }
+    case "empty": {
+      const empty = facts.scene.status === "measured" ? facts.scene.value.empty : undefined;
+      return empty !== undefined && sceneEmptyText(empty) === null
+        ? { sentence: "Little of the view is empty backdrop", value: null }
+        : null;
+    }
+    case "buried":
+    case "clipping":
+    case "fell":
+    case "camera":
+    case "sliding":
+      return null;
+    case "unseen": {
+      if (facts.scene.status !== "measured") return null;
+      const count = facts.scene.value.unseen.length + facts.scene.value.unseenMore;
+      return count === 0
+        ? { sentence: "Everything named comes on screen", value: null }
+        : { sentence: `${plural(count, "thing")} never came on screen`, value: null };
+    }
   }
 };
 
@@ -995,19 +1087,22 @@ const checkWords = (
 export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
   const views = gameFactsView(facts);
   const lead: ReadonlySet<GameFactId> = new Set(GAME_LEAD_FACTS);
+  const asCheck = (view: GameFactView): GameCheck => {
+    const words = view.reading._tag === "measured" ? checkWords(facts, view.id) : null;
+    // The scene rows' readings are already sentences about what a person would see.
+    const fallback =
+      view.reading._tag === "measured" ? view.reading.text : (CHECK_LABELS[view.id] ?? view.label);
+    return { ...view, sentence: words?.sentence ?? fallback, value: words?.value ?? null };
+  };
   const checks = GAME_LEAD_FACTS.flatMap((id) => {
     const view = views.find((entry) => entry.id === id);
-    if (view === undefined) return [];
-    const words = view.reading._tag === "measured" ? checkWords(facts, id) : null;
-    return [
-      { ...view, sentence: words?.sentence ?? CHECK_LABELS[id], value: words?.value ?? null },
-    ];
+    return view === undefined ? [] : [asCheck(view)];
   });
   const tone = (wanted: GameFactTone) =>
     views.filter((view) => view.reading._tag === "measured" && view.reading.tone === wanted).length;
   return {
     checks,
-    more: views.filter((view) => !lead.has(view.id)),
+    more: views.filter((view) => !lead.has(view.id)).map(asCheck),
     pass: tone("good"),
     toLook: tone("bad"),
   };

@@ -103,8 +103,8 @@ export const assetUseLines = (use: GameAssetUse): ReadonlyArray<string> => [
 ];
 
 /**
- * The Assets row's detail: one line per made model, then what was only
- * counted. A model's numbers are measurements, never a verdict on its look.
+ * The Assets row's detail: one line per made model, then how many more. A
+ * model's numbers are measurements, never a verdict on its look.
  */
 export const assetLines = (assets: GameAssetFacts): ReadonlyArray<string> => [
   ...assets.models.map((model) => {
@@ -121,12 +121,13 @@ export const assetLines = (assets: GameAssetFacts): ReadonlyArray<string> => [
     }`;
   }),
   ...(assets.more > 0 ? [`${assets.more} more not listed`] : []),
-  ...(assets.libraryFiles > 0
-    ? [
-        `${assets.libraryFiles} library file${assets.libraryFiles === 1 ? "" : "s"} credited in ASSETS.md`,
-      ]
-    : []),
 ];
+
+/** Where the rest of the Assets row's art comes from: said on hover, it is never a finding. */
+export const assetLibraryNote = (assets: GameAssetFacts): string | null =>
+  assets.libraryFiles > 0
+    ? `${assets.libraryFiles} library file${assets.libraryFiles === 1 ? " is" : "s are"} credited in ASSETS.md.`
+    : null;
 
 export interface DeltaLine {
   readonly label: string;
