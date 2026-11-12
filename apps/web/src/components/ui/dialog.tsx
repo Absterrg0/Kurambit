@@ -120,9 +120,10 @@ function DialogPopup({
           variant === "media" &&
             "z-[60] grid-rows-1 place-items-center px-4 py-6 [-webkit-app-region:no-drag]",
           // Clears native window controls (macOS traffic lights, the Windows caption buttons),
-          // which the owner reports as --app-modal-titlebar-height.
+          // which the owner reports as --app-modal-titlebar-height, and anything it keeps
+          // visible on the left, reported as --app-modal-left-inset.
           variant === "app-panel" &&
-            "grid-rows-1 items-center max-sm:p-0 sm:p-6 sm:pt-[max(1.5rem,var(--app-modal-titlebar-height,0px))] lg:p-10",
+            "grid-rows-1 items-center max-sm:p-0 sm:p-6 sm:pt-[max(1.5rem,var(--app-modal-titlebar-height,0px))] sm:pl-[calc(var(--app-modal-left-inset,0px)+1.5rem)] lg:p-10 lg:pl-[calc(var(--app-modal-left-inset,0px)+2.5rem)]",
         )}
       >
         <DialogPrimitive.Popup
