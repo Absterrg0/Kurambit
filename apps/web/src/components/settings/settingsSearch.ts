@@ -180,10 +180,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "default-model",
-    title: "Default model",
+    title: "Model for new games",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["new thread project provider reasoning effort"],
+    searchTerms: ["default model new thread project provider reasoning effort"],
   },
   {
     id: "default-permissions",
@@ -569,6 +569,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["project thread tree old flat list"],
   },
   {
+    id: "restore-defaults",
+    title: "Restore defaults",
+    to: "/settings/general",
+    searchTerms: ["reset device defaults preferences"],
+  },
+  {
     id: "keybindings",
     title: "Keybindings",
     to: "/settings/keybindings",
@@ -813,6 +819,19 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
 };
+
+/**
+ * Pages holding at least one value a game (project) can set for itself. Only these
+ * offer the "Applying settings for" game picker; elsewhere it would choose nothing.
+ */
+export const SETTINGS_PER_GAME_PATHS: ReadonlySet<string> = new Set(
+  (SETTINGS_SEARCH_ITEMS as readonly SettingsSearchItem[])
+    .filter((item) => {
+      const scope = item.scope ?? SETTINGS_CATEGORY_SCOPES[item.to];
+      return scope === "project-defaults" || scope === "project" || scope === "checkout";
+    })
+    .map((item) => item.to),
+);
 
 export function getSettingsSearchTargetScope(targetId: string) {
   const items: readonly SettingsSearchItem[] = SETTINGS_SEARCH_ITEMS;

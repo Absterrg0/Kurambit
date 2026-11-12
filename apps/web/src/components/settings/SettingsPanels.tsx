@@ -19,7 +19,7 @@ import { NotificationSettings } from "./NotificationSettings";
 import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { use, useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   type BackgroundActivityProfile,
   ProviderDriverKind,
@@ -159,6 +159,7 @@ import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsRestoredContext,
   SettingsRow,
   SettingsSection,
   useSettingsSearchTarget,
@@ -3008,7 +3009,37 @@ export function GeneralSettingsPanel() {
       </SettingsSection>
 
       <LegacyFeaturesSection />
+      <RestoreDefaultsSection />
     </SettingsPageContainer>
+  );
+}
+
+// A reset sits at the foot of the page, away from the close button, and confirms
+// with the list of what it will change before it does anything.
+function RestoreDefaultsSection() {
+  const onRestored = use(SettingsRestoredContext);
+  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+  return (
+    <SettingsSection id="restore-defaults" title="Reset">
+      <SettingsRow
+        {...searchableSetting("restore-defaults")}
+        description={
+          changedSettingLabels.length === 0
+            ? "Everything on this device is as Kurambit ships it."
+            : "Puts appearance, notifications, the composer and other app preferences on this device back to how Kurambit ships. Games, providers and keybindings stay as they are."
+        }
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={changedSettingLabels.length === 0}
+            onClick={() => void restoreDefaults()}
+          >
+            Restore defaults…
+          </Button>
+        }
+      />
+    </SettingsSection>
   );
 }
 

@@ -1,18 +1,19 @@
 # Settings and project overrides
 
 The "Applying settings for …" sentence at the top of Settings pages picks
-the project and environment a change applies to. Pages that only hold device preferences, such as
-Appearance, don't show it. They start at **All projects** and **All environments**
-and stay selected as you move between categories or search for a setting.
+the game (project) and environment a change applies to. Only pages with a value a game can set for
+itself show it, such as General's **Model for new games**. It starts at **All games** and
+**All environments** and stays selected as you move between categories or search for a setting.
 
 Preferences saved on this device, such as appearance, confirmations and browser profiles, always
 show and ignore the selection. Everything else is stored on a server. Choose one environment to
 edit its settings, or leave **All environments** to edit every connected environment at once.
 Offline environments keep their current values; this is a bulk edit, not a synced global default.
 
-Choose a project to override settings for it on the selected environments. A layers icon beside
-each server row's title shows where the value comes from: the built-in default, the environment,
-or a project override. Click it to see that chain on every selected environment. An override can
+Choose a game to override settings for it on the selected environments. When a value comes from
+somewhere other than the one you are editing (a game's own value, the repository's `kurambit.json`,
+or a mix), a layers icon beside the row's title says so. Click it to see that chain on every
+selected environment. An override can
 be reset to inherit again. Settings that cannot be overridden by a project are shown read-only
 while a project is selected.
 

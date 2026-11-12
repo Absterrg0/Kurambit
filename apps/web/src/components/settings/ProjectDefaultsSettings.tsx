@@ -37,7 +37,6 @@ import {
 import {
   useScopedSettings,
   useScopedSettingsMixed,
-  useScopedSettingSource,
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
@@ -90,7 +89,6 @@ export function ProjectDefaultsSettings({
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
-  const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
   const effective = target
@@ -141,18 +139,11 @@ export function ProjectDefaultsSettings({
       settingKeys={["defaultModelSelection"]}
       mixed={mixedModel}
       id="default-model"
-      title="Model"
+      title="Model for new games"
       description={
         isProjectScope
-          ? "Model for new games and chats in this project."
-          : "Default model for new games and chats. A game can override it."
-      }
-      status={
-        unavailable || mixedModel || modelSource === "project"
-          ? undefined
-          : settings.defaultModelSelection === null
-            ? "Automatic"
-            : undefined
+          ? "New chats in this game start on this model. The model picked in the game's composer wins."
+          : "New games start on this model. After that, each game keeps the model picked in its own composer."
       }
       resetAction={
         settings.defaultModelSelection !== null ? (

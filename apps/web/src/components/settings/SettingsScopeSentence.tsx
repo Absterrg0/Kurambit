@@ -41,6 +41,7 @@ import {
   settingsScopeProjectMachines,
 } from "./settingsScopeAxis";
 import { Text } from "../ui/text";
+import { SETTINGS_PER_GAME_PATHS } from "./settingsSearch";
 
 export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
@@ -61,6 +62,10 @@ export function SettingsScopeSentence() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { environments } = useEnvironments();
   if (scope === null || SETTINGS_DEVICE_ONLY_PATHS.has(pathname)) return null;
+  const showGame = SETTINGS_PER_GAME_PATHS.has(pathname);
+  // One environment is the only one there is: naming it, or "all" of it, says nothing.
+  const showEnvironment = environments.length > 1;
+  if (!showGame && !showEnvironment) return null;
   const props: SettingsScopeMenuProps = {
     value: scope.search,
     singleEnvironment: scope.singleEnvironment,
@@ -74,19 +79,24 @@ export function SettingsScopeSentence() {
       tone="muted"
       render={<p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 sm:px-4" />}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0">Applying settings for</span>
-        <ProjectScopeMenu {...props} />
-      </span>
-      {/* One environment is the only one there is: naming it, or "all" of it, says nothing. */}
-      {environments.length <= 1 ? null : (
+      {showGame ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">Applying settings for</span>
+          <ProjectScopeMenu {...props} />
+        </span>
+      ) : null}
+      {showEnvironment ? (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="shrink-0">
-            {scope.search.machine || scope.scope.kind === "checkout" ? "on" : "across"}
+            {!showGame
+              ? "Applying settings on"
+              : scope.search.machine || scope.scope.kind === "checkout"
+                ? "on"
+                : "across"}
           </span>
           <EnvironmentScopeMenu {...props} />
         </span>
-      )}
+      ) : null}
     </Text>
   );
 }
@@ -305,13 +315,13 @@ function ProjectScopeMenu({ value, groups, environments, onChange }: SettingsSco
   }));
   return (
     <ScopeMenu
-      ariaLabel="Project scope"
+      ariaLabel="Game scope"
       icon={selected ? <ProjectFavicon project={selected} className="size-3.5 shrink-0" /> : null}
-      label={selected?.displayName ?? (value.project ? "Unavailable project" : "All projects")}
+      label={selected?.displayName ?? (value.project ? "Unavailable game" : "All games")}
       value={projectAxisValue(value)}
       onChange={(next) => onChange(selectProjectAxis(value, next))}
-      searchLabel="Search projects"
-      allOption={{ value: ALL_PROJECTS_VALUE, label: "All projects" }}
+      searchLabel="Search games"
+      allOption={{ value: ALL_PROJECTS_VALUE, label: "All games" }}
       options={projects.map(({ group, machines }) => {
         const sameName = projects.filter(
           (other) =>
