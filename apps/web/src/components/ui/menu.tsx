@@ -329,6 +329,8 @@ function MenuSubPopup({
   align?: MenuPrimitive.Positioner.Props["align"];
   sideOffset?: MenuPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
+  /** A submenu of a `relaxed` picker passes it on; popups do not inherit it. */
+  spacing?: "default" | "relaxed";
 }) {
   const defaultAlignOffset = align !== "center" ? -5 : undefined;
 

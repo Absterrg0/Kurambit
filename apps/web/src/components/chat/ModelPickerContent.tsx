@@ -160,7 +160,7 @@ export function adjacentModelPickerProvider(input: {
 }
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
-const MODEL_LIST_ESTIMATED_ITEM_SIZE = 52;
+const MODEL_LIST_ESTIMATED_ITEM_SIZE = 30;
 
 function ModelListSeparator() {
   return <div className="h-0.5" />;
@@ -940,11 +940,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       aria-expanded={legacySection.isExpanded}
                       className="group w-full cursor-pointer"
                     >
-                      <div className="min-w-0 flex-1 text-left">
-                        <div className="text-xs font-medium leading-snug">Legacy models</div>
-                        <div className="mt-1 text-xs font-normal leading-snug text-muted-foreground/70">
-                          {legacySection.legacyModels.length} models
-                        </div>
+                      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <span className="truncate">Legacy models</span>
+                        <span className="text-meta text-muted-foreground">
+                          {legacySection.legacyModels.length}
+                        </span>
                       </div>
                       <ChevronRightIcon
                         className={cn(

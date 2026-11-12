@@ -16,15 +16,19 @@ import {
   isClaudeUltrathinkPrompt,
   normalizeModelSlug,
 } from "@kurambit/shared/model";
-import { memo } from "react";
+import { Fragment, memo, type ReactNode } from "react";
 import { BrainIcon } from "lucide-react";
 import {
   Menu,
   MenuGroup,
+  MenuGroupLabel,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
   MenuSeparator as MenuDivider,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
@@ -473,96 +477,153 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     );
   }
 
+  type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
+  type BooleanDescriptor = Extract<ProviderOptionDescriptor, { type: "boolean" }>;
+  const selectedValueOf = (descriptor: SelectDescriptor) =>
+    ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
+      ? "ultrathink"
+      : (getDescriptorStringValue(descriptor, modelSelection, reportedModelSelection) ?? "");
+  // A game maker picks how hard the agent thinks from plain levels. Levels that
+  // need a description to make sense (Ultracode) or rewrite the prompt (Ultrathink),
+  // the context window and Fast mode wait under Advanced.
+  const isAdvancedOption = (descriptor: SelectDescriptor, optionId: string, described: boolean) =>
+    descriptor.id === primarySelectDescriptor?.id &&
+    (described || (descriptor.promptInjectedValues?.includes(optionId) ?? false));
+  const isAdvancedDescriptor = (descriptor: ProviderOptionDescriptor) =>
+    descriptor.id === "contextWindow" || descriptor.id === "fastMode";
+  const effortLocked = (descriptor: SelectDescriptor) =>
+    ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id;
+
+  const renderSelectGroup = (
+    descriptor: SelectDescriptor,
+    options: SelectDescriptor["options"],
+    showDescriptions: boolean,
+  ) => (
+    <MenuGroup key={descriptor.id}>
+      <MenuGroupLabel>{descriptor.label}</MenuGroupLabel>
+      {effortLocked(descriptor) && !showDescriptions ? (
+        <div className="px-2 pb-1.5 text-meta text-muted-foreground">
+          Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this option.
+        </div>
+      ) : null}
+      <MenuRadioGroup
+        value={selectedValueOf(descriptor)}
+        onValueChange={(value) => handleSelectChange(descriptor, value)}
+      >
+        {options.map((option) => (
+          <MenuRadioItem
+            key={option.id}
+            value={option.id}
+            hideIndicator
+            // Base UI keeps radio menus open by default. Close on pick so
+            // the traits menu behaves like the model picker.
+            closeOnClick
+            disabled={effortLocked(descriptor)}
+          >
+            <span className="flex w-full min-w-0 flex-col">
+              <span className="min-w-0 truncate">
+                {option.label}
+                {option.isDefault ? (
+                  <>
+                    {" "}
+                    <DefaultBadge />
+                  </>
+                ) : null}
+              </span>
+              {showDescriptions && option.description ? (
+                <span className="max-w-56 text-pretty text-meta text-muted-foreground">
+                  {option.description}
+                </span>
+              ) : null}
+            </span>
+          </MenuRadioItem>
+        ))}
+      </MenuRadioGroup>
+    </MenuGroup>
+  );
+  const renderBooleanGroup = (descriptor: BooleanDescriptor) => (
+    <MenuGroup key={descriptor.id}>
+      <MenuGroupLabel>{descriptor.label}</MenuGroupLabel>
+      <MenuRadioGroup
+        value={descriptor.currentValue === true ? "on" : "off"}
+        onValueChange={(value) => {
+          updateDescriptors(
+            replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
+          );
+        }}
+      >
+        {(["on", "off"] as const).map((value) => (
+          <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
+            {value === "on" ? "On" : "Off"}
+          </MenuRadioItem>
+        ))}
+      </MenuRadioGroup>
+    </MenuGroup>
+  );
+
+  const plainGroups: Array<{ key: string; node: ReactNode }> = [];
+  const advancedGroups: Array<{ key: string; node: ReactNode }> = [];
+  let advancedValueLabel: string | null = null;
+  for (const descriptor of selectDescriptors) {
+    if (isAdvancedDescriptor(descriptor)) {
+      advancedGroups.push({
+        key: descriptor.id,
+        node: renderSelectGroup(descriptor, descriptor.options, true),
+      });
+      continue;
+    }
+    const plain = descriptor.options.filter(
+      (option) => !isAdvancedOption(descriptor, option.id, Boolean(option.description)),
+    );
+    const advanced = descriptor.options.filter((option) =>
+      isAdvancedOption(descriptor, option.id, Boolean(option.description)),
+    );
+    if (plain.length > 0)
+      plainGroups.push({ key: descriptor.id, node: renderSelectGroup(descriptor, plain, false) });
+    if (advanced.length > 0) {
+      advancedGroups.push({
+        key: descriptor.id,
+        node: renderSelectGroup(descriptor, advanced, true),
+      });
+      advancedValueLabel =
+        advanced.find((option) => option.id === selectedValueOf(descriptor))?.label ??
+        advancedValueLabel;
+    }
+  }
+  for (const descriptor of booleanDescriptors) {
+    if (isAdvancedDescriptor(descriptor)) {
+      advancedGroups.push({ key: descriptor.id, node: renderBooleanGroup(descriptor) });
+      if (descriptor.currentValue === true && advancedValueLabel === null)
+        advancedValueLabel = descriptor.label;
+    } else {
+      plainGroups.push({ key: descriptor.id, node: renderBooleanGroup(descriptor) });
+    }
+  }
+  const withDividers = (groups: ReadonlyArray<{ key: string; node: ReactNode }>) =>
+    groups.map((group, index) => (
+      <Fragment key={group.key}>
+        {index > 0 ? <MenuDivider /> : null}
+        {group.node}
+      </Fragment>
+    ));
+
   return (
     <>
-      {selectDescriptors.map((descriptor, index) => {
-        const selectedValue =
-          ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
-            ? "ultrathink"
-            : (getDescriptorStringValue(descriptor, modelSelection, reportedModelSelection) ?? "");
-
-        return (
-          <div key={descriptor.id}>
-            {index > 0 ? <MenuDivider /> : null}
-            <MenuGroup>
-              <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
-              </div>
-              {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
-                <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
-                  Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
-                  option.
-                </div>
+      {withDividers(plainGroups)}
+      {advancedGroups.length > 0 ? (
+        <>
+          {plainGroups.length > 0 ? <MenuDivider /> : null}
+          <MenuSub>
+            <MenuSubTrigger>
+              <span className="flex-1">Advanced</span>
+              {advancedValueLabel ? (
+                <span className="text-meta text-muted-foreground">{advancedValueLabel}</span>
               ) : null}
-              <MenuRadioGroup
-                value={selectedValue}
-                onValueChange={(value) => handleSelectChange(descriptor, value)}
-              >
-                {descriptor.options.map((option) => (
-                  <MenuRadioItem
-                    key={option.id}
-                    value={option.id}
-                    hideIndicator
-                    // Base UI keeps radio menus open by default. Close on pick so
-                    // the traits menu behaves like the model picker.
-                    closeOnClick
-                    disabled={ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id}
-                  >
-                    <span className="flex w-full min-w-0 flex-col">
-                      <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                        <span className="min-w-0 truncate">
-                          {option.label}
-                          {option.isDefault ? (
-                            <>
-                              {" "}
-                              <DefaultBadge />
-                            </>
-                          ) : null}
-                        </span>
-                      </span>
-                      {option.description ? (
-                        <span className="max-w-56 text-pretty text-muted-foreground/80 text-xs">
-                          {option.description}
-                        </span>
-                      ) : null}
-                    </span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </div>
-        );
-      })}
-      {booleanDescriptors.map((descriptor, index) => {
-        const selectedValue = descriptor.currentValue === true ? "on" : "off";
-
-        return (
-          <div key={descriptor.id}>
-            {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
-            <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
-              </div>
-              <MenuRadioGroup
-                value={selectedValue}
-                onValueChange={(value) => {
-                  updateDescriptors(
-                    replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                  );
-                }}
-              >
-                {(["on", "off"] as const).map((value) => (
-                  <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
-                    <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                      <span>{value === "on" ? "On" : "Off"}</span>
-                    </span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </div>
-        );
-      })}
+            </MenuSubTrigger>
+            <MenuSubPopup spacing="relaxed">{withDividers(advancedGroups)}</MenuSubPopup>
+          </MenuSub>
+        </>
+      ) : null}
     </>
   );
 });
@@ -754,7 +815,11 @@ export const TraitsPicker = memo(function TraitsPicker({
         </TooltipTrigger>
         <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
       </Tooltip>
-      <MenuPopup align="start" {...(isComposerOwned ? composerFloatingLayerProps : {})}>
+      <MenuPopup
+        align="start"
+        spacing="relaxed"
+        {...(isComposerOwned ? composerFloatingLayerProps : {})}
+      >
         <TraitsMenuContent
           provider={provider}
           {...(instanceId ? { instanceId } : {})}

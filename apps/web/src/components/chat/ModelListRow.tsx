@@ -62,45 +62,44 @@ export const ModelListRow = memo(function ModelListRow(props: {
           "data-disabled:pointer-events-auto data-disabled:cursor-not-allowed",
       )}
     >
-      <div className="min-w-0 flex-1 text-left">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="min-w-0 truncate text-xs font-medium leading-snug">
-            {props.useTriggerLabel
-              ? getTriggerDisplayModelLabel(model)
-              : getDisplayModelName(
-                  model,
-                  props.preferShortName ? { preferShortName: true } : undefined,
-                )}
-          </div>
-          {props.showNewBadge ? (
-            <span
-              className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
-              aria-label="New model"
-            >
-              New
-            </span>
-          ) : null}
-          {props.unavailable ? (
-            <Badge variant="outline" size="sm">
-              Unavailable
-            </Badge>
-          ) : null}
-        </div>
-        {props.showProvider && (
-          <div className="mt-1 flex items-center gap-1.5">
-            <ProviderInstanceIcon
-              driverKind={props.driverKind}
-              displayName={props.providerDisplayName}
-              acpRegistryAgentId={props.acpRegistryAgentId}
-              acpRegistryIconUrl={props.acpRegistryIconUrl}
-              className="size-3"
-              iconClassName="size-3"
-            />
-            <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
-              {providerLabel}
-            </span>
-          </div>
-        )}
+      {/* One line, as the shared menus are: the provider's icon leads, its name trails muted. */}
+      {props.showProvider ? (
+        <ProviderInstanceIcon
+          driverKind={props.driverKind}
+          displayName={props.providerDisplayName}
+          acpRegistryAgentId={props.acpRegistryAgentId}
+          acpRegistryIconUrl={props.acpRegistryIconUrl}
+          className="size-3.5"
+          iconClassName="size-3.5"
+        />
+      ) : null}
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        <span className="min-w-0 shrink truncate">
+          {props.useTriggerLabel
+            ? getTriggerDisplayModelLabel(model)
+            : getDisplayModelName(
+                model,
+                props.preferShortName ? { preferShortName: true } : undefined,
+              )}
+        </span>
+        {props.showNewBadge ? (
+          <span
+            className="shrink-0 rounded border border-update/35 bg-update/15 px-0.5 py-px text-3xs font-bold uppercase leading-none tracking-wide text-update-foreground"
+            aria-label="New model"
+          >
+            New
+          </span>
+        ) : null}
+        {props.unavailable ? (
+          <Badge variant="outline" size="sm">
+            Unavailable
+          </Badge>
+        ) : null}
+        {props.showProvider ? (
+          <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
+            {providerLabel}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
@@ -108,36 +107,45 @@ export const ModelListRow = memo(function ModelListRow(props: {
           <CheckIcon className="size-3.5" aria-hidden="true" />
         ) : null}
         {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="ghost-muted"
-                className="-mr-1 shrink-0"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onToggleFavorite(props.instanceId, props.slug);
-                }}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                }}
-                disabled={Boolean(props.disabledReason)}
-                aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
-              >
-                <StarIcon
-                  className={cn(
-                    "size-3.5 sm:size-3",
-                    props.isFavorite && "fill-current text-warning",
-                  )}
-                />
-              </Button>
-            }
-          />
-          <TooltipPopup side="top" align="center">
-            {props.isFavorite ? "Remove from favorites" : "Add to favorites"}
-          </TooltipPopup>
-        </Tooltip>
+        {/* A star on every row is noise; an unstarred one shows where the pointer or highlight is. */}
+        <span
+          className={cn(
+            "flex",
+            !props.isFavorite &&
+              "opacity-0 group-hover:opacity-100 group-data-highlighted:opacity-100 focus-within:opacity-100",
+          )}
+        >
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  className="-mr-1 shrink-0"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    props.onToggleFavorite(props.instanceId, props.slug);
+                  }}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                  }}
+                  disabled={Boolean(props.disabledReason)}
+                  aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+                >
+                  <StarIcon
+                    className={cn(
+                      "size-3.5 sm:size-3",
+                      props.isFavorite && "fill-current text-warning",
+                    )}
+                  />
+                </Button>
+              }
+            />
+            <TooltipPopup side="top" align="center">
+              {props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            </TooltipPopup>
+          </Tooltip>
+        </span>
       </div>
     </ComboboxItem>
   );

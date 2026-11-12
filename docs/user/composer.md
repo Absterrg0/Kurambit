@@ -94,6 +94,9 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+The effort menu lists the plain levels. Levels that change how the agent works (such as
+Ultracode and Ultrathink), the context window and Fast mode are under **Advanced** in the same menu.
+
 ## Quote an assistant response
 
 Select text within one assistant response and choose
