@@ -7954,7 +7954,7 @@ export default function ChatView(props: ChatViewProps) {
             <div className="flex shrink-0 items-center px-1">
               <Button size="sm" variant="ghost" onClick={showCompactGame}>
                 <Gamepad2Icon className="size-3.5" aria-hidden="true" />
-                Game
+                Back to the Stage
               </Button>
             </div>
           ) : null}

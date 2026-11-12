@@ -166,8 +166,12 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
   AsyncResult.isSuccess(result) &&
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
-/** A build card's picture height bounds: its 160px floor, and a cap so the Stage stays the star. */
-const BUILD_CARD_PICTURE = { min: 90, max: 200 } as const;
+/**
+ * A build card's picture height bounds: its 160px floor, and a cap so the Stage stays the star.
+ * Past the cap the cards stop growing: on a wide window they become a lane under the Stage
+ * rather than three posters competing with it.
+ */
+const BUILD_CARD_PICTURE = { min: 90, max: 150 } as const;
 /** The strip's gap between cards (gap-3), so three cards are sized to fit side by side. */
 const BUILD_CARD_GAP = 12;
 
@@ -193,7 +197,12 @@ const fitStage = (width: number, height: number, ratio: number) => {
   return {
     width: stageWidth,
     height: stageHeight,
-    cardWidth: Math.max(0, Math.floor((stageWidth - 2 * BUILD_CARD_GAP) / 3)),
+    cardWidth: Math.max(
+      0,
+      Math.floor(
+        Math.min((stageWidth - 2 * BUILD_CARD_GAP) / 3, (BUILD_CARD_PICTURE.max * 16) / 9),
+      ),
+    ),
   };
 };
 
@@ -454,12 +463,26 @@ function ThreadGameStage({
     height: number;
     cardWidth: number;
   } | null>(null);
-  // The column the strip and composer share. It follows the window and the pane's width, but
-  // not a composer growing under it: a longer message shrinks the Stage, never the column.
-  const [column, setColumn] = useState<{ readonly key: string; readonly width: number } | null>(
-    null,
-  );
+  // The column the strip and composer share: the Stage's width, less any growth of the message
+  // being written, so a longer message shrinks the Stage but never the composer under it.
+  const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
+  const [titleUnderControls, setTitleUnderControls] = useState(true);
+  const hasStatus = data != null;
+  useLayoutEffect(() => {
+    const section = stageRef.current;
+    const row = section?.querySelector<HTMLElement>("[data-game-topbar]");
+    if (section == null || row == null) return;
+    const check = () => {
+      const controls = document.querySelector<HTMLElement>("[data-sidebar-control]");
+      setTitleUnderControls(
+        controls !== null &&
+          row.getBoundingClientRect().left < controls.getBoundingClientRect().right,
+      );
+    };
+    check();
+    return observeResize([section, row], check);
+  }, [hasStatus]);
   useLayoutEffect(() => {
     const section = stageRef.current;
     // A compare fills the Stage's place: the Stage keeps the fit it had, for when it closes.
@@ -500,13 +523,32 @@ function ThreadGameStage({
           ? previous
           : next,
       );
-      const key = `${section.clientWidth}x${window.innerHeight}`;
+      const editor = section.parentElement?.querySelector<HTMLElement>(
+        "[data-game-direction-bar] .composer-tiptap",
+      );
+      // Past one line (a focused composer's taller well, more lines), the editor's height is
+      // the message's, not the window's.
+      const style = editor == null ? null : getComputedStyle(editor);
+      const growth =
+        editor == null || style === null
+          ? 0
+          : Math.max(
+              0,
+              editor.offsetHeight -
+                (Number.parseFloat(style.lineHeight) || 0) -
+                (Number.parseFloat(style.paddingTop) || 0) -
+                (Number.parseFloat(style.paddingBottom) || 0),
+            );
+      const columnWidth =
+        growth === 0
+          ? next.width
+          : fitStage(
+              section.clientWidth - 24,
+              section.clientHeight - taken - stripChrome - 8 + growth,
+              viewportHeight / viewportWidth,
+            ).width;
       setColumn((previous) =>
-        previous !== null &&
-        previous.key === key &&
-        (next.width < previous.width || Math.abs(next.width - previous.width) <= 1)
-          ? previous
-          : { key, width: next.width },
+        previous !== null && Math.abs(previous - columnWidth) <= 1 ? previous : columnWidth,
       );
     };
     measure();
@@ -525,7 +567,7 @@ function ThreadGameStage({
   // The strip and the composer under it end where the fitted Stage ends, so a height-bound
   // game on a wide window has one right edge. They live in other components, so the
   // column's width goes up as a CSS variable on the centre they share.
-  const stageColumn = column === null ? null : column.width + 24;
+  const stageColumn = column === null ? null : column + 24;
   useLayoutEffect(() => {
     const centre = stageRef.current?.closest<HTMLElement>("[data-game-centre]");
     if (centre == null || stageColumn === null) return;
@@ -994,6 +1036,7 @@ function ThreadGameStage({
     >
       <header className="@container/stage-header flex shrink-0 flex-col bg-background">
         <div
+          data-game-topbar=""
           className={cn(
             // The name's text, not its button, starts on the column's one text edge (the
             // Stage, the strip's label and captions, the tray), so the button hangs left. A
@@ -1002,8 +1045,10 @@ function ThreadGameStage({
             "mx-auto flex h-(--workspace-topbar-height) w-full max-w-(--game-stage-column) min-w-0 items-center gap-1.5 px-2 pl-3",
             // The window is dragged by its top bar; its buttons stay clickable.
             isElectron && "drag-region",
-            // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this corner.
-            COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+            // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this
+            // corner, but only a column that starts under them steps aside: a centred one keeps
+            // its title on the Stage's edge.
+            titleUnderControls && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             // With the Inspector hidden, the top bar runs under the desktop window controls.
             (compact || inspectorCollapsed) && "wco:pr-(--workspace-native-controls-inset)",
           )}
@@ -1023,7 +1068,8 @@ function ThreadGameStage({
                     size="sm"
                     variant="ghost"
                     aria-label={`${gameName}, game menu`}
-                    className="-ms-2.5 min-w-0 shrink"
+                    // The name keeps its room before the status line gives up any of its own.
+                    className="-ms-2.5 min-w-0 max-w-1/2 shrink-0"
                   />
                 }
               >

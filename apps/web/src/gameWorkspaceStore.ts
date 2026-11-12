@@ -16,10 +16,10 @@ const GAME_INSPECTOR_MAX_WORKSPACE_SHARE = 0.45;
 /**
  * Below this workspace width (the row after the sidebar, not the window) the
  * Inspector and the stage cannot both stay usable, so the workbench shows one
- * pane at a time. The threshold leaves the centre at least 600px at the
- * default Inspector width.
+ * pane at a time. Above it the game and its checks stay side by side: at a
+ * 1100px window with the sidebar open, the centre keeps about 480px.
  */
-const GAME_WORKSPACE_DOCK_MIN_WIDTH = 960;
+const GAME_WORKSPACE_DOCK_MIN_WIDTH = 800;
 
 export const isGameWorkspaceCompact = (workspaceWidth: number) =>
   workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;

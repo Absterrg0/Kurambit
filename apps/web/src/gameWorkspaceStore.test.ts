@@ -16,14 +16,14 @@ beforeEach(() => {
 describe("game workspace width", () => {
   it("treats a workspace below the dock threshold as compact", () => {
     expect(isGameWorkspaceCompact(0)).toBe(false);
-    expect(isGameWorkspaceCompact(959)).toBe(true);
-    expect(isGameWorkspaceCompact(960)).toBe(false);
+    expect(isGameWorkspaceCompact(799)).toBe(true);
+    expect(isGameWorkspaceCompact(800)).toBe(false);
     expect(isGameWorkspaceCompact(1280)).toBe(false);
   });
 
   it("keeps the remembered dock width while the workspace is compact", () => {
     useGameWorkspaceStore.getState().setInspectorWidth(700);
-    useGameWorkspaceStore.getState().fitInspectorWidth(800);
+    useGameWorkspaceStore.getState().fitInspectorWidth(760);
 
     // Fitting a single-pane layout would have rewritten this to 352.
     expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(700);
