@@ -127,7 +127,7 @@ function KeybindingsSearchInput({
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <InputGroup className="min-w-0 basis-full **:[input]:h-9 sm:basis-0 sm:flex-1 sm:**:[input]:h-8">
+    <InputGroup className="min-w-0 basis-full **:[input]:h-9 sm:min-w-52 sm:basis-0 sm:flex-1 sm:**:[input]:h-8">
       <InputGroupAddon>
         <SearchIcon aria-hidden className="size-3.5" />
       </InputGroupAddon>
