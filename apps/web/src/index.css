@@ -1385,6 +1385,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 @utility kbd-in-popover {
   --kbd-background: var(--kbd-popover-fill);
 }
+/* A tinted footer under a popover: the chip keeps the popover's own ground, so the
+   footer's hints read like the rows' instead of darker. */
+@utility kbd-in-footer {
+  --kbd-background: var(--kbd-popover-fill), linear-gradient(var(--popover), var(--popover));
+}
 @utility kbd-on-lit {
   --kbd-background: var(--kbd-lit-fill) !important;
   --kbd-foreground: var(--kbd-lit-foreground);
