@@ -40,6 +40,8 @@ export interface GameStatusInput {
   readonly operation: { readonly text: string; readonly since: number | null } | null;
   /** The game is served live from its folder. */
   readonly live: boolean;
+  /** The game has the keyboard: the person is playing it, not just looking at it. */
+  readonly focused: boolean;
 }
 
 /**
@@ -52,7 +54,14 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
     : input.phase === "playing"
       ? input.away && input.onStage !== null
         ? part(`Paused on ${input.onStage} while you're away`)
-        : part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`, { dot: "ok" })
+        : input.focused
+          ? part(input.onStage === null ? "Playing" : `Playing ${input.onStage}`, { dot: "ok" })
+          : part(
+              input.onStage === null
+                ? "On the Stage"
+                : `${input.onStage.charAt(0).toUpperCase()}${input.onStage.slice(1)} on the Stage`,
+              { dot: "ok" },
+            )
       : input.phase === "stopped"
         ? part("Stopped")
         : input.phase === "ready"
@@ -129,5 +138,6 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.operationRunning) return line("Building", "live");
   if (input.chats === "failed") return line("The last turn failed", "failed");
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
-  return line("No builds yet", "idle");
+  // A game opened from a folder plays before Kurambit has measured any build of it.
+  return line("Not measured yet", "idle");
 };

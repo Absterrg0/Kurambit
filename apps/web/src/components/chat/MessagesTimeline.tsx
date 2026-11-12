@@ -198,6 +198,7 @@ import {
   type AssistantCitationTarget,
 } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
+import { GameLogHistory } from "../game/GameLogHistory";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
@@ -1426,18 +1427,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (hideEmptyPlaceholder) {
       return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
     }
-    // A game's Log sits beside its Stage and builds, so it says what it will hold,
-    // top-aligned like the Inspector's other tabs.
-    if (gameThread) {
-      return (
-        <div className="flex h-full flex-col gap-1 p-4">
-          <p className="text-sm text-foreground">Nothing in the Log yet</p>
-          <p className="text-xs text-muted-foreground">
-            Your agent's work on this game shows here, turn by turn. Tell it what to change below
-            the game.
-          </p>
-        </div>
-      );
+    // A game's Log sits beside its Stage and builds: before this chat has turns it
+    // reads the game's build history, top-aligned like the Inspector's other tabs.
+    if (gameThread && citationThreadRef !== null) {
+      return <GameLogHistory threadRef={citationThreadRef} />;
     }
     return (
       <div

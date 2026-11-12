@@ -10,13 +10,16 @@ import {
   ClockIcon,
   ColumnsIcon,
   FileIcon,
+  FileSearchIcon,
   FileVideoIcon,
   ImageIcon,
   MinusIcon,
+  MoreHorizontalIcon,
   PlayIcon,
   RefreshCwIcon,
   ScrollTextIcon,
   TriangleAlertIcon,
+  Undo2Icon,
   XIcon,
 } from "lucide-react";
 import {
@@ -52,6 +55,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Kbd } from "../ui/kbd";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
@@ -145,7 +149,7 @@ export function GameInspectorPanel({ threadRef }: { threadRef: ScopedThreadRef }
     <div
       role="tabpanel"
       aria-label={TABS.find((entry) => entry.tab === tab)?.label}
-      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-50 flex min-h-0 flex-col overflow-y-auto bg-background"
+      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col overflow-y-auto bg-background"
     >
       {tab === "build" ? (
         <BuildPanel threadRef={threadRef} />
@@ -324,14 +328,19 @@ function BuildDetail({
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   return (
     <div className="flex flex-col gap-5 p-4">
-      <header className="flex items-center gap-3">
+      <BuildActions
+        threadRef={threadRef}
+        build={build}
+        list={list}
+        onCompare={(other) => requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })}
+      >
         <GameBuildStill
           threadRef={threadRef}
           gameName={gameName}
           build={build}
           className="h-12 w-20 shrink-0 rounded-md ring-1 ring-border ring-inset"
         />
-        <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <Text variant="label" tone="strong" truncate render={<h2 />}>
             {buildCaption(build) === buildName(build)
               ? buildName(build)
@@ -342,13 +351,7 @@ function BuildDetail({
             {onStage ? " · on the Stage" : note === null ? "" : ` · ${note}`}
           </Text>
         </div>
-      </header>
-      <BuildActions
-        threadRef={threadRef}
-        build={build}
-        list={list}
-        onCompare={(other) => requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })}
-      />
+      </BuildActions>
       {asked === null ? null : (
         <Section title={asked.title}>
           <Text
@@ -510,12 +513,13 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
               aria-hidden="true"
             />
             <Text variant="meta" tone="default" render={<span className="flex-1" />}>
-              More measurements
+              {view.more.length} more measurements
             </Text>
-            <Text variant="caption" tone="muted" numeric>
-              {morePass > 0 ? `${morePass} pass · ` : ""}
-              {view.more.length}
-            </Text>
+            {morePass > 0 ? (
+              <Text variant="caption" tone="muted" numeric>
+                {morePass} pass
+              </Text>
+            ) : null}
           </button>
           {moreOpen
             ? moreMeasured.map((fact) => (
@@ -581,6 +585,27 @@ function NotMeasured({ facts }: { facts: ReadonlyArray<GameFactView | GameCheck>
   ));
 }
 
+function EvidenceButton({ threadRef, item }: { threadRef: ScopedThreadRef; item: RunEvidence }) {
+  const EvidenceIcon = EVIDENCE_ICON[item.kind];
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={item.label}
+            onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
+          />
+        }
+      >
+        <EvidenceIcon aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{item.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function CheckRow({
   threadRef,
   fact,
@@ -624,28 +649,36 @@ function CheckRow({
             {value}
           </Text>
         )}
-        {/* A fixed gutter, so values right-align in one column whether a row has evidence or not. */}
-        <span className="flex w-18 shrink-0 items-center justify-end">
-          {fact.evidence.map((item) => {
-            const EvidenceIcon = EVIDENCE_ICON[item.kind];
-            return (
-              <Tooltip key={item.path}>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={item.label}
+        {/* One fixed 24px gutter, so values right-align in one column and every sentence keeps
+            room for one line; a row with several pieces of evidence opens them from a menu. */}
+        <span className="flex w-6 shrink-0 items-center justify-end">
+          {fact.evidence.length === 1 && fact.evidence[0] !== undefined ? (
+            <EvidenceButton threadRef={threadRef} item={fact.evidence[0]} />
+          ) : fact.evidence.length > 1 ? (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button size="icon-xs" variant="ghost" aria-label={`${fact.label}: evidence`} />
+                }
+              >
+                <FileSearchIcon aria-hidden="true" />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                {fact.evidence.map((item) => {
+                  const EvidenceIcon = EVIDENCE_ICON[item.kind];
+                  return (
+                    <MenuItem
+                      key={item.path}
                       onClick={() => useRightPanelStore.getState().openFile(threadRef, item.path)}
-                    />
-                  }
-                >
-                  <EvidenceIcon aria-hidden="true" />
-                </TooltipTrigger>
-                <TooltipPopup side="top">{item.label}</TooltipPopup>
-              </Tooltip>
-            );
-          })}
+                    >
+                      <EvidenceIcon />
+                      {item.label}
+                    </MenuItem>
+                  );
+                })}
+              </MenuPopup>
+            </Menu>
+          ) : null}
         </span>
       </div>
       {detail.length > 0 ? (
@@ -830,16 +863,23 @@ const RESTORE = {
 } as const;
 
 /** Its one restore, by the strip's rules, and a compare with the build before it. */
+/**
+ * The build's header: its still and name, and in a ⋯ beside them what can be
+ * done with it (its one restore, a compare with the build before), so the
+ * panel opens on what the build is, not on a button.
+ */
 function BuildActions({
   threadRef,
   build,
   list,
   onCompare,
+  children,
 }: {
   threadRef: ScopedThreadRef;
   build: GameBuild;
   list: GameBuildsResult;
   onCompare: (other: GameBuild) => void;
+  children: ReactNode;
 }) {
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const restores = useBuildRestore(threadRef, list.restore);
@@ -869,38 +909,52 @@ function BuildActions({
     (index === -1 ? undefined : list.builds[index + 1]);
   const kind = action === null ? null : RESTORE[action.kind];
   const error = action === null ? null : restores.error(action.target);
+  const canCompare = previous !== undefined && build.available && previous.available;
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {action !== null && kind !== null ? (
-          <Tooltip>
-            <TooltipTrigger render={<span />}>
-              <Button
-                size="xs"
-                variant="secondary"
-                disabled={action.blocked !== null || !restores.canRestore || restores.pending}
-                onClick={() =>
-                  void restores.send(
-                    action.target,
-                    action.kind === "go-back" ? restoreQuestion(buildName(build)) : null,
-                  )
-                }
-              >
-                {restores.restoring(action.target) ? kind.busy : kind.label}
-              </Button>
-            </TooltipTrigger>
-            {action.blocked === null ? null : (
-              <TooltipPopup side="top">{action.blocked}</TooltipPopup>
-            )}
-          </Tooltip>
+      <header className="flex items-center gap-3">
+        {children}
+        {(action !== null && kind !== null) || canCompare ? (
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button size="icon-sm" variant="ghost" aria-label={`${buildName(build)} actions`} />
+              }
+            >
+              <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-64">
+              {action !== null && kind !== null ? (
+                <MenuItem
+                  disabled={action.blocked !== null || !restores.canRestore || restores.pending}
+                  onClick={() =>
+                    void restores.send(
+                      action.target,
+                      action.kind === "go-back" ? restoreQuestion(buildName(build)) : null,
+                    )
+                  }
+                >
+                  <Undo2Icon />
+                  <span className="flex min-w-0 flex-col">
+                    {restores.restoring(action.target) ? kind.busy : kind.label}
+                    {action.blocked === null ? null : (
+                      <Text variant="caption" tone="muted">
+                        {action.blocked}
+                      </Text>
+                    )}
+                  </span>
+                </MenuItem>
+              ) : null}
+              {canCompare && previous !== undefined ? (
+                <MenuItem onClick={() => onCompare(previous)}>
+                  <ColumnsIcon />
+                  Compare with {buildName(previous).replace(/^Build /, "")}
+                </MenuItem>
+              ) : null}
+            </MenuPopup>
+          </Menu>
         ) : null}
-        {previous !== undefined && build.available && previous.available ? (
-          <Button size="xs" variant="ghost" onClick={() => onCompare(previous)}>
-            <ColumnsIcon aria-hidden="true" />
-            Compare with {buildName(previous).replace(/^Build /, "")}
-          </Button>
-        ) : null}
-      </div>
+      </header>
       {build.noPlay !== null ? (
         <Text variant="caption" tone="muted" render={<p />}>
           {build.noPlay}
@@ -998,7 +1052,13 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
               ) : null}
               <Text variant="caption" tone="muted" truncate>
                 {[
-                  style.family ?? null,
+                  // A family's slug ("kenney-lowpoly") read as words.
+                  style.family === undefined || style.family === null
+                    ? null
+                    : `${style.family.charAt(0).toUpperCase()}${style.family.slice(1)}`.replaceAll(
+                        "-",
+                        " ",
+                      ),
                   style.mode === "pixel" ? "Pixel art" : "Smooth",
                   typeof style.palette === "string" ? style.palette : null,
                 ]
@@ -1087,9 +1147,11 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
     <Section
       title="On screen"
       aside={
-        <Text variant="caption" tone="dim">
-          {things.length === 1 ? "1 thing" : `${things.length} things`}
-        </Text>
+        things.length === 0 ? undefined : (
+          <Text variant="caption" tone="dim">
+            {things.length === 1 ? "1 thing" : `${things.length} things`}
+          </Text>
+        )
       }
     >
       {things.length > 8 ? (

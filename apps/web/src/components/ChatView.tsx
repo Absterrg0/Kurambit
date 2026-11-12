@@ -7943,8 +7943,14 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           {gameLayout ? (
-            // Room for the panel control; under window controls the header's own inset covers those.
-            <div className="flex h-full min-w-0 flex-1 items-center pr-24 wco:pr-10">
+            // Under window controls the header's own inset covers those.
+            <div
+              className={cn(
+                "flex h-full min-w-0 flex-1 items-center wco:pr-10",
+                // The fixed panel toggles only show for a game while its side panel is open.
+                rightPanelOpen && "pr-24",
+              )}
+            >
               <GameInspectorTabs threadRef={activeThreadRef} />
             </div>
           ) : (

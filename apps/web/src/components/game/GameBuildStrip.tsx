@@ -300,7 +300,9 @@ export function GameBuildStrip({
           {actions}
         </div>
       )}
-      <div ref={cardsRef} className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1">
+      {/* A fixed height (a picture and two caption lines), so the Stage above never jumps
+          between games whose captions wrap differently. */}
+      <div ref={cardsRef} className="flex min-h-36 min-w-0 items-start gap-3 overflow-x-auto pb-1">
         {list === null ? (
           first.error !== null ? (
             <Text variant="caption" tone="muted" render={<p className="py-6" />}>
@@ -391,7 +393,7 @@ function BuildCard({
   // A saved build's caption already starts with its name.
   const name =
     build.source._tag === "saved"
-      ? caption.toLowerCase().startsWith(label.toLowerCase())
+      ? caption.toLowerCase().includes(label.toLowerCase())
         ? null
         : label
       : step !== null
@@ -449,8 +451,12 @@ function BuildCard({
       <TooltipPopup side="top" className="max-w-xs">
         {buildName(build)} · {formatBuildTime(build.at)}
         {undone ? " · undone" : ""}
-        <br />
-        {caption}
+        {caption === buildName(build) ? null : (
+          <>
+            <br />
+            {caption}
+          </>
+        )}
       </TooltipPopup>
     </Tooltip>
   );
@@ -527,7 +533,7 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
 function FirstBuildSlot() {
   return (
     <div className="flex w-40 shrink-0 flex-col gap-1.5">
-      <div className="aspect-video w-full rounded-md border border-dashed border-border" />
+      <div className="surface-well aspect-video w-full rounded-md" />
       <Text variant="caption" tone="muted" render={<span className="px-0.5" />}>
         The first build lands here
       </Text>

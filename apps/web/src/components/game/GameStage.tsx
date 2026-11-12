@@ -762,6 +762,7 @@ function ThreadGameStage({
     nextBuild: nextBuildNumber,
     operation: building ? { text: buildingMessage, since: buildingStartedAt } : null,
     live: stageKind === "live",
+    focused: gameFocused && !frameHidden,
   });
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
@@ -805,7 +806,9 @@ function ThreadGameStage({
             <FastForwardIcon className="size-3.5" aria-hidden="true" />
             {keepGoingView.label}
           </TooltipTrigger>
-          <TooltipPopup side="top">{keepGoingView.tooltip}</TooltipPopup>
+          <TooltipPopup side="top" align="end">
+            {keepGoingView.tooltip}
+          </TooltipPopup>
         </Tooltip>
         <MenuPopup align="end">
           <GameKeepGoingMenuContent threadRef={threadRef} />

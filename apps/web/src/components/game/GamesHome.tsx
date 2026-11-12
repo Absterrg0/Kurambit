@@ -524,14 +524,11 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           gameName={name}
           className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow] group-hover:ring-foreground/25 group-focus-visible:ring-2 group-focus-visible:ring-ring"
         >
+          {/* Without a picture of the game yet, its name on its own colour, like a cover. */}
           {picture === null ? (
-            <Text
-              variant="caption"
-              tone="inherit"
-              render={<span className="absolute inset-0 grid place-items-center text-white/50" />}
-            >
-              {build === null ? "No build yet" : "No picture yet"}
-            </Text>
+            <span className="absolute inset-0 grid place-items-center px-4 text-center font-display text-2xl/7 text-white/80">
+              {name}
+            </span>
           ) : null}
         </GamePicture>
         <span className="flex min-w-0 flex-col gap-0.5 px-0.5">
