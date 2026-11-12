@@ -41,7 +41,7 @@ export function GameLogHistory({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Text>
         <Text variant="caption" tone="muted" render={<p />}>
           {builds.length > 0
-            ? "This chat hasn't changed the game yet. Its builds so far:"
+            ? "Nothing in this Log has changed the game yet. Its builds so far:"
             : "Your agent's work on this game shows here, turn by turn. Tell it what to change below the game."}
         </Text>
       </div>

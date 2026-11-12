@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { GAME_ENGINES, type ScopedThreadRef } from "@kurambit/contracts";
-import { FastForwardIcon, GitCommitHorizontalIcon } from "lucide-react";
+import { FastForwardIcon, CornerDownRightIcon } from "lucide-react";
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
@@ -50,10 +50,7 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null;
   return (
     <div className="flex min-h-8 items-center gap-2 px-1 pt-1.5" data-game-composer-tray="">
-      <GitCommitHorizontalIcon
-        className="size-3.5 shrink-0 text-dim-foreground"
-        aria-hidden="true"
-      />
+      <CornerDownRightIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
       <Text variant="caption" tone="muted" truncate render={<span className="min-w-0 flex-1" />}>
         {target}
         {copy !== null ? " · the copy on the Stage stays as it is" : ""}
@@ -79,9 +76,7 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
               <FastForwardIcon className="size-3.5" aria-hidden="true" />
               {keepGoingView.label}
             </TooltipTrigger>
-            <TooltipPopup side="top" align="end">
-              {keepGoingView.tooltip}
-            </TooltipPopup>
+            <TooltipPopup side="left">{keepGoingView.tooltip}</TooltipPopup>
           </Tooltip>
           <MenuPopup align="end">
             <GameKeepGoingMenuContent threadRef={threadRef} />

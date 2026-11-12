@@ -999,6 +999,7 @@ function ThreadGameStage({
                   {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
                 </MenuItem>
               ) : null}
+              <MenuSeparator />
               <MenuItem
                 disabled={!canAct || !runningSomething}
                 onClick={() => void perform("stop")}

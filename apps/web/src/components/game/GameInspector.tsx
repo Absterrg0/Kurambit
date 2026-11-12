@@ -6,7 +6,6 @@ import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
   CheckIcon,
   ChevronRightIcon,
-  DotIcon,
   ClockIcon,
   ColumnsIcon,
   FileIcon,
@@ -290,7 +289,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         <Text variant="label" tone="strong" render={<h2 />}>
           Now on the Stage
         </Text>
-        <Text variant="caption" tone="muted" render={<p />}>
+        <Text variant="meta" tone="muted" render={<p />}>
           The game changed since {buildName(build)}, and isn't measured yet. Its checks below are
           the last measured.
         </Text>
@@ -661,21 +660,19 @@ function CheckRow({
 }) {
   const tone = fact.reading._tag === "measured" ? fact.reading.tone : null;
   // A reading that is neither good nor bad gets a small solid dot: a hollow ring reads as an unticked option.
-  const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : DotIcon;
+  const Icon = tone === "good" ? CheckIcon : tone === "bad" ? TriangleAlertIcon : null;
   return (
     <div className="flex flex-col gap-1 px-3 py-1.5">
       <div className="flex min-h-6 items-center gap-2.5">
         <span className="flex size-4 shrink-0 items-center justify-center">
-          <Icon
-            className={cn(
-              tone === "good"
-                ? "size-4 text-success"
-                : tone === "bad"
-                  ? "size-4 text-warning"
-                  : "size-4 text-muted-foreground",
-            )}
-            aria-hidden="true"
-          />
+          {Icon === null ? (
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-muted-foreground" />
+          ) : (
+            <Icon
+              className={cn("size-4", tone === "good" ? "text-success" : "text-warning")}
+              aria-hidden="true"
+            />
+          )}
         </span>
         <Text variant="meta" tone="default" render={<span className="min-w-0 flex-1" />}>
           <Tooltip>

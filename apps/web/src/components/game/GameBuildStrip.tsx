@@ -443,7 +443,7 @@ function BuildCard({
           </span>
         </span>
       </TooltipTrigger>
-      <TooltipPopup side="top" className="max-w-xs">
+      <TooltipPopup side="bottom" className="max-w-xs">
         {/* What the card doesn't already say: when, and how it measured. */}
         {formatBuildTime(build.at)}
         {checksPhrase(build.facts) === null ? "" : ` · ${checksPhrase(build.facts)}`}
@@ -461,7 +461,7 @@ function CardRing({ on }: { on: boolean }) {
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
         on
-          ? "ring-1 ring-foreground/70"
+          ? "ring-1 ring-foreground/45"
           : "ring-1 ring-border group-hover/card:ring-foreground/30 group-focus-visible/card:ring-2 group-focus-visible/card:ring-ring",
       )}
     />
