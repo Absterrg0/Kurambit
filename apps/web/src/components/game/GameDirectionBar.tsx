@@ -3,7 +3,11 @@ import { ChevronRightIcon, CrosshairIcon, Redo2Icon, Undo2Icon, XIcon } from "lu
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
-import { clampGameInspectorWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import {
+  clampGameInspectorWidth,
+  useDockedInspectorWidth,
+  useGameWorkspaceStore,
+} from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
@@ -152,7 +156,7 @@ export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
 
 /** The Inspector's edge: drag or arrow keys to resize it. */
 export function GameInspectorResize() {
-  const width = useGameWorkspaceStore((state) => state.inspectorWidth);
+  const width = useDockedInspectorWidth();
   const setWidth = useGameWorkspaceStore((state) => state.setInspectorWidth);
   const drag = useRef<{ x: number; width: number; workspace: number } | null>(null);
   const [dragging, setDragging] = useState(false);

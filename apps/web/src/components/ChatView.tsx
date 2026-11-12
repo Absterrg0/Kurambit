@@ -355,7 +355,11 @@ import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
-import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
+import {
+  useDockedInspectorWidth,
+  useGameWorkspaceStore,
+  type GameStageRequest,
+} from "../gameWorkspaceStore";
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameNextBanner } from "./game/GameNextBanner";
@@ -1658,7 +1662,7 @@ export default function ChatView(props: ChatViewProps) {
     (gameStatus.data !== null ||
       isGameStatusFailure(gameStatus.failure) ||
       gameStatus.error === null);
-  const gameInspectorWidth = useGameWorkspaceStore((state) => state.inspectorWidth);
+  const gameInspectorWidth = useDockedInspectorWidth();
   const gameInspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
   const gameInspectorTab = useGameWorkspaceStore((state) => state.inspectorTab);
   // A remembered Inspector width only means something while both panes fit. The

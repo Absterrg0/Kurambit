@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  clampGameInspectorWidth,
   GAME_INSPECTOR_DEFAULT_WIDTH,
   isGameWorkspaceCompact,
   useGameWorkspaceStore,
@@ -10,6 +11,7 @@ beforeEach(() => {
   useGameWorkspaceStore.setState({
     inspectorWidth: GAME_INSPECTOR_DEFAULT_WIDTH,
     inspectorCollapsed: false,
+    workspaceWidth: Number.POSITIVE_INFINITY,
   });
 });
 
@@ -29,13 +31,20 @@ describe("game workspace width", () => {
     expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(700);
   });
 
-  it("fits the remembered width once both panes can dock again", () => {
+  it("draws the remembered width fitted to the workspace, and keeps it as chosen", () => {
+    const drawn = () => {
+      const state = useGameWorkspaceStore.getState();
+      return clampGameInspectorWidth(state.inspectorWidth, state.workspaceWidth);
+    };
     useGameWorkspaceStore.getState().setInspectorWidth(700);
     useGameWorkspaceStore.getState().fitInspectorWidth(960);
-    expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(432);
-
-    useGameWorkspaceStore.getState().setInspectorWidth(420);
-    useGameWorkspaceStore.getState().fitInspectorWidth(1000);
-    expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(420);
+    expect(drawn()).toBe(432);
+    // A tight row gives the Stage the room: a third of it.
+    useGameWorkspaceStore.getState().fitInspectorWidth(840);
+    expect(drawn()).toBe(285);
+    // A narrow window never shrinks the width chosen for a wide one.
+    useGameWorkspaceStore.getState().fitInspectorWidth(2000);
+    expect(drawn()).toBe(700);
+    expect(useGameWorkspaceStore.getState().inspectorWidth).toBe(700);
   });
 });

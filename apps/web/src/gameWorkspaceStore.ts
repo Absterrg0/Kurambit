@@ -24,12 +24,26 @@ const GAME_WORKSPACE_DOCK_MIN_WIDTH = 800;
 export const isGameWorkspaceCompact = (workspaceWidth: number) =>
   workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;
 
-export const clampGameInspectorWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
-  Math.min(
-    GAME_INSPECTOR_MAX_WIDTH,
-    Math.floor(workspaceWidth * GAME_INSPECTOR_MAX_WORKSPACE_SHARE),
-    Math.max(GAME_INSPECTOR_MIN_WIDTH, Math.round(width)),
-  );
+/**
+ * Below this workspace width both panes stay but the Stage needs the room more: the Inspector
+ * gives up to a third of the row, down to its narrow width, so the game is never a thumbnail.
+ */
+const GAME_WORKSPACE_TIGHT_WIDTH = 900;
+const GAME_INSPECTOR_TIGHT_SHARE = 0.34;
+const GAME_INSPECTOR_NARROW_WIDTH = 272;
+
+export const clampGameInspectorWidth = (
+  width: number,
+  workspaceWidth = Number.POSITIVE_INFINITY,
+) => {
+  const share =
+    workspaceWidth < GAME_WORKSPACE_TIGHT_WIDTH
+      ? GAME_INSPECTOR_TIGHT_SHARE
+      : GAME_INSPECTOR_MAX_WORKSPACE_SHARE;
+  const cap = Math.floor(workspaceWidth * share);
+  const min = Math.min(GAME_INSPECTOR_MIN_WIDTH, Math.max(GAME_INSPECTOR_NARROW_WIDTH, cap));
+  return Math.min(GAME_INSPECTOR_MAX_WIDTH, cap, Math.max(min, Math.round(width)));
+};
 
 /**
  * What another surface (the palette, a key, the timeline, a chat turn's strip)
@@ -70,11 +84,13 @@ export interface GameInspectedBuild {
 }
 
 interface GameWorkspaceStoreState {
-  /** Width of the Inspector column on game threads, in CSS pixels. */
+  /** Width of the Inspector column the creator chose, in CSS pixels: remembered as chosen. */
   inspectorWidth: number;
+  /** The docked workspace row's width now, which the drawn Inspector is fitted to. Not persisted. */
+  workspaceWidth: number;
   inspectorCollapsed: boolean;
   setInspectorWidth: (width: number) => void;
-  /** Clamp a remembered width to what the current workspace can spare. */
+  /** Records the workspace's width, which the drawn width is clamped to (useDockedInspectorWidth). */
   fitInspectorWidth: (workspaceWidth: number) => void;
   toggleInspector: () => void;
   setInspectorCollapsed: (collapsed: boolean) => void;
@@ -98,16 +114,16 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
   persist(
     (set) => ({
       inspectorWidth: GAME_INSPECTOR_DEFAULT_WIDTH,
+      workspaceWidth: Number.POSITIVE_INFINITY,
       inspectorCollapsed: false,
       setInspectorWidth: (width) => set({ inspectorWidth: clampGameInspectorWidth(width) }),
       fitInspectorWidth: (workspaceWidth) =>
         set((state) => {
-          // A compact workspace shows one pane at a time, so its narrow width
-          // says nothing about the docked width the creator chose. Fitting
-          // there would quietly rewrite the remembered preference.
-          if (isGameWorkspaceCompact(workspaceWidth)) return {};
-          const fitted = clampGameInspectorWidth(state.inspectorWidth, workspaceWidth);
-          return fitted === state.inspectorWidth ? {} : { inspectorWidth: fitted };
+          // A compact workspace shows one pane at a time: there is no docked width to fit. The
+          // chosen width is never rewritten, so a narrow window does not shrink a wide one later.
+          if (isGameWorkspaceCompact(workspaceWidth) || workspaceWidth === state.workspaceWidth)
+            return {};
+          return { workspaceWidth };
         }),
       toggleInspector: () => set((state) => ({ inspectorCollapsed: !state.inspectorCollapsed })),
       setInspectorCollapsed: (collapsed) => set({ inspectorCollapsed: collapsed }),
@@ -141,3 +157,9 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
     },
   ),
 );
+
+/** The Inspector's drawn width: the chosen width, fitted to what the workspace can spare. */
+export const useDockedInspectorWidth = (): number =>
+  useGameWorkspaceStore((state) =>
+    clampGameInspectorWidth(state.inspectorWidth, state.workspaceWidth),
+  );

@@ -181,6 +181,14 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
 const BUILD_CARD_PICTURE = { min: 90, max: 150 } as const;
 /** The strip's gap between cards (gap-3), so three cards are sized to fit side by side. */
 const BUILD_CARD_GAP = 12;
+/**
+ * The height kept under the strip for the rows that come and go above the composer: the
+ * agent's note (two lines) and one suggestion. They appear as a turn runs and lands, and the
+ * Stage must not shrink and re-centre each time; only rows past this budget take its height.
+ */
+const TRANSIENT_ROWS_RESERVE = 92;
+const TRANSIENT_ROWS =
+  "[data-game-agent-note], [data-game-pointed], [data-game-direction-bar] [data-composer-banner-drawer]";
 
 /**
  * PURE. The Stage's width and its cards' picture height, in a column `width` wide with `height`
@@ -523,10 +531,16 @@ function ThreadGameStage({
           ?.firstElementChild?.getBoundingClientRect().height ?? BUILD_CARD_PICTURE.min;
       const stripChrome =
         strip === null ? 0 : Math.max(0, strip.getBoundingClientRect().height - picture);
+      // The rows that come and go under the strip are measured against their fixed budget,
+      // so the Stage's height does not follow them.
+      const transient = [
+        ...(section.parentElement?.querySelectorAll<HTMLElement>(TRANSIENT_ROWS) ?? []),
+      ].reduce((sum, row) => sum + row.offsetHeight, 0);
+      const height = section.clientHeight + transient - TRANSIENT_ROWS_RESERVE;
       // The surface's side insets (mx-3) and a breath above the strip.
       const next = fitStage(
         section.clientWidth - 24,
-        section.clientHeight - taken - stripChrome - 8,
+        height - taken - stripChrome - 8,
         viewportHeight / viewportWidth,
       );
       // The strip's measured chrome rounds with its pictures' size, so a fit can flip by a
@@ -560,7 +574,7 @@ function ThreadGameStage({
           ? next.width
           : fitStage(
               section.clientWidth - 24,
-              section.clientHeight - taken - stripChrome - 8 + growth,
+              height - taken - stripChrome - 8 + growth,
               viewportHeight / viewportWidth,
             ).width;
       setColumn((previous) =>
