@@ -343,7 +343,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/components/settings/ResourceTelemetryDiagnostics.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 80 }] },
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 60 }] },
       },
       {
         files: ["apps/web/src/routes/__root.tsx"],

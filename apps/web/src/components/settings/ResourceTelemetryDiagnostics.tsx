@@ -47,6 +47,7 @@ import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRelativeTimeState } from "../../hooks/useRelativeTimeState";
 import { Button } from "../ui/button";
+import { StatusLabel } from "../ui/status-dot";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -57,7 +58,8 @@ import {
   shouldShowResourceMonitorRetry,
   visibleResourceTelemetryProcesses,
 } from "./ResourceTelemetryDiagnostics.logic";
-import { SettingsSection } from "./settingsLayout";
+import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 15_000 },
@@ -96,6 +98,12 @@ function formatSampleInterval(valueMs: number): string {
 const NO_READING = "—";
 
 /** Why the native monitor gives no counters (a build without it, a monitor that stopped), else null. */
+/** The reason alone, for a row already titled "Not available in this build". */
+export function unavailableReason(message: string): string {
+  const reason = message.replace(/^Not available in this build:\s*/i, "");
+  return reason.charAt(0).toUpperCase() + reason.slice(1);
+}
+
 function noCountersReason(health: ResourceTelemetrySourceHealth): string | null {
   return health.status === "unavailable" ||
     health.status === "stopped" ||
@@ -194,37 +202,31 @@ function SourceStatusBadge({
     | undefined;
 }) {
   const tone = presentation?.tone ?? sourceStatusTone(status);
+  const text = presentation?.label ?? status;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-3xs font-semibold uppercase tracking-widest",
-        tone === "neutral" && "border-border/70 bg-muted/45 text-muted-foreground",
-        tone === "default" && "border-success/25 bg-success/10 text-success-foreground",
-        tone === "warning" && "border-warning/30 bg-warning/10 text-warning-foreground",
-        tone === "danger" && "border-destructive/30 bg-destructive/10 text-destructive",
-      )}
+    <StatusLabel
+      tone={
+        tone === "neutral"
+          ? "neutral"
+          : tone === "default"
+            ? "success"
+            : tone === "warning"
+              ? "warning"
+              : "danger"
+      }
     >
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          tone === "neutral" && "bg-muted-foreground/55",
-          tone === "default" && "bg-success",
-          tone === "warning" && "bg-warning",
-          tone === "danger" && "bg-destructive",
-        )}
-      />
-      {label} {presentation?.label ?? status}
-    </span>
+      {label ? `${label}: ${text}` : text.charAt(0).toUpperCase() + text.slice(1)}
+    </StatusLabel>
   );
 }
 
 function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
   const relative = useRelativeTimeState(sampledAt ? DateTime.formatIso(sampledAt) : null);
   if (relative.status !== "relative") {
-    return <span className="text-2xs text-muted-foreground/55">Waiting for sample</span>;
+    return <span className="text-meta text-muted-foreground">Waiting for sample</span>;
   }
   return (
-    <span className="text-2xs text-muted-foreground/60">
+    <span className="text-meta text-muted-foreground">
       Updated <span className="font-mono tabular-nums">{relative.value}</span>
       {relative.suffix ? ` ${relative.suffix}` : ""}
     </span>
@@ -246,15 +248,15 @@ function IconStat({
 }) {
   return (
     <div className="group min-w-0 px-4 py-4 sm:px-5">
-      <div className="flex items-center gap-2 text-3xs font-semibold uppercase tracking-widest text-muted-foreground/70">
-        <span className="text-muted-foreground/55 transition-colors group-hover:text-foreground/65">
+      <div className="flex items-center gap-2 text-meta font-medium text-muted-foreground">
+        <span className="text-muted-foreground transition-colors group-hover:text-foreground/65">
           {icon}
         </span>
         <span className="truncate">{label}</span>
       </div>
       <div
         className={cn(
-          "mt-2.5 truncate font-mono text-2xl font-semibold tracking-tighter tabular-nums text-foreground",
+          "mt-2.5 truncate font-mono text-2xl font-semibold tabular-nums text-foreground",
           tone === "warning" && "text-warning-foreground",
           tone === "danger" && "text-destructive",
         )}
@@ -262,7 +264,7 @@ function IconStat({
         {value}
       </div>
       {detail ? (
-        <div className="mt-1.5 truncate text-3xs text-muted-foreground/60">{detail}</div>
+        <div className="mt-1.5 truncate text-meta text-muted-foreground">{detail}</div>
       ) : null}
     </div>
   );
@@ -281,10 +283,8 @@ function AggregateCard({
     <div className="relative overflow-hidden border-t border-border/60 px-4 py-4 first:border-t-0 md:border-t-0 md:border-l md:first:border-l-0 sm:px-5">
       <span className={cn("absolute inset-x-5 top-0 h-0.5 rounded-full opacity-75", accentClass)} />
       <div className="flex items-center justify-between gap-3">
-        <div className="text-3xs font-semibold uppercase tracking-widest text-muted-foreground/75">
-          {label}
-        </div>
-        <div className="rounded-md bg-muted/55 px-1.5 py-0.5 font-mono text-3xs tabular-nums text-muted-foreground/70">
+        <div className="text-meta font-medium text-muted-foreground">{label}</div>
+        <div className="rounded-md bg-muted/55 px-1.5 py-0.5 font-mono text-meta tabular-nums text-muted-foreground">
           {aggregate.processCount} {aggregate.processCount === 1 ? "process" : "processes"}
         </div>
       </div>
@@ -301,10 +301,8 @@ function AggregateCard({
 function MetricPair({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-3xs font-semibold uppercase tracking-widest text-muted-foreground/45">
-        {label}
-      </div>
-      <div className="truncate font-mono text-xs font-medium tabular-nums text-foreground/90">
+      <div className="text-meta text-muted-foreground">{label}</div>
+      <div className="truncate font-mono text-xs font-medium tabular-nums text-foreground">
         {value}
       </div>
     </div>
@@ -319,7 +317,7 @@ function HealthSource({ label, health }: { label: string; health: ResourceTeleme
     <div className="flex items-start justify-between gap-4 border-t border-border/50 py-3 first:border-t-0">
       <div className="min-w-0">
         <div className="text-sm font-medium text-foreground">{label}</div>
-        <div className="mt-1 text-2xs leading-relaxed text-muted-foreground/65">
+        <div className="mt-1 text-meta leading-relaxed text-muted-foreground">
           {expectedInBrowser
             ? "Available when this page runs inside the desktop app."
             : Option.match(health.lastError, {
@@ -355,10 +353,10 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-4 border-t border-border/50 py-2.5 first:border-t-0">
-      <span className="text-2xs text-muted-foreground/75">{label}</span>
+      <span className="text-meta text-muted-foreground">{label}</span>
       <span
         className={cn(
-          "min-w-0 truncate text-right font-mono text-2xs tabular-nums text-foreground/85",
+          "min-w-0 truncate text-right font-mono text-meta tabular-nums text-foreground",
           valueClassName,
         )}
       >
@@ -404,7 +402,7 @@ function ResourceHistoryChart({
 
   return (
     <div className="border-t border-border/60 px-4 py-4 sm:px-5">
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-3xs text-muted-foreground/65">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-1.5 w-3 rounded-full bg-foreground/70" /> CPU average
         </span>
@@ -533,7 +531,7 @@ function ProcessActions({
   onSignal: (process: ResourceTelemetryProcess, signal: ServerProcessSignal) => void;
 }) {
   if (!canSignalProcess(process)) {
-    return <span className="text-3xs text-muted-foreground/35">—</span>;
+    return <span className="text-meta text-muted-foreground">—</span>;
   }
   const isSignaling = signalingKeys.has(processIdentityKey(process));
   return (
@@ -594,7 +592,7 @@ function ProcessTable({
             <col className="w-[6%]" />
             <col className="w-[4%]" />
           </colgroup>
-          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-3xs uppercase tracking-widest text-muted-foreground/65">
+          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-meta font-medium text-muted-foreground">
             <tr>
               <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
               <th className="px-3 py-2 font-semibold">Category</th>
@@ -626,7 +624,7 @@ function ProcessTable({
                     onToggle={toggle}
                   />
                 </td>
-                <td className="truncate px-3 py-2 text-2xs text-muted-foreground">
+                <td className="truncate px-3 py-2 text-meta text-muted-foreground">
                   {categoryLabel(process.category)}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums">
@@ -698,7 +696,7 @@ function HistoryProcessTable({
             <col className="w-[7%]" />
             <col className="w-[5%]" />
           </colgroup>
-          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-3xs uppercase tracking-widest text-muted-foreground/65">
+          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-meta font-medium text-muted-foreground">
             <tr>
               <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
               <th className="px-3 py-2 font-semibold">Category</th>
@@ -735,7 +733,7 @@ function HistoryProcessTable({
                     </TooltipPopup>
                   </Tooltip>
                 </td>
-                <td className="truncate px-3 py-2 text-2xs text-muted-foreground">
+                <td className="truncate px-3 py-2 text-meta text-muted-foreground">
                   {categoryLabel(process.category)}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular-nums">
@@ -780,12 +778,12 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
           <col className="w-[10%]" />
           <col className="w-[12%]" />
         </colgroup>
-        <thead className="border-b border-border/60 text-3xs uppercase tracking-widest text-muted-foreground/65">
+        <thead className="border-b border-border/60 text-meta font-medium text-muted-foreground">
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Component</th>
             <th className="px-3 py-2 font-semibold">Operation</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Read</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Write</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical read</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical write</th>
             <th className="px-3 py-2 text-right font-semibold">Count</th>
             <th className="px-3 py-2 text-right font-semibold sm:pr-5">Time</th>
           </tr>
@@ -976,6 +974,181 @@ export function ResourceTelemetryDiagnostics({
       snapshot.power.locked !== "unknown" ||
       snapshot.power.thermalState !== "unknown");
 
+  // A build without the native monitor says so once, keeps what does work (application
+  // I/O) in view, and folds the collector's own health away instead of framing dashes.
+  if (noCounters !== null) {
+    return (
+      <>
+        <SettingsSection title="Resource monitor">
+          <SettingsRow
+            title="Not available in this build"
+            description={`${unavailableReason(noCounters)} Power, idle and thermal state come from the desktop app.`}
+            control={
+              collectorNeedsRetry ? (
+                <Button size="sm" variant="outline" disabled={isRetrying} onClick={retryCollector}>
+                  <RefreshIcon size="xs" refreshing={isRetrying} />
+                  Retry monitor
+                </Button>
+              ) : null
+            }
+          />
+        </SettingsSection>
+        <SettingsSection
+          title="Instrumented application I/O"
+          headerAction={
+            <span className="text-meta text-muted-foreground">Logical bytes by operation</span>
+          }
+        >
+          <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5">
+            <div className="bg-muted/15 px-4 py-3 text-meta leading-relaxed text-muted-foreground sm:px-5">
+              Native counters identify which process is reading or writing. These application-level
+              counters identify known Kurambit operations so process spikes can be correlated with
+              specific persistence and logging paths.
+            </div>
+            <AttributionTable entries={snapshot?.attribution.entries ?? []} />
+          </div>
+        </SettingsSection>
+        <FoldedSettingsSection
+          id="resource-collection"
+          title="Collection details"
+          headerPlacement="outside"
+        >
+          <div className="grid md:grid-cols-2 md:divide-x md:divide-border/60">
+            <div className="px-4 py-4 sm:px-5">
+              <div className="mb-3 flex items-center gap-2 text-meta font-medium text-muted-foreground">
+                <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
+                  <BatteryIcon className="size-3.5" />
+                </span>
+                Host state
+              </div>
+              {hasHostPowerSignal && snapshot ? (
+                <>
+                  <DetailRow
+                    label="Power source"
+                    value={booleanStateLabel(snapshot.power.onBattery, {
+                      true: "Battery",
+                      false: "External power",
+                    })}
+                  />
+                  <DetailRow
+                    label="Low power mode"
+                    value={booleanStateLabel(snapshot.power.lowPowerMode, {
+                      true: "Enabled",
+                      false: "Disabled",
+                    })}
+                  />
+                  <DetailRow
+                    label="Idle"
+                    value={`${booleanStateLabel(snapshot.power.idle, {
+                      true: "Idle",
+                      false: "Active",
+                    })}${
+                      snapshot.power.idleSeconds === null
+                        ? ""
+                        : ` · ${Math.round(snapshot.power.idleSeconds)}s`
+                    }`}
+                  />
+                  <DetailRow
+                    label="Session"
+                    value={
+                      snapshot.power.suspended
+                        ? "Suspended"
+                        : booleanStateLabel(snapshot.power.locked, {
+                            true: "Locked",
+                            false: "Unlocked",
+                          })
+                    }
+                  />
+                  <DetailRow
+                    label="Thermal"
+                    value={snapshot.power.thermalState}
+                    valueClassName={
+                      snapshot.power.thermalState === "serious" ||
+                      snapshot.power.thermalState === "critical"
+                        ? "text-destructive"
+                        : undefined
+                    }
+                  />
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-5">
+                  <div className="text-sm font-medium text-foreground">
+                    Desktop host signals not connected
+                  </div>
+                  <p className="mt-1.5 max-w-sm text-meta leading-relaxed text-muted-foreground">
+                    Power, idle, lock, and thermal state are supplied by the desktop host.
+                    {noCounters === null
+                      ? " Process telemetry remains fully active in this browser session."
+                      : null}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="border-t border-border/60 px-4 py-4 md:border-t-0 sm:px-5">
+              <div className="mb-3 flex items-center gap-2 text-meta font-medium text-muted-foreground">
+                <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
+                  <GaugeIcon className="size-3.5" />
+                </span>
+                Collection health
+              </div>
+              {snapshot ? (
+                <>
+                  <HealthSource label="Native process monitor" health={snapshot.health.native} />
+                  <HealthSource label="Electron main process" health={snapshot.health.desktop} />
+                  <DetailRow
+                    label="Collection time"
+                    value={
+                      noCounters === null
+                        ? formatDurationMicros(snapshot.health.collectionDurationMicros)
+                        : NO_READING
+                    }
+                  />
+                  <DetailRow
+                    label="Process scan"
+                    value={
+                      noCounters === null
+                        ? `${snapshot.health.retainedProcessCount}/${snapshot.health.scannedProcessCount} retained`
+                        : NO_READING
+                    }
+                  />
+                  <DetailRow
+                    label="Inaccessible"
+                    value={
+                      noCounters === null
+                        ? String(snapshot.health.inaccessibleProcessCount)
+                        : NO_READING
+                    }
+                    valueClassName={
+                      snapshot.health.inaccessibleProcessCount > 0
+                        ? "text-warning-foreground"
+                        : undefined
+                    }
+                  />
+                  <DetailRow
+                    label="Sidecar"
+                    value={Option.match(snapshot.health.sidecarVersion, {
+                      onNone: () => "Unavailable",
+                      onSome: (version) =>
+                        `${version}${Option.match(snapshot.health.sidecarPid, {
+                          onNone: () => "",
+                          onSome: (pid) => ` · PID ${pid}`,
+                        })}`,
+                    })}
+                  />
+                  <DetailRow label="Restarts" value={String(snapshot.health.restartCount)} />
+                </>
+              ) : (
+                <div className="py-4 text-xs text-muted-foreground">
+                  Waiting for collector health.
+                </div>
+              )}
+            </div>
+          </div>
+        </FoldedSettingsSection>
+      </>
+    );
+  }
+
   return (
     <>
       <SettingsSection
@@ -1008,7 +1181,7 @@ export function ResourceTelemetryDiagnostics({
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm/5">
           <div className="flex flex-col gap-3 border-b border-border/60 bg-linear-to-r from-muted/45 via-muted/20 to-transparent px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
-              <div className="text-3xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+              <div className="text-meta font-medium text-muted-foreground">
                 Kurambit system footprint
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
@@ -1016,7 +1189,7 @@ export function ResourceTelemetryDiagnostics({
                 the monitor itself.
               </p>
             </div>
-            <div className="flex items-center gap-2 text-3xs text-muted-foreground/65">
+            <div className="flex items-center gap-2 text-meta text-muted-foreground">
               <span
                 className={cn(
                   "size-1.5 rounded-full",
@@ -1128,7 +1301,7 @@ export function ResourceTelemetryDiagnostics({
       >
         <div className="grid overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5 md:grid-cols-2 md:divide-x md:divide-border/60">
           <div className="px-4 py-4 sm:px-5">
-            <div className="mb-3 flex items-center gap-2 text-3xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+            <div className="mb-3 flex items-center gap-2 text-meta font-medium text-muted-foreground">
               <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
                 <BatteryIcon className="size-3.5" />
               </span>
@@ -1188,7 +1361,7 @@ export function ResourceTelemetryDiagnostics({
                 <div className="text-sm font-medium text-foreground">
                   Desktop host signals not connected
                 </div>
-                <p className="mt-1.5 max-w-sm text-2xs leading-relaxed text-muted-foreground/70">
+                <p className="mt-1.5 max-w-sm text-meta leading-relaxed text-muted-foreground">
                   Power, idle, lock, and thermal state are supplied by the desktop host.
                   {noCounters === null
                     ? " Process telemetry remains fully active in this browser session."
@@ -1198,7 +1371,7 @@ export function ResourceTelemetryDiagnostics({
             )}
           </div>
           <div className="border-t border-border/60 px-4 py-4 md:border-t-0 sm:px-5">
-            <div className="mb-3 flex items-center gap-2 text-3xs font-semibold uppercase tracking-widest text-muted-foreground/70">
+            <div className="mb-3 flex items-center gap-2 text-meta font-medium text-muted-foreground">
               <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
                 <GaugeIcon className="size-3.5" />
               </span>
@@ -1292,7 +1465,7 @@ export function ResourceTelemetryDiagnostics({
         title="Live process tree"
         headerAction={
           snapshot ? (
-            <span className="text-3xs text-muted-foreground/55">
+            <span className="text-meta text-muted-foreground">
               Identity: <span className="font-mono">PID + start time</span>
             </span>
           ) : null
@@ -1312,11 +1485,11 @@ export function ResourceTelemetryDiagnostics({
       <SettingsSection
         title="Instrumented application I/O"
         headerAction={
-          <span className="text-3xs text-muted-foreground/55">Logical bytes by operation</span>
+          <span className="text-meta text-muted-foreground">Logical bytes by operation</span>
         }
       >
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5">
-          <div className="bg-muted/15 px-4 py-3 text-2xs leading-relaxed text-muted-foreground sm:px-5">
+          <div className="bg-muted/15 px-4 py-3 text-meta leading-relaxed text-muted-foreground sm:px-5">
             Native counters identify which process is reading or writing. These application-level
             counters identify known Kurambit operations so process spikes can be correlated with
             specific persistence and logging paths.

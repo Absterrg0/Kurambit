@@ -39,8 +39,8 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ExpandableText } from "./ExpandableText";
-import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
-import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { ResourceTelemetryDiagnostics, unavailableReason } from "./ResourceTelemetryDiagnostics";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
@@ -96,7 +96,7 @@ function StatBlock({
 }) {
   return (
     <div className="min-w-0 border-border/60 px-4 py-3 sm:px-5">
-      <div className="flex min-w-0 items-center gap-1.5 text-2xs font-medium uppercase tracking-widest text-muted-foreground/70">
+      <div className="flex min-w-0 items-center gap-1.5 text-meta font-medium text-muted-foreground">
         <span className="min-w-0 truncate">{label}</span>
         {tooltip ? (
           <Tooltip>
@@ -104,7 +104,7 @@ function StatBlock({
               render={
                 <button
                   type="button"
-                  className="cursor-pointer inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 hover:text-foreground"
+                  className="cursor-pointer inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
                   aria-label={`${label} details`}
                 >
                   <InfoIcon className="size-3" />
@@ -185,7 +185,7 @@ function DiagnosticsTable({
             ))}
           </colgroup>
         ) : null}
-        <thead className="border-b border-border/60 text-2xs uppercase tracking-widest text-muted-foreground/70">
+        <thead className="border-b border-border/60 text-meta font-medium text-muted-foreground">
           <tr>
             {headers.map((header, index) => (
               <th
@@ -217,7 +217,7 @@ function TraceIdCell({ traceId }: { traceId: string }) {
       <Tooltip>
         <TooltipTrigger
           render={
-            <span className="min-w-0 flex-1 truncate font-mono text-2xs">
+            <span className="min-w-0 flex-1 truncate font-mono text-meta">
               {shortenTraceId(traceId)}
             </span>
           }
@@ -374,7 +374,7 @@ function ProcessDiagnosticsTable({
             <col className="w-[11%]" />
             <col className="w-[6%]" />
           </colgroup>
-          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-2xs uppercase tracking-widest text-muted-foreground/70">
+          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-meta font-medium text-muted-foreground">
             <tr>
               <th className="px-4 py-2 font-semibold sm:pl-5">Name</th>
               <th className="px-3 py-2 text-right font-semibold">CPU</th>
@@ -600,7 +600,7 @@ function ProcessResourceHistoryTable({
             <col className="w-[16%]" />
             <col className="w-[10%]" />
           </colgroup>
-          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-2xs uppercase tracking-widest text-muted-foreground/70">
+          <thead className="sticky top-0 z-10 border-b border-border/60 bg-card text-meta font-medium text-muted-foreground">
             <tr>
               <th className="px-4 py-2 font-semibold sm:pl-5">Process</th>
               <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
@@ -673,15 +673,15 @@ function DiagnosticsLastChecked({ checkedAt }: { checkedAt: DateTime.Utc | null 
   const relative = useRelativeTimeState(checkedAt ? DateTime.formatIso(checkedAt) : null);
 
   if (relative.status === "missing") {
-    return <span className="text-2xs text-muted-foreground/50">Checking</span>;
+    return <span className="text-meta text-muted-foreground">Checking</span>;
   }
 
   if (relative.status === "invalid") {
-    return <span className="text-2xs text-muted-foreground/50">Checked unavailable</span>;
+    return <span className="text-meta text-muted-foreground">Checked unavailable</span>;
   }
 
   return (
-    <span className="text-2xs text-muted-foreground/60">
+    <span className="text-meta text-muted-foreground">
       {relative.suffix ? (
         <>
           Checked <span className="font-mono tabular-nums">{relative.value}</span> {relative.suffix}
@@ -935,6 +935,17 @@ export function DiagnosticsSettingsPanel() {
       : null;
   const processPending = processData ? "—" : "...";
   const processResourceError = resourceData ? Option.getOrNull(resourceData.error) : null;
+  // A build with no process monitor has no readings to frame: each section says so once
+  // instead of a row of dashes over a red error.
+  const processesUnavailable = processDiagnosticsError !== null && processTotals === null;
+  const historyUnavailable =
+    processResourceError !== null && (resourceData?.retainedSampleCount ?? 0) === 0;
+  // "Not available in this build" is the platform having no monitor at all, which the
+  // Resource monitor section above already states; these sections then stay out of the way.
+  const isBuildGap = (message: string | undefined) =>
+    message !== undefined && /^Not available in this build/i.test(message);
+  const hideProcesses = processesUnavailable && isBuildGap(processDiagnosticsError?.message);
+  const hideHistory = historyUnavailable && isBuildGap(processResourceError?.message);
   const traceDiagnosticsError = data ? Option.getOrNull(data.error) : null;
   const traceDiagnosticsPartialFailure = data
     ? Option.getOrElse(data.partialFailure, () => false)
@@ -958,142 +969,166 @@ export function DiagnosticsSettingsPanel() {
     <SettingsPageContainer width="expanded" className="gap-10">
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
-      <SettingsSection
-        title="Live Processes"
-        headerAction={
-          <div className="flex items-center gap-1.5">
-            <DiagnosticsLastChecked checkedAt={processData?.readAt ?? null} />
-            <DiagnosticsRefreshButton
-              isPending={isProcessPending}
-              label="Refresh process diagnostics"
-              onClick={refreshProcesses}
-            />
-          </div>
-        }
-      >
-        <StatsGrid>
-          <StatBlock
-            label="Child Processes"
-            value={processTotals ? formatCount(processTotals.processCount) : processPending}
-          />
-          <StatBlock
-            label="CPU"
-            value={processTotals ? `${processTotals.totalCpuPercent.toFixed(1)}%` : processPending}
-            tooltip="Total CPU across live child processes of the current server process. The desktop shell and other parent processes are not included."
-          />
-          <StatBlock
-            label="Memory"
-            value={processTotals ? formatBytes(processTotals.totalRssBytes) : processPending}
-            tooltip="Total resident memory across live child processes of the current server process. The desktop shell and other parent processes are not included."
-          />
-          <StatBlock
-            label="Server PID"
-            value={processData ? String(processData.serverPid) : "..."}
-          />
-        </StatsGrid>
-        {processDiagnosticsError || processError ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processDiagnosticsError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processDiagnosticsError.message}</span>
-              </div>
-            ) : null}
-            {processError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processError}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        <ProcessDiagnosticsTable
-          processes={processData?.processes ?? []}
-          canMaintainEnvironment={canMaintainEnvironment}
-          signalingPid={signalingPid}
-          onSignal={signalProcess}
-          emptyLabel={
-            isProcessInitialLoading
-              ? "Loading live processes..."
-              : processTotals === null && processDiagnosticsError !== null
-                ? "No processes could be read."
-                : "No live descendant processes found."
+      {hideProcesses ? null : (
+        <SettingsSection
+          title="Live processes"
+          headerAction={
+            <div className="flex items-center gap-1.5">
+              <DiagnosticsLastChecked checkedAt={processData?.readAt ?? null} />
+              <DiagnosticsRefreshButton
+                isPending={isProcessPending}
+                label="Refresh process diagnostics"
+                onClick={refreshProcesses}
+              />
+            </div>
           }
-        />
-      </SettingsSection>
+        >
+          {processesUnavailable && processDiagnosticsError ? (
+            <SettingsRow
+              title="Not available in this build"
+              description={unavailableReason(processDiagnosticsError.message)}
+            />
+          ) : (
+            <>
+              <StatsGrid>
+                <StatBlock
+                  label="Child processes"
+                  value={processTotals ? formatCount(processTotals.processCount) : processPending}
+                />
+                <StatBlock
+                  label="CPU"
+                  value={
+                    processTotals ? `${processTotals.totalCpuPercent.toFixed(1)}%` : processPending
+                  }
+                  tooltip="Total CPU across live child processes of the current server process. The desktop shell and other parent processes are not included."
+                />
+                <StatBlock
+                  label="Memory"
+                  value={processTotals ? formatBytes(processTotals.totalRssBytes) : processPending}
+                  tooltip="Total resident memory across live child processes of the current server process. The desktop shell and other parent processes are not included."
+                />
+                <StatBlock
+                  label="Server PID"
+                  value={processData ? String(processData.serverPid) : "..."}
+                />
+              </StatsGrid>
+              {processDiagnosticsError || processError ? (
+                <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
+                  {processDiagnosticsError ? (
+                    <div className="flex items-start gap-2 text-destructive">
+                      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{processDiagnosticsError.message}</span>
+                    </div>
+                  ) : null}
+                  {processError ? (
+                    <div className="flex items-start gap-2 text-destructive">
+                      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{processError}</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <ProcessDiagnosticsTable
+                processes={processData?.processes ?? []}
+                canMaintainEnvironment={canMaintainEnvironment}
+                signalingPid={signalingPid}
+                onSignal={signalProcess}
+                emptyLabel={
+                  isProcessInitialLoading
+                    ? "Loading live processes..."
+                    : processTotals === null && processDiagnosticsError !== null
+                      ? "No processes could be read."
+                      : "No live descendant processes found."
+                }
+              />
+            </>
+          )}
+        </SettingsSection>
+      )}
+
+      {hideHistory ? null : (
+        <SettingsSection
+          title="Resource history"
+          headerAction={
+            <div className="flex items-center gap-1.5">
+              <ResourceHistoryWindowSelector
+                selectedWindowMs={resourceWindowMs}
+                onSelect={setResourceWindowMs}
+              />
+              <DiagnosticsLastChecked checkedAt={resourceData?.readAt ?? null} />
+              <DiagnosticsRefreshButton
+                isPending={isResourcePending}
+                label="Refresh resource history"
+                onClick={refreshResources}
+              />
+            </div>
+          }
+        >
+          {historyUnavailable && processResourceError ? (
+            <SettingsRow
+              title="Not available in this build"
+              description={unavailableReason(processResourceError.message)}
+            />
+          ) : (
+            <>
+              <StatsGrid>
+                <StatBlock
+                  label="CPU time"
+                  value={resourceData ? formatCpuTime(resourceData.totalCpuSecondsApprox) : "..."}
+                  tooltip="Approximate active CPU time for the Kurambit server root process and its descendants during the selected window. It grows only while sampled processes use CPU and older samples leave as the window moves."
+                />
+                <StatBlock
+                  label="Samples"
+                  value={resourceData ? formatCount(resourceData.retainedSampleCount) : "..."}
+                  tooltip="In-memory process samples retained by the server. The server samples only while diagnostics is open, and this resets when the server restarts."
+                />
+                <StatBlock
+                  label="Interval"
+                  value={
+                    resourceData
+                      ? resourceData.sampleIntervalMs === 0
+                        ? "On demand"
+                        : formatDuration(resourceData.sampleIntervalMs)
+                      : "..."
+                  }
+                />
+                <StatBlock
+                  label="Processes"
+                  value={resourceData ? formatCount(resourceData.topProcesses.length) : "..."}
+                />
+              </StatsGrid>
+              {processResourceError || resourceError ? (
+                <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
+                  {processResourceError ? (
+                    <div className="flex items-start gap-2 text-destructive">
+                      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{processResourceError.message}</span>
+                    </div>
+                  ) : null}
+                  {resourceError ? (
+                    <div className="flex items-start gap-2 text-destructive">
+                      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{resourceError}</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <ProcessResourceHistoryChart buckets={resourceData?.buckets ?? []} />
+              <ProcessResourceHistoryTable
+                processes={resourceData?.topProcesses ?? []}
+                emptyLabel={
+                  isResourceInitialLoading
+                    ? "Collecting process resource samples..."
+                    : "No process resource samples found for this window."
+                }
+              />
+            </>
+          )}
+        </SettingsSection>
+      )}
 
       <SettingsSection
-        title="Resource History"
-        headerAction={
-          <div className="flex items-center gap-1.5">
-            <ResourceHistoryWindowSelector
-              selectedWindowMs={resourceWindowMs}
-              onSelect={setResourceWindowMs}
-            />
-            <DiagnosticsLastChecked checkedAt={resourceData?.readAt ?? null} />
-            <DiagnosticsRefreshButton
-              isPending={isResourcePending}
-              label="Refresh resource history"
-              onClick={refreshResources}
-            />
-          </div>
-        }
-      >
-        <StatsGrid>
-          <StatBlock
-            label="CPU Time"
-            value={resourceData ? formatCpuTime(resourceData.totalCpuSecondsApprox) : "..."}
-            tooltip="Approximate active CPU time for the Kurambit server root process and its descendants during the selected window. It grows only while sampled processes use CPU and older samples leave as the window moves."
-          />
-          <StatBlock
-            label="Samples"
-            value={resourceData ? formatCount(resourceData.retainedSampleCount) : "..."}
-            tooltip="In-memory process samples retained by the server. The server samples only while diagnostics is open, and this resets when the server restarts."
-          />
-          <StatBlock
-            label="Interval"
-            value={
-              resourceData
-                ? resourceData.sampleIntervalMs === 0
-                  ? "On demand"
-                  : formatDuration(resourceData.sampleIntervalMs)
-                : "..."
-            }
-          />
-          <StatBlock
-            label="Processes"
-            value={resourceData ? formatCount(resourceData.topProcesses.length) : "..."}
-          />
-        </StatsGrid>
-        {processResourceError || resourceError ? (
-          <div className="space-y-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {processResourceError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{processResourceError.message}</span>
-              </div>
-            ) : null}
-            {resourceError ? (
-              <div className="flex items-start gap-2 text-destructive">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-                <span>{resourceError}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        <ProcessResourceHistoryChart buckets={resourceData?.buckets ?? []} />
-        <ProcessResourceHistoryTable
-          processes={resourceData?.topProcesses ?? []}
-          emptyLabel={
-            isResourceInitialLoading
-              ? "Collecting process resource samples..."
-              : "No process resource samples found for this window."
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        title="Trace Diagnostics"
+        title="Trace diagnostics"
         headerAction={
           <div className="flex items-center gap-1.5">
             <DiagnosticsLastChecked checkedAt={data?.readAt ?? null} />
@@ -1133,7 +1168,7 @@ export function DiagnosticsSettingsPanel() {
             tone={data && data.failureCount > 0 ? "danger" : "default"}
           />
           <StatBlock
-            label="Slow Spans"
+            label="Slow spans"
             value={data ? formatCount(data.slowSpanCount) : "..."}
             tooltip={
               data
@@ -1143,7 +1178,7 @@ export function DiagnosticsSettingsPanel() {
             tone={data && data.slowSpanCount > 0 ? "warning" : "default"}
           />
           <StatBlock
-            label="Parse Errors"
+            label="Parse errors"
             value={data ? formatCount(data.parseErrorCount) : "..."}
             tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
           />
@@ -1181,7 +1216,7 @@ export function DiagnosticsSettingsPanel() {
         ) : null}
       </SettingsSection>
 
-      <SettingsSection title="Latest Failures">
+      <SettingsSection title="Latest failures">
         {data && data.latestFailures.length > 0 ? (
           <DiagnosticsTable headers={["Span", "Cause", "Duration", "Ended"]}>
             {data.latestFailures.map((failure) => (
@@ -1282,7 +1317,7 @@ export function DiagnosticsSettingsPanel() {
                 <col className="w-[26%]" />
                 <col className="w-[30%]" />
               </colgroup>
-              <thead className="border-b border-border/60 text-2xs uppercase tracking-widest text-muted-foreground/70">
+              <thead className="border-b border-border/60 text-meta font-medium text-muted-foreground">
                 <tr>
                   <th className="whitespace-nowrap px-4 py-2.5 font-semibold sm:pl-5">Time</th>
                   <th className="whitespace-nowrap px-4 py-2.5 font-semibold">Level</th>
@@ -1301,7 +1336,7 @@ export function DiagnosticsSettingsPanel() {
                       <RelativeTimeNoWrap value={event.seenAt} />
                     </td>
                     <td className="px-4 py-3 align-top">
-                      <span className="inline-flex rounded bg-muted px-1.5 py-0.5 font-mono text-2xs font-medium uppercase text-foreground/80">
+                      <span className="inline-flex rounded bg-muted px-1.5 py-0.5 font-mono text-meta font-medium uppercase text-foreground/80">
                         {event.level}
                       </span>
                     </td>
