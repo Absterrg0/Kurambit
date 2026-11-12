@@ -148,7 +148,10 @@ function SidebarControl() {
       if (
         isRichTextBoldShortcut(event) &&
         event.target instanceof HTMLElement &&
-        event.target.closest('[data-composer-rich-text="true"]')
+        event.target.closest('[data-composer-rich-text="true"]') &&
+        // A game's composer asks the game for changes; bold means nothing there, and the
+        // composer is where focus starts, so the sidebar's key must work from it.
+        !event.target.closest("[data-game-centre]")
       ) {
         // The rich-text composer claims Mod+B for bold; the toggle stays
         // available everywhere else, including the plain-text composer.

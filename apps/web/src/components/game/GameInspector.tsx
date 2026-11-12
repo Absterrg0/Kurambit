@@ -379,7 +379,14 @@ function BuildDetail({
   useEffect(() => {
     if (neverMeasured) void sendMeasure(build.id);
   }, [neverMeasured, build.id, sendMeasure]);
-  const factsData = facts.data;
+  // While the build is measured again, what it measured before stands until new readings land,
+  // so a pass never blinks out and back; the heading says it is being measured.
+  const [lastSettled, setLastSettled] = useState<GameBuildFacts | null>(null);
+  const read = facts.data;
+  const busy = read !== null && (read.state === "measuring" || read.state === "queued");
+  if (read !== null && !busy && read.state !== "never" && read !== lastSettled)
+    setLastSettled(read);
+  const factsData = read === null ? null : withLastReadings(read, busy ? lastSettled : null);
   const measureAnswer = measure.answer(build.id);
   const source = build.source;
   const step = source._tag === "turn" ? source.step : null;
@@ -506,7 +513,15 @@ function BuildDetail({
             ) : null}
           </Empty>
         ) : (
-          <Checks threadRef={threadRef} facts={factsData} />
+          <>
+            {/* What is measuring, and how long is left, on its own line: never cut off. */}
+            {busy && factsData.message.trim() !== "" ? (
+              <Text variant="meta" tone="muted" render={<p />}>
+                {factsData.message}
+              </Text>
+            ) : null}
+            <Checks threadRef={threadRef} facts={factsData} />
+          </>
         )}
         {measureAnswer !== null && measureAnswer.text !== factsData?.message ? (
           <Text
@@ -539,6 +554,29 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
  * first number read always matches the rows. Before any reading lands, "0
  * pass" would read as a verdict.
  */
+const FACT_KEYS = [
+  "boots",
+  "idle",
+  "masher",
+  "skilled",
+  "winnableWithoutSkill",
+  "liveness",
+  "firstResponse",
+  "assets",
+  "performance",
+  "use",
+  "scene",
+] as const satisfies ReadonlyArray<keyof GameBuildFacts>;
+
+/** A measuring build's facts with each reading still to come taken from its last measure. */
+function withLastReadings(facts: GameBuildFacts, last: GameBuildFacts | null): GameBuildFacts {
+  if (last === null) return facts;
+  const merged: Record<(typeof FACT_KEYS)[number], unknown> = { ...facts };
+  for (const key of FACT_KEYS)
+    if (facts[key].status === "pending" && last[key].status === "measured") merged[key] = last[key];
+  return { ...facts, ...(merged as Pick<GameBuildFacts, (typeof FACT_KEYS)[number]>) };
+}
+
 function checksSummary(facts: GameBuildFacts): string {
   const view = gameChecksView(facts);
   const busy = facts.state === "measuring" || facts.state === "queued";
@@ -552,7 +590,7 @@ function checksSummary(facts: GameBuildFacts): string {
       : []),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
-    ...(busy && facts.message.trim() !== "" ? [facts.message.replace(/\.$/, "")] : []),
+    ...(busy ? ["measuring again"] : []),
   ].join(" · ");
 }
 

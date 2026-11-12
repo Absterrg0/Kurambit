@@ -1604,7 +1604,7 @@ function SidebarGameRowBody(props: {
   read: boolean;
   active: boolean;
 }) {
-  const { status, build } = useGameLibraryLine({
+  const { status, build, pending } = useGameLibraryLine({
     game: props.game,
     main: props.main,
     chats: props.chats,
@@ -1615,13 +1615,18 @@ function SidebarGameRowBody(props: {
   const rename = useRenameGame(props.game.environmentId);
   return (
     <div className="flex items-center gap-2.5 px-2 py-1.5 pe-7">
-      <GamePicture
-        environmentId={props.game.environmentId}
-        root={props.game.root}
-        path={build?.still ?? null}
-        gameName={name}
-        className="size-7.5 shrink-0 rounded-md"
-      />
+      {pending ? (
+        // Its picture is not known yet: a quiet well, not an initial it will swap away.
+        <Skeleton shape="card" className="size-7.5 shrink-0" />
+      ) : (
+        <GamePicture
+          environmentId={props.game.environmentId}
+          root={props.game.root}
+          path={build?.still ?? null}
+          gameName={name}
+          className="size-7.5 shrink-0 rounded-md"
+        />
+      )}
       <span className="flex min-w-0 flex-1 flex-col">
         {renaming ? (
           <GameNameInput

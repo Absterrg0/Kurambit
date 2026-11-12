@@ -78,6 +78,7 @@ import {
   MenuShortcut,
   MenuTrigger,
 } from "../ui/menu";
+import { Skeleton } from "../ui/skeleton";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -579,6 +580,9 @@ function ThreadGameStage({
   const backToLive = () => {
     setCompare(null);
     if (asked !== null) void stopBuild(asked.build);
+    // The Inspector follows the Stage back: Now's summary, not the build last clicked.
+    if (useGameWorkspaceStore.getState().inspectedBuild?.threadKey === threadKey)
+      inspectBuild(null);
   };
   // An earlier build on the Stage, from a copy: the copy's frame shows it.
   const playBuild = async (build: GameBuild | GameBuildRef) => {
@@ -669,6 +673,23 @@ function ThreadGameStage({
           />
           <span className="min-w-0 break-words">The game could not be read: {query.error}</span>
         </span>
+      </section>
+    ) : query.error === null ? (
+      // Read but not answered yet: the Stage's own shape, so nothing moves when it lands.
+      <section
+        aria-busy="true"
+        aria-label="Loading the game"
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+      >
+        <div className="flex h-(--workspace-topbar-height) shrink-0 items-center px-3">
+          <Skeleton className="h-4 w-28" />
+        </div>
+        <div className="mx-3 min-h-0 flex-1 rounded-xl bg-stage-well" />
+        <div className="grid shrink-0 grid-cols-3 gap-3 px-3 pt-9 pb-8">
+          {[0, 1, 2].map((n) => (
+            <Skeleton key={n} shape="card" className="aspect-video max-h-40 w-full" />
+          ))}
+        </div>
       </section>
     ) : null;
   const engine = GAME_ENGINES[data.manifest.engine.name];

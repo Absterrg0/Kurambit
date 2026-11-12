@@ -63,7 +63,9 @@ export function GameArtSettingsPanel() {
     <SettingsPageContainer description="Who makes each kind of asset your agent asks for. Auto takes the first ready provider; the agent never switches it for you.">
       {environmentId === null ? (
         <Text variant="body" tone="muted" render={<p className="px-3 sm:px-4" />}>
-          Art providers belong to one computer. Choose it above.
+          {scope.environmentIds.length <= 1
+            ? "Connecting…"
+            : "Art providers belong to one computer. Choose it above."}
         </Text>
       ) : (
         <GameArtSettings key={environmentId} environmentId={environmentId} />

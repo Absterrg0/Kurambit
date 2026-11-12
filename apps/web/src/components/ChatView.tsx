@@ -174,7 +174,7 @@ import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
-import { useIsGameThread } from "../hooks/useIsGameThread";
+import { isGameStatusFailure, useIsGameThreadStatus } from "../hooks/useIsGameThread";
 import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
@@ -1642,7 +1642,15 @@ export default function ChatView(props: ChatViewProps) {
   const activePreviewMiniPlayer = usePreviewMiniPlayerStore((state) =>
     selectThreadPreviewMiniPlayer(state.byThreadKey, activeThreadRef),
   );
-  const isGameThread = useIsGameThread(activeThreadRef);
+  const gameStatus = useIsGameThreadStatus(activeThreadRef);
+  // Until the server answers whether this thread is a game, the screen keeps the game's shape
+  // (the Stage's well, the strip, the Inspector) rather than flash an empty chat: only a
+  // "not a game" answer turns it into one.
+  const isGameThread =
+    activeThreadRef !== null &&
+    (gameStatus.data !== null ||
+      isGameStatusFailure(gameStatus.failure) ||
+      gameStatus.error === null);
   const gameInspectorWidth = useGameWorkspaceStore((state) => state.inspectorWidth);
   const gameInspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
   const gameInspectorTab = useGameWorkspaceStore((state) => state.inspectorTab);

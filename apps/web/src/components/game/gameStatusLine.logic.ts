@@ -135,12 +135,14 @@ export interface GameLibraryStatusInput {
   readonly operationRunning: boolean;
   /** The folder's build, else the newest one, as a sentence names it, with when it was made. */
   readonly build: { readonly name: string; readonly at: string } | null;
+  /** The game's builds have been read; before that nothing is said about them. */
+  readonly known: boolean;
 }
 
 /** One line for a game in the library (the sidebar and Home), read from the top bar's sources. */
 export interface GameLibraryStatus {
   readonly text: string;
-  readonly tone: "live" | "failed" | "idle";
+  readonly tone: "live" | "failed" | "idle" | "pending";
   /** Ticks an elapsed time after the text. */
   readonly since: string | null;
   /** A relative time after the text ("2m"). */
@@ -167,6 +169,7 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.operationRunning) return line("Building", "live");
   if (input.chats === "failed") return line("The last turn failed", "failed");
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
+  if (!input.known) return line("", "pending");
   // A game opened from a folder plays before Kurambit has measured any build of it.
   return line("Not measured yet", "idle");
 };

@@ -27,7 +27,7 @@ import {
 } from "../components/settings/settingsSearch";
 
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
-  const { scope, connectedEnvironments } = useSettingsScope();
+  const { scope, connectedEnvironments, environments: scopedEnvironments } = useSettingsScope();
   const { environments } = useEnvironments();
   const hash = useLocation({ select: (location) => location.hash });
   const searchTarget = getSettingsSearchTargetScope(hash);
@@ -81,10 +81,17 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
       </SettingsPageContainer>
     );
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
+    // A computer still coming up is connecting, not lost: only a failed one asks for a reconnect.
+    const connecting = scopedEnvironments.some(
+      (environment) =>
+        environment.connection.phase === "available" ||
+        environment.connection.phase === "connecting" ||
+        (environment.connection.phase === "connected" && environment.serverConfig === null),
+    );
     return (
       <SettingsPageContainer>
         <p className="text-sm text-muted-foreground">
-          Reconnect {scope.label} to change its settings.
+          {connecting ? "Connecting…" : `Reconnect ${scope.label} to change its settings.`}
         </p>
       </SettingsPageContainer>
     );

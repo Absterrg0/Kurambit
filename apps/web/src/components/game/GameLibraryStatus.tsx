@@ -6,6 +6,7 @@ import { cn } from "../../lib/utils";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { useRelativeTimeState } from "../../hooks/useRelativeTimeState";
+import { Skeleton } from "../ui/skeleton";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
@@ -15,8 +16,9 @@ import { buildName } from "./gameBuilds.logic";
 import { gameLibraryStatus, type GameLibraryStatus } from "./gameStatusLine.logic";
 import type { GameLibraryEntry } from "./useGameLibrary";
 
-/** The folder's build when the list names it, else the newest; null before any. */
+/** The folder's build when the list names it, else the newest; null before any, undefined unread. */
 const latestBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (AsyncResult.isInitial(result)) return undefined;
   if (!AsyncResult.isSuccess(result)) return null;
   const { builds, current } = result.value;
   return builds.find((build) => build.id === current) ?? builds[0] ?? null;
@@ -27,7 +29,7 @@ const latestBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown
  * screen reads, so an open game and its library row share one read. Pass null
  * to read nothing (a row scrolled out of view).
  */
-function useGameLatestBuild(threadRef: ScopedThreadRef | null): GameBuild | null {
+function useGameLatestBuild(threadRef: ScopedThreadRef | null): GameBuild | null | undefined {
   return useEnvironmentQuerySelector(
     threadRef === null
       ? null
@@ -50,7 +52,12 @@ export function useGameLibraryLine(input: {
   /** The most urgent state of the game's chats (resolveGameSidebarStatus). */
   readonly chats: SidebarThreadStatus | null;
   readonly read: boolean;
-}): { readonly status: GameLibraryStatus; readonly build: GameBuild | null } {
+}): {
+  readonly status: GameLibraryStatus;
+  readonly build: GameBuild | null;
+  /** The builds are still being read: the picture and the line wait rather than guess. */
+  readonly pending: boolean;
+} {
   const { game, main, chats } = input;
   const build = useGameLatestBuild(
     input.read && main !== null ? scopeThreadRef(game.environmentId, main.id) : null,
@@ -65,9 +72,11 @@ export function useGameLibraryLine(input: {
     turnStartedAt: main === null ? null : resolveWorkingStartedAt(main),
     keepGoing: game.run?.step ?? null,
     operationRunning: game.operation?.state === "running",
-    build: build === null ? null : { name: buildName(build), at: build.at },
+    build: build == null ? null : { name: buildName(build), at: build.at },
+    // A game with no chat has no builds to read; any other waits for its read.
+    known: main === null || build !== undefined,
   });
-  return { status, build };
+  return { status, build: build ?? null, pending: main !== null && build === undefined };
 }
 
 /** A game's one status line: a dot for live work or a failure, the words, then its time. */
@@ -81,7 +90,10 @@ export function GameLibraryStatusText({
   return (
     <span className={cn("flex min-w-0 items-center gap-1.5", className)}>
       {/* A dot only when it says something: live work, or a failure. Idle needs none. */}
-      {status.tone === "live" ? (
+      {status.tone === "pending" ? (
+        // Not read yet: a quiet bar where the line goes, never a fact nobody checked.
+        <Skeleton className="my-0.5 h-3 w-24" />
+      ) : status.tone === "live" ? (
         <StatusDot tone="live" pulse />
       ) : status.tone === "failed" ? (
         <StatusDot tone="danger" />

@@ -110,7 +110,9 @@ export function GameToolsSettingsPanel() {
     <SettingsPageContainer description="The programs this computer builds, renders and records your games with.">
       {environmentId === null ? (
         <Text variant="body" tone="muted" render={<p className="px-3 sm:px-4" />}>
-          Game tools belong to one computer. Choose it above.
+          {scope.environmentIds.length <= 1
+            ? "Connecting…"
+            : "Game tools belong to one computer. Choose it above."}
         </Text>
       ) : (
         <>
