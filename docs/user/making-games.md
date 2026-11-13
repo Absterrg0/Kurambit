@@ -63,8 +63,10 @@ model (your last game's, else Claude) and one options button for how characters 
 are saved in `~/Games`. Kurambit names the game from your brief; rename it any time from the game's
 name above the stage, or by double-clicking or right-clicking it in the sidebar. **Start building**
 creates the folder and opens the game while its first build is being made, with your brief sent as
-the first message, so you see exactly what the agent was told. Your agent builds a first playable version in a few minutes; every message after
-that makes it better.
+the first message, so you see exactly what the agent was told. Your game is playable on the stage within a few minutes, on models
+from the asset library; when the library has no model of your hero or its main threat, the agent
+then makes that one in Blender in the same turn, which can take several minutes more. Every message
+after that makes it better, and what you ask for is done in that turn rather than put off.
 
 A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
 plays it, so you watch the starter turn into your game while your agent works. When the agent saves,
