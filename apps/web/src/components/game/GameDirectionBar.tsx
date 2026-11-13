@@ -1,14 +1,13 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
-import { CrosshairIcon, Gamepad2Icon, SlidersHorizontalIcon, XIcon } from "lucide-react";
+import { CrosshairIcon, XIcon } from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
-import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { clampGameDockHeight, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
-import { showGameTab, useGameTabShown } from "./gameRightPanel";
 
 import { useTurnUndo } from "./useBuildActions";
 
@@ -52,19 +51,18 @@ export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
 }
 
 /**
- * The line between the game and the chat under it: drag it, or use the arrow keys, to give
- * the game more or less of the column.
+ * The line between the game and the dock under it: drag it, or use the arrow keys, to give the
+ * dock more or less of the column.
  */
-export function GameStageResize() {
-  const share = useGameWorkspaceStore((state) => state.gameStageShare);
-  const setShare = useGameWorkspaceStore((state) => state.setGameStageShare);
+export function GameDockResize() {
+  const height = useGameWorkspaceStore((state) => state.dockHeight);
+  const setHeight = useGameWorkspaceStore((state) => state.setDockHeight);
   const [dragging, setDragging] = useState(false);
-  const columnOf = (node: HTMLElement) => node.parentElement?.getBoundingClientRect() ?? null;
   const move = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging) return;
-    const column = columnOf(event.currentTarget);
-    if (column === null || column.height === 0) return;
-    setShare((event.clientY - column.top) / column.height);
+    const column = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (column === undefined) return;
+    setHeight(clampGameDockHeight(column.bottom - event.clientY, column.height));
   };
   const end = (event: ReactPointerEvent<HTMLDivElement>) => {
     setDragging(false);
@@ -75,14 +73,14 @@ export function GameStageResize() {
     <div
       role="separator"
       aria-orientation="horizontal"
-      aria-label="Resize the game"
-      aria-valuenow={Math.round(share * 100)}
+      aria-label="Resize the dock"
+      aria-valuenow={height}
       tabIndex={0}
       data-dragging={dragging ? "true" : "false"}
       className={cn(
-        "relative z-20 -my-1 h-2 shrink-0 cursor-row-resize touch-none select-none",
+        "relative z-20 -my-1 h-2 shrink-0 cursor-row-resize touch-none select-none outline-none",
         "after:absolute after:inset-x-0 after:top-1/2 after:h-px after:bg-border",
-        "hover:after:h-0.5 hover:after:bg-primary/50 focus-visible:after:h-0.5 focus-visible:after:bg-primary/50 data-[dragging=true]:after:h-0.5 data-[dragging=true]:after:bg-primary/70",
+        "hover:after:bg-primary/60 focus-visible:after:bg-primary/60 data-[dragging=true]:after:bg-primary",
       )}
       onPointerDown={(event) => {
         event.preventDefault();
@@ -93,46 +91,11 @@ export function GameStageResize() {
       onPointerUp={end}
       onPointerCancel={end}
       onKeyDown={(event) => {
-        if (event.key === "ArrowUp") setShare(share - 0.04);
-        else if (event.key === "ArrowDown") setShare(share + 0.04);
+        if (event.key === "ArrowUp") setHeight(height + 24);
+        else if (event.key === "ArrowDown") setHeight(height - 24);
         else return;
         event.preventDefault();
       }}
     />
-  );
-}
-
-/**
- * The chat's header when the game plays beside it, as a tab of the right panel: the chat's
- * name, and the ways back to the game and to Tune when the panel shows neither.
- */
-export function GameChatHeader({
-  threadRef,
-  title,
-}: {
-  threadRef: ScopedThreadRef;
-  title: string;
-}) {
-  const gameShown = useGameTabShown(threadRef, "game");
-  const tuneShown = useGameTabShown(threadRef, "tune");
-  return (
-    <div className="flex h-full min-w-0 flex-1 items-center gap-1.5">
-      <Text variant="label" tone="strong" truncate render={<h1 className="min-w-0" />}>
-        {title}
-      </Text>
-      <span className="min-w-2 flex-1" />
-      {gameShown ? null : (
-        <Button size="sm" variant="ghost" onClick={() => showGameTab(threadRef, "game")}>
-          <Gamepad2Icon aria-hidden="true" />
-          Game
-        </Button>
-      )}
-      {tuneShown ? null : (
-        <Button size="sm" variant="ghost" onClick={() => showGameTab(threadRef, "tune")}>
-          <SlidersHorizontalIcon aria-hidden="true" />
-          Tune
-        </Button>
-      )}
-    </div>
   );
 }

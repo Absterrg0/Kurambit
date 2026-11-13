@@ -219,7 +219,7 @@ line in the chat says what happened to each:
 - **kept**: no fact Kurambit watches got worse;
 - **undone**: a fact got worse (the game stopped booting, a bot now crashes, it froze, it answers
   later, or it can now be won without skill), so Kurambit put back the build the step started from.
-  The chat says what got worse. **Redo** in the chat or the builds panel puts the step back if you
+  The chat says what got worse. **Redo** in the chat or the dock's Checks tab puts the step back if you
   want it anyway, and keep going goes on from there. A step undone twice is not tried again in this
   run;
 - **not undone**: it made a fact worse but was left in place, with why: a later turn had already
@@ -238,21 +238,24 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 
 ## Play and revise
 
-A game opens on its chat, with the game on top of it. The game's bar says in one line what the
-game is doing (playing a build, making the next one, frozen, keep going's step, or that your agent
-needs a choice), with Undo, Redo, the **⋯** menu of stage controls, buttons that fill the column
-with the game or fold it to its bar, and **Builds**. The game's name opens its menu (rename, folder,
-**Export…**, **Look…**). Drag the line under the game to give it more or less room. Under the chat
-is the box where you tell the game what to change, with **Keep going** beside it.
+A game opens like an editor. The toolbar on top says what the game is doing (playing a build,
+making the next one, frozen, keep going's step, or that your agent needs a choice) with the build's
+checks as marks, then the play controls: **Restart**, **Pause** (which also lets you point at things)
+and slow motion (¼×, ½×, 1×), then sound, **Fullscreen**, Undo, Redo, the **⋯** menu and **Tune**.
+The game's name opens its menu (rename, folder, **Export…**, **Look…**). Under the game, the
+builds run as a timeline, and under them is the dock: **Agent** (your chat with the agent, and the
+box where you tell the game what to change, with **Keep going** beside it), **Checks** (the build's
+checks beside what changed) and **Recordings** (the bot's plays). Drag the line above the dock to
+resize it, or fold it away to give the game the column.
 
-**Builds** opens the right panel's Builds tab: the game's builds as pictures, the chosen build's
-checks, what changed and its recordings. `mod+Alt+C` shows or hides it. To play the game in the right
-panel instead, as a tab beside Builds, choose **Play beside the chat** in the game's menu, or
-Settings › Appearance › **Where the game plays**; the panel's own controls then fill the window
-with it or close it. A narrow window always puts the game above the chat.
+**Tune**, on the right, lists the values the running game reads, such as its speeds, jump height,
+timers and counts, grouped by thing. Drag a name or a slider, or type a number, and the game changes
+at once; **Keep as a build** keeps the changes and Undo takes them back. If a game shows nothing to
+tune, **Ask your agent to expose them** asks for it. **Look** is the right panel's other tab.
+`mod+Alt+C` shows or hides Tune.
 
-- **A three.js game is always on.** The stage plays the game folder itself, and **Reload** restarts
-  it now, at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
+- **A three.js game is always on.** The stage plays the game folder itself, and **Restart** starts
+  it again at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
   **Fullscreen** shows only the game, edge to edge. A game made from the starter opens on its title screen: choose Play there, or press
   Enter. The game pauses and mutes while the stage is hidden and resumes when you come back.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
@@ -267,9 +270,9 @@ with it or close it. A narrow window always puts the game above the chat.
   what a new package contains. Upload the extracted files to an ordinary static HTTP host and serve
   them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
   a WebAssembly export.
-- The right panel is resizable; drag its edge, or close it to give the chat and the game more room.
+- The right panel is resizable; drag its edge, or close it to give the game more room.
 - **Point at a thing.** Press Tab (or **Freeze** in the **⋯** menu) to freeze the game, then click a
-  character or prop: the builds panel shows it under **On screen**, where its values tune the running game
+  character or prop: **Tune** shows it first, where its values tune the running game
   live and **Keep as a build** keeps them, and it is attached to your next message as a chip. Sending
   sends the frame, what the thing is and its values with your words. The chip's **×** or Esc stops
   pointing; Tab plays on.
@@ -295,13 +298,13 @@ cannot tell which you want, it asks you. A build is the game folder as its turn
 left it. A three.js game's stage shows the folder live, so while your agent works it can be ahead of
 the latest build.
 
-The build strip in the builds panel has one picture per build, oldest to newest: a frame from the
+The build timeline under the game has one picture per build, oldest to newest: a frame from the
 build's own play, what you asked for, its number and time, and what changed in its checks. The build on the stage is outlined, an undone build is dimmed and struck, a keep-going
 step carries a step sign, and the build being made waits as a dashed card with its time. **Now**
 appears when the game folder is not any build (edited since, or another build plays from a copy);
 until the Stage has shown the game, its picture is the last build's, dimmed.
 **Older** pages back. Clicking a picture plays that build (an older one from a copy; the game folder
-is never touched, and **Back to the current game** or the newest picture returns) and shows it in the builds panel, which lists how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won, is it won by random or no input, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement, each in a plain sentence, under **Other measurements**, what changed in your agent's words (with the files it changed,
+is never touched, and **Back to the current game** or the newest picture returns) and shows it in the dock's **Checks** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won, is it won by random or no input, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement, each in a plain sentence, under **Other measurements**, what changed in your agent's words (with the files it changed,
 which open the diff), its recordings, and in the **⋯** beside the build's name:
 
 - **Undo this build** on the latest turn, which puts back the build the turn started from. After an undo,
@@ -311,7 +314,7 @@ which open the diff), its recordings, and in the **⋯** beside the build's name
   stay as they are. What the folder held is saved as a build first, so going back never discards work, and
   **Redo** puts it back.
 
-When the game folder has changed since its last build, the panel shows **Now on the Stage** first and
+When the game folder has changed since its last build, the tab shows **Now on the Stage** first and
 the checks under **Last measured build**, since they belong to that build, not to what plays now.
 Checks not measured for the same reason are said once; the ⓘ beside them says why. **Compare with** the build
 before it, or **Compare** on the strip (or **Compare builds…** in the command palette) to pick two
@@ -322,7 +325,7 @@ fact that was not measured on one side reads "not comparable" with the reason. O
 playing runs; the other is paused and muted. **Close** returns to the live game.
 
 Under a turn's changed files in the chat, the turn's build is one line: its name, which plays it and
-shows it in the builds panel, its checks, and **Undo** or **Redo** on the latest turn.
+shows it in the dock's Checks tab, its checks, and **Undo** or **Redo** on the latest turn.
 
 Undo changes the game's files, not the chat: the conversation stays as it is, so your agent still
 knows what it tried, and it sees from the files that you undid it. Undo, Redo and going back wait

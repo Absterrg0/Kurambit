@@ -3,21 +3,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { showGameTab, toggleGameTab, useGameTabShown } from "./gameRightPanel";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { GameStageControls } from "./GameStageControls";
-import { GameBuildDetail } from "./GameInspector";
+import { GameStagePlayControls, GameStageViewControls } from "./GameStageControls";
+import { CheckMarks, useStageChecks } from "./GameDock";
 import {
   CircleStopIcon,
   CrosshairIcon,
-  ListChecksIcon,
   SlidersHorizontalIcon,
   ChevronDownIcon,
-  ChevronUpIcon,
-  Columns2Icon,
-  Maximize2Icon,
-  Minimize2Icon,
   PaletteIcon,
-  Rows2Icon,
   DownloadIcon,
   FilmIcon,
   FolderOpenIcon,
@@ -112,7 +105,7 @@ import {
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
-import { buildName, buildPhrase, checksLine, doesNotStart, undoOutcome } from "./gameBuilds.logic";
+import { buildName, buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.logic";
 import { nextBuildOf } from "./GameLibraryStatus";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
@@ -176,13 +169,6 @@ const folderBuildIdOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unkno
     ? result.value.current
     : null;
 
-/** The checks of the build the folder holds, in the words every surface uses. */
-const folderChecksOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
-  if (!AsyncResult.isSuccess(result) || result.value.folderEdited !== false) return null;
-  const build = result.value.builds.find((each) => each.id === result.value.current);
-  return build === undefined ? null : checksLine(build.facts);
-};
-
 /** The build the folder holds, as a sentence names it ("build 7"), unless edited since. */
 const folderBuildPhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result) || result.value.folderEdited === true) return null;
@@ -226,7 +212,7 @@ const SHORT_WINDOW = 840;
  */
 const TRANSIENT_ROWS_RESERVE = 38;
 /** A build card in the panel's strip, at the panel's width. */
-const STRIP_CARD_WIDTH = 112;
+const STRIP_CARD_WIDTH = 88;
 /**
  * What the loading skeleton's column gives up besides its Stage, so its Stage is the size the
  * fit gives a 16:9 game and nothing moves when the game is read.
@@ -379,10 +365,8 @@ interface GameStageProps {
   onAskAgent: (text: string) => void;
   /** The window is narrow: the game always stacks above the chat. */
   compact?: boolean;
-  /** Mounted but out of sight (another tab of the right panel); the game holds still. */
+  /** Mounted but out of sight; the game holds still. */
   hidden?: boolean;
-  /** On top of the chat, or a tab of the right panel beside it. */
-  placement?: "above" | "right";
   /** What the person asked of the turn now running, for the build slot's caption. */
   turnRequest?: string | null;
 }
@@ -391,21 +375,13 @@ function ThreadGameStage({
   threadRef,
   turnRunning,
   onAskAgent,
-  compact = false,
   hidden = false,
-  placement = "above",
   turnRequest = null,
 }: GameStageProps) {
   const navigate = useNavigate();
-  const gameView = useGameWorkspaceStore((state) => state.gameView);
-  const setGameView = useGameWorkspaceStore((state) => state.setGameView);
-  const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
-  const setGamePlacement = useGameWorkspaceStore((state) => state.setGamePlacement);
-  const buildDetailOpen = useGameWorkspaceStore((state) => state.buildDetailOpen);
-  const setBuildDetailOpen = useGameWorkspaceStore((state) => state.setBuildDetailOpen);
-  // Folded to its bar the game holds still, as it does in a hidden pane. Beside the chat it
-  // folds by closing the panel instead.
-  const collapsed = placement === "above" && gameView === "collapsed";
+  const showDockTab = useGameWorkspaceStore((state) => state.showDockTab);
+  const stageChecks = useStageChecks(threadRef);
+  const collapsed = false;
   const panelOpen = useRightPanelStore(
     (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
   );
@@ -574,7 +550,6 @@ function ThreadGameStage({
   // turn is changing the folder under it. Only a new frame is kept, never one from before.
   const folderBuild = useEnvironmentQuerySelector(buildsAtom, folderBuildIdOf) ?? null;
   // One pane at a time, the Inspector's way in carries what it would show first.
-  const folderChecks = useEnvironmentQuerySelector(buildsAtom, folderChecksOf) ?? null;
   const keptStill = useRef(stageStill);
   // The folder settling on a new build (a turn's end, an Undo) takes one frame of it, since the
   // game may have come up mid-turn, before the build it now shows existed.
@@ -1212,7 +1187,7 @@ function ThreadGameStage({
             // its title on the Stage's edge.
             titleUnderControls && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             // With the Inspector hidden, the top bar runs under the desktop window controls.
-            (placement === "right" || !panelOpen) && "wco:pr-(--workspace-native-controls-inset)",
+            !panelOpen && "wco:pr-(--workspace-native-controls-inset)",
           )}
         >
           {renamingGame && quietShell !== null ? (
@@ -1255,17 +1230,6 @@ function ThreadGameStage({
                   Look…
                 </MenuItem>
                 <MenuSeparator />
-                {compact ? null : (
-                  <MenuItem
-                    onClick={() => {
-                      setGamePlacement(gamePlacement === "above" ? "right" : "above");
-                      if (gameView !== "split") setGameView("split");
-                    }}
-                  >
-                    {gamePlacement === "above" ? <Columns2Icon /> : <Rows2Icon />}
-                    {gamePlacement === "above" ? "Play beside the chat" : "Play above the chat"}
-                  </MenuItem>
-                )}
                 <MenuItem onClick={() => void navigate({ to: "/settings/game-tools" })}>
                   <WrenchIcon />
                   Game tools…
@@ -1274,30 +1238,30 @@ function ThreadGameStage({
             </Menu>
           )}
           <GameStatusLine status={statusLine} />
-          {/* The build on the Stage and how its checks went, one click from its whole detail:
-              checks, what changed, recordings. */}
-          {!hasBuild ? null : (
-            <Popover open={buildDetailOpen} onOpenChange={setBuildDetailOpen}>
-              <PopoverTrigger
+          {/* The build's checks at a glance; the dock's Checks tab has them whole. */}
+          {!hasBuild || stageChecks === null || stageChecks.of === 0 ? null : (
+            <Tooltip>
+              <TooltipTrigger
                 render={
                   <Button
                     size="xs"
-                    variant="outline"
+                    variant="ghost"
                     className="shrink-0"
-                    aria-label="The build's checks and what changed"
-                    onClick={() => inspectBuild(null)}
+                    aria-label={`Checks: ${stageChecks.pass} of ${stageChecks.of} pass`}
+                    onClick={() => {
+                      inspectBuild(null);
+                      showDockTab("checks");
+                    }}
                   />
                 }
               >
-                <ListChecksIcon aria-hidden="true" />
-                {playTarget === null && folderChecks !== null ? folderChecks : "Checks"}
-              </PopoverTrigger>
-              <PopoverPopup side="bottom" align="start" width="lg" padding="none">
-                <div className="max-h-[min(70vh,40rem)] overflow-y-auto">
-                  <GameBuildDetail threadRef={threadRef} />
-                </div>
-              </PopoverPopup>
-            </Popover>
+                <CheckMarks checks={stageChecks} />
+                <Text variant="caption" tone="muted" numeric>
+                  {stageChecks.pass}/{stageChecks.of}
+                </Text>
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">The build's checks and what changed</TooltipPopup>
+            </Tooltip>
           )}
           {/* An earlier build on the Stage says so in the line it already has, and its way back
               sits beside it: nothing is inserted over the Stage, so the column never moves. */}
@@ -1308,6 +1272,23 @@ function ThreadGameStage({
             </Button>
           ) : null}
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
+          {stageKind === "live" ? (
+            <GameStagePlayControls
+              threadRef={threadRef}
+              playing={phase.kind === "playing" && compare === null}
+              canReload={data.previewUrl !== null}
+              onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
+              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+            />
+          ) : null}
+          <span className="min-w-2 flex-1" />
+          <GameStageViewControls
+            threadRef={threadRef}
+            playing={phase.kind === "playing" && stageKind !== "window"}
+            onFullscreen={toggleFullscreen}
+            onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+          />
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
           <IconAction
             label={undoLabel}
             detail={undoDetail}
@@ -1409,32 +1390,7 @@ function ThreadGameStage({
               </MenuItem>
             </MenuPopup>
           </Menu>
-          {/* How much room the game takes: folded to this bar, beside or above the chat, or
-              all of it. The chat is always one click back. */}
-          {/* Beside the chat the panel's own controls fill the window or close it. */}
-          {placement === "right" ? null : collapsed ? (
-            <IconAction label="Show the game" onClick={() => setGameView("split")}>
-              <ChevronDownIcon className="size-3.5" aria-hidden="true" />
-            </IconAction>
-          ) : (
-            <>
-              <IconAction
-                label={gameView === "expanded" ? "Back to the chat" : "Fill with the game"}
-                onClick={() => setGameView(gameView === "expanded" ? "split" : "expanded")}
-              >
-                {gameView === "expanded" ? (
-                  <Minimize2Icon className="size-3.5" aria-hidden="true" />
-                ) : (
-                  <Maximize2Icon className="size-3.5" aria-hidden="true" />
-                )}
-              </IconAction>
-              <IconAction label="Hide the game" onClick={() => setGameView("collapsed")}>
-                <ChevronUpIcon className="size-3.5" aria-hidden="true" />
-              </IconAction>
-            </>
-          )}
-          {/* Beside the chat, Tune is the panel's next tab already. */}
-          {placement === "right" ? null : (
+          {
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1456,7 +1412,7 @@ function ThreadGameStage({
                 </TooltipLabel>
               </TooltipPopup>
             </Tooltip>
-          )}
+          }
         </div>
       </header>
       {compare !== null ? (
@@ -1618,21 +1574,14 @@ function ThreadGameStage({
           overlay={<GameStageOverlay threadKey={threadKey} />}
         />
       </div>
-      <GameStageControls
-        threadRef={threadRef}
-        playing={phase.kind === "playing" && stageKind === "live" && compare === null}
-        canReload={stageKind === "live" && data.previewUrl !== null}
-        onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
-        onFullscreen={toggleFullscreen}
-        onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-      />
       <GameBuildStrip
         // A compare takes the strip's place too: hidden, never squeezed, so its picks and pages stay.
         hidden={compare !== null}
         cardWidth={STRIP_CARD_WIDTH}
         cardPicture={Math.floor((STRIP_CARD_WIDTH * 9) / 16)}
-        // One caption line under each card: the game keeps the height.
+        // One caption line beside each picture: a timeline row, so the game keeps the height.
         compact
+        row
         threadRef={threadRef}
         gameName={gameName}
         playing={playTarget?.build ?? null}
@@ -1645,7 +1594,7 @@ function ThreadGameStage({
         onCompare={setCompare}
         onInspect={(build) => {
           inspectBuild({ threadKey, build: build.id, snapshot: build });
-          setBuildDetailOpen(true);
+          showDockTab("checks");
         }}
       />
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>

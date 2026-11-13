@@ -65,7 +65,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { KbdShortcut } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -82,6 +81,7 @@ import {
   useCharacterRoute,
 } from "./GameCharacterRoute";
 import { useGameName } from "./GameName";
+import { GameTuneField } from "./GameTuneField";
 import { GameGeneratedArt } from "./GameGeneratedArt";
 import {
   GameGenerationBody,
@@ -177,12 +177,24 @@ function Rows({ children }: { children: ReactNode }) {
 // ─── Build ────────────────────────────────────────────────────────────────────
 
 /** The build the Inspector shows: the one picked on the strip, else the one on the Stage. */
-/** A build's detail, over the game from its checks chip or a strip card. */
-export function GameBuildDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
-  return <BuildPanel threadRef={threadRef} />;
+/** A build's detail, in the dock under the game: its checks and what changed, or its recordings. */
+export function GameBuildDetail({
+  threadRef,
+  part,
+}: {
+  threadRef: ScopedThreadRef;
+  part: "checks" | "recordings";
+}) {
+  return <BuildPanel threadRef={threadRef} part={part} />;
 }
 
-function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
+function BuildPanel({
+  threadRef,
+  part,
+}: {
+  threadRef: ScopedThreadRef;
+  part: "checks" | "recordings";
+}) {
   const threadKey = scopedThreadKey(threadRef);
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -249,6 +261,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     <BuildDetail
       key={build.id}
       threadRef={threadRef}
+      part={part}
       build={build}
       list={data}
       // A compare's side is on the compare, not the Stage: it is named by its letter.
@@ -294,8 +307,11 @@ function BuildDetail({
   onStage,
   heading,
   onBackToStage,
+  part,
 }: {
   threadRef: ScopedThreadRef;
+  /** The dock's Checks tab (checks beside what changed) or its Recordings tab. */
+  part: "checks" | "recordings";
   build: GameBuild;
   list: GameBuildsResult;
   onStage: boolean;
@@ -336,145 +352,167 @@ function BuildDetail({
       ? null
       : { title: "Why", text: buildCaption(build), verdict: stepVerdictText(step) };
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
+  if (part === "recordings")
+    return (
+      <div className="p-4">
+        {factsData !== null && factsData.state !== "never" ? (
+          <Recordings threadRef={threadRef} build={build} facts={factsData} />
+        ) : (
+          <Text variant="meta" tone="muted" render={<p />}>
+            {buildName(build)} has no recordings yet: a bot plays each build and its runs show here.
+          </Text>
+        )}
+      </div>
+    );
   return (
-    <div className="flex flex-col gap-5 p-4">
-      {heading === null ? null : (
-        <div className="-mb-3 flex min-h-6 items-center gap-2">
-          <Text variant="meta" tone="strong" emphasis render={<h3 className="min-w-0 flex-1" />}>
-            {heading}
-          </Text>
-          {onBackToStage === null ? null : (
-            <Button size="xs" variant="ghost" onClick={onBackToStage}>
-              Show the Stage's build
-            </Button>
+    <div className="@container/dock">
+      <div className="grid gap-x-10 gap-y-5 p-4 @3xl/dock:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-5">
+          {heading === null ? null : (
+            <div className="-mb-3 flex min-h-6 items-center gap-2">
+              <Text
+                variant="meta"
+                tone="strong"
+                emphasis
+                render={<h3 className="min-w-0 flex-1" />}
+              >
+                {heading}
+              </Text>
+              {onBackToStage === null ? null : (
+                <Button size="xs" variant="ghost" onClick={onBackToStage}>
+                  Show the Stage's build
+                </Button>
+              )}
+            </div>
           )}
-        </div>
-      )}
-      <BuildActions
-        threadRef={threadRef}
-        build={build}
-        list={list}
-        onCompare={(other) => requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })}
-      >
-        {/* The strip above already shows the build's picture; its name and time lead here. */}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Text variant="label" tone="strong" truncate render={<h2 />}>
-            {buildName(build)}
-          </Text>
-          {/* Where it is, then when it was made; it wraps rather than cut either. Each part
+          <BuildActions
+            threadRef={threadRef}
+            build={build}
+            list={list}
+            onCompare={(other) =>
+              requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })
+            }
+          >
+            {/* The strip above already shows the build's picture; its name and time lead here. */}
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <Text variant="label" tone="strong" truncate render={<h2 />}>
+                {buildName(build)}
+              </Text>
+              {/* Where it is, then when it was made; it wraps rather than cut either. Each part
               leads with its separator and the line's first one is clipped, so a wrap neither
               ends nor starts a line on it. */}
-          <Text variant="meta" tone="muted">
-            <Separated nowrap>
-              {onStage ? <span>On the Stage</span> : null}
-              <span>{formatBuildTime(build.at)}</span>
-            </Separated>
-          </Text>
-        </div>
-      </BuildActions>
-      {asked === null ? null : (
-        <Section title={asked.title}>
-          <Text
-            variant="body"
-            render={<p className="border-l-2 border-border py-0.5 ps-2.5 break-words" />}
-          >
-            {asked.text}
-          </Text>
-          {asked.verdict === null ? null : (
-            <Text variant="meta" tone="muted" render={<p />}>
-              {asked.verdict.charAt(0).toUpperCase() + asked.verdict.slice(1)}
-            </Text>
-          )}
-        </Section>
-      )}
-      <Section
-        // Under another build's heading, the checks name whose they are: never read as the Stage's.
-        title={heading === null ? "Checks" : `Checks · ${buildName(build)}`}
-        detail={
-          factsData !== null && factsData.state !== "never" && build.available ? (
-            checksSummary(factsData, busy && factsData.message.trim() !== "")
-          ) : factsData === null && facts.error === null && build.available ? (
-            // The summary's line, held while the checks are read.
-            <Skeleton className="my-0.5 h-3 w-36" />
-          ) : null
-        }
-        aside={
-          measure.canMeasure &&
-          build.available &&
-          factsData !== null &&
-          // An unmeasured build's well carries its own Measure now.
-          factsData.state !== "never" &&
-          factsData.state !== "measuring" &&
-          factsData.state !== "queued" ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label="Measure again"
-                    onClick={() => void measure.send(build.id, true)}
-                  />
-                }
+              <Text variant="meta" tone="muted">
+                <Separated nowrap>
+                  {onStage ? <span>On the Stage</span> : null}
+                  <span>{formatBuildTime(build.at)}</span>
+                </Separated>
+              </Text>
+            </div>
+          </BuildActions>
+          {asked === null ? null : (
+            <Section title={asked.title}>
+              <Text
+                variant="body"
+                render={<p className="border-l-2 border-border py-0.5 ps-2.5 break-words" />}
               >
-                <RefreshCwIcon aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup side="top">Measure again</TooltipPopup>
-            </Tooltip>
-          ) : undefined
-        }
-      >
-        {!build.available ? (
-          <Text variant="meta" tone="muted" render={<p />}>
-            This build's history was pruned; only what the strip shows is left.
-          </Text>
-        ) : factsData === null ? (
-          facts.error === null ? (
-            <ChecksLoading />
-          ) : (
-            <Text variant="meta" tone="muted" render={<p />}>
-              {facts.error}
-            </Text>
-          )
-        ) : factsData.state === "never" ? (
-          <Empty variant="well">
-            <EmptyHeader>
-              <EmptyTitle>Not measured yet</EmptyTitle>
-              <EmptyDescription>
-                {factsData.message.trim() === ""
-                  ? "A bot plays this build and its checks land here."
-                  : factsData.message}
-              </EmptyDescription>
-            </EmptyHeader>
-            {measure.canMeasure ? (
-              <EmptyContent>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void measure.send(build.id, true)}
-                >
-                  Measure now
-                </Button>
-              </EmptyContent>
+                {asked.text}
+              </Text>
+              {asked.verdict === null ? null : (
+                <Text variant="meta" tone="muted" render={<p />}>
+                  {asked.verdict.charAt(0).toUpperCase() + asked.verdict.slice(1)}
+                </Text>
+              )}
+            </Section>
+          )}
+          <Section
+            // Under another build's heading, the checks name whose they are: never read as the Stage's.
+            title={heading === null ? "Checks" : `Checks · ${buildName(build)}`}
+            detail={
+              factsData !== null && factsData.state !== "never" && build.available ? (
+                checksSummary(factsData, busy && factsData.message.trim() !== "")
+              ) : factsData === null && facts.error === null && build.available ? (
+                // The summary's line, held while the checks are read.
+                <Skeleton className="my-0.5 h-3 w-36" />
+              ) : null
+            }
+            aside={
+              measure.canMeasure &&
+              build.available &&
+              factsData !== null &&
+              // An unmeasured build's well carries its own Measure now.
+              factsData.state !== "never" &&
+              factsData.state !== "measuring" &&
+              factsData.state !== "queued" ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="Measure again"
+                        onClick={() => void measure.send(build.id, true)}
+                      />
+                    }
+                  >
+                    <RefreshCwIcon aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Measure again</TooltipPopup>
+                </Tooltip>
+              ) : undefined
+            }
+          >
+            {!build.available ? (
+              <Text variant="meta" tone="muted" render={<p />}>
+                This build's history was pruned; only what the strip shows is left.
+              </Text>
+            ) : factsData === null ? (
+              facts.error === null ? (
+                <ChecksLoading />
+              ) : (
+                <Text variant="meta" tone="muted" render={<p />}>
+                  {facts.error}
+                </Text>
+              )
+            ) : factsData.state === "never" ? (
+              <Empty variant="well">
+                <EmptyHeader>
+                  <EmptyTitle>Not measured yet</EmptyTitle>
+                  <EmptyDescription>
+                    {factsData.message.trim() === ""
+                      ? "A bot plays this build and its checks land here."
+                      : factsData.message}
+                  </EmptyDescription>
+                </EmptyHeader>
+                {measure.canMeasure ? (
+                  <EmptyContent>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void measure.send(build.id, true)}
+                    >
+                      Measure now
+                    </Button>
+                  </EmptyContent>
+                ) : null}
+              </Empty>
+            ) : (
+              <>
+                <SinceBase threadRef={threadRef} build={build} list={list} />
+                <Checks threadRef={threadRef} facts={factsData} />
+              </>
+            )}
+            {/* Only a refusal: a queued or running measurement says so in the line under the title. */}
+            {measureAnswer !== null && measureAnswer.failed ? (
+              <Text variant="meta" tone="destructive" render={<p role="alert" />}>
+                {measureAnswer.text}
+              </Text>
             ) : null}
-          </Empty>
-        ) : (
-          <>
-            <SinceBase threadRef={threadRef} build={build} list={list} />
-            <Checks threadRef={threadRef} facts={factsData} />
-          </>
-        )}
-        {/* Only a refusal: a queued or running measurement says so in the line under the title. */}
-        {measureAnswer !== null && measureAnswer.failed ? (
-          <Text variant="meta" tone="destructive" render={<p role="alert" />}>
-            {measureAnswer.text}
-          </Text>
-        ) : null}
-      </Section>
-      <WhatChanged threadRef={threadRef} build={build} />
-      {factsData !== null && factsData.state !== "never" ? (
-        <Recordings threadRef={threadRef} build={build} facts={factsData} />
-      ) : null}
+          </Section>
+        </div>
+        <div className="min-w-0">
+          <WhatChanged threadRef={threadRef} build={build} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -1617,9 +1655,10 @@ export function GameTunePanel({
         ) : groups.length === 0 && selected === null ? (
           <Empty variant="well">
             <EmptyHeader>
-              <EmptyTitle>Nothing to tune yet</EmptyTitle>
+              <EmptyTitle>Nothing to tune on this screen</EmptyTitle>
               <EmptyDescription>
-                This game reads none of its numbers from the Stage. Your agent can expose them.
+                A game's values show here once play starts. If none show while you play, your agent
+                can expose them.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
@@ -1637,36 +1676,16 @@ export function GameTunePanel({
             </EmptyContent>
           </Empty>
         ) : (
-          groups.map((thing) => (
-            <section key={thing.id} className="flex flex-col gap-3">
-              <div className="flex min-h-6 items-center gap-2">
-                <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
-                  {thing.name}
-                </Text>
-                <Text variant="caption" tone="dim">
-                  {thing.kind}
-                </Text>
-                <span className="flex-1" />
-                {tunedFrom[thing.id] === undefined ? null : (
-                  <Button size="xs" variant="ghost" onClick={() => resetStageValues(thing.id)}>
-                    Reset
-                  </Button>
-                )}
-              </div>
-              {(thing.values ?? []).map((value) => {
-                const was = tunedFrom[thing.id]?.[value.key];
-                return (
-                  <ValueRow
-                    key={value.key}
-                    value={value}
-                    was={was !== undefined && was !== value.value ? was : undefined}
-                    disabled={!tunable}
-                    onChange={(next) => tuneStageValue(thing.id, value.key, next, value.value)}
-                  />
-                );
-              })}
-            </section>
-          ))
+          <div className="-mx-4 border-t border-border">
+            {groups.map((thing) => (
+              <TuneGroup
+                key={thing.id}
+                thing={thing}
+                tunedFrom={tunedFrom[thing.id]}
+                disabled={!tunable}
+              />
+            ))}
+          </div>
         )}
         {/* Paused, everything on screen can be pointed at, tunable or not. */}
         {playing && paused && notice === null ? <ThingsSection threadRef={threadRef} /> : null}
@@ -1710,6 +1729,63 @@ export function GameTunePanel({
 }
 
 const NO_TUNING: Readonly<Record<string, Readonly<Record<string, number | boolean>>>> = {};
+
+/** One thing's values under a header that folds them, the way an inspector groups components. */
+function TuneGroup({
+  thing,
+  tunedFrom,
+  disabled,
+}: {
+  thing: GameThing;
+  tunedFrom: Readonly<Record<string, number | boolean>> | undefined;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className="border-b border-border pb-1">
+      <div className="flex h-8 items-center gap-1.5 pe-2 ps-1">
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-expanded={open}
+          aria-label={open ? `Fold ${thing.name}` : `Unfold ${thing.name}`}
+          onClick={() => setOpen(!open)}
+        >
+          <ChevronRightIcon
+            className={cn("motion-popup transition-transform", open && "rotate-90")}
+            aria-hidden="true"
+          />
+        </Button>
+        <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
+          {thing.name}
+        </Text>
+        <Text variant="caption" tone="dim">
+          {thing.kind}
+        </Text>
+        <span className="flex-1" />
+        {tunedFrom === undefined ? null : (
+          <Button size="xs" variant="ghost" onClick={() => resetStageValues(thing.id)}>
+            Reset
+          </Button>
+        )}
+      </div>
+      {open
+        ? (thing.values ?? []).map((value) => {
+            const was = tunedFrom?.[value.key];
+            return (
+              <ValueRow
+                key={value.key}
+                value={value}
+                was={was !== undefined && was !== value.value ? was : undefined}
+                disabled={disabled}
+                onChange={(next) => tuneStageValue(thing.id, value.key, next, value.value)}
+              />
+            );
+          })
+        : null}
+    </section>
+  );
+}
 
 /** The Look tab: the game's style, how its characters are made, and the art made for it. */
 export function GameLookPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
@@ -2145,8 +2221,6 @@ const valueLabel = (value: GameThingValue) => {
     .trim();
   return words.length === 0 ? value.key : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 };
-const shownValue = (value: number | boolean) =>
-  typeof value === "number" ? String(Math.round(value * 1000) / 1000) : value ? "on" : "off";
 
 /** Live sliders for its tuned values, kept as a build or put back. */
 function ValuesSection({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: GameThing }) {
@@ -2264,63 +2338,13 @@ function ValueRow({
   disabled: boolean;
   onChange: (next: number | boolean) => void;
 }) {
-  const label = valueLabel(value);
-  const reading = (
-    <Text
-      variant="caption"
-      tone="inherit"
-      mono
-      numeric
-      render={<span className={was !== undefined ? "text-primary" : "text-muted-foreground"} />}
-    >
-      {was === undefined ? null : <span className="me-1.5">was {shownValue(was)}</span>}
-      {shownValue(value.value)}
-    </Text>
-  );
-  if (typeof value.value === "boolean")
-    return (
-      <label className="flex items-center gap-2">
-        <Text variant="meta" truncate render={<span className="flex-1" />}>
-          {label}
-        </Text>
-        {reading}
-        <Switch
-          checked={value.value}
-          disabled={disabled}
-          onCheckedChange={(checked) => onChange(checked)}
-          aria-label={label}
-        />
-      </label>
-    );
-  const ranged = value.min !== undefined && value.max !== undefined;
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-baseline gap-2">
-        <Text variant="meta" truncate render={<span className="flex-1" />}>
-          {label}
-        </Text>
-        {reading}
-      </div>
-      {ranged ? (
-        <input
-          type="range"
-          aria-label={label}
-          min={value.min}
-          max={value.max}
-          step={value.step ?? ((value.max ?? 1) - (value.min ?? 0)) / 100}
-          value={value.value}
-          disabled={disabled}
-          onChange={(event) => onChange(Number(event.currentTarget.value))}
-          className={cn(
-            "h-4 w-full cursor-pointer disabled:cursor-default disabled:opacity-50",
-            was !== undefined ? "accent-primary" : "accent-foreground",
-          )}
-        />
-      ) : (
-        <Text variant="caption" tone="muted" render={<p />}>
-          No range set, so it has no slider.
-        </Text>
-      )}
-    </div>
+    <GameTuneField
+      label={valueLabel(value)}
+      value={value}
+      was={was}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }

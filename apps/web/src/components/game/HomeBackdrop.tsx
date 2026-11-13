@@ -114,7 +114,7 @@ export function HomeBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
       {/* The light the dither is lit by: a soft vermilion bloom from the lower right. */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_75%_at_100%_100%,rgb(226_88_42/0.22),rgb(226_88_42/0.07)_45%,transparent_75%)] dark:bg-[radial-gradient(ellipse_70%_75%_at_100%_100%,rgb(226_88_42/0.28),rgb(226_88_42/0.08)_45%,transparent_75%)]" />
+      <div className="home-backdrop-bloom absolute inset-0" />
       <canvas
         ref={canvasRef}
         className="absolute inset-0 size-full [--home-backdrop-grid:#ececee] [--home-backdrop-hot:#d14b1f] [--home-backdrop-mid:#e9a184] [--home-backdrop-warm:#f3cbb9] dark:[--home-backdrop-grid:#141414] dark:[--home-backdrop-hot:#ef6a3a] dark:[--home-backdrop-mid:#9a3b1b] dark:[--home-backdrop-warm:#3a180c]"

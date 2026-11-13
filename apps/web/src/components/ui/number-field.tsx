@@ -80,8 +80,26 @@ export function NumberFieldIncrement({
 
 export function NumberFieldInput({
   className,
+  variant = "default",
   ...props
-}: NumberFieldPrimitive.Input.Props): React.ReactElement {
+}: NumberFieldPrimitive.Input.Props & {
+  /**
+   * `inspector`: an engine inspector's value field, compact, mono and right-aligned on its own
+   * well; it takes the live colour while its root is `data-changed`.
+   */
+  variant?: "default" | "inspector";
+}): React.ReactElement {
+  if (variant === "inspector")
+    return (
+      <NumberFieldPrimitive.Input
+        className={cn(
+          "h-6 w-full min-w-0 rounded-md px-1.5 text-end font-mono text-caption tabular-nums text-foreground outline-none surface-well focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring in-data-changed:text-live in-data-changed:ring-1 in-data-changed:ring-inset in-data-changed:ring-live/50",
+          className,
+        )}
+        data-slot="number-field-input"
+        {...props}
+      />
+    );
   return (
     <NumberFieldPrimitive.Input
       className={cn(

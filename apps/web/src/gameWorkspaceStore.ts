@@ -42,15 +42,13 @@ export type GameStageRequest =
 /** The panel beside the chat: a build's checks and changes, or, while pointing, what is on screen. */
 export type GameInspectorTab = "build" | "scene";
 
-/** Where the game plays: on top of the chat, or in its own column beside it. */
-export type GamePlacement = "above" | "right";
+/** The dock under the game: the agent's chat, the build's checks, its recordings. */
+export type GameDockTab = "agent" | "checks" | "recordings";
 
-/** How much of the chat's column the game takes: hidden to its bar, shared, or all of it. */
-export type GameView = "collapsed" | "split" | "expanded";
-
-/** The game's share of the column's height while it shares it with the chat. */
-const GAME_STAGE_SHARE_DEFAULT = 0.72;
-const clampGameStageShare = (share: number) => Math.min(0.85, Math.max(0.3, share));
+/** The dock's height in CSS pixels, never so tall the game disappears or so short it says nothing. */
+const GAME_DOCK_DEFAULT_HEIGHT = 240;
+export const clampGameDockHeight = (height: number, column = Number.POSITIVE_INFINITY) =>
+  Math.round(Math.min(Math.max(160, column - 240), Math.max(160, height)));
 
 /** The build the Inspector shows, for one thread; null shows the one on the Stage. */
 export interface GameInspectedBuild {
@@ -73,12 +71,9 @@ interface GameWorkspaceStoreState {
     readonly kind: "show" | "toggle" | "look";
     readonly n: number;
   } | null;
-  /** The build detail (checks, what changed, recordings) is open over the game. Not persisted. */
-  buildDetailOpen: boolean;
-  setBuildDetailOpen: (open: boolean) => void;
-  /** What a pointed thing opens: its values in Tune ("scene"), or a build's detail ("build"). */
+  /** What a pointed thing opens: its values in Tune ("scene"), or a build's checks ("build"). */
   inspectorTab: GameInspectorTab;
-  /** A build's detail over the game, or the Tune tab for what is on screen. */
+  /** A build's checks in the dock, or the Tune tab for what is on screen. */
   showInspectorTab: (tab: GameInspectorTab) => void;
   inspectedBuild: GameInspectedBuild | null;
   /** Shows a build in the Inspector's Build tab; null follows the Stage again. */
@@ -86,13 +81,16 @@ interface GameWorkspaceStoreState {
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
   requestStage: (request: GameStageRequest) => void;
-  gamePlacement: GamePlacement;
-  setGamePlacement: (placement: GamePlacement) => void;
-  gameView: GameView;
-  setGameView: (view: GameView) => void;
-  gameStageShare: number;
-  setGameStageShare: (share: number) => void;
-  /** The game's Look (style, characters, generated art), as a dialog. Not persisted. */
+  dockHeight: number;
+  setDockHeight: (height: number) => void;
+  /** The dock folded to its tabs, the game taking the column. */
+  dockCollapsed: boolean;
+  setDockCollapsed: (collapsed: boolean) => void;
+  /** The dock's open tab. Not persisted: a new session opens on the agent. */
+  dockTab: GameDockTab;
+  /** Opens a tab, unfolding the dock. */
+  showDockTab: (tab: GameDockTab) => void;
+  /** Asks for the Look tab in the right panel (lookOpen stays false: the request is the news). */
   lookOpen: boolean;
   setLookOpen: (open: boolean) => void;
 }
@@ -106,13 +104,11 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           buildsRequest: { kind: "toggle", n: (state.buildsRequest?.n ?? 0) + 1 },
         })),
       buildsRequest: null,
-      buildDetailOpen: false,
-      setBuildDetailOpen: (open) => set({ buildDetailOpen: open }),
       inspectorTab: "build",
       showInspectorTab: (tab) =>
         set((state) =>
           tab === "build"
-            ? { inspectorTab: tab, buildDetailOpen: true }
+            ? { inspectorTab: tab, dockTab: "checks", dockCollapsed: false }
             : {
                 inspectorTab: tab,
                 buildsRequest: { kind: "show", n: (state.buildsRequest?.n ?? 0) + 1 },
@@ -123,12 +119,12 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       stageRequest: null,
       requestStage: (request) =>
         set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
-      gamePlacement: "above",
-      setGamePlacement: (placement) => set({ gamePlacement: placement }),
-      gameView: "split",
-      setGameView: (view) => set({ gameView: view }),
-      gameStageShare: GAME_STAGE_SHARE_DEFAULT,
-      setGameStageShare: (share) => set({ gameStageShare: clampGameStageShare(share) }),
+      dockHeight: GAME_DOCK_DEFAULT_HEIGHT,
+      setDockHeight: (height) => set({ dockHeight: clampGameDockHeight(height) }),
+      dockCollapsed: false,
+      setDockCollapsed: (collapsed) => set({ dockCollapsed: collapsed }),
+      dockTab: "agent",
+      showDockTab: (tab) => set({ dockTab: tab, dockCollapsed: false }),
       lookOpen: false,
       setLookOpen: (open) =>
         set((state) =>
@@ -138,23 +134,20 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         ),
     }),
     {
-      name: "kurambit:game-workspace:v5",
+      name: "kurambit:game-workspace:v6",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
       partialize: (state) => ({
-        gamePlacement: state.gamePlacement,
-        // Filling the column is for this sitting; a new one opens with the chat in view.
-        gameView: state.gameView === "expanded" ? "split" : state.gameView,
-        gameStageShare: state.gameStageShare,
+        dockHeight: state.dockHeight,
+        dockCollapsed: state.dockCollapsed,
       }),
-      // A share saved out of range never starves the game or the chat.
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
         return {
           ...current,
           ...saved,
-          gameStageShare: clampGameStageShare(saved?.gameStageShare ?? current.gameStageShare),
+          dockHeight: clampGameDockHeight(saved?.dockHeight ?? current.dockHeight),
         };
       },
     },

@@ -1,16 +1,11 @@
 import { GameStage } from "./game/GameStage";
 import { GameComposerTray } from "./game/GameComposerTray";
 import { GameLookPanel, GameTunePanel } from "./game/GameInspector";
+import { GameDockBar, GameDockPanel } from "./game/GameDock";
 import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
-import { createPortal } from "react-dom";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
-import {
-  GameChatHeader,
-  GamePointedChip,
-  GameStageResize,
-  useLatestTurnUndone,
-} from "./game/GameDirectionBar";
+import { GamePointedChip, GameDockResize, useLatestTurnUndone } from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -1581,10 +1576,6 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
   );
   const browserAvailable = isPreviewSupportedInRuntime() || activeEnvironmentServerBrowser;
-  const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
-    container: workspaceLayoutElement,
-    widthStorageKey: `kurambit:preview-panel-width:${activeThreadKey}`,
-  });
   const activeThreadShell = useQuietThreadShell(isServerThread ? activeThreadRef : null);
   const timelineThreadError =
     serverRuntime?.status === "failed" &&
@@ -1659,10 +1650,15 @@ export default function ChatView(props: ChatViewProps) {
     (gameStatus.data !== null ||
       isGameStatusFailure(gameStatus.failure) ||
       gameStatus.error === null);
-  const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
-  const gameView = useGameWorkspaceStore((state) => state.gameView);
-  const gameStageShare = useGameWorkspaceStore((state) => state.gameStageShare);
-  const [gameRightHost, setGameRightHost] = useState<HTMLElement | null>(null);
+  // A game's inspector (Tune, Look) starts at the narrowest panel, so the viewport keeps the room.
+  const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
+    container: workspaceLayoutElement,
+    widthStorageKey: `kurambit:preview-panel-width:${activeThreadKey}`,
+    ...(isGameThread ? { defaultWidth: 360 } : {}),
+  });
+  const dockHeight = useGameWorkspaceStore((state) => state.dockHeight);
+  const dockCollapsed = useGameWorkspaceStore((state) => state.dockCollapsed);
+  const dockTab = useGameWorkspaceStore((state) => state.dockTab);
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
@@ -1678,16 +1674,6 @@ export default function ChatView(props: ChatViewProps) {
       else showGameTab(activeThreadRef, buildsRequest.kind === "look" ? "look" : "tune");
     }
   }
-  // Beside the chat the game is a tab of the right panel, there for as long as it plays there;
-  // above the chat it has no tab. Closing the panel only hides it.
-  const gameStageBeside = isGameThread && gamePlacement === "right" && !gameWorkspaceCompact;
-  const panelHasGame = rightPanelState.surfaces.some((surface) => surface.kind === "game");
-  useEffect(() => {
-    if (!isGameThread || activeThreadRef === null) return;
-    if (gameStageBeside && !panelHasGame) showGameTab(activeThreadRef, "game");
-    else if (!gameStageBeside && panelHasGame)
-      useRightPanelStore.getState().closeSurface(activeThreadRef, "game");
-  }, [isGameThread, activeThreadRef, gameStageBeside, panelHasGame]);
   // A game opens with Tune beside it the first time this session, so its values are in view.
   const panelHasTune = rightPanelState.surfaces.some((surface) => surface.kind === "tune");
   useEffect(() => {
@@ -7491,16 +7477,6 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
-  // Where the game renders while it plays beside the chat: beside the panel's own content, so
-  // switching tabs only hides it.
-  const gameRightHostElement = isGameThread ? (
-    <div
-      ref={setGameRightHost}
-      className={
-        renderedRightPanelSurface?.kind === "game" ? "flex min-h-0 flex-1 flex-col" : "hidden"
-      }
-    />
-  ) : null;
   const rightPanelContent = activeThreadRef ? (
     <RightPanelSurfaceContent
       surface={renderedRightPanelSurface}
@@ -7626,24 +7602,18 @@ export default function ChatView(props: ChatViewProps) {
       ? (timelineMessages.findLast((message) => message.role === "user")?.text.trim() ?? null)
       : null;
   const gameTurnRequest = gameTurnRequestWhole?.split("\n")[0]?.slice(0, 140) ?? null;
-  // The game plays on top of the chat, or as a tab of the right panel beside it (a person's
-  // choice; a narrow window always stacks them).
-  const gameStageAbove = gamePlacement === "above" || gameWorkspaceCompact;
-  // Beside the chat the game shows only while its tab is the panel's open one; mounted
-  // otherwise, held still, so it keeps its progress.
-  const gameInPanelShown =
-    rightPanelOpen && renderedRightPanelSurface?.kind === "game" && !gameStageAbove;
   const gameStage = gameLayout ? (
     <GameStage
       threadRef={activeThreadRef}
       turnRunning={phase === "running"}
       onAskAgent={askAgentToFixStable}
       compact={gameWorkspaceCompact}
-      hidden={!gameStageAbove && !gameInPanelShown}
-      placement={gameStageAbove ? "above" : "right"}
       turnRequest={gameTurnRequest}
     />
   ) : null;
+  // The dock under the game: the chat (with its composer) while Agent is open, else the build's
+  // checks or recordings. The chat stays mounted under the others, so its scroll survives.
+  const gameChatShown = !gameLayout || (!dockCollapsed && dockTab === "agent");
   // One composer for the thread: under the transcript in a chat, under the
   // Stage in a game, so drafts, the queue and pending questions never fork.
   const composerLane = (
@@ -7931,13 +7901,13 @@ export default function ChatView(props: ChatViewProps) {
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
         data-game-centre={gameLayout ? "" : undefined}
       >
-        {gameLayout && gameStageAbove ? (
-          // The Stage's own bar is the page's header; the anchor stays for the details popover.
+        {gameLayout ? (
+          // The Stage's own toolbar is the page's header; the anchor stays for the details popover.
           <span ref={threadPanelPopoverAnchorRef} aria-hidden className="absolute top-0 left-0" />
         ) : null}
         <header
-          ref={gameLayout && gameStageAbove ? undefined : threadPanelPopoverAnchorRef}
-          hidden={gameLayout && gameStageAbove}
+          ref={gameLayout ? undefined : threadPanelPopoverAnchorRef}
+          hidden={gameLayout}
           data-chat-header
           className={cn(
             "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
@@ -7960,9 +7930,7 @@ export default function ChatView(props: ChatViewProps) {
           ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
-          {gameLayout ? (
-            <GameChatHeader threadRef={activeThreadRef} title={activeThread.title} />
-          ) : (
+          {gameLayout ? null : (
             <ChatHeader
               activeThreadEnvironmentId={activeThread.environmentId}
               activeThreadId={activeThread.id}
@@ -7980,36 +7948,27 @@ export default function ChatView(props: ChatViewProps) {
             />
           )}
         </header>
-        {gameLayout && gameStageAbove ? (
+        {gameLayout ? (
           <>
-            <div
-              className={cn(
-                "relative flex min-h-0 flex-col",
-                gameView === "expanded" ? "flex-1" : "shrink-0",
-                gameView === "collapsed" && "overflow-hidden",
-              )}
-              style={
-                gameView === "split"
-                  ? { height: `${Math.round(gameStageShare * 100)}%` }
-                  : gameView === "collapsed"
-                    ? { height: "var(--workspace-topbar-height)" }
-                    : undefined
-              }
-            >
-              {gameStage}
-            </div>
-            {gameView === "split" ? <GameStageResize /> : null}
+            <div className="relative flex min-h-0 flex-1 flex-col">{gameStage}</div>
+            {dockCollapsed ? null : <GameDockResize />}
+            <GameDockBar threadRef={activeThreadRef} />
+            {!dockCollapsed && dockTab !== "agent" ? (
+              <div className="flex flex-none flex-col" style={{ height: dockHeight }}>
+                <GameDockPanel threadRef={activeThreadRef} tab={dockTab} />
+              </div>
+            ) : null}
           </>
         ) : null}
 
         <div
           className={cn(
-            "relative flex min-h-0 min-w-0 flex-1",
-            // Filling the column with the game hides the chat under it, mounted, so its scroll
-            // and find survive.
-            gameLayout && gameStageAbove && gameView === "expanded" && "hidden",
+            "relative flex min-h-0 min-w-0",
+            gameLayout ? "flex-none" : "flex-1",
+            !gameChatShown && "hidden",
           )}
-          inert={gameLayout && gameStageAbove && gameView === "expanded"}
+          style={gameLayout ? { height: dockHeight } : undefined}
+          inert={!gameChatShown}
         >
           <ThreadFindCanvas
             findOptions={{
@@ -8321,10 +8280,6 @@ export default function ChatView(props: ChatViewProps) {
         ))}
       </div>
 
-      {gameLayout && !gameStageAbove && gameRightHost !== null
-        ? createPortal(gameStage, gameRightHost)
-        : null}
-
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
@@ -8359,7 +8314,6 @@ export default function ChatView(props: ChatViewProps) {
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
         >
-          {gameRightHostElement}
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
@@ -8406,7 +8360,6 @@ export default function ChatView(props: ChatViewProps) {
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
           >
-            {gameRightHostElement}
             {rightPanelContent}
           </RightPanelTabs>
         </RightPanelSheet>

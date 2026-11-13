@@ -21,24 +21,23 @@ import {
 } from "./gameStageBridge";
 
 const SPEEDS = [0.25, 0.5, 1] as const;
+const NONE: ReadonlyArray<string> = [];
 
 /**
- * The game's own controls, under it where they never cover its HUD: restart, pause, slow
- * motion, sound and fullscreen. Each hands the keyboard back to the game after it acts.
+ * The toolbar's play group, the way an engine's play bar works: restart, pause (which also
+ * lets you point at things), and slow motion. Each hands the keyboard back to the game.
  */
-export function GameStageControls({
+export function GameStagePlayControls({
   threadRef,
   playing,
   canReload,
   onRestart,
-  onFullscreen,
   onFocus,
 }: {
   threadRef: ScopedThreadRef;
   playing: boolean;
   canReload: boolean;
   onRestart: () => void;
-  onFullscreen: () => void;
   onFocus: () => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
@@ -50,27 +49,24 @@ export function GameStageControls({
     false,
   );
   const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
-  const muted = useThreadStageBridge(threadKey, (state) => state.muted, false);
-  if (!playing) return null;
   return (
-    <div
-      data-game-stage-controls=""
-      className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 items-center gap-1 px-3 pt-2"
-    >
-      <Control
-        label="Restart the game"
-        disabled={!canReload}
-        onClick={() => {
-          onRestart();
-          onFocus();
-        }}
-      >
-        <RotateCcwIcon aria-hidden="true" />
-      </Control>
-      {ready && capabilities.includes("freeze") ? (
+    <div className="flex shrink-0 items-center gap-1.5" data-game-play-controls="">
+      <div className="flex items-center gap-0.5 rounded-lg p-0.5 surface-well">
+        <Control
+          label="Restart the game"
+          disabled={!playing || !canReload}
+          onClick={() => {
+            onRestart();
+            onFocus();
+          }}
+        >
+          <RotateCcwIcon aria-hidden="true" />
+        </Control>
         <Control
           label={paused ? "Play on" : "Pause, and point at things"}
           pressed={paused}
+          live={!paused && playing}
+          disabled={!playing || !ready || !capabilities.includes("freeze")}
           onClick={() => {
             toggleStageFreeze();
             if (paused) onFocus();
@@ -78,12 +74,13 @@ export function GameStageControls({
         >
           {paused ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
         </Control>
-      ) : null}
+      </div>
       {ready && capabilities.includes("speed") ? (
         <ToggleGroup
           aria-label="Game speed"
           variant="segmented"
           size="xs"
+          disabled={!playing}
           value={[String(speed)]}
           onValueChange={(value) => {
             const next = Number(value[0]);
@@ -94,16 +91,38 @@ export function GameStageControls({
         >
           {SPEEDS.map((each) => (
             <Toggle key={each} value={String(each)} aria-label={`${each} times speed`}>
-              {each === 1 ? "1×" : `${each}×`}
+              {each === 0.25 ? "¼×" : each === 0.5 ? "½×" : "1×"}
             </Toggle>
           ))}
         </ToggleGroup>
       ) : null}
-      <span className="flex-1" />
+    </div>
+  );
+}
+
+/** The toolbar's view group: sound and fullscreen. */
+export function GameStageViewControls({
+  threadRef,
+  playing,
+  onFullscreen,
+  onFocus,
+}: {
+  threadRef: ScopedThreadRef;
+  playing: boolean;
+  onFullscreen: () => void;
+  onFocus: () => void;
+}) {
+  const threadKey = scopedThreadKey(threadRef);
+  const capabilities = useThreadStageBridge(threadKey, (state) => state.capabilities, NONE);
+  const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
+  const muted = useThreadStageBridge(threadKey, (state) => state.muted, false);
+  return (
+    <>
       {ready && capabilities.includes("mute") ? (
         <Control
           label={muted ? "Sound on" : "Mute"}
           pressed={muted}
+          disabled={!playing}
           onClick={() => {
             setStageMuted(!muted);
             onFocus();
@@ -112,24 +131,25 @@ export function GameStageControls({
           {muted ? <VolumeXIcon aria-hidden="true" /> : <Volume2Icon aria-hidden="true" />}
         </Control>
       ) : null}
-      <Control label="Fullscreen" onClick={onFullscreen}>
+      <Control label="Fullscreen" disabled={!playing} onClick={onFullscreen}>
         <MaximizeIcon aria-hidden="true" />
       </Control>
-    </div>
+    </>
   );
 }
-
-const NONE: ReadonlyArray<string> = [];
 
 function Control({
   label,
   pressed,
+  live = false,
   disabled = false,
   onClick,
   children,
 }: {
   label: string;
   pressed?: boolean;
+  /** Playing: the pause button carries the live colour, as an engine's play bar does. */
+  live?: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
@@ -143,6 +163,7 @@ function Control({
             variant="ghost"
             aria-label={label}
             {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
+            data-live={live ? "" : undefined}
             disabled={disabled}
             onClick={onClick}
           />
@@ -150,7 +171,7 @@ function Control({
       >
         {children}
       </TooltipTrigger>
-      <TooltipPopup side="top">{label}</TooltipPopup>
+      <TooltipPopup side="bottom">{label}</TooltipPopup>
     </Tooltip>
   );
 }

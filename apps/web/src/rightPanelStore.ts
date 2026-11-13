@@ -8,16 +8,7 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
-const RIGHT_PANEL_KINDS = [
-  "diff",
-  "files",
-  "file",
-  "preview",
-  "terminal",
-  "game",
-  "tune",
-  "look",
-] as const;
+const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal", "tune", "look"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -32,8 +23,6 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
-  /** A game's Stage, when it plays beside the chat instead of above it. */
-  | { id: "game"; kind: "game" }
   /** A game's live values: jump height, speeds, timers, tuned while it plays. */
   | { id: "tune"; kind: "tune" }
   /** A game's look: its style, how characters are made, its generated art. */
@@ -164,8 +153,6 @@ const singletonSurface = (
       return { id: "diff", kind };
     case "files":
       return { id: "files", kind };
-    case "game":
-      return { id: "game", kind };
     case "tune":
       return { id: "tune", kind };
     case "look":

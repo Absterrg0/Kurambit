@@ -127,6 +127,7 @@ export function GameBuildStrip({
   onCompare,
   cardWidth,
   cardPicture,
+  row = false,
   compact,
   onInspect,
   hidden = false,
@@ -147,6 +148,8 @@ export function GameBuildStrip({
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
   /** Each card's width, which the Stage sets from the height its game's shape leaves over. */
   cardWidth: number;
+  /** A timeline row under the viewport: each picture with its name and checks beside it. */
+  row?: boolean;
   /** The cards' picture height: 16:9 of their width, or shorter on a short window. */
   cardPicture: number;
   /** A short window: a card's caption has one line of its request where a full card has two. */
@@ -424,6 +427,7 @@ export function GameBuildStrip({
       // Compact cards (a short window) have a shorter picture and one line of their request, so
       // the Stage keeps the height and a build is still told by what was asked.
       data-compact={compact ? "true" : undefined}
+      data-layout={row ? "row" : undefined}
     >
       <CardRequestFits
         value={compact ? Math.floor(cardWidth / CAPTION_CHARACTER) : CARD_REQUEST_FITS}

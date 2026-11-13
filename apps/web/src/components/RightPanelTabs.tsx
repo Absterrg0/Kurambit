@@ -22,7 +22,6 @@ import {
   ChevronRight,
   FileDiff,
   Files,
-  Gamepad2,
   Palette,
   SlidersHorizontal,
   Globe2,
@@ -482,8 +481,6 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
-    case "game":
-      return "Game";
     case "tune":
       return "Tune";
     case "look":
@@ -561,8 +558,6 @@ function SurfaceIcon({
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
-    case "game":
-      return <Gamepad2 className="size-3 shrink-0" />;
     case "tune":
       return <SlidersHorizontal className="size-3 shrink-0" />;
     case "look":
