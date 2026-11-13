@@ -661,7 +661,20 @@ function CardCaption({
         >
           {title}
         </Text>
-        {aside === null ? null : (
+        {aside === null ? (
+          // A compact card's second line is its state; a card with none (Now) shows its own
+          // subtitle there, so every compact caption is two lines and the strip one height.
+          <Text
+            variant="meta"
+            tone="muted"
+            numeric
+            render={
+              <span className="hidden min-h-lh truncate group-data-[compact=true]/strip:block" />
+            }
+          >
+            {meta}
+          </Text>
+        ) : (
           <Text
             variant="meta"
             tone="muted"
@@ -861,7 +874,10 @@ function NowCard({
   const current = list.builds.find((build) => build.id === list.current) ?? null;
   const changed = list.folderEdited === true;
   // The top bar names the build it changed since; the card says only what Now is.
-  const meta = changed ? "Changed · not measured" : "The current game";
+  // Name and state, then what it is: "Now · Not measured", over "Changed since Values kept".
+  const meta = changed
+    ? `Changed since ${current === null ? "the last build" : buildName(current)}`
+    : "The current game";
   const borrowed = changed && still === null && current !== null;
   return (
     <Tooltip>
@@ -907,7 +923,12 @@ function NowCard({
           ) : null}
           <CardRing on={active && !picking} />
         </GameNowPicture>
-        <CardCaption strong={active} title="Now" meta={meta} />
+        <CardCaption
+          strong={active}
+          title="Now"
+          aside={changed ? "Not measured" : null}
+          meta={meta}
+        />
       </TooltipTrigger>
       <TooltipPopup side="top" align="end" className="max-w-xs">
         {changed

@@ -205,7 +205,8 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.operationRunning) return line("Building", "live");
   if (input.chats === "failed") return line("The last turn failed", "failed");
   if (input.build?.doesNotStart === true)
-    return line(`${input.build.name} does not start`, "failed", { at: input.build.at });
+    // The row already names the game; its build's outcome is the line.
+    return line("Does not start", "failed", { at: input.build.at });
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
   if (!input.known) return line("", "pending");
   // A game opened from a folder plays before Kurambit has measured any build of it.

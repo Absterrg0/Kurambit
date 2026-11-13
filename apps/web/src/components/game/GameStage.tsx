@@ -1514,7 +1514,8 @@ function ThreadGameStage({
             Stage's top edge. Neither takes a row, so the Stage keeps its size. */}
         {folderDoesNotStart && failureVisible !== null && stageBuildName !== null ? (
           <div className="pointer-events-none absolute inset-x-3 inset-y-0 z-20 flex items-center justify-center p-6">
-            <div className="pointer-events-auto flex max-w-md min-w-0 flex-col items-center gap-2 text-center text-stage-foreground">
+            {/* Its own dark backing: the words never depend on what the dead game painted. */}
+            <div className="pointer-events-auto flex max-w-md min-w-0 flex-col items-center gap-2 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
               <TriangleAlertIcon className="size-5 text-destructive" aria-hidden="true" />
               <Text variant="label" tone="inherit" render={<p role="alert" />}>
                 {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} does not start`}
