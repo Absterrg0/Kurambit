@@ -13,6 +13,15 @@ import { GameElapsed } from "./GameElapsed";
 import { GamePicture } from "./GameBuildStill";
 import { useBuildFrame } from "./gameStageBridge";
 import { useTurnLanding } from "./useTurnLanding";
+import { useKeepGoing } from "./useKeepGoing";
+import { clockTime } from "./keepGoing.logic";
+import type { GameKeepGoingStatus } from "@kurambit/contracts";
+
+/** When Keep going's proposed next step starts, while it only waits for that time. */
+const keepGoingStartsAt = (status: GameKeepGoingStatus | null | undefined): string | null =>
+  status?.phase === "proposed" && status.proposal?.deadline != null
+    ? clockTime(status.proposal.deadline)
+    : null;
 import { derivePhase } from "../../session-logic";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarThreadStatus } from "../Sidebar.logic";
@@ -79,6 +88,8 @@ export function useGameLibraryLine(input: {
   const build = useGameLatestBuild(mainRef);
   // Between a turn's end and its build being listed, as the game screen says it.
   const saving = useTurnLanding(mainRef, derivePhase(main?.runtime ?? null) === "running");
+  // A game Keep going runs on reads its run, so a step that only waits shows no working dot.
+  const keepGoing = useKeepGoing(game.run !== null ? mainRef : null);
   const status = gameLibraryStatus({
     chats:
       chats === "approval" || chats === "input" || chats === "failed"
@@ -87,6 +98,7 @@ export function useGameLibraryLine(input: {
           ? "working"
           : "other",
     keepGoing: game.run?.step ?? null,
+    keepGoingStartsAt: keepGoingStartsAt(keepGoing.status),
     operationRunning: game.operation?.state === "running",
     saving,
     build:

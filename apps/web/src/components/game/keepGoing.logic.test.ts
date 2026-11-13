@@ -114,11 +114,12 @@ describe("the keep-going banner", () => {
       kind: "proposal",
       lead: "Step 3:",
       line: "Try the undone step another way, or a smaller one",
-      detail: "after an undo · starts at 14:32",
+      detail: "starts at 14:32",
+      why: "after an undo",
       held: false,
     });
     expect(keepGoingBannerView(GUIDED_HELD, MAIN_CHAT, clock)).toMatchObject({
-      detail: "after an undo · waits for you",
+      detail: "waits for you",
       held: true,
     });
   });

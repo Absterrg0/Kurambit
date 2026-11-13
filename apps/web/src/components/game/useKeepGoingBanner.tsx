@@ -78,7 +78,12 @@ export function useKeepGoingBanner(
                 >
                   {view.line}
                 </TooltipTrigger>
-                <TooltipPopup side="top">{view.text}</TooltipPopup>
+                <TooltipPopup side="top">
+                  <span className="flex flex-col gap-1">
+                    <span>{view.text}</span>
+                    <span className="text-muted-foreground">Why: {view.why}</span>
+                  </span>
+                </TooltipPopup>
               </Tooltip>
             </span>
           ),

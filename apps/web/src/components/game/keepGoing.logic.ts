@@ -175,8 +175,10 @@ export type KeepGoingBannerView =
       /** The proposal's first line; the full text is `text`. */
       readonly line: string;
       readonly text: string;
-      /** Why, then when: "a check to look at · starts at 14:32", or "… · waits for you". */
+      /** When: "starts at 14:32", or "waits for you" while held. */
       readonly detail: string;
+      /** Why the step was chosen: "the game does not start". */
+      readonly why: string;
       readonly held: boolean;
     }
   | {
@@ -232,11 +234,12 @@ export const keepGoingBannerView = (
       lead: `${n === null ? "Next step" : `Step ${n}`}:`,
       line: proposal.summary,
       text: proposal.text,
+      // When, on the row; why is in the row's tooltip, since the action mostly says it.
       detail: [
-        stepWhyLabel(proposal.why),
         proposal.deadline === null ? "waits for you" : `starts at ${clock(proposal.deadline)}`,
         ...(note === null ? [] : [note]),
       ].join(" · "),
+      why: stepWhyLabel(proposal.why),
       held,
     };
   }

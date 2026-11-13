@@ -200,6 +200,15 @@ export function GameBuildStrip({
       }
     }
   }
+  // Which ends of the row have cards scrolled past them, for a fade on that edge only.
+  const [clipped, setClipped] = useState<"none" | "start" | "end" | "both">("none");
+  const readClipped = useStableCallback(() => {
+    const row = cardsRef.current;
+    if (row === null) return;
+    const start = row.scrollLeft > 1;
+    const end = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
+    setClipped(start && end ? "both" : start ? "start" : end ? "end" : "none");
+  });
   // The card a person is looking for is whole in view: the one being made while a turn runs,
   // else the one on the Stage. It is brought into view when a build lands or a turn starts,
   // and when the row's width changes, unless the person has scrolled the row themselves.
@@ -224,6 +233,8 @@ export function GameBuildStrip({
     // Where the row actually is: the browser clamps past its end, and a clamped value read as
     // the person scrolling would stop the row being placed again.
     placed.current = row.scrollLeft;
+    // The edge fades follow at once, not on the scroll event a frame later.
+    readClipped();
   });
   const stageKey = stageBuildId(list, playing);
   useEffect(() => {
@@ -248,15 +259,6 @@ export function GameBuildStrip({
       browsed.current = true;
     readClipped();
   };
-  // Which ends of the row have cards scrolled past them, for a fade on that edge only.
-  const [clipped, setClipped] = useState<"none" | "start" | "end" | "both">("none");
-  const readClipped = useStableCallback(() => {
-    const row = cardsRef.current;
-    if (row === null) return;
-    const start = row.scrollLeft > 1;
-    const end = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
-    setClipped(start && end ? "both" : start ? "start" : end ? "end" : "none");
-  });
   useEffect(() => {
     const row = cardsRef.current;
     if (row === null) return;
