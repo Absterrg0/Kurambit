@@ -13,7 +13,7 @@ import {
   type GameEngineId,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderOpenIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ArrowUpIcon, FolderOpenIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
@@ -40,7 +40,8 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { SidebarInset } from "../ui/sidebar";
-import { Kbd } from "../ui/kbd";
+import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -242,8 +243,9 @@ function BriefBox({
 
   return (
     <section className="flex w-full flex-col gap-3">
-      {/* The page's one display line, in the same face as the covers below. */}
-      <h1 className="mb-2 font-display text-4xl/10 text-strong-foreground">
+      {/* T3 Code's draft headline: plain, centred, the composer under it. */}
+      {/* oxlint-disable-next-line kurambit/no-raw-type-classes -- the same classes as T3's DraftHeroHeadline, the one hero line in the app. */}
+      <h1 className="mb-3 w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
         {firstRun ? "Make a game you want to play" : "What should we make next?"}
       </h1>
       <form
@@ -251,7 +253,7 @@ function BriefBox({
           event.preventDefault();
           void start();
         }}
-        className="flex w-full flex-col rounded-3xl border border-border bg-card shadow-composer transition-colors focus-within:border-foreground/20 dark:shadow-none"
+        className="flex w-full flex-col rounded-2xl border border-border bg-card shadow-composer transition-colors focus-within:border-foreground/20 dark:shadow-composer-dark"
       >
         <label htmlFor="game-brief" className="sr-only">
           Describe the game you want to make
@@ -265,7 +267,7 @@ function BriefBox({
           rows={2}
           disabled={busy}
           placeholder="Describe the game you want to play…"
-          className="min-h-22 w-full resize-none bg-transparent px-5 pt-4.5 text-base/6 text-strong-foreground outline-none placeholder:text-placeholder"
+          className="min-h-20 w-full resize-none bg-transparent px-4 pt-3.5 text-base/6 text-foreground outline-none placeholder:text-placeholder"
         />
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
           {/* One active engine is no choice, so no picker shows. */}
@@ -327,15 +329,33 @@ function BriefBox({
           />
           <span className="flex-1" />
           {/* Lit only once there is a brief to build: an empty box's Enter just focuses it. */}
-          <Button
-            type="submit"
-            size="sm"
-            variant={trimmedBrief.length === 0 ? "secondary" : "default"}
-            disabled={busy || !ready}
-          >
-            {busy ? "Starting…" : "Start building"}
-            {busy ? null : <Kbd>⏎</Kbd>}
-          </Button>
+          {/* The composer's own send disc: lit once there is a brief to build. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="submit"
+                  aria-label={busy ? "Starting" : "Start building"}
+                  disabled={busy || !ready || trimmedBrief.length === 0}
+                  className={cn(
+                    "relative isolate flex size-8 items-center justify-center overflow-hidden rounded-full transition-[scale] duration-150 enabled:cursor-pointer hover:scale-105 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:hover:scale-100 [&_svg]:pointer-events-none",
+                    trimmedBrief.length > 0
+                      ? "surface-lit text-primary-foreground hover:surface-lit-hover disabled:opacity-64"
+                      : "surface-raised text-muted-foreground",
+                  )}
+                />
+              }
+            >
+              {busy ? (
+                <Spinner size="sm" aria-hidden="true" />
+              ) : (
+                <ArrowUpIcon className="size-4" aria-hidden="true" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              <TooltipLabel shortcut="⏎">Start building</TooltipLabel>
+            </TooltipPopup>
+          </Tooltip>
         </div>
       </form>
 
@@ -357,7 +377,7 @@ function BriefBox({
           ))}
         </ul>
       ) : (
-        <Text variant="meta" tone="muted" render={<p />}>
+        <Text variant="meta" tone="dim" render={<p className="text-center" />}>
           A playable first version in a few minutes. Rename, restyle and change it any time.
         </Text>
       )}
@@ -514,11 +534,11 @@ function ContinueShelf({
     <section aria-labelledby="games" className="@container flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <Text variant="label" tone="muted" render={<h2 id="games" />}>
-          Continue
+          Your games
         </Text>
         {canOpen ? <OpenGameLink /> : null}
       </div>
-      <ul role="list" className="grid grid-cols-2 gap-x-5 gap-y-6 @xl:grid-cols-3">
+      <ul role="list" className="grid grid-cols-2 gap-x-4 gap-y-5 @xl:grid-cols-3 @3xl:grid-cols-4">
         {shown.map((cover) => (
           <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
         ))}
@@ -559,7 +579,7 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           path={picture}
           gameName={name}
           mark="none"
-          className="aspect-video w-full rounded-xl ring-1 ring-border ring-inset transition-[box-shadow,translate] duration-150 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:ring-foreground/40 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none motion-reduce:group-hover:translate-y-0"
+          className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset transition-shadow duration-150 group-hover:ring-foreground/30 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none"
         >
           {/* Without a picture yet, the Stage's last frame, else the game's own colour. */}
           {picture === null && shown !== null ? (
