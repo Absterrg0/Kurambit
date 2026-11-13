@@ -21,6 +21,8 @@
 //     grade: { saturation: 1.08, contrast: 1.05, warmth: 0.05, vignette: 0.5 },
 //     resolution: "adaptive", // the render scale follows the GPU's time to hold 60 fps, with a
 //                             // sharpen; or a fixed scale such as 1 or 0.75
+//     ground: true,           // a large plain floor (one colour, no texture) gets soft patches of
+//                             // light and dark, as a field or floor has; false: drawn flat
 //   };
 //
 // "day" and "flat" draw straight to the canvas with its MSAA, the tone mapping and
@@ -150,6 +152,7 @@ export function resolveLook(options = {}) {
     bloom: part("bloom"),
     grade: part("grade"),
     shadows: options.shadows !== false,
+    ground: options.ground !== false,
     resolution: options.resolution ?? "adaptive",
     // A 2D game's exact colours: an orthographic camera with nothing about the look named.
     exactWhenOrthographic: options.preset === undefined && options.toneMapping === undefined,
@@ -339,14 +342,49 @@ export function lookShader(shader) {
   shader.vertexShader = shader.vertexShader
     .replace(
       "#include <common>",
-      "#include <common>\n#define LOOK_BAKED\nuniform mat4 lookBakedMatrix;\nuniform float lookBakedPush;\nvarying vec4 vLookBaked;",
+      "#include <common>\n#define LOOK_BAKED\nuniform mat4 lookBakedMatrix;\nuniform float lookBakedPush;\nvarying vec4 vLookBaked;\n#ifdef LOOK_GROUND\nvarying vec2 vLookGround;\n#endif",
     )
-    .replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${BAKED_VERTEX}`);
+    .replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${BAKED_VERTEX}`)
+    .replace("#include <begin_vertex>", `#include <begin_vertex>\n${GROUND_VERTEX}`);
   shader.fragmentShader = shader.fragmentShader
-    .replace("#include <common>", `#include <common>\n#define LOOK_BAKED\n${BAKED_FRAGMENT}`)
+    .replace(
+      "#include <common>",
+      `#include <common>\n#define LOOK_BAKED\n${BAKED_FRAGMENT}\n${GROUND_PARS}`,
+    )
     .replace("#include <normal_fragment_begin>", FOLIAGE_NORMAL)
+    .replace("#include <color_fragment>", GROUND_FRAGMENT)
     .replace("#include <lights_fragment_begin>", LIGHTS_BAKED);
 }
+// A large plain floor (createLook's markGrounds): soft patches of light and dark and a little
+// warmth on the light ones, from its world position, so it never tiles and never moves.
+const GROUND_VERTEX = /* glsl */ `
+#ifdef LOOK_GROUND
+  vLookGround = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;
+#endif`;
+const GROUND_FRAGMENT = /* glsl */ `#include <color_fragment>
+#ifdef LOOK_GROUND
+{
+  float lookPatch = lookGroundNoise( vLookGround * 0.09 ) * 0.5
+    + lookGroundNoise( vLookGround * 0.33 + 17.0 ) * 0.35
+    + lookGroundNoise( vLookGround * 1.3 + 41.0 ) * 0.15;
+  // Blended noise stays near its middle: its range is stretched before it shades.
+  lookPatch = smoothstep( 0.28, 0.72, lookPatch );
+  diffuseColor.rgb *= mix( 0.7, 1.12, lookPatch );
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.08, 1.05, 0.84 ),
+    smoothstep( 0.65, 1.0, lookPatch ) * 0.6 );
+}
+#endif`;
+const GROUND_PARS = /* glsl */ `
+#ifdef LOOK_GROUND
+varying vec2 vLookGround;
+float lookGroundHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+float lookGroundNoise( vec2 p ) {
+  vec2 i = floor( p ), f = fract( p );
+  vec2 u = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( lookGroundHash( i ), lookGroundHash( i + vec2( 1.0, 0.0 ) ), u.x ),
+    mix( lookGroundHash( i + vec2( 0.0, 1.0 ) ), lookGroundHash( i + vec2( 1.0, 1.0 ) ), u.x ), u.y );
+}
+#endif`;
 // Foliage (shell/assets.js marks it): a double-sided card whose normals point up, as grass and
 // leaves are made for engines that light both faces alike. three.js turns a back face's normal
 // around, to point down away from the sun, and every blade seen from behind draws black.
@@ -518,6 +556,7 @@ export async function createLook(canvas, options = {}) {
       if (scene.background === null) scene.background = new THREE.Color(look.sky.horizon);
       return;
     }
+    if (look.ground) markGrounds(scene);
     if (scene.background === null) scene.background = backgroundColor ?? sky.background;
     if (scene.environment === null && look.environment !== false) {
       const own = scene.background;
@@ -543,6 +582,30 @@ export async function createLook(canvas, options = {}) {
     return probe;
   };
   const exact = (camera) => look.exactWhenOrthographic && camera.isOrthographicCamera === true;
+  /**
+   * A large plain floor: a lit mesh with one colour and no texture, lying flat and wider than
+   * 20 m. One flat colour across a whole field is what makes a first build read as a prototype;
+   * its material gets the look's ground variation (GROUND_FRAGMENT), once.
+   */
+  const markGrounds = (scene) => {
+    scene.updateMatrixWorld(true);
+    const size = new THREE.Vector3();
+    const box = new THREE.Box3();
+    scene.traverse((object) => {
+      if (!object.isMesh || object.isInstancedMesh || object.isSkinnedMesh) return;
+      const material = object.material;
+      if (Array.isArray(material) || material == null || material.map != null) return;
+      if (material.color === undefined || material.isMeshBasicMaterial) return;
+      if (material.defines?.LOOK_GROUND !== undefined) return;
+      const geometry = object.geometry;
+      if (geometry.boundingBox === null) geometry.computeBoundingBox();
+      box.copy(geometry.boundingBox).applyMatrix4(object.matrixWorld).getSize(size);
+      const wide = Math.max(size.x, size.z);
+      if (wide < 20 || size.y > wide * 0.02) return;
+      material.defines = { ...material.defines, LOOK_GROUND: "" };
+      material.needsUpdate = true;
+    });
+  };
 
   const draw = (scene, camera, dt) => {
     dress(scene, camera);
