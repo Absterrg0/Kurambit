@@ -55,7 +55,7 @@ export const performanceOf = (
   if (browser.software || (record !== null && record !== "none" && record.software))
     // Its 300-character cap would cut the probe's output, so the reason is set after.
     return {
-      ...notMeasured("software", false, true),
+      ...notMeasured("software", false, true, "software"),
       why: `a harness fault on this machine, not the game's: the plays drew in software (${record !== null && record !== "none" ? record.renderer : (browser.renderer ?? "SwiftShader")}), where frame times say nothing about a game, because Kurambit's GPU probe found no hardware renderer (${browser.probe || "no output"})`.slice(
         0,
         700,
@@ -65,6 +65,8 @@ export const performanceOf = (
     return notMeasured(
       "the game's shell does not report frame times (its copy of the shell predates performance measurement)",
       false,
+      false,
+      "old-shell",
     );
   if (record === null) return notMeasured("the play's performance record could not be read", true);
   if (record.frames < MIN_FRAMES || record.fps === null || record.low1Fps === null)

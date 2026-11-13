@@ -424,6 +424,9 @@ outside their catalog.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.
+  A reason that changes what a person is told or what the harness does next carries a `cause`
+  literal beside `why`; the client words the cause and the harness branches on it, and neither
+  reads meaning out of `why`, which is the agents' text and free to change.
 - **Facts skip what is already known or not needed.** The boot check is not run again when this
   server's own `game_check` booted the same bytes (engine folder and `game.json`) clean, and the
   tester's bot plays a chat turn's build only while keep going, which judges by it, is on; a

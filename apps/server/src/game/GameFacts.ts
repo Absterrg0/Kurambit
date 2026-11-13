@@ -87,7 +87,7 @@ import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
  * Changes when the server's reading of a measurement changes; the bot files are hashed besides.
  * A new tier needs no bump: planOf measures each fact a stored row lacks, and nothing else.
  */
-const FACTS_VERSION = 3;
+const FACTS_VERSION = 4;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
@@ -143,7 +143,7 @@ const idleMachine = Effect.gen(function* () {
 /** The random-input play's scene record as the scene fact. */
 const sceneOf = (record: GameSceneReport | "no-shell" | null): Fact<"scene"> =>
   record === "no-shell"
-    ? notMeasured(SCENE_OLD_SHELL, false)
+    ? notMeasured(SCENE_OLD_SHELL, false, false, "old-shell")
     : record === null
       ? notMeasured("the random-input play's scene report could not be read", true)
       : { status: "measured", value: record };
@@ -627,9 +627,7 @@ const make = Effect.gen(function* () {
         ? skilled?.status === "measured"
         : skilled?.status !== "measured" || skilled.value.bot.hash !== bot.hash;
     const stillDeferred =
-      !skilledWanted &&
-      skilled?.status === "not-measured" &&
-      skilled.why === GAME_FACTS_SKILLED_DEFERRED;
+      !skilledWanted && skilled?.status === "not-measured" && skilled.cause === "deferred";
     if (botChanged && !stillDeferred) tiers.add("skilled");
     return tiers;
   };
@@ -796,6 +794,8 @@ const make = Effect.gen(function* () {
             ? notMeasured(
                 `its boot check was not measured${boots?.status === "not-measured" ? `: ${boots.why}` : ""}`,
                 true,
+                false,
+                boots?.status === "not-measured" ? boots.cause : undefined,
               )
             : !kitWritten
               ? notMeasured("the harness's bots could not be written into the build's copy", true)
@@ -866,7 +866,7 @@ const make = Effect.gen(function* () {
         // Why a build has no use when no play left a record: the plays' own reason.
         const noRecord = (fact: Fact<"idle"> | Fact<"masher"> | Fact<"skilled">) =>
           fact.status === "not-measured"
-            ? notMeasured(`its plays were not measured: ${fact.why}`, fact.retry)
+            ? notMeasured(`its plays were not measured: ${fact.why}`, fact.retry, false, fact.cause)
             : fact.status === "measured" && fact.value.ending === "did-not-boot"
               ? notMeasured("no play loaded the game's page: it did not boot", false)
               : notMeasured("the plays' record of what the game loaded could not be kept", true);
@@ -963,6 +963,7 @@ const make = Effect.gen(function* () {
                     `the random-input run was not measured: ${run.fact.why}`,
                     run.fact.retry,
                     isStanding(run.fact),
+                    run.fact.cause,
                   )
                 : notMeasured(what, true);
             const measuredRun = run.fact.status === "measured" && run.result !== null;
@@ -1043,13 +1044,15 @@ const make = Effect.gen(function* () {
             const skilled = notMeasured(
               "no play bot yet; Keep going writes one, or ask your agent for one",
               false,
+              false,
+              "no-play-bot",
             );
             // No play ran: the other plays' reason stands when they left no record either.
             const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
             yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
           } else if (!skilledWanted) {
             // Only keep going's judgment and a person need the tester's bot (GameFacts.measure).
-            const skilled = notMeasured(GAME_FACTS_SKILLED_DEFERRED, false);
+            const skilled = notMeasured(GAME_FACTS_SKILLED_DEFERRED, false, false, "deferred");
             yield* write({ skilled, ...(yield* useAfter("skilled", null, noRecord(skilled))) });
           } else {
             // The game's own bot and its copy of the kit, beside the harness's kit.
