@@ -10,6 +10,8 @@ export interface GameStatusPart {
   readonly since: number | null;
   /** The phrase in a full sentence, for its tooltip: the line itself is compressed. */
   readonly hint: string | null;
+  /** A shorter phrase for a narrow top bar, so the line is never cut mid-word. */
+  readonly short: string | null;
 }
 
 const part = (text: string, more: Partial<Omit<GameStatusPart, "text">> = {}): GameStatusPart => ({
@@ -18,6 +20,7 @@ const part = (text: string, more: Partial<Omit<GameStatusPart, "text">> = {}): G
   strong: false,
   since: null,
   hint: null,
+  short: null,
   ...more,
 });
 
@@ -66,6 +69,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
         ? null
         : input.copy && input.onStage !== null
           ? part(`Playing ${input.onStage} from a copy`, {
+              short: "Playing a copy",
               hint: "The game folder is untouched. Back to the current game puts it on the Stage again.",
             })
           : // At rest the line names what plays, in the words the Inspector and sidebar use.
@@ -75,6 +79,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
               })
             : input.changedSince !== null
               ? part(`Changed since ${input.changedSince} · not measured`, {
+                  short: "Changed · not measured",
                   hint: `The game folder has changed since ${input.changedSince}, so the Stage plays something no build has measured yet. The next build measures it.`,
                 })
               : input.measured || input.landing

@@ -1008,7 +1008,8 @@ const checkWords = (
       if (facts.liveness.status !== "measured") return null;
       const live = facts.liveness.value;
       return live.freezes.length === 0
-        ? { sentence: "Keeps moving, no still stretches", value: null }
+        ? // One name in either reading; the reading is the value, as Compare shows it.
+          { sentence: "Keeps moving", value: "no still stretch" }
         : live.longestFreeze >= 3
           ? {
               sentence: "Stands still for a while",

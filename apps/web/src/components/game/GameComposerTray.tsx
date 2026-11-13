@@ -21,7 +21,17 @@ import { useKeepGoing } from "./useKeepGoing";
  * and Keep going, the other way to move the game on. A person directing the
  * game reads both where they write.
  */
-export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function GameComposerTray({
+  threadRef,
+  next = null,
+  onAskNext,
+}: {
+  threadRef: ScopedThreadRef;
+  /** The agent's suggested next change, shown as the composer's placeholder. */
+  next?: string | null;
+  /** Puts the suggestion in the composer to edit or send. */
+  onAskNext?: (text: string) => void;
+}) {
   const status = useIsGameThreadStatus(threadRef).data;
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -57,6 +67,20 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
   return (
     <div className="flex min-h-9 items-center gap-2 pt-1.5" data-game-composer-tray="">
       <TraySentence>{sentence}</TraySentence>
+      {next === null || onAskNext === undefined ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button size="compact" variant="ghost" onClick={() => onAskNext(next)}>
+                Ask for it
+              </Button>
+            }
+          />
+          <TooltipPopup side="top" className="max-w-xs">
+            Put the agent's suggestion in the box: {next}
+          </TooltipPopup>
+        </Tooltip>
+      )}
       {canKeepGoing ? (
         <Menu>
           <Tooltip>

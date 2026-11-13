@@ -339,11 +339,12 @@ function ComparePane({
         />
       </div>
       <Text variant="meta" tone="muted" numeric truncate render={<p />}>
+        {/* Name, then its states, then its time: the same order on both sides. */}
         {[
           buildName(build),
           undone ? "undone" : null,
-          formatBuildTime(build.at),
           shown && inspectorOpen ? "in the Inspector" : null,
+          formatBuildTime(build.at),
         ]
           .filter((part) => part !== null)
           .join(" · ")}

@@ -1394,6 +1394,8 @@ export interface ChatComposerProps {
   interactionMode: ProviderInteractionMode;
   /** Game threads hide the coding access picker and use game copy. */
   gameThread?: boolean;
+  /** A game's placeholder in place of its usual one: the agent's suggested next change. */
+  gamePlaceholder?: string | null;
 
   lockedProvider: ProviderDriverKind | null;
   providerStatuses: ServerProvider[];
@@ -1761,6 +1763,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     gameThread = false,
+    gamePlaceholder = null,
     interactionMode: requestedInteractionMode,
     lockedProvider,
     providerStatuses,
@@ -6837,7 +6840,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : gameThread
-                                  ? "Tell your game what to change…"
+                                  ? (gamePlaceholder ?? "Tell your game what to change…")
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                     : "Ask anything, @tag files/folders, $use skills, or / for commands"

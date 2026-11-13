@@ -244,6 +244,8 @@ export const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher", "mot
 const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {
   colour: "Largest colour",
   motion: "Picture change (motion)",
+  // The same quantity on both sides: the longest stretch with nothing moving.
+  freeze: "Longest still stretch",
 };
 
 export interface CompareRow {
@@ -338,6 +340,10 @@ export const compareRows = (
       return `${runEvent(check.sentence)} ${check.value}`;
     // Colour and motion are numbers, named by the row: just the number.
     if (id === "colour") return check.value?.replace(/^largest colour /, "") ?? fallback;
+    if (id === "freeze" && check.value !== null)
+      return check.value === "no still stretch"
+        ? "None"
+        : check.value.replace(/^longest (still )?/, "");
     if (id === "motion") return fallback.replace(/^Motion |^Almost no motion \(|\)$/g, "");
     const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
     if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;
@@ -445,6 +451,7 @@ export const changeWord = (
   if (verdict && row.tone === "worse") return "Worse";
   if (row.mark === "≠") return "Changed";
   const up = row.mark === "↑";
+  if (row.id === "freeze") return up ? "Longer" : "Shorter";
   // A time moves later or earlier; an amount is more or less.
   return RUN_FACTS.has(row.id) || row.id === "first-response"
     ? up

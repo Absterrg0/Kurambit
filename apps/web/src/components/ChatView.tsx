@@ -363,7 +363,7 @@ import {
 } from "../gameWorkspaceStore";
 import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
 import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
-import { useGameNextBanner } from "./game/GameNextBanner";
+import { useGameNext } from "./game/GameNextBanner";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useGameGenerationCards } from "./game/GameGenerationCard";
 import { useEnvironmentScope } from "~/state/session";
@@ -3163,9 +3163,8 @@ export default function ChatView(props: ChatViewProps) {
     isGameThread && isServerThread ? activeThreadRef : null,
     isWorking,
   );
-  const gameNextBanner = useGameNextBanner(
-    keepGoingBanner.hidesNext || latestTurnUndone ? null : gameNextReply,
-    askAgentToFixStable,
+  const gameNext = useGameNext(
+    keepGoingBanner.hidesNext || latestTurnUndone || isWorking ? null : gameNextReply,
   );
   const sendAppMessage = async (text: string) => {
     if (!isServerThread || activeThreadId === null) {
@@ -5100,11 +5099,12 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   const composerBannerItems = (() => {
     // Under a game's Stage one row at most: a question or approval (the composer's
-    // own panel) first, then keep going's status, then the Next suggestion.
+    // own panel) first, then keep going's status. The Next suggestion is the composer's
+    // placeholder instead.
     const gameRunItem =
       activePendingApproval !== null || activePendingUserInput !== null
         ? null
-        : (keepGoingBanner.item ?? gameNextBanner);
+        : keepGoingBanner.item;
     const gameRunItems = gameRunItem === null ? [] : [gameRunItem];
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
@@ -7757,6 +7757,7 @@ export default function ChatView(props: ChatViewProps) {
                     runtimeMode={runtimeMode}
                     interactionMode={interactionMode}
                     gameThread={isGameThread}
+                    gamePlaceholder={gameNext === null ? null : `Next: ${gameNext}`}
                     lockedProvider={modelPickerLockedProvider}
                     providerStatuses={providerStatuses as ServerProvider[]}
                     providerCatalogKnown={serverConfig !== null}
@@ -7882,7 +7883,11 @@ export default function ChatView(props: ChatViewProps) {
             </div>
           </ComposerSurface.Shell>
           {gameLayout && activeThreadRef !== null ? (
-            <GameComposerTray threadRef={activeThreadRef} />
+            <GameComposerTray
+              threadRef={activeThreadRef}
+              next={gameNext}
+              onAskNext={askAgentToFixStable}
+            />
           ) : null}
           <div
             aria-hidden
@@ -7924,8 +7929,11 @@ export default function ChatView(props: ChatViewProps) {
             // shares both its edges.
             className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col"
           >
+            {/* One row above the composer: keep going's status (its own row in the
+                composer's drawer) takes the agent's line's place, so the room stays one row. */}
             {activePendingApproval !== null ||
-            activePendingUserInput !== null ? null : latestTurnUndone && !isWorking ? (
+            activePendingUserInput !== null ||
+            keepGoingBanner.item !== null ? null : latestTurnUndone && !isWorking ? (
               <GameUndoneNote threadRef={activeThreadRef} runId={activeLatestRun?.runId ?? null} />
             ) : (
               <GameDirectionNote
@@ -7934,7 +7942,7 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenLog={() => useGameWorkspaceStore.getState().showInspectorTab("log")}
               />
             )}
-            {gameWorkspace.compact && gameAgentNote === null ? (
+            {gameWorkspace.compact && gameAgentNote === null && keepGoingBanner.item === null ? (
               <GameFirstChangeNote threadRef={activeThreadRef} />
             ) : null}
             <GamePointedChip threadRef={activeThreadRef} />

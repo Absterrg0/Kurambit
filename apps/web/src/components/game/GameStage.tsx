@@ -203,55 +203,36 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
 /**
- * A build card's picture height bounds: its 160px floor, and a cap so the Stage stays the star.
- * Past the cap the cards stop growing: on a wide window they become a lane under the Stage
- * rather than three posters competing with it.
+ * A build card's picture height. Cards are one size at every window: the strip is a lane under
+ * the Stage that holds as many builds as fit and scrolls for the rest, and the Stage takes the
+ * height a larger card would have taken.
  */
-const BUILD_CARD_PICTURE = { min: 90, max: 150 } as const;
-/** The strip's gap between cards (gap-3), so three cards are sized to fit side by side. */
-const BUILD_CARD_GAP = 12;
+const BUILD_CARD_PICTURE = 100;
 /**
- * The height kept under the strip for the rows that come and go above the composer: the
- * agent's one-line note and one suggestion. They appear as a turn runs and lands, and the
- * Stage must not shrink and re-centre each time; only rows past this budget take its height.
- * Every game keeps it, so a game's Stage does not step at its first message either.
+ * The height kept above the composer for the one row that comes and goes there: the agent's line
+ * (or the note that a build was undone). It appears as a turn runs and lands, and the Stage must
+ * not shrink and re-centre each time; every game keeps it, so the Stage does not step at a
+ * game's first message either.
  */
-const TRANSIENT_ROWS_RESERVE = 72;
+const TRANSIENT_ROWS_RESERVE = 38;
 /**
  * What the loading skeleton's column gives up besides its Stage and card pictures: the strip's
  * label, captions and gaps (about 96px), the room above the composer and the fit's breath, so
  * its Stage is the size the fit gives a 16:9 game.
  */
-const SKELETON_STRIP_CHROME = 96 + TRANSIENT_ROWS_RESERVE + 4;
+const SKELETON_STRIP_CHROME = 96 + BUILD_CARD_PICTURE + TRANSIENT_ROWS_RESERVE + 4;
 
 /**
- * PURE. The Stage's width and its cards' picture height, in a column `width` wide with `height`
- * for the Stage and one row of pictures. The game keeps its shape (`ratio`, height over width),
- * and three cards always span the Stage's width: a height-bound Stage gives up a little height so
- * the strip under it is one row as wide as the game, never a short row and a gap.
+ * PURE. The Stage's size in a column `width` wide with `height` for the Stage and one row of
+ * card pictures. The game keeps its shape (`ratio`, height over width); the cards are a fixed
+ * size, so the Stage is as large as the column allows.
  */
 const fitStage = (width: number, height: number, ratio: number) => {
-  const picture = (stage: number) => (((stage - 2 * BUILD_CARD_GAP) / 3) * 9) / 16;
-  const clamp = (value: number) =>
-    Math.min(BUILD_CARD_PICTURE.max, Math.max(BUILD_CARD_PICTURE.min, value));
-  let stage = width;
-  if (stage * ratio + clamp(picture(stage)) > height) {
-    // Where the game and three spanning cards exactly fill the height.
-    stage = (height + (2 * BUILD_CARD_GAP * 9) / (3 * 16)) / (ratio + 9 / (3 * 16));
-    const wanted = picture(stage);
-    if (wanted !== clamp(wanted)) stage = (height - clamp(wanted)) / ratio;
-  }
-  const stageHeight = Math.floor(Math.max(0, Math.min(stage, width) * ratio));
-  const stageWidth = Math.floor(stageHeight / ratio);
+  const stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - BUILD_CARD_PICTURE)));
   return {
-    width: stageWidth,
+    width: Math.floor(stageHeight / ratio),
     height: stageHeight,
-    cardWidth: Math.max(
-      0,
-      Math.floor(
-        Math.min((stageWidth - 2 * BUILD_CARD_GAP) / 3, (BUILD_CARD_PICTURE.max * 16) / 9),
-      ),
-    ),
+    cardWidth: Math.floor((BUILD_CARD_PICTURE * 16) / 9),
   };
 };
 
@@ -590,7 +571,7 @@ function ThreadGameStage({
       const picture =
         strip
           ?.querySelector("[data-game-build-card], [data-game-build-slot]")
-          ?.firstElementChild?.getBoundingClientRect().height ?? BUILD_CARD_PICTURE.min;
+          ?.firstElementChild?.getBoundingClientRect().height ?? BUILD_CARD_PICTURE;
       const stripChrome =
         strip === null ? 0 : Math.max(0, strip.getBoundingClientRect().height - picture);
       // The rows that come and go above the composer (the agent's note, a suggestion tucked
@@ -823,13 +804,12 @@ function ThreadGameStage({
           <Skeleton className="h-4 w-28" />
         </div>
         {/* The fitted column at a 16:9 game, the shape most games have: a Stage, the strip's
-            label and three cards a third of its width. Its width is the window's or what the
-            height allows (the Stage and a card row are 3/4 of the width tall, plus the strip's
-            label and captions), so only the game's own shape moves it when the game is read. */}
+            label and its cards at their one size. Its width is the window's or what the height
+            allows, so only the game's own shape moves it when the game is read. */}
         <div className="flex min-h-0 flex-1 justify-center" style={{ containerType: "size" }}>
           <div
             className="flex flex-col"
-            style={{ width: `min(100cqw - 24px, (100cqh - ${SKELETON_STRIP_CHROME}px) * 4 / 3)` }}
+            style={{ width: `min(100cqw - 24px, (100cqh - ${SKELETON_STRIP_CHROME}px) * 16 / 9)` }}
           >
             <div className="aspect-video w-full rounded-xl bg-stage-well" />
             <div className="flex h-7 items-center pt-2.5">
@@ -837,9 +817,13 @@ function ThreadGameStage({
                 Builds
               </Text>
             </div>
-            <div className="grid grid-cols-3 gap-3 pt-1.5">
+            <div className="flex gap-3 overflow-hidden pt-1.5">
               {[0, 1, 2].map((n) => (
-                <div key={n} className="flex flex-col gap-1.5">
+                <div
+                  key={n}
+                  className="flex shrink-0 flex-col gap-1.5"
+                  style={{ width: (BUILD_CARD_PICTURE * 16) / 9 }}
+                >
                   <Skeleton shape="card" className="aspect-video w-full" />
                   <Skeleton className="h-3 w-20" />
                 </div>
@@ -1189,7 +1173,10 @@ function ThreadGameStage({
             // Stage, the strip's label and captions, the tray), so the button hangs left. A
             // height-bound Stage's column is centred, and the row spans it: its right group
             // ends on the Stage's edge, over the game rather than an empty margin.
-            "mx-auto flex h-(--workspace-topbar-height) w-full max-w-(--game-stage-column) min-w-0 items-center gap-1.5 px-2 pl-3",
+            "mx-auto flex h-(--workspace-topbar-height) w-full min-w-0 items-center gap-1.5 px-2 pl-3",
+            // With the Inspector folded the row spans the whole column: its status and the
+            // Inspector's summary need the room more than they need the Stage's edges.
+            !compact && "max-w-(--game-stage-column)",
             // The window is dragged by its top bar; its buttons stay clickable.
             isElectron && "drag-region",
             // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this
@@ -1252,7 +1239,7 @@ function ThreadGameStage({
               Back to the current game
             </Button>
           ) : null}
-          <span className="min-w-2 flex-1" />
+          <span data-topbar-spacer="" className="min-w-2 flex-1" />
           <IconAction
             label={undoLabel}
             shortcut={undoKey}
@@ -1372,7 +1359,22 @@ function ThreadGameStage({
               }
             >
               <PanelRightIcon className="size-3.5" aria-hidden="true" />
-              {compact ? (playTarget === null ? (folderChecks ?? "Inspector") : "Inspector") : null}
+              {/* Folded, the way in names the Inspector and what it holds: the Stage's checks,
+                  or, while two builds are compared, that it shows side A. */}
+              {compact ? (
+                <>
+                  Inspector
+                  {compare !== null ? (
+                    <Text variant="meta" tone="muted" render={<span />}>
+                      · side A
+                    </Text>
+                  ) : playTarget === null && folderChecks !== null ? (
+                    <Text variant="meta" tone="muted" render={<span />}>
+                      · {folderChecks}
+                    </Text>
+                  ) : null}
+                </>
+              ) : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               <TooltipLabel shortcut={inspectorKey}>
@@ -1612,29 +1614,63 @@ function TruncatedText({ text, className }: { text: string; className?: string }
 
 function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
   const hints = status.map((part) => part.hint).filter((hint) => hint !== null);
+  // The full line when it fits, else each phrase's short form: never an ellipsis mid-word. An
+  // unseen copy of the full line is measured against the room the line has.
+  const full = useRef<HTMLSpanElement | null>(null);
+  const room = useRef<HTMLSpanElement | null>(null);
+  const [short, setShort] = useState(false);
+  const hasShort = status.some((part) => part.short !== null);
+  useLayoutEffect(() => {
+    const measured = full.current;
+    const box = room.current;
+    if (measured === null || box === null || !hasShort) return;
+    // The line's room is its own width and the top bar's spacer after it.
+    const spacer = box
+      .closest("[data-game-topbar]")
+      ?.querySelector<HTMLElement>("[data-topbar-spacer]");
+    const check = () =>
+      setShort(
+        measured.scrollWidth > box.clientWidth + Math.max(0, (spacer?.clientWidth ?? 0) - 8) + 1,
+      );
+    check();
+    // The unseen full line resizes when its words change, so it re-measures then too.
+    return observeResize([box, measured, ...(spacer == null ? [] : [spacer])], check);
+  }, [hasShort]);
+  const parts = (shortForm: boolean) =>
+    status.map((part, index) => (
+      <span key={part.text} className="flex min-w-0 items-center gap-1.5">
+        {index > 0 ? (
+          <Text variant="meta" tone="muted" aria-hidden="true">
+            ·
+          </Text>
+        ) : null}
+        {part.dot === "live" ? <StatusDot tone="live" pulse /> : null}
+        <Text variant="meta" tone={part.strong ? "default" : "muted"} truncate>
+          {shortForm ? (part.short ?? part.text) : part.text}
+        </Text>
+        {part.since === null ? null : (
+          <Text variant="meta" tone="muted" numeric>
+            <GameElapsed since={part.since} prefix="· " />
+          </Text>
+        )}
+      </span>
+    ));
   const line = (
     <span
+      ref={room}
       role="status"
-      className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden whitespace-nowrap"
+      className="relative flex min-w-0 shrink items-center gap-1.5 overflow-hidden whitespace-nowrap"
     >
-      {status.map((part, index) => (
-        <span key={part.text} className="flex min-w-0 items-center gap-1.5">
-          {index > 0 ? (
-            <Text variant="meta" tone="dim" aria-hidden="true">
-              ·
-            </Text>
-          ) : null}
-          {part.dot === "live" ? <StatusDot tone="live" pulse /> : null}
-          <Text variant="meta" tone={part.strong ? "default" : "muted"} truncate>
-            {part.text}
-          </Text>
-          {part.since === null ? null : (
-            <Text variant="meta" tone="muted" numeric>
-              <GameElapsed since={part.since} prefix="· " />
-            </Text>
-          )}
+      {parts(short && hasShort)}
+      {hasShort ? (
+        <span
+          ref={full}
+          aria-hidden="true"
+          className="invisible absolute top-0 left-0 flex w-max items-center gap-1.5"
+        >
+          {parts(false)}
         </span>
-      ))}
+      ) : null}
     </span>
   );
   if (hints.length === 0) return line;

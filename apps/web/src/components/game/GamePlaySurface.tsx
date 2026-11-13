@@ -163,7 +163,7 @@ export function GamePlaySurface({
           <GameFrame
             key={frameKey}
             url={previewUrl}
-            title={`${gameName} preview`}
+            title={`${gameName} on the Stage`}
             gameName={gameName}
             poster={poster}
             hidden={hidden}

@@ -41,8 +41,20 @@ import {
   timelineMarks,
 } from "./gameBuildTimeline.logic";
 
-/** About how many characters of a request a card's caption shows before it cuts the rest. */
-const CARD_CAPTION_FITS = 32;
+/** About how many characters a card's two request lines, or its one name line, show. */
+const CARD_REQUEST_FITS = 48;
+const CARD_NAME_FITS = 24;
+
+/**
+ * PURE. A request short enough for a card's two lines, ended at a word: a deliberate short form
+ * rather than a line clamp's cut mid-word. The card's tooltip gives it whole.
+ */
+const cardRequest = (request: string) => {
+  if (request.length <= CARD_REQUEST_FITS) return request;
+  const cut = request.slice(0, CARD_REQUEST_FITS - 1);
+  const word = cut.lastIndexOf(" ");
+  return `${(word > CARD_REQUEST_FITS / 2 ? cut.slice(0, word) : cut).replace(/[\s,;:.]+$/, "")}…`;
+};
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
 
@@ -543,36 +555,34 @@ function BuildCard({
         <CardCaption
           strong={onStage}
           title={
-            name === null || build.source._tag === "saved" ? (
-              <span className={cn(undone && "line-through")}>{caption}</span>
-            ) : (
-              <>
-                <span className={cn(undone && "line-through")}>{name}</span>
-                {undone ? <span className="text-muted-foreground"> · undone</span> : null}
-              </>
-            )
+            <span className={cn(undone && "line-through")}>
+              {name === null || build.source._tag === "saved" ? caption : name}
+            </span>
           }
+          // An undone build's state is that it is undone; its checks describe a game no longer
+          // on the Stage, so they do not compete with the current build's.
+          aside={undone ? "Undone" : <CheckDelta build={build} previous={previous} />}
           meta={
             <>
               {step === null ? null : (
-                <FastForwardIcon className="size-3 shrink-0" aria-hidden="true" />
+                <FastForwardIcon className="me-1 inline size-3 align-[-1px]" aria-hidden="true" />
               )}
-              <span className="truncate">
-                {name === null || build.source._tag === "saved"
-                  ? formatBuildTime(build.at)
-                  : caption}
-              </span>
+              {name === null || build.source._tag === "saved"
+                ? formatBuildTime(build.at)
+                : cardRequest(caption)}
             </>
           }
-          aside={<CheckDelta build={build} previous={previous} />}
         />
       </TooltipTrigger>
-      {/* Under the card, so it never covers the strip's own row above: the whole caption, its
-          time, and how the build measured, which the card does not say. */}
-      <TooltipPopup side="bottom" className="max-w-xs">
+      {/* Over the card, where the Stage's edge has room for it, never across the composer:
+          the whole name or request first when the card had to shorten it, then its time and
+          how the build measured, which the card does not say. */}
+      <TooltipPopup side="top" className="max-w-xs">
         <span className="flex flex-col gap-0.5">
-          {/* The whole request only when the card had to cut it. */}
-          {caption.length > CARD_CAPTION_FITS ? <span>{caption}</span> : null}
+          {caption.length >
+          (name === null || build.source._tag === "saved" ? CARD_NAME_FITS : CARD_REQUEST_FITS) ? (
+            <span>{caption}</span>
+          ) : null}
           <span className="text-muted-foreground">
             {/* The time only when the caption shows the request in its place; "undone" is on
                 the caption already. */}
@@ -597,7 +607,8 @@ function CardCaption({
   strong,
 }: {
   title: ReactNode;
-  /** Beside the name, so the second line is the request's whole width. */
+  /** The card's state beside its name ("Being made", a check count, "Undone"), so every card
+   * reads `name · state` over its request. */
   aside?: ReactNode;
   meta: ReactNode;
   strong: boolean;
@@ -624,11 +635,13 @@ function CardCaption({
           </Text>
         )}
       </span>
+      {/* Two lines, wrapping at words, the same height on every card: a request is read, not
+          cut to a fragment, and the strip keeps one height. */}
       <Text
         variant="meta"
         tone="muted"
         numeric
-        render={<span className="flex min-w-0 items-center gap-1.5" />}
+        render={<span className="line-clamp-2 min-w-0" style={{ minHeight: "2lh" }} />}
       >
         {meta}
       </Text>
@@ -756,9 +769,15 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
       </div>
       <CardCaption
         strong={false}
-        title={slot.caption ?? slot.label}
+        title={slot.label}
         // The top bar holds the turn's clock; the slot says only what it is.
-        meta={slot.saving === true ? "Being saved" : "Being made"}
+        aside={
+          <span className="flex items-center gap-1">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
+            {slot.saving === true ? "Being saved" : "Being made"}
+          </span>
+        }
+        meta={slot.caption === null ? "" : cardRequest(slot.caption)}
       />
     </div>
   );
@@ -835,7 +854,7 @@ function NowCard({
         </GameNowPicture>
         <CardCaption strong={active} title="Now" meta={meta} />
       </TooltipTrigger>
-      <TooltipPopup side="bottom" align="end" className="max-w-xs">
+      <TooltipPopup side="top" align="end" className="max-w-xs">
         {changed
           ? borrowed && current !== null
             ? `The game as it is now, changed since ${buildName(current)}. Picture from ${buildName(current)}.`

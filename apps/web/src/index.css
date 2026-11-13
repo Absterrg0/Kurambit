@@ -1556,8 +1556,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --secondary: #f2f0ec;
   --secondary-foreground: #141312;
   --muted: #f2f0ec;
-  --muted-foreground: #6f6a63;
-  --placeholder: #807b74;
+  /* Secondary text holds 4.5:1 on every light surface it sits on (the paper, cards and the
+     muted fill); the placeholder too, a step lighter than muted. */
+  --muted-foreground: #635e58;
+  --placeholder: #726d66;
   --secondary-label: var(--muted-foreground);
   --icon-muted: #86817a;
   --message-surface: #f1efea;
@@ -1623,7 +1625,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --secondary-foreground: #f5f3ef;
     --muted: #191918;
     --muted-foreground: #8e8a83;
-    --placeholder: #7c7872;
+    --placeholder: #8a867f;
     --icon-muted: #77736c;
     --message-surface: #191918;
     --message-action-hover: #ffffff;

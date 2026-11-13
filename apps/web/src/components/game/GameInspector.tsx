@@ -216,7 +216,8 @@ function Section({
   children,
 }: {
   title: string;
-  detail?: string | null;
+  /** The summary line: words, or a placeholder holding its line while they are read. */
+  detail?: ReactNode;
   aside?: ReactNode;
   children: ReactNode;
 }) {
@@ -230,10 +231,13 @@ function Section({
           {aside === undefined ? null : <span className="ml-auto flex items-center">{aside}</span>}
         </div>
         {/* The summary has its own line and wraps: no count is ever cut off. */}
-        {detail === undefined || detail === null || detail === "" ? null : (
+        {detail === undefined || detail === null || detail === "" ? null : typeof detail ===
+          "string" ? (
           <Text variant="meta" tone="muted" numeric render={<p />}>
             {detail}
           </Text>
+        ) : (
+          detail
         )}
       </div>
       {children}
@@ -518,9 +522,12 @@ function BuildDetail({
         // Under another build's heading, the checks name whose they are: never read as the Stage's.
         title={heading === null ? "Checks" : `Checks · ${buildName(build)}`}
         detail={
-          factsData !== null && factsData.state !== "never" && build.available
-            ? checksSummary(factsData, busy && factsData.message.trim() !== "")
-            : null
+          factsData !== null && factsData.state !== "never" && build.available ? (
+            checksSummary(factsData, busy && factsData.message.trim() !== "")
+          ) : factsData === null && facts.error === null && build.available ? (
+            // The summary's line, held while the checks are read.
+            <Skeleton className="my-0.5 h-3 w-36" />
+          ) : null
         }
         aside={
           measure.canMeasure &&
@@ -554,7 +561,27 @@ function BuildDetail({
           </Text>
         ) : factsData === null ? (
           facts.error === null ? (
-            <Skeleton shape="card" className="h-40 w-full" />
+            // The list's own shape while it is read: every build is measured on the same
+            // checks, so their names and rows are known and nothing under them moves.
+            <div aria-busy="true" className="flex flex-col gap-2">
+              <Rows>
+                {GAME_LEAD_FACTS.map((id) => (
+                  <div key={id} className="flex min-h-9 items-center gap-2.5 px-3">
+                    <span className="size-4 shrink-0" />
+                    <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
+                      {gameFactName(id)}
+                    </Text>
+                    <Skeleton className="h-3 w-10" />
+                    <span className="w-6 shrink-0" />
+                  </div>
+                ))}
+              </Rows>
+              <Rows>
+                <div className="flex min-h-9 items-center px-3">
+                  <Skeleton className="h-3 w-40" />
+                </div>
+              </Rows>
+            </div>
           ) : (
             <Text variant="meta" tone="muted" render={<p />}>
               {facts.error}
@@ -1026,24 +1053,37 @@ function CheckRow({
             />
           )}
         </span>
-        <Text variant="meta" tone="default" render={<span className="min-w-0 flex-1" />}>
-          <Tooltip>
-            <TooltipTrigger render={<span />}>{text}</TooltipTrigger>
-            <TooltipPopup side="left" className="max-w-sm">
-              <span className="flex flex-col gap-1">
-                <span>
-                  {fact.label}: {fact.reading._tag === "measured" ? fact.reading.text : text}
+        {/* The name on one line and its reading beside it; a reading that does not fit moves
+            under the name rather than breaking it mid-row. */}
+        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
+          <Text
+            variant="meta"
+            tone="default"
+            render={<span className="min-w-0 whitespace-nowrap" />}
+          >
+            <Tooltip>
+              <TooltipTrigger render={<span />}>{text}</TooltipTrigger>
+              <TooltipPopup side="left" className="max-w-sm">
+                <span className="flex flex-col gap-1">
+                  <span>
+                    {fact.label}: {fact.reading._tag === "measured" ? fact.reading.text : text}
+                  </span>
+                  {note === null ? null : <span>{note}</span>}
                 </span>
-                {note === null ? null : <span>{note}</span>}
-              </span>
-            </TooltipPopup>
-          </Tooltip>
-        </Text>
-        {value === null ? null : (
-          <Text variant="meta" tone="muted" numeric render={<span className="shrink-0" />}>
-            {value}
+              </TooltipPopup>
+            </Tooltip>
           </Text>
-        )}
+          {value === null ? null : (
+            <Text
+              variant="meta"
+              tone="muted"
+              numeric
+              render={<span className="ms-auto shrink-0 whitespace-nowrap" />}
+            >
+              {value}
+            </Text>
+          )}
+        </span>
         {/* One fixed 24px gutter, so values right-align in one column and every sentence keeps
             room for one line; a row with several pieces of evidence opens them from a menu. */}
         <span className="flex w-6 shrink-0 items-center justify-end">
