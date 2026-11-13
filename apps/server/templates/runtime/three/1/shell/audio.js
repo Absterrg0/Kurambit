@@ -45,6 +45,7 @@ export function unlockAudio() {
   sfx.connect(master);
   gains = { master, music, sfx };
   for (const name of VOLUME_NAMES) gains[name].gain.value = volumes[name];
+  if (muted) gains.master.gain.value = 0;
   if (held) context.suspend().catch(() => undefined);
   if (musicUrl !== null) playMusic(musicUrl);
   if (bedUrl !== null) startBed();
@@ -54,7 +55,16 @@ window.addEventListener("keydown", unlockAudio, { capture: true });
 
 export function setVolume(name, value) {
   volumes[name] = Math.min(1, Math.max(0, Number(value) || 0));
-  if (gains !== null) gains[name].gain.setTargetAtTime(volumes[name], context.currentTime, 0.02);
+  if (gains !== null && !(muted && name === "master"))
+    gains[name].gain.setTargetAtTime(volumes[name], context.currentTime, 0.02);
+}
+
+/** The Stage's mute: silences everything through the master gain, the game's volumes untouched. */
+let muted = false;
+export function muteAudio(on) {
+  muted = on;
+  if (gains !== null)
+    gains.master.gain.setTargetAtTime(on ? 0 : volumes.master, context.currentTime, 0.02);
 }
 
 export function getVolume(name) {

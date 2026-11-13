@@ -54,16 +54,19 @@ export function RightPanelSurfaceContent(props: {
   readonly onCloseSurface: (surface: RightPanelSurface) => void;
   readonly terminal: RightPanelTerminalProps;
   readonly files: RightPanelFileProps;
-  /** A game's Builds tab. Its Game tab renders beside this content, so it never unmounts. */
-  readonly gameBuilds?: ReactNode;
+  /** A game's Tune and Look tabs. Its Game tab renders beside this content, so it never unmounts. */
+  readonly gameTune?: ReactNode;
+  readonly gameLook?: ReactNode;
 }) {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
   switch (surface.kind) {
     case "game":
       return null;
-    case "builds":
-      return props.gameBuilds ?? null;
+    case "tune":
+      return props.gameTune ?? null;
+    case "look":
+      return props.gameLook ?? null;
     case "preview":
       return (
         <Suspense fallback={null}>

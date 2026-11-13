@@ -72,6 +72,7 @@ import {
   playTick,
   setVolume,
   unlockAudio,
+  muteAudio,
 } from "./audio.js";
 import * as game from "#main";
 
@@ -787,6 +788,8 @@ const view = () => {
   stageView.camera = shown.camera;
   return stageView;
 };
+// The Stage's slow motion: play time runs at this share of real time.
+let studioSpeed = 1;
 const bridge = createStageBridge({
   canvas,
   renderer,
@@ -801,6 +804,10 @@ const bridge = createStageBridge({
     applyHold();
   },
   redraw: () => (redraw = true),
+  speed(scale) {
+    studioSpeed = scale;
+  },
+  mute: muteAudio,
   drawClean() {
     if (run?.compiling === true) return;
     look.update();
@@ -911,7 +918,7 @@ renderer.setAnimationLoop((now) => {
     run !== null && !run.compiling && !held && (GameState.state === "playing" || endBeat > 0);
   let dt = 0;
   if (moving) {
-    dt = real * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1);
+    dt = real * studioSpeed * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1);
     step(dt);
     if (endBeat > 0 && (endBeat -= real) <= 0) showEnd();
     redraw = true;

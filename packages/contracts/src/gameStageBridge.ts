@@ -22,7 +22,14 @@ const GAME_STAGE_BRIDGE_VERSION = 1;
 /** The most things a game reports; the rest are left out. */
 const GAME_STAGE_MAX_THINGS = 200;
 
-export const GameStageCapability = Schema.Literals(["freeze", "select", "tune", "trace"]);
+export const GameStageCapability = Schema.Literals([
+  "freeze",
+  "select",
+  "tune",
+  "trace",
+  "speed",
+  "mute",
+]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
 export const GameThingKind = Schema.Literals([
@@ -121,8 +128,21 @@ export const StudioCapture = Schema.Struct({
   type: Schema.Literal("studio-capture"),
 });
 
+/** How fast play runs, 1 being the game's own pace: slow motion to look at a jump or a hit. */
+export const StudioSpeed = Schema.Struct({
+  type: Schema.Literal("studio-speed"),
+  value: Schema.Finite,
+});
+/** Silences the game's sound, or gives it back, without touching its own volume settings. */
+export const StudioMute = Schema.Struct({
+  type: Schema.Literal("studio-mute"),
+  on: Schema.Boolean,
+});
+
 export const GameStageToGameMessage = Schema.Union([
   StudioFreeze,
+  StudioSpeed,
+  StudioMute,
   StudioPointer,
   StudioSelect,
   StudioTune,

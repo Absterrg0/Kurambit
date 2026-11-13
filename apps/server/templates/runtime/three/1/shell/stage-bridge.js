@@ -16,7 +16,7 @@
 import * as THREE from "../vendor/three.module.js";
 
 const BRIDGE = 1;
-const CAPABILITIES = ["freeze", "select", "tune", "trace"];
+const CAPABILITIES = ["freeze", "select", "tune", "trace", "speed", "mute"];
 const KINDS = new Set([
   "character",
   "creature",
@@ -91,9 +91,19 @@ const fits = (value, fallback) =>
  * The Stage end of the bridge. The shell passes how to reach the run: `view()`
  * is the scene and camera on screen (or null), `freeze(on)` holds play and
  * sound, `redraw()` asks for one frame, `drawClean()` draws one frame with no
- * outline (for a capture).
+ * outline (for a capture), `speed(scale)` sets how fast play runs and `mute(on)`
+ * silences the game.
  */
-export function createStageBridge({ canvas, renderer, view, freeze, redraw, drawClean }) {
+export function createStageBridge({
+  canvas,
+  renderer,
+  view,
+  freeze,
+  redraw,
+  drawClean,
+  speed,
+  mute,
+}) {
   let active = false;
   let frozen = false;
   let hovered = null;
@@ -595,6 +605,10 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
           text(data.key, 120) &&
           (finite(data.value) || typeof data.value === "boolean")
         );
+      case "studio-speed":
+        return finite(data.value) && data.value > 0 && data.value <= 4;
+      case "studio-mute":
+        return typeof data.on === "boolean";
       case "studio-things-request":
       case "studio-capture":
         return true;
@@ -610,6 +624,10 @@ export function createStageBridge({ canvas, renderer, view, freeze, redraw, draw
     switch (data.type) {
       case "studio-freeze":
         return setFrozen(data.on);
+      case "studio-speed":
+        return speed?.(data.value);
+      case "studio-mute":
+        return mute?.(data.on);
       case "studio-pointer": {
         const record = pick(data.x, data.y);
         if (data.action === "select") {

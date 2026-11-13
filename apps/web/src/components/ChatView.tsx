@@ -1,7 +1,7 @@
 import { GameStage } from "./game/GameStage";
 import { GameComposerTray } from "./game/GameComposerTray";
-import { GameBuildsPanel, GameLookDialog } from "./game/GameInspector";
-import { showGameBuilds, showGameInPanel, toggleGameBuilds } from "./game/gameRightPanel";
+import { GameLookPanel, GameTunePanel } from "./game/GameInspector";
+import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
 import { createPortal } from "react-dom";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
@@ -564,6 +564,8 @@ const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 // broadcast to all shell subscribers.
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
 // A game playing on the Stage: a key typed outside any field on its screen is meant for it.
+// Games whose Tune tab this session has opened once; closing it after that is the person's call.
+const TUNE_OFFERED = new Set<string>();
 const GAME_FRAME_ON_STAGE = '[data-game-stage="true"] iframe[data-game-frame]';
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 function useDraftHeroLayoutTransition(
@@ -1660,7 +1662,6 @@ export default function ChatView(props: ChatViewProps) {
   const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
   const gameView = useGameWorkspaceStore((state) => state.gameView);
   const gameStageShare = useGameWorkspaceStore((state) => state.gameStageShare);
-  const [gameStripHost, setGameStripHost] = useState<HTMLElement | null>(null);
   const [gameRightHost, setGameRightHost] = useState<HTMLElement | null>(null);
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
@@ -1673,8 +1674,8 @@ export default function ChatView(props: ChatViewProps) {
   if (buildsRequest !== null && buildsRequest.n !== seenBuildsRequestN) {
     setSeenBuildsRequestN(buildsRequest.n);
     if (isGameThread && activeThreadRef !== null) {
-      if (buildsRequest.kind === "show") showGameBuilds(activeThreadRef);
-      else toggleGameBuilds(activeThreadRef);
+      if (buildsRequest.kind === "toggle") toggleGameTab(activeThreadRef, "tune");
+      else showGameTab(activeThreadRef, buildsRequest.kind === "look" ? "look" : "tune");
     }
   }
   // Beside the chat the game is a tab of the right panel, there for as long as it plays there;
@@ -1683,10 +1684,19 @@ export default function ChatView(props: ChatViewProps) {
   const panelHasGame = rightPanelState.surfaces.some((surface) => surface.kind === "game");
   useEffect(() => {
     if (!isGameThread || activeThreadRef === null) return;
-    if (gameStageBeside && !panelHasGame) showGameInPanel(activeThreadRef);
+    if (gameStageBeside && !panelHasGame) showGameTab(activeThreadRef, "game");
     else if (!gameStageBeside && panelHasGame)
       useRightPanelStore.getState().closeSurface(activeThreadRef, "game");
   }, [isGameThread, activeThreadRef, gameStageBeside, panelHasGame]);
+  // A game opens with Tune beside it the first time this session, so its values are in view.
+  const panelHasTune = rightPanelState.surfaces.some((surface) => surface.kind === "tune");
+  useEffect(() => {
+    if (!isGameThread || activeThreadRef === null || panelHasTune) return;
+    const key = scopedThreadKey(activeThreadRef);
+    if (TUNE_OFFERED.has(key)) return;
+    TUNE_OFFERED.add(key);
+    showGameTab(activeThreadRef, "tune");
+  }, [isGameThread, activeThreadRef, panelHasTune]);
   const requestGameStage = (request: GameStageRequest): false | void => {
     if (!isGameThread) return false;
     useGameWorkspaceStore.getState().requestStage(request);
@@ -5311,7 +5321,7 @@ export default function ChatView(props: ChatViewProps) {
       "game.chat.toggle": () => {
         // Only a game thread has the builds this shortcut shows and hides.
         if (!isGameThread || activeThreadRef === null) return false;
-        toggleGameBuilds(activeThreadRef);
+        toggleGameTab(activeThreadRef, "tune");
       },
       // The Stage acts on these, so the keys, the palette and the timeline
       // share one path. A focused game never sees them: its frame is
@@ -7520,11 +7530,12 @@ export default function ChatView(props: ChatViewProps) {
         newShortcutLabel: newTerminalShortcutLabel ?? undefined,
         closeShortcutLabel: closeTerminalShortcutLabel ?? undefined,
       }}
-      gameBuilds={
+      gameTune={
         isGameThread ? (
-          <GameBuildsPanel threadRef={activeThreadRef} onStripHost={setGameStripHost} />
+          <GameTunePanel threadRef={activeThreadRef} onAsk={askAgentToFixStable} />
         ) : null
       }
+      gameLook={isGameThread ? <GameLookPanel threadRef={activeThreadRef} /> : null}
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
@@ -7631,7 +7642,6 @@ export default function ChatView(props: ChatViewProps) {
       hidden={!gameStageAbove && !gameInPanelShown}
       placement={gameStageAbove ? "above" : "right"}
       turnRequest={gameTurnRequest}
-      stripHost={gameStripHost}
     />
   ) : null;
   // One composer for the thread: under the transcript in a chat, under the
@@ -8311,7 +8321,6 @@ export default function ChatView(props: ChatViewProps) {
         ))}
       </div>
 
-      {gameLayout ? <GameLookDialog threadRef={activeThreadRef} /> : null}
       {gameLayout && !gameStageAbove && gameRightHost !== null
         ? createPortal(gameStage, gameRightHost)
         : null}

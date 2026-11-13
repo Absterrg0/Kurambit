@@ -45,6 +45,10 @@ interface StageBridgeState {
   readonly autoFrozen: boolean;
   readonly hover: { readonly id: string; readonly rect?: GameStageRect | undefined } | null;
   readonly selected: StageSelection | null;
+  /** How fast play runs (1 is the game's own pace), as the Stage last asked. */
+  readonly speed: number;
+  /** The Stage silenced the game. */
+  readonly muted: boolean;
   /** What each value was before the person tuned it here and has not kept: id → key → value. */
   readonly tunedFrom: Readonly<Record<string, Readonly<Record<string, number | boolean>>>>;
   readonly post: ((message: GameStageToGameMessage) => void) | null;
@@ -60,6 +64,8 @@ const EMPTY: Omit<StageBridgeState, "owner" | "post" | "hold"> = {
   autoFrozen: false,
   hover: null,
   selected: null,
+  speed: 1,
+  muted: false,
   tunedFrom: {},
 };
 
@@ -346,6 +352,39 @@ export const tuneStageValue = (
       tunedFrom: { ...state.tunedFrom, [id]: { ...thing, [key]: before } },
     });
   state.post({ type: "studio-tune", id, key, value });
+  withValue(id, key, value);
+};
+
+/** The list and the pointed thing show a tuned value at once; the game's next report confirms it. */
+const withValue = (id: string, key: string, value: number | boolean) => {
+  const state = useStageBridge.getState();
+  const tuned = (thing: GameThing): GameThing =>
+    thing.id !== id || thing.values === undefined
+      ? thing
+      : {
+          ...thing,
+          values: thing.values.map((entry) => (entry.key === key ? { ...entry, value } : entry)),
+        };
+  useStageBridge.setState({
+    things: state.things.map(tuned),
+    selected:
+      state.selected === null ? null : { ...state.selected, thing: tuned(state.selected.thing) },
+  });
+};
+
+/** Slow motion and back: play time runs at `speed` of real time. */
+export const setStageSpeed = (speed: number) => {
+  const state = useStageBridge.getState();
+  if (state.post === null || !state.capabilities.includes("speed")) return;
+  state.post({ type: "studio-speed", value: speed });
+  useStageBridge.setState({ speed });
+};
+
+export const setStageMuted = (muted: boolean) => {
+  const state = useStageBridge.getState();
+  if (state.post === null || !state.capabilities.includes("mute")) return;
+  state.post({ type: "studio-mute", on: muted });
+  useStageBridge.setState({ muted });
 };
 
 /** Puts one thing's tuned values back as they were. */
@@ -353,8 +392,10 @@ export const resetStageValues = (id: string) => {
   const state = useStageBridge.getState();
   const before = state.tunedFrom[id];
   if (before === undefined) return;
-  for (const [key, value] of Object.entries(before))
+  for (const [key, value] of Object.entries(before)) {
     state.post?.({ type: "studio-tune", id, key, value });
+    withValue(id, key, value);
+  }
   const { [id]: _reset, ...rest } = state.tunedFrom;
   useStageBridge.setState({ tunedFrom: rest });
 };

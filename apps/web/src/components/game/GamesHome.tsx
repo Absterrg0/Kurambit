@@ -47,6 +47,8 @@ import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { GamePicture } from "./GameBuildStill";
+import { HomeBackdrop } from "./HomeBackdrop";
+import { KurambitMark } from "../brand/KurambitBrand";
 import { useStageStill } from "./gameStageBridge";
 import {
   CHARACTER_ROUTES,
@@ -93,10 +95,11 @@ export function GamesHome() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+        <HomeBackdrop />
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
+        <div className="relative min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div
             className={cn(
               "mx-auto flex w-full max-w-200 flex-col px-8",
@@ -243,7 +246,8 @@ function BriefBox({
 
   return (
     <section className="flex w-full flex-col gap-3">
-      {/* T3 Code's draft headline: plain, centred, the composer under it. */}
+      <KurambitMark className="mx-auto mb-2 size-14" />
+      {/* A plain, centred headline, the composer under it. */}
       {/* oxlint-disable-next-line kurambit/no-raw-type-classes -- the same classes as T3's DraftHeroHeadline, the one hero line in the app. */}
       <h1 className="mb-3 w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
         {firstRun ? "Make a game you want to play" : "What should we make next?"}

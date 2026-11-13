@@ -3,32 +3,28 @@ import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
 import { useRightPanelStore } from "../../rightPanelStore";
 
-/** A game's builds and, beside the chat, the game itself are tabs of T3's right panel. */
+/**
+ * A game's Tune and Look, and, beside the chat, the game itself, are tabs of T3's right panel.
+ * Its builds and checks stay in the game's own column, where they are always in view.
+ */
+type GameTab = "tune" | "look" | "game";
+
 const shownTab = (ref: ScopedThreadRef) => {
   const state = useRightPanelStore.getState().byThreadKey[scopedThreadKey(ref)];
   return state?.isOpen === true ? state.activeSurfaceId : null;
 };
 
-export const showGameBuilds = (ref: ScopedThreadRef) =>
-  useRightPanelStore.getState().open(ref, "builds");
+export const showGameTab = (ref: ScopedThreadRef, tab: GameTab) =>
+  useRightPanelStore.getState().open(ref, tab);
 
-/** Builds, or the panel closed when builds are what it shows. */
-export const toggleGameBuilds = (ref: ScopedThreadRef) => {
-  if (shownTab(ref) === "builds") useRightPanelStore.getState().close(ref);
-  else showGameBuilds(ref);
+/** The tab, or the panel closed when that tab is what it shows. */
+export const toggleGameTab = (ref: ScopedThreadRef, tab: GameTab) => {
+  if (shownTab(ref) === tab) useRightPanelStore.getState().close(ref);
+  else showGameTab(ref, tab);
 };
 
-export const showGameInPanel = (ref: ScopedThreadRef) =>
-  useRightPanelStore.getState().open(ref, "game");
-
-export const useGameBuildsShown = (ref: ScopedThreadRef) =>
+export const useGameTabShown = (ref: ScopedThreadRef, tab: GameTab) =>
   useRightPanelStore((state) => {
     const thread = state.byThreadKey[scopedThreadKey(ref)];
-    return thread?.isOpen === true && thread.activeSurfaceId === "builds";
-  });
-
-export const useGameShownInPanel = (ref: ScopedThreadRef) =>
-  useRightPanelStore((state) => {
-    const thread = state.byThreadKey[scopedThreadKey(ref)];
-    return thread?.isOpen === true && thread.activeSurfaceId === "game";
+    return thread?.isOpen === true && thread.activeSurfaceId === tab;
   });

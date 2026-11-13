@@ -15,7 +15,8 @@ const RIGHT_PANEL_KINDS = [
   "preview",
   "terminal",
   "game",
-  "builds",
+  "tune",
+  "look",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -33,8 +34,10 @@ export type RightPanelSurface =
   | { id: "diff"; kind: "diff" }
   /** A game's Stage, when it plays beside the chat instead of above it. */
   | { id: "game"; kind: "game" }
-  /** A game's builds: the strip, the chosen build's checks and what changed. */
-  | { id: "builds"; kind: "builds" }
+  /** A game's live values: jump height, speeds, timers, tuned while it plays. */
+  | { id: "tune"; kind: "tune" }
+  /** A game's look: its style, how characters are made, its generated art. */
+  | { id: "look"; kind: "look" }
   | {
       id: "files";
       kind: "files";
@@ -163,8 +166,10 @@ const singletonSurface = (
       return { id: "files", kind };
     case "game":
       return { id: "game", kind };
-    case "builds":
-      return { id: "builds", kind };
+    case "tune":
+      return { id: "tune", kind };
+    case "look":
+      return { id: "look", kind };
   }
 };
 

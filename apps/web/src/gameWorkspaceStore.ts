@@ -49,7 +49,7 @@ export type GamePlacement = "above" | "right";
 export type GameView = "collapsed" | "split" | "expanded";
 
 /** The game's share of the column's height while it shares it with the chat. */
-const GAME_STAGE_SHARE_DEFAULT = 0.58;
+const GAME_STAGE_SHARE_DEFAULT = 0.72;
 const clampGameStageShare = (share: number) => Math.min(0.85, Math.max(0.3, share));
 
 /** The build the Inspector shows, for one thread; null shows the one on the Stage. */
@@ -63,16 +63,22 @@ export interface GameInspectedBuild {
 }
 
 interface GameWorkspaceStoreState {
-  /** Shows or hides the game's builds in the right panel. */
+  /** Shows or hides the game's Tune tab in the right panel. */
   toggleInspector: () => void;
   /**
-   * Asks the open game's screen to show its builds in the right panel (`show`) or toggle them
-   * there; `n` makes a repeat news. The panel is T3's, kept per thread, so the screen acts on it.
+   * Asks the open game's screen for a right-panel tab: Tune shown, Tune toggled, or Look shown;
+   * `n` makes a repeat news. The panel is T3's, kept per thread, so the screen acts on it.
    */
-  buildsRequest: { readonly kind: "show" | "toggle"; readonly n: number } | null;
-  /** What the builds tab shows. Not persisted: a new session opens on the build. */
+  buildsRequest: {
+    readonly kind: "show" | "toggle" | "look";
+    readonly n: number;
+  } | null;
+  /** The build detail (checks, what changed, recordings) is open over the game. Not persisted. */
+  buildDetailOpen: boolean;
+  setBuildDetailOpen: (open: boolean) => void;
+  /** What a pointed thing opens: its values in Tune ("scene"), or a build's detail ("build"). */
   inspectorTab: GameInspectorTab;
-  /** Shows the builds tab, on its build or on what is on screen. */
+  /** A build's detail over the game, or the Tune tab for what is on screen. */
   showInspectorTab: (tab: GameInspectorTab) => void;
   inspectedBuild: GameInspectedBuild | null;
   /** Shows a build in the Inspector's Build tab; null follows the Stage again. */
@@ -100,12 +106,18 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           buildsRequest: { kind: "toggle", n: (state.buildsRequest?.n ?? 0) + 1 },
         })),
       buildsRequest: null,
+      buildDetailOpen: false,
+      setBuildDetailOpen: (open) => set({ buildDetailOpen: open }),
       inspectorTab: "build",
       showInspectorTab: (tab) =>
-        set((state) => ({
-          inspectorTab: tab,
-          buildsRequest: { kind: "show", n: (state.buildsRequest?.n ?? 0) + 1 },
-        })),
+        set((state) =>
+          tab === "build"
+            ? { inspectorTab: tab, buildDetailOpen: true }
+            : {
+                inspectorTab: tab,
+                buildsRequest: { kind: "show", n: (state.buildsRequest?.n ?? 0) + 1 },
+              },
+        ),
       inspectedBuild: null,
       inspectBuild: (inspected) => set({ inspectedBuild: inspected }),
       stageRequest: null,
@@ -118,7 +130,12 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       gameStageShare: GAME_STAGE_SHARE_DEFAULT,
       setGameStageShare: (share) => set({ gameStageShare: clampGameStageShare(share) }),
       lookOpen: false,
-      setLookOpen: (open) => set({ lookOpen: open }),
+      setLookOpen: (open) =>
+        set((state) =>
+          open
+            ? { buildsRequest: { kind: "look", n: (state.buildsRequest?.n ?? 0) + 1 } }
+            : { lookOpen: false },
+        ),
     }),
     {
       name: "kurambit:game-workspace:v5",

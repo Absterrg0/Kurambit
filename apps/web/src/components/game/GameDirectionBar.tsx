@@ -1,5 +1,5 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
-import { CrosshairIcon, Gamepad2Icon, ListChecksIcon, XIcon } from "lucide-react";
+import { CrosshairIcon, Gamepad2Icon, SlidersHorizontalIcon, XIcon } from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -8,12 +8,7 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
-import {
-  showGameBuilds,
-  showGameInPanel,
-  useGameBuildsShown,
-  useGameShownInPanel,
-} from "./gameRightPanel";
+import { showGameTab, useGameTabShown } from "./gameRightPanel";
 
 import { useTurnUndo } from "./useBuildActions";
 
@@ -109,7 +104,7 @@ export function GameStageResize() {
 
 /**
  * The chat's header when the game plays beside it, as a tab of the right panel: the chat's
- * name, and the ways back to the game and its builds when the panel shows neither.
+ * name, and the ways back to the game and to Tune when the panel shows neither.
  */
 export function GameChatHeader({
   threadRef,
@@ -118,8 +113,8 @@ export function GameChatHeader({
   threadRef: ScopedThreadRef;
   title: string;
 }) {
-  const gameShown = useGameShownInPanel(threadRef);
-  const buildsShown = useGameBuildsShown(threadRef);
+  const gameShown = useGameTabShown(threadRef, "game");
+  const tuneShown = useGameTabShown(threadRef, "tune");
   return (
     <div className="flex h-full min-w-0 flex-1 items-center gap-1.5">
       <Text variant="label" tone="strong" truncate render={<h1 className="min-w-0" />}>
@@ -127,15 +122,15 @@ export function GameChatHeader({
       </Text>
       <span className="min-w-2 flex-1" />
       {gameShown ? null : (
-        <Button size="sm" variant="ghost" onClick={() => showGameInPanel(threadRef)}>
+        <Button size="sm" variant="ghost" onClick={() => showGameTab(threadRef, "game")}>
           <Gamepad2Icon aria-hidden="true" />
           Game
         </Button>
       )}
-      {buildsShown ? null : (
-        <Button size="sm" variant="ghost" onClick={() => showGameBuilds(threadRef)}>
-          <ListChecksIcon aria-hidden="true" />
-          Builds
+      {tuneShown ? null : (
+        <Button size="sm" variant="ghost" onClick={() => showGameTab(threadRef, "tune")}>
+          <SlidersHorizontalIcon aria-hidden="true" />
+          Tune
         </Button>
       )}
     </div>
