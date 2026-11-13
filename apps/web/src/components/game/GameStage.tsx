@@ -217,8 +217,12 @@ const BUILD_CARD_GAP = 12;
  * Every game keeps it, so a game's Stage does not step at its first message either.
  */
 const TRANSIENT_ROWS_RESERVE = 72;
-/** The loading skeleton's strip label, captions and gaps, around its Stage and cards. */
-const SKELETON_STRIP_CHROME = 80;
+/**
+ * What the loading skeleton's column gives up besides its Stage and card pictures: the strip's
+ * label, captions and gaps (about 96px), the room above the composer and the fit's breath, so
+ * its Stage is the size the fit gives a 16:9 game.
+ */
+const SKELETON_STRIP_CHROME = 96 + TRANSIENT_ROWS_RESERVE + 4;
 
 /**
  * PURE. The Stage's width and its cards' picture height, in a column `width` wide with `height`

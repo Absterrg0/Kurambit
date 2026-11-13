@@ -4470,7 +4470,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Under a game's Stage there is no timeline to scroll: the composer rests at
   // one line until the prompt wraps or something attaches, giving the Stage the room.
   const isComposerResting = shouldUseRestingComposerLayout({
-    isExistingThread: routeKind === "server" && activeThreadId !== null,
+    // A game's composer is its resting row from the first paint, while the thread still loads.
+    isExistingThread: gameThread || (routeKind === "server" && activeThreadId !== null),
     isMobileViewport,
     isScrollCollapsed: gameThread || isComposerScrollCollapsed,
     hasExpandedChrome:
