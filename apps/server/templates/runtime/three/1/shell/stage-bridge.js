@@ -394,8 +394,70 @@ export function createStageBridge({
         if (record !== undefined) return record;
       }
     }
+    // Nothing the game named is under the pointer: whatever is drawn there still is, named from
+    // the scene itself, so a person can point at anything they see (instanced trees, a model the
+    // game loaded on its own). A registered thing in front of it was found above.
+    for (const hit of raycaster.intersectObjects(seen.scene.children, true)) {
+      if (!shown(hit.object) || hit.object.isLine || hit.object.isPoints) continue;
+      for (let node = hit.object; node !== null; node = node.parent) {
+        const record = byObject.get(node);
+        if (record !== undefined) return record;
+      }
+      return sceneThing(hit.object, seen.scene);
+    }
     return null;
   };
+
+  /**
+   * A thing for an object the game never named: the nearest node up from the hit with a name of
+   * its own (a model's root, a named mesh), else the hit mesh. A tuned placeholder of the same
+   * name (ctx.tune("Fox") with no ctx.thing) becomes this object, values and all.
+   */
+  const sceneThing = (object, scene) => {
+    let body = object;
+    for (let node = object; node !== null && node !== scene; node = node.parent)
+      if (meaningful(node.name)) {
+        body = node;
+        break;
+      }
+    const earlier = byObject.get(body);
+    if (earlier !== undefined) return earlier;
+    const label = humanName(
+      meaningful(body.name)
+        ? body.name.replace(/[._-]?\d+$/, "")
+        : meaningful(body.geometry?.name)
+          ? body.geometry.name
+          : "Thing",
+    );
+    for (const record of things.values())
+      if (record.placeholder === true && record.name.toLowerCase() === label.toLowerCase()) {
+        things.delete(record.id);
+        add({
+          ...record,
+          object: body,
+          kind: record.kind === "rule" ? "other" : record.kind,
+          placeholder: false,
+        });
+        return things.get(record.id) ?? null;
+      }
+    const { id, n } = unique(`scene:${label}`, "#");
+    add({
+      id,
+      name: n === null ? label : `${label} ${n}`,
+      kind: body.isInstancedMesh ? "prop" : "other",
+      object: body,
+      auto: true,
+    });
+    return things.get(id) ?? null;
+  };
+  // Exporters' and loaders' generic names say nothing a person would.
+  const meaningful = (name) =>
+    typeof name === "string" &&
+    name.length > 0 &&
+    name.length <= 80 &&
+    !/^(scene|root|rootnode|group|object|mesh|node|armature|gltf|model|auxscene)[\s._-]*\d*$/i.test(
+      name,
+    );
 
   // The outline: the hovered and selected things drawn flat into a mask, then
   // one full-screen pass draws the mask's edges over the frame. Only while
