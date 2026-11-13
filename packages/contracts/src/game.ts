@@ -909,5 +909,10 @@ export const GameCheckResult = Schema.Struct({
   scene: Schema.optionalKey(GameCheckScene),
   /** What the game looked like, for engines that can show it (three.js). */
   views: Schema.optionalKey(Schema.Array(GameCheckView)),
+  /**
+   * How the gameplay entry's play ran on this machine's GPU, in one line ("58 fps · 1% low 41 ·
+   * GPU 14.2 ms at 1× of 1280×720 · 420 draw calls · 2.3M triangles"), or why it was not read.
+   */
+  performance: Schema.optionalKey(Schema.String),
 });
 export type GameCheckResult = typeof GameCheckResult.Type;

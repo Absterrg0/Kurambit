@@ -88,3 +88,76 @@ export const performanceOf = (
     }
   );
 };
+
+/** A frame's GPU time with room for the browser's own work at 60 fps (shell/look.js's budget). */
+const CHECK_GPU_BUDGET_MS = 12.5;
+/** Past these a laptop's integrated GPU, slower than the one that measured, misses frames. */
+const CHECK_DRAW_CALLS = 400;
+const CHECK_TRIANGLES = 1_500_000;
+const finite = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+const count = (n: number) =>
+  n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)}M`
+    : n >= 10_000
+      ? `${Math.round(n / 1000)}k`
+      : `${n}`;
+
+/**
+ * PURE. game_check's play, read as one line and, when it misses 60 fps or spends more than a laptop
+ * has, a warning that names what costs. Software drawing says nothing about a game, so it is said
+ * as not measured. A slow frame rate with the GPU in budget is the CPU's: the game's code, or a
+ * busy machine, and the warning says which it can tell.
+ */
+export const checkPerformance = (
+  raw: unknown,
+  browser: { readonly software: boolean },
+): { readonly line: string; readonly warning: string | null } => {
+  const record = Option.getOrNull(decodePlayPerf(JSON.stringify(raw ?? null)));
+  if (browser.software || record?.software === true)
+    return {
+      line: "not measured: this machine's check drew in software, where frame rates say nothing",
+      warning: null,
+    };
+  if (record === null || record.fps === null || record.frames < MIN_FRAMES / 2)
+    return { line: "not measured: the play drew too few frames to read", warning: null };
+  const extra = raw as { readonly drawCalls?: unknown; readonly triangles?: unknown };
+  const draws = finite(extra.drawCalls);
+  const triangles = finite(extra.triangles);
+  const gpu = record.gpuMs;
+  const line = [
+    `${Math.round(record.fps)} fps`,
+    record.low1Fps === null ? null : `1% low ${Math.round(record.low1Fps)}`,
+    gpu === null
+      ? null
+      : `GPU ${gpu.toFixed(1)} ms at ${record.scale ?? 1}× of ${Math.round(record.width)}×${Math.round(record.height)}`,
+    draws === null ? null : `${count(draws)} draw calls`,
+    triangles === null ? null : `${count(triangles)} triangles`,
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
+  const costs = [
+    gpu !== null && gpu > CHECK_GPU_BUDGET_MS
+      ? `the GPU takes ${gpu.toFixed(1)} ms a frame (budget ${CHECK_GPU_BUDGET_MS})`
+      : null,
+    record.scale !== null && record.scale < 1
+      ? `the look dropped to ${record.scale}× resolution to keep up`
+      : null,
+    draws !== null && draws > CHECK_DRAW_CALLS
+      ? `${count(draws)} draw calls (budget ${CHECK_DRAW_CALLS}): draw repeated models as one InstancedMesh (buildLevel does) and merge static pieces`
+      : null,
+    triangles !== null && triangles > CHECK_TRIANGLES
+      ? `${count(triangles)} triangles (budget ${count(CHECK_TRIANGLES)}): fewer or lighter copies of the densest model, nothing far away drawn at full detail`
+      : null,
+  ].filter((cost) => cost !== null);
+  const slow = record.fps < SMOOTH_FPS || (record.low1Fps !== null && record.low1Fps < 40);
+  if (costs.length === 0 && !slow) return { line, warning: null };
+  const why =
+    costs.length > 0
+      ? `${costs.join("; ")}. Also cheap to cut: the look's ao and bloom passes, shadow casting on small props.`
+      : "the GPU has room, so the time goes to the game's own code each frame (allocations, scans over every object, physics) or this machine was busy; profile update(dt) before cutting art.";
+  return {
+    line,
+    warning: `${slow ? "Under 60 fps" : "Heavier than a laptop GPU holds at 60 fps"}: ${why}`,
+  };
+};

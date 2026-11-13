@@ -38,6 +38,7 @@ import {
   SCENE_OLD_SHELL,
   type PageScene,
 } from "./sceneReport.ts";
+import { checkPerformance } from "./playPerf.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
 
@@ -195,6 +196,7 @@ export const makeThreeBackend = (
       let scenePlay: { readonly page: PageScene; readonly ms: number } | null = null;
       // What each entry looked like as the check left it: the agent judges its game from these.
       const views: Array<GameCheckView> = [];
+      let playPerf: unknown = null;
       const played = yield* Effect.tryPromise({
         try: async (signal) => {
           let timedOut = false;
@@ -237,7 +239,10 @@ export const makeThreeBackend = (
               if (await session.still(view))
                 views.push({ entry, path: NodePath.relative(ctx.root, view) });
               await session.close();
-              if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
+              if (measure) {
+                scenePlay = { page: session.scene(), ms: Date.now() - started };
+                playPerf = session.perf();
+              }
               reached.push(entry);
             } else if (
               entry !== "boot" &&
@@ -315,6 +320,9 @@ export const makeThreeBackend = (
         run,
         ...(scene === undefined ? {} : { scene }),
         views,
+        ...(input.scene && reached.includes("gameplay")
+          ? { performance: checkPerformance(playPerf, browser) }
+          : {}),
       };
     });
   return {

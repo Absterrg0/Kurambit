@@ -90,6 +90,8 @@ export interface GameEngineCheckReport {
   readonly scene?: GameCheckScene;
   /** Pictures of the entries it ran, from an engine that can take them. */
   readonly views?: ReadonlyArray<GameCheckView>;
+  /** How its play ran, and a warning when it missed 60 fps or spent more than a laptop has. */
+  readonly performance?: { readonly line: string; readonly warning: string | null };
 }
 
 /** One release the engine wrote into a staging folder. */
@@ -427,6 +429,9 @@ const make = Effect.gen(function* () {
       // the warning says what the check did not cover rather than implying it did.
       const warnings = [
         ...(reported?.warnings ?? []),
+        ...(executed.performance?.warning == null
+          ? []
+          : [{ file: `${project}/`, message: executed.performance.warning }]),
         ...(manifest.gameplayScene == null && profile.check.withoutGameplayScene !== null
           ? [{ file: "game.json", message: profile.check.withoutGameplayScene }]
           : []),
@@ -448,6 +453,7 @@ const make = Effect.gen(function* () {
         ...(executed.views === undefined || executed.views.length === 0
           ? {}
           : { views: executed.views }),
+        ...(executed.performance === undefined ? {} : { performance: executed.performance.line }),
         ...(scene
           ? {
               scene: executed.scene ?? {
