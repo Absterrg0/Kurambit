@@ -75,7 +75,10 @@ export type GameStripRequest = {
 
 /** The build being made, as the strip's last slot shows it. */
 export interface GameBuildSlot {
+  /** What its picture says while it is made ("Making build 3"). */
   readonly label: string;
+  /** Its name, as its card will be named once it lands ("Build 3"). */
+  readonly name: string;
   /** What was asked for, when known. */
   readonly caption: string | null;
   /** Keep going is making it: the slot sits under the run's bracket. */
@@ -197,7 +200,13 @@ export function GameBuildStrip({
   const slotShown = slot !== null;
   useEffect(() => {
     const row = cardsRef.current;
-    if (row !== null && newest !== "") row.scrollLeft = row.scrollWidth;
+    if (row === null || newest === "") return;
+    // Again once the new card has its size (it grows in), so the newest is whole.
+    row.scrollLeft = row.scrollWidth;
+    const later = window.setTimeout(() => {
+      row.scrollLeft = row.scrollWidth;
+    }, 400);
+    return () => window.clearTimeout(later);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the slot appearing adds a card at the end, which must scroll into view too.
   }, [newest, slotShown]);
   // Which ends of the row have cards scrolled past them, for a fade on that edge only.
@@ -769,7 +778,7 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
       </div>
       <CardCaption
         strong={false}
-        title={slot.label}
+        title={slot.name}
         // The top bar holds the turn's clock; the slot says only what it is.
         aside={
           <span className="flex items-center gap-1">

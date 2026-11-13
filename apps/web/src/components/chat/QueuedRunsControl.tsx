@@ -75,6 +75,9 @@ export function QueuedRunsControl({
   readonly editingRunId: RunId | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
   readonly onCancelEdit: () => void;
+  /** One queued message is one row, its "Queued" said in the row: a game keeps the room above
+   * its composer to one row. */
+  readonly oneRow?: boolean;
 }) {
   const projection = useThreadProjection(
     scopeThreadRef(props.environmentId, props.threadId),
@@ -207,6 +210,7 @@ export function QueuedRunsControl({
   }));
 
   if (items.length === 0) return null;
+  const single = props.oneRow === true && items.length === 1;
 
   const remove = async (runId: RunId) => {
     setBusyRunId(runId);
@@ -226,24 +230,28 @@ export function QueuedRunsControl({
         data-chat-composer-collapsed-controls="true"
         className="relative z-0"
       >
-        <ComposerBanner.Row
-          render={<button type="button" />}
-          aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
-          aria-expanded={expanded}
-          aria-controls={queueListId}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <ComposerBanner.Icon>
-            <ListOrderedIcon />
-          </ComposerBanner.Icon>
-          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
-          <ComposerBanner.Actions>
-            <ComposerBanner.Count>{items.length}</ComposerBanner.Count>
-            <ComposerBanner.ToggleIcon expanded={expanded} />
-          </ComposerBanner.Actions>
-        </ComposerBanner.Row>
-        <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
+        {single ? null : (
+          <ComposerBanner.Row
+            render={<button type="button" />}
+            aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
+            aria-expanded={expanded}
+            aria-controls={queueListId}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <ComposerBanner.Icon>
+              <ListOrderedIcon />
+            </ComposerBanner.Icon>
+            <ComposerBanner.Content className="text-muted-foreground">
+              Queued
+            </ComposerBanner.Content>
+            <ComposerBanner.Actions>
+              <ComposerBanner.Count>{items.length}</ComposerBanner.Count>
+              <ComposerBanner.ToggleIcon expanded={expanded} />
+            </ComposerBanner.Actions>
+          </ComposerBanner.Row>
+        )}
+        <ComposerBanner.Scroll className={cn("max-h-32", !expanded && !single && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
               const previewText = replaceComposerContextReferences(item.text, (reference) =>
@@ -338,6 +346,7 @@ export function QueuedRunsControl({
                     ) : null}
                   </ComposerBanner.Icon>
                   <ComposerBanner.Content className="text-foreground/80">
+                    {single ? <span className="shrink-0 text-muted-foreground">Queued</span> : null}
                     {isEditing ? <span className="sr-only">Editing queued message: </span> : null}
                     {item.pending ? (
                       <Clock3Icon

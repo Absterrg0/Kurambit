@@ -1056,11 +1056,7 @@ function CheckRow({
         {/* The name on one line and its reading beside it; a reading that does not fit moves
             under the name rather than breaking it mid-row. */}
         <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
-          <Text
-            variant="meta"
-            tone="default"
-            render={<span className="min-w-0 whitespace-nowrap" />}
-          >
+          <Text variant="meta" tone="default" render={<span className="min-w-0" />}>
             <Tooltip>
               <TooltipTrigger render={<span />}>{text}</TooltipTrigger>
               <TooltipPopup side="left" className="max-w-sm">

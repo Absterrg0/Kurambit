@@ -7345,6 +7345,7 @@ export default function ChatView(props: ChatViewProps) {
         editingRunId={queuedRunEdit.editingRunId}
         onEditQueuedRun={queuedRunEdit.beginEdit}
         onCancelEdit={queuedRunEdit.cancelEdit}
+        oneRow={isGameThread}
       />
     ) : null;
   // One-shot: the resend "Work locally" queued fires once, then the marker clears.
@@ -7927,7 +7928,12 @@ export default function ChatView(props: ChatViewProps) {
             data-game-direction-bar=""
             // The Stage's fitted column (set by GameStage), centred with it, so the composer
             // shares both its edges.
-            className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col"
+            className={cn(
+              "mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col",
+              // One row above the composer: a row the composer attaches (a queued message,
+              // keep going's status) takes the agent's line's place.
+              "[&:has([data-slot=composer-banner-attachment])_[data-game-agent-note]]:hidden",
+            )}
           >
             {/* One row above the composer: keep going's status (its own row in the
                 composer's drawer) takes the agent's line's place, so the room stays one row. */}

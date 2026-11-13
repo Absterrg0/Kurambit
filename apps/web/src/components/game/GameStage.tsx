@@ -1117,12 +1117,14 @@ function ThreadGameStage({
   const buildSlot: GameBuildSlot | null = keepGoingMaking
     ? {
         label: keepGoingStatus.step === null ? "Next step" : `Step ${keepGoingStatus.step}`,
+        name: keepGoingStatus.step === null ? "Next step" : `Step ${keepGoingStatus.step}`,
         caption: keepGoingStatus.proposal?.summary ?? null,
         keepGoing: true,
       }
     : turnRunning || landing
       ? {
           label: landing ? `Saving build ${nextBuildNumber}` : `Making build ${nextBuildNumber}`,
+          name: `Build ${nextBuildNumber}`,
           caption: turnRequest ?? slotRequest,
           keepGoing: false,
           saving: landing,
@@ -1165,7 +1167,7 @@ function ThreadGameStage({
         hidden ? "hidden" : "flex",
       )}
     >
-      <header className="@container/stage-header flex shrink-0 flex-col bg-background">
+      <header className="@container/stage-header relative flex shrink-0 flex-col bg-background">
         <div
           data-game-topbar=""
           className={cn(
@@ -1383,7 +1385,13 @@ function ThreadGameStage({
             </TooltipPopup>
           </Tooltip>
         </div>
-        {statusBanner}
+        {/* Over the Stage's top edge rather than a row above it: a game that throws keeps the
+            Stage its size, and the bar sits on the game it describes. */}
+        {statusBanner === null ? null : (
+          <div className="absolute inset-x-3 top-full z-20 overflow-hidden rounded-t-xl bg-background shadow-sm">
+            {statusBanner}
+          </div>
+        )}
       </header>
       {compare !== null ? (
         <GameBuildCompare

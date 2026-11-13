@@ -981,7 +981,9 @@ const checkWords = (
         ? null
         : facts.boots.value.ok
           ? { sentence: "Starts without errors", value: null }
-          : { sentence: `Does not start: ${facts.boots.value.detail}`, value: null };
+          : // The check's name, as every check has one; what stopped it is in the row's
+            // tooltip and on the Stage's error bar.
+            { sentence: "Does not start", value: null };
     case "idle":
       return facts.idle.status === "measured" ? tierCheck("with no input", facts.idle.value) : null;
     case "skilled":
