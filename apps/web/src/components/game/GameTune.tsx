@@ -190,9 +190,6 @@ function PointedThing({
             </Text>
           </h3>
         )}
-        <Text variant="caption" tone="muted">
-          {thing.kind}
-        </Text>
         <span className="flex-1" />
         <Tooltip>
           <TooltipTrigger
@@ -255,9 +252,6 @@ function TuneGroup({
           />
           <Text variant="meta" tone="strong" emphasis truncate>
             {thing.name}
-          </Text>
-          <Text variant="caption" tone="muted">
-            {thing.kind}
           </Text>
           {changed === 0 ? null : (
             <Text variant="caption" tone="inherit" render={<span className="text-live" />}>

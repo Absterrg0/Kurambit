@@ -297,12 +297,14 @@ function BuildDetail({
       : null,
   );
   const measure = useMeasureOnOpen(threadRef);
-  // Shown, by a card or a link: a build that never was measured is, once.
-  const neverMeasured = build.available && build.facts.state === "never";
+  // Shown, by a card or a link: a build that never was measured is, once, and so is one an
+  // older harness measured (after an update), so its readings compare with the others'.
+  const owesMeasure =
+    build.available && (build.facts.state === "never" || build.facts.state === "stale");
   const sendMeasure = measure.send;
   useEffect(() => {
-    if (neverMeasured) void sendMeasure(build.id);
-  }, [neverMeasured, build.id, sendMeasure]);
+    if (owesMeasure) void sendMeasure(build.id);
+  }, [owesMeasure, build.id, sendMeasure]);
   // While the build is measured again, what it measured before stands until new readings land,
   // so a pass never blinks out and back; the heading says it is being measured.
   const [lastSettled, setLastSettled] = useState<GameBuildFacts | null>(null);
@@ -1938,6 +1940,21 @@ export function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; th
   );
 }
 
+/** Short words a player writes in capitals: "maxHp" reads "Max HP". */
+const VALUE_ACRONYMS: ReadonlySet<string> = new Set([
+  "hp",
+  "xp",
+  "mp",
+  "ap",
+  "fov",
+  "ai",
+  "ui",
+  "hud",
+  "fps",
+  "npc",
+  "dps",
+]);
+
 /** A value's name as a person reads it: the game's label, else its key in words ("dashCooldown" → "Dash cooldown"). */
 export const valueLabel = (value: GameThingValue) => {
   if (value.label !== undefined) return value.label;
@@ -1945,6 +1962,9 @@ export const valueLabel = (value: GameThingValue) => {
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
     .toLowerCase()
-    .trim();
+    .trim()
+    .split(/\s+/)
+    .map((word) => (VALUE_ACRONYMS.has(word) ? word.toUpperCase() : word))
+    .join(" ");
   return words.length === 0 ? value.key : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 };
