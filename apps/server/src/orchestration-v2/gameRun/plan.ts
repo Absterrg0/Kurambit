@@ -94,12 +94,13 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
       events.push({ ...event, id } as OrchestrationV2DomainEvent);
     }
     const effects = decided.success.effects.map(
-      ({ request, availableAt }): EffectOutbox.PendingOrchestrationEffectV2 => ({
-        id: `effect:${command.commandId}:${request.type}:${"stepId" in request ? request.stepId : request.runId}`,
+      ({ request, availableAt, holdsThread }): EffectOutbox.PendingOrchestrationEffectV2 => ({
+        id: `effect:${command.commandId}:${request.type}:${request.stepId}`,
         commandId: command.commandId,
         threadId,
         request,
         ...(availableAt === undefined ? {} : { availableAt: DateTime.makeUnsafe(availableAt) }),
+        ...(holdsThread === undefined ? {} : { holdsThread }),
       }),
     );
     return Result.succeed<GameRunPlan>({

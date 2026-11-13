@@ -26,8 +26,8 @@ export interface GameRunStepJob {
 }
 
 export interface GameRunResend extends GameRunStepJob {
-  /** Why the turn goes again: an instant failure ("memory": a stage-era row only). */
-  readonly turn: "retry" | "memory";
+  /** Why the turn goes again: an instant failure. */
+  readonly turn: "retry";
   readonly n: number;
 }
 

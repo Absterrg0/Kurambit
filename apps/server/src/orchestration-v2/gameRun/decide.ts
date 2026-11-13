@@ -1004,6 +1004,11 @@ interface GameRunEffect {
   readonly request: GameRunEffectRequest;
   /** Epoch ms; absent runs at once. */
   readonly availableAt?: number;
+  /**
+   * A run's timers wait without holding the thread: the creator's chat, the next step and an
+   * ending are queued behind none of them, and each checks the run again when it fires.
+   */
+  readonly holdsThread?: false;
 }
 
 export interface GameRunDecision {
@@ -1141,6 +1146,7 @@ const effectsOf = (record: GameRunStep): GameRunEffect[] =>
               decisionId: record.id,
             },
             availableAt: record.step.deadline,
+            holdsThread: false,
           },
         ]
     : [
@@ -1530,15 +1536,13 @@ const schedule = (work: Work, command: Command<"game-run.step.schedule">) =>
     Result.flatMap(currentStep(work, run, command.stepId, command.attempt), (record) => {
       const base = { runId: run.id, stepId: record.id, attempt: record.attempt };
       const timer = command.timer;
-      const effect: GameRunEffect =
+      const request: GameRunEffectRequest =
         timer.kind === "cap"
-          ? { request: { type: "game-run.step.deadline", ...base }, availableAt: command.at }
+          ? { type: "game-run.step.deadline", ...base }
           : timer.kind === "resend"
-            ? {
-                request: { type: "game-run.step.resend", ...base, turn: timer.turn, n: timer.n },
-                availableAt: command.at,
-              }
-            : { request: { type: "game-run.step.wake", ...base }, availableAt: command.at };
+            ? { type: "game-run.step.resend", ...base, turn: timer.turn, n: timer.n }
+            : { type: "game-run.step.wake", ...base };
+      const effect: GameRunEffect = { request, availableAt: command.at, holdsThread: false };
       // The step records the timer: the orchestrator commits no command without
       // an event, and a timer only an effect carried would never be set.
       const line =
@@ -1593,6 +1597,7 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
               attempt: record.attempt,
             },
             availableAt: work.now + turn.capMs,
+            holdsThread: false,
           },
         ],
       );

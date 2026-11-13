@@ -4,7 +4,6 @@ import {
   CommandId,
   GameRunId,
   GameRunStepId,
-  IsoDateTime,
   PositiveInt,
   MessageId,
   NodeId,
@@ -140,13 +139,13 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     stepId: GameRunStepId,
     attempt: PositiveInt,
   }),
-  // A step turn sent again after an instant failure ("memory": stage era only).
+  // A step turn sent again after an instant failure.
   Schema.Struct({
     type: Schema.Literal("game-run.step.resend"),
     runId: GameRunId,
     stepId: GameRunStepId,
     attempt: PositiveInt,
-    turn: Schema.Literals(["retry", "memory"]),
+    turn: Schema.Literal("retry"),
     n: PositiveInt,
   }),
   // A step's work run again later (a tool that failed, recovery), without holding a job meanwhile.
@@ -155,35 +154,6 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     runId: GameRunId,
     stepId: GameRunStepId,
     attempt: PositiveInt,
-  }),
-  // Retired with the stage era: they still decode, so an outbox row from
-  // before the upgrade never fails, and the worker settles them with no work.
-  Schema.Struct({
-    type: Schema.Literal("game-run.decision.wake"),
-    runId: GameRunId,
-    stepId: GameRunStepId,
-    decisionId: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("game-run.finish"),
-    runId: GameRunId,
-    endedAt: IsoDateTime,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("game-run.restore.execute"),
-    runId: GameRunId,
-    requestId: Schema.String,
-  }),
-  Schema.Struct({
-    type: Schema.Literal("game-run.outputs"),
-    runId: GameRunId,
-    stepId: GameRunStepId,
-    files: Schema.Array(Schema.Struct({ path: Schema.String, text: Schema.String })),
-    release: Schema.Array(ThreadId),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("game-run.copies.release"),
-    runId: GameRunId,
   }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
@@ -204,12 +174,6 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.step.deadline",
   "game-run.step.resend",
   "game-run.step.wake",
-  // Retired: settled with no work.
-  "game-run.decision.wake",
-  "game-run.finish",
-  "game-run.restore.execute",
-  "game-run.outputs",
-  "game-run.copies.release",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
@@ -260,6 +224,12 @@ export interface PendingOrchestrationEffectV2 {
   readonly threadId: ThreadId;
   readonly request: OrchestrationEffectRequestV2;
   readonly availableAt?: DateTime.Utc;
+  /**
+   * False for a timer that only waits for its time: while it is pending, later effects of its
+   * thread are not queued behind it, and it checks its own state again when it fires. Absent
+   * means true.
+   */
+  readonly holdsThread?: boolean;
 }
 
 export class EffectOutboxError extends Schema.TaggedError<EffectOutboxError>()(
@@ -423,11 +393,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               OR (
                 active.status = 'pending'
                 AND active.rowid < candidate.rowid
-                -- A game run's timer waits for its time without holding the
-                -- thread: the creator's chat, the next step and an ending's
-                -- finish are queued behind it, and the timer checks the run
-                -- again whenever it fires.
-                AND active.effect_type NOT IN ('game-run.step.deadline', 'game-run.decision.deadline', 'game-run.step.resend', 'game-run.step.wake')
+                AND active.holds_thread = 1
                 AND ${
                   excludeRestartContinuations
                     ? sql`active.effect_type != 'provider-runtime.continue'`
@@ -479,6 +445,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
                 status,
                 attempt_count,
                 available_at,
+                holds_thread,
                 created_at,
                 updated_at
               )
@@ -491,6 +458,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
                 'pending',
                 0,
                 ${DateTime.formatIso(effect.availableAt ?? now)},
+                ${effect.holdsThread === false ? 0 : 1},
                 ${nowIso},
                 ${nowIso}
               )

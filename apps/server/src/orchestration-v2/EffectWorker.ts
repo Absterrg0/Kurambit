@@ -570,13 +570,6 @@ export const layerExecutor: Layer.Layer<
               ),
             );
           }
-          // Retired with the stage era: a row from before the upgrade settles with no work.
-          case "game-run.decision.wake":
-          case "game-run.finish":
-          case "game-run.restore.execute":
-          case "game-run.outputs":
-          case "game-run.copies.release":
-            return Effect.void;
           case "game-run.decision.deadline": {
             const request = effect.request;
             return gameRunDecisions
