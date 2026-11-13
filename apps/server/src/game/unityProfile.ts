@@ -6,6 +6,9 @@ import {
 } from "@kurambit/contracts";
 import type { GameEngineProfile } from "./engineProfile.ts";
 
+const RUNTIME_SETTINGS =
+  /^( *)m_RuntimeSettings:\r?\n\1 {2}m_List:(?: \[\])?\r?\n(?:\1 {2}- rid: -?\d+\r?\n)*/m;
+
 export const UNITY_PROFILE: GameEngineProfile = {
   id: "unity",
   status: GAME_ENGINES.unity.status,
@@ -21,14 +24,14 @@ export const UNITY_PROFILE: GameEngineProfile = {
     { target: "Linux", artifact: "builds/linux/game.x86_64", ships: "folder", packageable: false },
     { target: "Windows", artifact: "builds/windows/game.exe", ships: "folder", packageable: false },
   ],
-  // A Unity project's own caches sit at its root beside Assets/ and are rewritten by every
-  // editor start; Mono's crash dumps land there whenever an editor is stopped.
-  buildInputs: {
-    skipDirs: [],
-    rootOutputDirs: ["Library", "Temp", "Logs", "UserSettings", "obj", "Build", "Builds"],
-    sidecarSuffixes: [],
-    rootOutputFiles: /(?:\.csproj|\.sln)$|^mono_crash\./,
-    derivedAssets: true,
+  // URP keeps a list of the settings a player needs in `m_RuntimeSettings`. A
+  // player build fills it from the rest of the file and an editor save empties
+  // it again, so it flips on every warm-up and build without any source edit.
+  // The build recomputes it either way: it is output kept inside an input file.
+  derivedInput: {
+    glob: "*.asset",
+    marker: "m_RuntimeSettings:",
+    normalise: (text) => text.replace(RUNTIME_SETTINGS, "$1m_RuntimeSettings: derived\n"),
   },
   scaffold: {
     version: UNITY_MIN_VERSION,
@@ -41,6 +44,10 @@ export const UNITY_PROFILE: GameEngineProfile = {
       "unity/[Oo]bj/",
       "unity/*.csproj",
       "unity/*.sln",
+      // Its own build folders and Mono's crash dumps, which land whenever an editor is stopped.
+      "unity/[Bb]uild/",
+      "unity/[Bb]uilds/",
+      "unity/mono_crash.*",
     ],
     agents: `Build BRIEF.md's game in Unity 6 (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
 

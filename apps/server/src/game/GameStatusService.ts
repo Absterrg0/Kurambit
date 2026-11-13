@@ -17,7 +17,7 @@ import {
 } from "@kurambit/contracts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GameArt from "./art/GameArt.ts";
-import { engineProfile, type GameSourceRules } from "./engineProfile.ts";
+import { engineProfile } from "./engineProfile.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameExport from "./GameExport.ts";
@@ -27,7 +27,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { characterRoute } from "./gameStyle.ts";
-import { type SourceHashCache, snapshotBuildSource } from "./sourceSnapshot.ts";
+import { makeSourceIdentity } from "./sourceTree.ts";
 import { COPY_OF } from "./unityPlayerCache.ts";
 
 /** What a client sees of a game: its status, the pushes that say it changed, and the tools it needs. */
@@ -66,9 +66,6 @@ export class GameStatusService extends Context.Service<
   }
 >()("kurambit/game/GameStatusService") {}
 
-/** Checkouts whose status hashes are kept; see statusSnapshot. */
-const STATUS_HASH_CHECKOUTS = 16;
-
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
@@ -80,25 +77,7 @@ const make = Effect.gen(function* () {
   const exporter = yield* GameExport.GameExport;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const settings = yield* ServerSettings.ServerSettingsService;
-  // Status is read on every push for the thread, so its freshness answer reuses
-  // hashes of files whose stat identity is unchanged. An explicit check rereads
-  // every byte and refreshes the cache. The most recently read checkouts keep
-  // theirs (a run's sample copies are checkouts too); one dropped costs a
-  // single full read. A cache holds up to 10k files, about 3 MB.
-  const statusHashes = new Map<string, SourceHashCache>();
-  const statusSnapshot = (root: string, project: string, reread: boolean, rules: GameSourceRules) =>
-    Effect.promise((signal) => {
-      const key = `${root}\0${project}`;
-      const cache = statusHashes.get(key) ?? new Map();
-      statusHashes.delete(key);
-      statusHashes.set(key, cache);
-      if (statusHashes.size > STATUS_HASH_CHECKOUTS) {
-        const oldest = statusHashes.keys().next().value;
-        if (oldest !== undefined) statusHashes.delete(oldest);
-      }
-      if (reread) cache.clear();
-      return snapshotBuildSource(root, project, { signal, cache, rules });
-    });
+  const identify = yield* makeSourceIdentity;
   // The machine's toolchain, cached: the stage reads it on its own query,
   // never on every status read. Keyed by the toolchain's revision, so a fetch
   // is seen at once; a settings change clears it.
@@ -156,12 +135,7 @@ const make = Effect.gen(function* () {
         const profile = engineProfile(manifest.engine.name);
         const selected = yield* selectionOf(root);
         if (selected === null || selected === "damaged" || selected.sourceId === null) return false;
-        const current = yield* statusSnapshot(
-          root,
-          manifestProject(manifest),
-          false,
-          profile.buildInputs,
-        );
+        const current = yield* identify(root, manifestProject(manifest), profile.derivedInput);
         return current.kind === "known" && current.sourceId === selected.sourceId;
       }),
     toolchain: (threadId) =>
@@ -211,12 +185,7 @@ const make = Effect.gen(function* () {
       const current =
         live || selected === null || selected.sourceId === null
           ? null
-          : yield* statusSnapshot(
-              root,
-              manifestProject(manifest),
-              statusOptions?.checkSources === true,
-              profile.buildInputs,
-            );
+          : yield* identify(root, manifestProject(manifest), profile.derivedInput);
       const currentId = current?.kind === "known" ? current.sourceId : null;
       const matchesSelected =
         selected === null || selected.sourceId === null || currentId === null

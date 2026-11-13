@@ -26,18 +26,15 @@ export interface GameProfileRelease {
   readonly packageable: boolean;
 }
 
-/** What of an engine project is build input; everything else is the engine's own output. */
-export interface GameSourceRules {
-  /** Directory names never walked, anywhere in the tree. */
-  readonly skipDirs: ReadonlyArray<string>;
-  /** Directory names at the project root the engine writes. */
-  readonly rootOutputDirs: ReadonlyArray<string>;
-  /** File suffixes the engine generates beside real sources. */
-  readonly sidecarSuffixes: ReadonlyArray<string>;
-  /** Files at the project root the engine or its IDE writes; null when none. */
-  readonly rootOutputFiles: RegExp | null;
-  /** Small `.asset` files are read through the URP settings normalisation (see sourceSnapshot). */
-  readonly derivedAssets: boolean;
+/**
+ * A file the engine rewrites inside its own inputs without any source edit:
+ * files matching `glob` that hold `marker` count by `normalise(text)`, not by
+ * their bytes, in the source identity (sourceTree).
+ */
+export interface GameDerivedInput {
+  readonly glob: string;
+  readonly marker: string;
+  readonly normalise: (text: string) => string;
 }
 
 export interface GameEngineProfile {
@@ -67,8 +64,11 @@ export interface GameEngineProfile {
   readonly exportTargets: ReadonlyArray<GameExportTarget>;
   /** Every release it makes, by target. */
   readonly releases: ReadonlyArray<GameProfileRelease>;
-  /** What of the project is build input, for the source identity. */
-  readonly buildInputs: GameSourceRules;
+  /**
+   * Build input is what git sees of the project (its .gitignore leaves out the
+   * engine's output); this names an input file the engine itself rewrites.
+   */
+  readonly derivedInput: GameDerivedInput | null;
   /** A new game: the engine version the manifest records, the folders made beside the template's, and the opening of its AGENTS.md. */
   readonly scaffold: {
     readonly version: string;

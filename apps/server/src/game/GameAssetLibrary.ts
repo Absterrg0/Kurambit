@@ -40,7 +40,7 @@ import {
   styleFromLock,
 } from "./gameStyle.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
-import { hashFile } from "./sourceSnapshot.ts";
+import { hashFile } from "./hashFile.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import {
   INDEX_VERSION,

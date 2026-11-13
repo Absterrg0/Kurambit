@@ -406,7 +406,11 @@ outside their catalog.
 - **Facts are keyed by content.** A facts row is keyed by the git tree of the build's engine
   folder plus a harness id, so builds with the same project share facts, and facts from another
   harness are never compared. Owed work is data, not memory: a measure writes its row first, so
-  a startup reconcile re-measures any row that still owes a tier.
+  a startup reconcile re-measures any row that still owes a tier. Exports, checks, explore,
+  Play's freshness and the Unity player key the working folder the same way: the engine folder's
+  tree in a capture of the working tree ([sourceTree](../../apps/server/src/game/sourceTree.ts)),
+  never a walk of our own. Git records a link, not what it points at, so a link in the engine
+  folder makes the sources unknown there.
 - **Game browsers draw on the GPU.** Once per server process, `makeGameBrowser` probes the pinned
   headless shell for a hardware WebGL backend (Linux: EGL, then Vulkan, on the GPU's render node,
   with no display in its environment) and every game browser launches with the first that drew on
@@ -588,7 +592,7 @@ template's URP assets are committed as a player build re-saves them; an older se
 would make every new game's first build change its sources and fail the identity check. The
 URP global settings' `m_RuntimeSettings` list is the exception: every editor save empties it
 and every player build refills it, so whichever state a game committed, the next build flips it.
-The build-source identity leaves that list out ([sourceSnapshot.ts](../../apps/server/src/game/sourceSnapshot.ts));
+The build-source identity reads that list as derived (the Unity profile's `derivedInput`, applied in [sourceTree.ts](../../apps/server/src/game/sourceTree.ts));
 counting it failed the first boot after every warm-up. Domain reload stays on (`EditorSettings` enter-play-mode options
 off): the kits keep static state, and a second play session in one editor would otherwise
 reach objects the previous session destroyed.

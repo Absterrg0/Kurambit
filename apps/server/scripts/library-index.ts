@@ -43,7 +43,7 @@ import {
   type LibraryPackFile,
 } from "../src/game/assetLibraryFiles.ts";
 import { readGltfJson } from "../src/game/gltfJson.ts";
-import { hashFile } from "../src/game/sourceSnapshot.ts";
+import { hashFile } from "../src/game/hashFile.ts";
 
 const OUT = NodePath.join(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),

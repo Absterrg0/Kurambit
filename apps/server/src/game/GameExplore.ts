@@ -62,7 +62,7 @@ import {
   type PlayLaunch,
 } from "./playLaunch.ts";
 import { WebBrowserGone, WebPageCrashed } from "./webPlaySession.ts";
-import { snapshotBuildSource } from "./sourceSnapshot.ts";
+import { makeSourceIdentity } from "./sourceTree.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 
 /**
@@ -185,10 +185,9 @@ const make = Effect.gen(function* () {
   yield* Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, startedMs)).pipe(
     Effect.catchCause((cause) => Effect.logWarning("Pruning explore evidence failed.", { cause })),
   );
+  const identify = yield* makeSourceIdentity;
   const snapshot = (root: string, project: string, backend: GameEngine.GameEngineBackend) =>
-    Effect.promise((signal) =>
-      snapshotBuildSource(root, project, { signal, rules: backend.profile.buildInputs }),
-    );
+    identify(root, project, backend.profile.derivedInput);
   interface ExploreSession {
     readonly id: string;
     readonly root: string;

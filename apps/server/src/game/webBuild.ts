@@ -3,7 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { GAME_SOURCE_FILE_LIMIT, sourceLimitDetail } from "@kurambit/contracts";
-import { hashFile } from "./sourceSnapshot.ts";
+import { hashFile } from "./hashFile.ts";
 
 /** The legacy mutable build directory. A new export never writes here. */
 export const WEB_BUILD_DIRECTORY = "builds/web";
