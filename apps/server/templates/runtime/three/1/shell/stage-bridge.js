@@ -382,30 +382,47 @@ export function createStageBridge({
     if (w === 0 || h === 0) return null;
     pointer.set((x / w) * 2 - 1, 1 - (y / h) * 2);
     raycaster.setFromCamera(pointer, seen.camera);
-    const bodies = [];
-    for (const record of things.values())
-      if (record.object !== null && attached(record.object, seen.scene) && shown(record.object))
-        bodies.push(record.object);
-    // The nearest visible hit, then the nearest registered thing up its parents.
-    for (const hit of raycaster.intersectObjects(bodies, true)) {
-      if (!shown(hit.object)) continue;
-      for (let node = hit.object; node !== null; node = node.parent) {
-        const record = byObject.get(node);
-        if (record !== undefined) return record;
+    // The nearest visible object drawn under the pointer, then the thing it belongs to: the
+    // nearest registered thing up its parents, else one named from the scene itself, so a
+    // person can point at anything they see (instanced trees, a model the game loaded on its
+    // own) and the ground behind it never wins.
+    // An animated character: three's ray test can miss a skinned mesh, whose bounds are its
+    // bind pose, so a named one is found by its posed box when that is nearer than the hit.
+    let posed = null;
+    let posedAt = Infinity;
+    for (const record of things.values()) {
+      if (record.object === null || record.kind === "level" || !skinned(record.object)) continue;
+      if (!attached(record.object, seen.scene) || !shown(record.object)) continue;
+      box.setFromObject(record.object, true);
+      if (raycaster.ray.intersectBox(box, through) === null) continue;
+      const distance = through.distanceTo(raycaster.ray.origin);
+      if (distance < posedAt) {
+        posed = record;
+        posedAt = distance;
       }
     }
-    // Nothing the game named is under the pointer: whatever is drawn there still is, named from
-    // the scene itself, so a person can point at anything they see (instanced trees, a model the
-    // game loaded on its own). A registered thing in front of it was found above.
     for (const hit of raycaster.intersectObjects(seen.scene.children, true)) {
       if (!shown(hit.object) || hit.object.isLine || hit.object.isPoints) continue;
+      if (posed !== null && posedAt < hit.distance) return posed;
+      let inner = null;
       for (let node = hit.object; node !== null; node = node.parent) {
         const record = byObject.get(node);
-        if (record !== undefined) return record;
+        // A level holds everything built into it: a tree in it is a tree, not the level.
+        if (record !== undefined)
+          return record.kind === "level" && inner !== null ? sceneThing(inner, seen.scene) : record;
+        if (inner === null && (meaningful(node.name) || node.isInstancedMesh)) inner = node;
       }
       return sceneThing(hit.object, seen.scene);
     }
-    return null;
+    return posed;
+  };
+  const through = new THREE.Vector3();
+  const skinned = (object) => {
+    let found = false;
+    object.traverse((node) => {
+      if (node.isSkinnedMesh) found = true;
+    });
+    return found;
   };
 
   /**
@@ -414,32 +431,44 @@ export function createStageBridge({
    * name (ctx.tune("Fox") with no ctx.thing) becomes this object, values and all.
    */
   const sceneThing = (object, scene) => {
+    // Up to, never past, a thing already registered: its parts are found, not renamed.
     let body = object;
-    for (let node = object; node !== null && node !== scene; node = node.parent)
-      if (meaningful(node.name)) {
+    for (
+      let node = object;
+      node !== null && node !== scene && !byObject.has(node);
+      node = node.parent
+    )
+      if (meaningful(node.name) || node.isInstancedMesh) {
         body = node;
         break;
       }
     const earlier = byObject.get(body);
     if (earlier !== undefined) return earlier;
+    // A copy of an ASSETS model the game drew its own way (an InstancedMesh of its geometry):
+    // the copy's thing, named and with its model file, becomes this object.
+    if (body.isMesh)
+      for (const record of things.values())
+        if (record.auto && unplaced(record, scene) && sharesGeometry(record.object, body))
+          return rebind(record, body);
+    const own = meaningful(body.name) ? body.name.split(":")[0].replace(/[._-]?\d+$/, "") : "";
     const label = humanName(
-      meaningful(body.name)
-        ? body.name.replace(/[._-]?\d+$/, "")
+      meaningful(own)
+        ? own
         : meaningful(body.geometry?.name)
           ? body.geometry.name
-          : "Thing",
+          : meaningful(body.material?.name)
+            ? body.material.name
+            : "Thing",
     );
+    // A thing of that name the game tuned (ctx.tune("Fox") with no ctx.thing), or a copy of its
+    // ASSETS model that never reached the scene (a level instances it): this object is that
+    // thing, so its values and its model file come with it.
     for (const record of things.values())
-      if (record.placeholder === true && record.name.toLowerCase() === label.toLowerCase()) {
-        things.delete(record.id);
-        add({
-          ...record,
-          object: body,
-          kind: record.kind === "rule" ? "other" : record.kind,
-          placeholder: false,
-        });
-        return things.get(record.id) ?? null;
-      }
+      if (
+        record.name.toLowerCase() === label.toLowerCase() &&
+        (record.placeholder === true || (record.auto && unplaced(record, scene)))
+      )
+        return rebind(record, body);
     const { id, n } = unique(`scene:${label}`, "#");
     add({
       id,
@@ -449,6 +478,27 @@ export function createStageBridge({
       auto: true,
     });
     return things.get(id) ?? null;
+  };
+  const unplaced = (record, scene) => record.object === null || !attached(record.object, scene);
+  const sharesGeometry = (copy, mesh) => {
+    if (copy === null || mesh.geometry === undefined) return false;
+    let shared = false;
+    copy.traverse((node) => {
+      if (node.isMesh && node.geometry === mesh.geometry) shared = true;
+    });
+    return shared;
+  };
+  /** The thing becomes this object, keeping its id, name, values and model file. */
+  const rebind = (record, body) => {
+    things.delete(record.id);
+    if (record.object !== null) byObject.delete(record.object);
+    add({
+      ...record,
+      object: body,
+      kind: record.kind === "rule" ? "other" : record.kind,
+      placeholder: false,
+    });
+    return things.get(record.id) ?? null;
   };
   // Exporters' and loaders' generic names say nothing a person would.
   const meaningful = (name) =>
