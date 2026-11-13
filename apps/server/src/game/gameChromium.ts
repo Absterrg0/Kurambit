@@ -6,8 +6,21 @@ import { GameOperationError } from "@kurambit/contracts";
 import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
-import { chromiumChildEnv } from "./gameWebServer.ts";
+import { engineChildEnv } from "./GameProcesses.ts";
 import { RUNTIME_ROUTE } from "./gameRuntime.ts";
+
+/**
+ * A clean room for Chromium and its children: the allowlisted engine base
+ * plus the heap knob, and nothing else. No desktop
+ * display leaks in (headless runs own no DISPLAY), and page JS stays
+ * sandboxed with no environment to read; only the utility processes that
+ * launch the browser see this.
+ */
+export const chromiumChildEnv = (): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = { ...engineChildEnv() };
+  env.NODE_OPTIONS = "--max-old-space-size=1536";
+  return env;
+};
 
 interface Drawing {
   readonly owner: string;

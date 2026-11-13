@@ -1,21 +1,20 @@
 // @effect-diagnostics nodeBuiltinImport:off -- This module owns the loopback HTTP boundary for three.js sources.
-import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
-import * as Mime from "effect/http/Mime";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
-import { engineChildEnv } from "./GameProcesses.ts";
+import * as Scope from "effect/Scope";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import * as HttpServerRespondable from "effect/http/HttpServerRespondable";
+import * as HttpStaticServer from "effect/http/HttpStaticServer";
+import * as Mime from "effect/http/Mime";
+import { guardHttpResponseWriteErrors } from "../httpResponseErrorGuard.ts";
 import { runtimeRequestFile } from "./gameRuntime.ts";
 import { insideGame } from "./gamePath.ts";
-
-/** Text types carry their charset so a page without a meta tag still decodes as UTF-8. */
-const contentType = (path: string): string =>
-  Option.match(Mime.getType(path), {
-    onNone: () => "application/octet-stream",
-    onSome: (type) => (type.startsWith("text/") ? `${type}; charset=utf-8` : type),
-  });
 
 export interface WebStaticServer {
   /** Loopback origin serving the directory, e.g. http://127.0.0.1:PORT/. */
@@ -24,11 +23,55 @@ export interface WebStaticServer {
 }
 
 /**
+ * The real file a request names inside `webRoot` (itself a realpath), or a status when there is
+ * none. HttpStaticServer only checks the path lexically and follows links, so a link out of the
+ * folder is refused here, before it is asked.
+ */
+const gameRequestFile = async (webRoot: string, url: string): Promise<string | 403 | 404> => {
+  const raw = decodeURIComponent(url.split("?")[0] ?? "/");
+  if (raw.includes("\0") || raw.includes("\\") || raw.split("/").includes("..")) return 403;
+  const real = await NodeFSP.realpath(
+    NodePath.resolve(webRoot, `.${raw === "/" ? "/index.html" : raw}`),
+  ).catch(() => null);
+  if (real === null) return 404;
+  return real.startsWith(webRoot + NodePath.sep) ? real : 403;
+};
+
+/** Text types carry their charset so a page without a meta tag still decodes as UTF-8. */
+const contentType = (path: string): string =>
+  Option.match(Mime.getType(path), {
+    onNone: () => "application/octet-stream",
+    onSome: (type) => (type.startsWith("text/") ? `${type}; charset=utf-8` : type),
+  });
+
+/**
+ * Answers the request with exactly `file`, already resolved and checked. HttpStaticServer
+ * brings the content type, ranges, ETag and 304s; its own table lacks game formats (glb,
+ * ktx2...), so the type comes from Mime.
+ */
+const serveFile = (file: string, cacheControl: string) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const extension = NodePath.extname(file).slice(1).toLowerCase();
+    const serve = yield* HttpStaticServer.make({
+      root: NodePath.dirname(file),
+      index: undefined,
+      cacheControl,
+      mimeTypes: extension === "" ? {} : { [extension]: contentType(file) },
+    });
+    return yield* serve.pipe(
+      Effect.provideService(
+        HttpServerRequest.HttpServerRequest,
+        request.modify({ url: `/${encodeURIComponent(NodePath.basename(file))}` }),
+      ),
+    );
+  });
+
+/**
  * Serves a game-relative directory over loopback, for Play and for
  * check/explore/bot runs. It is its own origin on purpose: the game is
  * agent-written JS and must never run on the app origin beside the session
- * cookie. Requests resolve through realpath, so a symlink cannot reach outside
- * the directory. With `runtimes`, `/_kurambit/runtime/...` is answered from
+ * cookie. With `runtimes`, `/_kurambit/runtime/...` is answered from
  * Kurambit's runtime (gameRuntime.ts) for a game that loads it; an export
  * holds its own copy and is served without.
  */
@@ -46,119 +89,63 @@ export const serveGameDirectory = async (
   // another folder) would serve whatever it points at to the game's page.
   const webRoot = await NodeFSP.realpath(insideGame(root, directory, { root: "allowed" }));
   await NodeFSP.access(NodePath.join(webRoot, "index.html"));
-  const server = NodeHttp.createServer((request, response) => {
-    void (async () => {
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        response.writeHead(405).end();
-        return;
-      }
-      const raw = decodeURIComponent((request.url ?? "/").split("?")[0] ?? "/");
-      if (raw.includes("\0") || raw.includes("\\") || raw.split("/").includes("..")) {
-        response.writeHead(403).end();
-        return;
-      }
-      const runtimeFile =
-        options.runtimes == null ? null : await runtimeRequestFile(options.runtimes, raw);
-      if (runtimeFile !== null) {
-        await serveRuntimeFile(request, response, runtimeFile);
-        return;
-      }
-      const target = NodePath.resolve(webRoot, `.${raw === "/" ? "/index.html" : raw}`);
-      let real: string;
-      try {
-        real = await NodeFSP.realpath(target);
-      } catch {
-        response.writeHead(404).end();
-        return;
-      }
-      if (!real.startsWith(webRoot + NodePath.sep)) {
-        response.writeHead(403).end();
-        return;
-      }
-      const stat = await NodeFSP.stat(real);
-      if (!stat.isFile()) {
-        response.writeHead(404).end();
-        return;
-      }
-      response.writeHead(200, {
-        "Content-Type": contentType(real),
-        "Content-Length": stat.size,
-        "Cache-Control": "no-store",
-      });
-      if (request.method === "HEAD") response.end();
-      else {
-        options.onServed?.(NodePath.relative(webRoot, real).split(NodePath.sep).join("/"));
-        NodeFS.createReadStream(real)
-          .on("error", () => response.destroy())
-          .pipe(response);
-      }
-    })().catch(() => {
-      if (!response.headersSent) response.writeHead(404);
-      response.end();
-    });
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (address === null || typeof address === "string" || !NodeNet.isIPv4(address.address))
-    throw new Error("Preview did not bind TCP");
-  return {
-    url: `http://127.0.0.1:${address.port}/`,
-    close: async () => {
-      server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    },
+  const runtimes = options.runtimes ?? null;
+
+  const app = Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (request.method !== "GET" && request.method !== "HEAD")
+      return HttpServerResponse.empty({ status: 405 });
+    // The runtime's URL names only the major, so a minor update must reach the next load: the
+    // browser keeps it and asks again each time (no-cache), and an unchanged file answers 304,
+    // which keeps the compiled module in the browser's code cache across a live reload. Runtime
+    // files are Kurambit's, not the game's, so asset use never counts them.
+    const runtimeFile =
+      runtimes === null
+        ? null
+        : yield* Effect.promise(() =>
+            runtimeRequestFile(runtimes, decodeURIComponent(request.url.split("?")[0] ?? "/")),
+          );
+    if (runtimeFile !== null) return yield* serveFile(runtimeFile, "no-cache");
+    const file = yield* Effect.promise(() => gameRequestFile(webRoot, request.url));
+    if (typeof file === "number") return HttpServerResponse.empty({ status: file });
+    const response = yield* serveFile(file, "no-store");
+    if (request.method === "GET" && (response.status === 200 || response.status === 206))
+      options.onServed?.(NodePath.relative(webRoot, file).split(NodePath.sep).join("/"));
+    return response;
+  }).pipe(
+    Effect.catch((error) =>
+      HttpServerRespondable.toResponseOrElse(error, HttpServerResponse.empty({ status: 500 })),
+    ),
+    // A malformed URL escape throws while decoding; it names no file.
+    Effect.catchDefect(() => Effect.succeed(HttpServerResponse.empty({ status: 404 }))),
+  );
+
+  const nodeServer = guardHttpResponseWriteErrors(NodeHttp.createServer());
+  const scope = Effect.runSync(Scope.make());
+  const close = async () => {
+    // The browser holds keep-alive connections open; a closed preview must not wait on them.
+    nodeServer.closeAllConnections();
+    await Effect.runPromise(Scope.close(scope, Exit.void));
   };
-};
-
-/**
- * One runtime file. Its URL names only the major, so a minor update must reach the next load:
- * the browser keeps it and asks again each time (no-cache), and an unchanged file answers 304
- * from its stat alone, which keeps the compiled module in the browser's code cache across a
- * live reload. Runtime files are Kurambit's, not the game's, so asset use never counts them.
- */
-const serveRuntimeFile = async (
-  request: NodeHttp.IncomingMessage,
-  response: NodeHttp.ServerResponse,
-  file: string,
-) => {
-  const stat = await NodeFSP.stat(file);
-  if (!stat.isFile()) {
-    response.writeHead(404).end();
-    return;
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const server = yield* NodeHttpServer.make(() => nodeServer, {
+          host: "127.0.0.1",
+          port: 0,
+          disablePreemptiveShutdown: true,
+        });
+        yield* server.serve(app);
+      }).pipe(Scope.provide(scope), Effect.provide(NodeHttpServer.layerHttpServices)),
+    );
+  } catch (cause) {
+    await close();
+    throw cause;
   }
-  const etag = `W/"${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
-  const headers = { ETag: etag, "Cache-Control": "no-cache" };
-  if (request.headers["if-none-match"] === etag) {
-    response.writeHead(304, headers).end();
-    return;
+  const address = nodeServer.address();
+  if (address === null || typeof address === "string" || !NodeNet.isIPv4(address.address)) {
+    await close();
+    throw new Error("Preview did not bind TCP");
   }
-  response.writeHead(200, {
-    ...headers,
-    "Content-Type": contentType(file),
-    "Content-Length": stat.size,
-  });
-  if (request.method === "HEAD") response.end();
-  else
-    NodeFS.createReadStream(file)
-      .on("error", () => response.destroy())
-      .pipe(response);
-};
-
-/**
- * A clean room for Chromium and its children: the allowlisted engine base
- * plus the heap knob, and nothing else. No desktop
- * display leaks in (headless runs own no DISPLAY), and page JS stays
- * sandboxed with no environment to read; only the utility processes that
- * launch the browser see this.
- */
-export const chromiumChildEnv = (): NodeJS.ProcessEnv => {
-  const env: NodeJS.ProcessEnv = { ...engineChildEnv() };
-  env.NODE_OPTIONS = "--max-old-space-size=1536";
-  return env;
+  return { url: `http://127.0.0.1:${address.port}/`, close };
 };

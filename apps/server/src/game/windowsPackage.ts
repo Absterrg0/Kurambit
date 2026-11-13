@@ -2,12 +2,13 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Effect from "effect/Effect";
 import {
   ArchivePublishError,
   publishArchive,
   type ArchiveFileSystem,
 } from "./archivePublication.ts";
-import { StoredZipError, throwIfAborted, writeStoredZip } from "./storedZip.ts";
+import { writeZipArchive } from "../zipArchive.ts";
 import {
   inspectWindowsBuildSource,
   type WindowsBuildInspection,
@@ -127,9 +128,6 @@ const fileSource = (file: OpenedFile): WindowsBuildSource => ({
 const fingerprint = (stat: OpenedFile["stat"]) =>
   `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 
-const readSourceChunk = (file: OpenedFile, offset: number, length: number) =>
-  readFileRange(file, offset, length);
-
 interface ArchiveEntry {
   readonly name: string;
   readonly file: OpenedFile;
@@ -139,37 +137,33 @@ const writeArchive = async (input: {
   readonly path: string;
   readonly entries: readonly ArchiveEntry[];
   readonly signal: AbortSignal | undefined;
-}): Promise<{
-  readonly bytes: number;
-  readonly sha256: string;
-  readonly files: readonly WindowsPackageFile[];
-}> => {
+}) => {
+  const paths = new Map(input.entries.map((entry) => [entry.name, entry.file.path] as const));
   try {
-    return await writeStoredZip({
-      path: input.path,
-      signal: input.signal,
-      entries: input.entries.map((entry) => ({
-        name: entry.name,
-        path: entry.file.path,
-        size: entry.file.size,
-        mtimeMs: Number(entry.file.stat.mtimeMs),
-        // The release's two files are already open and fingerprinted for the whole package.
-        open: async () => ({
-          read: (offset: number, length: number) => readSourceChunk(entry.file, offset, length),
-          close: async () => undefined,
-        }),
-      })),
-    });
+    return await Effect.runPromise(
+      writeZipArchive(
+        input.path,
+        input.entries.map((entry) => ({
+          name: entry.name,
+          size: entry.file.size,
+          mtime: entry.file.stat.mtime,
+          // The release's two files are already open and fingerprinted for the whole package.
+          open: async () => entry.file.handle.createReadStream({ start: 0, autoClose: false }),
+        })),
+        ({ source, changed, cause }) =>
+          new WindowsPackageError(
+            (source && paths.get(source.name)) ?? input.path,
+            changed ? "changed" : "io",
+            changed
+              ? "The Windows release file changed while it was being packaged. Export Windows again and retry."
+              : `The Windows package could not be written: ${describe(cause)}`,
+            { cause },
+          ),
+      ),
+      { signal: input.signal },
+    );
   } catch (cause) {
-    if (cause instanceof StoredZipError)
-      throw new WindowsPackageError(
-        cause.path,
-        cause.kind,
-        cause.kind === "changed"
-          ? "The Windows release file changed while it was being packaged. Export Windows again and retry."
-          : "The Windows release is too large for a standard ZIP archive.",
-        { cause },
-      );
+    input.signal?.throwIfAborted();
     throw cause;
   }
 };
@@ -199,7 +193,7 @@ export const packageWindowsRelease = async (input: {
   readonly root: string;
   readonly signal?: AbortSignal | undefined;
 }): Promise<WindowsPackageResult> => {
-  throwIfAborted(input.signal);
+  input.signal?.throwIfAborted();
   const directory = NodePath.join(input.root, "builds/windows");
   const executablePath = NodePath.join(directory, "game.exe");
   const pckPath = NodePath.join(directory, "game.pck");
@@ -209,7 +203,7 @@ export const packageWindowsRelease = async (input: {
   let staged: string | null = null;
   try {
     pck = await openOptionalFile(pckPath);
-    throwIfAborted(input.signal);
+    input.signal?.throwIfAborted();
     const inspection: WindowsBuildInspection = await inspectWindowsBuildSource({
       executable: fileSource(executable),
       pck: pck === null ? null : fileSource(pck),
@@ -235,7 +229,7 @@ export const packageWindowsRelease = async (input: {
       signal: input.signal,
     });
     for (const entry of entries) {
-      throwIfAborted(input.signal);
+      input.signal?.throwIfAborted();
       const current = await entry.file.handle.stat();
       if (fingerprint(current) !== before.get(entry.name))
         throw new WindowsPackageError(
@@ -255,7 +249,7 @@ export const packageWindowsRelease = async (input: {
           "The Windows release changed while it was being packaged. Export Windows again and retry.",
         );
     }
-    throwIfAborted(input.signal);
+    input.signal?.throwIfAborted();
     const stagedPath = staged;
     if (stagedPath === null)
       throw new WindowsPackageError(

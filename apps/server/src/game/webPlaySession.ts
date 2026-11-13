@@ -12,7 +12,7 @@ import {
 } from "./gameChromium.ts";
 import { asGameState } from "./gameBotRuntime.ts";
 import { READ_SCENE, START_SCENE, type PageScene } from "./sceneReport.ts";
-import { chromiumChildEnv } from "./gameWebServer.ts";
+import { chromiumChildEnv } from "./gameChromium.ts";
 import {
   PLAY_BOUNDS,
   PlayClosed,
