@@ -390,7 +390,11 @@ const make = Effect.gen(function* () {
       );
       // One create per folder at a time in this server, so a second click
       // cannot take the first's half-made folder for a leftover.
-      return yield* createLocks.withLock(requestedRoot, createAt(input, name, requestedRoot));
+      // The scaffold (game.json, the page's title) and the project take the name the game got.
+      return yield* createLocks.withLock(
+        requestedRoot,
+        createAt({ ...input, name }, name, requestedRoot),
+      );
     },
   );
   const createAt = (input: GameCreateInput, name: string, requestedRoot: string) =>
