@@ -93,7 +93,6 @@ import {
   SkipForwardIcon,
   SquarePenIcon,
   ShapesIcon,
-  ScrollTextIcon,
   ListChecksIcon,
   SwatchBookIcon,
   StepForwardIcon,
@@ -1609,36 +1608,26 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "game.fullscreen",
       run: requestStage({ kind: "fullscreen" }),
     });
-    for (const [tab, title, terms, TabIcon] of [
-      [
-        "build",
-        "Show build checks",
-        ["build", "checks", "facts", "measured", "changes"],
-        ListChecksIcon,
-      ],
-      [
-        "scene",
-        "Show scene",
-        ["scene", "things", "look", "art", "selection", "values", "style"],
-        ShapesIcon,
-      ],
-      [
-        "log",
-        "Show Log",
-        ["log", "chat", "conversation", "transcript", "messages"],
-        ScrollTextIcon,
-      ],
-    ] as const)
-      actionItems.push({
-        kind: "action",
-        value: `action:game-inspector-${tab}`,
-        title,
-        searchTerms: [...terms, "inspector", "game"],
-        icon: <TabIcon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          useGameWorkspaceStore.getState().showInspectorTab(tab);
-        },
-      });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-builds",
+      title: "Show builds",
+      searchTerms: ["build", "builds", "checks", "facts", "measured", "changes", "game"],
+      icon: <ListChecksIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useGameWorkspaceStore.getState().showInspectorTab("build");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-look",
+      title: "Look…",
+      searchTerms: ["look", "style", "art", "characters", "palette", "game"],
+      icon: <ShapesIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useGameWorkspaceStore.getState().setLookOpen(true);
+      },
+    });
     // The game's latest turn build, the one the timeline selects by default.
     const latestBuild = turnUndo.view?.build ?? null;
     if (latestBuild !== null) {

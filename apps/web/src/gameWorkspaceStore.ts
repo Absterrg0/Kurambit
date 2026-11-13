@@ -57,8 +57,22 @@ export type GameStageRequest =
   | { readonly kind: "export" }
   | { readonly kind: "generated-art" };
 
-/** The Inspector beside the game: a build's checks and changes, the game's look and things, the full log. */
-export type GameInspectorTab = "build" | "scene" | "log";
+/** The panel beside the chat: a build's checks and changes, or, while pointing, what is on screen. */
+export type GameInspectorTab = "build" | "scene";
+
+/** Where the game plays: on top of the chat, or in its own column beside it. */
+export type GamePlacement = "above" | "right";
+
+/** How much of the chat's column the game takes: hidden to its bar, shared, or all of it. */
+export type GameView = "collapsed" | "split" | "expanded";
+
+/** The game's share of the column's height while it shares it with the chat. */
+const GAME_STAGE_SHARE_DEFAULT = 0.58;
+export const clampGameStageShare = (share: number) => Math.min(0.85, Math.max(0.3, share));
+/** The game's column beside the chat, when it plays there. */
+export const GAME_COLUMN_DEFAULT_WIDTH = 640;
+export const clampGameColumnWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
+  Math.min(Math.floor(workspaceWidth * 0.62), Math.max(360, Math.round(width)));
 
 /** The build the Inspector shows, for one thread; null shows the one on the Stage. */
 export interface GameInspectedBuild {
@@ -91,6 +105,17 @@ interface GameWorkspaceStoreState {
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
   requestStage: (request: GameStageRequest) => void;
+  gamePlacement: GamePlacement;
+  setGamePlacement: (placement: GamePlacement) => void;
+  gameView: GameView;
+  setGameView: (view: GameView) => void;
+  gameStageShare: number;
+  setGameStageShare: (share: number) => void;
+  gameColumnWidth: number;
+  setGameColumnWidth: (width: number) => void;
+  /** The game's Look (style, characters, generated art), as a dialog. Not persisted. */
+  lookOpen: boolean;
+  setLookOpen: (open: boolean) => void;
 }
 
 /**
@@ -102,7 +127,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
     (set) => ({
       inspectorWidth: GAME_INSPECTOR_DEFAULT_WIDTH,
       workspaceWidth: Number.POSITIVE_INFINITY,
-      inspectorCollapsed: false,
+      inspectorCollapsed: true,
       setInspectorWidth: (width) => set({ inspectorWidth: clampGameInspectorWidth(width) }),
       fitInspectorWidth: (workspaceWidth) =>
         set((state) => {
@@ -121,15 +146,30 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       stageRequest: null,
       requestStage: (request) =>
         set((state) => ({ stageRequest: { request, n: (state.stageRequest?.n ?? 0) + 1 } })),
+      gamePlacement: "above",
+      setGamePlacement: (placement) => set({ gamePlacement: placement }),
+      gameView: "split",
+      setGameView: (view) => set({ gameView: view }),
+      gameStageShare: GAME_STAGE_SHARE_DEFAULT,
+      setGameStageShare: (share) => set({ gameStageShare: clampGameStageShare(share) }),
+      gameColumnWidth: GAME_COLUMN_DEFAULT_WIDTH,
+      setGameColumnWidth: (width) => set({ gameColumnWidth: clampGameColumnWidth(width) }),
+      lookOpen: false,
+      setLookOpen: (open) => set({ lookOpen: open }),
     }),
     {
-      name: "kurambit:game-workspace:v3",
+      name: "kurambit:game-workspace:v4",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
       partialize: (state) => ({
         inspectorWidth: state.inspectorWidth,
         inspectorCollapsed: state.inspectorCollapsed,
+        gamePlacement: state.gamePlacement,
+        // Filling the column is for this sitting; a new one opens with the chat in view.
+        gameView: state.gameView === "expanded" ? "split" : state.gameView,
+        gameStageShare: state.gameStageShare,
+        gameColumnWidth: state.gameColumnWidth,
       }),
       // An old session may hold a width that would starve the stage; the clamp
       // lives here so loading the store cannot reintroduce it.
@@ -139,6 +179,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           ...current,
           ...saved,
           inspectorWidth: clampGameInspectorWidth(saved?.inspectorWidth ?? current.inspectorWidth),
+          gameStageShare: clampGameStageShare(saved?.gameStageShare ?? current.gameStageShare),
         };
       },
     },

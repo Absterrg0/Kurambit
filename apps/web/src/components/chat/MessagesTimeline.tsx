@@ -198,7 +198,6 @@ import {
   type AssistantCitationTarget,
 } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
-import { GameLogHistory } from "../game/GameLogHistory";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
@@ -1427,17 +1426,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (hideEmptyPlaceholder) {
       return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
     }
-    // A game's Log sits beside its Stage and builds, top-aligned like the Inspector's other tabs.
-    if (gameThread && citationThreadRef !== null) {
-      return <GameLogHistory />;
-    }
     return (
       <div
         className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"
         style={{ paddingBottom: contentInsetEndAdjustment }}
       >
         <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
+          {gameThread
+            ? "Tell your game what to change. Your agent's work shows here."
+            : "Send a message to start the conversation."}
         </p>
       </div>
     );

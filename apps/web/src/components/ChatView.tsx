@@ -1,15 +1,15 @@
 import { GameStage } from "./game/GameStage";
 import { GameComposerTray } from "./game/GameComposerTray";
-import { GameInspectorPanel, GameInspectorTabs } from "./game/GameInspector";
+import { GameBuildsPanel, GameLookDialog } from "./game/GameInspector";
 import { gameAgentNote as gameAgentNoteOf } from "./game/gameAgentNote.logic";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
 import {
-  GameDirectionNote,
+  GameChatHeader,
+  GameColumnResize,
   GameInspectorResize,
   GamePointedChip,
-  GameFirstChangeNote,
-  GameUndoneNote,
+  GameStageResize,
   useGameMakingFirstBuild,
   useLatestTurnUndone,
 } from "./game/GameDirectionBar";
@@ -273,7 +273,6 @@ import { PersistentThreadTerminalDrawer } from "./PersistentThreadTerminals";
 import {
   AlarmClockIcon,
   CheckCircle2Icon,
-  Gamepad2Icon,
   MessageCircleIcon,
   PaperclipIcon,
   ChevronDownIcon,
@@ -1668,6 +1667,11 @@ export default function ChatView(props: ChatViewProps) {
   const gameInspectorWidth = useDockedInspectorWidth();
   const gameInspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
   const gameInspectorTab = useGameWorkspaceStore((state) => state.inspectorTab);
+  const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
+  const gameView = useGameWorkspaceStore((state) => state.gameView);
+  const gameStageShare = useGameWorkspaceStore((state) => state.gameStageShare);
+  const gameColumnWidth = useGameWorkspaceStore((state) => state.gameColumnWidth);
+  const [gameStripHost, setGameStripHost] = useState<HTMLElement | null>(null);
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
@@ -7636,6 +7640,26 @@ export default function ChatView(props: ChatViewProps) {
   // its scroll, and inert so nothing in it can take focus while unseen.
   const gameInspectorHidden = gameLayout && !gameWorkspace.inspectorVisible;
   const gameStageHidden = gameLayout && !gameWorkspace.stageVisible;
+  // The game plays on top of the chat, or in its own column beside it (a person's choice; a
+  // narrow window always stacks them).
+  const gameStageAbove = gamePlacement === "above" || gameWorkspace.compact;
+  // The chat's column gives way to the builds pane on a narrow window, and to a game filling
+  // the room beside it.
+  const gameChatHidden =
+    gameLayout && (gameStageHidden || (!gameStageAbove && gameView === "expanded"));
+  const gameStage = gameLayout ? (
+    <GameStage
+      threadRef={activeThreadRef}
+      turnRunning={phase === "running"}
+      onAskAgent={askAgentToFixStable}
+      compact={gameWorkspace.compact}
+      hidden={gameStageHidden && gameStageAbove}
+      onShowInspector={showCompactInspector}
+      turnRequest={gameTurnRequest}
+      note={gameStageMakingFirst ? (gameAgentNote?.text ?? null) : null}
+      stripHost={gameStripHost}
+    />
+  ) : null;
   const compactInspectorVisible =
     gameLayout && gameWorkspace.compact && gameWorkspace.inspectorVisible;
   // One composer for the thread: under the transcript in a chat, under the
@@ -7917,76 +7941,23 @@ export default function ChatView(props: ChatViewProps) {
       data-game-workspace-compact={gameWorkspace.compact ? "true" : "false"}
     >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
-      {gameLayout ? (
-        <div
-          data-game-centre=""
-          className={cn(
-            "relative min-h-0 min-w-0 flex-1 flex-col",
-            gameStageHidden ? "hidden" : "flex",
-          )}
-          inert={gameStageHidden}
-        >
-          <GameStage
-            threadRef={activeThreadRef}
-            turnRunning={phase === "running"}
-            onAskAgent={askAgentToFixStable}
-            compact={gameWorkspace.compact}
-            hidden={gameStageHidden}
-            onShowInspector={showCompactInspector}
-            turnRequest={gameTurnRequest}
-            note={gameAgentNote?.text ?? null}
-          />
-          <div
-            data-game-direction-bar=""
-            // The Stage's fitted column (set by GameStage), centred with it, so the composer
-            // shares both its edges.
-            className={cn(
-              "mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col",
-              // One row above the composer: a row the composer attaches (a queued message,
-              // keep going's status) takes the agent's line's place.
-              "[&:has([data-composer-banner-surface])_[data-game-agent-note]]:hidden",
-            )}
-          >
-            {/* One row above the composer: keep going's status (its own row in the
-                composer's drawer) takes the agent's line's place, so the room stays one row. */}
-            {activePendingApproval !== null ||
-            activePendingUserInput !== null ||
-            keepGoingBanner.item !== null ? null : latestTurnUndone && !isWorking ? (
-              <GameUndoneNote threadRef={activeThreadRef} runId={activeLatestRun?.runId ?? null} />
-            ) : (
-              <GameDirectionNote
-                threadRef={activeThreadRef}
-                // Before build 1 the Stage carries the agent's words: said once, there.
-                note={gameStageMakingFirst ? null : gameAgentNote}
-                onOpenLog={() => useGameWorkspaceStore.getState().showInspectorTab("log")}
-              />
-            )}
-            {gameWorkspace.compact && gameAgentNote === null && keepGoingBanner.item === null ? (
-              <GameFirstChangeNote threadRef={activeThreadRef} />
-            ) : null}
-            <GamePointedChip threadRef={activeThreadRef} />
-            {composerLane}
-          </div>
-          {gameInspectorDocked ? <GameInspectorResize /> : null}
-        </div>
-      ) : null}
       <div
         className={cn(
           "relative flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized || gameInspectorHidden
-            ? "invisible w-0 flex-none"
-            : gameInspectorDocked
-              ? "shrink-0"
-              : "flex-1",
+          rightPanelMaximized || gameChatHidden ? "invisible w-0 flex-none" : "flex-1",
         )}
-        style={gameInspectorDocked ? { width: gameInspectorWidth } : undefined}
-        inert={gameInspectorHidden}
-        aria-hidden={gameInspectorHidden}
+        inert={gameChatHidden}
+        aria-hidden={gameChatHidden}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
-        data-game-inspector-docked={gameInspectorDocked ? "true" : "false"}
+        data-game-centre={gameLayout ? "" : undefined}
       >
+        {gameLayout && gameStageAbove ? (
+          // The Stage's own bar is the page's header; the anchor stays for the details popover.
+          <span ref={threadPanelPopoverAnchorRef} aria-hidden className="absolute top-0 left-0" />
+        ) : null}
         <header
-          ref={threadPanelPopoverAnchorRef}
+          ref={gameLayout && gameStageAbove ? undefined : threadPanelPopoverAnchorRef}
+          hidden={gameLayout && gameStageAbove}
           data-chat-header
           className={cn(
             "relative bg-background [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
@@ -8007,31 +7978,14 @@ export default function ChatView(props: ChatViewProps) {
               className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
             />
           ) : null}
-          {compactInspectorVisible ? (
-            <div className="flex shrink-0 items-center px-1">
-              <Button size="sm" variant="ghost" onClick={showCompactGame}>
-                <Gamepad2Icon className="size-3.5" aria-hidden="true" />
-                Back to the Stage
-              </Button>
-            </div>
-          ) : null}
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           {gameLayout ? (
-            // Under window controls the header's own inset covers those.
-            <div
-              className={cn(
-                // The header's gutters are 4px wider than the panel's padding: the tab track
-                // reaches out to the content's edges instead.
-                "-mx-1 flex h-full min-w-0 flex-1 items-center wco:pr-10",
-                // The fixed panel toggles only show for a game while its side panel is open.
-                rightPanelOpen && "pr-24",
-                // As a sheet the panel's column is centred, and its tabs sit over it.
-                compactInspectorVisible && "justify-center pe-16",
-              )}
-            >
-              <GameInspectorTabs threadRef={activeThreadRef} />
-            </div>
+            <GameChatHeader
+              threadRef={activeThreadRef}
+              title={activeThread.title}
+              gameHidden={gameView === "collapsed"}
+            />
           ) : (
             <ChatHeader
               activeThreadEnvironmentId={activeThread.environmentId}
@@ -8050,19 +8004,36 @@ export default function ChatView(props: ChatViewProps) {
             />
           )}
         </header>
-        {gameLayout ? (
-          <GameInspectorPanel threadRef={activeThreadRef} compact={compactInspectorVisible} />
+        {gameLayout && gameStageAbove ? (
+          <>
+            <div
+              className={cn(
+                "relative flex min-h-0 flex-col",
+                gameView === "expanded" ? "flex-1" : "shrink-0",
+                gameView === "collapsed" && "overflow-hidden",
+              )}
+              style={
+                gameView === "split"
+                  ? { height: `${Math.round(gameStageShare * 100)}%` }
+                  : gameView === "collapsed"
+                    ? { height: "var(--workspace-topbar-height)" }
+                    : undefined
+              }
+            >
+              {gameStage}
+            </div>
+            {gameView === "split" ? <GameStageResize /> : null}
+          </>
         ) : null}
 
         <div
           className={cn(
             "relative flex min-h-0 min-w-0 flex-1",
-            // The Log fades in as the tab panel over it goes, on the same clock as the others.
-            gameLayout && "motion-popup transition-opacity",
-            gameLayout && gameInspectorTab !== "log" && "opacity-0",
+            // Filling the column with the game hides the chat under it, mounted, so its scroll
+            // and find survive.
+            gameLayout && gameStageAbove && gameView === "expanded" && "hidden",
           )}
-          // Under another Inspector tab the Log stays mounted, so its scroll and find survive.
-          inert={gameLayout && gameInspectorTab !== "log"}
+          inert={gameLayout && gameStageAbove && gameView === "expanded"}
         >
           <ThreadFindCanvas
             findOptions={{
@@ -8269,20 +8240,23 @@ export default function ChatView(props: ChatViewProps) {
               )}
             </div>
 
-            {isGameThread && activeThreadRef ? null : (
-              <div
-                ref={setComposerOverlayElement}
-                inert={isRevertingCheckpoint}
-                data-chat-composer-overlay="true"
-                className={
-                  isDraftHeroState
-                    ? "pointer-events-none absolute inset-0 z-20 flex items-center"
-                    : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
-                }
-              >
-                {composerLane}
-              </div>
-            )}
+            <div
+              ref={setComposerOverlayElement}
+              inert={isRevertingCheckpoint}
+              data-chat-composer-overlay="true"
+              className={
+                isDraftHeroState
+                  ? "pointer-events-none absolute inset-0 z-20 flex items-center"
+                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+              }
+            >
+              {gameLayout ? (
+                <div className="pointer-events-auto mx-auto w-full max-w-(--chat-content-max-width)">
+                  <GamePointedChip threadRef={activeThreadRef} />
+                </div>
+              ) : null}
+              {composerLane}
+            </div>
 
             {canOperatePreview && activeThreadRef && activeEnvironmentServerBrowser ? (
               <PreviewSessionSync threadRef={activeThreadRef} />
@@ -8305,46 +8279,49 @@ export default function ChatView(props: ChatViewProps) {
               onConfirm={handleSwitchCheckoutToThreadStable}
             />
 
-            <ThreadDetailsPanel
-              anchor={threadPanelPopoverAnchorRef}
-              handle={threadPanelPopoverHandle}
-              onPresentationChange={setThreadPanelPresentation}
-              forceNewWorktree={multipleModelSelections !== null}
-              environmentId={activeThread.environmentId}
-              threadId={activeThread.id}
-              {...(draftId ? { draftId } : {})}
-              activeProjectName={activeProject?.title}
-              activeProjectScripts={activeProject ? activeProjectScripts : undefined}
-              preferredScriptId={
-                activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-              }
-              keybindings={keybindings}
-              availableEditors={availableEditors}
-              showOpenInPicker={showOpenInPicker}
-              gitCwd={gitCwd}
-              isGitRepo={isGitRepo}
-              envLocked={envLocked}
-              availableEnvironments={logicalProjectEnvironments}
-              onEnvironmentChange={onEnvironmentChangeStable}
-              onEnvModeChange={onEnvModeChangeStable}
-              envMode={envMode}
-              {...(canOverrideServerThreadEnvMode
-                ? {
-                    activeThreadBranchOverride: activeThreadBranch,
-                    onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                  }
-                : {})}
-              startFromOrigin={startFromOrigin}
-              onStartFromOriginChange={onStartFromOriginChange}
-              onComposerFocusRequest={scheduleComposerFocusStable}
-              {...(isServerThread && isGitRepo
-                ? { onOpenChanges: openChangesFromThreadPanelStable }
-                : {})}
-              onRunProjectScript={runProjectScriptStable}
-              onAddProjectScript={saveProjectScriptStable}
-              onUpdateProjectScript={updateProjectScriptStable}
-              onDeleteProjectScript={deleteProjectScriptStable}
-            />
+            {/* A game's folder, branch and commits are the harness's, not the person's. */}
+            {isGameThread ? null : (
+              <ThreadDetailsPanel
+                anchor={threadPanelPopoverAnchorRef}
+                handle={threadPanelPopoverHandle}
+                onPresentationChange={setThreadPanelPresentation}
+                forceNewWorktree={multipleModelSelections !== null}
+                environmentId={activeThread.environmentId}
+                threadId={activeThread.id}
+                {...(draftId ? { draftId } : {})}
+                activeProjectName={activeProject?.title}
+                activeProjectScripts={activeProject ? activeProjectScripts : undefined}
+                preferredScriptId={
+                  activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+                }
+                keybindings={keybindings}
+                availableEditors={availableEditors}
+                showOpenInPicker={showOpenInPicker}
+                gitCwd={gitCwd}
+                isGitRepo={isGitRepo}
+                envLocked={envLocked}
+                availableEnvironments={logicalProjectEnvironments}
+                onEnvironmentChange={onEnvironmentChangeStable}
+                onEnvModeChange={onEnvModeChangeStable}
+                envMode={envMode}
+                {...(canOverrideServerThreadEnvMode
+                  ? {
+                      activeThreadBranchOverride: activeThreadBranch,
+                      onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                    }
+                  : {})}
+                startFromOrigin={startFromOrigin}
+                onStartFromOriginChange={onStartFromOriginChange}
+                onComposerFocusRequest={scheduleComposerFocusStable}
+                {...(isServerThread && isGitRepo
+                  ? { onOpenChanges: openChangesFromThreadPanelStable }
+                  : {})}
+                onRunProjectScript={runProjectScriptStable}
+                onAddProjectScript={saveProjectScriptStable}
+                onUpdateProjectScript={updateProjectScriptStable}
+                onDeleteProjectScript={deleteProjectScriptStable}
+              />
+            )}
           </ThreadFindCanvas>
         </div>
 
@@ -8367,6 +8344,54 @@ export default function ChatView(props: ChatViewProps) {
           />
         ))}
       </div>
+
+      {gameLayout && !gameStageAbove ? (
+        // The game in its own column beside the chat, mounted while folded so it keeps its
+        // progress; filled, it takes the chat's room too.
+        <div
+          className={cn(
+            "relative min-h-0 min-w-0 flex-col border-l border-border",
+            gameView === "collapsed" || gameWorkspace.compact
+              ? "hidden"
+              : gameView === "expanded"
+                ? "flex flex-1"
+                : "flex shrink-0",
+          )}
+          style={gameView === "split" ? { width: gameColumnWidth } : undefined}
+          inert={gameView === "collapsed"}
+        >
+          {gameStage}
+          {gameView === "split" ? <GameColumnResize /> : null}
+        </div>
+      ) : null}
+      {gameLayout ? (
+        <div
+          className={cn(
+            "relative flex min-h-0 min-w-0 flex-col overflow-x-hidden",
+            gameInspectorHidden || rightPanelMaximized
+              ? "invisible w-0 flex-none"
+              : gameInspectorDocked
+                ? "shrink-0 border-l border-border"
+                : "flex-1",
+          )}
+          style={gameInspectorDocked ? { width: gameInspectorWidth } : undefined}
+          inert={gameInspectorHidden}
+          aria-hidden={gameInspectorHidden}
+          data-game-inspector-docked={gameInspectorDocked ? "true" : "false"}
+        >
+          <GameBuildsPanel
+            threadRef={activeThreadRef}
+            compact={compactInspectorVisible}
+            onStripHost={setGameStripHost}
+            onClose={() => {
+              if (gameWorkspace.compact) showCompactGame();
+              else useGameWorkspaceStore.getState().setInspectorCollapsed(true);
+            }}
+          />
+          {gameInspectorDocked ? <GameInspectorResize /> : null}
+          <GameLookDialog threadRef={activeThreadRef} />
+        </div>
+      ) : null}
 
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelTabs

@@ -7,6 +7,7 @@ import {
   ArrowDownIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   ChevronRightIcon,
   CircleIcon,
   ClockIcon,
@@ -47,9 +48,17 @@ import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
 import { useDiffPanelStore } from "../../diffPanelStore";
-import { type GameInspectorTab, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { dispatchComposerFocus } from "../../lib/desktopSnapShot";
 import { cn, randomUUID } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
@@ -74,7 +83,6 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/men
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Separated } from "../ui/separated";
 import { Skeleton } from "../ui/skeleton";
-import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
@@ -124,65 +132,53 @@ import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildAc
 import { useChangedSinceBase } from "./useChangedSinceBase";
 import { useTurnLanding } from "./useTurnLanding";
 
-const TABS: ReadonlyArray<{ readonly tab: GameInspectorTab; readonly label: string }> = [
-  { tab: "build", label: "Build" },
-  { tab: "scene", label: "Scene" },
-  { tab: "log", label: "Log" },
-];
-
 /**
- * The Inspector's three tabs, in its column's header. The Log stays mounted
- * under the other two, so its scroll, find and running turn never reset.
+ * The panel beside the chat: the game's builds as a strip, the chosen build's checks and what
+ * changed, or, while the Stage is frozen to point at things, what is on screen. The strip itself
+ * is the Stage's, rendered into `onStripHost` so it keeps the Stage's play and compare wiring.
  */
-export function GameInspectorTabs({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const tab = useGameWorkspaceStore((state) => state.inspectorTab);
-  const showTab = useGameWorkspaceStore((state) => state.showInspectorTab);
-  // A generation waiting on the person's pick is never missed behind another tab.
-  const choosing = useChoosingCount(threadRef);
-  return (
-    <Tabs
-      value={tab}
-      onValueChange={(next: GameInspectorTab) => showTab(next)}
-      className="w-full max-w-80"
-    >
-      <TabsList aria-label="Inspector" className="w-full">
-        {TABS.map((entry) => (
-          <TabsTab key={entry.tab} value={entry.tab}>
-            {entry.label}
-            {entry.tab === "scene" && choosing > 0 ? (
-              <span className="size-1.5 rounded-full bg-warning" aria-label="A pick is waiting" />
-            ) : null}
-          </TabsTab>
-        ))}
-      </TabsList>
-    </Tabs>
-  );
-}
-
-/**
- * The open tab's panel, over the Log; nothing while the Log is open. As the sheet of a
- * narrow window it covers the composer, so the tray (what the next message changes, and
- * Keep going) stays pinned under it.
- */
-export function GameInspectorPanel({
+export function GameBuildsPanel({
   threadRef,
   compact,
+  onStripHost,
+  onClose,
 }: {
   threadRef: ScopedThreadRef;
   compact: boolean;
+  onStripHost: (host: HTMLElement | null) => void;
+  onClose: () => void;
 }) {
   const tab = useGameWorkspaceStore((state) => state.inspectorTab);
-  if (tab === "log") return null;
+  const showTab = useGameWorkspaceStore((state) => state.showInspectorTab);
   return (
-    <div
-      role="tabpanel"
-      aria-label={TABS.find((entry) => entry.tab === tab)?.label}
-      className="absolute inset-x-0 bottom-0 top-(--workspace-topbar-height) z-(--z-sheet) flex min-h-0 flex-col bg-background"
-    >
+    <div className="flex min-h-0 flex-1 flex-col bg-background" data-game-builds-panel="">
+      <div className="flex h-(--workspace-topbar-height) shrink-0 items-center gap-1 px-3">
+        {tab === "scene" ? (
+          <Button size="xs" variant="ghost" onClick={() => showTab("build")}>
+            <ChevronLeftIcon aria-hidden="true" />
+            Builds
+          </Button>
+        ) : (
+          <Text variant="label" tone="strong" render={<h2 className="ps-1" />}>
+            Builds
+          </Text>
+        )}
+        {tab === "scene" ? (
+          <Text variant="label" tone="strong" render={<h2 className="ps-1" />}>
+            On screen
+          </Text>
+        ) : null}
+        <span className="flex-1" />
+        <Button size="icon-sm" variant="ghost" aria-label="Hide builds" onClick={onClose}>
+          <XIcon aria-hidden="true" />
+        </Button>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
-        {/* In the wide sheet of a narrow window, the panel keeps a reading width, centred. Keyed by tab,
-            so a new tab fades in on the popup clock as the pill slides, like TabsPanel (the
-            tabs live in the column's header, outside this panel's tree). */}
+        <div
+          ref={onStripHost}
+          data-game-strip-host=""
+          className={cn("shrink-0 px-4", tab === "scene" && "hidden")}
+        />
         <div
           key={tab}
           className="mx-auto w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
@@ -195,7 +191,6 @@ export function GameInspectorPanel({
         </div>
       </div>
       {compact ? (
-        // The rule spans the sheet; the tray keeps the content's centred column.
         <div className="shrink-0 border-t border-border">
           <div className="mx-auto w-full max-w-160 px-4 pb-2">
             <GameComposerTray threadRef={threadRef} />
@@ -203,6 +198,27 @@ export function GameInspectorPanel({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The game's look: its style, how characters are made, and generated art, from the game's menu. */
+export function GameLookDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const open = useGameWorkspaceStore((state) => state.lookOpen);
+  const setOpen = useGameWorkspaceStore((state) => state.setLookOpen);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogPopup className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Look</DialogTitle>
+          <DialogDescription>
+            The game's style, how its characters are made, and the art made for it.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <LookSection threadRef={threadRef} />
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -1660,7 +1676,6 @@ function ScenePanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const notice = useSelectNotice(threadRef);
   return (
     <div className="flex flex-col gap-5 p-4">
-      <LookSection threadRef={threadRef} />
       {/* The thing pointed at comes before the list, which can run to a hundred props. */}
       {notice === null && selected !== null ? (
         <ThingInspector threadRef={threadRef} thing={selected.thing} />

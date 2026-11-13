@@ -225,7 +225,7 @@ describe("VS Code theme import", () => {
       colors: {
         "editor.background": "#121212",
         // The standard dark accent, so the fallback has to pass over it.
-        "editorWidget.background": "#e2582a",
+        "editorWidget.background": "#346bf1",
       },
     });
     expect(asHex(theme.colors.focus)).toBe("#ffffff");

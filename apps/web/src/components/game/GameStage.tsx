@@ -2,10 +2,17 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   CircleStopIcon,
   CrosshairIcon,
   ChevronDownIcon,
+  ChevronUpIcon,
+  Columns2Icon,
+  Maximize2Icon,
+  Minimize2Icon,
+  PaletteIcon,
+  Rows2Icon,
   DownloadIcon,
   FilmIcon,
   FolderOpenIcon,
@@ -215,6 +222,8 @@ const SHORT_WINDOW = 840;
  * game's first message either.
  */
 const TRANSIENT_ROWS_RESERVE = 38;
+/** A build card in the panel's strip, at the panel's width. */
+const STRIP_CARD_WIDTH = 136;
 /**
  * What the loading skeleton's column gives up besides its Stage, so its Stage is the size the
  * fit gives a 16:9 game and nothing moves when the game is read.
@@ -223,53 +232,6 @@ const skeletonChrome = (picture: number) =>
   // The strip's label, gaps and caption lines (one fewer on compact cards), its pictures, the
   // room above the composer and the fit's breath: the loaded column's own measurements.
   (picture === BUILD_CARD_PICTURE ? 113 : 96) + picture + TRANSIENT_ROWS_RESERVE + 9;
-
-/** The strip's gap between cards (gap-3). */
-const BUILD_CARD_GAP = 12;
-
-/**
- * PURE. The Stage's size in a column `width` wide with `height` for the Stage and one row of
- * card pictures. The game keeps its shape (`ratio`, height over width). Cards are one size, so
- * the Stage is as large as the column allows, until three of them no longer fit its width: on a
- * short window they shrink with it, so three always show whole, and the Stage takes the height
- * they give back.
- */
-const fitStage = (
-  width: number,
-  height: number,
-  ratio: number,
-  picture: number = BUILD_CARD_PICTURE,
-) => {
-  const lane = (stageWidth: number) => (stageWidth - 2 * BUILD_CARD_GAP) / 3;
-  let stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - picture)));
-  // A compact card is only shorter: it keeps the width a full card would have, room for a
-  // build's name, and its picture is cropped to the strip's height.
-  let cardWidth = Math.floor((BUILD_CARD_PICTURE * 16) / 9);
-  if (lane(stageHeight / ratio) < cardWidth) {
-    // Where the Stage and three cards a third of its width exactly fill the height.
-    stageHeight = Math.floor(
-      Math.max(
-        0,
-        Math.min(
-          width * ratio,
-          (height + (2 * BUILD_CARD_GAP * 9) / (3 * 16)) / (1 + 9 / (3 * 16 * ratio)),
-        ),
-      ),
-    );
-    cardWidth = Math.floor(lane(stageHeight / ratio));
-  }
-  // A card's picture is never taller than its whole 16:9 frame. A short window's cards start
-  // short and take whatever height the Stage leaves over: their pictures are cropped only
-  // where the Stage needs the height, and whole where it is bound by its column's width.
-  const whole = Math.floor((cardWidth * 9) / 16);
-  const spare = Math.max(0, Math.floor(height - stageHeight - picture));
-  return {
-    width: Math.floor(stageHeight / ratio),
-    height: stageHeight,
-    cardWidth,
-    cardPicture: Math.min(whole, picture + spare),
-  };
-};
 
 /**
  * The folded Inspector's label, after the checks: how many readings the build on the Stage
@@ -409,6 +371,15 @@ export function GameStageLoading() {
   );
 }
 
+/**
+ * The game on screen, for fullscreen: only the game, edge to edge on black, never the
+ * Stage's bar or strip. A copy or the folder's own game, whichever is shown.
+ */
+const playSurfaceOf = (section: HTMLElement | null): HTMLElement | null =>
+  [...(section?.querySelectorAll<HTMLElement>("[data-game-play-surface]") ?? [])].find(
+    (surface) => surface.offsetParent !== null,
+  ) ?? null;
+
 export function GameStage(props: GameStageProps) {
   // One stage per thread: a compare, a pick, a held reload or an error of one
   // game never carries into another (ChatView keeps its children mounted).
@@ -435,6 +406,8 @@ interface GameStageProps {
   turnRequest?: string | null;
   /** The agent's live note, for the Stage while the first build is made. */
   note?: string | null;
+  /** Where the build strip renders: the build panel beside the chat, when it is open. */
+  stripHost?: HTMLElement | null;
 }
 
 function ThreadGameStage({
@@ -446,8 +419,16 @@ function ThreadGameStage({
   onShowInspector,
   turnRequest = null,
   note = null,
+  stripHost = null,
 }: GameStageProps) {
   const navigate = useNavigate();
+  const gameView = useGameWorkspaceStore((state) => state.gameView);
+  const setGameView = useGameWorkspaceStore((state) => state.setGameView);
+  const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
+  const setGamePlacement = useGameWorkspaceStore((state) => state.setGamePlacement);
+  const setLookOpen = useGameWorkspaceStore((state) => state.setLookOpen);
+  // Folded to its bar the game holds still, as it does in a hidden pane.
+  const collapsed = gameView === "collapsed";
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
@@ -701,86 +682,37 @@ function ThreadGameStage({
     // A compare fills the Stage's place: the Stage keeps the fit it had, for when it closes.
     if (section === null || comparing) return;
     const measure = () => {
-      const strip = section.querySelector<HTMLElement>("[data-game-build-strip]");
       let taken = 0;
       for (const child of section.children)
         if (
           child instanceof HTMLElement &&
           child.dataset.stageFit === undefined &&
-          child.dataset.stageSpacer === undefined &&
-          child !== strip
+          child.dataset.stageSpacer === undefined
         )
           taken += child.offsetHeight;
-      // The strip less its pictures: they grow with what the Stage leaves over, so measuring
-      // them in would chase their own growth. Both sides as rendered, unrounded: a rounded
-      // picture height would move the chrome by a pixel per fit and never settle.
-      const picture =
-        strip
-          ?.querySelector("[data-game-build-card], [data-game-build-slot]")
-          ?.firstElementChild?.getBoundingClientRect().height ?? BUILD_CARD_PICTURE;
-      const stripChrome =
-        strip === null ? 0 : Math.max(0, strip.getBoundingClientRect().height - picture);
-      // The rows that come and go above the composer (the agent's note, a suggestion tucked
-      // under the composer's edge) are measured against their fixed budget, so the Stage's
-      // height does not follow them: their footprint is the bar's top to the composer's top.
-      const bar = section.parentElement?.querySelector<HTMLElement>("[data-game-direction-bar]");
-      const composer = bar?.querySelector<HTMLElement>('[data-chat-composer-main-surface="true"]');
-      const transient =
-        bar == null || composer == null
-          ? 0
-          : Math.max(0, composer.getBoundingClientRect().top - bar.getBoundingClientRect().top);
-      const height = section.clientHeight + transient - TRANSIENT_ROWS_RESERVE;
-      const compact = window.innerHeight < SHORT_WINDOW;
-      const cardPicture = compact ? BUILD_CARD_PICTURE_SHORT : BUILD_CARD_PICTURE;
-      // The surface's side insets (mx-3) and a breath above the strip.
+      // The game at its own shape, as large as the room under the bar allows, inside the
+      // surface's side insets (mx-3) and a breath above and below.
+      const ratio = viewportHeight / viewportWidth;
+      const width = section.clientWidth - 24;
+      const stageHeight = Math.floor(
+        Math.max(0, Math.min(width * ratio, section.clientHeight - taken - 16)),
+      );
       const next = {
-        ...fitStage(
-          section.clientWidth - 24,
-          height - taken - stripChrome - 8,
-          viewportHeight / viewportWidth,
-          cardPicture,
-        ),
-        compact,
+        width: Math.floor(stageHeight / ratio),
+        height: stageHeight,
+        cardWidth: STRIP_CARD_WIDTH,
+        cardPicture: Math.floor((STRIP_CARD_WIDTH * 9) / 16),
+        compact: false,
       };
-      // The strip's measured chrome rounds with its pictures' size, so a fit can flip by a
-      // pixel and back on every measure: a pixel's change is no change.
       setStageFit((previous) =>
         previous !== null &&
         Math.abs(previous.width - next.width) <= 1 &&
-        Math.abs(previous.height - next.height) <= 1 &&
-        Math.abs(previous.cardWidth - next.cardWidth) <= 1 &&
-        Math.abs(previous.cardPicture - next.cardPicture) <= 1 &&
-        previous.compact === next.compact
+        Math.abs(previous.height - next.height) <= 1
           ? previous
           : next,
       );
-      const editor = section.parentElement?.querySelector<HTMLElement>(
-        "[data-game-direction-bar] .composer-tiptap",
-      );
-      // Past one line (a focused composer's taller well, more lines), the editor's height is
-      // the message's, not the window's.
-      const style = editor == null ? null : getComputedStyle(editor);
-      const growth =
-        editor == null || style === null
-          ? 0
-          : Math.max(
-              0,
-              editor.offsetHeight -
-                (Number.parseFloat(style.lineHeight) || 0) -
-                (Number.parseFloat(style.paddingTop) || 0) -
-                (Number.parseFloat(style.paddingBottom) || 0),
-            );
-      const columnWidth =
-        growth === 0
-          ? next.width
-          : fitStage(
-              section.clientWidth - 24,
-              height - taken - stripChrome - 8 + growth,
-              viewportHeight / viewportWidth,
-              cardPicture,
-            ).width;
       setColumn((previous) =>
-        previous !== null && Math.abs(previous - columnWidth) <= 1 ? previous : columnWidth,
+        previous !== null && Math.abs(previous - next.width) <= 1 ? previous : next.width,
       );
     };
     measure();
@@ -902,7 +834,7 @@ function ThreadGameStage({
         // itself when a game plays in it, the only time the menu offers fullscreen too.
         if (document.fullscreenElement) void document.exitFullscreen();
         else if (stageRef.current?.hasAttribute("data-fullscreen-ready"))
-          void stageRef.current.requestFullscreen();
+          void playSurfaceOf(stageRef.current)?.requestFullscreen();
         return;
       }
       case "undo":
@@ -918,7 +850,7 @@ function ThreadGameStage({
         setExportOpen(true);
         return;
       case "generated-art":
-        showInspectorTab("scene");
+        setLookOpen(true);
         return;
     }
   });
@@ -1035,7 +967,7 @@ function ThreadGameStage({
     seenRevision !== null &&
     operation.revision > seenRevision;
   // The folder's frame is not on screen: a copy, a compare, or another pane.
-  const frameHidden = hidden || playTarget !== null || compare !== null;
+  const frameHidden = hidden || collapsed || playTarget !== null || compare !== null;
   // Fold the served identity across reads: a live change or a replaced
   // export remounts the game, unless the person is in it (the chip asks) or
   // it is not on screen (it loads when shown). Absorbed reads return the same
@@ -1127,7 +1059,7 @@ function ThreadGameStage({
   });
   const toggleFullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
-    else void stageRef.current?.requestFullscreen();
+    else void playSurfaceOf(stageRef.current)?.requestFullscreen();
   };
   const statusBanner =
     failureVisible !== null ? (
@@ -1303,9 +1235,6 @@ function ThreadGameStage({
             // height-bound Stage's column is centred, and the row spans it: its right group
             // ends on the Stage's edge, over the game rather than an empty margin.
             "mx-auto flex h-(--workspace-topbar-height) w-full min-w-0 items-center gap-1.5 px-2 pl-3",
-            // With the Inspector folded the row spans the whole column: its status and the
-            // Inspector's summary need the room more than they need the Stage's edges.
-            !compact && "max-w-(--game-stage-column)",
             // The window is dragged by its top bar; its buttons stay clickable.
             isElectron && "drag-region",
             // With the sidebar collapsed, its toggle (and macOS's traffic lights) sit over this
@@ -1351,7 +1280,22 @@ function ThreadGameStage({
                   <DownloadIcon />
                   Export…
                 </MenuItem>
+                <MenuItem onClick={() => setLookOpen(true)}>
+                  <PaletteIcon />
+                  Look…
+                </MenuItem>
                 <MenuSeparator />
+                {compact ? null : (
+                  <MenuItem
+                    onClick={() => {
+                      setGamePlacement(gamePlacement === "above" ? "right" : "above");
+                      if (gameView !== "split") setGameView("split");
+                    }}
+                  >
+                    {gamePlacement === "above" ? <Columns2Icon /> : <Rows2Icon />}
+                    {gamePlacement === "above" ? "Play beside the chat" : "Play above the chat"}
+                  </MenuItem>
+                )}
                 <MenuItem onClick={() => void navigate({ to: "/settings/game-tools" })}>
                   <WrenchIcon />
                   Game tools…
@@ -1470,16 +1414,36 @@ function ThreadGameStage({
               </MenuItem>
             </MenuPopup>
           </Menu>
+          {/* How much room the game takes: folded to this bar, beside or above the chat, or
+              all of it. The chat is always one click back. */}
+          {collapsed ? (
+            <IconAction label="Show the game" onClick={() => setGameView("split")}>
+              <ChevronDownIcon className="size-3.5" aria-hidden="true" />
+            </IconAction>
+          ) : (
+            <>
+              <IconAction
+                label={gameView === "expanded" ? "Back to the chat" : "Fill with the game"}
+                onClick={() => setGameView(gameView === "expanded" ? "split" : "expanded")}
+              >
+                {gameView === "expanded" ? (
+                  <Minimize2Icon className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <Maximize2Icon className="size-3.5" aria-hidden="true" />
+                )}
+              </IconAction>
+              <IconAction label="Hide the game" onClick={() => setGameView("collapsed")}>
+                <ChevronUpIcon className="size-3.5" aria-hidden="true" />
+              </IconAction>
+            </>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
-                  // Compact, the Inspector is a whole other view, so its way in says its name.
-                  size={compact ? "sm" : "icon-sm"}
+                  size="sm"
                   variant="ghost"
-                  aria-label={
-                    compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"
-                  }
+                  aria-label={compact || inspectorCollapsed ? "Show builds" : "Hide builds"}
                   aria-pressed={!compact && !inspectorCollapsed}
                   onClick={() => {
                     if (compact) onShowInspector?.();
@@ -1489,30 +1453,26 @@ function ThreadGameStage({
               }
             >
               <PanelRightIcon className="size-3.5" aria-hidden="true" />
-              {/* Folded, the way in names the Inspector and what it holds: the Stage's checks,
-                  or, while two builds are compared, that it shows side A. */}
-              {compact ? (
-                <>
-                  Inspector
-                  {compare !== null ? (
-                    <Text variant="meta" tone="muted" render={<span />}>
-                      {/* Which build it shows, not only which side. */}·{" "}
-                      {compareAName == null
-                        ? "side A"
-                        : `A: ${compareAName.charAt(0).toUpperCase()}${compareAName.slice(1)}`}
-                    </Text>
-                  ) : playTarget === null && folderChecks !== null ? (
-                    <Text variant="meta" tone="muted" render={<span />}>
-                      · {folderChecks}
-                      <FoldedChange threadRef={threadRef} />
-                    </Text>
-                  ) : null}
-                </>
+              {/* Folded, the way in names what the panel holds: the Stage's checks, or, while
+                  two builds are compared, which build is side A. */}
+              Builds
+              {compact && compare !== null ? (
+                <Text variant="meta" tone="muted" render={<span />}>
+                  ·{" "}
+                  {compareAName == null
+                    ? "side A"
+                    : `A: ${compareAName.charAt(0).toUpperCase()}${compareAName.slice(1)}`}
+                </Text>
+              ) : compact && playTarget === null && folderChecks !== null ? (
+                <Text variant="meta" tone="muted" render={<span />}>
+                  · {folderChecks}
+                  <FoldedChange threadRef={threadRef} />
+                </Text>
               ) : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               <TooltipLabel shortcut={inspectorKey}>
-                {compact || inspectorCollapsed ? "Show the Inspector" : "Hide the Inspector"}
+                {compact || inspectorCollapsed ? "Show builds" : "Hide builds"}
               </TooltipLabel>
             </TooltipPopup>
           </Tooltip>
@@ -1562,7 +1522,7 @@ function ThreadGameStage({
                 url={playTarget.result.url}
                 title={`${gameName}, ${playTarget.label}`}
                 gameName={gameName}
-                hidden={hidden || compare !== null}
+                hidden={hidden || collapsed || compare !== null}
                 focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
               />
             ) : (
@@ -1580,7 +1540,7 @@ function ThreadGameStage({
           playTarget === null && compare === null
             ? cn(
                 "relative flex min-h-0 flex-col self-center px-3",
-                stageFit === null ? "flex-1 self-stretch" : "shrink-0",
+                stageFit === null ? "flex-1 self-stretch" : "my-auto shrink-0",
               )
             : "hidden"
         }
@@ -1678,31 +1638,35 @@ function ThreadGameStage({
           note={note}
         />
       </div>
-      <GameBuildStrip
-        // A compare takes the strip's place too: hidden, never squeezed, so its picks and pages stay.
-        hidden={compare !== null}
-        cardWidth={stageFit?.cardWidth ?? 160}
-        cardPicture={stageFit?.cardPicture ?? 90}
-        compact={stageFit?.compact ?? false}
-        threadRef={threadRef}
-        gameName={gameName}
-        playing={playTarget?.build ?? null}
-        slot={buildSlot}
-        request={timelineRequest}
-        reelOpen={reelOpen}
-        onPlay={(build) => void playBuild(build)}
-        onPlayUnlisted={(ref) => void playBuild(ref)}
-        onLive={backToLive}
-        onCompare={setCompare}
-        onInspect={(build) => {
-          inspectBuild({ threadKey, build: build.id, snapshot: build });
-          if (useGameWorkspaceStore.getState().inspectorTab !== "build") showInspectorTab("build");
-        }}
-      />
-      {/* What the Stage's fitted height leaves over, kept under the strip, never as bands round the game. */}
-      {compare === null ? (
-        <div aria-hidden="true" data-stage-spacer="" className="min-h-0 flex-1" />
-      ) : null}
+      {/* The builds live in the panel beside the chat; the strip renders there while it is
+          open, and keeps this Stage's play, compare and pick wiring. */}
+      {stripHost === null
+        ? null
+        : createPortal(
+            <GameBuildStrip
+              // A compare takes the strip's place too: hidden, never squeezed, so its picks and pages stay.
+              hidden={false}
+              cardWidth={STRIP_CARD_WIDTH}
+              cardPicture={Math.floor((STRIP_CARD_WIDTH * 9) / 16)}
+              compact={false}
+              threadRef={threadRef}
+              gameName={gameName}
+              playing={playTarget?.build ?? null}
+              slot={buildSlot}
+              request={timelineRequest}
+              reelOpen={reelOpen}
+              onPlay={(build) => void playBuild(build)}
+              onPlayUnlisted={(ref) => void playBuild(ref)}
+              onLive={backToLive}
+              onCompare={setCompare}
+              onInspect={(build) => {
+                inspectBuild({ threadKey, build: build.id, snapshot: build });
+                if (useGameWorkspaceStore.getState().inspectorTab !== "build")
+                  showInspectorTab("build");
+              }}
+            />,
+            stripHost,
+          )}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
           <DialogHeader>
