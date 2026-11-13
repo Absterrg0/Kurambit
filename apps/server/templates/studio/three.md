@@ -241,7 +241,10 @@ export function update(dt, ctx) {
 dir.z)`. Each `ctx.assets.model` call is its own copy, so each character
    gets its own `animate`; `dispose()` it when it is gone for good. A
    character exported from Blender is named in `ASSETS` by its sidecar and
-   moves with `locomotion`, so its feet stay planted.
+   moves with `locomotion`, so its feet stay planted. Size it by the sidecar's
+   height (`copy.userData.asset.height`, metres at scale 1): a box measured
+   around a skinned copy before its bones move reads the bind data, not what
+   draws, and scales it wildly.
 8. The facts' Performance row is the random-input play ("60 fps · 1% low 48 ·
    GPU 9 ms at 0.8× of 1280×720"): a low 1% or a small scale is a reason to
    bake the level's shadow, trim triangles or drop a pass. "Not measured"
