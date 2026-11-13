@@ -155,19 +155,14 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const profile = engineProfile(manifest.engine.name);
         const selected = yield* selectionOf(root);
+        if (selected === null || selected === "damaged" || selected.sourceId === null) return false;
         const current = yield* statusSnapshot(
           root,
           manifestProject(manifest),
           false,
           profile.buildInputs,
         );
-        return (
-          selected !== null &&
-          selected !== "damaged" &&
-          selected.sourceId !== null &&
-          current.kind === "known" &&
-          current.sourceId === selected.sourceId
-        );
+        return current.kind === "known" && current.sourceId === selected.sourceId;
       }),
     toolchain: (threadId) =>
       Effect.gen(function* () {
@@ -207,24 +202,28 @@ const make = Effect.gen(function* () {
               }
               return true;
             });
+      // A live-staged game plays its folder, which is never older than itself,
+      // so its status reads no source identity at all.
+      const live = profile.stage === "live";
       // Freshness is a byte question against the snapshot the export recorded.
       // An unreadable tree cannot be shown to match, but it is also not proven
       // to differ.
-      const current = yield* statusSnapshot(
-        root,
-        manifestProject(manifest),
-        statusOptions?.checkSources === true,
-        profile.buildInputs,
-      );
-      const currentId = current.kind === "known" ? current.sourceId : null;
+      const current =
+        live || selected === null || selected.sourceId === null
+          ? null
+          : yield* statusSnapshot(
+              root,
+              manifestProject(manifest),
+              statusOptions?.checkSources === true,
+              profile.buildInputs,
+            );
+      const currentId = current?.kind === "known" ? current.sourceId : null;
       const matchesSelected =
         selected === null || selected.sourceId === null || currentId === null
           ? null
           : currentId === selected.sourceId;
       // What Play would show: a good export does not make the selected build
       // fresh, and a source edit does not make the selected artifact unplayable.
-      // A live-staged game plays its folder, which is never older than itself.
-      const live = profile.stage === "live";
       const webBuildStale =
         !live &&
         (damaged ||
