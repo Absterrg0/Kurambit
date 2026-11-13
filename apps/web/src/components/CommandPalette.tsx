@@ -93,7 +93,6 @@ import {
   SkipForwardIcon,
   SquarePenIcon,
   ShapesIcon,
-  ListChecksIcon,
   SwatchBookIcon,
   StepForwardIcon,
   SquarePlusIcon,
@@ -779,7 +778,6 @@ function OpenCommandPaletteDialog(props: {
     gameStatus !== null &&
     gameStatus !== undefined &&
     GAME_ENGINES[gameStatus.manifest.engine.name].stageBridge;
-  const inspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const canRestore = useAtomValue(
     activeThreadRef === null
@@ -1569,8 +1567,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-toggle-inspector",
-      title: inspectorCollapsed ? "Show Inspector" : "Hide Inspector",
-      searchTerms: ["inspector", "panel", "dock", "chat", "hide", "show", "stage", "game"],
+      title: "Show or hide builds",
+      searchTerms: ["builds", "inspector", "panel", "checks", "hide", "show", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.chat.toggle",
       run: async () => {
@@ -1607,16 +1605,6 @@ function OpenCommandPaletteDialog(props: {
       icon: <MaximizeIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.fullscreen",
       run: requestStage({ kind: "fullscreen" }),
-    });
-    actionItems.push({
-      kind: "action",
-      value: "action:game-builds",
-      title: "Show builds",
-      searchTerms: ["build", "builds", "checks", "facts", "measured", "changes", "game"],
-      icon: <ListChecksIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        useGameWorkspaceStore.getState().showInspectorTab("build");
-      },
     });
     actionItems.push({
       kind: "action",

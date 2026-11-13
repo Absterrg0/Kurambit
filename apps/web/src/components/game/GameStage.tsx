@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { toggleGameBuilds, useGameBuildsShown } from "./gameRightPanel";
 import {
   CircleStopIcon,
   CrosshairIcon,
@@ -396,12 +397,12 @@ interface GameStageProps {
   /** The thread's agent turn is running; a settled turn refreshes the stage. */
   turnRunning: boolean;
   onAskAgent: (text: string) => void;
-  /** The workbench shows a single pane, so the Inspector is a switch rather than a column. */
+  /** The window is narrow: the game always stacks above the chat. */
   compact?: boolean;
-  /** Another compact pane is showing; the stage stays mounted but is inert. */
+  /** Mounted but out of sight (another tab of the right panel); the game holds still. */
   hidden?: boolean;
-  /** Opens the compact workbench's Inspector pane. */
-  onShowInspector?: (() => void) | undefined;
+  /** On top of the chat, or a tab of the right panel beside it. */
+  placement?: "above" | "right";
   /** What the person asked of the turn now running, for the build slot's caption. */
   turnRequest?: string | null;
   /** Where the build strip renders: the build panel beside the chat, when it is open. */
@@ -414,7 +415,7 @@ function ThreadGameStage({
   onAskAgent,
   compact = false,
   hidden = false,
-  onShowInspector,
+  placement = "above",
   turnRequest = null,
   stripHost = null,
 }: GameStageProps) {
@@ -424,13 +425,16 @@ function ThreadGameStage({
   const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
   const setGamePlacement = useGameWorkspaceStore((state) => state.setGamePlacement);
   const setLookOpen = useGameWorkspaceStore((state) => state.setLookOpen);
-  // Folded to its bar the game holds still, as it does in a hidden pane.
-  const collapsed = gameView === "collapsed";
+  // Folded to its bar the game holds still, as it does in a hidden pane. Beside the chat it
+  // folds by closing the panel instead.
+  const collapsed = placement === "above" && gameView === "collapsed";
+  const panelOpen = useRightPanelStore(
+    (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
+  );
+  const buildsShown = useGameBuildsShown(threadRef);
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
-  const inspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
-  const setInspectorCollapsed = useGameWorkspaceStore((state) => state.setInspectorCollapsed);
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
@@ -458,15 +462,6 @@ function ThreadGameStage({
   const [timelineRequest, setTimelineRequest] = useState<GameStripRequest | null>(null);
   const [reelOpen, setReelOpen] = useState(false);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
-  // Side A's build, for the folded Inspector's label while two builds are compared.
-  const compareA = compare?.[0];
-  const compareAName = useEnvironmentQuerySelector(
-    gameEnvironment.builds({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-    buildPhraseOf(compareA?._tag === "build" ? compareA.build : null),
-  );
   const [exportOpen, setExportOpen] = useState(false);
   const showInspectorTab = useGameWorkspaceStore((state) => state.showInspectorTab);
   const threadKey = scopedThreadKey(threadRef);
@@ -1239,7 +1234,7 @@ function ThreadGameStage({
             // its title on the Stage's edge.
             titleUnderControls && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             // With the Inspector hidden, the top bar runs under the desktop window controls.
-            (compact || inspectorCollapsed) && "wco:pr-(--workspace-native-controls-inset)",
+            (placement === "right" || !panelOpen) && "wco:pr-(--workspace-native-controls-inset)",
           )}
         >
           {renamingGame && quietShell !== null ? (
@@ -1413,7 +1408,8 @@ function ThreadGameStage({
           </Menu>
           {/* How much room the game takes: folded to this bar, beside or above the chat, or
               all of it. The chat is always one click back. */}
-          {collapsed ? (
+          {/* Beside the chat the panel's own controls fill the window or close it. */}
+          {placement === "right" ? null : collapsed ? (
             <IconAction label="Show the game" onClick={() => setGameView("split")}>
               <ChevronDownIcon className="size-3.5" aria-hidden="true" />
             </IconAction>
@@ -1434,45 +1430,37 @@ function ThreadGameStage({
               </IconAction>
             </>
           )}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={compact || inspectorCollapsed ? "Show builds" : "Hide builds"}
-                  aria-pressed={!compact && !inspectorCollapsed}
-                  onClick={() => {
-                    if (compact) onShowInspector?.();
-                    else setInspectorCollapsed(!inspectorCollapsed);
-                  }}
-                />
-              }
-            >
-              <PanelRightIcon className="size-3.5" aria-hidden="true" />
-              {/* Folded, the way in names what the panel holds: the Stage's checks, or, while
-                  two builds are compared, which build is side A. */}
-              Builds
-              {compact && compare !== null ? (
-                <Text variant="meta" tone="muted" render={<span />}>
-                  ·{" "}
-                  {compareAName == null
-                    ? "side A"
-                    : `A: ${compareAName.charAt(0).toUpperCase()}${compareAName.slice(1)}`}
-                </Text>
-              ) : compact && playTarget === null && folderChecks !== null ? (
-                <Text variant="meta" tone="muted" render={<span />}>
-                  · {folderChecks}
-                  <FoldedChange threadRef={threadRef} />
-                </Text>
-              ) : null}
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">
-              <TooltipLabel shortcut={inspectorKey}>
-                {compact || inspectorCollapsed ? "Show builds" : "Hide builds"}
-              </TooltipLabel>
-            </TooltipPopup>
-          </Tooltip>
+          {/* Beside the chat, Builds is the panel's next tab already. */}
+          {placement === "right" ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={buildsShown ? "Hide builds" : "Show builds"}
+                    aria-pressed={buildsShown}
+                    onClick={() => toggleGameBuilds(threadRef)}
+                  />
+                }
+              >
+                <PanelRightIcon className="size-3.5" aria-hidden="true" />
+                Builds
+                {/* On a narrow window the panel is a sheet: the way in names what it holds. */}
+                {compact && !buildsShown && playTarget === null && folderChecks !== null ? (
+                  <Text variant="meta" tone="muted" render={<span />}>
+                    · {folderChecks}
+                    <FoldedChange threadRef={threadRef} />
+                  </Text>
+                ) : null}
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                <TooltipLabel shortcut={inspectorKey}>
+                  {buildsShown ? "Hide builds" : "Show builds"}
+                </TooltipLabel>
+              </TooltipPopup>
+            </Tooltip>
+          )}
         </div>
       </header>
       {compare !== null ? (
@@ -1482,7 +1470,7 @@ function ThreadGameStage({
           viewport={data.viewport}
           gameName={gameName}
           hidden={hidden}
-          inspectorOpen={!compact && !inspectorCollapsed}
+          inspectorOpen={buildsShown}
           onPair={setCompare}
           onClose={() => setCompare(null)}
         />

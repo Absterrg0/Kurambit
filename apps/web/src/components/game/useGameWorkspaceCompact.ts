@@ -1,8 +1,7 @@
 import { useLayoutEffect, useState, useSyncExternalStore } from "react";
 
-import { isGameWorkspaceCompact, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { isGameWorkspaceCompact } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
-import type { GameWorkspacePane } from "./gameWorkspaceLayout";
 
 interface CompactWorkspaceStore {
   readonly subscribe: (listener: () => void) => () => void;
@@ -25,9 +24,6 @@ function createCompactWorkspaceStore(): CompactWorkspaceStore {
   };
   const measure = (width: number) => {
     if (width <= 0) return;
-    // The store ignores this while compact, so a temporary narrow layout never
-    // rewrites the creator's remembered dock width.
-    useGameWorkspaceStore.getState().fitInspectorWidth(width);
     const next = isGameWorkspaceCompact(width);
     if (next === compact) return;
     compact = next;
@@ -79,22 +75,4 @@ export function useGameWorkspaceCompact(
     return () => store.stop();
   }, [enabled, store, workspaceElement]);
   return useSyncExternalStore(store.subscribe, store.getSnapshot, () => false);
-}
-
-/**
- * The pane a compact workbench shows. Entering compact always lands on the
- * stage; leaving compact drops the temporary choice so the docked layout shows
- * the creator's saved Inspector preference again.
- */
-export function useCompactGamePane(compact: boolean) {
-  const [state, setState] = useState<{ compact: boolean; pane: GameWorkspacePane }>({
-    compact,
-    pane: "game",
-  });
-  if (state.compact !== compact) {
-    setState({ compact, pane: "game" });
-  }
-  const pane = compact ? state.pane : "game";
-  const setPane = (next: GameWorkspacePane) => setState({ compact, pane: next });
-  return [pane, setPane] as const;
 }

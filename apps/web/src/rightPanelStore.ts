@@ -8,7 +8,15 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
-const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal"] as const;
+const RIGHT_PANEL_KINDS = [
+  "diff",
+  "files",
+  "file",
+  "preview",
+  "terminal",
+  "game",
+  "builds",
+] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -23,6 +31,10 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
+  /** A game's Stage, when it plays beside the chat instead of above it. */
+  | { id: "game"; kind: "game" }
+  /** A game's builds: the strip, the chosen build's checks and what changed. */
+  | { id: "builds"; kind: "builds" }
   | {
       id: "files";
       kind: "files";
@@ -149,6 +161,10 @@ const singletonSurface = (
       return { id: "diff", kind };
     case "files":
       return { id: "files", kind };
+    case "game":
+      return { id: "game", kind };
+    case "builds":
+      return { id: "builds", kind };
   }
 };
 
@@ -326,7 +342,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     const kind = (surface as { kind?: string }).kind;
-                    if (!["diff", "files", "file", "preview", "terminal"].includes(kind ?? ""))
+                    if (!(RIGHT_PANEL_KINDS as ReadonlyArray<string>).includes(kind ?? ""))
                       return [];
                     if (
                       (surface.kind === "file" || surface.kind === "files") &&

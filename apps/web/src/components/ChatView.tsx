@@ -1,12 +1,12 @@
 import { GameStage } from "./game/GameStage";
 import { GameComposerTray } from "./game/GameComposerTray";
 import { GameBuildsPanel, GameLookDialog } from "./game/GameInspector";
+import { showGameBuilds, showGameInPanel, toggleGameBuilds } from "./game/gameRightPanel";
+import { createPortal } from "react-dom";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
 import {
   GameChatHeader,
-  GameColumnResize,
-  GameInspectorResize,
   GamePointedChip,
   GameStageResize,
   useLatestTurnUndone,
@@ -353,13 +353,8 @@ import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
-import {
-  useDockedInspectorWidth,
-  useGameWorkspaceStore,
-  type GameStageRequest,
-} from "../gameWorkspaceStore";
-import { resolveGameWorkspaceLayout } from "./game/gameWorkspaceLayout";
-import { useCompactGamePane, useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
+import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
+import { useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameNext } from "./game/GameNextBanner";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useGameGenerationCards } from "./game/GameGenerationCard";
@@ -1662,43 +1657,40 @@ export default function ChatView(props: ChatViewProps) {
     (gameStatus.data !== null ||
       isGameStatusFailure(gameStatus.failure) ||
       gameStatus.error === null);
-  const gameInspectorWidth = useDockedInspectorWidth();
-  const gameInspectorCollapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
-  const gameInspectorTab = useGameWorkspaceStore((state) => state.inspectorTab);
   const gamePlacement = useGameWorkspaceStore((state) => state.gamePlacement);
   const gameView = useGameWorkspaceStore((state) => state.gameView);
   const gameStageShare = useGameWorkspaceStore((state) => state.gameStageShare);
-  const gameColumnWidth = useGameWorkspaceStore((state) => state.gameColumnWidth);
   const [gameStripHost, setGameStripHost] = useState<HTMLElement | null>(null);
+  const [gameRightHost, setGameRightHost] = useState<HTMLElement | null>(null);
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
   const gameWorkspaceCompact = useGameWorkspaceCompact(workspaceLayoutElement, isGameThread);
-  const [compactGamePane, setCompactGamePane] = useCompactGamePane(gameWorkspaceCompact);
-  const showCompactGame = () => setCompactGamePane("game");
-  // An Inspector tab opened from the Stage (a pointed thing, the palette) is the
-  // Inspector pane on a compact workbench.
-  const [seenInspectorTab, setSeenInspectorTab] = useState(gameInspectorTab);
-  if (gameInspectorTab !== seenInspectorTab) {
-    setSeenInspectorTab(gameInspectorTab);
-    if (gameWorkspaceCompact) setCompactGamePane("inspector");
+  // Builds live in T3's right panel, per thread: the palette, a key and a pointed thing ask for
+  // them through the workspace store, and this screen opens or toggles them for its thread.
+  const buildsRequest = useGameWorkspaceStore((state) => state.buildsRequest);
+  const [seenBuildsRequestN, setSeenBuildsRequestN] = useState(buildsRequest?.n ?? 0);
+  if (buildsRequest !== null && buildsRequest.n !== seenBuildsRequestN) {
+    setSeenBuildsRequestN(buildsRequest.n);
+    if (isGameThread && activeThreadRef !== null) {
+      if (buildsRequest.kind === "show") showGameBuilds(activeThreadRef);
+      else toggleGameBuilds(activeThreadRef);
+    }
   }
-  // A Stage request (a strip's Play, a round card, the palette, a key) is a
-  // request to see the game, so a compact workbench showing the Inspector
-  // switches. Undo and Redo change the folder and need no pane.
-  const stageRequest = useGameWorkspaceStore((state) => state.stageRequest);
-  const [seenStageRequestN, setSeenStageRequestN] = useState(stageRequest?.n ?? 0);
-  if (stageRequest !== null && stageRequest.n !== seenStageRequestN) {
-    setSeenStageRequestN(stageRequest.n);
-    const kind = stageRequest.request.kind;
-    if (kind !== "undo" && kind !== "redo" && compactGamePane !== "game")
-      setCompactGamePane("game");
-  }
+  // Beside the chat the game is a tab of the right panel, there for as long as it plays there;
+  // above the chat it has no tab. Closing the panel only hides it.
+  const gameStageBeside = isGameThread && gamePlacement === "right" && !gameWorkspaceCompact;
+  const panelHasGame = rightPanelState.surfaces.some((surface) => surface.kind === "game");
+  useEffect(() => {
+    if (!isGameThread || activeThreadRef === null) return;
+    if (gameStageBeside && !panelHasGame) showGameInPanel(activeThreadRef);
+    else if (!gameStageBeside && panelHasGame)
+      useRightPanelStore.getState().closeSurface(activeThreadRef, "game");
+  }, [isGameThread, activeThreadRef, gameStageBeside, panelHasGame]);
   const requestGameStage = (request: GameStageRequest): false | void => {
     if (!isGameThread) return false;
     useGameWorkspaceStore.getState().requestStage(request);
   };
-  const showCompactInspector = () => setCompactGamePane("inspector");
   const panelTerminalIds = new Set(
     rightPanelState.surfaces.flatMap((surface) =>
       surface.kind === "terminal" ? surface.terminalIds : [],
@@ -5317,14 +5309,9 @@ export default function ChatView(props: ChatViewProps) {
       },
       "rightPanel.toggle": () => toggleRightPanelStable(),
       "game.chat.toggle": () => {
-        // Only a game thread has the Inspector this shortcut shows and hides.
-        if (!isGameThread) return false;
-        if (gameWorkspaceCompact) {
-          if (compactGamePane === "inspector") showCompactGame();
-          else showCompactInspector();
-          return;
-        }
-        useGameWorkspaceStore.getState().toggleInspector();
+        // Only a game thread has the builds this shortcut shows and hides.
+        if (!isGameThread || activeThreadRef === null) return false;
+        toggleGameBuilds(activeThreadRef);
       },
       // The Stage acts on these, so the keys, the palette and the timeline
       // share one path. A focused game never sees them: its frame is
@@ -7494,6 +7481,16 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  // Where the game renders while it plays beside the chat: beside the panel's own content, so
+  // switching tabs only hides it.
+  const gameRightHostElement = isGameThread ? (
+    <div
+      ref={setGameRightHost}
+      className={
+        renderedRightPanelSurface?.kind === "game" ? "flex min-h-0 flex-1 flex-col" : "hidden"
+      }
+    />
+  ) : null;
   const rightPanelContent = activeThreadRef ? (
     <RightPanelSurfaceContent
       surface={renderedRightPanelSurface}
@@ -7523,6 +7520,11 @@ export default function ChatView(props: ChatViewProps) {
         newShortcutLabel: newTerminalShortcutLabel ?? undefined,
         closeShortcutLabel: closeTerminalShortcutLabel ?? undefined,
       }}
+      gameBuilds={
+        isGameThread ? (
+          <GameBuildsPanel threadRef={activeThreadRef} onStripHost={setGameStripHost} />
+        ) : null
+      }
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
@@ -7606,15 +7608,6 @@ export default function ChatView(props: ChatViewProps) {
     addFolders: addDroppedFoldersToComposer,
   });
 
-  // Game threads put the game in the centre and the thread's column becomes
-  // the Inspector. A wide workspace docks it at its remembered width; a compact
-  // one shows a single usable pane, chosen by its switch, without unmounting either.
-  const gameWorkspace = resolveGameWorkspaceLayout({
-    compact: gameWorkspaceCompact,
-    compactPane: compactGamePane,
-    inspectorCollapsed: gameInspectorCollapsed,
-    rightPanelMaximized,
-  });
   const gameLayout = isGameThread && activeThreadRef !== null;
   // What the person asked of the running turn: the caption of the build slot.
   const gameTurnRequestWhole =
@@ -7622,32 +7615,25 @@ export default function ChatView(props: ChatViewProps) {
       ? (timelineMessages.findLast((message) => message.role === "user")?.text.trim() ?? null)
       : null;
   const gameTurnRequest = gameTurnRequestWhole?.split("\n")[0]?.slice(0, 140) ?? null;
-  const gameInspectorDocked = gameLayout && gameWorkspace.inspectorDocked;
-  // A hidden Inspector keeps its column mounted at zero width so the Log keeps
-  // its scroll, and inert so nothing in it can take focus while unseen.
-  const gameInspectorHidden = gameLayout && !gameWorkspace.inspectorVisible;
-  const gameStageHidden = gameLayout && !gameWorkspace.stageVisible;
-  // The game plays on top of the chat, or in its own column beside it (a person's choice; a
-  // narrow window always stacks them).
-  const gameStageAbove = gamePlacement === "above" || gameWorkspace.compact;
-  // The chat's column gives way to the builds pane on a narrow window, and to a game filling
-  // the room beside it.
-  const gameChatHidden =
-    gameLayout && (gameStageHidden || (!gameStageAbove && gameView === "expanded"));
+  // The game plays on top of the chat, or as a tab of the right panel beside it (a person's
+  // choice; a narrow window always stacks them).
+  const gameStageAbove = gamePlacement === "above" || gameWorkspaceCompact;
+  // Beside the chat the game shows only while its tab is the panel's open one; mounted
+  // otherwise, held still, so it keeps its progress.
+  const gameInPanelShown =
+    rightPanelOpen && renderedRightPanelSurface?.kind === "game" && !gameStageAbove;
   const gameStage = gameLayout ? (
     <GameStage
       threadRef={activeThreadRef}
       turnRunning={phase === "running"}
       onAskAgent={askAgentToFixStable}
-      compact={gameWorkspace.compact}
-      hidden={gameStageHidden && gameStageAbove}
-      onShowInspector={showCompactInspector}
+      compact={gameWorkspaceCompact}
+      hidden={!gameStageAbove && !gameInPanelShown}
+      placement={gameStageAbove ? "above" : "right"}
       turnRequest={gameTurnRequest}
       stripHost={gameStripHost}
     />
   ) : null;
-  const compactInspectorVisible =
-    gameLayout && gameWorkspace.compact && gameWorkspace.inspectorVisible;
   // One composer for the thread: under the transcript in a chat, under the
   // Stage in a game, so drafts, the queue and pending questions never fork.
   const composerLane = (
@@ -7924,18 +7910,14 @@ export default function ChatView(props: ChatViewProps) {
     <div
       ref={setWorkspaceLayoutElement}
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
-      data-game-workspace-compact={gameWorkspace.compact ? "true" : "false"}
+      data-game-workspace-compact={gameWorkspaceCompact ? "true" : "false"}
     >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
           "relative flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized || gameChatHidden ? "invisible w-0 flex-none" : "flex-1",
-          // Beside the game the chat keeps a readable width; the game's column gives way first.
-          gameLayout && !gameStageAbove && !gameChatHidden && "min-w-88",
+          rightPanelMaximized ? "invisible w-0 flex-none" : "flex-1",
         )}
-        inert={gameChatHidden}
-        aria-hidden={gameChatHidden}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
         data-game-centre={gameLayout ? "" : undefined}
       >
@@ -7969,11 +7951,7 @@ export default function ChatView(props: ChatViewProps) {
           {!rightPanelControlsAtRoot && !rightPanelControlsInPanel ? panelLayoutControls : null}
           {inlineRightPanelOwnsTitleBar ? threadPanelHeaderControl : null}
           {gameLayout ? (
-            <GameChatHeader
-              threadRef={activeThreadRef}
-              title={activeThread.title}
-              gameHidden={gameView === "collapsed"}
-            />
+            <GameChatHeader threadRef={activeThreadRef} title={activeThread.title} />
           ) : (
             <ChatHeader
               activeThreadEnvironmentId={activeThread.environmentId}
@@ -8333,53 +8311,10 @@ export default function ChatView(props: ChatViewProps) {
         ))}
       </div>
 
-      {gameLayout && !gameStageAbove ? (
-        // The game in its own column beside the chat, mounted while folded so it keeps its
-        // progress; filled, it takes the chat's room too.
-        <div
-          className={cn(
-            "relative min-h-0 min-w-0 flex-col border-l border-border",
-            gameView === "collapsed" || gameWorkspace.compact
-              ? "hidden"
-              : gameView === "expanded"
-                ? "flex flex-1"
-                : "flex min-w-80 shrink",
-          )}
-          style={gameView === "split" ? { width: gameColumnWidth } : undefined}
-          inert={gameView === "collapsed"}
-        >
-          {gameStage}
-          {gameView === "split" ? <GameColumnResize /> : null}
-        </div>
-      ) : null}
-      {gameLayout ? (
-        <div
-          className={cn(
-            "relative flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-            gameInspectorHidden || rightPanelMaximized
-              ? "invisible w-0 flex-none"
-              : gameInspectorDocked
-                ? "shrink-0 border-l border-border"
-                : "flex-1",
-          )}
-          style={gameInspectorDocked ? { width: gameInspectorWidth } : undefined}
-          inert={gameInspectorHidden}
-          aria-hidden={gameInspectorHidden}
-          data-game-inspector-docked={gameInspectorDocked ? "true" : "false"}
-        >
-          <GameBuildsPanel
-            threadRef={activeThreadRef}
-            compact={compactInspectorVisible}
-            onStripHost={setGameStripHost}
-            onClose={() => {
-              if (gameWorkspace.compact) showCompactGame();
-              else useGameWorkspaceStore.getState().setInspectorCollapsed(true);
-            }}
-          />
-          {gameInspectorDocked ? <GameInspectorResize /> : null}
-          <GameLookDialog threadRef={activeThreadRef} />
-        </div>
-      ) : null}
+      {gameLayout ? <GameLookDialog threadRef={activeThreadRef} /> : null}
+      {gameLayout && !gameStageAbove && gameRightHost !== null
+        ? createPortal(gameStage, gameRightHost)
+        : null}
 
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelTabs
@@ -8415,6 +8350,7 @@ export default function ChatView(props: ChatViewProps) {
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
         >
+          {gameRightHostElement}
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
@@ -8461,6 +8397,7 @@ export default function ChatView(props: ChatViewProps) {
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
           >
+            {gameRightHostElement}
             {rightPanelContent}
           </RightPanelTabs>
         </RightPanelSheet>

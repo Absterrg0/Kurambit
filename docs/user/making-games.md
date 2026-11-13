@@ -245,11 +245,11 @@ with the game or fold it to its bar, and **Builds**. The game's name opens its m
 **Export…**, **Look…**). Drag the line under the game to give it more or less room. Under the chat
 is the box where you tell the game what to change, with **Keep going** beside it.
 
-To play the game in its own column beside the chat instead, choose **Play beside the chat** in the
-game's menu, or Settings › Appearance › **Where the game plays**. **Builds** opens a panel on the
-right with the game's builds as pictures, the chosen build's checks, what changed and its
-recordings. `mod+Alt+C` shows or hides it; in a narrow window it takes the place of the chat until
-you switch back.
+**Builds** opens the right panel's Builds tab: the game's builds as pictures, the chosen build's
+checks, what changed and its recordings. `mod+Alt+C` shows or hides it. To play the game in the right
+panel instead, as a tab beside Builds, choose **Play beside the chat** in the game's menu, or
+Settings › Appearance › **Where the game plays**; the panel's own controls then fill the window
+with it or close it. A narrow window always puts the game above the chat.
 
 - **A three.js game is always on.** The stage plays the game folder itself, and **Reload** restarts
   it now, at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
@@ -267,7 +267,7 @@ you switch back.
   what a new package contains. Upload the extracted files to an ordinary static HTTP host and serve
   them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
   a WebAssembly export.
-- The builds panel is resizable; drag its edge, or close it to give the chat and the game more room.
+- The right panel is resizable; drag its edge, or close it to give the chat and the game more room.
 - **Point at a thing.** Press Tab (or **Freeze** in the **⋯** menu) to freeze the game, then click a
   character or prop: the builds panel shows it under **On screen**, where its values tune the running game
   live and **Keep as a build** keeps them, and it is attached to your next message as a chip. Sending

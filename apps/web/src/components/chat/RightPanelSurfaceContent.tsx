@@ -6,7 +6,7 @@ import type {
   ScopedThreadRef,
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import type { ComposerImageAttachment, DraftId } from "../../composerDraftStore";
 import type { ShortcutMatchContext } from "../../keybindings";
 import { type RightPanelSurface, useRightPanelStore } from "../../rightPanelStore";
@@ -54,10 +54,16 @@ export function RightPanelSurfaceContent(props: {
   readonly onCloseSurface: (surface: RightPanelSurface) => void;
   readonly terminal: RightPanelTerminalProps;
   readonly files: RightPanelFileProps;
+  /** A game's Builds tab. Its Game tab renders beside this content, so it never unmounts. */
+  readonly gameBuilds?: ReactNode;
 }) {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
   switch (surface.kind) {
+    case "game":
+      return null;
+    case "builds":
+      return props.gameBuilds ?? null;
     case "preview":
       return (
         <Suspense fallback={null}>

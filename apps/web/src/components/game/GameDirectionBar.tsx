@@ -1,18 +1,19 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { CrosshairIcon, Gamepad2Icon, PanelRightIcon, XIcon } from "lucide-react";
+import { useState, type PointerEvent as ReactPointerEvent } from "react";
+import { CrosshairIcon, Gamepad2Icon, ListChecksIcon, XIcon } from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
-import {
-  clampGameColumnWidth,
-  clampGameInspectorWidth,
-  useDockedInspectorWidth,
-  useGameWorkspaceStore,
-} from "../../gameWorkspaceStore";
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
+import {
+  showGameBuilds,
+  showGameInPanel,
+  useGameBuildsShown,
+  useGameShownInPanel,
+} from "./gameRightPanel";
 
 import { useTurnUndo } from "./useBuildActions";
 
@@ -52,97 +53,6 @@ export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
         Goes with your next message, with this frame and its values
       </Text>
     </div>
-  );
-}
-
-/**
- * A column's left edge, for a column on the workspace's right: drag or arrow keys to resize
- * it. `clamp` fits a width to the workspace row it lives in.
- */
-function ColumnEdgeResize({
-  label,
-  width,
-  setWidth,
-  clamp,
-}: {
-  label: string;
-  width: number;
-  setWidth: (width: number) => void;
-  clamp: (width: number, workspace: number) => number;
-}) {
-  const drag = useRef<{ x: number; width: number; workspace: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const workspaceOf = (node: HTMLElement) =>
-    node.parentElement?.parentElement?.clientWidth ?? window.innerWidth;
-  const start = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { x: event.clientX, width, workspace: workspaceOf(event.currentTarget) };
-    setDragging(true);
-  };
-  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const from = drag.current;
-    if (from === null) return;
-    setWidth(clamp(from.width - (event.clientX - from.x), from.workspace));
-  };
-  const end = (event: ReactPointerEvent<HTMLDivElement>) => {
-    drag.current = null;
-    setDragging(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  return (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuenow={width}
-      tabIndex={0}
-      data-dragging={dragging ? "true" : "false"}
-      className={cn(
-        "absolute inset-y-0 left-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize touch-none select-none",
-        "hover:bg-primary/40 focus-visible:bg-primary/40 data-[dragging=true]:bg-primary/60",
-      )}
-      onPointerDown={start}
-      onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={end}
-      onKeyDown={(event) => {
-        const workspace = workspaceOf(event.currentTarget);
-        if (event.key === "ArrowLeft") setWidth(clamp(width + 24, workspace));
-        else if (event.key === "ArrowRight") setWidth(clamp(width - 24, workspace));
-        else return;
-        event.preventDefault();
-      }}
-    />
-  );
-}
-
-/** The builds panel's edge. */
-export function GameInspectorResize() {
-  const width = useDockedInspectorWidth();
-  const setWidth = useGameWorkspaceStore((state) => state.setInspectorWidth);
-  return (
-    <ColumnEdgeResize
-      label="Resize builds"
-      width={width}
-      setWidth={setWidth}
-      clamp={clampGameInspectorWidth}
-    />
-  );
-}
-
-/** The game's column's edge, when it plays beside the chat. */
-export function GameColumnResize() {
-  const width = useGameWorkspaceStore((state) => state.gameColumnWidth);
-  const setWidth = useGameWorkspaceStore((state) => state.setGameColumnWidth);
-  return (
-    <ColumnEdgeResize
-      label="Resize the game"
-      width={width}
-      setWidth={setWidth}
-      clamp={clampGameColumnWidth}
-    />
   );
 }
 
@@ -198,38 +108,36 @@ export function GameStageResize() {
 }
 
 /**
- * The chat's header when the game plays in its own column: the game's name, and the ways back
- * to the game and to its builds when either is folded away.
+ * The chat's header when the game plays beside it, as a tab of the right panel: the chat's
+ * name, and the ways back to the game and its builds when the panel shows neither.
  */
 export function GameChatHeader({
+  threadRef,
   title,
-  gameHidden,
 }: {
   threadRef: ScopedThreadRef;
   title: string;
-  gameHidden: boolean;
 }) {
-  const setGameView = useGameWorkspaceStore((state) => state.setGameView);
-  const buildsHidden = useGameWorkspaceStore((state) => state.inspectorCollapsed);
-  const setBuildsHidden = useGameWorkspaceStore((state) => state.setInspectorCollapsed);
+  const gameShown = useGameShownInPanel(threadRef);
+  const buildsShown = useGameBuildsShown(threadRef);
   return (
     <div className="flex h-full min-w-0 flex-1 items-center gap-1.5">
       <Text variant="label" tone="strong" truncate render={<h1 className="min-w-0" />}>
         {title}
       </Text>
       <span className="min-w-2 flex-1" />
-      {gameHidden ? (
-        <Button size="sm" variant="ghost" onClick={() => setGameView("split")}>
+      {gameShown ? null : (
+        <Button size="sm" variant="ghost" onClick={() => showGameInPanel(threadRef)}>
           <Gamepad2Icon aria-hidden="true" />
-          Show the game
+          Game
         </Button>
-      ) : null}
-      {buildsHidden ? (
-        <Button size="sm" variant="ghost" onClick={() => setBuildsHidden(false)}>
-          <PanelRightIcon aria-hidden="true" />
+      )}
+      {buildsShown ? null : (
+        <Button size="sm" variant="ghost" onClick={() => showGameBuilds(threadRef)}>
+          <ListChecksIcon aria-hidden="true" />
           Builds
         </Button>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -1,10 +1,5 @@
-import { useState } from "react";
-
-import { useDockedInspectorWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { Skeleton } from "../ui/skeleton";
-import { GameInspectorLoading } from "./GameInspector";
 import { GameStageLoading } from "./GameStage";
-import { useGameWorkspaceCompact } from "./useGameWorkspaceCompact";
 
 /**
  * The game screen before its thread is known (a cold load, between the splash and the first
@@ -12,13 +7,8 @@ import { useGameWorkspaceCompact } from "./useGameWorkspaceCompact";
  * area is never blank beside the sidebar's placeholders, and nothing moves when the game arrives.
  */
 export function GameOpening() {
-  const [row, setRow] = useState<HTMLDivElement | null>(null);
-  const compact = useGameWorkspaceCompact(row, true);
-  const collapsed = useGameWorkspaceStore((state) => state.inspectorCollapsed);
-  const inspectorWidth = useDockedInspectorWidth();
   return (
     <div
-      ref={setRow}
       aria-busy="true"
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
     >
@@ -32,16 +22,6 @@ export function GameOpening() {
           <Skeleton shape="card" className="h-20 w-full" />
         </div>
       </div>
-      {compact || collapsed ? null : (
-        // The Inspector's place, in the shape its own first read has.
-        <div
-          aria-hidden="true"
-          className="flex shrink-0 flex-col pt-(--workspace-topbar-height)"
-          style={{ width: inspectorWidth }}
-        >
-          <GameInspectorLoading />
-        </div>
-      )}
     </div>
   );
 }

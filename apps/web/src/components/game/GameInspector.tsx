@@ -85,7 +85,6 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill, PictureSourceBadge } from "./GameBuildStill";
-import { GameComposerTray } from "./GameComposerTray";
 import {
   characterRouteLabel,
   GameCharacterRoutePicker,
@@ -131,51 +130,38 @@ import { useChangedSinceBase } from "./useChangedSinceBase";
 import { useTurnLanding } from "./useTurnLanding";
 
 /**
- * The panel beside the chat: the game's builds as a strip, the chosen build's checks and what
- * changed, or, while the Stage is frozen to point at things, what is on screen. The strip itself
- * is the Stage's, rendered into `onStripHost` so it keeps the Stage's play and compare wiring.
+ * The Builds tab of the right panel: the game's builds as a strip, the chosen build's checks and
+ * what changed, or, while the Stage is frozen to point at things, what is on screen. The strip
+ * itself is the Stage's, rendered into `onStripHost` so it keeps the Stage's play and compare
+ * wiring.
  */
 export function GameBuildsPanel({
   threadRef,
-  compact,
   onStripHost,
-  onClose,
 }: {
   threadRef: ScopedThreadRef;
-  compact: boolean;
   onStripHost: (host: HTMLElement | null) => void;
-  onClose: () => void;
 }) {
   const tab = useGameWorkspaceStore((state) => state.inspectorTab);
   const showTab = useGameWorkspaceStore((state) => state.showInspectorTab);
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background" data-game-builds-panel="">
-      <div className="flex h-(--workspace-topbar-height) shrink-0 items-center gap-1 px-3">
-        {tab === "scene" ? (
+      {tab === "scene" ? (
+        <div className="flex shrink-0 items-center gap-1 px-3 pt-2">
           <Button size="xs" variant="ghost" onClick={() => showTab("build")}>
             <ChevronLeftIcon aria-hidden="true" />
             Builds
           </Button>
-        ) : (
-          <Text variant="label" tone="strong" render={<h2 className="ps-1" />}>
-            Builds
-          </Text>
-        )}
-        {tab === "scene" ? (
           <Text variant="label" tone="strong" render={<h2 className="ps-1" />}>
             On screen
           </Text>
-        ) : null}
-        <span className="flex-1" />
-        <Button size="icon-sm" variant="ghost" aria-label="Hide builds" onClick={onClose}>
-          <XIcon aria-hidden="true" />
-        </Button>
-      </div>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
         <div
           ref={onStripHost}
           data-game-strip-host=""
-          className={cn("shrink-0 px-4", tab === "scene" && "hidden")}
+          className={cn("shrink-0 px-4 pt-2", tab === "scene" && "hidden")}
         />
         <div
           key={tab}
@@ -188,13 +174,6 @@ export function GameBuildsPanel({
           )}
         </div>
       </div>
-      {compact ? (
-        <div className="shrink-0 border-t border-border">
-          <div className="mx-auto w-full max-w-160 px-4 pb-2">
-            <GameComposerTray threadRef={threadRef} />
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -893,7 +872,7 @@ function ChecksLoading() {
  * The Build tab before its builds are read: a build's header and the named check rows, the
  * shape it has once they are, from the first frame the Inspector is on screen.
  */
-export function GameInspectorLoading() {
+function GameInspectorLoading() {
   return (
     <div aria-busy="true" className="flex flex-col gap-5 p-4">
       <div className="flex items-center gap-3">

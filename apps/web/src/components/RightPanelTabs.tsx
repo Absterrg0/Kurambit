@@ -22,6 +22,8 @@ import {
   ChevronRight,
   FileDiff,
   Files,
+  Gamepad2,
+  ListChecks,
   Globe2,
   Plus,
   TerminalSquare,
@@ -479,6 +481,10 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "game":
+      return "Game";
+    case "builds":
+      return "Builds";
     case "files":
       return "Files";
     case "file":
@@ -552,6 +558,10 @@ function SurfaceIcon({
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
+    case "game":
+      return <Gamepad2 className="size-3 shrink-0" />;
+    case "builds":
+      return <ListChecks className="size-3 shrink-0" />;
     case "files":
       return <Files className="size-3 shrink-0" />;
     case "file":

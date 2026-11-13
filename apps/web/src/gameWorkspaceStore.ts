@@ -4,33 +4,15 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-/** The Inspector sits beside the game, so it starts narrow enough to leave the stage room. */
-export const GAME_INSPECTOR_DEFAULT_WIDTH = 352;
-const GAME_INSPECTOR_MIN_WIDTH = 300;
-const GAME_INSPECTOR_MAX_WIDTH = 760;
-/**
- * The stage is the product. However wide the Inspector was left in an old
- * session, it never gets more than this share of the workspace.
- */
-const GAME_INSPECTOR_MAX_WORKSPACE_SHARE = 0.45;
 /**
  * Below this workspace width (the row after the sidebar, not the window) the
- * Inspector and the stage cannot both stay usable, so the workbench shows one
- * pane at a time: the game takes the row, and the Inspector, one click away,
- * names the checks on its button. At a 1100px window with the sidebar open,
- * side by side would leave the game under 500px wide.
+ * game and the chat cannot both stay usable side by side, so the game stacks
+ * above the chat whatever the person chose.
  */
 const GAME_WORKSPACE_DOCK_MIN_WIDTH = 900;
 
 export const isGameWorkspaceCompact = (workspaceWidth: number) =>
   workspaceWidth > 0 && workspaceWidth < GAME_WORKSPACE_DOCK_MIN_WIDTH;
-
-export const clampGameInspectorWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
-  Math.min(
-    GAME_INSPECTOR_MAX_WIDTH,
-    Math.floor(workspaceWidth * GAME_INSPECTOR_MAX_WORKSPACE_SHARE),
-    Math.max(GAME_INSPECTOR_MIN_WIDTH, Math.round(width)),
-  );
 
 /**
  * What another surface (the palette, a key, the timeline, a chat turn's strip)
@@ -69,10 +51,6 @@ export type GameView = "collapsed" | "split" | "expanded";
 /** The game's share of the column's height while it shares it with the chat. */
 const GAME_STAGE_SHARE_DEFAULT = 0.58;
 const clampGameStageShare = (share: number) => Math.min(0.85, Math.max(0.3, share));
-/** The game's column beside the chat, when it plays there. */
-const GAME_COLUMN_DEFAULT_WIDTH = 640;
-export const clampGameColumnWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
-  Math.min(Math.floor(workspaceWidth * 0.62), Math.max(360, Math.round(width)));
 
 /** The build the Inspector shows, for one thread; null shows the one on the Stage. */
 export interface GameInspectedBuild {
@@ -85,19 +63,16 @@ export interface GameInspectedBuild {
 }
 
 interface GameWorkspaceStoreState {
-  /** Width of the Inspector column the creator chose, in CSS pixels: remembered as chosen. */
-  inspectorWidth: number;
-  /** The docked workspace row's width now, which the drawn Inspector is fitted to. Not persisted. */
-  workspaceWidth: number;
-  inspectorCollapsed: boolean;
-  setInspectorWidth: (width: number) => void;
-  /** Records the workspace's width, which the drawn width is clamped to (useDockedInspectorWidth). */
-  fitInspectorWidth: (workspaceWidth: number) => void;
+  /** Shows or hides the game's builds in the right panel. */
   toggleInspector: () => void;
-  setInspectorCollapsed: (collapsed: boolean) => void;
-  /** The Inspector's open tab. Not persisted: a new session opens on the build. */
+  /**
+   * Asks the open game's screen to show its builds in the right panel (`show`) or toggle them
+   * there; `n` makes a repeat news. The panel is T3's, kept per thread, so the screen acts on it.
+   */
+  buildsRequest: { readonly kind: "show" | "toggle"; readonly n: number } | null;
+  /** What the builds tab shows. Not persisted: a new session opens on the build. */
   inspectorTab: GameInspectorTab;
-  /** Opens a tab, showing the Inspector if it was collapsed. */
+  /** Shows the builds tab, on its build or on what is on screen. */
   showInspectorTab: (tab: GameInspectorTab) => void;
   inspectedBuild: GameInspectedBuild | null;
   /** Shows a build in the Inspector's Build tab; null follows the Stage again. */
@@ -111,36 +86,26 @@ interface GameWorkspaceStoreState {
   setGameView: (view: GameView) => void;
   gameStageShare: number;
   setGameStageShare: (share: number) => void;
-  gameColumnWidth: number;
-  setGameColumnWidth: (width: number) => void;
   /** The game's Look (style, characters, generated art), as a dialog. Not persisted. */
   lookOpen: boolean;
   setLookOpen: (open: boolean) => void;
 }
 
-/**
- * The game stage's layout preferences. One width for every game: a person who
- * widens the Inspector once means it everywhere, the way an editor remembers a panel.
- */
+/** The game screen's layout preferences, one set for every game. */
 export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
   persist(
     (set) => ({
-      inspectorWidth: GAME_INSPECTOR_DEFAULT_WIDTH,
-      workspaceWidth: Number.POSITIVE_INFINITY,
-      inspectorCollapsed: true,
-      setInspectorWidth: (width) => set({ inspectorWidth: clampGameInspectorWidth(width) }),
-      fitInspectorWidth: (workspaceWidth) =>
-        set((state) => {
-          // A compact workspace shows one pane at a time: there is no docked width to fit. The
-          // chosen width is never rewritten, so a narrow window does not shrink a wide one later.
-          if (isGameWorkspaceCompact(workspaceWidth) || workspaceWidth === state.workspaceWidth)
-            return {};
-          return { workspaceWidth };
-        }),
-      toggleInspector: () => set((state) => ({ inspectorCollapsed: !state.inspectorCollapsed })),
-      setInspectorCollapsed: (collapsed) => set({ inspectorCollapsed: collapsed }),
+      toggleInspector: () =>
+        set((state) => ({
+          buildsRequest: { kind: "toggle", n: (state.buildsRequest?.n ?? 0) + 1 },
+        })),
+      buildsRequest: null,
       inspectorTab: "build",
-      showInspectorTab: (tab) => set({ inspectorTab: tab, inspectorCollapsed: false }),
+      showInspectorTab: (tab) =>
+        set((state) => ({
+          inspectorTab: tab,
+          buildsRequest: { kind: "show", n: (state.buildsRequest?.n ?? 0) + 1 },
+        })),
       inspectedBuild: null,
       inspectBuild: (inspected) => set({ inspectedBuild: inspected }),
       stageRequest: null,
@@ -152,42 +117,29 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setGameView: (view) => set({ gameView: view }),
       gameStageShare: GAME_STAGE_SHARE_DEFAULT,
       setGameStageShare: (share) => set({ gameStageShare: clampGameStageShare(share) }),
-      gameColumnWidth: GAME_COLUMN_DEFAULT_WIDTH,
-      setGameColumnWidth: (width) => set({ gameColumnWidth: clampGameColumnWidth(width) }),
       lookOpen: false,
       setLookOpen: (open) => set({ lookOpen: open }),
     }),
     {
-      name: "kurambit:game-workspace:v4",
+      name: "kurambit:game-workspace:v5",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
       partialize: (state) => ({
-        inspectorWidth: state.inspectorWidth,
-        inspectorCollapsed: state.inspectorCollapsed,
         gamePlacement: state.gamePlacement,
         // Filling the column is for this sitting; a new one opens with the chat in view.
         gameView: state.gameView === "expanded" ? "split" : state.gameView,
         gameStageShare: state.gameStageShare,
-        gameColumnWidth: state.gameColumnWidth,
       }),
-      // An old session may hold a width that would starve the stage; the clamp
-      // lives here so loading the store cannot reintroduce it.
+      // A share saved out of range never starves the game or the chat.
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
         return {
           ...current,
           ...saved,
-          inspectorWidth: clampGameInspectorWidth(saved?.inspectorWidth ?? current.inspectorWidth),
           gameStageShare: clampGameStageShare(saved?.gameStageShare ?? current.gameStageShare),
         };
       },
     },
   ),
 );
-
-/** The Inspector's drawn width: the chosen width, fitted to what the workspace can spare. */
-export const useDockedInspectorWidth = (): number =>
-  useGameWorkspaceStore((state) =>
-    clampGameInspectorWidth(state.inspectorWidth, state.workspaceWidth),
-  );
