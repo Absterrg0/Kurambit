@@ -32,7 +32,7 @@ export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
       <span className="flex h-6 min-w-0 items-center gap-1.5 rounded-md bg-primary/15 ps-2 pe-0.5 text-strong-foreground">
         <CrosshairIcon className="size-3.5 shrink-0" aria-hidden="true" />
         <Text variant="meta" tone="inherit" truncate>
-          {thing.name}
+          {thing.instance === undefined ? thing.name : `${thing.name} #${thing.instance.index + 1}`}
         </Text>
         <Button
           size="icon-micro"

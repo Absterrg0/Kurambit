@@ -2,6 +2,7 @@ import { useRef } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { GameStageRect, GameStageTrace, GameThing } from "@kurambit/contracts";
 
+import { Text } from "../ui/text";
 import { pointStage, useThreadStageBridge } from "./gameStageBridge";
 
 const KIND_WORD: Record<GameThing["kind"], string> = {
@@ -71,6 +72,12 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
         const point = at(event as unknown as ReactPointerEvent<HTMLDivElement>);
         pointStage(point.x, point.y, "select");
       }}
+      // A double click goes into a group, as a design tool does: one clump of the grass.
+      onDoubleClick={(event) => {
+        if (!pointable) return;
+        const point = at(event as unknown as ReactPointerEvent<HTMLDivElement>);
+        pointStage(point.x, point.y, "select-inner");
+      }}
     >
       {selected?.trace !== undefined ? <StageTrace trace={selected.trace} /> : null}
       {hovered !== null && hover?.rect !== undefined ? (
@@ -78,6 +85,19 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
       ) : null}
       {selected?.rect !== undefined ? (
         <NameTag rect={selected.rect} thing={selected.thing} selected />
+      ) : null}
+      {selected !== null &&
+      selected.thing.instance === undefined &&
+      (selected.thing.instances ?? 0) > 1 ? (
+        <Text
+          variant="caption"
+          tone="inherit"
+          render={
+            <span className="pointer-events-none absolute right-3 bottom-3 rounded-md bg-black/60 px-2 py-1 text-stage-foreground/85" />
+          }
+        >
+          All {selected.thing.instances} · double-click to pick one
+        </Text>
       ) : null}
     </div>
   );
@@ -104,6 +124,9 @@ function NameTag({
       style={{ left: Math.max(0, rect.x), top: Math.max(22, rect.y - 4) }}
     >
       {thing.name}
+      {thing.instance === undefined ? null : (
+        <span className="tabular-nums">#{thing.instance.index + 1}</span>
+      )}
       <span className={selected ? "text-2xs text-white/75" : "text-2xs text-stage-muted"}>
         {KIND_WORD[thing.kind]}
       </span>

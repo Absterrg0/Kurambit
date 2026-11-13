@@ -108,6 +108,9 @@ export function createStageBridge({
   let frozen = false;
   let hovered = null;
   let selected = null;
+  // One instance of the selected thing (a clump of its grass, a tree of its forest), picked by
+  // a double click, as a design tool goes into a group; null is the whole thing.
+  let selectedIndex = null;
   let changed = false;
   let postedAt = 0;
   let traceClock = 0;
@@ -130,10 +133,14 @@ export function createStageBridge({
   const add = (record) => {
     if (things.size >= MAX_REGISTERED) return null;
     things.set(record.id, { ring: null, head: 0, count: 0, ...record });
-    if (record.object !== null) byObject.set(record.object, things.get(record.id));
+    for (const body of bodiesOf(record)) byObject.set(body, things.get(record.id));
     changed = true;
     return record;
   };
+  // A thing is one object, or (`parts`) the several meshes one model was drawn as: a tree
+  // instanced as a trunk mesh and a leaves mesh is one tree.
+  const bodiesOf = (record) =>
+    record.parts !== undefined ? record.parts : record.object === null ? [] : [record.object];
   // ctx.tune names a thing before (or without) ctx.thing; the game's own naming takes its place.
   const placeholder = (id) => ({
     id,
@@ -233,7 +240,10 @@ export function createStageBridge({
       if (copy === undefined) add(placeholder(key));
       else {
         things.delete(copy.id);
-        if (selected === copy) selected = null;
+        if (selected === copy) {
+          selected = null;
+          selectedIndex = null;
+        }
         if (hovered === copy) hovered = null;
         add({ ...copy, id: key, auto: false });
       }
@@ -261,6 +271,7 @@ export function createStageBridge({
   // Screen maths, with no allocation per call.
   const at = new THREE.Vector3();
   const box = new THREE.Box3();
+  const partBox = new THREE.Box3();
   const size = () => {
     const rect = canvas.getBoundingClientRect();
     return { w: rect.width, h: rect.height };
@@ -285,8 +296,13 @@ export function createStageBridge({
       return undefined;
     // Precise: a skinned character's cached bounds are its bind pose, which can sit far from
     // where it stands. Only selection and hover ask, never a frame.
-    box.setFromObject(record.object, true);
+    box.makeEmpty();
+    for (const body of bodiesOf(record)) box.union(partBox.setFromObject(body, true));
     if (box.isEmpty()) return undefined;
+    return projectBox(box, seen);
+  };
+  /** A world box as the rectangle it covers on the canvas, clipped to it; undefined off screen. */
+  const projectBox = (world, seen) => {
     const { w, h } = size();
     let x0 = Infinity;
     let y0 = Infinity;
@@ -294,9 +310,9 @@ export function createStageBridge({
     let y1 = -Infinity;
     for (let i = 0; i < 8; i += 1) {
       at.set(
-        i & 1 ? box.max.x : box.min.x,
-        i & 2 ? box.max.y : box.min.y,
-        i & 4 ? box.max.z : box.min.z,
+        i & 1 ? world.max.x : world.min.x,
+        i & 2 ? world.max.y : world.min.y,
+        i & 4 ? world.max.z : world.min.z,
       ).project(seen.camera);
       if (at.z > 1) continue;
       const x = ((at.x + 1) / 2) * w;
@@ -316,7 +332,9 @@ export function createStageBridge({
 
   const describe = (record, seen) => {
     const values = valuesOf(record.id);
+    const instanced = instancedOf(record);
     return {
+      ...(instanced.length === 0 ? {} : { instances: instanced[0].count }),
       id: record.id,
       name: record.name,
       kind: record.kind,
@@ -363,14 +381,52 @@ export function createStageBridge({
   const postSelected = () => {
     const seen = view();
     if (selected === null) return toStage({ type: "studio-selected", thing: null });
-    const rect = rectOf(selected, seen);
-    const trace = traceOf(selected, seen);
+    const instances = selectedIndex === null ? [] : instancedOf(selected);
+    const rect =
+      instances.length > 0 ? instanceRect(instances, selectedIndex, seen) : rectOf(selected, seen);
+    const trace = instances.length > 0 ? undefined : traceOf(selected, seen);
     toStage({
       type: "studio-selected",
-      thing: describe(selected, seen),
+      thing: {
+        ...describe(selected, seen),
+        ...(instances.length > 0
+          ? { instance: { index: selectedIndex, count: instances[0].count } }
+          : {}),
+      },
       ...(rect === undefined ? {} : { rect }),
       ...(trace === undefined ? {} : { trace }),
     });
+  };
+
+  const instancedOf = (record) => bodiesOf(record).flatMap(instancedIn);
+  /** The instanced meshes that draw an object: the object itself, or those inside it. */
+  const instancedIn = (object) => {
+    const found = [];
+    object?.traverse?.((node) => {
+      if (node.isInstancedMesh) found.push(node);
+    });
+    return found;
+  };
+  const instanceMatrix = new THREE.Matrix4();
+  const instanceBox = new THREE.Box3();
+  /** One instance's world box, from every instanced mesh that draws it at that index. */
+  const instanceBoxOf = (meshes, index) => {
+    box.makeEmpty();
+    for (const mesh of meshes) {
+      if (index >= mesh.count) continue;
+      mesh.getMatrixAt(index, instanceMatrix);
+      instanceMatrix.premultiply(mesh.matrixWorld);
+      if (mesh.geometry.boundingBox === null) mesh.geometry.computeBoundingBox();
+      instanceBox.copy(mesh.geometry.boundingBox).applyMatrix4(instanceMatrix);
+      box.union(instanceBox);
+    }
+    return box;
+  };
+  const instanceRect = (meshes, index, seen) => {
+    if (seen === null) return undefined;
+    const world = instanceBoxOf(meshes, index);
+    if (world.isEmpty()) return undefined;
+    return projectBox(world, seen);
   };
 
   const raycaster = new THREE.Raycaster();
@@ -417,6 +473,17 @@ export function createStageBridge({
     return posed;
   };
   const through = new THREE.Vector3();
+  /** The instance of an instanced mesh under the pointer, as [its thing, its index]; or null. */
+  const pickInstance = (x, y) => {
+    const record = pick(x, y);
+    if (record === null) return null;
+    const meshes = instancedOf(record);
+    if (meshes.length === 0) return null;
+    // pick() aimed the raycaster; the nearest hit on one of the thing's own meshes says which.
+    for (const hit of raycaster.intersectObjects(meshes, false))
+      if (hit.instanceId !== undefined && shown(hit.object)) return [record, hit.instanceId];
+    return null;
+  };
   const skinned = (object) => {
     let found = false;
     object.traverse((node) => {
@@ -449,7 +516,7 @@ export function createStageBridge({
     if (body.isMesh)
       for (const record of things.values())
         if (record.auto && unplaced(record, scene) && sharesGeometry(record.object, body))
-          return rebind(record, body);
+          return rebind(record, body, drawnFrom(record.object, body, scene));
     const own = meaningful(body.name) ? body.name.split(":")[0].replace(/[._-]?\d+$/, "") : "";
     const label = humanName(
       meaningful(own)
@@ -479,7 +546,8 @@ export function createStageBridge({
     });
     return things.get(id) ?? null;
   };
-  const unplaced = (record, scene) => record.object === null || !attached(record.object, scene);
+  const unplaced = (record, scene) =>
+    record.object === null || (record.parts === undefined && !attached(record.object, scene));
   const sharesGeometry = (copy, mesh) => {
     if (copy === null || mesh.geometry === undefined) return false;
     let shared = false;
@@ -488,13 +556,36 @@ export function createStageBridge({
     });
     return shared;
   };
-  /** The thing becomes this object, keeping its id, name, values and model file. */
-  const rebind = (record, body) => {
+  /**
+   * Every mesh in the scene drawn from the copy's geometries with the hit mesh's instance count:
+   * the parts one model was split into when it was instanced (a tree's trunk and leaves).
+   */
+  const drawnFrom = (copy, hit, scene) => {
+    const geometries = new Set();
+    copy?.traverse((node) => {
+      if (node.isMesh) geometries.add(node.geometry);
+    });
+    const parts = [];
+    scene.traverse((node) => {
+      if (
+        node.isMesh &&
+        geometries.has(node.geometry) &&
+        (node.isInstancedMesh ? node.count : 1) === (hit.isInstancedMesh ? hit.count : 1) &&
+        !byObject.has(node)
+      )
+        parts.push(node);
+    });
+    return parts.length > 1 ? parts : undefined;
+  };
+  /** The thing becomes this object (or these parts), keeping its id, name, values and model file. */
+  const rebind = (record, body, parts) => {
     things.delete(record.id);
-    if (record.object !== null) byObject.delete(record.object);
+    for (const old of bodiesOf(record)) byObject.delete(old);
+    const { parts: _old, ...rest } = record;
     add({
-      ...record,
+      ...rest,
       object: body,
+      ...(parts === undefined ? {} : { parts }),
       kind: record.kind === "rule" ? "other" : record.kind,
       placeholder: false,
     });
@@ -592,6 +683,20 @@ export function createStageBridge({
     return { mesh, material, camera: new THREE.OrthographicCamera() };
   };
 
+  // One instance drawn alone into the mask: a plain mesh of its geometry where it stands.
+  const lone = new THREE.Mesh(new THREE.BufferGeometry(), masks.selected);
+  lone.matrixAutoUpdate = false;
+  lone.frustumCulled = false;
+  const drawInstance = (meshes, index, camera) => {
+    for (const mesh of meshes) {
+      if (index >= mesh.count || !shown(mesh)) continue;
+      mesh.getMatrixAt(index, instanceMatrix);
+      lone.geometry = mesh.geometry;
+      lone.matrix.multiplyMatrices(mesh.matrixWorld, instanceMatrix);
+      renderer.render(lone, camera);
+    }
+  };
+
   /** After the frame's draw: the outline, or nothing at all unless frozen with something to show. */
   const overlay = () => {
     if (!frozen || (hovered === null && selected === null)) return;
@@ -618,12 +723,18 @@ export function createStageBridge({
         [selected, "selected"],
       ]) {
         if (record?.object == null || !attached(record.object, seen.scene)) continue;
-        if (which === "hover" && record === selected) continue;
-        flat(record.object, which);
-        try {
-          renderer.render(record.object, seen.camera);
-        } finally {
-          unflat();
+        if (which === "hover" && record === selected && selectedIndex === null) continue;
+        if (which === "selected" && selectedIndex !== null) {
+          drawInstance(instancedOf(record), selectedIndex, seen.camera);
+          continue;
+        }
+        for (const body of bodiesOf(record)) {
+          flat(body, which);
+          try {
+            renderer.render(body, seen.camera);
+          } finally {
+            unflat();
+          }
         }
       }
       quad.material.uniforms.mask.value = mask.texture;
@@ -674,6 +785,7 @@ export function createStageBridge({
     hovered = null;
     if (selected !== null) {
       selected = null;
+      selectedIndex = null;
       if (active) postSelected();
     }
     traceClock = 0;
@@ -706,7 +818,9 @@ export function createStageBridge({
         return typeof data.on === "boolean";
       case "studio-pointer":
         return (
-          finite(data.x) && finite(data.y) && (data.action === "hover" || data.action === "select")
+          finite(data.x) &&
+          finite(data.y) &&
+          (data.action === "hover" || data.action === "select" || data.action === "select-inner")
         );
       case "studio-select":
       case "studio-hover-thing":
@@ -741,9 +855,18 @@ export function createStageBridge({
       case "studio-mute":
         return mute?.(data.on);
       case "studio-pointer": {
+        if (data.action === "select-inner") {
+          // A double click goes into a group: one instance of it, else the thing as a click.
+          const inner = pickInstance(data.x, data.y);
+          selected = inner === null ? pick(data.x, data.y) : inner[0];
+          selectedIndex = inner === null ? null : inner[1];
+          postSelected();
+          return redraw();
+        }
         const record = pick(data.x, data.y);
         if (data.action === "select") {
           selected = record;
+          selectedIndex = null;
           postSelected();
         } else if (record !== hovered) {
           hovered = record;
@@ -758,6 +881,7 @@ export function createStageBridge({
       }
       case "studio-select":
         selected = data.id === null ? null : (things.get(data.id) ?? null);
+        selectedIndex = null;
         postSelected();
         return redraw();
       case "studio-tune": {

@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { ThreadId } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 
 /**
@@ -68,6 +68,10 @@ export const GameThing = Schema.Struct({
   /** Its tuned values (`ctx.tune`), with the ranges the game registered. */
   values: Schema.optionalKey(Schema.Array(GameThingValue)),
   onScreen: Schema.Boolean,
+  /** It is drawn as many instances of one mesh (a field of grass): how many. */
+  instances: Schema.optionalKey(NonNegativeInt),
+  /** One instance of it was picked (a double click into its group): which, and of how many. */
+  instance: Schema.optionalKey(Schema.Struct({ index: NonNegativeInt, count: NonNegativeInt })),
 });
 export type GameThing = typeof GameThing.Type;
 
@@ -98,7 +102,8 @@ export const StudioPointer = Schema.Struct({
   type: Schema.Literal("studio-pointer"),
   x: Schema.Finite,
   y: Schema.Finite,
-  action: Schema.Literals(["hover", "select"]),
+  /** select-inner: a double click, which goes into a group to one instance of it. */
+  action: Schema.Literals(["hover", "select", "select-inner"]),
 });
 /** Select from the Things list: highlights the thing (and frames it if it is on screen); null clears. */
 export const StudioSelect = Schema.Struct({
@@ -294,6 +299,10 @@ export const gameStageAskContext = (selection: {
     "The person selected this in the running game (the attached frame is the canvas when they asked):",
     `- Thing: ${thing.name} (${thing.kind}), id \`${thing.id}\`.`,
   ];
+  if (thing.instance !== undefined)
+    lines.push(
+      `- Just one of its ${thing.instance.count} instances: instance ${thing.instance.index} of its InstancedMesh, the one the person double-clicked, not the whole group.`,
+    );
   if (thing.asset !== undefined)
     lines.push(
       `- Asset: \`${thing.asset.path}\`${thing.asset.sidecar === undefined ? "" : `, sidecar \`${thing.asset.sidecar}\` (its source and generation)`}.`,
@@ -307,7 +316,7 @@ export const gameStageAskContext = (selection: {
       `- On the frame at x ${round(rect.x)}, y ${round(rect.y)}, ${round(rect.w)} by ${round(rect.h)} px.`,
     );
   else lines.push(thing.onScreen ? "- On screen." : "- Not on screen.");
-  if (thing.kind !== "rule" && thing.kind !== "sound")
+  if (thing.kind !== "rule" && thing.kind !== "sound" && thing.instance === undefined)
     lines.push(`- Its path over the last 10 s: ${gameStageTraceSummary(trace)}`);
   return lines.join("\n");
 };

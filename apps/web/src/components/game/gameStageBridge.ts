@@ -313,7 +313,7 @@ export const selectStageThing = (id: string) =>
 export const hoverStageThing = (id: string | null) =>
   useStageBridge.getState().post?.({ type: "studio-hover-thing", id });
 
-export const pointStage = (x: number, y: number, action: "hover" | "select") =>
+export const pointStage = (x: number, y: number, action: "hover" | "select" | "select-inner") =>
   useStageBridge.getState().post?.({ type: "studio-pointer", x, y, action });
 
 /** A live value change; the first change of a value remembers what it was, for Reset. */

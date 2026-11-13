@@ -388,23 +388,10 @@ function ThreadGameStage({
   const [buildsOpen, setBuildsOpen] = useState(false);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const showInspectorTab = useGameWorkspaceStore((state) => state.showInspectorTab);
   const threadKey = scopedThreadKey(threadRef);
   // Paused by the person, to point at things.
   const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
-  const selectedId = useThreadStageBridge(
-    threadKey,
-    (state) => state.selected?.thing.id ?? null,
-    null,
-  );
-  // Pointing at a thing opens Scene on it.
-  const shownSelection = useRef(selectedId);
-  useEffect(() => {
-    const before = shownSelection.current;
-    shownSelection.current = selectedId;
-    if (selectedId !== null && selectedId !== before) showInspectorTab("scene");
-  }, [selectedId, showInspectorTab]);
   const keepGoing = useKeepGoing(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{

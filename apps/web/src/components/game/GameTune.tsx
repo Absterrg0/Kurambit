@@ -17,6 +17,7 @@ import {
   clearStageSelection,
   forgetStageTuning,
   resetStageValues,
+  selectStageThing,
   tuneStageValue,
   useThreadStageBridge,
 } from "./gameStageBridge";
@@ -168,9 +169,27 @@ function PointedThing({
     >
       <div className="flex h-10 items-center gap-2 ps-4 pe-2">
         <CrosshairIcon className="size-3.5 shrink-0 text-live" aria-hidden="true" />
-        <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
-          {thing.name}
-        </Text>
+        {thing.instance === undefined ? (
+          <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
+            {thing.name}
+          </Text>
+        ) : (
+          // Inside a group, as a design tool shows it: the group, then the one picked.
+          <h3 className="flex min-w-0 items-center gap-1">
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              className="-ms-1.5 min-w-0"
+              onClick={() => selectStageThing(thing.id)}
+            >
+              <span className="truncate">{thing.name}</span>
+            </Button>
+            <ChevronRightIcon className="size-3 shrink-0 text-dim-foreground" aria-hidden="true" />
+            <Text variant="meta" tone="strong" emphasis numeric>
+              #{thing.instance.index + 1}
+            </Text>
+          </h3>
+        )}
         <Text variant="caption" tone="muted">
           {thing.kind}
         </Text>
@@ -192,7 +211,11 @@ function PointedThing({
         </Tooltip>
       </div>
       <Text variant="caption" tone="muted" render={<p className="px-4 pb-2" />}>
-        Your next message takes it, with this frame and its values.
+        {thing.instance !== undefined
+          ? `One of ${thing.instance.count}. Your next message takes this one, with the frame; its values are the whole group's.`
+          : (thing.instances ?? 0) > 1
+            ? `All ${thing.instances} of them. Double-click one in the game to pick just it. Your next message takes this, with the frame.`
+            : "Your next message takes it, with this frame and its values."}
       </Text>
       <TuneRows thing={thing} tunedFrom={tunedFrom} disabled={disabled} />
       <div className="px-4 pt-2">
