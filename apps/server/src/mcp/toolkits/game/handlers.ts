@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Reads game_check's pictures to attach them as images.
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -5,7 +8,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { Tool, type Toolkit } from "effect/ai";
-import { GameOperationError, type ThreadId } from "@kurambit/contracts";
+import { GameOperationError, THREE_VIEWPORT, type ThreadId } from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
@@ -15,6 +18,7 @@ import { GameCaller } from "../../../game/GameCaller.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
+import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
 import * as GameStage from "../../../game/GameStage.ts";
@@ -24,6 +28,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   GameToolkit,
+  GameCheckToolkit,
   GameAnimateToolkit,
   GameAssetsSearchToolkit,
   GameBlenderLookToolkit,
@@ -129,17 +134,6 @@ const handlers = {
   ),
   game_import: McpToolAccess.actsAsCaller(() =>
     withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)),
-  ),
-  game_check: McpToolAccess.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      if (input.change !== undefined) {
-        const change = input.change;
-        yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-          builds.declareChange(threadId, change),
-        );
-      }
-      return yield* withGame(GameEngine.GameEngine, (engines, threadId) => engines.check(threadId));
-    }),
   ),
   game_export: McpToolAccess.actsAsCaller((input) =>
     withGame(GameExport.GameExport, (exporter, threadId) =>
@@ -303,6 +297,48 @@ export const layerUnityScreenshot = McpToolAccess.toLayer(
   unityScreenshotHandlers,
 );
 
+/**
+ * game_check, registered like the Blender look so its views (the title and play as the check
+ * left them) become real image content: the agent sees its game before it ends the turn.
+ */
+const checkHandlers = {
+  game_check: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      if (input.change !== undefined) {
+        const change = input.change;
+        yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+          builds.declareChange(threadId, change),
+        );
+      }
+      const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
+        engines.check(threadId),
+      );
+      const views = result.views ?? [];
+      if (views.length === 0) return result;
+      const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+        projects.resolve(threadId),
+      );
+      const screenshots = yield* Effect.promise(() =>
+        Promise.all(
+          views.map((view) =>
+            NodeFSP.readFile(NodePath.join(root, view.path)).then(
+              (bytes) => ({
+                mimeType: "image/png" as const,
+                data: bytes.toString("base64"),
+                ...THREE_VIEWPORT,
+              }),
+              () => null,
+            ),
+          ),
+        ),
+      );
+      const shown = screenshots.filter((shot) => shot !== null);
+      return shown.length === 0 ? result : { ...result, screenshots: shown };
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
+export const layerCheck = McpToolAccess.toLayer(GameCheckToolkit, checkHandlers);
+
 /** Registered like the Blender look, so the contact sheet becomes real image content. */
 const assetsSearchHandlers = {
   game_assets_search: McpToolAccess.readsAsCaller((input) =>
@@ -340,6 +376,7 @@ export const layerMore = McpToolAccess.toLayer(
   Effect.gen(function* () {
     const kits = [
       runner(yield* GameToolkit),
+      runner(yield* GameCheckToolkit),
       runner(yield* GameBlenderLookToolkit),
       runner(yield* GameAnimateToolkit),
       runner(yield* GameBlenderRenderSpritesToolkit),
@@ -387,6 +424,7 @@ export const layerMore = McpToolAccess.toLayer(
         McpToolAccess.HandlersLayer.layer(layerBlenderLook),
         McpToolAccess.HandlersLayer.layer(layerAnimate),
         McpToolAccess.HandlersLayer.layer(layerBlenderRenderSprites),
+        McpToolAccess.HandlersLayer.layer(layerCheck),
       ),
     ),
   ),

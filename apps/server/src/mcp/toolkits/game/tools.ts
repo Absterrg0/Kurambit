@@ -22,6 +22,7 @@ import {
   GameBlenderExportResult,
   GameBlenderLookInput,
   GameBlenderLookResult,
+  GameBlenderLookScreenshot,
   GameBlenderRenderSpritesInput,
   GameBlenderRenderSpritesResult,
   GameBlenderSceneInput,
@@ -86,6 +87,7 @@ import * as GameBuilds from "../../../game/GameBuilds.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
+import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
 import * as GameStage from "../../../game/GameStage.ts";
@@ -407,17 +409,27 @@ const ImportTool = Tool.make("game_import", {
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_import"));
-const CheckTool = Tool.make("game_check", {
-  description: `Fast static and boot check for this thread's game: it imports, then boots the entry the player opens and the gameplay entry game.json declares, and reports what the game did as errors and warnings with file:line, and which entries ran. ${perEngine((t) => t.check)} \`scene\` is the scene report: a few seconds of random input on the gameplay entry, and a line for each thing a person would see is wrong (the player hidden, off screen or too small, an empty view, a character buried or inside a solid, bodies inside each other, something fallen out of the world, the camera inside a wall, sliding in idle), each naming a frame that outlines it; fix those too before you end the turn. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory). Start every build or fix loop with this; it is much faster than a playtest. \`change\`: \`new\` build, or \`fix\`, a small correction kept as the current build.`,
+/** game_check's answer, with its pictures attached as images (the views' PNGs, title then play). */
+const GameCheckToolResult = Schema.Struct({
+  ...GameCheckResult.fields,
+  screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+});
+export const GameCheckTool = Tool.make("game_check", {
+  description: `Fast static and boot check for this thread's game: it imports, then boots the entry the player opens and the gameplay entry game.json declares, and reports what the game did as errors and warnings with file:line, and which entries ran. ${perEngine((t) => t.check)} \`scene\` is the scene report: a few seconds of random input on the gameplay entry, and a line for each thing a person would see is wrong (the player hidden, off screen or too small, an empty view, a character buried or inside a solid, bodies inside each other, something fallen out of the world, the camera inside a wall, sliding in idle), each naming a frame that outlines it; fix those too before you end the turn. \`views\` are attached as images: the title as it boots and play after the random input. Look at them as the player will: anything black, missing, broken, clashing, cluttered or unlike the brief is a bug to fix before you end the turn, and say what you saw in your reply. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory). Start every build or fix loop with this; it is much faster than a playtest. \`change\`: \`new\` build, or \`fix\`, a small correction kept as the current build.`,
   parameters: Schema.Struct({ change: Schema.optionalKey(Schema.Literals(["new", "fix"])) }),
-  success: GameCheckResult,
+  success: GameCheckToolResult,
   failure,
   failureMode: "return",
-  dependencies: [...on(GameEngine.GameEngine), GameBuilds.GameBuilds],
+  dependencies: [
+    ...on(GameEngine.GameEngine),
+    GameBuilds.GameBuilds,
+    GameProjectService.GameProjectService,
+  ],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_check"));
+export const GameCheckToolkit = Toolkit.make(GameCheckTool);
 const ExportTool = Tool.make("game_export", {
   description: `Import and export this thread's game for one target; a target its engine does not make is refused. ${perEngine((t) => t.export)} A release is staged and checked, then replaces the previous one only when the sources did not change while it was made, so a failed export leaves the last good build in place. Web exports to a content-addressed build. Returns the published artifact's path and the command output, or why it failed.`,
   parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
@@ -718,7 +730,6 @@ export const GameToolkit = Toolkit.make(
   UnityPlayTool,
   UnityConsoleTool,
   ImportTool,
-  CheckTool,
   ExportTool,
   PackageWindowsTool,
   PackageWebTool,
@@ -769,6 +780,7 @@ export const GameMoreTool = Tool.make("game_more", {
   // It runs any game tool, so it stands on every service they do.
   dependencies: [
     GameStatusService.GameStatusService,
+    GameProjectService.GameProjectService,
     GameBlender.GameBlender,
     GameArt.GameArt,
     GameAssetLibrary.GameAssetLibrary,

@@ -344,8 +344,17 @@ export function lookShader(shader) {
     .replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${BAKED_VERTEX}`);
   shader.fragmentShader = shader.fragmentShader
     .replace("#include <common>", `#include <common>\n#define LOOK_BAKED\n${BAKED_FRAGMENT}`)
+    .replace("#include <normal_fragment_begin>", FOLIAGE_NORMAL)
     .replace("#include <lights_fragment_begin>", LIGHTS_BAKED);
 }
+// Foliage (shell/assets.js marks it): a double-sided card whose normals point up, as grass and
+// leaves are made for engines that light both faces alike. three.js turns a back face's normal
+// around, to point down away from the sun, and every blade seen from behind draws black.
+const FOLIAGE_NORMAL = /* glsl */ `#include <normal_fragment_begin>
+#if defined( LOOK_FOLIAGE ) && ! defined( FLAT_SHADED )
+	normal = normalize( vNormal );
+	nonPerturbedNormal = normal;
+#endif`;
 // Every material without its own hook goes through the look's; three keys its
 // programs by this function's text, the same for all of them.
 THREE.Material.prototype.onBeforeCompile = function (shader) {

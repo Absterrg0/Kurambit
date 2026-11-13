@@ -10,6 +10,7 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameCheckScene,
+  type GameCheckView,
   type GameProcessResult,
   sceneLines,
   manifestProject,
@@ -187,11 +188,13 @@ export const makeThreeBackend = (
       // The page as the player opens it, then the gameplay entry the template
       // names (the starter's shell boots straight into play with "?play"), so a
       // failure in gameplay start cannot hide behind the title screen.
-      const entries: Array<readonly [string, string]> = [["boot", server.url]];
+      const entries: Array<readonly [GameCheckView["entry"], string]> = [["boot", server.url]];
       if (input.gameplayScene !== "")
         entries.push(["gameplay", new URL(input.gameplayScene, server.url).href]);
       // The gameplay entry's play, measured by the shell's scene report: what it left, and how long it took.
       let scenePlay: { readonly page: PageScene; readonly ms: number } | null = null;
+      // What each entry looked like as the check left it: the agent judges its game from these.
+      const views: Array<GameCheckView> = [];
       const played = yield* Effect.tryPromise({
         try: async (signal) => {
           let timedOut = false;
@@ -230,6 +233,9 @@ export const makeThreeBackend = (
               if (measure && session.scene() !== "no-shell")
                 await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
               else await new Promise((resolve) => setTimeout(resolve, 2000));
+              const view = NodePath.join(temporary, `view-${entry}.png`);
+              if (await session.still(view))
+                views.push({ entry, path: NodePath.relative(ctx.root, view) });
               await session.close();
               if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
               reached.push(entry);
@@ -308,6 +314,7 @@ export const makeThreeBackend = (
         issues: [...issues],
         run,
         ...(scene === undefined ? {} : { scene }),
+        views,
       };
     });
   return {

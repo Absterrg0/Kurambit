@@ -892,6 +892,13 @@ export const GameCheckScene = Schema.Union([
   Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
 ]);
 export type GameCheckScene = typeof GameCheckScene.Type;
+/** A picture of the game as the check left it: the title as it boots, or play after its input. */
+export const GameCheckView = Schema.Struct({
+  entry: Schema.Literals(["boot", "gameplay"]),
+  /** Game-relative PNG beside the check's log. */
+  path: Schema.String,
+});
+export type GameCheckView = typeof GameCheckView.Type;
 export const GameCheckResult = Schema.Struct({
   ok: Schema.Boolean,
   errors: Schema.Array(GameCheckIssue),
@@ -900,5 +907,7 @@ export const GameCheckResult = Schema.Struct({
   entries: Schema.Array(Schema.String),
   durationMs: Schema.Number,
   scene: Schema.optionalKey(GameCheckScene),
+  /** What the game looked like, for engines that can show it (three.js). */
+  views: Schema.optionalKey(Schema.Array(GameCheckView)),
 });
 export type GameCheckResult = typeof GameCheckResult.Type;

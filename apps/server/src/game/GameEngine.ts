@@ -18,6 +18,7 @@ import {
   type GameActionResult,
   type GameCheckIssue,
   type GameCheckResult,
+  type GameCheckView,
   type GameCheckScene,
   type GameProcessResult,
   type GameToolStatus,
@@ -87,6 +88,8 @@ export interface GameEngineCheckReport {
   readonly run: GameProcessResult;
   /** The scene report of a check that asked for one, from an engine that measures it. */
   readonly scene?: GameCheckScene;
+  /** Pictures of the entries it ran, from an engine that can take them. */
+  readonly views?: ReadonlyArray<GameCheckView>;
 }
 
 /** One release the engine wrote into a staging folder. */
@@ -442,6 +445,9 @@ const make = Effect.gen(function* () {
         warnings: limitIssues(warnings),
         entries: reported?.entries ?? [],
         durationMs: (yield* Clock.currentTimeMillis) - startedAt,
+        ...(executed.views === undefined || executed.views.length === 0
+          ? {}
+          : { views: executed.views }),
         ...(scene
           ? {
               scene: executed.scene ?? {

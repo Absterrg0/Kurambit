@@ -4,6 +4,8 @@ import {
   GameMoreToolkit,
   GameAssetsSearchTool,
   GameAssetsSearchToolkit,
+  GameCheckTool,
+  GameCheckToolkit,
   GameAnimateTool,
   GameAnimateToolkit,
   GameBlenderLookTool,
@@ -878,6 +880,21 @@ const registerGameMore = Effect.fn("McpHttpServer.registerGameMore")(function* (
   );
 });
 
+const registerGameCheck = Effect.fn("McpHttpServer.registerGameCheck")(function* () {
+  const services = yield* registrationServices(GameCheckTool);
+  const built = yield* GameCheckToolkit;
+  yield* registerImageTool(
+    GameCheckTool,
+    (payload, options) =>
+      built
+        .handle("game_check", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) => effect.pipe(Effect.provideContext(services)),
+    "check",
+    (error) => (error instanceof Error ? error.message : "Game check failed."),
+  );
+});
+
 const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
   const services = yield* registrationServices(GameAssetsSearchTool);
   const built = yield* GameAssetsSearchToolkit;
@@ -1038,11 +1055,14 @@ const layerGameAssetsSearch = imageToolRegistration(
   GameHandlers.layerAssetsSearch,
 );
 
+const layerGameCheck = imageToolRegistration(registerGameCheck(), GameHandlers.layerCheck);
+
 const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
   layerGameAnimate,
   layerGameBlenderRenderSprites,
   layerGameAssetsSearch,
+  layerGameCheck,
   layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
   imageToolRegistration(registerGameMore(), GameHandlers.layerMore),

@@ -148,10 +148,60 @@ async function readSidecar(path) {
   return asset;
 }
 
-// Every copy of a model casts and receives the look's shadows (shell/look.js).
+// Every copy of a model casts and receives the look's shadows (shell/look.js), and its foliage is
+// lit from both faces alike.
 function withShadows(gltf) {
   gltf.scene.traverse((object) => {
-    if (object.isMesh) object.castShadow = object.receiveShadow = true;
+    if (!object.isMesh) return;
+    object.castShadow = object.receiveShadow = true;
+    if (greyMask(object))
+      for (const material of [object.material].flat()) {
+        material.vertexColors = false;
+        material.needsUpdate = true;
+      }
+    if (isFoliage(object))
+      for (const material of [object.material].flat()) {
+        material.defines = { ...material.defines, LOOK_FOLIAGE: "" };
+        material.needsUpdate = true;
+      }
   });
   return gltf;
+}
+
+/**
+ * Grey vertex colours on a textured model are a mask the model's own engine reads (wind, ambient
+ * occlusion), not a tint: drawn as colour they turn grass and bark nearly black, so they are not
+ * drawn. A model coloured by its vertices has no texture, or colours that are not grey.
+ */
+function greyMask(mesh) {
+  const colors = mesh.geometry?.attributes?.color;
+  if (colors === undefined || colors.count === 0) return false;
+  if (![mesh.material].flat().every((material) => material?.map != null)) return false;
+  const step = Math.max(1, Math.floor(colors.count / 256));
+  for (let i = 0; i < colors.count; i += step) {
+    const r = colors.getX(i);
+    if (Math.abs(r - colors.getY(i)) > 0.02 || Math.abs(r - colors.getZ(i)) > 0.02) return false;
+  }
+  return true;
+}
+
+/**
+ * Double-sided foliage, authored for engines that light both faces alike (shell/look.js lights it
+ * so): a cut-out card (leaves, flowers: alpha-tested) or a mesh whose normals nearly all point up
+ * (grass). A solid double-sided cloth or sign keeps three's own two-sided lighting.
+ */
+function isFoliage(mesh) {
+  const materials = [mesh.material].flat();
+  if (!materials.every((material) => material?.side === THREE.DoubleSide)) return false;
+  if (materials.every((material) => material.alphaTest > 0)) return true;
+  const normals = mesh.geometry?.attributes?.normal;
+  if (normals === undefined || normals.count === 0) return false;
+  const step = Math.max(1, Math.floor(normals.count / 256));
+  let up = 0;
+  let seen = 0;
+  for (let i = 0; i < normals.count; i += step) {
+    seen += 1;
+    if (normals.getY(i) > 0.9) up += 1;
+  }
+  return up / seen >= 0.8;
 }
