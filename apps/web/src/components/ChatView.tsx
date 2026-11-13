@@ -7932,7 +7932,7 @@ export default function ChatView(props: ChatViewProps) {
               "mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col",
               // One row above the composer: a row the composer attaches (a queued message,
               // keep going's status) takes the agent's line's place.
-              "[&:has([data-slot=composer-banner-attachment])_[data-game-agent-note]]:hidden",
+              "[&:has([data-composer-banner-surface])_[data-game-agent-note]]:hidden",
             )}
           >
             {/* One row above the composer: keep going's status (its own row in the

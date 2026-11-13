@@ -51,12 +51,13 @@ export const budgetValue = (minutes: number | null): string =>
 export const budgetFromValue = (value: string): number | null =>
   value === "none" ? null : Number(value);
 
+/** Why a step was chosen, in the screen's words: checks and builds, not the harness's facts. */
 const WHY_LABEL: Record<GameRunStepWhy, string> = {
   steer: "your note",
-  blocker: "blocker",
+  blocker: "the game does not start",
   regression: "after an undo",
-  bot: "a bot for the skilled fact",
-  fact: "a failing fact",
+  bot: "a play bot",
+  fact: "a check to look at",
   next: "your agent's next step",
 };
 const stepWhyLabel = (why: GameRunStepWhy): string => WHY_LABEL[why];

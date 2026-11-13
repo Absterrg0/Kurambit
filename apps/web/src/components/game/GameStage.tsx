@@ -222,18 +222,34 @@ const TRANSIENT_ROWS_RESERVE = 38;
  */
 const SKELETON_STRIP_CHROME = 96 + BUILD_CARD_PICTURE + TRANSIENT_ROWS_RESERVE + 4;
 
+/** The strip's gap between cards (gap-3). */
+const BUILD_CARD_GAP = 12;
+
 /**
  * PURE. The Stage's size in a column `width` wide with `height` for the Stage and one row of
- * card pictures. The game keeps its shape (`ratio`, height over width); the cards are a fixed
- * size, so the Stage is as large as the column allows.
+ * card pictures. The game keeps its shape (`ratio`, height over width). Cards are one size, so
+ * the Stage is as large as the column allows, until three of them no longer fit its width: on a
+ * short window they shrink with it, so three always show whole, and the Stage takes the height
+ * they give back.
  */
 const fitStage = (width: number, height: number, ratio: number) => {
-  const stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - BUILD_CARD_PICTURE)));
-  return {
-    width: Math.floor(stageHeight / ratio),
-    height: stageHeight,
-    cardWidth: Math.floor((BUILD_CARD_PICTURE * 16) / 9),
-  };
+  const lane = (stageWidth: number) => (stageWidth - 2 * BUILD_CARD_GAP) / 3;
+  let stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - BUILD_CARD_PICTURE)));
+  let cardWidth = Math.floor((BUILD_CARD_PICTURE * 16) / 9);
+  if (lane(stageHeight / ratio) < cardWidth) {
+    // Where the Stage and three cards a third of its width exactly fill the height.
+    stageHeight = Math.floor(
+      Math.max(
+        0,
+        Math.min(
+          width * ratio,
+          (height + (2 * BUILD_CARD_GAP * 9) / (3 * 16)) / (1 + 9 / (3 * 16 * ratio)),
+        ),
+      ),
+    );
+    cardWidth = Math.floor(lane(stageHeight / ratio));
+  }
+  return { width: Math.floor(stageHeight / ratio), height: stageHeight, cardWidth };
 };
 
 /** The folder's own game frame, not a build copy's. */

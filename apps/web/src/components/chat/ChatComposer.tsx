@@ -4466,7 +4466,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isPreparingWorktree ||
     showProviderUnavailable ||
     projectSelectionRequired ||
-    environmentUnavailable !== null ||
+    // A game's composer keeps its resting row while the app connects; the screen says the
+    // environment is unavailable elsewhere, and a composer that changes shape on load jumps.
+    (environmentUnavailable !== null && !gameThread) ||
     composerSubmissionError !== null ||
     providerInputSubmissionError !== null ||
     hasImageAttachmentAttention;
