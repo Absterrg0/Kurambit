@@ -48,22 +48,21 @@ is the person's to read and edit too.
 
 How this game's characters are made is the person's choice, shown by
 game_status as `characters`: `library` (the default), `blender` or
-`generated`. Read it before any character; you cannot change it. When the
-route cannot do what is asked (the library has no cat), say so in your reply
-and name the other routes: the person changes it under the game's More menu,
-"Make characters with". A message asking for one made character does not
-change the route. An unrigged model is a prop on every route.
+`generated`. Read it before any character; you cannot change it. A message
+asking for one made character does not change the route. An unrigged model
+is a prop on every route.
 
-- `library`: characters from the lock's packs, played by state with the
-  engine's character animator. On `standard-humanoid`,
-  `game_blender_character` with a library body
+- `library`: the library first, Blender for what it lacks. Characters from
+  the lock's packs, played by state with the engine's character animator. On
+  `standard-humanoid`, `game_blender_character` with a library body
   (`quaternius-universal-base-characters`) puts it on the skeleton with the
-  library's clips. No character fits: recolour one (a family's characters
-  share one small colormap texture; edit a copy of that PNG and point the
-  copy's material at it). Animals and creatures (Quaternius' animals and
-  monsters, animated Poly Pizza models) each come on a
-  skeleton of their own with their own clips: play a model's clips on that
-  model only.
+  library's clips. Animals and creatures (Quaternius' animals and monsters,
+  animated Poly Pizza models) each come on a skeleton of their own with their
+  own clips: play a model's clips on that model only. When the library has no
+  model that is the brief's subject (a robot, a particular animal, a named
+  machine), make that one in Blender (Made characters, Made from scratch)
+  rather than standing something else in for it: a knight is not a robot.
+  The same goes for a prop the brief names.
 - `blender`: made characters: on the standard skeleton with the library's
   clips (Made characters), or on their own rig with their own clips (Made
   from scratch).

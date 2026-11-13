@@ -210,10 +210,11 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
   });
 });
 
-it("refuses Blender-made characters off the Blender route, naming the setting", () => {
-  expect(lockCharacterRouteRefusal("mpfb-body", characterRoute({}))).toMatch(/with library/);
+it("makes in Blender what the library lacks, never what the person's providers own", () => {
+  expect(lockCharacterRouteRefusal("mpfb-body", characterRoute({}))).toBeNull();
+  expect(lockCharacterRouteRefusal("unstamped-mesh", "library")).toBeNull();
   expect(lockCharacterRouteRefusal("unstamped-mesh", "generated")).toMatch(/with generated/);
-  expect(lockCharacterRouteRefusal("unstamped-mesh", "library")).toMatch(/Make characters with/);
+  expect(lockCharacterRouteRefusal("generated-body", "library")).toMatch(/Make characters with/);
   expect(
     lockCharacterRouteRefusal("mpfb-body", characterRoute({ characters: "blender" })),
   ).toBeNull();

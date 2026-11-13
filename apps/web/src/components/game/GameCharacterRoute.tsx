@@ -35,7 +35,7 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
   {
     route: "library",
     label: "Library",
-    description: "Characters from the asset library's packs",
+    description: "The asset library first; the agent builds in Blender what it lacks",
   },
   {
     route: "blender",

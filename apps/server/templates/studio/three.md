@@ -6,10 +6,12 @@ add a model to `ASSETS` only once its file is in place.
 
 ## The first turn
 
-- Library art from the first build: the player, threats and level pieces are
-  library models (sprites in 2D) named in `ASSETS`. A Box, Sphere or Cylinder
-  never stands in for a character, an enemy or a prop; effects (`Juice.burst`,
-  a glow) are fine.
+- Real art from the first build: the player, threats and level pieces are
+  library models (sprites in 2D) named in `ASSETS`. When the library has no
+  model that is the brief's subject (its player, its threat, a prop it names),
+  make that one in Blender (art-pipeline skill) instead of standing in
+  something else. A Box, Sphere or Cylinder never stands in for a character,
+  an enemy or a prop; effects (`Juice.burst`, a glow) are fine.
 - Packs differ in scale (a Kenney blocky character stands several times a
   mini one): when you mix packs, size each model with `root.scale.setScalar(n)`.
 - In a 3D view the look draws the sky, its light and the fog: do not set

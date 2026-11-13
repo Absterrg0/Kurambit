@@ -439,17 +439,21 @@ export const styleHash = (style: GameStyle | null): string =>
 export const characterRoute = (manifest: Pick<GameManifest, "characters">): GameCharacterRoute =>
   manifest.characters ?? GAME_STYLE_DEFAULT_CHARACTERS;
 
-/** The routes whose characters may be made in Blender; the rest ship only library or stamped sources. */
+/**
+ * The routes whose characters may be made in Blender. Library means the library first: a subject
+ * it has no model of (a robot, a cat) is made in Blender rather than stood in by something else.
+ * Generated ships only what the person's providers made, or library and stamped sources.
+ */
 const MAKES_CHARACTERS: Record<GameCharacterRoute, boolean> = {
-  library: false,
+  library: true,
   blender: true,
   generated: false,
 };
 
 /**
- * Why the person's character route refuses a character, or null: off the Blender route,
- * an MPFB2 body or a character mesh that came from no stamped source is not theirs to ship;
- * off the generated route, neither is a generated character or creature.
+ * Why the person's character route refuses a character, or null: on the generated route, an
+ * MPFB2 body or a character mesh that came from no stamped source is not theirs to ship; off
+ * the generated route, neither is a generated character or creature.
  */
 export const lockCharacterRouteRefusal = (
   what: "mpfb-body" | "unstamped-mesh" | "generated-body",
@@ -462,5 +466,5 @@ export const lockCharacterRouteRefusal = (
       : what === "generated-body"
         ? "A generated character or creature (an AI provider made its body)"
         : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and the person chose to make this game's characters with ${route}. Use ${route === "generated" ? "a generated character (game_generate) or a library body" : "a library body or the lock's packs"}, and if the request needs another kind of character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
+  return `${thing}, and the person chose to make this game's characters with ${route}. Use ${route === "generated" ? "a generated character (game_generate) or a library body" : route === "library" ? "a library body, or make the character in Blender" : "a library body or the lock's packs"}, and if the request needs another kind of character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
 };

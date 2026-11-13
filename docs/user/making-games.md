@@ -99,14 +99,15 @@ then have the art redone. Delete it to lift the lock.
 
 Each game has one setting for how its characters are made, **Make characters with**: **Library**
 (the default), **Blender** or **Generated**. Pick it under the home screen box's options button, so the first turn builds the cast your way, and change it later under **Look…** in the game's menu
-(**Characters**) or the command palette's **Make characters with…**. On **Library** the agent takes characters from the asset library and will not model
-one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
+(**Characters**) or the command palette's **Make characters with…**. On **Library** the agent takes characters from the asset library, and builds
+in Blender only what the library has no model of, such as a robot when the brief asks for one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
 head, clothes, tail or ears it models itself, with the library's animations already fitted. On
 **Generated** an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy on your
 own key makes rigged 3D characters, and with Codex alone they are images, such as character sheets
 and sprites. Generated can be picked once a 3D provider
 or Codex is ready; until then the choice says what to set up. The agent never changes the setting itself: when the chosen way cannot make
 something, it says so and names the others, and you switch the setting when you want to.
+Blender building needs Blender installed (Settings › Game tools).
 
 Human bodies on **Blender** come from MPFB2, which you install once: **Settings → Game tools**, under
 Blender, **Human bodies**, **Install**. Its code is GPL-3.0, so Kurambit does not ship it; Install downloads
