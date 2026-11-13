@@ -727,7 +727,8 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
  */
 function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: string }) {
   return (
-    <div className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
+    // A slot to the Stage's fit, which reads a card's picture height from it.
+    <div data-game-build-slot="" className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
       <GameNowPicture
         still={still}
         gameName={gameName}
