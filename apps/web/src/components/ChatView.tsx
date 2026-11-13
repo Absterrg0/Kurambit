@@ -1657,6 +1657,7 @@ export default function ChatView(props: ChatViewProps) {
   // Builds live in T3's right panel, per thread: the palette, a key and a pointed thing ask for
   // them through the workspace store, and this screen opens or toggles them for its thread.
   const panelRequest = useGameWorkspaceStore((state) => state.panelRequest);
+  const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
   const [seenPanelRequestN, setSeenPanelRequestN] = useState(panelRequest?.n ?? 0);
   if (panelRequest !== null && panelRequest.n !== seenPanelRequestN) {
     setSeenPanelRequestN(panelRequest.n);
@@ -7933,7 +7934,7 @@ export default function ChatView(props: ChatViewProps) {
         {gameLayout ? (
           <>
             <div className="relative flex flex-none flex-col">{gameStage}</div>
-            <GameSplitResize />
+            {gameHidden ? null : <GameSplitResize />}
           </>
         ) : null}
 

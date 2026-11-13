@@ -135,17 +135,7 @@ export function GamePlaySurface({
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   // Frozen, the game is pointed at, not played: its "Click to play" cover would sit on the selection.
-  // Held because the Stage lost focus, it is played again by a click, so the cover stays.
-  const frozen = useThreadStageBridge(
-    bridge.threadKey,
-    (state) => state.frozen && !state.autoFrozen,
-    false,
-  );
-  const away = useThreadStageBridge(
-    bridge.threadKey,
-    (state) => state.frozen && state.autoFrozen,
-    false,
-  );
+  const frozen = useThreadStageBridge(bridge.threadKey, (state) => state.frozen, false);
   useStageBridgeFrame(`${bridge.threadKey}\0${frameKey}`, playing ? frame : null, bridge.enabled);
   return (
     <div
@@ -164,7 +154,6 @@ export function GamePlaySurface({
             focusRequest={focusRequest}
             onFrame={setFrame}
             frozen={frozen}
-            away={away}
             freezeKey={bridge.enabled ? bridge.freezeKey : null}
           />
         ) : (
@@ -253,7 +242,6 @@ export function GameFrame({
   focusRequest = 0,
   onFrame,
   frozen = false,
-  away = false,
   freezeKey = null,
   gameName,
 }: {
@@ -270,8 +258,6 @@ export function GameFrame({
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
   /** The Stage froze the game to point at it: its hint says how to point instead. */
   frozen?: boolean;
-  /** Held because the Stage lost focus: it waits, quietly, for a click. */
-  away?: boolean;
   /** The key that freezes this game, for its hint; null when it cannot be frozen. */
   freezeKey?: string | null;
 }) {
@@ -480,7 +466,7 @@ export function GameFrame({
             <>
               <StageHint>
                 <MousePointerClickIcon className="size-3 shrink-0" aria-hidden="true" />
-                {away ? "Paused · click to play" : "Click to play"}
+                Click to play
               </StageHint>
               {freezeKey === null ? null : <StageHint muted>{freezeKey} freezes</StageHint>}
             </>

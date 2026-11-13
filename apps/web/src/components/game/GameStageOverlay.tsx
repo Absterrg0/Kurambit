@@ -25,11 +25,7 @@ const KIND_WORD: Record<GameThing["kind"], string> = {
  */
 export function GameStageOverlay({ threadKey }: { threadKey: string }) {
   // Held because the Stage lost focus, the game is played again, not pointed at.
-  const frozen = useThreadStageBridge(
-    threadKey,
-    (state) => state.frozen && !state.autoFrozen,
-    false,
-  );
+  const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const pointable = useThreadStageBridge(
     threadKey,
     (state) => state.status === "ready" && state.capabilities.includes("select"),

@@ -43,11 +43,7 @@ export function GameStagePlayControls({
   const threadKey = scopedThreadKey(threadRef);
   const capabilities = useThreadStageBridge(threadKey, (state) => state.capabilities, NONE);
   const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
-  const paused = useThreadStageBridge(
-    threadKey,
-    (state) => state.frozen && !state.autoFrozen,
-    false,
-  );
+  const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-game-play-controls="">

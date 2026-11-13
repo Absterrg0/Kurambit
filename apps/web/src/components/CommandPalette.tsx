@@ -84,6 +84,7 @@ import {
   PlayIcon,
   Redo2Icon,
   PanelRightIcon,
+  PanelTopCloseIcon,
   Undo2Icon,
   WrenchIcon,
   PaletteIcon,
@@ -1605,6 +1606,17 @@ function OpenCommandPaletteDialog(props: {
       icon: <MaximizeIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.fullscreen",
       run: requestStage({ kind: "fullscreen" }),
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-hide",
+      title: useGameWorkspaceStore.getState().gameHidden ? "Show the game" : "Hide the game",
+      searchTerms: ["hide", "show", "fold", "collapse", "chat", "stage", "game"],
+      icon: <PanelTopCloseIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const { gameHidden, setGameHidden } = useGameWorkspaceStore.getState();
+        setGameHidden(!gameHidden);
+      },
     });
     actionItems.push({
       kind: "action",

@@ -19,6 +19,8 @@ import {
   MaximizeIcon,
   MinimizeIcon,
   MoreHorizontalIcon,
+  PanelTopCloseIcon,
+  PanelTopOpenIcon,
   PencilIcon,
   PlayIcon,
   Redo2Icon,
@@ -96,7 +98,6 @@ import { GameStageOverlay } from "./GameStageOverlay";
 import {
   clearStageSelection,
   toggleStageFreeze,
-  useStageAwayFreeze,
   useStageBridge,
   useStageStill,
   keepBuildFrame,
@@ -347,7 +348,9 @@ function ThreadGameStage({
 }: GameStageProps) {
   const navigate = useNavigate();
   const stageChecks = useStageChecks(threadRef);
-  const collapsed = false;
+  // Hidden by the person: the chat takes the column, and the game pauses and mutes.
+  const collapsed = useGameWorkspaceStore((state) => state.gameHidden);
+  const setGameHidden = useGameWorkspaceStore((state) => state.setGameHidden);
   const panelOpen = useRightPanelStore(
     (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
   );
@@ -387,12 +390,8 @@ function ThreadGameStage({
   const [exportOpen, setExportOpen] = useState(false);
   const showInspectorTab = useGameWorkspaceStore((state) => state.showInspectorTab);
   const threadKey = scopedThreadKey(threadRef);
-  // Frozen by the person; a game held while the Stage has no focus reads as away instead.
-  const frozen = useThreadStageBridge(
-    threadKey,
-    (state) => state.frozen && !state.autoFrozen,
-    false,
-  );
+  // Paused by the person, to point at things.
+  const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
   const selectedId = useThreadStageBridge(
     threadKey,
@@ -433,8 +432,6 @@ function ThreadGameStage({
   const [frameBuild, setFrameBuild] = useState<string | null>(null);
   // The person is in the game: its frame is the document's focused element.
   const [gameFocused, setGameFocused] = useState(false);
-  const [stageFocused, setStageFocused] = useState(false);
-  useStageAwayFreeze(threadKey, !stageFocused);
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
   // A shown live game opens itself while the server says nobody asked for it
@@ -1108,18 +1105,9 @@ function ThreadGameStage({
       aria-hidden={hidden}
       inert={hidden}
       tabIndex={-1}
-      onFocus={(event) => {
-        setGameFocused(isFolderGameFrame(event.target));
-        setStageFocused(true);
-      }}
+      onFocus={(event) => setGameFocused(isFolderGameFrame(event.target))}
       onBlur={(event) => {
         if (isFolderGameFrame(event.target)) setGameFocused(false);
-        if (
-          !(
-            event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)
-          )
-        )
-          setStageFocused(false);
       }}
       onKeyDown={(event) => {
         // Esc clears the selection when the Stage itself has focus; a focused game sends it up
@@ -1339,181 +1327,189 @@ function ThreadGameStage({
           }
         </div>
       </header>
-      {compare !== null ? (
-        // In the game's own place and size, so the chat under it never moves.
-        <div
-          className="mx-auto flex w-full flex-col"
-          style={
-            stageFit === null ? undefined : { height: stageFit.height, maxWidth: stageFit.width }
-          }
-        >
-          <GameBuildCompare
-            threadRef={threadRef}
-            pair={compare}
-            viewport={data.viewport}
-            gameName={gameName}
-            hidden={hidden}
-            inspectorOpen={buildTabShown}
-            onPair={setCompare}
-            onClose={() => setCompare(null)}
-          />
-        </div>
-      ) : null}
-      {/*
+      {/* Hidden, the game stays mounted out of sight, so showing it again keeps its progress. */}
+      <div className={collapsed ? "hidden" : "contents"}>
+        {compare !== null ? (
+          // In the game's own place and size, so the chat under it never moves.
+          <div
+            className="mx-auto flex w-full flex-col"
+            style={
+              stageFit === null ? undefined : { height: stageFit.height, maxWidth: stageFit.width }
+            }
+          >
+            <GameBuildCompare
+              threadRef={threadRef}
+              pair={compare}
+              viewport={data.viewport}
+              gameName={gameName}
+              hidden={hidden}
+              inspectorOpen={buildTabShown}
+              onPair={setCompare}
+              onClose={() => setCompare(null)}
+            />
+          </div>
+        ) : null}
+        {/*
         The folder's game stays mounted under a copy or a compare, so it keeps
         its progress. The engine cannot see CSS hiding (an iframe's document
         stays visible with its parent), so the frame tells the game over
         postMessage to pause and mute while it is not shown.
       */}
-      {playTarget !== null ? (
+        {playTarget !== null ? (
+          <div
+            aria-hidden={compare !== null}
+            data-game-play-surface="build"
+            data-stage-fit=""
+            className={
+              compare === null
+                ? cn(
+                    "group/stage relative flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
+                    stageFit === null ? "flex-1" : "shrink-0",
+                  )
+                : "hidden"
+            }
+            style={
+              compare === null && stageFit !== null
+                ? { height: stageFit.height, width: stageFit.width }
+                : undefined
+            }
+          >
+            <GameFrameBox viewport={data.viewport} gameName={gameName} playing>
+              {playTarget.result._tag === "web" ? (
+                <GameFrame
+                  key={`${playTarget.build}\0${playTarget.result.url}`}
+                  url={playTarget.result.url}
+                  title={`${gameName}, ${playTarget.label}`}
+                  gameName={gameName}
+                  hidden={hidden || collapsed || compare !== null}
+                  focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
+                />
+              ) : (
+                <p className="flex size-full items-center justify-center p-6 text-center text-body text-washi/90">
+                  {playTarget.result.message}
+                </p>
+              )}
+            </GameFrameBox>
+          </div>
+        ) : null}
         <div
-          aria-hidden={compare !== null}
-          data-game-play-surface="build"
+          aria-hidden={playTarget !== null || compare !== null}
           data-stage-fit=""
           className={
-            compare === null
+            playTarget === null && compare === null
               ? cn(
-                  "group/stage relative flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
-                  stageFit === null ? "flex-1" : "shrink-0",
+                  "relative flex min-h-0 flex-col self-center",
+                  stageFit === null
+                    ? "aspect-video w-full max-w-(--chat-content-max-width)"
+                    : "shrink-0",
                 )
               : "hidden"
           }
-          style={
-            compare === null && stageFit !== null
-              ? { height: stageFit.height, width: stageFit.width }
-              : undefined
-          }
+          style={playTarget === null && compare === null ? stageFitStyle : undefined}
         >
-          <GameFrameBox viewport={data.viewport} gameName={gameName} playing>
-            {playTarget.result._tag === "web" ? (
-              <GameFrame
-                key={`${playTarget.build}\0${playTarget.result.url}`}
-                url={playTarget.result.url}
-                title={`${gameName}, ${playTarget.label}`}
-                gameName={gameName}
-                hidden={hidden || collapsed || compare !== null}
-                focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
-              />
-            ) : (
-              <p className="flex size-full items-center justify-center p-6 text-center text-body text-washi/90">
-                {playTarget.result.message}
-              </p>
-            )}
-          </GameFrameBox>
-        </div>
-      ) : null}
-      <div
-        aria-hidden={playTarget !== null || compare !== null}
-        data-stage-fit=""
-        className={
-          playTarget === null && compare === null
-            ? cn(
-                "relative flex min-h-0 flex-col self-center",
-                stageFit === null
-                  ? "aspect-video w-full max-w-(--chat-content-max-width)"
-                  : "shrink-0",
-              )
-            : "hidden"
-        }
-        style={playTarget === null && compare === null ? stageFitStyle : undefined}
-      >
-        {noWebGl ? <NoWebGlCard /> : null}
-        {/* Inside the Stage's own edges: a build that does not start says so in the Stage's
+          {noWebGl ? <NoWebGlCard /> : null}
+          {/* Inside the Stage's own edges: a build that does not start says so in the Stage's
             middle, with the way to fix it and the way back; any other error lies over the
             Stage's top edge. Neither takes a row, so the Stage keeps its size. */}
-        {folderDoesNotStart && failureVisible !== null && stageBuildName !== null ? (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
-            {/* Its own dark backing: the words never depend on what the dead game painted. */}
-            <div className="pointer-events-auto flex max-w-lg min-w-0 flex-col items-center gap-2 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
-              <TriangleAlertIcon className="size-5 text-destructive" aria-hidden="true" />
-              <Text variant="label" tone="inherit" render={<p role="alert" />}>
-                {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} does not start`}
-              </Text>
-              {/* What happened in plain words, then the error itself as its own detail, whole. */}
-              <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
-                An error in the game's code stops it before it starts.
-              </Text>
-              <Text
-                variant="caption"
-                tone="inherit"
-                render={
-                  <p className="line-clamp-3 max-w-full rounded-md bg-white/6 px-2.5 py-1.5 text-left font-mono break-words" />
-                }
-              >
-                {failureVisible.split("\n")[0] ?? failureVisible}
-              </Text>
-              <div className="mt-1 flex items-center gap-2">
-                {keepGoingStartsAt === null ? (
-                  <Button size="sm" variant="overlay" onClick={() => onAskAgent(failurePrompt)}>
-                    Ask your agent to fix it
-                  </Button>
-                ) : (
-                  // Keep going already has the agent's next step waiting, in the row above the
-                  // composer: one route to the fix on screen, not two.
-                  <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
-                    Keep going takes its next step at {keepGoingStartsAt}
-                  </Text>
-                )}
-                {turnUndoAllowed("undo") ? (
-                  <Button
-                    size="sm"
-                    variant="overlay"
-                    onClick={() => handleRequest({ kind: "undo" }, 0)}
-                  >
-                    <Undo2Icon aria-hidden="true" />
-                    Undo
-                  </Button>
-                ) : null}
+          {folderDoesNotStart && failureVisible !== null && stageBuildName !== null ? (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
+              {/* Its own dark backing: the words never depend on what the dead game painted. */}
+              <div className="pointer-events-auto flex max-w-lg min-w-0 flex-col items-center gap-2 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
+                <TriangleAlertIcon className="size-5 text-destructive" aria-hidden="true" />
+                <Text variant="label" tone="inherit" render={<p role="alert" />}>
+                  {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} does not start`}
+                </Text>
+                {/* What happened in plain words, then the error itself as its own detail, whole. */}
+                <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
+                  An error in the game's code stops it before it starts.
+                </Text>
+                <Text
+                  variant="caption"
+                  tone="inherit"
+                  render={
+                    <p className="line-clamp-3 max-w-full rounded-md bg-white/6 px-2.5 py-1.5 text-left font-mono break-words" />
+                  }
+                >
+                  {failureVisible.split("\n")[0] ?? failureVisible}
+                </Text>
+                <div className="mt-1 flex items-center gap-2">
+                  {keepGoingStartsAt === null ? (
+                    <Button size="sm" variant="overlay" onClick={() => onAskAgent(failurePrompt)}>
+                      Ask your agent to fix it
+                    </Button>
+                  ) : (
+                    // Keep going already has the agent's next step waiting, in the row above the
+                    // composer: one route to the fix on screen, not two.
+                    <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
+                      Keep going takes its next step at {keepGoingStartsAt}
+                    </Text>
+                  )}
+                  {turnUndoAllowed("undo") ? (
+                    <Button
+                      size="sm"
+                      variant="overlay"
+                      onClick={() => handleRequest({ kind: "undo" }, 0)}
+                    >
+                      <Undo2Icon aria-hidden="true" />
+                      Undo
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
-          </div>
-        ) : statusBanner === null ? null : (
-          <div className="absolute inset-x-0 top-0 z-20 overflow-hidden rounded-t-xl bg-background shadow-sm">
-            {statusBanner}
-          </div>
-        )}
-        <GamePlaySurface
-          phase={shownPhase}
-          viewport={data.viewport}
-          gameName={gameName}
-          // A live remount lands in play, the first load and Reload on the title.
-          previewUrl={
-            stageKind === "live" && frame.intoPlay && data.previewUrl !== null
-              ? `${data.previewUrl}${LIVE_PLAY_HASH}`
-              : data.previewUrl
-          }
-          frameKey={frameKey}
-          hidden={frameHidden}
-          canOperate={canAct}
-          operation={
-            busy !== null
-              ? { name: BUSY_LABELS[busy.action], own: true }
-              : operationState === "running" && data.operation !== null
-                ? {
-                    name: data.operation.name,
-                    own: data.operation.ownerThreadId === threadRef.threadId,
-                  }
-                : null
-          }
-          onPlay={() => void perform("preview")}
-          onRebuild={() => void perform("rebuild")}
-          onStop={() => void perform("stop")}
-          onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
-          onOpenTools={() => void navigate({ to: "/settings/game-tools" })}
-          held={held}
-          onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
-          onStudioMessage={onStudioMessage}
-          focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
-          bridge={{ threadKey, enabled: engine.stageBridge, freezeKey }}
-          overlay={<GameStageOverlay threadKey={threadKey} />}
-        />
+          ) : statusBanner === null ? null : (
+            <div className="absolute inset-x-0 top-0 z-20 overflow-hidden rounded-t-xl bg-background shadow-sm">
+              {statusBanner}
+            </div>
+          )}
+          <GamePlaySurface
+            phase={shownPhase}
+            viewport={data.viewport}
+            gameName={gameName}
+            // A live remount lands in play, the first load and Reload on the title.
+            previewUrl={
+              stageKind === "live" && frame.intoPlay && data.previewUrl !== null
+                ? `${data.previewUrl}${LIVE_PLAY_HASH}`
+                : data.previewUrl
+            }
+            frameKey={frameKey}
+            hidden={frameHidden}
+            canOperate={canAct}
+            operation={
+              busy !== null
+                ? { name: BUSY_LABELS[busy.action], own: true }
+                : operationState === "running" && data.operation !== null
+                  ? {
+                      name: data.operation.name,
+                      own: data.operation.ownerThreadId === threadRef.threadId,
+                    }
+                  : null
+            }
+            onPlay={() => void perform("preview")}
+            onRebuild={() => void perform("rebuild")}
+            onStop={() => void perform("stop")}
+            onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
+            onOpenTools={() => void navigate({ to: "/settings/game-tools" })}
+            held={held}
+            onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
+            onStudioMessage={onStudioMessage}
+            focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
+            bridge={{ threadKey, enabled: engine.stageBridge, freezeKey }}
+            overlay={<GameStageOverlay threadKey={threadKey} />}
+          />
+        </div>
       </div>
       <div
         data-game-controls=""
         className="mx-auto flex h-11 w-full shrink-0 items-center gap-1.5"
         style={{ maxWidth: column ?? undefined }}
       >
-        {stageKind === "live" ? (
+        {collapsed ? (
+          <Button size="sm" variant="ghost" className="-ms-2" onClick={() => setGameHidden(false)}>
+            <PanelTopOpenIcon aria-hidden="true" />
+            Show the game
+          </Button>
+        ) : stageKind === "live" ? (
           <GameStagePlayControls
             threadRef={threadRef}
             playing={phase.kind === "playing" && compare === null}
@@ -1568,12 +1564,19 @@ function ThreadGameStage({
             />
           </PopoverPopup>
         </Popover>
-        <GameStageViewControls
-          threadRef={threadRef}
-          playing={phase.kind === "playing" && stageKind !== "window"}
-          onFullscreen={toggleFullscreen}
-          onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-        />
+        {collapsed ? null : (
+          <>
+            <GameStageViewControls
+              threadRef={threadRef}
+              playing={phase.kind === "playing" && stageKind !== "window"}
+              onFullscreen={toggleFullscreen}
+              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+            />
+            <IconAction label="Hide the game" side="top" onClick={() => setGameHidden(true)}>
+              <PanelTopCloseIcon className="size-3.5" aria-hidden="true" />
+            </IconAction>
+          </>
+        )}
       </div>
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
@@ -1615,6 +1618,7 @@ function IconAction({
   detail = null,
   shortcut = null,
   disabled = false,
+  side = "bottom",
   onClick,
   children,
 }: {
@@ -1624,6 +1628,7 @@ function IconAction({
   /** Its key, shown in the tooltip beside the label. */
   shortcut?: string | null;
   disabled?: boolean;
+  side?: "top" | "bottom";
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -1642,7 +1647,7 @@ function IconAction({
       >
         {children}
       </TooltipTrigger>
-      <TooltipPopup side="bottom" className="max-w-xs">
+      <TooltipPopup side={side} className="max-w-xs">
         <span className="flex flex-col gap-1">
           <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
           {detail === null ? null : <span className="text-muted-foreground">{detail}</span>}

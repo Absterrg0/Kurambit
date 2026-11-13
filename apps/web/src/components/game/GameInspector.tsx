@@ -181,6 +181,15 @@ function Rows({ children }: { children: ReactNode }) {
  * the Stage, with its checks, what it changed and its recordings.
  */
 export function GameBuildDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
+  // The tab scrolls as a whole: a build's checks, changes and recordings are taller than a window.
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
+      <BuildTab threadRef={threadRef} />
+    </div>
+  );
+}
+
+function BuildTab({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -1597,11 +1606,7 @@ export function GameTunePanel({
     }
   };
   const playing = status === "ready";
-  const paused = useThreadStageBridge(
-    threadKey,
-    (state) => state.frozen && !state.autoFrozen,
-    false,
-  );
+  const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
       <div className="mx-auto flex w-full max-w-160 flex-col gap-5 p-4">
@@ -1958,11 +1963,7 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   // pointing from the line that tells them to.
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   const gameOnStage = useThreadStageBridge(threadKey, () => true, false);
-  const frozenByPerson = useThreadStageBridge(
-    threadKey,
-    (state) => state.frozen && !state.autoFrozen,
-    false,
-  );
+  const frozenByPerson = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const [query, setQuery] = useState("");
   const words = query.trim().toLowerCase();
   const shownThings =

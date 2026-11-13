@@ -69,6 +69,9 @@ interface GameWorkspaceStoreState {
   /** The chat's share of the game's column; the game takes the rest. */
   chatShare: number;
   setChatShare: (share: number) => void;
+  /** The game folded away: the chat takes the column, and the game pauses and mutes. */
+  gameHidden: boolean;
+  setGameHidden: (hidden: boolean) => void;
   /** Asks for the Look tab in the right panel. */
   showLook: () => void;
 }
@@ -92,6 +95,8 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           })),
         chatShare: GAME_CHAT_SHARE_DEFAULT,
         setChatShare: (share) => set({ chatShare: clampGameChatShare(share) }),
+        gameHidden: false,
+        setGameHidden: (hidden) => set({ gameHidden: hidden }),
         showLook: () => request("look"),
       };
     },
@@ -100,10 +105,14 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
-      partialize: (state) => ({ chatShare: state.chatShare }),
+      partialize: (state) => ({ chatShare: state.chatShare, gameHidden: state.gameHidden }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
-        return { ...current, chatShare: clampGameChatShare(saved?.chatShare ?? current.chatShare) };
+        return {
+          ...current,
+          chatShare: clampGameChatShare(saved?.chatShare ?? current.chatShare),
+          gameHidden: saved?.gameHidden === true,
+        };
       },
     },
   ),
