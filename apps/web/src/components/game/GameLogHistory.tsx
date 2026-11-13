@@ -6,7 +6,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
  */
 export function GameLogHistory() {
   return (
-    <div className="flex h-full min-h-0 flex-col p-4">
+    <div className="flex h-full min-h-0 flex-col px-5.5 py-4">
       <Empty variant="well">
         <EmptyHeader>
           <EmptyTitle>No turns in this Log yet</EmptyTitle>

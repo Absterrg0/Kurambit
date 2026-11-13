@@ -42,9 +42,10 @@ import {
   timelineMarks,
 } from "./gameBuildTimeline.logic";
 
-/** About how many characters a card's two request lines, or its one name line, show. */
+/** Below this width a card is compact: its name and its state, its request in the tooltip. */
+const COMPACT_CARD_WIDTH = 150;
+/** About how many characters a card's two request lines show. */
 const CARD_REQUEST_FITS = 48;
-const CARD_NAME_FITS = 24;
 
 /**
  * PURE. A request short enough for a card's two lines, ended at a word: a deliberate short form
@@ -195,21 +196,52 @@ export function GameBuildStrip({
       }
     }
   }
-  // The newest builds are the ones a person wants: a new build scrolls to them,
-  // while Older adds cards at the left and leaves the row where it is.
+  // The card a person is looking for is whole in view: the one being made while a turn runs,
+  // else the one on the Stage. It is brought into view when a build lands or a turn starts,
+  // and when the row's width changes, unless the person has scrolled the row themselves.
   const newest = marks.at(-1)?.id ?? "";
   const slotShown = slot !== null;
+  const browsed = useRef(false);
+  const placed = useRef<number | null>(null);
+  const reveal = useStableCallback(() => {
+    const row = cardsRef.current;
+    if (row === null) return;
+    const card =
+      (slotShown ? row.querySelector<HTMLElement>("[data-game-build-slot]") : null) ??
+      row.querySelector<HTMLElement>('[aria-current="true"]') ??
+      (row.lastElementChild instanceof HTMLElement ? row.lastElementChild : null);
+    if (card === null) return;
+    const left = card.offsetLeft - row.offsetLeft;
+    const right = left + card.offsetWidth;
+    let next = row.scrollLeft;
+    if (right > row.scrollLeft + row.clientWidth) next = right - row.clientWidth;
+    if (left < next) next = left;
+    placed.current = next;
+    row.scrollLeft = next;
+  });
+  const stageKey = stageBuildId(list, playing);
+  useEffect(() => {
+    browsed.current = false;
+    reveal();
+    // Again once a new card has its size (it grows in).
+    const later = window.setTimeout(reveal, 400);
+    return () => window.clearTimeout(later);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a landing, a new slot or the Stage's build changing is when the row is placed again.
+  }, [newest, slotShown, stageKey, reveal]);
   useEffect(() => {
     const row = cardsRef.current;
-    if (row === null || newest === "") return;
-    // Again once the new card has its size (it grows in), so the newest is whole.
-    row.scrollLeft = row.scrollWidth;
-    const later = window.setTimeout(() => {
-      row.scrollLeft = row.scrollWidth;
-    }, 400);
-    return () => window.clearTimeout(later);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the slot appearing adds a card at the end, which must scroll into view too.
-  }, [newest, slotShown]);
+    if (row === null) return;
+    return observeResize([row], () => {
+      if (!browsed.current) reveal();
+    });
+  }, [reveal]);
+  const onRowScroll = () => {
+    const row = cardsRef.current;
+    // A scroll the row did not place itself is the person browsing: leave them where they are.
+    if (row !== null && placed.current !== null && Math.abs(row.scrollLeft - placed.current) > 2)
+      browsed.current = true;
+    readClipped();
+  };
   // Which ends of the row have cards scrolled past them, for a fade on that edge only.
   const [clipped, setClipped] = useState<"none" | "start" | "end" | "both">("none");
   const readClipped = useStableCallback(() => {
@@ -348,9 +380,12 @@ export function GameBuildStrip({
       // Composer menus (the model picker) stop at the strip's top rather than cover the Stage.
       data-composer-menu-ceiling=""
       hidden={hidden}
-      className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
+      className="group/strip mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
       style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}
+      // Compact cards (a short window) carry a name and a state, no request: it is in the
+      // card's tooltip, and the Stage keeps the height.
+      data-compact={cardWidth < COMPACT_CARD_WIDTH ? "true" : undefined}
     >
       {reelOpen ? (
         <GameReel
@@ -375,8 +410,9 @@ export function GameBuildStrip({
         </div>
       ) : (
         <div className="flex h-7 min-w-0 items-center gap-2">
-          <Text variant="meta" tone="muted">
-            Builds
+          {/* How many builds the lane holds, so a row that scrolls says it has more. */}
+          <Text variant="meta" tone="muted" numeric>
+            {marks.length > 0 ? `Builds · ${marks.length}` : "Builds"}
           </Text>
           {olderNext !== null ? (
             <Button size="xs" variant="ghost" onClick={() => setOlderCount(olderCount + 1)}>
@@ -412,7 +448,7 @@ export function GameBuildStrip({
           between games whose captions wrap differently. */}
       <div
         ref={cardsRef}
-        onScroll={readClipped}
+        onScroll={onRowScroll}
         className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1"
         style={clipped === "none" ? undefined : { maskImage: edgeFade(clipped) }}
       >
@@ -454,9 +490,9 @@ export function GameBuildStrip({
   );
 }
 
-/** A 24px fade on each edge the row has scrolled cards past, so a cut card reads as more. */
+/** A 40px fade on each edge the row has scrolled cards past, so a cut card reads as more. */
 const edgeFade = (clipped: "start" | "end" | "both") =>
-  `linear-gradient(to right, ${clipped === "end" ? "black" : "transparent"}, black 24px, black calc(100% - 24px), ${clipped === "start" ? "black" : "transparent"})`;
+  `linear-gradient(to right, ${clipped === "end" ? "black" : "transparent"}, black 40px, black calc(100% - 40px), ${clipped === "start" ? "black" : "transparent"})`;
 
 /** One run of keep going: its builds under a labelled bracket. */
 function KeepGoingBracket({ children }: { children: ReactNode }) {
@@ -584,22 +620,13 @@ function BuildCard({
           }
         />
       </TooltipTrigger>
-      {/* Over the card, where the Stage's edge has room for it, never across the composer:
-          the whole name or request first when the card had to shorten it, then its time and
-          how the build measured, which the card does not say. */}
+      {/* Over the card, never across the composer. */}
       <TooltipPopup side="top" className="max-w-xs">
         <span className="flex flex-col gap-0.5">
-          {caption.length >
-          (name === null || build.source._tag === "saved" ? CARD_NAME_FITS : CARD_REQUEST_FITS) ? (
-            <span>{caption}</span>
-          ) : null}
+          {/* One shape on every card: what it is in full, then how it measured and when. */}
+          <span>{caption}</span>
           <span className="text-muted-foreground">
-            {/* The time only when the caption shows the request in its place; "undone" is on
-                the caption already. */}
-            {[
-              name === null || build.source._tag === "saved" ? null : formatBuildTime(build.at),
-              checksLine(build.facts),
-            ]
+            {[checksLine(build.facts), formatBuildTime(build.at)]
               .filter((part) => part !== null)
               .join(" · ")}
           </span>
@@ -625,7 +652,7 @@ function CardCaption({
 }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center gap-1.5">
+      <span className="flex min-w-0 items-center gap-1.5 group-data-[compact=true]/strip:flex-col group-data-[compact=true]/strip:items-start group-data-[compact=true]/strip:gap-0.5">
         <Text
           variant="meta"
           tone={strong ? "strong" : "default"}
@@ -639,7 +666,9 @@ function CardCaption({
             variant="meta"
             tone="muted"
             numeric
-            render={<span className="ms-auto flex shrink-0" />}
+            render={
+              <span className="ms-auto flex shrink-0 group-data-[compact=true]/strip:ms-0 group-data-[compact=true]/strip:min-h-lh" />
+            }
           >
             {aside}
           </Text>
@@ -651,7 +680,12 @@ function CardCaption({
         variant="meta"
         tone="muted"
         numeric
-        render={<span className="line-clamp-2 min-w-0" style={{ minHeight: "2lh" }} />}
+        render={
+          <span
+            className="line-clamp-2 min-w-0 group-data-[compact=true]/strip:hidden"
+            style={{ minHeight: "2lh" }}
+          />
+        }
       >
         {meta}
       </Text>

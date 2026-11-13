@@ -498,8 +498,12 @@ function BuildDetail({
           </Text>
           <Text variant="meta" tone="muted">
             {/* Where it is, then when it was made; it wraps rather than cut either. */}
-            {onStage ? "On the Stage · " : ""}
-            <span className="whitespace-nowrap">{formatBuildTime(build.at)}</span>
+            {/* The separator goes with the date, so a wrap never ends a line on it. */}
+            {onStage ? "On the Stage " : ""}
+            <span className="whitespace-nowrap">
+              {onStage ? "· " : ""}
+              {formatBuildTime(build.at)}
+            </span>
           </Text>
         </div>
       </BuildActions>
@@ -565,11 +569,11 @@ function BuildDetail({
             // checks, so their names and rows are known and nothing under them moves.
             <div aria-busy="true" className="flex flex-col gap-2">
               <Rows>
-                {GAME_LEAD_FACTS.map((id) => (
-                  <div key={id} className="flex min-h-9 items-center gap-2.5 px-3">
+                {SKELETON_CHECKS.map((name) => (
+                  <div key={name} className="flex min-h-9 items-center gap-2.5 px-3">
                     <span className="size-4 shrink-0" />
                     <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
-                      {gameFactName(id)}
+                      {name}
                     </Text>
                     <Skeleton className="h-3 w-10" />
                     <span className="w-6 shrink-0" />
@@ -611,12 +615,6 @@ function BuildDetail({
           </Empty>
         ) : (
           <>
-            {/* What is measuring, and how long is left, on its own line: never cut off. */}
-            {busy && factsData.message.trim() !== "" ? (
-              <Text variant="meta" tone="muted" render={<p />}>
-                {factsData.message}
-              </Text>
-            ) : null}
             <SinceBase threadRef={threadRef} build={build} list={list} />
             <Checks threadRef={threadRef} facts={factsData} />
           </>
@@ -803,7 +801,12 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             lead
           />
         ))}
-        {pending > 0 ? <PendingRow count={pending} /> : null}
+        {pending > 0 ? (
+          <PendingRow
+            count={pending}
+            step={facts.state === "measuring" || facts.state === "queued" ? facts.message : ""}
+          />
+        ) : null}
         <NotMeasured facts={view.checks} note={noteOf} />
       </Rows>
       {view.more.length > 0 ? (
@@ -851,12 +854,22 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
   );
 }
 
-function PendingRow({ count }: { count: number }) {
+/**
+ * The checks still to come, as one row of the list: while a bot is playing, what it is doing
+ * ("Checking it starts (step 2 of 4)"), since the summary above already counts them.
+ */
+function PendingRow({ count, step = "" }: { count: number; step?: string }) {
+  const doing = step
+    .trim()
+    .replace(/^Measuring:\s*/i, "")
+    .replace(/\.$/, "");
   return (
     <div className="flex min-h-9 items-center gap-2.5 px-3">
       <ClockIcon className="size-4 shrink-0 text-dim-foreground" aria-hidden="true" />
       <Text variant="meta" tone="muted">
-        {count === 1 ? "1 check" : `${count} checks`} still to measure
+        {doing === ""
+          ? `${count === 1 ? "1 check" : `${count} checks`} still to measure`
+          : `${doing.charAt(0).toUpperCase()}${doing.slice(1)}`}
       </Text>
     </div>
   );
@@ -872,6 +885,21 @@ function namesPhrase(names: ReadonlyArray<string>): string {
 }
 
 /** Facts not measured, one row per reason. */
+/**
+ * The checks' rows while they are read, in the words and order a measured build's list most
+ * often has (a game's play bot comes later, so its row is last), so the rows do not change text
+ * or swap places when the readings arrive.
+ */
+const SKELETON_CHECKS = [
+  "Starts without errors",
+  "Can be lost with no input",
+  "Not won by random or no input",
+  "Runs smoothly",
+  "Keeps moving",
+  "Colour is varied",
+  "Can be won by the play bot",
+] as const;
+
 /** Why a build's checks could not be read when the build itself does not start. */
 const DID_NOT_START = "the game did not start, so the bots could not play it";
 
@@ -1522,9 +1550,9 @@ function BuildActions({
                     <Text variant="caption" tone="muted">
                       {action.blocked ??
                         (action.kind === "undo"
-                          ? previous === undefined
-                            ? "The game goes back to before it; it stays on the strip"
-                            : `The game goes back to ${buildName(previous)}`
+                          ? `The game goes back to ${
+                              previous === undefined ? "before it" : buildName(previous)
+                            }; it stays on the strip.`
                           : action.kind === "redo"
                             ? "The game becomes this build again"
                             : "The game becomes this build; later ones stay on the strip")}

@@ -216,6 +216,9 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
  * height a larger card would have taken.
  */
 const BUILD_CARD_PICTURE = 100;
+/** On a short window (under 800px tall) cards are compact, so the Stage keeps its share. */
+const BUILD_CARD_PICTURE_SHORT = 68;
+const SHORT_WINDOW = 800;
 /**
  * The height kept above the composer for the one row that comes and goes there: the agent's line
  * (or the note that a build was undone). It appears as a turn runs and lands, and the Stage must
@@ -224,11 +227,13 @@ const BUILD_CARD_PICTURE = 100;
  */
 const TRANSIENT_ROWS_RESERVE = 38;
 /**
- * What the loading skeleton's column gives up besides its Stage and card pictures: the strip's
- * label, captions and gaps (about 96px), the room above the composer and the fit's breath, so
- * its Stage is the size the fit gives a 16:9 game.
+ * What the loading skeleton's column gives up besides its Stage, so its Stage is the size the
+ * fit gives a 16:9 game and nothing moves when the game is read.
  */
-const SKELETON_STRIP_CHROME = 96 + BUILD_CARD_PICTURE + TRANSIENT_ROWS_RESERVE + 4;
+const skeletonChrome = (picture: number) =>
+  // The strip's label, gaps and caption lines (one fewer on compact cards), its pictures, the
+  // room above the composer and the fit's breath: the loaded column's own measurements.
+  (picture === BUILD_CARD_PICTURE ? 113 : 96) + picture + TRANSIENT_ROWS_RESERVE + 9;
 
 /** The strip's gap between cards (gap-3). */
 const BUILD_CARD_GAP = 12;
@@ -240,10 +245,15 @@ const BUILD_CARD_GAP = 12;
  * short window they shrink with it, so three always show whole, and the Stage takes the height
  * they give back.
  */
-const fitStage = (width: number, height: number, ratio: number) => {
+const fitStage = (
+  width: number,
+  height: number,
+  ratio: number,
+  picture: number = BUILD_CARD_PICTURE,
+) => {
   const lane = (stageWidth: number) => (stageWidth - 2 * BUILD_CARD_GAP) / 3;
-  let stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - BUILD_CARD_PICTURE)));
-  let cardWidth = Math.floor((BUILD_CARD_PICTURE * 16) / 9);
+  let stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - picture)));
+  let cardWidth = Math.floor((picture * 16) / 9);
   if (lane(stageHeight / ratio) < cardWidth) {
     // Where the Stage and three cards a third of its width exactly fill the height.
     stageHeight = Math.floor(
@@ -492,9 +502,10 @@ function ThreadGameStage({
   const undoLabel =
     undoName === null
       ? "Undo the last build"
-      : `Undo ${undoName}${undoBaseName == null ? "" : `, back to ${undoBaseName}`}${
-          changedSince == null ? "" : "; the changes since are kept on the strip"
-        }`;
+      : // The sentence the build's own menu uses: where the game goes, and that nothing is lost.
+        `Undo ${undoName}: the game goes back to ${undoBaseName ?? "before it"}; ${
+          changedSince == null ? "it stays" : "it and the changes since stay"
+        } on the strip.`;
   const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
@@ -609,11 +620,14 @@ function ThreadGameStage({
           ? 0
           : Math.max(0, composer.getBoundingClientRect().top - bar.getBoundingClientRect().top);
       const height = section.clientHeight + transient - TRANSIENT_ROWS_RESERVE;
+      const cardPicture =
+        window.innerHeight < SHORT_WINDOW ? BUILD_CARD_PICTURE_SHORT : BUILD_CARD_PICTURE;
       // The surface's side insets (mx-3) and a breath above the strip.
       const next = fitStage(
         section.clientWidth - 24,
         height - taken - stripChrome - 8,
         viewportHeight / viewportWidth,
+        cardPicture,
       );
       // The strip's measured chrome rounds with its pictures' size, so a fit can flip by a
       // pixel and back on every measure: a pixel's change is no change.
@@ -648,6 +662,7 @@ function ThreadGameStage({
               section.clientWidth - 24,
               height - taken - stripChrome - 8 + growth,
               viewportHeight / viewportWidth,
+              cardPicture,
             ).width;
       setColumn((previous) =>
         previous !== null && Math.abs(previous - columnWidth) <= 1 ? previous : columnWidth,
@@ -807,6 +822,11 @@ function ThreadGameStage({
     setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
   });
 
+  // The card size the loaded strip will have at this window's height.
+  const skeletonPicture =
+    typeof window !== "undefined" && window.innerHeight < SHORT_WINDOW
+      ? BUILD_CARD_PICTURE_SHORT
+      : BUILD_CARD_PICTURE;
   if (!data)
     return query.error !== null && isGameStatusFailure(query.failure) ? (
       <section className="flex min-h-0 flex-1 items-center justify-center p-6 text-body text-muted-foreground">
@@ -834,7 +854,9 @@ function ThreadGameStage({
         <div className="flex min-h-0 flex-1 justify-center" style={{ containerType: "size" }}>
           <div
             className="flex flex-col"
-            style={{ width: `min(100cqw - 24px, (100cqh - ${SKELETON_STRIP_CHROME}px) * 16 / 9)` }}
+            style={{
+              width: `min(100cqw - 24px, (100cqh - ${skeletonChrome(skeletonPicture)}px) * 16 / 9)`,
+            }}
           >
             <div className="aspect-video w-full rounded-xl bg-stage-well" />
             <div className="flex h-7 items-center pt-2.5">
@@ -847,7 +869,7 @@ function ThreadGameStage({
                 <div
                   key={n}
                   className="flex shrink-0 flex-col gap-1.5"
-                  style={{ width: (BUILD_CARD_PICTURE * 16) / 9 }}
+                  style={{ width: (skeletonPicture * 16) / 9 }}
                 >
                   <Skeleton shape="card" className="aspect-video w-full" />
                   <Skeleton className="h-3 w-20" />

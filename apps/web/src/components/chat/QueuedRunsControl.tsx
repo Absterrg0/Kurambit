@@ -442,13 +442,19 @@ export function QueuedRunsControl({
                               }}
                             >
                               <CornerUpRightIcon />
-                              Steer
+                              {/* A game says what it does in the game's words: the message
+                                  joins the turn that is running instead of waiting for it. */}
+                              {props.oneRow === true ? "Add to this turn" : "Steer"}
                             </Button>
                           </TooltipTrigger>
                           <TooltipPopup>
                             {activeRun === null
-                              ? "There is no active run to steer"
-                              : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                              ? props.oneRow === true
+                                ? "No turn is running to add it to"
+                                : "There is no active run to steer"
+                              : props.oneRow === true
+                                ? "Give it to the agent now, in the turn it is working on"
+                                : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
                         <Tooltip>

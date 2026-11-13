@@ -1396,6 +1396,8 @@ export interface ChatComposerProps {
   gameThread?: boolean;
   /** A game's placeholder in place of its usual one: the agent's suggested next change. */
   gamePlaceholder?: string | null;
+  /** The action that takes the suggestion, shown at the end of its line while the box is empty. */
+  gamePlaceholderAction?: ReactNode | null;
 
   lockedProvider: ProviderDriverKind | null;
   providerStatuses: ServerProvider[];
@@ -1764,6 +1766,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     runtimeMode,
     gameThread = false,
     gamePlaceholder = null,
+    gamePlaceholderAction = null,
     interactionMode: requestedInteractionMode,
     lockedProvider,
     providerStatuses,
@@ -6818,6 +6821,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     placeholderClassName={cn(
                       isComposerResting &&
                         "flex items-center overflow-hidden whitespace-nowrap leading-8",
+                      // A suggestion is words to read, not a hint: secondary text, not placeholder grey.
+                      gameThread && gamePlaceholder !== null && "text-muted-foreground",
                     )}
                     onChange={onPromptChangeStable}
                     onVisibleSelectionChange={expandComposerForEditorChangeStable}
@@ -6930,6 +6935,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  {/* A game's suggestion, written as the placeholder, is taken at the end of its
+                      own line: the action sits where the words it acts on are. */}
+                  {gamePlaceholderAction !== null &&
+                  prompt.trim() === "" &&
+                  gamePlaceholder !== null
+                    ? gamePlaceholderAction
+                    : null}
                   {showComposerAttachAction ? (
                     <>
                       <input

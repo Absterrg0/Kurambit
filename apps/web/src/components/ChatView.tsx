@@ -7759,6 +7759,17 @@ export default function ChatView(props: ChatViewProps) {
                     interactionMode={interactionMode}
                     gameThread={isGameThread}
                     gamePlaceholder={gameNext === null ? null : `Next: ${gameNext}`}
+                    gamePlaceholderAction={
+                      gameNext === null ? null : (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => askAgentToFixStable(gameNext)}
+                        >
+                          Ask for it
+                        </Button>
+                      )
+                    }
                     lockedProvider={modelPickerLockedProvider}
                     providerStatuses={providerStatuses as ServerProvider[]}
                     providerCatalogKnown={serverConfig !== null}
@@ -7884,11 +7895,7 @@ export default function ChatView(props: ChatViewProps) {
             </div>
           </ComposerSurface.Shell>
           {gameLayout && activeThreadRef !== null ? (
-            <GameComposerTray
-              threadRef={activeThreadRef}
-              next={gameNext}
-              onAskNext={askAgentToFixStable}
-            />
+            <GameComposerTray threadRef={activeThreadRef} />
           ) : null}
           <div
             aria-hidden

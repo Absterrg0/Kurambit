@@ -296,9 +296,13 @@ export const compareHeadline = (compared: CompareRows): string => {
     varies === 0
       ? ""
       : `; ${varies === 1 ? "1 reading varies from run to run by itself" : `${varies} readings vary from run to run by themselves`}`;
+  // Readings neither build has are counted here too, so the headline accounts for every row
+  // even where the table's end is out of view.
+  const missing = compared.unmeasured.reduce((sum, group) => sum + group.names.length, 0);
+  const alsoMissing = missing === 0 ? "" : `; ${missing} not measured on either build`;
   if (differ === 0 && same === 0) return "Nothing measured on both builds to compare yet.";
-  if (differ === 0) return `No measured difference${alsoVaries}.`;
-  return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}${alsoVaries}.`;
+  if (differ === 0) return `No measured difference${alsoVaries}${alsoMissing}.`;
+  return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}${alsoVaries}${alsoMissing}.`;
 };
 
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;

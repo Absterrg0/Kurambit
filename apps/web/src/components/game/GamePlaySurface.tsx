@@ -517,9 +517,11 @@ function StartingCard({
     return () => window.clearTimeout(timer);
   }, []);
   return (
-    <div className="absolute inset-0 z-10 grid place-items-center overflow-hidden bg-stage">
+    // The Stage's own well, the loading skeleton's colour, with the last picture a trace under
+    // it: from first paint to the game the Stage stays one near-black, in both themes.
+    <div className="absolute inset-0 z-10 grid place-items-center overflow-hidden bg-stage-well">
       {poster === null ? null : (
-        <div aria-hidden="true" className="absolute inset-0 opacity-25 blur-xs">
+        <div aria-hidden="true" className="absolute inset-0 opacity-10 blur-xs">
           {poster}
         </div>
       )}
