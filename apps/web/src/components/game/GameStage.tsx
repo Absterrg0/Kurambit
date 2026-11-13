@@ -253,7 +253,9 @@ const fitStage = (
 ) => {
   const lane = (stageWidth: number) => (stageWidth - 2 * BUILD_CARD_GAP) / 3;
   let stageHeight = Math.floor(Math.max(0, Math.min(width * ratio, height - picture)));
-  let cardWidth = Math.floor((picture * 16) / 9);
+  // A compact card is only shorter: it keeps the width a full card would have, room for a
+  // build's name, and its picture is cropped to the strip's height.
+  let cardWidth = Math.floor((BUILD_CARD_PICTURE * 16) / 9);
   if (lane(stageHeight / ratio) < cardWidth) {
     // Where the Stage and three cards a third of its width exactly fill the height.
     stageHeight = Math.floor(
@@ -267,7 +269,12 @@ const fitStage = (
     );
     cardWidth = Math.floor(lane(stageHeight / ratio));
   }
-  return { width: Math.floor(stageHeight / ratio), height: stageHeight, cardWidth };
+  return {
+    width: Math.floor(stageHeight / ratio),
+    height: stageHeight,
+    cardWidth,
+    cardPicture: Math.min(picture, Math.floor((cardWidth * 9) / 16)),
+  };
 };
 
 /** The folder's own game frame, not a build copy's. */
@@ -564,6 +571,7 @@ function ThreadGameStage({
     width: number;
     height: number;
     cardWidth: number;
+    cardPicture: number;
   } | null>(null);
   // The column the strip and composer share: the Stage's width, less any growth of the message
   // being written, so a longer message shrinks the Stage but never the composer under it.
@@ -869,9 +877,9 @@ function ThreadGameStage({
                 <div
                   key={n}
                   className="flex shrink-0 flex-col gap-1.5"
-                  style={{ width: (skeletonPicture * 16) / 9 }}
+                  style={{ width: (BUILD_CARD_PICTURE * 16) / 9 }}
                 >
-                  <Skeleton shape="card" className="aspect-video w-full" />
+                  <Skeleton shape="card" className="w-full" style={{ height: skeletonPicture }} />
                   <Skeleton className="h-3 w-20" />
                 </div>
               ))}
@@ -1603,6 +1611,7 @@ function ThreadGameStage({
         // A compare takes the strip's place too: hidden, never squeezed, so its picks and pages stay.
         hidden={compare !== null}
         cardWidth={stageFit?.cardWidth ?? 160}
+        cardPicture={stageFit?.cardPicture ?? 90}
         threadRef={threadRef}
         gameName={gameName}
         playing={playTarget?.build ?? null}

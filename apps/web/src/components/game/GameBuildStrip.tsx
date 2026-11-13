@@ -42,8 +42,9 @@ import {
   timelineMarks,
 } from "./gameBuildTimeline.logic";
 
-/** Below this width a card is compact: its name and its state, its request in the tooltip. */
-const COMPACT_CARD_WIDTH = 150;
+/** Below this picture height a card is compact: its name and its state, its request in the
+ * tooltip. */
+const COMPACT_CARD_PICTURE = 80;
 /** About how many characters a card's two request lines show. */
 const CARD_REQUEST_FITS = 48;
 
@@ -117,6 +118,7 @@ export function GameBuildStrip({
   onLive,
   onCompare,
   cardWidth,
+  cardPicture,
   onInspect,
   hidden = false,
 }: {
@@ -136,6 +138,8 @@ export function GameBuildStrip({
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
   /** Each card's width, which the Stage sets from the height its game's shape leaves over. */
   cardWidth: number;
+  /** The cards' picture height: 16:9 of their width, or shorter on a short window. */
+  cardPicture: number;
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
   /** Something else (a compare) has the strip's place: it stays mounted, out of sight. */
@@ -216,8 +220,10 @@ export function GameBuildStrip({
     let next = row.scrollLeft;
     if (right > row.scrollLeft + row.clientWidth) next = right - row.clientWidth;
     if (left < next) next = left;
-    placed.current = next;
     row.scrollLeft = next;
+    // Where the row actually is: the browser clamps past its end, and a clamped value read as
+    // the person scrolling would stop the row being placed again.
+    placed.current = row.scrollLeft;
   });
   const stageKey = stageBuildId(list, playing);
   useEffect(() => {
@@ -382,10 +388,15 @@ export function GameBuildStrip({
       hidden={hidden}
       className="group/strip mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
-      style={{ "--build-card-width": `${cardWidth}px` } as CSSProperties}
+      style={
+        {
+          "--build-card-width": `${cardWidth}px`,
+          "--build-card-picture": `${cardPicture}px`,
+        } as CSSProperties
+      }
       // Compact cards (a short window) carry a name and a state, no request: it is in the
       // card's tooltip, and the Stage keeps the height.
-      data-compact={cardWidth < COMPACT_CARD_WIDTH ? "true" : undefined}
+      data-compact={cardPicture < COMPACT_CARD_PICTURE ? "true" : undefined}
     >
       {reelOpen ? (
         <GameReel
@@ -461,7 +472,7 @@ export function GameBuildStrip({
             // Cards at their final size, so the strip does not jump when the builds arrive.
             [0, 1, 2].map((n) => (
               <div key={n} className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
-                <Skeleton shape="card" className="aspect-video w-full" />
+                <Skeleton shape="card" className="h-(--build-card-picture) w-full" />
                 <Skeleton className="h-3 w-24" />
               </div>
             ))
@@ -583,7 +594,10 @@ function BuildCard({
           build={build}
           title={buildName(build)}
           mark="name"
-          className={cn("aspect-video w-full rounded-md", undone && "opacity-50 saturate-50")}
+          className={cn(
+            "h-(--build-card-picture) w-full rounded-md",
+            undone && "opacity-50 saturate-50",
+          )}
         >
           <CardRing
             on={picking ? false : onStage}
@@ -607,7 +621,7 @@ function BuildCard({
           }
           // An undone build's state is that it is undone; its checks describe a game no longer
           // on the Stage, so they do not compete with the current build's.
-          aside={undone ? "Undone" : <CheckDelta build={build} previous={previous} />}
+          aside={undone ? "Undone" : checkDelta(build, previous)}
           meta={
             <>
               {step === null ? null : (
@@ -657,7 +671,7 @@ function CardCaption({
           variant="meta"
           tone={strong ? "strong" : "default"}
           truncate
-          render={<span className="min-w-0" />}
+          render={<span className="max-w-full min-w-0" />}
         >
           {title}
         </Text>
@@ -758,7 +772,7 @@ function PickBadge() {
  * something to look at says so, and only that; one that only repeats the count before it says
  * nothing.
  */
-function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild | null }) {
+function checkDelta(build: GameBuild, previous: GameBuild | null): ReactNode {
   const state = build.facts.state;
   if (state === "queued" || state === "measuring")
     return (
@@ -815,7 +829,7 @@ function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: s
         gameName={gameName}
         fallback={null}
         threadRef={null}
-        className="aspect-video w-full rounded-md"
+        className="h-(--build-card-picture) w-full rounded-md"
       />
       <CardCaption strong={false} title="Now" meta="The game so far" />
     </div>
@@ -829,7 +843,7 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
       data-game-build-slot=""
       className={cn("flex w-(--build-card-width) shrink-0 flex-col gap-1.5", NEW_CARD_MOTION)}
     >
-      <div className="flex aspect-video w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
+      <div className="flex h-(--build-card-picture) w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
         <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
         <Text variant="meta" tone="default">
           {slot.label}
@@ -907,7 +921,7 @@ function NowCard({
           gameName={gameName}
           fallback={changed ? current : null}
           threadRef={threadRef}
-          className="aspect-video w-full rounded-md"
+          className="h-(--build-card-picture) w-full rounded-md"
         >
           {borrowed ? (
             // The picture is the last build's until the Stage shows the game: it says so.
