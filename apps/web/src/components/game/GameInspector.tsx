@@ -96,7 +96,7 @@ import {
   buildName,
   buildPhrase,
   formatBuildTime,
-  plainWhy,
+  notMeasuredWhy,
   undoOutcome,
 } from "./gameBuilds.logic";
 import {
@@ -821,7 +821,7 @@ function NotMeasured({
   const folded = new Map<string, Array<GameCheck>>();
   for (const fact of facts)
     if (fact.reading._tag === "not-measured") {
-      const why = startFailed ? DID_NOT_START : fact.reading.why;
+      const why = startFailed ? DID_NOT_START : notMeasuredWhy(fact.reading);
       folded.set(why, [...(folded.get(why) ?? []), fact]);
     }
   // One row like every check, the names wrapping rather than cut; every name and
@@ -866,8 +866,8 @@ function NotMeasured({
                   </Text>
                 ) : null}
                 <Text variant="meta" tone="muted" render={<span />}>
-                  {plainWhy(why).charAt(0).toUpperCase() + plainWhy(why).slice(1)}
-                  {/[.!?]$/.test(plainWhy(why)) ? "" : "."}
+                  {why.charAt(0).toUpperCase() + why.slice(1)}
+                  {/[.!?]$/.test(why) ? "" : "."}
                 </Text>
                 {notes.map((line) => (
                   <Text key={line} variant="meta" tone="muted" render={<span />}>

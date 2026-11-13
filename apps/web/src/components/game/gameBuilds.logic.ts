@@ -8,9 +8,10 @@ import {
   type GameBuild,
   type GameBuildFacts,
   type GameBuildFactsSummary,
-  type GameCheck,
   type GameBuildsResult,
+  type GameCheck,
   type GameFactDelta,
+  type GameFactNotMeasuredCause,
   type GameFactTone,
   type GameFactId,
   type GameFactView,
@@ -100,7 +101,7 @@ export const factLine = (view: GameFactView): FactLine => {
     case "measured":
       return { label: view.label, text: reading.text, tone: reading.tone };
     case "not-measured":
-      return { label: view.label, text: `Not measured: ${reading.why}`, tone: null };
+      return { label: view.label, text: `Not measured: ${notMeasuredWhy(reading)}`, tone: null };
     case "pending":
       return { label: view.label, text: "Not measured yet", tone: null };
   }
@@ -191,53 +192,36 @@ const checksPhrase = (facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">):
 };
 
 /**
- * PURE. A reason a fact was not measured, as a person reads it: the machine's load figures
- * and the old play-bot wording stay in the stored reading, where agents read them.
+ * What kept a fact from being measured, in a person's words. The server's own reason, with the
+ * machine's figures and the renderer probe's output, is for agents and bug reports.
  */
-export const plainWhy = (why: string): string =>
-  why
-    .replace(/ \(load [\d.]+ on \d+ cores\)/g, "")
-    // The renderer probe's raw output is for agents and bug reports.
-    .replace(/ \([^()]*RENDERER=[^()]*\)/g, "")
-    // The harness's own diagnosis, in a person's words: what this computer could not do.
-    .replace(
-      /^a harness fault on this machine, not the game's: the plays drew in software.*$/,
-      "this computer has no graphics card Kurambit can use, so it cannot judge speed here",
-    )
-    .replace(
-      /^the harness renders in software here, so the game ran at [\d.]+× real time$/,
-      "this computer ran the game without a graphics card, too slowly to judge",
-    )
-    .replace(/, so the game ran at [\d.]+× real time$/, ", so the game ran too slowly to judge")
-    .replace(
-      "the game's shell predates scene reports",
-      "the game was made before Kurambit read scenes; a new build adds it",
-    )
-    .replace(
-      /the game's shell does not report frame times \(its copy of the shell predates performance measurement\)/,
-      "the game was made before Kurambit measured speed; a new build adds it",
-    )
-    .replace(/\btier bot\b/g, "bot")
-    // Every wording the measurer has used for a missing play bot, stored on older builds, reads
-    // as one sentence.
-    .replace(
-      /(?:this game has )?no play bot yet\b.*$/i,
-      "no play bot yet; Keep going writes one, or ask your agent for one",
-    );
+const CAUSE_WORDS: Readonly<Record<GameFactNotMeasuredCause, string>> = {
+  software:
+    "this computer has no graphics card Kurambit can use, so plays here run too slowly to judge the game",
+  busy: "this computer was busy with other work, so the reading says nothing about the game; the next measure takes it again",
+  slow: "the game ran slower than real time on this computer, too slowly to play through in time",
+  "old-shell": "the game was made before Kurambit measured this; a new build adds it",
+  "no-play-bot": "no play bot yet; Keep going writes one, or ask your agent for one",
+  deferred: "the play bot plays a build when Keep going judges it or when you measure it",
+};
+
+/** PURE. Why a fact has no reading, as a person reads it: its cause's words, else the build's own reason. */
+export const notMeasuredWhy = (reading: {
+  readonly why: string;
+  readonly cause?: GameFactNotMeasuredCause;
+}): string => (reading.cause === undefined ? reading.why : CAUSE_WORDS[reading.cause]);
 
 /** The bot runs, whose readings are an event and its time. */
 const RUN_FACTS: ReadonlySet<GameFactId> = new Set(["idle", "masher", "skilled"]);
-/** A run's event in a word, from its check's sentence: "Random input loses" is "Lost". */
-const runEvent = (sentence: string): string =>
-  /\blos[est]/i.test(sentence)
-    ? "Lost"
-    : /\bwin|\bwon/i.test(sentence)
-      ? "Won"
-      : /crash/i.test(sentence)
-        ? "Crashed"
-        : /answering/i.test(sentence)
-          ? "Stopped answering"
-          : "No ending";
+/** A run's ending in a word: "Random input loses" is "Lost". */
+const RUN_EVENTS: Readonly<Record<NonNullable<GameCheck["ending"]>, string>> = {
+  won: "Won",
+  lost: "Lost",
+  "no-ending": "No ending",
+  crashed: "Crashed",
+  unresponsive: "Stopped answering",
+  "did-not-boot": "Did not start",
+};
 /**
  * What a row's reading means, said under it when it differs: its scale. That a reading varies
  * by itself is said once, by the headline and the row's "Varies".
@@ -334,6 +318,9 @@ export const compareHeadline = (compared: CompareRows): CompareHeadline => {
   };
 };
 
+/** Seconds as the checks write them: a tenth under ten, whole past it. */
+const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
+
 /** PURE. A number's move from A to B in the reading's unit; null where a size means nothing. */
 const moveAmount = (id: GameFactId, a: number, b: number): string | null => {
   const sign = b > a ? "+" : "−";
@@ -343,7 +330,7 @@ const moveAmount = (id: GameFactId, a: number, b: number): string | null => {
   }
   if (!RUN_FACTS.has(id) && id !== "freeze" && id !== "first-response") return null;
   const size = Math.abs(b - a);
-  return size < 0.05 ? null : `${sign}${size < 10 ? size.toFixed(1) : Math.round(size)} s`;
+  return size < 0.05 ? null : `${sign}${seconds(size)}`;
 };
 
 /**
@@ -372,7 +359,7 @@ const sideWhy = (view: GameFactView | undefined): string | null =>
     ? null
     : view.reading._tag === "pending"
       ? "still being measured"
-      : plainWhy(view.reading.why);
+      : notMeasuredWhy(view.reading);
 
 /**
  * PURE. Two builds' facts as the compare view draws them: the lead checks first, by the
@@ -384,8 +371,8 @@ export const compareRows = (
   viewsB: ReadonlyArray<GameFactView>,
   /** Each side's checks as the Inspector words them, so a cell says its reading, not its row. */
   checks?: {
-    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading">>;
-    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading">>;
+    readonly a: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading" | "ending">>;
+    readonly b: ReadonlyArray<Pick<GameCheck, "id" | "sentence" | "value" | "reading" | "ending">>;
   },
 ): CompareRows => {
   // A reading in the Inspector's words: its number when it has one ("at 7.9 s"), with its
@@ -401,15 +388,15 @@ export const compareRows = (
     const check = checks?.[side].find((entry) => entry.id === id);
     if (check === undefined) return fallback;
     // A bot run's reading names what happened, not only when: "Lost at 4.8 s".
-    if (RUN_FACTS.has(id) && check.value !== null)
-      return `${runEvent(check.sentence)} ${check.value}`;
-    // Colour and motion are numbers, named by the row: just the number.
-    if (id === "colour") return check.value?.replace(/^largest colour /, "") ?? fallback;
-    if (id === "freeze" && check.value !== null)
-      return check.value === "no still stretch"
-        ? "None"
-        : check.value.replace(/^longest (still )?/, "");
-    if (id === "motion") return fallback.replace(/^Motion |^Almost no motion \(|\)$/g, "");
+    if (RUN_FACTS.has(id) && check.ending !== null && check.value !== null)
+      return `${RUN_EVENTS[check.ending]} ${check.value}`;
+    // Colour, motion and the longest still stretch are numbers, named by the row: just the number.
+    const number = check.reading._tag === "measured" ? check.reading.value : null;
+    if (number !== null) {
+      if (id === "colour") return `${Math.round(number * 100)}%`;
+      if (id === "motion") return number.toFixed(1);
+      if (id === "freeze") return number === 0 ? "None" : seconds(number);
+    }
     const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
     if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;
     return check.sentence.toLowerCase() === name.toLowerCase() ? "Yes" : check.sentence;
@@ -451,7 +438,7 @@ export const compareRows = (
     if (delta.change === "not-comparable" && delta.a === null && delta.b === null) {
       const why =
         whyA === whyB || whyB === null
-          ? (whyA ?? plainWhy(delta.why ?? "no reading"))
+          ? (whyA ?? delta.why ?? "no reading")
           : whyA === null
             ? whyB
             : `A: ${whyA}; B: ${whyB}`;
@@ -469,7 +456,7 @@ export const compareRows = (
         note:
           delta.a === null || delta.b === null
             ? null
-            : `Not comparable: ${plainWhy(delta.why ?? "measured differently")}`,
+            : `Not comparable: ${delta.why ?? "measured differently"}`,
       });
       if (delta.a === null) missing("A", whyA ?? "no reading", name);
       else if (delta.b === null) missing("B", whyB ?? "no reading", name);
