@@ -1,7 +1,6 @@
 import { GameStage } from "./game/GameStage";
 import { GameComposerTray } from "./game/GameComposerTray";
 import { GameBuildsPanel, GameLookDialog } from "./game/GameInspector";
-import { gameAgentNote as gameAgentNoteOf } from "./game/gameAgentNote.logic";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
 import {
@@ -10,7 +9,6 @@ import {
   GameInspectorResize,
   GamePointedChip,
   GameStageResize,
-  useGameMakingFirstBuild,
   useLatestTurnUndone,
 } from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
@@ -3164,10 +3162,6 @@ export default function ChatView(props: ChatViewProps) {
   const latestTurnUndone = useLatestTurnUndone(
     isGameThread && isServerThread ? activeThreadRef : null,
     activeLatestRun?.runId ?? null,
-  );
-  const gameStageMakingFirst = useGameMakingFirstBuild(
-    isGameThread && isServerThread ? activeThreadRef : null,
-    isWorking,
   );
   const gameNext = useGameNext(
     keepGoingBanner.hidesNext || latestTurnUndone || isWorking ? null : gameNextReply,
@@ -7622,13 +7616,6 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelMaximized,
   });
   const gameLayout = isGameThread && activeThreadRef !== null;
-  const gameAgentNote = gameLayout
-    ? gameAgentNoteOf(
-        timelineEntries,
-        isWorking,
-        activeWorkStartedAt === null ? null : Date.parse(activeWorkStartedAt),
-      )
-    : null;
   // What the person asked of the running turn: the caption of the build slot.
   const gameTurnRequestWhole =
     gameLayout && phase === "running"
@@ -7656,7 +7643,6 @@ export default function ChatView(props: ChatViewProps) {
       hidden={gameStageHidden && gameStageAbove}
       onShowInspector={showCompactInspector}
       turnRequest={gameTurnRequest}
-      note={gameStageMakingFirst ? (gameAgentNote?.text ?? null) : null}
       stripHost={gameStripHost}
     />
   ) : null;

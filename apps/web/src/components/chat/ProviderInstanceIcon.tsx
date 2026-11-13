@@ -54,10 +54,9 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
 }
 
 /**
- * One rule for provider marks: in chrome (pickers, triggers, rows, the sidebar) a mark
- * is mono, in the text's colour, because colour on screen belongs to the games. Brand
- * colour is for surfaces about the provider itself: Settings › Providers, Add provider,
- * first-run sign-in and Usage charts.
+ * Provider marks are identity, so they keep their own colours at rest, as in T3 Code: a
+ * person finds Claude or Codex by its colour in a picker or a row. `mono` is for a mark set
+ * in running text.
  */
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
@@ -81,7 +80,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
     : undefined;
   const badgeContent = props.badgeContent ?? "initials";
-  const mono = (props.tone ?? "mono") === "mono";
+  const mono = (props.tone ?? "brand") === "mono";
   // Raster marks (Antigravity, registry agents) cannot take a fill, so they lose their colour.
   const rasterMonoClass = mono ? "grayscale" : undefined;
   const isAcpRegistry = props.driverKind === "acpRegistry";

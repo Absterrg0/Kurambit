@@ -404,8 +404,6 @@ interface GameStageProps {
   onShowInspector?: (() => void) | undefined;
   /** What the person asked of the turn now running, for the build slot's caption. */
   turnRequest?: string | null;
-  /** The agent's live note, for the Stage while the first build is made. */
-  note?: string | null;
   /** Where the build strip renders: the build panel beside the chat, when it is open. */
   stripHost?: HTMLElement | null;
 }
@@ -418,7 +416,6 @@ function ThreadGameStage({
   hidden = false,
   onShowInspector,
   turnRequest = null,
-  note = null,
   stripHost = null,
 }: GameStageProps) {
   const navigate = useNavigate();
@@ -1635,7 +1632,6 @@ function ThreadGameStage({
           focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
           bridge={{ threadKey, enabled: engine.stageBridge, freezeKey }}
           overlay={<GameStageOverlay threadKey={threadKey} />}
-          note={note}
         />
       </div>
       {/* The builds live in the panel beside the chat; the strip renders there while it is

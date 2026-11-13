@@ -97,7 +97,6 @@ export function GamePlaySurface({
   focusRequest,
   bridge,
   overlay,
-  note = null,
 }: {
   phase: GameStagePhase;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
@@ -132,8 +131,6 @@ export function GamePlaySurface({
   };
   /** Drawn over the playing game: the frozen game's pointer layer, names and path. */
   overlay?: ReactNode;
-  /** The agent's live note, shown while the first build is made. */
-  note?: string | null;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
@@ -181,7 +178,6 @@ export function GamePlaySurface({
             onStop={onStop}
             onAskAgent={onAskAgent}
             onOpenTools={onOpenTools}
-            note={note}
           />
         )}
         {playing ? overlay : null}
@@ -232,7 +228,11 @@ export function GameFrameBox({
       style={
         playing
           ? frameStyle(viewport)
-          : { background: `radial-gradient(120% 90% at 50% 30%, ${pigment}, ${pigmentInk})` }
+          : // The game's own colour as a faint light from above on the Stage's dark, never a
+            // full-bleed wash that reads as an error or a loading screen.
+            {
+              background: `radial-gradient(90% 70% at 50% 0%, color-mix(in srgb, ${pigment} 26%, transparent), transparent), ${pigmentInk}`,
+            }
       }
     >
       {children}
@@ -546,10 +546,8 @@ function StageStateCard({
   onStop,
   onAskAgent,
   onOpenTools,
-  note,
 }: {
   gameName: string;
-  note: string | null;
   phase: GameStagePhase;
   canOperate: boolean;
   operation: { readonly name: string; readonly own: boolean } | null;
@@ -616,20 +614,9 @@ function StageStateCard({
           </>
         ) : null}
         {phase.kind === "first-build" ? (
-          // The top bar says "Making build 1" with the turn's one clock; the Stage carries what
-          // the agent is doing, which nothing else on the screen says while it makes the game.
+          // The top bar says "Making build 1" with the turn's one clock, and the chat under the
+          // Stage shows the agent at work: the Stage only says where the game will appear.
           <div className="flex max-w-md flex-col items-center gap-3">
-            {/* Two lines kept for the agent's words, which sit on the lower one: a line that
-                grows from one to two, or arrives, never moves the game's name above it. */}
-            <Text
-              variant="body"
-              tone="inherit"
-              render={<div className="flex min-h-[2lh] items-end justify-center" />}
-            >
-              {note === null ? null : (
-                <p className="line-clamp-3 text-stage-foreground text-balance">{note}</p>
-              )}
-            </Text>
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
               {phase.saving === true
                 ? "Build 1 is being saved and plays here in a moment."

@@ -12,32 +12,9 @@ import {
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
-import { gameEnvironment } from "../../state/game";
-import { useEnvironmentQuery } from "../../state/query";
 import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
 
 import { useTurnUndo } from "./useBuildActions";
-import { useTurnLanding } from "./useTurnLanding";
-
-/**
- * The game has no build yet while its first turn runs or its build is saved: the Stage shows
- * the making card, with the agent's words.
- */
-export function useGameMakingFirstBuild(
-  threadRef: ScopedThreadRef | null,
-  working: boolean,
-): boolean {
-  const landing = useTurnLanding(threadRef, working);
-  const list = useEnvironmentQuery(
-    threadRef === null
-      ? null
-      : gameEnvironment.builds({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId },
-        }),
-  ).data;
-  return threadRef !== null && (working || landing) && list !== null && list.builds.length === 0;
-}
 
 /** The latest turn's build was undone: its reply and its Next no longer describe the game. */
 export function useLatestTurnUndone(threadRef: ScopedThreadRef | null, runId: RunId | null) {

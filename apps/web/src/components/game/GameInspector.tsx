@@ -4,7 +4,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
-  ArrowDownIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -59,7 +58,6 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { dispatchComposerFocus } from "../../lib/desktopSnapShot";
 import { cn, randomUUID } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import {
@@ -314,25 +312,6 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     data.builds.find((entry) => entry.id === (onStageId ?? data.current)) ??
     data.builds[0] ??
     null;
-  // The checks every build gets, unlit: the loop's next step, shown before it happens.
-  const checksToCome = (
-    <section aria-labelledby="checks-to-come" className="flex flex-col gap-2 px-1">
-      <Text variant="meta" tone="muted" render={<h3 id="checks-to-come" />}>
-        What each build is measured on
-      </Text>
-      <ul className="flex flex-col gap-1.5">
-        {/* The Checks list's own names, in its order: the same checks, before they are read. */}
-        {SKELETON_CHECKS.map((check) => (
-          <li key={check.name} className="flex items-center gap-2">
-            <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
-            <Text variant="meta" tone="muted">
-              {check.name}
-            </Text>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
   if (build === null)
     return working || landing ? (
       <div className="flex flex-col gap-5 p-4">
@@ -342,11 +321,10 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
           </Text>
           <Text variant="meta" tone="muted" render={<p />}>
             {landing
-              ? "Being saved. It plays on the Stage in a moment, and a bot plays it to measure these."
-              : "Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to measure these."}
+              ? "Being saved. It plays on the Stage in a moment, and a bot plays it to check it."
+              : "Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to check it."}
           </Text>
         </div>
-        {checksToCome}
       </div>
     ) : (
       <div className="flex flex-col gap-4 p-4">
@@ -360,18 +338,11 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
             </EmptyTitle>
             <EmptyDescription>
               {shell?.latestRun == null
-                ? "Tell your game what to change. Your agent's change becomes build 1, and a bot plays it to measure its checks here."
+                ? "Tell your game what to change in the chat. Your agent's change becomes build 1, and a bot plays it and checks it here."
                 : "Build 1 lands here when a turn of your agent changes the game."}
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <Button size="sm" variant="outline" onClick={dispatchComposerFocus}>
-              Describe a change
-              <ArrowDownIcon aria-hidden />
-            </Button>
-          </EmptyContent>
         </Empty>
-        {checksToCome}
       </div>
     );
   const detail = (
