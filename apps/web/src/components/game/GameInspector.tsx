@@ -1872,27 +1872,26 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
               nothing to point at, and play does. */}
           <EmptyHeader>
             <EmptyTitle>Nothing named on screen yet</EmptyTitle>
-            <EmptyDescription>
-              {freezeKey === null ? (
-                "Play, then freeze the game to point at something."
-              ) : (
-                <>
-                  Play, then freeze the game (<KbdShortcut>{freezeKey}</KbdShortcut>) to point at
-                  something.
-                </>
-              )}
-            </EmptyDescription>
+            <EmptyDescription>Play, then freeze the game to point at something.</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!gameOnStage}
-              onClick={() => requestStage({ kind: "freeze" })}
-            >
-              {frozenByPerson ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
-              {frozenByPerson ? "Play on" : "Freeze to point at things"}
-            </Button>
+            {/* The action and its key side by side: the key is the same Freeze, said once. */}
+            <span className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!gameOnStage}
+                onClick={() => requestStage({ kind: "freeze" })}
+              >
+                {frozenByPerson ? (
+                  <PlayIcon aria-hidden="true" />
+                ) : (
+                  <PauseIcon aria-hidden="true" />
+                )}
+                {frozenByPerson ? "Play on" : "Freeze to point at things"}
+              </Button>
+              {freezeKey === null ? null : <KbdShortcut>{freezeKey}</KbdShortcut>}
+            </span>
           </EmptyContent>
         </Empty>
       ) : null}
