@@ -707,7 +707,8 @@ function PickBadge() {
 /**
  * What changed in the checks since the build before, over the checks both measured: the thing
  * keep going decides on. While a build is being measured it says only that; a build with
- * something to look at says so; one that only repeats the count before it says nothing.
+ * something to look at says so, and only that; one that only repeats the count before it says
+ * nothing.
  */
 function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild | null }) {
   const state = build.facts.state;
@@ -731,7 +732,9 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
           {bad} to look at
         </span>
       ) : null}
-      {gained !== 0 ? (
+      {/* One phrase beside the name: something to look at says it alone, and the count's
+          change is in the card's tooltip. */}
+      {gained !== 0 && bad === 0 ? (
         <span
           className={gained > 0 ? "text-success-foreground" : "text-warning-foreground"}
           aria-label={`${Math.abs(gained)} ${gained > 0 ? "more" : "fewer"} checks pass`}

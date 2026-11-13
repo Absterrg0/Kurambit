@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronRightIcon, CrosshairIcon, Redo2Icon, Undo2Icon, XIcon } from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
@@ -9,6 +9,7 @@ import {
   useGameWorkspaceStore,
 } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
+import { observeResize } from "../../lib/observeResize";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import type { GameAgentNote } from "./gameAgentNote.logic";
@@ -27,6 +28,15 @@ import { useQuietThreadShell } from "../../state/entities";
  * live while it works, the opening of its reply once it is done. The whole
  * conversation is a click away in the Log.
  */
+/**
+ * PURE. A reply's first clause as a sentence of its own ("Blocks now start falling sooner."), the
+ * note's short form when the whole reply does not fit its one line.
+ */
+export const firstClause = (text: string): string => {
+  const match = text.match(/^(.+?)[:;.!?—]\s/);
+  return match?.[1] === undefined ? text : `${match[1].replace(/[\s,]+$/, "")}.`;
+};
+
 export function GameDirectionNote({
   note,
   onOpenLog,
@@ -34,6 +44,21 @@ export function GameDirectionNote({
   note: GameAgentNote | null;
   onOpenLog: () => void;
 }) {
+  // The whole reply when it fits its line, else its first clause: a sentence, never a cut. An
+  // unseen copy of the whole reply is measured against the line's room.
+  const room = useRef<HTMLParagraphElement | null>(null);
+  const full = useRef<HTMLSpanElement | null>(null);
+  const [short, setShort] = useState(false);
+  const hasNote = note !== null;
+  useLayoutEffect(() => {
+    const box = room.current;
+    const measured = full.current;
+    if (box === null || measured === null) return;
+    const check = () => setShort(measured.scrollWidth > box.clientWidth + 1);
+    check();
+    return observeResize([box, measured], check);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the line mounts once there is a note; before that there is nothing to measure.
+  }, [hasNote]);
   if (note === null) return null;
   return (
     <div className="flex items-start gap-2.5 px-4 pt-2 pb-1.5" data-game-agent-note="">
@@ -46,9 +71,12 @@ export function GameDirectionNote({
         variant="body"
         tone={note.live ? "strong" : "default"}
         // One line, so the room above the composer is one height; the whole reply is in the Log.
-        render={<p className="min-w-0 flex-1 truncate" aria-live="polite" />}
+        render={<p ref={room} className="relative min-w-0 flex-1 truncate" aria-live="polite" />}
       >
-        {note.text}
+        {short ? firstClause(note.text) : note.text}
+        <span ref={full} aria-hidden="true" className="invisible absolute top-0 left-0 w-max">
+          {note.text}
+        </span>
       </Text>
       <Button size="xs" variant="ghost" onClick={onOpenLog} className="shrink-0">
         Log
