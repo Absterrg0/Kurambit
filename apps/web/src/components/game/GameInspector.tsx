@@ -23,7 +23,6 @@ import {
   ScrollTextIcon,
   TriangleAlertIcon,
   Undo2Icon,
-  XIcon,
 } from "lucide-react";
 import {
   GAME_ENGINES,
@@ -41,7 +40,6 @@ import {
   type GameThingValue,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
-import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -49,7 +47,7 @@ import { useDiffPanelStore } from "../../diffPanelStore";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
-import { cn, randomUUID } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import {
   useQuietThreadShell,
@@ -61,7 +59,6 @@ import ChatMarkdown from "../ChatMarkdown";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
@@ -81,7 +78,6 @@ import {
   useCharacterRoute,
 } from "./GameCharacterRoute";
 import { useGameName } from "./GameName";
-import { GameTuneField } from "./GameTuneField";
 import { GameGeneratedArt } from "./GameGeneratedArt";
 import {
   GameGenerationBody,
@@ -104,12 +100,8 @@ import {
   undoOutcome,
 } from "./gameBuilds.logic";
 import {
-  clearStageSelection,
-  forgetStageTuning,
   hoverStageThing,
-  resetStageValues,
   selectStageThing,
-  tuneStageValue,
   useGameFreezeKey,
   useStageStill,
   useThreadStageBridge,
@@ -264,7 +256,7 @@ function BuildTab({ threadRef }: { threadRef: ScopedThreadRef }) {
         inspected?.side !== undefined
           ? `Compare · side ${inspected.side}`
           : nowOnStage
-            ? "The build it changed from"
+            ? "The game changed since this build. The next build measures it."
             : build.id !== onStageId
               ? "Not on the Stage"
               : null
@@ -276,22 +268,7 @@ function BuildTab({ threadRef }: { threadRef: ScopedThreadRef }) {
       }
     />
   );
-  if (!nowOnStage) return detail;
-  // What plays now, then a hard line, then the build the checks are from: green ticks
-  // under the line are history, never a reading of the game on the Stage.
-  return (
-    <>
-      <div className="flex flex-col gap-0.5 border-b border-border p-4">
-        <Text variant="label" tone="strong" render={<h2 />}>
-          Now on the Stage
-        </Text>
-        <Text variant="meta" tone="muted" render={<p />}>
-          Not measured yet. The next build measures it.
-        </Text>
-      </div>
-      {detail}
-    </>
-  );
+  return detail;
 }
 
 function BuildDetail({
@@ -343,157 +320,141 @@ function BuildDetail({
       ? null
       : { title: "Why", text: buildCaption(build), verdict: stepVerdictText(step) };
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
+  const recordings =
+    factsData !== null && factsData.state !== "never" ? (
+      <Recordings threadRef={threadRef} build={build} facts={factsData} />
+    ) : null;
   return (
-    <div className="@container/build">
-      <div className="grid gap-x-10 gap-y-5 p-4 @3xl/build:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-5">
-          {heading === null ? null : (
-            <div className="-mb-3 flex min-h-6 items-center gap-2">
-              <Text
-                variant="meta"
-                tone="strong"
-                emphasis
-                render={<h3 className="min-w-0 flex-1" />}
-              >
-                {heading}
-              </Text>
-              {onBackToStage === null ? null : (
-                <Button size="xs" variant="ghost" onClick={onBackToStage}>
-                  Show the Stage's build
-                </Button>
-              )}
-            </div>
-          )}
-          <BuildActions
-            threadRef={threadRef}
-            build={build}
-            list={list}
-            onCompare={(other) =>
-              requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })
-            }
-          >
-            {/* The strip above already shows the build's picture; its name and time lead here. */}
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <Text variant="label" tone="strong" truncate render={<h2 />}>
-                {buildName(build)}
-              </Text>
-              {/* Where it is, then when it was made; it wraps rather than cut either. Each part
-              leads with its separator and the line's first one is clipped, so a wrap neither
-              ends nor starts a line on it. */}
-              <Text variant="meta" tone="muted">
-                <Separated nowrap>
-                  {onStage ? <span>On the Stage</span> : null}
-                  <span>{formatBuildTime(build.at)}</span>
-                </Separated>
-              </Text>
-            </div>
-          </BuildActions>
-          {asked === null ? null : (
-            <Section title={asked.title}>
-              <Text
-                variant="body"
-                render={<p className="border-l-2 border-border py-0.5 ps-2.5 break-words" />}
-              >
-                {asked.text}
-              </Text>
-              {asked.verdict === null ? null : (
-                <Text variant="meta" tone="muted" render={<p />}>
-                  {asked.verdict.charAt(0).toUpperCase() + asked.verdict.slice(1)}
-                </Text>
-              )}
-            </Section>
-          )}
-          <Section
-            // Under another build's heading, the checks name whose they are: never read as the Stage's.
-            title={heading === null ? "Checks" : `Checks · ${buildName(build)}`}
-            detail={
-              factsData !== null && factsData.state !== "never" && build.available ? (
-                checksSummary(factsData, busy && factsData.message.trim() !== "")
-              ) : factsData === null && facts.error === null && build.available ? (
-                // The summary's line, held while the checks are read.
-                <Skeleton className="my-0.5 h-3 w-36" />
-              ) : null
-            }
-            aside={
-              measure.canMeasure &&
-              build.available &&
-              factsData !== null &&
-              // An unmeasured build's well carries its own Measure now.
-              factsData.state !== "never" &&
-              factsData.state !== "measuring" &&
-              factsData.state !== "queued" ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label="Measure again"
-                        onClick={() => void measure.send(build.id, true)}
-                      />
-                    }
-                  >
-                    <RefreshCwIcon aria-hidden="true" />
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">Measure again</TooltipPopup>
-                </Tooltip>
-              ) : undefined
-            }
-          >
-            {!build.available ? (
-              <Text variant="meta" tone="muted" render={<p />}>
-                This build's history was pruned; only what the strip shows is left.
-              </Text>
-            ) : factsData === null ? (
-              facts.error === null ? (
-                <ChecksLoading />
-              ) : (
-                <Text variant="meta" tone="muted" render={<p />}>
-                  {facts.error}
-                </Text>
-              )
-            ) : factsData.state === "never" ? (
-              <Empty variant="well">
-                <EmptyHeader>
-                  <EmptyTitle>Not measured yet</EmptyTitle>
-                  <EmptyDescription>
-                    {factsData.message.trim() === ""
-                      ? "A bot plays this build and its checks land here."
-                      : factsData.message}
-                  </EmptyDescription>
-                </EmptyHeader>
-                {measure.canMeasure ? (
-                  <EmptyContent>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void measure.send(build.id, true)}
-                    >
-                      Measure now
-                    </Button>
-                  </EmptyContent>
-                ) : null}
-              </Empty>
-            ) : (
-              <>
-                <SinceBase threadRef={threadRef} build={build} list={list} />
-                <Checks threadRef={threadRef} facts={factsData} />
-              </>
+    <div className="flex flex-col">
+      <div className="flex flex-col gap-3 border-b border-border p-4">
+        {heading === null ? null : (
+          <div className="flex items-start gap-2 rounded-md bg-accent px-2.5 py-1.5">
+            <Text variant="caption" tone="default" render={<p className="min-w-0 flex-1" />}>
+              {heading}
+            </Text>
+            {onBackToStage === null ? null : (
+              <Button size="xs" variant="ghost" className="-my-0.5" onClick={onBackToStage}>
+                Show the Stage's build
+              </Button>
             )}
-            {/* Only a refusal: a queued or running measurement says so in the line under the title. */}
-            {measureAnswer !== null && measureAnswer.failed ? (
-              <Text variant="meta" tone="destructive" render={<p role="alert" />}>
-                {measureAnswer.text}
+          </div>
+        )}
+        <BuildActions
+          threadRef={threadRef}
+          build={build}
+          list={list}
+          onCompare={(other) =>
+            requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })
+          }
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <Text variant="title" tone="strong" truncate render={<h2 />}>
+              {buildName(build)}
+            </Text>
+            <Text variant="meta" tone="muted">
+              <Separated nowrap>
+                {onStage ? <span>On the Stage</span> : null}
+                <span>{formatBuildTime(build.at)}</span>
+              </Separated>
+            </Text>
+          </div>
+        </BuildActions>
+        {asked === null ? null : (
+          <div className="flex flex-col gap-1">
+            <Text
+              variant="body"
+              render={<p className="border-l-2 border-border py-0.5 ps-2.5 break-words" />}
+            >
+              {asked.text}
+            </Text>
+            {asked.verdict === null ? null : (
+              <Text variant="meta" tone="muted" render={<p />}>
+                {asked.verdict.charAt(0).toUpperCase() + asked.verdict.slice(1)}
               </Text>
-            ) : null}
-          </Section>
-        </div>
-        <div className="flex min-w-0 flex-col gap-5">
-          <WhatChanged threadRef={threadRef} build={build} />
-          {factsData !== null && factsData.state !== "never" ? (
-            <Recordings threadRef={threadRef} build={build} facts={factsData} />
+            )}
+          </div>
+        )}
+      </div>
+      {recordings === null ? null : <div className="border-b border-border p-4">{recordings}</div>}
+      <div className="border-b border-border p-4">
+        <Section
+          title="Checks"
+          detail={
+            factsData !== null && factsData.state !== "never" && build.available ? (
+              checksSummary(factsData, busy && factsData.message.trim() !== "")
+            ) : factsData === null && facts.error === null && build.available ? (
+              <Skeleton className="my-0.5 h-3 w-36" />
+            ) : null
+          }
+          aside={
+            measure.canMeasure &&
+            build.available &&
+            factsData !== null &&
+            factsData.state !== "never" &&
+            factsData.state !== "measuring" &&
+            factsData.state !== "queued" ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Measure again"
+                      onClick={() => void measure.send(build.id, true)}
+                    />
+                  }
+                >
+                  <RefreshCwIcon aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Measure again</TooltipPopup>
+              </Tooltip>
+            ) : undefined
+          }
+        >
+          {!build.available ? (
+            <Text variant="meta" tone="muted" render={<p />}>
+              This build's history was pruned; only its picture and name are left.
+            </Text>
+          ) : factsData === null ? (
+            facts.error === null ? (
+              <ChecksLoading />
+            ) : (
+              <Text variant="meta" tone="muted" render={<p />}>
+                {facts.error}
+              </Text>
+            )
+          ) : factsData.state === "never" ? (
+            <div className="flex flex-col items-start gap-2">
+              <Text variant="meta" tone="muted" render={<p />}>
+                {factsData.message.trim() === ""
+                  ? "Not measured yet. A bot plays this build and its checks land here."
+                  : factsData.message}
+              </Text>
+              {measure.canMeasure ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void measure.send(build.id, true)}
+                >
+                  Measure now
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <Checks threadRef={threadRef} facts={factsData} />
+              <SinceBase threadRef={threadRef} build={build} list={list} />
+            </>
+          )}
+          {measureAnswer !== null && measureAnswer.failed ? (
+            <Text variant="meta" tone="destructive" render={<p role="alert" />}>
+              {measureAnswer.text}
+            </Text>
           ) : null}
-        </div>
+        </Section>
+      </div>
+      <div className="p-4">
+        <WhatChanged threadRef={threadRef} build={build} />
       </div>
     </div>
   );
@@ -1180,8 +1141,32 @@ function WhatChanged({ threadRef, build }: { threadRef: ScopedThreadRef; build: 
         )
       }
     >
-      {words === "" ? null : <ChatMarkdown text={words} cwd={undefined} threadRef={threadRef} />}
+      {words === "" ? null : <ClampedReply text={words} threadRef={threadRef} />}
     </Section>
+  );
+}
+
+/** The agent's reply, a few lines of it until asked for the rest: the whole of it is in the chat. */
+function ClampedReply({ text, threadRef }: { text: string; threadRef: ScopedThreadRef }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 420;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <div className={cn("relative w-full", long && !open && "max-h-40 overflow-hidden")}>
+        <ChatMarkdown text={text} cwd={undefined} threadRef={threadRef} />
+        {long && !open ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background to-transparent"
+          />
+        ) : null}
+      </div>
+      {long ? (
+        <Button size="xs" variant="ghost" className="-ms-2" onClick={() => setOpen(!open)}>
+          {open ? "Show less" : "Show all"}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -1498,6 +1483,27 @@ function BuildActions({
           </Menu>
         ) : null}
       </header>
+      {/* The two things a person does with a build they are looking at, in reach. */}
+      {canPlay || canCompare ? (
+        <div className="-ms-2 flex flex-wrap items-center gap-1">
+          {canPlay ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => requestStage({ kind: "play", build: refOf(build) })}
+            >
+              <PlayIcon aria-hidden="true" />
+              Play this build
+            </Button>
+          ) : null}
+          {canCompare && previous !== undefined ? (
+            <Button size="sm" variant="ghost" onClick={() => onCompare(previous)}>
+              <ColumnsIcon aria-hidden="true" />
+              Compare with {buildPhrase(buildName(previous))}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {build.noPlay !== null ? (
         <Text variant="meta" tone="muted" render={<p />}>
           {build.noPlay}
@@ -1521,7 +1527,7 @@ const decodeStyle = Schema.decodeUnknownOption(Schema.fromJsonString(GameStyle))
  * cannot point at things, the game is not on the Stage, or it has not answered yet. Null when
  * selecting works, and the list itself says whether it is empty.
  */
-function useSelectNotice(
+export function useSelectNotice(
   threadRef: ScopedThreadRef,
 ): { readonly title: string; readonly body: string } | null {
   const engine = useIsGameThreadStatus(threadRef).data?.manifest.engine.name ?? null;
@@ -1547,222 +1553,6 @@ function useSelectNotice(
       body: "The game is starting. Its named things show here once it answers.",
     };
   return null;
-}
-
-/**
- * The Tune tab: every value the running game tunes (`ctx.tune`), grouped by thing, as controls
- * that change the game at once. The thing pointed at on the frozen Stage comes first, with its
- * look. One Keep makes the changed values a build; Reset puts them back.
- */
-export function GameTunePanel({
-  threadRef,
-  onAsk,
-}: {
-  threadRef: ScopedThreadRef;
-  onAsk: (text: string) => void;
-}) {
-  const threadKey = scopedThreadKey(threadRef);
-  const notice = useSelectNotice(threadRef);
-  const status = useThreadStageBridge(threadKey, (state) => state.status, null);
-  const tunable = useThreadStageBridge(
-    threadKey,
-    (state) => state.capabilities.includes("tune"),
-    false,
-  );
-  const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
-  const selected = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
-  const tunedFrom = useThreadStageBridge(threadKey, (state) => state.tunedFrom, NO_TUNING);
-  const canKeep = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));
-  const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
-  const [keeping, setKeeping] = useState(false);
-  const [said, setSaid] = useState<{ readonly text: string; readonly failed: boolean } | null>(
-    null,
-  );
-  const groups = things.filter(
-    (thing) => (thing.values?.length ?? 0) > 0 && thing.id !== selected?.id,
-  );
-  const changedOf = (thing: GameThing) =>
-    (thing.values ?? []).filter((value) => {
-      const was = tunedFrom[thing.id]?.[value.key];
-      return was !== undefined && was !== value.value;
-    });
-  const changed = [...(selected === null ? [] : [selected]), ...groups]
-    .map((thing) => ({ id: thing.id, values: changedOf(thing) }))
-    .filter((thing) => thing.values.length > 0);
-  const changedCount = changed.reduce((sum, thing) => sum + thing.values.length, 0);
-  const keepAll = async () => {
-    setKeeping(true);
-    setSaid(null);
-    const result = await keep({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, things: changed, commandId: randomUUID() },
-    });
-    setKeeping(false);
-    if (result._tag === "Failure")
-      setSaid({ text: String(squashAtomCommandFailure(result)), failed: true });
-    else {
-      for (const thing of changed) forgetStageTuning(thing.id);
-      setSaid({ text: result.value.message, failed: false });
-    }
-  };
-  const playing = status === "ready";
-  const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
-      <div className="mx-auto flex w-full max-w-160 flex-col gap-5 p-4">
-        {notice === null && selected !== null ? (
-          <ThingInspector threadRef={threadRef} thing={selected} />
-        ) : null}
-        {notice !== null ? (
-          <Empty variant="well">
-            <EmptyHeader>
-              <EmptyTitle>{notice.title}</EmptyTitle>
-              <EmptyDescription>{notice.body}</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : !playing ? (
-          <Empty variant="well">
-            <EmptyHeader>
-              <EmptyTitle>Play the game to tune it</EmptyTitle>
-              <EmptyDescription>
-                Its speeds, jump height, timers and counts show here while it runs, and change it as
-                you drag them.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : groups.length === 0 && selected === null ? (
-          <Empty variant="well">
-            <EmptyHeader>
-              <EmptyTitle>Nothing to tune on this screen</EmptyTitle>
-              <EmptyDescription>
-                A game's values show here once play starts. If none show while you play, your agent
-                can expose them.
-              </EmptyDescription>
-            </EmptyHeader>
-            <EmptyContent>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  onAsk(
-                    "Make this game's key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.",
-                  )
-                }
-              >
-                Ask your agent to expose them
-              </Button>
-            </EmptyContent>
-          </Empty>
-        ) : (
-          <div className="-mx-4 border-t border-border">
-            {groups.map((thing) => (
-              <TuneGroup
-                key={thing.id}
-                thing={thing}
-                tunedFrom={tunedFrom[thing.id]}
-                disabled={!tunable}
-              />
-            ))}
-          </div>
-        )}
-        {/* Paused, everything on screen can be pointed at, tunable or not. */}
-        {playing && paused && notice === null ? <ThingsSection threadRef={threadRef} /> : null}
-      </div>
-      {playing && (groups.length > 0 || said !== null) ? (
-        <div className="sticky bottom-0 mt-auto flex flex-col gap-1.5 border-t border-border bg-background px-4 py-3">
-          <div className="flex items-center gap-1.5">
-            <Button
-              size="sm"
-              disabled={changedCount === 0 || keeping || !canKeep}
-              onClick={() => void keepAll()}
-            >
-              {keeping ? "Keeping…" : "Keep as a build"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={Object.keys(tunedFrom).length === 0}
-              onClick={() => {
-                for (const id of Object.keys(tunedFrom)) resetStageValues(id);
-              }}
-            >
-              Reset all
-            </Button>
-          </div>
-          <Text
-            variant="caption"
-            tone={said?.failed === true ? "destructive" : "muted"}
-            render={<p role={said?.failed === true ? "alert" : undefined} />}
-          >
-            {said !== null
-              ? said.text
-              : changedCount > 0
-                ? `${changedCount === 1 ? "One value" : `${changedCount} values`} changed and playing. Keep makes them a build; Undo takes it back.`
-                : "Changes play at once and last until the game reloads, unless you keep them."}
-          </Text>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-const NO_TUNING: Readonly<Record<string, Readonly<Record<string, number | boolean>>>> = {};
-
-/** One thing's values under a header that folds them, the way an inspector groups components. */
-function TuneGroup({
-  thing,
-  tunedFrom,
-  disabled,
-}: {
-  thing: GameThing;
-  tunedFrom: Readonly<Record<string, number | boolean>> | undefined;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(true);
-  return (
-    <section className="border-b border-border pb-1">
-      <div className="flex h-8 items-center gap-1.5 pe-2 ps-1">
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          aria-expanded={open}
-          aria-label={open ? `Fold ${thing.name}` : `Unfold ${thing.name}`}
-          onClick={() => setOpen(!open)}
-        >
-          <ChevronRightIcon
-            className={cn("motion-popup transition-transform", open && "rotate-90")}
-            aria-hidden="true"
-          />
-        </Button>
-        <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
-          {thing.name}
-        </Text>
-        <Text variant="caption" tone="dim">
-          {thing.kind}
-        </Text>
-        <span className="flex-1" />
-        {tunedFrom === undefined ? null : (
-          <Button size="xs" variant="ghost" onClick={() => resetStageValues(thing.id)}>
-            Reset
-          </Button>
-        )}
-      </div>
-      {open
-        ? (thing.values ?? []).map((value) => {
-            const was = tunedFrom?.[value.key];
-            return (
-              <ValueRow
-                key={value.key}
-                value={value}
-                was={was !== undefined && was !== value.value ? was : undefined}
-                disabled={disabled}
-                onChange={(next) => tuneStageValue(thing.id, value.key, next, value.value)}
-              />
-            );
-          })
-        : null}
-    </section>
-  );
 }
 
 /** The Look tab: the game's style, how its characters are made, and the art made for it. */
@@ -1950,7 +1740,7 @@ const KIND_GROUPS: ReadonlyArray<{ readonly kind: GameThing["kind"]; readonly la
 const NO_THINGS: ReadonlyArray<GameThing> = [];
 
 /** Everything the game registered, on screen or not; choosing one points at it. */
-function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
   const freezeKey = useGameFreezeKey();
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
@@ -2079,50 +1869,8 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
-/** The thing pointed at: where its look comes from and its values, tuned live. */
-function ThingInspector({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: GameThing }) {
-  return (
-    <div
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.altKey || event.ctrlKey || event.metaKey) return;
-        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
-          return;
-        event.preventDefault();
-        clearStageSelection();
-      }}
-      className="flex flex-col gap-4 border-y border-border py-4 outline-none"
-    >
-      <header className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <Text variant="title" tone="strong" truncate render={<h3 />}>
-            {thing.name}
-          </Text>
-          <Text variant="caption" tone="muted" truncate>
-            {thing.kind} · {thing.onScreen ? "on screen" : "off screen"} · {thing.id}
-          </Text>
-        </div>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="Stop pointing at it (Esc)"
-          onClick={clearStageSelection}
-        >
-          <XIcon aria-hidden="true" />
-        </Button>
-      </header>
-      <ThingLook threadRef={threadRef} thing={thing} />
-      <ValuesSection threadRef={threadRef} thing={thing} />
-      <Text variant="caption" tone="muted" render={<p />}>
-        It is in the box under the game: what you write there goes to your agent with this frame,
-        the {thing.name.toLowerCase()} and its values.
-      </Text>
-    </div>
-  );
-}
-
 /** Its model or sprite and where it comes from: a generation's own card, or the file. */
-function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: GameThing }) {
+export function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: GameThing }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   const generations = useGameGenerations(threadRef).data;
   const actions = useGenerationActions(threadRef);
@@ -2186,7 +1934,7 @@ function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: Ga
 }
 
 /** A value's name as a person reads it: the game's label, else its key in words ("dashCooldown" → "Dash cooldown"). */
-const valueLabel = (value: GameThingValue) => {
+export const valueLabel = (value: GameThingValue) => {
   if (value.label !== undefined) return value.label;
   const words = value.key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -2195,130 +1943,3 @@ const valueLabel = (value: GameThingValue) => {
     .trim();
   return words.length === 0 ? value.key : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 };
-
-/** Live sliders for its tuned values, kept as a build or put back. */
-function ValuesSection({ threadRef, thing }: { threadRef: ScopedThreadRef; thing: GameThing }) {
-  const threadKey = scopedThreadKey(threadRef);
-  const tunable = useThreadStageBridge(
-    threadKey,
-    (state) => state.capabilities.includes("tune"),
-    false,
-  );
-  const before = useThreadStageBridge(threadKey, (state) => state.tunedFrom[thing.id], undefined);
-  const canKeep = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));
-  const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
-  const [keeping, setKeeping] = useState(false);
-  const [said, setSaid] = useState<{ readonly text: string; readonly failed: boolean } | null>(
-    null,
-  );
-  const values = thing.values ?? [];
-  if (values.length === 0)
-    return (
-      <Section title="Values">
-        <Text variant="meta" tone="muted" render={<p />}>
-          The game tunes no values on this thing. Ask your agent to expose some.
-        </Text>
-      </Section>
-    );
-  const changed = values.filter(
-    (value) => before !== undefined && value.key in before && before[value.key] !== value.value,
-  );
-  const keepAsBuild = async () => {
-    setKeeping(true);
-    setSaid(null);
-    const result = await keep({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        things: [{ id: thing.id, values: changed }],
-        commandId: randomUUID(),
-      },
-    });
-    setKeeping(false);
-    if (result._tag === "Failure")
-      setSaid({ text: String(squashAtomCommandFailure(result)), failed: true });
-    else {
-      forgetStageTuning(thing.id);
-      setSaid({ text: result.value.message, failed: false });
-    }
-  };
-  return (
-    <Section
-      title="Values"
-      aside={
-        tunable ? (
-          <Text variant="caption" tone="muted">
-            Live in the running game
-          </Text>
-        ) : undefined
-      }
-    >
-      <div className="flex flex-col gap-3">
-        {values.map((value) => {
-          const was = before?.[value.key];
-          const edited = was !== undefined && was !== value.value;
-          return (
-            <ValueRow
-              key={value.key}
-              value={value}
-              was={edited ? was : undefined}
-              disabled={!tunable}
-              onChange={(next) => tuneStageValue(thing.id, value.key, next, value.value)}
-            />
-          );
-        })}
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={changed.length === 0 || keeping || !canKeep}
-          onClick={() => void keepAsBuild()}
-        >
-          {keeping ? "Keeping…" : "Keep as a build"}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={before === undefined}
-          onClick={() => resetStageValues(thing.id)}
-        >
-          Reset
-        </Button>
-      </div>
-      <Text
-        variant="caption"
-        tone={said?.failed === true ? "destructive" : "muted"}
-        render={<p role={said?.failed === true ? "alert" : undefined} />}
-      >
-        {said !== null
-          ? said.text
-          : changed.length > 0
-            ? `${changed.length === 1 ? "One value" : `${changed.length} values`} changed and the game is using ${changed.length === 1 ? "it" : "them"}. Keep makes a build; Undo takes it back.`
-            : "Changes play at once and last until the game reloads, unless you keep them."}
-      </Text>
-    </Section>
-  );
-}
-
-function ValueRow({
-  value,
-  was,
-  disabled,
-  onChange,
-}: {
-  value: GameThingValue;
-  was: number | boolean | undefined;
-  disabled: boolean;
-  onChange: (next: number | boolean) => void;
-}) {
-  return (
-    <GameTuneField
-      label={valueLabel(value)}
-      value={value}
-      was={was}
-      disabled={disabled}
-      onChange={onChange}
-    />
-  );
-}

@@ -1,5 +1,6 @@
 import { GameStage } from "./game/GameStage";
-import { GameBuildDetail, GameLookPanel, GameTunePanel } from "./game/GameInspector";
+import { GameBuildDetail, GameLookPanel } from "./game/GameInspector";
+import { GameTunePanel } from "./game/GameTune";
 import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";

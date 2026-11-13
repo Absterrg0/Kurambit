@@ -1,16 +1,23 @@
 import { NumberField } from "@base-ui/react/number-field";
 import { Slider } from "@base-ui/react/slider";
 import type { GameThingValue } from "@kurambit/contracts";
+import { RotateCcwIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
 import { NumberFieldInput } from "../ui/number-field";
 import { Switch } from "../ui/switch";
 import { Text } from "../ui/text";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+
+/** One row's columns: name, control, number, and the reset slot (kept so rows line up). */
+const ROW =
+  "grid h-8 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_3.75rem_1.5rem] items-center gap-2 ps-4 pe-1.5";
 
 /**
- * One tuned value as an engine's inspector shows it: its name (drag it to scrub), a number field
- * to type into, and a short slider over the range the game registered. A value changed from what
- * the game started with carries the live colour, and says what it was.
+ * One tuned value as an engine's inspector shows it: its name (drag it to scrub), a slider over
+ * the range the game registered, and the number to type. A value changed from what the game
+ * started with carries the live colour, says what it was, and puts it back from its reset.
  */
 export function GameTuneField({
   label,
@@ -18,33 +25,31 @@ export function GameTuneField({
   was,
   disabled,
   onChange,
+  onReset,
 }: {
   label: string;
   value: GameThingValue;
   was: number | boolean | undefined;
   disabled: boolean;
   onChange: (next: number | boolean) => void;
+  onReset?: (() => void) | undefined;
 }) {
   const changed = was !== undefined;
+  const reset = <ResetSlot was={was} onReset={onReset} />;
   if (typeof value.value === "boolean")
     return (
-      <div className="grid h-7 grid-cols-[minmax(0,7rem)_1fr] items-center gap-2 ps-6 pe-3">
-        <Text variant="meta" tone="default" truncate>
-          {label}
-        </Text>
-        <div className="flex items-center gap-2">
+      <div className={ROW}>
+        <Name label={label} changed={changed} />
+        <span />
+        <span className="flex justify-end">
           <Switch
             checked={value.value}
             disabled={disabled}
             onCheckedChange={(checked) => onChange(checked)}
             aria-label={label}
           />
-          {changed ? (
-            <Text variant="caption" tone="muted">
-              was {was ? "on" : "off"}
-            </Text>
-          ) : null}
-        </div>
+        </span>
+        {reset}
       </div>
     );
   const number = value.value;
@@ -64,17 +69,12 @@ export function GameTuneField({
       onValueChange={(next) => {
         if (next !== null && Number.isFinite(next)) onChange(next);
       }}
-      className="grid h-7 grid-cols-[minmax(0,7rem)_4.25rem_1fr] items-center gap-2 ps-6 pe-3"
+      className={cn(ROW, "hover:bg-accent/50")}
       data-changed={changed ? "" : undefined}
     >
       <NumberField.ScrubArea className="min-w-0 cursor-ew-resize select-none">
-        <Text variant="meta" tone="default" truncate render={<span className="block" />}>
-          {label}
-        </Text>
+        <Name label={label} changed={changed} />
       </NumberField.ScrubArea>
-      <NumberField.Group className="contents">
-        <NumberFieldInput variant="inspector" aria-label={label} />
-      </NumberField.Group>
       {ranged ? (
         <Slider.Root
           value={number}
@@ -88,19 +88,65 @@ export function GameTuneField({
           }}
           aria-label={label}
         >
-          <Slider.Control className="flex h-5 w-full touch-none items-center">
-            <Slider.Track className="relative h-0.75 w-full rounded-full bg-foreground/10">
+          <Slider.Control className="flex h-6 w-full touch-none items-center">
+            <Slider.Track className="relative h-1 w-full rounded-full bg-foreground/10">
               <Slider.Indicator
-                className={cn("rounded-full", changed ? "bg-live" : "bg-muted-foreground")}
+                className={cn("rounded-full", changed ? "bg-live" : "bg-foreground/35")}
               />
-              <Slider.Thumb className="size-2.5 rounded-full bg-strong-foreground shadow-sm outline-none ring-2 ring-background focus-visible:ring-ring" />
+              <Slider.Thumb className="size-3 rounded-full bg-strong-foreground shadow-sm outline-none ring-2 ring-background focus-visible:ring-ring" />
             </Slider.Track>
           </Slider.Control>
         </Slider.Root>
       ) : (
         <span />
       )}
+      <NumberField.Group className="contents">
+        <NumberFieldInput variant="inspector" aria-label={label} />
+      </NumberField.Group>
+      {reset}
     </NumberField.Root>
+  );
+}
+
+function Name({ label, changed }: { label: string; changed: boolean }) {
+  return (
+    <Text
+      variant="meta"
+      tone={changed ? "inherit" : "muted"}
+      truncate
+      render={<span className={cn("block", changed && "text-live")} />}
+    >
+      {label}
+    </Text>
+  );
+}
+
+/** Puts one value back, with what it was in its tooltip; an empty slot when it is unchanged. */
+function ResetSlot({
+  was,
+  onReset,
+}: {
+  was: number | boolean | undefined;
+  onReset: (() => void) | undefined;
+}) {
+  if (was === undefined || onReset === undefined) return <span />;
+  const before = typeof was === "boolean" ? (was ? "on" : "off") : String(was);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Put back to ${before}`}
+            onClick={onReset}
+          />
+        }
+      >
+        <RotateCcwIcon aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipPopup side="left">Was {before}</TooltipPopup>
+    </Tooltip>
   );
 }
 
