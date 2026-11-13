@@ -16,7 +16,7 @@ import { useTurnLanding } from "./useTurnLanding";
 import { derivePhase } from "../../session-logic";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarThreadStatus } from "../Sidebar.logic";
-import { buildName } from "./gameBuilds.logic";
+import { buildName, doesNotStart } from "./gameBuilds.logic";
 import { gameLibraryStatus, type GameLibraryStatus } from "./gameStatusLine.logic";
 import type { GameLibraryEntry } from "./useGameLibrary";
 
@@ -89,7 +89,10 @@ export function useGameLibraryLine(input: {
     keepGoing: game.run?.step ?? null,
     operationRunning: game.operation?.state === "running",
     saving,
-    build: build == null ? null : { name: buildName(build), at: build.at },
+    build:
+      build == null
+        ? null
+        : { name: buildName(build), at: build.at, doesNotStart: doesNotStart(build.facts) },
     // A game with no chat has no builds to read; any other waits for its read.
     known: main === null || build !== undefined,
   });

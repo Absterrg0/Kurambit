@@ -114,6 +114,8 @@ export function useKeepGoingBanner(
               >
                 Skip
               </Button>
+              {/* The way out of the run, beside the step it would start. */}
+              {stop}
             </>
           ),
         },

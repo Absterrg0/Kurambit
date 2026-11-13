@@ -54,7 +54,7 @@ describe("the keep-going control", () => {
 
   it("names the live mode, is pressed, and holds the budget at its end time", () => {
     expect(control(AUTOPILOT_TURN)).toMatchObject({
-      label: "Autopilot",
+      label: "Keep going · Autopilot",
       pressed: true,
       value: "autopilot",
       budgetDisabled: true,
@@ -112,13 +112,13 @@ describe("the keep-going banner", () => {
   it("shows the proposal with its start time, and waits while held", () => {
     expect(keepGoingBannerView(GUIDED_PROPOSED, MAIN_CHAT, clock)).toMatchObject({
       kind: "proposal",
-      lead: "Step 3 · after an undo:",
+      lead: "Step 3:",
       line: "Try the undone step another way, or a smaller one",
-      detail: "Starts at 14:32",
+      detail: "after an undo · starts at 14:32",
       held: false,
     });
     expect(keepGoingBannerView(GUIDED_HELD, MAIN_CHAT, clock)).toMatchObject({
-      detail: "Waits for you",
+      detail: "after an undo · waits for you",
       held: true,
     });
   });

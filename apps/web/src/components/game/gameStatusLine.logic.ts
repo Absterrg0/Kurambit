@@ -28,6 +28,8 @@ export interface GameStatusInput {
   readonly phase: GameStagePhase["kind"];
   /** The build on the Stage, as a sentence names it ("build 7"); null before one. */
   readonly onStage: string | null;
+  /** The build on the Stage was measured and does not start: said with its name. */
+  readonly onStageDoesNotStart: boolean;
   /** The build on the Stage plays from a copy, not the game folder. */
   readonly copy: boolean;
   /** The game's builds have been read: before that, nothing is said about them. */
@@ -36,6 +38,8 @@ export interface GameStatusInput {
   /** The step keep going is on, in this chat; null when it is not running here. */
   readonly keepGoingStep: number | null;
   readonly keepGoingLive: boolean;
+  /** Keep going's next step is proposed to start at this time ("3:11 PM"); null otherwise. */
+  readonly keepGoingStartsAt: string | null;
   readonly turnRunning: boolean;
   readonly turnStartedAt: number | null;
   /** The number the build being made will take. */
@@ -74,9 +78,12 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
             })
           : // At rest the line names what plays, in the words the Inspector and sidebar use.
             input.onStage !== null
-            ? part(sentence(input.onStage), {
-                hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
-              })
+            ? part(
+                `${sentence(input.onStage)}${input.onStageDoesNotStart ? " · does not start" : ""}`,
+                {
+                  hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
+                },
+              )
             : input.changedSince !== null
               ? part(`Changed since ${input.changedSince} · not measured`, {
                   short: "Changed · not measured",
@@ -108,36 +115,41 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
         dot: "live",
         hint: "Your agent is waiting for your answer in the Log.",
       })
-    : input.keepGoingLive && input.keepGoingStep !== null
-      ? part(`Keep going, step ${input.keepGoingStep}`, {
-          strong: true,
-          dot: "live",
-          hint: "Keep going is improving the game a step at a time, each step a build.",
+    : input.keepGoingLive && input.keepGoingStep !== null && input.keepGoingStartsAt !== null
+      ? // A step proposed for later is not work under way: no working dot until it starts.
+        part(`Keep going · step ${input.keepGoingStep} at ${input.keepGoingStartsAt}`, {
+          hint: "Keep going proposed its next step; it starts then unless you change or skip it.",
         })
-      : input.keepGoingLive
-        ? part("Keep going", {
+      : input.keepGoingLive && input.keepGoingStep !== null
+        ? part(`Keep going · step ${input.keepGoingStep}`, {
             strong: true,
             dot: "live",
             hint: "Keep going is improving the game a step at a time, each step a build.",
           })
-        : input.restoring !== null
-          ? part(input.restoring, { strong: true, dot: "live" })
-          : input.landing
-            ? part(`Saving build ${input.nextBuild}…`, {
-                strong: true,
-                dot: "live",
-                hint: `The agent's turn has ended. Build ${input.nextBuild} is being saved, then it plays here and a bot measures it.`,
-              })
-            : input.turnRunning
-              ? part(`Making build ${input.nextBuild}`, {
+        : input.keepGoingLive
+          ? part("Keep going", {
+              strong: true,
+              dot: "live",
+              hint: "Keep going is improving the game a step at a time, each step a build.",
+            })
+          : input.restoring !== null
+            ? part(input.restoring, { strong: true, dot: "live" })
+            : input.landing
+              ? part(`Saving build ${input.nextBuild}…`, {
                   strong: true,
                   dot: "live",
-                  since: input.turnStartedAt,
-                  hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
+                  hint: `The agent's turn has ended. Build ${input.nextBuild} is being saved, then it plays here and a bot measures it.`,
                 })
-              : input.operation !== null && !input.live
-                ? part(input.operation.text, { dot: "live", since: input.operation.since })
-                : null;
+              : input.turnRunning
+                ? part(`Making build ${input.nextBuild}`, {
+                    strong: true,
+                    dot: "live",
+                    since: input.turnStartedAt,
+                    hint: `Your agent is changing the game. When the turn ends it becomes build ${input.nextBuild}, played and measured here.`,
+                  })
+                : input.operation !== null && !input.live
+                  ? part(input.operation.text, { dot: "live", since: input.operation.since })
+                  : null;
   return [stage, work].filter((entry) => entry !== null);
 };
 
@@ -151,7 +163,12 @@ export interface GameLibraryStatusInput {
   /** A turn has ended and its build is being saved (useTurnLanding). */
   readonly saving: boolean;
   /** The folder's build, else the newest one, as a sentence names it, with when it was made. */
-  readonly build: { readonly name: string; readonly at: string } | null;
+  readonly build: {
+    readonly name: string;
+    readonly at: string;
+    /** It was measured and does not start: its own outcome, said in place of its name alone. */
+    readonly doesNotStart?: boolean;
+  } | null;
   /** The game's builds have been read; before that nothing is said about them. */
   readonly known: boolean;
 }
@@ -187,6 +204,8 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.chats === "working") return line("Building", "live");
   if (input.operationRunning) return line("Building", "live");
   if (input.chats === "failed") return line("The last turn failed", "failed");
+  if (input.build?.doesNotStart === true)
+    return line(`${input.build.name} does not start`, "failed", { at: input.build.at });
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
   if (!input.known) return line("", "pending");
   // A game opened from a folder plays before Kurambit has measured any build of it.

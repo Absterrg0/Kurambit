@@ -101,7 +101,8 @@ import {
   useThreadStageBridge,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
-import { buildName, buildPhrase, checksLine } from "./gameBuilds.logic";
+import { clockTime } from "./keepGoing.logic";
+import { buildName, buildPhrase, checksLine, doesNotStart } from "./gameBuilds.logic";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
 import { GameElapsed } from "./GameElapsed";
@@ -182,6 +183,13 @@ const folderBuildPhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unk
   if (!AsyncResult.isSuccess(result) || result.value.folderEdited === true) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
   return build === undefined ? null : buildPhrase(buildName(build));
+};
+
+/** The build the folder holds was measured and does not start. */
+const folderDoesNotStartOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result) || result.value.folderEdited !== false) return false;
+  const build = result.value.builds.find((each) => each.id === result.value.current);
+  return build !== undefined && doesNotStart(build.facts);
 };
 
 /** The folder's last build, as a sentence names it, when the folder changed since it. */
@@ -478,6 +486,7 @@ function ThreadGameStage({
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
+  const folderDoesNotStart = useEnvironmentQuerySelector(buildsAtom, folderDoesNotStartOf) === true;
   const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
   // On a game changed since its build, the restore keeps those changes as a build of their own.
   const undoLabel =
@@ -1109,12 +1118,19 @@ function ThreadGameStage({
   const statusLine = gameStatusLine({
     phase: shownPhase.kind,
     onStage: playTarget === null ? stageBuildName : buildPhrase(playTarget.label),
+    onStageDoesNotStart: playTarget === null && folderDoesNotStart,
     copy: playTarget !== null,
     known: buildsRead,
     needsChoice:
       quietShell !== null && (quietShell.hasPendingApprovals || quietShell.hasPendingUserInput),
     keepGoingStep: keepGoingHere ? keepGoingStatus.step : null,
     keepGoingLive: keepGoingHere,
+    keepGoingStartsAt:
+      keepGoingHere &&
+      keepGoingStatus.phase === "proposed" &&
+      keepGoingStatus.proposal?.deadline != null
+        ? clockTime(keepGoingStatus.proposal.deadline)
+        : null,
     turnRunning,
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
     nextBuild: nextBuildNumber,
@@ -1401,13 +1417,6 @@ function ThreadGameStage({
             </TooltipPopup>
           </Tooltip>
         </div>
-        {/* Over the Stage's top edge rather than a row above it: a game that throws keeps the
-            Stage its size, and the bar sits on the game it describes. */}
-        {statusBanner === null ? null : (
-          <div className="absolute inset-x-3 top-full z-20 overflow-hidden rounded-t-xl bg-background shadow-sm">
-            {statusBanner}
-          </div>
-        )}
       </header>
       {compare !== null ? (
         <GameBuildCompare
@@ -1478,6 +1487,45 @@ function ThreadGameStage({
         style={playTarget === null && compare === null ? stageFitStyle : undefined}
       >
         {noWebGl ? <NoWebGlCard /> : null}
+        {/* Inside the Stage's own edges: a build that does not start says so in the Stage's
+            middle, with the way to fix it and the way back; any other error lies over the
+            Stage's top edge. Neither takes a row, so the Stage keeps its size. */}
+        {folderDoesNotStart && failureVisible !== null && stageBuildName !== null ? (
+          <div className="pointer-events-none absolute inset-x-3 inset-y-0 z-20 flex items-center justify-center p-6">
+            <div className="pointer-events-auto flex max-w-md min-w-0 flex-col items-center gap-2 text-center text-stage-foreground">
+              <TriangleAlertIcon className="size-5 text-destructive" aria-hidden="true" />
+              <Text variant="label" tone="inherit" render={<p role="alert" />}>
+                {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} does not start`}
+              </Text>
+              <Text
+                variant="caption"
+                tone="inherit"
+                render={<p className="max-w-full truncate font-mono opacity-75" />}
+              >
+                {failureVisible.split("\n")[0] ?? failureVisible}
+              </Text>
+              <div className="mt-1 flex items-center gap-2">
+                <Button size="sm" variant="overlay" onClick={() => onAskAgent(failurePrompt)}>
+                  Ask your agent to fix it
+                </Button>
+                {turnUndoAllowed("undo") ? (
+                  <Button
+                    size="sm"
+                    variant="overlay"
+                    onClick={() => handleRequest({ kind: "undo" }, 0)}
+                  >
+                    <Undo2Icon aria-hidden="true" />
+                    Undo
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : statusBanner === null ? null : (
+          <div className="absolute inset-x-3 top-0 z-20 overflow-hidden rounded-t-xl bg-background shadow-sm">
+            {statusBanner}
+          </div>
+        )}
         <GamePlaySurface
           phase={shownPhase}
           viewport={data.viewport}

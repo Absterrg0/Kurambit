@@ -462,6 +462,14 @@ export const changeWord = (
       : "Less";
 };
 
+/**
+ * PURE. A build was measured and does not start: its own outcome, said in place of a count of
+ * checks to look at, since every other check depends on the game starting.
+ */
+export const doesNotStart = (summary: Pick<GameBuildFactsSummary, "lead">): boolean =>
+  summary.lead?.measured?.includes("boots") === true &&
+  summary.lead.passing?.includes("boots") !== true;
+
 /** PURE. A build's checks have settled: measured, with or without some not measured. */
 export const factsSettled = (summary: Pick<GameBuildFactsSummary, "state">): boolean =>
   summary.state === "measured" || summary.state === "incomplete";

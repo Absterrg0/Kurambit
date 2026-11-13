@@ -1,5 +1,12 @@
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ChevronRightIcon, CrosshairIcon, Redo2Icon, Undo2Icon, XIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CrosshairIcon,
+  Redo2Icon,
+  TriangleAlertIcon,
+  Undo2Icon,
+  XIcon,
+} from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -15,7 +22,7 @@ import { Text } from "../ui/text";
 import type { GameAgentNote } from "./gameAgentNote.logic";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
-import { buildName, buildPhrase } from "./gameBuilds.logic";
+import { buildName, buildPhrase, doesNotStart } from "./gameBuilds.logic";
 import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
 
 import { useTurnUndo } from "./useBuildActions";
@@ -38,12 +45,18 @@ export const firstClause = (text: string): string => {
 };
 
 export function GameDirectionNote({
+  threadRef,
   note,
   onOpenLog,
 }: {
+  threadRef: ScopedThreadRef;
   note: GameAgentNote | null;
   onOpenLog: () => void;
 }) {
+  // A finished turn whose build does not start: the measured outcome takes the agent's line,
+  // since the reply describes a change that does not run; the reply stays in the Log.
+  const latest = useGameLatestBuild(threadRef);
+  const failed = note !== null && !note.live && latest != null && doesNotStart(latest.facts);
   // The whole reply when it fits its line, else its first clause: a sentence, never a cut. An
   // unseen copy of the whole reply is measured against the line's room.
   const room = useRef<HTMLParagraphElement | null>(null);
@@ -60,6 +73,22 @@ export function GameDirectionNote({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- the line mounts once there is a note; before that there is nothing to measure.
   }, [hasNote]);
   if (note === null) return null;
+  if (failed)
+    return (
+      <div className="flex items-start gap-2.5 px-4 pt-2 pb-1.5" data-game-agent-note="failed">
+        <TriangleAlertIcon
+          className="mt-0.5 size-3.5 shrink-0 text-destructive"
+          aria-hidden="true"
+        />
+        <Text variant="body" tone="default" render={<p className="min-w-0 flex-1 truncate" />}>
+          {`${buildName(latest)} does not start. The agent's reply is in the Log.`}
+        </Text>
+        <Button size="xs" variant="ghost" onClick={onOpenLog} className="shrink-0">
+          Log
+          <ChevronRightIcon aria-hidden="true" />
+        </Button>
+      </div>
+    );
   return (
     <div className="flex items-start gap-2.5 px-4 pt-2 pb-1.5" data-game-agent-note="">
       <span

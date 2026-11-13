@@ -208,7 +208,7 @@ export const headline = (proposal: Pick<GameRunProposal, "why" | "text">, max = 
 
 /** What a fact step asks for, in the creator's terms rather than the agent's. */
 const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
-  boots: "Make the game boot cleanly",
+  boots: "Make the game start without errors",
   idle: "Make the game lose when nobody plays",
   masher: "Make random button-mashing lose",
   skilled: "Make the game winnable by a skilled player",

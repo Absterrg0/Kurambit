@@ -872,6 +872,9 @@ function namesPhrase(names: ReadonlyArray<string>): string {
 }
 
 /** Facts not measured, one row per reason. */
+/** Why a build's checks could not be read when the build itself does not start. */
+const DID_NOT_START = "the game did not start, so the bots could not play it";
+
 function NotMeasured({
   facts,
   note,
@@ -879,10 +882,18 @@ function NotMeasured({
   facts: ReadonlyArray<GameCheck>;
   note: (fact: GameFactView) => string | null;
 }) {
+  // A build that does not start leaves every other check unread for that one reason: one row
+  // says so, rather than several rows whose reasons all follow from it.
+  const startFailed = facts.some(
+    (fact) =>
+      fact.id === "boots" && fact.reading._tag === "measured" && fact.reading.tone === "bad",
+  );
   const folded = new Map<string, Array<GameCheck>>();
   for (const fact of facts)
-    if (fact.reading._tag === "not-measured")
-      folded.set(fact.reading.why, [...(folded.get(fact.reading.why) ?? []), fact]);
+    if (fact.reading._tag === "not-measured") {
+      const why = startFailed ? DID_NOT_START : fact.reading.why;
+      folded.set(why, [...(folded.get(why) ?? []), fact]);
+    }
   // One row like every check, the names wrapping rather than cut; every name and
   // why none was measured wait behind its info button.
   return [...folded].map(([why, group]) => {
@@ -897,8 +908,14 @@ function NotMeasured({
             sentence's room and wrap it. Why, and every name, open in a popover that stays. */}
         <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
           {/* A list of labels is no sentence: past two, the row counts them and its popover names them. */}
-          {names.length > 2 ? `${names.length} not measured` : namesPhrase(names)}
-          {names.length > 2 ? null : <span className="sr-only"> (not measured)</span>}
+          {why === DID_NOT_START
+            ? `${names.length} not measured: the game did not start`
+            : names.length > 2
+              ? `${names.length} not measured`
+              : namesPhrase(names)}
+          {names.length > 2 || why === DID_NOT_START ? null : (
+            <span className="sr-only"> (not measured)</span>
+          )}
         </Text>
         <span className="flex w-6 shrink-0 items-center justify-end">
           <Popover>

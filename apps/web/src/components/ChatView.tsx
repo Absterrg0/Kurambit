@@ -7943,6 +7943,7 @@ export default function ChatView(props: ChatViewProps) {
               <GameUndoneNote threadRef={activeThreadRef} runId={activeLatestRun?.runId ?? null} />
             ) : (
               <GameDirectionNote
+                threadRef={activeThreadRef}
                 // Before build 1 the Stage carries the agent's words: said once, there.
                 note={gameStageMakingFirst ? null : gameAgentNote}
                 onOpenLog={() => useGameWorkspaceStore.getState().showInspectorTab("log")}

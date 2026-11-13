@@ -8,7 +8,7 @@ import type {
 } from "@kurambit/contracts";
 
 /** A clock time in the reader's locale: nothing on the client counts down. */
-const clockTime = (at: string): string => {
+export const clockTime = (at: string): string => {
   const date = new Date(at);
   return Number.isNaN(date.getTime())
     ? ""
@@ -128,7 +128,8 @@ export const keepGoingControlView = (
   const endsAt = here ? status.endsAt : null;
   const mode = KEEP_GOING_MODES.find((entry) => entry.mode === status?.mode);
   return {
-    label: here && mode !== undefined ? mode.label : "Keep going",
+    // Running, it says what it is and how: "Keep going · Guided", never the mode alone.
+    label: here && mode !== undefined ? `Keep going · ${mode.label}` : "Keep going",
     pressed: here,
     value: status?.mode ?? "off",
     disabled,
@@ -169,12 +170,12 @@ export type KeepGoingBannerView =
       readonly kind: "proposal";
       readonly id: string;
       readonly stepId: string;
-      /** "Step 3 · a failing fact:" */
+      /** "Step 3:" */
       readonly lead: string;
       /** The proposal's first line; the full text is `text`. */
       readonly line: string;
       readonly text: string;
-      /** "Starts at 14:32", or "Waits for you" while held. */
+      /** Why, then when: "a check to look at · starts at 14:32", or "… · waits for you". */
       readonly detail: string;
       readonly held: boolean;
     }
@@ -226,11 +227,14 @@ export const keepGoingBannerView = (
       kind: "proposal",
       id: `keep-going-proposal:${proposal.stepId}`,
       stepId: proposal.stepId,
-      lead: `${n === null ? "Next step" : `Step ${n}`} · ${stepWhyLabel(proposal.why)}:`,
+      // What it will do first, then why and when, quieter: "Step 1: Make the game start
+      // cleanly", then "the game does not start · starts at 3:11 PM".
+      lead: `${n === null ? "Next step" : `Step ${n}`}:`,
       line: proposal.summary,
       text: proposal.text,
       detail: [
-        proposal.deadline === null ? "Waits for you" : `Starts at ${clock(proposal.deadline)}`,
+        stepWhyLabel(proposal.why),
+        proposal.deadline === null ? "waits for you" : `starts at ${clock(proposal.deadline)}`,
         ...(note === null ? [] : [note]),
       ].join(" · "),
       held,

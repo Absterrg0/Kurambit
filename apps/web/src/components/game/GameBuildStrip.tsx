@@ -29,6 +29,7 @@ import {
   buildCaption,
   buildName,
   checksLine,
+  doesNotStart,
   factsSettled,
   formatBuildTime,
   passDelta,
@@ -720,6 +721,14 @@ function CheckDelta({ build, previous }: { build: GameBuild; previous: GameBuild
       </span>
     );
   if (!factsSettled(build.facts)) return null;
+  // A build that does not start is its own outcome, not one more check to look at.
+  if (doesNotStart(build.facts))
+    return (
+      <span className="flex shrink-0 items-center gap-1 text-destructive-foreground">
+        <TriangleAlertIcon aria-hidden="true" className="size-3 text-destructive" />
+        Does not start
+      </span>
+    );
   const bad = build.facts.bad;
   const gained = passDelta(build, previous) ?? 0;
   if (bad === 0 && gained === 0) return null;
