@@ -1,11 +1,9 @@
 import { GameStage } from "./game/GameStage";
-import { GameComposerTray } from "./game/GameComposerTray";
-import { GameLookPanel, GameTunePanel } from "./game/GameInspector";
-import { GameDockBar, GameDockPanel } from "./game/GameDock";
+import { GameBuildDetail, GameLookPanel, GameTunePanel } from "./game/GameInspector";
 import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
 import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
-import { GamePointedChip, GameDockResize, useLatestTurnUndone } from "./game/GameDirectionBar";
+import { GamePointedChip, GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -349,7 +347,6 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
-import { useGameWorkspaceCompact } from "./game/useGameWorkspaceCompact";
 import { useGameNext } from "./game/GameNextBanner";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useGameGenerationCards } from "./game/GameGenerationCard";
@@ -950,8 +947,6 @@ function chatActionErrorMessage(error: unknown): string {
 const ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE = 3;
 const EMPTY_HELD_TURN_DIFF_SUMMARIES: readonly never[] = [];
 const noopHeldTurnDiff = (_turnId: RunId, _filePath?: string) => {};
-// Under the Stage the composer overlays nothing, so its height pads no timeline.
-const noopComposerOverlayHeight = (_height: number) => {};
 const noopHeldRevert = (_targetTurnCount: number) => {};
 const noopHeldAttachment = (_attachment: ChatFileAttachment) => {};
 
@@ -1656,22 +1651,18 @@ export default function ChatView(props: ChatViewProps) {
     widthStorageKey: `kurambit:preview-panel-width:${activeThreadKey}`,
     ...(isGameThread ? { defaultWidth: 360 } : {}),
   });
-  const dockHeight = useGameWorkspaceStore((state) => state.dockHeight);
-  const dockCollapsed = useGameWorkspaceStore((state) => state.dockCollapsed);
-  const dockTab = useGameWorkspaceStore((state) => state.dockTab);
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
-  const gameWorkspaceCompact = useGameWorkspaceCompact(workspaceLayoutElement, isGameThread);
   // Builds live in T3's right panel, per thread: the palette, a key and a pointed thing ask for
   // them through the workspace store, and this screen opens or toggles them for its thread.
-  const buildsRequest = useGameWorkspaceStore((state) => state.buildsRequest);
-  const [seenBuildsRequestN, setSeenBuildsRequestN] = useState(buildsRequest?.n ?? 0);
-  if (buildsRequest !== null && buildsRequest.n !== seenBuildsRequestN) {
-    setSeenBuildsRequestN(buildsRequest.n);
+  const panelRequest = useGameWorkspaceStore((state) => state.panelRequest);
+  const [seenPanelRequestN, setSeenPanelRequestN] = useState(panelRequest?.n ?? 0);
+  if (panelRequest !== null && panelRequest.n !== seenPanelRequestN) {
+    setSeenPanelRequestN(panelRequest.n);
     if (isGameThread && activeThreadRef !== null) {
-      if (buildsRequest.kind === "toggle") toggleGameTab(activeThreadRef, "tune");
-      else showGameTab(activeThreadRef, buildsRequest.kind === "look" ? "look" : "tune");
+      if (panelRequest.kind === "toggle") toggleGameTab(activeThreadRef, "tune");
+      else showGameTab(activeThreadRef, panelRequest.kind === "show" ? "tune" : panelRequest.kind);
     }
   }
   // A game opens with Tune beside it the first time this session, so its values are in view.
@@ -7512,6 +7503,7 @@ export default function ChatView(props: ChatViewProps) {
         ) : null
       }
       gameLook={isGameThread ? <GameLookPanel threadRef={activeThreadRef} /> : null}
+      gameBuild={isGameThread ? <GameBuildDetail threadRef={activeThreadRef} /> : null}
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
@@ -7607,13 +7599,9 @@ export default function ChatView(props: ChatViewProps) {
       threadRef={activeThreadRef}
       turnRunning={phase === "running"}
       onAskAgent={askAgentToFixStable}
-      compact={gameWorkspaceCompact}
       turnRequest={gameTurnRequest}
     />
   ) : null;
-  // The dock under the game: the chat (with its composer) while Agent is open, else the build's
-  // checks or recordings. The chat stays mounted under the others, so its scroll survives.
-  const gameChatShown = !gameLayout || (!dockCollapsed && dockTab === "agent");
   // One composer for the thread: under the transcript in a chat, under the
   // Stage in a game, so drafts, the queue and pending questions never fork.
   const composerLane = (
@@ -7778,9 +7766,7 @@ export default function ChatView(props: ChatViewProps) {
                     getTimelineScrollableNode={getTimelineScrollableNodeStable}
                     isTimelineAtLogicalEnd={isTimelineAtLogicalEndStable}
                     timelineOverflows={timelineOverflows}
-                    onComposerOverlayHeightChange={
-                      gameLayout ? noopComposerOverlayHeight : publishComposerOverlayHeightStable
-                    }
+                    onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
                     onRestingChange={onComposerRestingChangeStable}
                     promptRef={promptRef}
                     composerImagesRef={composerImagesRef}
@@ -7875,9 +7861,6 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             </div>
           </ComposerSurface.Shell>
-          {gameLayout && activeThreadRef !== null ? (
-            <GameComposerTray threadRef={activeThreadRef} />
-          ) : null}
           <div
             aria-hidden
             className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
@@ -7890,7 +7873,6 @@ export default function ChatView(props: ChatViewProps) {
     <div
       ref={setWorkspaceLayoutElement}
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
-      data-game-workspace-compact={gameWorkspaceCompact ? "true" : "false"}
     >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
@@ -7950,26 +7932,12 @@ export default function ChatView(props: ChatViewProps) {
         </header>
         {gameLayout ? (
           <>
-            <div className="relative flex min-h-0 flex-1 flex-col">{gameStage}</div>
-            {dockCollapsed ? null : <GameDockResize />}
-            <GameDockBar threadRef={activeThreadRef} />
-            {!dockCollapsed && dockTab !== "agent" ? (
-              <div className="flex flex-none flex-col" style={{ height: dockHeight }}>
-                <GameDockPanel threadRef={activeThreadRef} tab={dockTab} />
-              </div>
-            ) : null}
+            <div className="relative flex flex-none flex-col">{gameStage}</div>
+            <GameSplitResize />
           </>
         ) : null}
 
-        <div
-          className={cn(
-            "relative flex min-h-0 min-w-0",
-            gameLayout ? "flex-none" : "flex-1",
-            !gameChatShown && "hidden",
-          )}
-          style={gameLayout ? { height: dockHeight } : undefined}
-          inert={!gameChatShown}
-        >
+        <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
             findOptions={{
               skills: timelineSkills,
@@ -7982,7 +7950,7 @@ export default function ChatView(props: ChatViewProps) {
             controlsRef={threadFindControlsRef}
             onOpenChange={setIsThreadFindActive}
             detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
-            composerOverlayElement={isDraftHeroState || gameLayout ? null : composerOverlayElement}
+            composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
             data-chat-workspace-drop-target="true"
             onDragEnter={workspaceFileDropHandlers.onDragEnter}
             onDragOver={workspaceFileDropHandlers.onDragOver}
@@ -8138,7 +8106,7 @@ export default function ChatView(props: ChatViewProps) {
                 anchorMessageId={paintOnlyDisplayedTimeline ? null : timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReadyStable}
                 onAnchorSizeChanged={onTimelineAnchorSizeChangedStable}
-                contentInsetEndAdjustment={gameLayout ? 0 : composerTimelineInset}
+                contentInsetEndAdjustment={composerTimelineInset}
                 liveFollowEnabled={!paintOnlyDisplayedTimeline && timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChangeStable}
                 onContentOverflowChange={setTimelineOverflows}
@@ -8155,7 +8123,7 @@ export default function ChatView(props: ChatViewProps) {
               {showScrollToBottom && !isThreadFindActive && (
                 <div
                   className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
-                  style={{ bottom: (gameLayout ? 0 : scrollToEndClearance) + 4 }}
+                  style={{ bottom: scrollToEndClearance + 4 }}
                 >
                   <Button
                     aria-label="Scroll to end"

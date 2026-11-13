@@ -1613,7 +1613,7 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["look", "style", "art", "characters", "palette", "game"],
       icon: <ShapesIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        useGameWorkspaceStore.getState().setLookOpen(true);
+        useGameWorkspaceStore.getState().showLook();
       },
     });
     // The game's latest turn build, the one the timeline selects by default.

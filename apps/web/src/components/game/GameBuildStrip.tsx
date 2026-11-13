@@ -127,7 +127,6 @@ export function GameBuildStrip({
   onCompare,
   cardWidth,
   cardPicture,
-  row = false,
   compact,
   onInspect,
   hidden = false,
@@ -148,8 +147,6 @@ export function GameBuildStrip({
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
   /** Each card's width, which the Stage sets from the height its game's shape leaves over. */
   cardWidth: number;
-  /** A timeline row under the viewport: each picture with its name and checks beside it. */
-  row?: boolean;
   /** The cards' picture height: 16:9 of their width, or shorter on a short window. */
   cardPicture: number;
   /** A short window: a card's caption has one line of its request where a full card has two. */
@@ -413,10 +410,8 @@ export function GameBuildStrip({
       ref={settleAfterFirstPaint}
       aria-label="Builds"
       data-game-build-strip=""
-      // Composer menus (the model picker) stop at the strip's top rather than cover the Stage.
-      data-composer-menu-ceiling=""
       hidden={hidden}
-      className="group/strip mx-auto flex w-full max-w-(--game-stage-column) shrink-0 flex-col gap-1.5 px-3 pt-2.5 pb-1.5"
+      className="group/strip flex w-max max-w-full min-w-0 shrink-0 flex-col gap-1.5 px-1 pt-1 pb-0.5"
       // The Stage sizes the cards: wider pictures take the height the game's shape leaves over.
       style={
         {
@@ -427,7 +422,6 @@ export function GameBuildStrip({
       // Compact cards (a short window) have a shorter picture and one line of their request, so
       // the Stage keeps the height and a build is still told by what was asked.
       data-compact={compact ? "true" : undefined}
-      data-layout={row ? "row" : undefined}
     >
       <CardRequestFits
         value={compact ? Math.floor(cardWidth / CAPTION_CHARACTER) : CARD_REQUEST_FITS}

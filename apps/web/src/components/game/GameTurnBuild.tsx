@@ -1,7 +1,18 @@
-import { CheckIcon, CircleDashedIcon, Redo2Icon, TriangleAlertIcon, Undo2Icon } from "lucide-react";
-import type { GameBuild, RunId, ScopedThreadRef } from "@kurambit/contracts";
+import {
+  CheckIcon,
+  CircleDashedIcon,
+  FileDiffIcon,
+  Redo2Icon,
+  TriangleAlertIcon,
+  Undo2Icon,
+} from "lucide-react";
+import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
+import type { TurnDiffFileChange } from "../../types";
+import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { buildName, checksLine, factsSettled } from "./gameBuilds.logic";
@@ -9,11 +20,32 @@ import { stepVerdictText } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
 
 /**
- * A changing chat turn's build in the chat, on one line: its name, its checks,
- * and Undo or Redo while it is the latest. The name shows it on the Stage and
- * in the Inspector, where everything else about it lives.
+ * A changing chat turn's build in the chat, on one line: its name, its checks, the files it
+ * changed (their diff opens in the right panel) and Undo or Redo while it is the latest. The
+ * name plays it on the Stage; its Build tab has everything else.
  */
-export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef; runId: RunId }) {
+export function GameTurnBuild({
+  threadRef,
+  runId,
+  files,
+  onOpenDiff,
+}: {
+  threadRef: ScopedThreadRef;
+  runId: RunId;
+  files: ReadonlyArray<TurnDiffFileChange>;
+  onOpenDiff: () => void;
+}) {
+  const stat = summarizeTurnDiffStats(files);
+  const filesButton =
+    files.length === 0 ? null : (
+      <Button size="xs" variant="ghost" onClick={onOpenDiff}>
+        <FileDiffIcon aria-hidden="true" />
+        {files.length === 1 ? "1 file" : `${files.length} files`}
+        {hasNonZeroStat(stat) ? (
+          <DiffStatLabel additions={stat.additions} deletions={stat.deletions} layout="inline" />
+        ) : null}
+      </Button>
+    );
   const undo = useTurnUndo(threadRef, runId);
   const view = undo.view;
   const open = () =>
@@ -26,10 +58,12 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
       );
   if (view === null)
     return (
-      <div data-game-turn-build="" className="mt-1.5">
+      <div data-game-turn-build="" className="mt-1.5 flex items-center gap-x-1.5">
         <Button size="xs" variant="ghost" onClick={open}>
           Open this turn's build
         </Button>
+        <span className="flex-1" />
+        {filesButton}
       </div>
     );
   const build = view.build;
@@ -37,21 +71,42 @@ export function GameTurnBuild({ threadRef, runId }: { threadRef: ScopedThreadRef
   const step = build.source._tag === "turn" ? build.source.step : null;
   return (
     <div data-game-turn-build={build.id} className="mt-1.5 flex flex-col gap-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+      <div className="-ms-2 flex min-w-0 items-center gap-x-0.5">
         {!factsSettled(build.facts) ? (
-          <CircleDashedIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
+          <CircleDashedIcon
+            className="ms-2 size-3.5 shrink-0 text-dim-foreground"
+            aria-hidden="true"
+          />
         ) : build.facts.bad > 0 ? (
-          <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden="true" />
+          <TriangleAlertIcon className="ms-2 size-3.5 shrink-0 text-warning" aria-hidden="true" />
         ) : (
-          <CheckIcon className="size-3.5 shrink-0 text-success" aria-hidden="true" />
+          <CheckIcon className="ms-2 size-3.5 shrink-0 text-success" aria-hidden="true" />
         )}
         <Button size="xs" variant="ghost" onClick={open} disabled={!build.available}>
           {buildName(build)}
         </Button>
-        <Text variant="meta" tone="muted" truncate>
-          {step?.verdict != null ? `${stepVerdictText(step)} · ` : ""}
-          {checksLine(build.facts)}
-        </Text>
+        <Button
+          size="xs"
+          variant="ghost-muted"
+          className="min-w-0"
+          disabled={!build.available}
+          onClick={() => {
+            const state = useGameWorkspaceStore.getState();
+            state.inspectBuild({
+              threadKey: scopedThreadKey(threadRef),
+              build: build.id,
+              snapshot: build,
+            });
+            state.showInspectorTab("build");
+          }}
+        >
+          <span className="truncate">
+            {step?.verdict != null ? `${stepVerdictText(step)} · ` : ""}
+            {checksLine(build.facts)}
+          </span>
+        </Button>
+        <span className="flex-1" />
+        {filesButton}
         {action !== null ? (
           <Button
             size="xs"

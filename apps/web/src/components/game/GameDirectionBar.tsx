@@ -3,7 +3,7 @@ import { CrosshairIcon, XIcon } from "lucide-react";
 import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
-import { clampGameDockHeight, useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
@@ -51,18 +51,18 @@ export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
 }
 
 /**
- * The line between the game and the dock under it: drag it, or use the arrow keys, to give the
- * dock more or less of the column.
+ * The edge between the game and the chat under it: drag it, or use the arrow keys, to give the chat
+ * more or less of the column. Only a hairline on hover: at rest the column has no lines.
  */
-export function GameDockResize() {
-  const height = useGameWorkspaceStore((state) => state.dockHeight);
-  const setHeight = useGameWorkspaceStore((state) => state.setDockHeight);
+export function GameSplitResize() {
+  const share = useGameWorkspaceStore((state) => state.chatShare);
+  const setShare = useGameWorkspaceStore((state) => state.setChatShare);
   const [dragging, setDragging] = useState(false);
   const move = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging) return;
     const column = event.currentTarget.parentElement?.getBoundingClientRect();
-    if (column === undefined) return;
-    setHeight(clampGameDockHeight(column.bottom - event.clientY, column.height));
+    if (column === undefined || column.height <= 0) return;
+    setShare((column.bottom - event.clientY) / column.height);
   };
   const end = (event: ReactPointerEvent<HTMLDivElement>) => {
     setDragging(false);
@@ -73,14 +73,16 @@ export function GameDockResize() {
     <div
       role="separator"
       aria-orientation="horizontal"
-      aria-label="Resize the dock"
-      aria-valuenow={height}
+      aria-label="Resize the game and the chat"
+      aria-valuenow={Math.round(share * 100)}
+      aria-valuemin={22}
+      aria-valuemax={70}
       tabIndex={0}
       data-dragging={dragging ? "true" : "false"}
       className={cn(
         "relative z-20 -my-1 h-2 shrink-0 cursor-row-resize touch-none select-none outline-none",
-        "after:absolute after:inset-x-0 after:top-1/2 after:h-px after:bg-border",
-        "hover:after:bg-primary/60 focus-visible:after:bg-primary/60 data-[dragging=true]:after:bg-primary",
+        "after:absolute after:inset-x-0 after:top-1/2 after:h-px after:bg-transparent",
+        "hover:after:bg-border focus-visible:after:bg-primary/60 data-[dragging=true]:after:bg-primary/60",
       )}
       onPointerDown={(event) => {
         event.preventDefault();
@@ -91,8 +93,8 @@ export function GameDockResize() {
       onPointerUp={end}
       onPointerCancel={end}
       onKeyDown={(event) => {
-        if (event.key === "ArrowUp") setHeight(height + 24);
-        else if (event.key === "ArrowDown") setHeight(height - 24);
+        if (event.key === "ArrowUp") setShare(share + 0.04);
+        else if (event.key === "ArrowDown") setShare(share - 0.04);
         else return;
         event.preventDefault();
       }}

@@ -22,6 +22,7 @@ import {
   ChevronRight,
   FileDiff,
   Files,
+  ListChecks,
   Palette,
   SlidersHorizontal,
   Globe2,
@@ -485,6 +486,8 @@ function surfaceTitle(
       return "Tune";
     case "look":
       return "Look";
+    case "build":
+      return "Build";
     case "files":
       return "Files";
     case "file":
@@ -562,6 +565,8 @@ function SurfaceIcon({
       return <SlidersHorizontal className="size-3 shrink-0" />;
     case "look":
       return <Palette className="size-3 shrink-0" />;
+    case "build":
+      return <ListChecks className="size-3 shrink-0" />;
     case "files":
       return <Files className="size-3 shrink-0" />;
     case "file":

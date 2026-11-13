@@ -1431,11 +1431,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
         className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"
         style={{ paddingBottom: contentInsetEndAdjustment }}
       >
-        <p className="text-sm text-muted-foreground/30">
-          {gameThread
-            ? "Tell your game what to change. Your agent's work shows here."
-            : "Send a message to start the conversation."}
-        </p>
+        {/* A game's composer already says what to do; its empty chat stays quiet. */}
+        {gameThread ? null : (
+          <p className="text-sm text-muted-foreground/30">
+            Send a message to start the conversation.
+          </p>
+        )}
       </div>
     );
   }
@@ -4066,13 +4067,16 @@ function AssistantChangedFilesSectionInner({
       onFileContextMenu={onFileContextMenuHandler}
     />
   );
-  // A game turn that changed files is a build: its facts, Play and Undo sit under its files.
+  // A game turn that changed files is a build: one line with its checks, its files (the diff opens
+  // in the right panel) and Undo, never the file tree a code turn shows.
   if (!ctx.gameThread || ctx.threadRef === null) return card;
   return (
-    <>
-      {card}
-      <GameTurnBuild threadRef={ctx.threadRef} runId={turnSummary.runId} />
-    </>
+    <GameTurnBuild
+      threadRef={ctx.threadRef}
+      runId={turnSummary.runId}
+      files={checkpointFiles}
+      onOpenDiff={() => onOpenTurnDiff(turnSummary.runId)}
+    />
   );
 }
 

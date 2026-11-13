@@ -64,7 +64,7 @@ export function GameBuildCompare({
   gameName: string;
   /** The Stage is not shown: both sides pause. */
   hidden: boolean;
-  /** The Inspector is beside the compare, so its side can say "in the Inspector". */
+  /** The Build tab is beside the compare, so its side can say "in the Build tab". */
   inspectorOpen: boolean;
   /** Another build picked for a side. */
   onPair: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
@@ -123,7 +123,7 @@ export function GameBuildCompare({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The pair and the way out never scroll away. */}
-      <header className="mx-auto flex w-full max-w-(--game-stage-column) shrink-0 items-center gap-2 px-3 pb-2">
+      <header className="flex w-full shrink-0 items-center gap-2 pb-2">
         <Text variant="meta" tone="muted" render={<h2 className="shrink-0" />}>
           Compare
         </Text>
@@ -177,7 +177,7 @@ export function GameBuildCompare({
       {/* The facts scroll under a fade and beside a thumb that stays, so a cut row always reads
           as more below. */}
       <ScrollArea scrollFade persistentScrollbar className="min-h-0 flex-1">
-        <div className="mx-auto flex w-full max-w-(--game-stage-column) flex-col gap-5 px-3 pb-4">
+        <div className="flex w-full flex-col gap-5 pb-4">
           {comparison === null || sides === null ? (
             query.error === null ? (
               <div className="grid grid-cols-2 gap-3">
@@ -351,7 +351,7 @@ function ComparePane({
           {[
             buildName(build),
             undone ? "undone" : null,
-            shown && inspectorOpen ? "in the Inspector" : null,
+            shown && inspectorOpen ? "in the Build tab" : null,
             formatBuildTime(build.at),
           ]
             .filter((part) => part !== null)

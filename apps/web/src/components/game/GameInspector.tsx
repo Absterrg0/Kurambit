@@ -176,25 +176,11 @@ function Rows({ children }: { children: ReactNode }) {
 
 // ─── Build ────────────────────────────────────────────────────────────────────
 
-/** The build the Inspector shows: the one picked on the strip, else the one on the Stage. */
-/** A build's detail, in the dock under the game: its checks and what changed, or its recordings. */
-export function GameBuildDetail({
-  threadRef,
-  part,
-}: {
-  threadRef: ScopedThreadRef;
-  part: "checks" | "recordings";
-}) {
-  return <BuildPanel threadRef={threadRef} part={part} />;
-}
-
-function BuildPanel({
-  threadRef,
-  part,
-}: {
-  threadRef: ScopedThreadRef;
-  part: "checks" | "recordings";
-}) {
+/**
+ * The right panel's Build tab: the build picked from the builds list or the chat, else the one on
+ * the Stage, with its checks, what it changed and its recordings.
+ */
+export function GameBuildDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -261,7 +247,6 @@ function BuildPanel({
     <BuildDetail
       key={build.id}
       threadRef={threadRef}
-      part={part}
       build={build}
       list={data}
       // A compare's side is on the compare, not the Stage: it is named by its letter.
@@ -307,11 +292,8 @@ function BuildDetail({
   onStage,
   heading,
   onBackToStage,
-  part,
 }: {
   threadRef: ScopedThreadRef;
-  /** The dock's Checks tab (checks beside what changed) or its Recordings tab. */
-  part: "checks" | "recordings";
   build: GameBuild;
   list: GameBuildsResult;
   onStage: boolean;
@@ -352,21 +334,9 @@ function BuildDetail({
       ? null
       : { title: "Why", text: buildCaption(build), verdict: stepVerdictText(step) };
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
-  if (part === "recordings")
-    return (
-      <div className="p-4">
-        {factsData !== null && factsData.state !== "never" ? (
-          <Recordings threadRef={threadRef} build={build} facts={factsData} />
-        ) : (
-          <Text variant="meta" tone="muted" render={<p />}>
-            {buildName(build)} has no recordings yet: a bot plays each build and its runs show here.
-          </Text>
-        )}
-      </div>
-    );
   return (
-    <div className="@container/dock">
-      <div className="grid gap-x-10 gap-y-5 p-4 @3xl/dock:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+    <div className="@container/build">
+      <div className="grid gap-x-10 gap-y-5 p-4 @3xl/build:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           {heading === null ? null : (
             <div className="-mb-3 flex min-h-6 items-center gap-2">
@@ -509,8 +479,11 @@ function BuildDetail({
             ) : null}
           </Section>
         </div>
-        <div className="min-w-0">
+        <div className="flex min-w-0 flex-col gap-5">
           <WhatChanged threadRef={threadRef} build={build} />
+          {factsData !== null && factsData.state !== "never" ? (
+            <Recordings threadRef={threadRef} build={build} facts={factsData} />
+          ) : null}
         </div>
       </div>
     </div>

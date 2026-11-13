@@ -17,8 +17,8 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 /**
  * The Stage end of the bridge (packages/contracts/src/gameStageBridge.ts):
  * what the game on the Stage said about itself, and the way to talk back. One
- * game frame owns it at a time, so the Stage's overlay and the dock's
- * Inspector and Things read the same state without threading props through
+ * game frame owns it at a time, so the Stage's overlay and the right panel's
+ * Tune read the same state without threading props through
  * ChatView. Nothing here is persisted: a reload starts from the game again.
  */
 export type StageBridgeStatus =

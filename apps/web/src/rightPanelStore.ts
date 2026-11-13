@@ -8,7 +8,16 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
-const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal", "tune", "look"] as const;
+const RIGHT_PANEL_KINDS = [
+  "diff",
+  "files",
+  "file",
+  "preview",
+  "terminal",
+  "tune",
+  "look",
+  "build",
+] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -27,6 +36,8 @@ export type RightPanelSurface =
   | { id: "tune"; kind: "tune" }
   /** A game's look: its style, how characters are made, its generated art. */
   | { id: "look"; kind: "look" }
+  /** A game build's checks, what it changed and its recordings. */
+  | { id: "build"; kind: "build" }
   | {
       id: "files";
       kind: "files";
@@ -157,6 +168,8 @@ const singletonSurface = (
       return { id: "tune", kind };
     case "look":
       return { id: "look", kind };
+    case "build":
+      return { id: "build", kind };
   }
 };
 

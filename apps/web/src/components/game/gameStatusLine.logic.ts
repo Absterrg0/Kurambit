@@ -30,6 +30,9 @@ export interface GameStatusInput {
   readonly onStage: string | null;
   /** The build on the Stage was measured and does not start: said with its name. */
   readonly onStageDoesNotStart: boolean;
+  /** The Stage's controls already name the build that plays, so the line names it only when it
+   * has news (it does not start). */
+  readonly onStageNamedElsewhere?: boolean;
   /** The build on the Stage plays from a copy, not the game folder. */
   readonly copy: boolean;
   /** The game's builds have been read: before that, nothing is said about them. */
@@ -78,13 +81,15 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
             })
           : // At rest the line names what plays, in the words the Inspector and sidebar use.
             input.onStage !== null
-            ? part(
-                `${sentence(input.onStage)}${input.onStageDoesNotStart ? " · does not start" : ""}`,
-                {
-                  ...(input.onStageDoesNotStart ? { dot: "failed" as const } : {}),
-                  hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
-                },
-              )
+            ? input.onStageNamedElsewhere === true && !input.onStageDoesNotStart
+              ? null
+              : part(
+                  `${sentence(input.onStage)}${input.onStageDoesNotStart ? " · does not start" : ""}`,
+                  {
+                    ...(input.onStageDoesNotStart ? { dot: "failed" as const } : {}),
+                    hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
+                  },
+                )
             : input.changedSince !== null
               ? part(`Changed since ${input.changedSince} · not measured`, {
                   short: "Changed · not measured",

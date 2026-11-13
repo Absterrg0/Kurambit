@@ -4,10 +4,10 @@ import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { useRightPanelStore } from "../../rightPanelStore";
 
 /**
- * A game's inspector, Tune and Look, is tabs of T3's right panel. Its builds, checks and chat stay
- * in the game's own column, where they are always in view.
+ * A game's inspectors are tabs of T3's right panel: Tune (live values), Look (its style) and Build
+ * (a build's checks, changes and recordings). The game, its chat and its builds stay in the column.
  */
-type GameTab = "tune" | "look";
+type GameTab = "tune" | "look" | "build";
 
 const shownTab = (ref: ScopedThreadRef) => {
   const state = useRightPanelStore.getState().byThreadKey[scopedThreadKey(ref)];

@@ -51,7 +51,7 @@ export function GameStagePlayControls({
   const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-game-play-controls="">
-      <div className="flex items-center gap-0.5 rounded-lg p-0.5 surface-well">
+      <div className="flex items-center gap-0.5">
         <Control
           label="Restart the game"
           disabled={!playing || !canReload}
@@ -159,7 +159,7 @@ function Control({
       <TooltipTrigger
         render={
           <Button
-            size="icon-xs"
+            size="icon-sm"
             variant="ghost"
             aria-label={label}
             {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
