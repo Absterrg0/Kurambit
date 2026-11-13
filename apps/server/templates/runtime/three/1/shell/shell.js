@@ -112,6 +112,24 @@ const { renderer } = look;
 let run = null;
 /** A live title's lasting scene (the game's title(dt, ctx)), or null. */
 let titleCtx = null;
+/**
+ * The title's backdrop when the game has neither title(dt, ctx) nor title art of its own: its first
+ * run's world, built behind the menu, held at its start and orbited slowly, so a game opens on
+ * itself rather than on a dark card. Never moved by input; Play builds the real run fresh.
+ */
+let titleWorld = null;
+// Title art the game ships (style.css's --title-art) keeps the menu on it, as the game chose.
+const ownTitleArt = await fetch("assets/ui/title_bg.png", { method: "HEAD" }).then(
+  (response) => response.ok && (response.headers.get("content-type") ?? "").startsWith("image/"),
+  () => false,
+);
+{
+  // While the world is the backdrop: the menu over it through a soft shade, and no HUD (it is play's).
+  const style = document.createElement("style");
+  style.textContent = `body[data-title-world] #backdrop{background:radial-gradient(ellipse 60% 55% at 50% 45%,rgb(0 0 0/.2),rgb(0 0 0/.62))!important}
+body[data-title-world] #hud,body[data-title-world] #hud-kit,body[data-title-world] #flash{visibility:hidden}`;
+  document.head.append(style);
+}
 let openScreen = null;
 let settingsFrom = null;
 let endBeat = 0;
@@ -242,6 +260,7 @@ function clearRun() {
 }
 
 function startRun() {
+  closeTitleWorld();
   clearRun();
   GameState.state = "playing";
   show(null);
@@ -284,8 +303,114 @@ function showTitle() {
   GameState.result = "";
   GameState.result_text = "";
   GameState.state = "title";
+  openTitleWorld();
   show(screens.title);
   redraw = true;
+}
+
+const TITLE_ORBIT = 0.06; // radians a second: a slow drift, never a spin
+
+function openTitleWorld() {
+  if (game.title !== undefined || game.start === undefined || ownTitleArt || titleWorld !== null)
+    return;
+  const world = newContext();
+  Juice.stage = world.ctx.scene;
+  try {
+    newRun(KEEP);
+    game.start(world.ctx);
+  } catch {
+    // A start that fails here fails in play too, where the check reports it: the plain title stays.
+    disposeTitleWorld(world);
+    return;
+  }
+  GameState.state = "title";
+  // Framed as the game frames itself: around its player (or what it built), from where its own
+  // camera stands, so the drift shows the world the way play will.
+  const scene = world.ctx.scene;
+  const target = new THREE.Vector3();
+  const player = world.ctx.player;
+  if (player?.isObject3D === true) player.getWorldPosition(target);
+  else if (player != null && Number.isFinite(player.x))
+    target.set(player.x, player.y ?? 0, player.z);
+  else new THREE.Box3().setFromObject(scene).getCenter(target);
+  const camera = world.ctx.camera;
+  const offset = camera.position.clone().sub(target);
+  const flat = Math.hypot(offset.x, offset.z);
+  world.title = {
+    target: target.add(new THREE.Vector3(0, 0.6, 0)),
+    radius: flat < 1 ? 9 : Math.min(40, Math.max(4, flat)),
+    // A little lower than play's view, so the title shows the world toward its horizon.
+    height: offset.length() < 1 ? 4 : Math.min(30, Math.max(1.5, offset.y * 0.65)),
+    angle: flat < 1 ? 0.6 : Math.atan2(offset.x, offset.z),
+    updating: typeof game.update === "function",
+  };
+  titleWorld = world;
+  document.body.dataset.titleWorld = "";
+  world.compiling = true;
+  look.compile(scene, camera).then(() => (world.compiling = false));
+  placeTitleCamera(0);
+}
+
+function placeTitleCamera(dt) {
+  const { ctx, title } = titleWorld;
+  title.angle += dt * TITLE_ORBIT;
+  ctx.camera.position.set(
+    title.target.x + Math.sin(title.angle) * title.radius,
+    title.target.y + title.height,
+    title.target.z + Math.cos(title.angle) * title.radius,
+  );
+  ctx.camera.lookAt(title.target);
+}
+
+/** One held frame of the title world: the game's update with no time passing, so its characters
+ * take the poses play gives them, then their clips and the drift advance on real time. */
+function stepTitleWorld(real) {
+  const world = titleWorld;
+  if (world.title.updating)
+    try {
+      game.update(0, world.ctx);
+    } catch {
+      world.title.updating = false;
+    }
+  try {
+    animateShell.update(real);
+  } catch {
+    // An animation the title cannot play leaves the pose as it is.
+  }
+  clearTitleInput(world);
+  placeTitleCamera(real);
+}
+
+function clearTitleInput(world) {
+  world.pressed.clear();
+  world.clicked.clear();
+  world.down.clear();
+}
+
+function closeTitleWorld() {
+  if (titleWorld === null) return;
+  const world = titleWorld;
+  titleWorld = null;
+  delete document.body.dataset.titleWorld;
+  disposeTitleWorld(world);
+}
+
+function disposeTitleWorld(world) {
+  for (const remove of world.listeners) remove();
+  try {
+    game.stop?.(world.ctx);
+  } catch {
+    // Its stop belongs to play; the world is let go either way.
+  }
+  dispose(world.ctx.scene);
+  juiceShell.reset();
+  animateShell.reset();
+  cameraShell.reset();
+  look.reset();
+  bridge.reset();
+  Juice.stage = null;
+  hud.replaceChildren();
+  hudKit.replaceChildren();
 }
 
 onRunEnded((won, text, stats) => {
@@ -723,6 +848,7 @@ function step(dt) {
 function draw(dt) {
   if (run === null) {
     if (titleCtx !== null) look.render(titleCtx.scene, titleCtx.camera, dt);
+    else if (titleWorld !== null) look.render(titleWorld.ctx.scene, titleWorld.ctx.camera, dt);
     else renderer.clear();
     return;
   }
@@ -743,7 +869,8 @@ function draw(dt) {
 function onResize() {
   look.resize(window.innerWidth, window.innerHeight);
   const aspect = window.innerWidth / window.innerHeight;
-  for (const camera of [run?.ctx.camera, titleCtx?.camera]) fit(camera, aspect);
+  for (const camera of [run?.ctx.camera, titleCtx?.camera, titleWorld?.ctx.camera])
+    fit(camera, aspect);
   if (run !== null)
     try {
       game.resize?.(run.ctx);
@@ -922,6 +1049,10 @@ renderer.setAnimationLoop((now) => {
     step(dt);
     if (endBeat > 0 && (endBeat -= real) <= 0) showEnd();
     redraw = true;
+  } else if (run === null && titleWorld !== null && !held && !document.hidden) {
+    dt = real;
+    stepTitleWorld(real);
+    redraw = titleWorld.compiling !== true;
   } else if (run === null && titleCtx !== null && !held && !document.hidden) {
     dt = real;
     try {
