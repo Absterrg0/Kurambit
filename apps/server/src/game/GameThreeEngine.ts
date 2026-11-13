@@ -39,6 +39,21 @@ import {
   type PageScene,
 } from "./sceneReport.ts";
 import { checkPerformance } from "./playPerf.ts";
+import { dominantShare } from "./videoSignals.ts";
+import { PNG } from "pngjs";
+
+/**
+ * Past this share of play's picture in one colour the world reads as a blank to a person: a plain
+ * lawn under a top-down camera holds about 42%, the same lawn dressed with patches 26%. The
+ * build's facts fail a view only past 60%; this is the check's earlier warning.
+ */
+const FLAT_VIEW_SHARE = 0.4;
+/** The share one colour holds in a PNG picture; null when it cannot be read. */
+const flatShareOf = (path: string) =>
+  NodeFSP.readFile(path).then(
+    (bytes) => dominantShare(PNG.sync.read(bytes).data, 4),
+    () => null,
+  );
 
 const BOOT_TIMEOUT_MS = 60_000;
 
@@ -197,6 +212,8 @@ export const makeThreeBackend = (
       // What each entry looked like as the check left it: the agent judges its game from these.
       const views: Array<GameCheckView> = [];
       let playPerf: unknown = null;
+      // The share one colour holds in play's picture, the same reading the build's facts make.
+      let flatView: number | null = null;
       const played = yield* Effect.tryPromise({
         try: async (signal) => {
           let timedOut = false;
@@ -236,8 +253,10 @@ export const makeThreeBackend = (
                 await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
               else await new Promise((resolve) => setTimeout(resolve, 2000));
               const view = NodePath.join(temporary, `view-${entry}.png`);
-              if (await session.still(view))
+              if (await session.still(view)) {
                 views.push({ entry, path: NodePath.relative(ctx.root, view) });
+                if (entry === "gameplay") flatView = await flatShareOf(view);
+              }
               await session.close();
               if (measure) {
                 scenePlay = { page: session.scene(), ms: Date.now() - started };
@@ -314,7 +333,15 @@ export const makeThreeBackend = (
         reported: {
           entries: reached,
           errors: issues,
-          warnings: [],
+          warnings:
+            flatView !== null && flatView > FLAT_VIEW_SHARE
+              ? [
+                  {
+                    file: `${ctx.projectName}/`,
+                    message: `One flat colour fills ${Math.round(flatView * 100)}% of play's picture: the ground or the backdrop reads as a blank. Give it a texture or a material with variation, dress the world in what the brief has, or frame the camera so the world fills the view.`,
+                  },
+                ]
+              : [],
         },
         issues: [...issues],
         run,

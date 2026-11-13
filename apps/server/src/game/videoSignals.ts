@@ -41,12 +41,15 @@ const mean = (values: ReadonlyArray<number>) =>
   values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 
-/** The share of pixels the most common colour holds, quantised to 4 bits a channel. */
-const dominantShare = (rgb: Uint8Array): number => {
+/**
+ * The share of pixels the most common colour holds, quantised to 4 bits a channel; `stride` 4
+ * reads RGBA (a decoded PNG), its alpha ignored.
+ */
+export const dominantShare = (rgb: Uint8Array, stride = 3): number => {
   const counts = new Uint32Array(4096);
   let top = 0;
-  const pixels = Math.floor(rgb.length / 3);
-  for (let i = 0; i < pixels * 3; i += 3) {
+  const pixels = Math.floor(rgb.length / stride);
+  for (let i = 0; i < pixels * stride; i += stride) {
     const bucket = ((rgb[i]! >> 4) << 8) | ((rgb[i + 1]! >> 4) << 4) | (rgb[i + 2]! >> 4);
     const count = ++counts[bucket]!;
     if (count > top) top = count;
