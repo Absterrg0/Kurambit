@@ -638,7 +638,12 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             fact={check}
             text={check.sentence}
             value={check.value}
-            detail={[]}
+            // What stopped a game from starting is the one thing to fix first: said, not hovered.
+            detail={
+              check.id === "boots" && facts.boots.status === "measured" && !facts.boots.value.ok
+                ? [facts.boots.value.detail]
+                : []
+            }
             note={noteOf(check)}
             lead
           />

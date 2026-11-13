@@ -16,12 +16,11 @@
   They import the bare specifier `three`; the import map in the game's
   `index.html` points it at this folder's `three.module.js`. Games load models through
   `ASSETS` and `ctx.assets` (`shell/assets.js`), which uses these.
-- `addons/postprocessing/{EffectComposer,Pass,RenderPass,ShaderPass,MaskPass,UnrealBloomPass,OutputPass}.js`,
-  `addons/shaders/{CopyShader,LuminosityHighPassShader,OutputShader}.js` and
-  `addons/environments/RoomEnvironment.js` (the look, `shell/look.js`): the
-  same tarball's files, added 2026-11-06 (sha512 integrity matches the
-  registry). Like the files above, they pass through the repository's code
-  formatter on commit, which changes whitespace and quotes, not code.
+- `addons/environments/RoomEnvironment.js` (the look's studio reflections, `shell/look.js`) and
+  `addons/postprocessing/Pass.js` (the base class N8AO extends, below): the same tarball's
+  files, added 2026-11-06 (sha512 integrity matches the registry). Like the files above, they
+  pass through the repository's code formatter on commit, which changes whitespace and quotes,
+  not code.
 - `addons/libs/meshopt_decoder.module.js` (the decoder for the meshopt-compressed
   models game_blender_export ships, `shell/assets.js`): the same tarball's file,
   unmodified, added 2026-11-08. meshoptimizer, MIT License, copyright (c)

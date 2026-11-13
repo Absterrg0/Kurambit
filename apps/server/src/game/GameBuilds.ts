@@ -613,6 +613,7 @@ const make = Effect.gen(function* () {
       );
       return {
         scanned: rows.length,
+        newest: rows[0] === undefined ? null : DateTime.formatIso(rows[0].checkpoint.capturedAt),
         oldest:
           rows.at(-1) === undefined ? null : DateTime.formatIso(rows.at(-1)!.checkpoint.capturedAt),
         entries: entries.flat(),
@@ -760,6 +761,7 @@ const make = Effect.gen(function* () {
         entries: listed,
         kept,
         more: floor !== null || listed.length > limit,
+        turnsReadThrough: before === undefined ? turns.newest : null,
         // How many person builds the game has from before `at`: every older
         // turn read, so a page's numbers never depend on what else was loaded.
         personBefore: (at: string) => {
@@ -1028,6 +1030,7 @@ const make = Effect.gen(function* () {
         folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
         restore,
         ...(latestUse === undefined ? {} : { latestUse }),
+        ...(listed.turnsReadThrough === null ? {} : { turnsReadThrough: listed.turnsReadThrough }),
       } satisfies GameBuildsResult;
     });
 

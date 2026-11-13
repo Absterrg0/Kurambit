@@ -1655,18 +1655,7 @@ export default function ChatView(props: ChatViewProps) {
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
-  // Builds live in T3's right panel, per thread: the palette, a key and a pointed thing ask for
-  // them through the workspace store, and this screen opens or toggles them for its thread.
-  const panelRequest = useGameWorkspaceStore((state) => state.panelRequest);
   const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
-  const [seenPanelRequestN, setSeenPanelRequestN] = useState(panelRequest?.n ?? 0);
-  if (panelRequest !== null && panelRequest.n !== seenPanelRequestN) {
-    setSeenPanelRequestN(panelRequest.n);
-    if (isGameThread && activeThreadRef !== null) {
-      if (panelRequest.kind === "toggle") toggleGameTab(activeThreadRef, "tune");
-      else showGameTab(activeThreadRef, panelRequest.kind === "show" ? "tune" : panelRequest.kind);
-    }
-  }
   // A game opens with Tune beside it the first time this session, so its values are in view.
   const panelHasTune = rightPanelState.surfaces.some((surface) => surface.kind === "tune");
   useEffect(() => {
@@ -4393,10 +4382,14 @@ export default function ChatView(props: ChatViewProps) {
   const publishComposerOverlayHeight = (height: number) => {
     const nextHeight = Math.ceil(height);
     if (nextHeight <= 0) return;
-    const isResting = overlayComposerIsResting({
-      composerMounted: composerMountedRef.current,
-      composerReportedResting: composerRestingRef.current,
-    });
+    // A game's composer rests at one row by design and grows only with a long prompt, so its
+    // short chat under the Stage reserves the row it shows, not the room to expand.
+    const isResting =
+      !isGameThread &&
+      overlayComposerIsResting({
+        composerMounted: composerMountedRef.current,
+        composerReportedResting: composerRestingRef.current,
+      });
     const modelStrip = composerOverlayElement?.querySelector<HTMLElement>(
       '[data-composer-model-strip="true"]',
     );

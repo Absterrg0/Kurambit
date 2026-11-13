@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { showGameTab, toggleGameTab, useGameTabShown } from "./gameRightPanel";
 import { GameStagePlayControls, GameStageViewControls } from "./GameStageControls";
 import { GameKeepGoingButton } from "./GameKeepGoingButton";
-import { CheckMarks, useStageChecks } from "./GameStageChecks";
 import {
   CircleStopIcon,
   CrosshairIcon,
@@ -347,7 +346,6 @@ function ThreadGameStage({
   turnRequest = null,
 }: GameStageProps) {
   const navigate = useNavigate();
-  const stageChecks = useStageChecks(threadRef);
   // Hidden by the person: the chat takes the column, and the game pauses and mutes.
   const collapsed = useGameWorkspaceStore((state) => state.gameHidden);
   const setGameHidden = useGameWorkspaceStore((state) => state.setGameHidden);
@@ -1512,9 +1510,6 @@ function ThreadGameStage({
               <Button size="sm" variant="ghost" aria-label="Builds" disabled={compare !== null} />
             }
           >
-            {stageChecks === null || stageChecks.of === 0 ? null : (
-              <CheckMarks checks={stageChecks} />
-            )}
             <Text variant="meta" tone="default" truncate>
               {playTarget?.label ?? folderName ?? "No builds yet"}
             </Text>

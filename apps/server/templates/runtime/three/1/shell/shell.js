@@ -118,11 +118,10 @@ let titleCtx = null;
  * itself rather than on a dark card. Never moved by input; Play builds the real run fresh.
  */
 let titleWorld = null;
-// Title art the game ships (style.css's --title-art) keeps the menu on it, as the game chose.
-const ownTitleArt = await fetch("assets/ui/title_bg.png", { method: "HEAD" }).then(
-  (response) => response.ok && (response.headers.get("content-type") ?? "").startsWith("image/"),
-  () => false,
-);
+// A backdrop the game set (style.css's --title-art) keeps the menu on it, as the game chose. Read
+// from the style, not fetched: a probe for art the game never made is a 404 the check reports.
+const ownTitleArt =
+  getComputedStyle(document.documentElement).getPropertyValue("--title-art").trim() !== "";
 {
   // While the world is the backdrop: the menu over it through a soft shade, and no HUD (it is play's).
   const style = document.createElement("style");

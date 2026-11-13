@@ -2,6 +2,7 @@
 
 import { showOpenGameDialog, useNewGame } from "./game/gameEntryStore";
 import { useTurnUndo } from "./game/useBuildActions";
+import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
 import { useKeepGoing } from "./game/useKeepGoing";
 import {
   CHARACTER_ROUTES,
@@ -792,6 +793,7 @@ function OpenCommandPaletteDialog(props: {
       : gameEnvironment.action.permissionAtom(activeThreadRef.environmentId),
   );
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
+  const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
@@ -1567,14 +1569,12 @@ function OpenCommandPaletteDialog(props: {
       });
     actionItems.push({
       kind: "action",
-      value: "action:game-toggle-inspector",
-      title: "Show or hide builds",
-      searchTerms: ["builds", "inspector", "panel", "checks", "hide", "show", "game"],
+      value: "action:game-toggle-tune",
+      title: "Show or hide Tune",
+      searchTerms: ["tune", "values", "inspector", "panel", "hide", "show", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.chat.toggle",
-      run: async () => {
-        useGameWorkspaceStore.getState().toggleInspector();
-      },
+      run: async () => toggleGameTab(threadRef, "tune"),
     });
     const requestStage = (request: GameStageRequest) => async () => {
       useGameWorkspaceStore.getState().requestStage(request);
@@ -1610,13 +1610,10 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:game-hide",
-      title: useGameWorkspaceStore.getState().gameHidden ? "Show the game" : "Hide the game",
+      title: gameHidden ? "Show the game" : "Hide the game",
       searchTerms: ["hide", "show", "fold", "collapse", "chat", "stage", "game"],
       icon: <PanelTopCloseIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        const { gameHidden, setGameHidden } = useGameWorkspaceStore.getState();
-        setGameHidden(!gameHidden);
-      },
+      run: async () => useGameWorkspaceStore.getState().setGameHidden(!gameHidden),
     });
     actionItems.push({
       kind: "action",
@@ -1624,9 +1621,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Look…",
       searchTerms: ["look", "style", "art", "characters", "palette", "game"],
       icon: <ShapesIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        useGameWorkspaceStore.getState().showLook();
-      },
+      run: async () => showGameTab(threadRef, "look"),
     });
     // The game's latest turn build, the one the timeline selects by default.
     const latestBuild = turnUndo.view?.build ?? null;

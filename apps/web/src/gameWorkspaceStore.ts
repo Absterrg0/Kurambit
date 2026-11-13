@@ -29,9 +29,6 @@ export type GameStageRequest =
   | { readonly kind: "export" }
   | { readonly kind: "generated-art" };
 
-/** What a pointed thing or a build opens in the right panel: its values in Tune, or the build's tab. */
-export type GameInspectorTab = "build" | "scene";
-
 /** How much of the game's column the chat under it keeps, as a share of the column's height. */
 const GAME_CHAT_SHARE_DEFAULT = 0.38;
 const clampGameChatShare = (share: number) =>
@@ -48,18 +45,6 @@ export interface GameInspectedBuild {
 }
 
 interface GameWorkspaceStoreState {
-  /** Shows or hides the game's Tune tab in the right panel. */
-  toggleInspector: () => void;
-  /**
-   * Asks the open game's screen for a right-panel tab: Tune shown or toggled, Look, or Build;
-   * `n` makes a repeat news. The panel is T3's, kept per thread, so the screen acts on it.
-   */
-  panelRequest: {
-    readonly kind: "show" | "toggle" | "look" | "build";
-    readonly n: number;
-  } | null;
-  /** Opens a build's tab, or Tune for what is pointed at on the Stage. */
-  showInspectorTab: (tab: GameInspectorTab) => void;
   inspectedBuild: GameInspectedBuild | null;
   /** Shows a build in the Build tab; null follows the Stage again. */
   inspectBuild: (inspected: GameInspectedBuild | null) => void;
@@ -72,34 +57,24 @@ interface GameWorkspaceStoreState {
   /** The game folded away: the chat takes the column, and the game pauses and mutes. */
   gameHidden: boolean;
   setGameHidden: (hidden: boolean) => void;
-  /** Asks for the Look tab in the right panel. */
-  showLook: () => void;
 }
 
 /** The game screen's layout preferences, one set for every game. */
 export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
   persist(
-    (set) => {
-      const request = (kind: "show" | "toggle" | "look" | "build") =>
-        set((state) => ({ panelRequest: { kind, n: (state.panelRequest?.n ?? 0) + 1 } }));
-      return {
-        toggleInspector: () => request("toggle"),
-        panelRequest: null,
-        showInspectorTab: (tab) => request(tab === "build" ? "build" : "show"),
-        inspectedBuild: null,
-        inspectBuild: (inspected) => set({ inspectedBuild: inspected }),
-        stageRequest: null,
-        requestStage: (stageRequest) =>
-          set((state) => ({
-            stageRequest: { request: stageRequest, n: (state.stageRequest?.n ?? 0) + 1 },
-          })),
-        chatShare: GAME_CHAT_SHARE_DEFAULT,
-        setChatShare: (share) => set({ chatShare: clampGameChatShare(share) }),
-        gameHidden: false,
-        setGameHidden: (hidden) => set({ gameHidden: hidden }),
-        showLook: () => request("look"),
-      };
-    },
+    (set) => ({
+      inspectedBuild: null,
+      inspectBuild: (inspected) => set({ inspectedBuild: inspected }),
+      stageRequest: null,
+      requestStage: (stageRequest) =>
+        set((state) => ({
+          stageRequest: { request: stageRequest, n: (state.stageRequest?.n ?? 0) + 1 },
+        })),
+      chatShare: GAME_CHAT_SHARE_DEFAULT,
+      setChatShare: (share) => set({ chatShare: clampGameChatShare(share) }),
+      gameHidden: false,
+      setGameHidden: (hidden) => set({ gameHidden: hidden }),
+    }),
     {
       name: "kurambit:game-workspace:v7",
       storage: createJSONStorage(() =>

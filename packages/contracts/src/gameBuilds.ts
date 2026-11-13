@@ -1317,6 +1317,11 @@ export const GameBuildsResult = Schema.Struct({
       generations: GameGenerationUse,
     }),
   ),
+  /**
+   * The first page only: when the newest turn checkpoint it read was captured. A turn captured
+   * by then that `builds` does not list made no build (it changed nothing of the game's).
+   */
+  turnsReadThrough: Schema.optionalKey(Schema.String),
 });
 export type GameBuildsResult = typeof GameBuildsResult.Type;
 

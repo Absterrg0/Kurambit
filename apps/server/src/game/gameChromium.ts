@@ -9,6 +9,34 @@ import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import { chromiumChildEnv } from "./gameWebServer.ts";
 import { RUNTIME_ROUTE } from "./gameRuntime.ts";
 
+interface Drawing {
+  readonly owner: string;
+  shared: boolean;
+}
+const drawingNow = new Set<Drawing>();
+
+/**
+ * Runs a game play whose frame times are read, and says whether another game drew on this
+ * machine's GPU beside it: two games drawing at once slow each other, so such a reading says
+ * nothing about either. Plays of one owner (a build's facts, in their lanes) do not count
+ * against each other.
+ */
+export const drawingAlone = <A, E, R>(owner: string, play: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const entry: Drawing = { owner, shared: false };
+      for (const other of drawingNow)
+        if (other.owner !== owner) {
+          other.shared = true;
+          entry.shared = true;
+        }
+      drawingNow.add(entry);
+      return entry;
+    }),
+    (entry) => Effect.map(play, (value) => ({ value, gpuShared: entry.shared })),
+    (entry) => Effect.sync(() => void drawingNow.delete(entry)),
+  );
+
 export interface GameBrowser {
   readonly executable: string;
   /** Chrome's sandbox, on unless the operator turned it off (KURAMBIT_SERVER_BROWSER_SANDBOX=0). */

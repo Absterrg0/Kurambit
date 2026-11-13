@@ -112,6 +112,7 @@ const count = (n: number) =>
 export const checkPerformance = (
   raw: unknown,
   browser: { readonly software: boolean },
+  gpuShared: boolean,
 ): { readonly line: string; readonly warning: string | null } => {
   const record = Option.getOrNull(decodePlayPerf(JSON.stringify(raw ?? null)));
   if (browser.software || record?.software === true)
@@ -136,13 +137,20 @@ export const checkPerformance = (
   ]
     .filter((part) => part !== null)
     .join(" · ");
+  // Another game drawing beside this one slows both, so its times are not this game's to fix;
+  // what it draws (calls, triangles) is the same however busy the GPU was.
+  const timings = gpuShared
+    ? []
+    : [
+        gpu !== null && gpu > CHECK_GPU_BUDGET_MS
+          ? `the GPU takes ${gpu.toFixed(1)} ms a frame (budget ${CHECK_GPU_BUDGET_MS})`
+          : null,
+        record.scale !== null && record.scale < 1
+          ? `the look dropped to ${record.scale}× resolution to keep up`
+          : null,
+      ];
   const costs = [
-    gpu !== null && gpu > CHECK_GPU_BUDGET_MS
-      ? `the GPU takes ${gpu.toFixed(1)} ms a frame (budget ${CHECK_GPU_BUDGET_MS})`
-      : null,
-    record.scale !== null && record.scale < 1
-      ? `the look dropped to ${record.scale}× resolution to keep up`
-      : null,
+    ...timings,
     draws !== null && draws > CHECK_DRAW_CALLS
       ? `${count(draws)} draw calls (budget ${CHECK_DRAW_CALLS}): draw repeated models as one InstancedMesh (buildLevel does) and merge static pieces`
       : null,
@@ -150,14 +158,18 @@ export const checkPerformance = (
       ? `${count(triangles)} triangles (budget ${count(CHECK_TRIANGLES)}): fewer or lighter copies of the densest model, nothing far away drawn at full detail`
       : null,
   ].filter((cost) => cost !== null);
-  const slow = record.fps < SMOOTH_FPS || (record.low1Fps !== null && record.low1Fps < 40);
-  if (costs.length === 0 && !slow) return { line, warning: null };
+  const slow =
+    !gpuShared && (record.fps < SMOOTH_FPS || (record.low1Fps !== null && record.low1Fps < 40));
+  const shown = gpuShared
+    ? `${line} (another game drew on this GPU during the play, so its times are not this game's: check again for them)`
+    : line;
+  if (costs.length === 0 && !slow) return { line: shown, warning: null };
   const why =
     costs.length > 0
       ? `${costs.join("; ")}. Also cheap to cut: the look's ao and bloom passes, shadow casting on small props.`
       : "the GPU has room, so the time goes to the game's own code each frame (allocations, scans over every object, physics) or this machine was busy; profile update(dt) before cutting art.";
   return {
-    line,
+    line: shown,
     warning: `${slow ? "Under 60 fps" : "Heavier than a laptop GPU holds at 60 fps"}: ${why}`,
   };
 };

@@ -15,6 +15,7 @@ import type { TurnDiffFileChange } from "../../types";
 import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
+import { showGameTab } from "./gameRightPanel";
 import { buildName, checksLine, factsSettled } from "./gameBuilds.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
@@ -91,13 +92,12 @@ export function GameTurnBuild({
           className="min-w-0"
           disabled={!build.available}
           onClick={() => {
-            const state = useGameWorkspaceStore.getState();
-            state.inspectBuild({
+            useGameWorkspaceStore.getState().inspectBuild({
               threadKey: scopedThreadKey(threadRef),
               build: build.id,
               snapshot: build,
             });
-            state.showInspectorTab("build");
+            showGameTab(threadRef, "build");
           }}
         >
           <span className="truncate">

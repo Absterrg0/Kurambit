@@ -1,14 +1,13 @@
 import { useEffect } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import * as Option from "effect/Option";
 import { create } from "zustand";
 import {
-  decodeGameToStageMessage,
   type GameStageCapability,
   type GameStageRect,
   type GameStageToGameMessage,
   type GameStageTrace,
   type GameThing,
+  type GameToStageMessage,
 } from "@kurambit/contracts";
 
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -151,89 +150,90 @@ const settleCapture = (png: string | null) => {
   for (const resolve of waiters) resolve(png);
 };
 
-const isLegacyReady = (data: unknown) =>
-  typeof data === "object" && data !== null && (data as { type?: unknown }).type === "studio-ready";
-
 /**
- * Wires one game frame to the bridge while it is mounted and shown. `enabled`
- * is false for engines whose shells have no bridge: their frame never owns it.
+ * Wires one game frame to the bridge while it is mounted and shown, and returns what to do
+ * with each message the frame posts (GameFrame owns the one listener). `enabled` is false for
+ * engines whose shells have no bridge: their frame never owns it.
  */
 export function useStageBridgeFrame(
   owner: string,
   frame: HTMLIFrameElement | null,
   enabled: boolean,
-) {
+): ((message: GameToStageMessage) => void) | undefined {
+  const target = enabled ? (frame?.contentWindow ?? null) : null;
   useEffect(() => {
-    const target = frame?.contentWindow ?? null;
-    if (!enabled || frame === null || target === null) return;
+    if (target === null) return;
     const post = (message: GameStageToGameMessage) => target.postMessage(message, "*");
     const hold = (on: boolean) => {
-      target.postMessage({ type: "studio-visibility", visible: !on }, "*");
+      post({ type: "studio-visibility", visible: !on });
       useStageBridge.setState({ frozen: on });
     };
     useStageBridge.setState({ ...EMPTY, owner, post, hold });
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== target) return;
-      const decoded = decodeGameToStageMessage(event.data);
-      if (Option.isNone(decoded)) {
-        // An old shell's boot signal: the game has no bridge, and says so only once.
-        if (isLegacyReady(event.data) && useStageBridge.getState().status === "waiting")
-          useStageBridge.setState({ status: "none" });
-        return;
-      }
-      const message = decoded.value;
-      switch (message.type) {
-        case "studio-ready":
-          useStageBridge.setState({ status: "ready", capabilities: message.capabilities });
-          post({ type: "studio-things-request" });
-          // One frame of the game as it comes up, so the build it plays has a picture at once.
-          window.setTimeout(() => {
-            if (useStageBridge.getState().owner === owner) void captureStageFrame();
-          }, FIRST_FRAME_MS);
-          return;
-        case "studio-things":
-          useStageBridge.setState({ things: message.things });
-          return;
-        case "studio-hover":
-          useStageBridge.setState({
-            hover: message.id === null ? null : { id: message.id, rect: message.rect },
-          });
-          return;
-        case "studio-selected":
-          useStageBridge.setState({
-            selected:
-              message.thing === null
-                ? null
-                : { thing: message.thing, rect: message.rect, trace: message.trace },
-          });
-          return;
-        case "studio-frozen":
-          // Playing on keeps the selection, so its values can be tuned while playing.
-          useStageBridge.setState(message.on ? { frozen: true } : { frozen: false, hover: null });
-          if (message.on) void captureStageFrame();
-          return;
-        case "studio-frame":
-          settleCapture(message.png);
-          keepStill(owner, message.png);
-          return;
-        case "studio-key":
-          // A focused game keeps every key from the app, so the shell sends Tab up: it moves
-          // on past the Stage, as Tab does everywhere else. Escape clears what was pointed at,
-          // else plays on. Freezing is its own key, so Tab never traps anyone in the game.
-          if (message.key === "Tab") focusPastFrame(frame);
-          else if (useStageBridge.getState().selected !== null) clearStageSelection();
-          else toggleStageFreeze();
-          return;
-      }
-    };
-    window.addEventListener("message", onMessage);
     return () => {
-      window.removeEventListener("message", onMessage);
       settleCapture(null);
       if (useStageBridge.getState().owner === owner)
         useStageBridge.setState({ ...EMPTY, owner: null, post: null, hold: null });
     };
-  }, [owner, frame, enabled]);
+  }, [owner, target]);
+  return target === null || frame === null
+    ? undefined
+    : (message: GameToStageMessage) => receive(owner, frame, message);
+}
+
+function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMessage) {
+  if (useStageBridge.getState().owner !== owner) return;
+  switch (message.type) {
+    case "studio-ready":
+      // An old shell's boot signal carries no bridge: Freeze only holds that game.
+      if (message.bridge === undefined) {
+        if (useStageBridge.getState().status === "waiting")
+          useStageBridge.setState({ status: "none" });
+        return;
+      }
+      useStageBridge.setState({ status: "ready", capabilities: message.capabilities ?? [] });
+      useStageBridge.getState().post?.({ type: "studio-things-request" });
+      // One frame of the game as it comes up, so the build it plays has a picture at once.
+      window.setTimeout(() => {
+        if (useStageBridge.getState().owner === owner) void captureStageFrame();
+      }, FIRST_FRAME_MS);
+      return;
+    case "studio-things":
+      useStageBridge.setState({ things: message.things });
+      return;
+    case "studio-hover":
+      useStageBridge.setState({
+        hover: message.id === null ? null : { id: message.id, rect: message.rect },
+      });
+      return;
+    case "studio-selected":
+      useStageBridge.setState({
+        selected:
+          message.thing === null
+            ? null
+            : { thing: message.thing, rect: message.rect, trace: message.trace },
+      });
+      return;
+    case "studio-frozen":
+      // Playing on keeps the selection, so its values can be tuned while playing.
+      useStageBridge.setState(message.on ? { frozen: true } : { frozen: false, hover: null });
+      if (message.on) void captureStageFrame();
+      return;
+    case "studio-frame":
+      settleCapture(message.png);
+      keepStill(owner, message.png);
+      return;
+    case "studio-key":
+      // A focused game keeps every key from the app, so the shell sends Tab up: it moves
+      // on past the Stage, as Tab does everywhere else. Escape clears what was pointed at,
+      // else plays on. Freezing is its own key, so Tab never traps anyone in the game.
+      if (message.key === "Tab") focusPastFrame(frame);
+      else if (useStageBridge.getState().selected !== null) clearStageSelection();
+      else toggleStageFreeze();
+      return;
+    case "studio-error":
+    case "studio-visibility-ack":
+      return;
+  }
 }
 
 const FOCUSABLE =

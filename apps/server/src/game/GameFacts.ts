@@ -65,7 +65,7 @@ import {
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
-import { isSoftwareRenderer, makeGameBrowser } from "./gameChromium.ts";
+import { drawingAlone, isSoftwareRenderer, makeGameBrowser } from "./gameChromium.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import { insideGame } from "./gamePath.ts";
@@ -115,19 +115,19 @@ const machineNow = (stalled: number | null): MachineLoad => ({
   stalled,
   load: NodeOS.loadavg()[0] ?? 0,
 });
-/** `work` with how busy the machine was while it ran. */
-const withMachine = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+/** `work` (a play of `owner`'s) with how busy the machine was while it ran. */
+const withMachine = <A, E, R>(owner: string, work: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const from = yield* Clock.currentTimeMillis;
     const before = yield* cpuPressure;
-    const value = yield* work;
+    const { value, gpuShared } = yield* drawingAlone(owner, work);
     const ms = (yield* Clock.currentTimeMillis) - from;
     const after = yield* cpuPressure;
     const stalled =
       before === null || after === null || ms <= 0
         ? null
         : Math.min(1, Math.max(0, (after.total - before.total) / (ms * 1000)));
-    return { value, machine: machineNow(stalled) };
+    return { value, machine: { ...machineNow(stalled), gpuShared } };
   });
 /** Waits a while for an idle machine; a tier that plays on a busy one anyway is classified so. */
 const idleMachine = Effect.gen(function* () {
@@ -605,8 +605,12 @@ const make = Effect.gen(function* () {
     person: boolean,
     engine: GameEngineId,
     skilledWanted: boolean,
+    runtime: string | null,
   ): ReadonlySet<Tier> => {
     if (found === null || found.harness !== harness) return new Set(TIERS);
+    // The same files on another runtime are another game to play: its readings are stale.
+    if (runtime !== null && found.stored.runtime !== undefined && found.stored.runtime !== runtime)
+      return new Set(TIERS);
     const stored = found.stored;
     const standing = new Set(stored.standing ?? []);
     const owes = new Set(factsOf(engine));
@@ -812,7 +816,7 @@ const make = Effect.gen(function* () {
           lane?: string,
         ) => {
           const run = (work: Effect.Effect<GameBotRunResult, GameOperationError>) =>
-            withMachine(lane === undefined ? step(work) : work).pipe(
+            withMachine(key, lane === undefined ? step(work) : work).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
             );
           const input = { file, seconds, mode: "play" as const, decider };
@@ -1169,6 +1173,7 @@ const make = Effect.gen(function* () {
             job.person,
             build.engine,
             skilled,
+            yield* runtimeOf(build.root, build.engine),
           );
           job.tiers = tiers;
           job.written.clear();
@@ -1189,6 +1194,7 @@ const make = Effect.gen(function* () {
               job.person,
               build.engine,
               true,
+              yield* runtimeOf(build.root, build.engine),
             );
             job.tiers = again.has("skilled") ? new Set<Tier>(["skilled"]) : new Set<Tier>();
             job.written.clear();

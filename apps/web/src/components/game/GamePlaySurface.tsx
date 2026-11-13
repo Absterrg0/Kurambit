@@ -10,7 +10,14 @@ import {
   TriangleAlertIcon,
   WrenchIcon,
 } from "lucide-react";
-import type { GameViewport } from "@kurambit/contracts";
+import * as Option from "effect/Option";
+import {
+  decodeGameToStageMessage,
+  type GameStageToGameMessage,
+  type GameToStageMessage,
+  type GameViewport,
+  type StudioError,
+} from "@kurambit/contracts";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
@@ -29,33 +36,27 @@ const frameStyle = (viewport: GameViewport) => ({
 });
 
 /**
- * The one bridge message the app sends the game. The Godot side's StudioProbe
- * listens for it, pauses the SceneTree and mutes the master bus while hidden,
- * restores them when shown again, and answers with `studio-visibility-ack`.
+ * What the app says to every engine's game: the Godot side's StudioProbe and the three.js shell
+ * pause and mute while hidden, restore when shown again, and answer with `studio-visibility-ack`.
  */
-const visibilityMessage = (visible: boolean) => ({ type: "studio-visibility" as const, visible });
+const visibilityMessage = (visible: boolean): GameStageToGameMessage => ({
+  type: "studio-visibility",
+  visible,
+});
 
-/**
- * What the template's bridge (`shell/studio.js`) says about the page: its
- * first error, bounded, or that the game booted. Older games never send them.
- */
+/** What the Stage hears of the page itself: its first error, or that the game booted. */
 export type StudioMessage =
   | { readonly type: "studio-error"; readonly message: string }
   | { readonly type: "studio-ready" };
 
-const readStudioMessage = (data: unknown): StudioMessage | null => {
-  if (typeof data !== "object" || data === null || !("type" in data)) return null;
-  if (data.type === "studio-ready") return { type: "studio-ready" };
-  if (data.type !== "studio-error") return null;
-  const field = (key: string) => {
-    const value = (data as Record<string, unknown>)[key];
-    return typeof value === "string" || typeof value === "number"
-      ? String(value).slice(0, 500)
-      : "";
-  };
-  const where = [field("source"), field("line")].filter((part) => part !== "").join(":");
-  const message = field("message") || "Unknown error";
-  return { type: "studio-error", message: where === "" ? message : `${message} (${where})` };
+const errorText = (error: typeof StudioError.Type) => {
+  const field = (value: string | number | undefined) =>
+    value === undefined ? "" : String(value).slice(0, 500);
+  const where = [field(error.source), field(error.line)]
+    .filter((part) => part !== "" && part !== "0")
+    .join(":");
+  const message = error.message.slice(0, 500) || "Unknown error";
+  return where === "" ? message : `${message} (${where})`;
 };
 
 /**
@@ -68,14 +69,6 @@ const MODAL_SURFACES =
 
 /** How long a game may take to load before the Stage says it is slow, and offers a reload. */
 const SLOW_START_MS = 15_000;
-
-/** The game's answer, so the stage knows whether hidden playback really stopped. */
-interface VisibilityAck {
-  readonly type: "studio-visibility-ack";
-  readonly visible: boolean;
-  readonly paused: boolean;
-  readonly muted: boolean;
-}
 
 export function GamePlaySurface({
   phase,
@@ -136,7 +129,11 @@ export function GamePlaySurface({
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   // Frozen, the game is pointed at, not played: its "Click to play" cover would sit on the selection.
   const frozen = useThreadStageBridge(bridge.threadKey, (state) => state.frozen, false);
-  useStageBridgeFrame(`${bridge.threadKey}\0${frameKey}`, playing ? frame : null, bridge.enabled);
+  const onBridgeMessage = useStageBridgeFrame(
+    `${bridge.threadKey}\0${frameKey}`,
+    playing ? frame : null,
+    bridge.enabled,
+  );
   return (
     <div
       data-game-play-surface="true"
@@ -151,6 +148,7 @@ export function GamePlaySurface({
             gameName={gameName}
             hidden={hidden}
             onStudioMessage={onStudioMessage}
+            onBridgeMessage={onBridgeMessage}
             focusRequest={focusRequest}
             onFrame={setFrame}
             frozen={frozen}
@@ -239,6 +237,7 @@ export function GameFrame({
   title,
   hidden,
   onStudioMessage,
+  onBridgeMessage,
   focusRequest = 0,
   onFrame,
   frozen = false,
@@ -251,8 +250,10 @@ export function GameFrame({
   gameName: string;
   /** The game should pause and mute itself: another tab is open, or another frame has focus. */
   hidden: boolean;
-  /** Hears the bridge's error and ready messages from this frame only. */
+  /** Hears the page's error and ready messages from this frame only. */
   onStudioMessage?: ((message: StudioMessage) => void) | undefined;
+  /** The Stage bridge's end of this frame, while it owns the bridge. */
+  onBridgeMessage?: ((message: GameToStageMessage) => void) | undefined;
   focusRequest?: number;
   /** Hands the iframe to the Stage bridge. */
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
@@ -334,33 +335,30 @@ export function GameFrame({
   // The hint is exactly "an unconfirmed pause is outstanding".
   const [unacknowledged, setUnacknowledged] = useState(false);
 
+  // The one listener for what this frame's page says; every other window is ignored.
   useEffect(() => {
-    const onAck = (event: MessageEvent) => {
-      if (event.source !== frameRef.current?.contentWindow) return;
-      const ack = event.data as Partial<VisibilityAck> | null;
-      if (ack?.type !== "studio-visibility-ack") return;
-      // Only a hide the game actually applied retires the warning. A resumed
-      // ack, or one that admits the tree is still running or the bus is
-      // audible, does not: that is exactly the state the hint names.
-      if (ack.visible !== false || ack.paused !== true || ack.muted !== true) return;
-      pendingAck.current = false;
-      setUnacknowledged(false);
-    };
-    window.addEventListener("message", onAck);
-    return () => window.removeEventListener("message", onAck);
-  }, []);
-
-  useEffect(() => {
-    if (onStudioMessage === undefined) return;
     const onMessage = (event: MessageEvent) => {
-      // Only this frame's own window speaks for the game on screen.
       if (event.source !== frameRef.current?.contentWindow) return;
-      const message = readStudioMessage(event.data);
-      if (message !== null) onStudioMessage(message);
+      const decoded = decodeGameToStageMessage(event.data);
+      if (Option.isNone(decoded)) return;
+      const message = decoded.value;
+      if (message.type === "studio-visibility-ack") {
+        // Only a hide the game actually applied retires the warning. A resumed
+        // ack, or one that admits the tree is still running or the bus is
+        // audible, does not: that is exactly the state the hint names.
+        if (message.visible || !message.paused || !message.muted) return;
+        pendingAck.current = false;
+        setUnacknowledged(false);
+        return;
+      }
+      if (message.type === "studio-error")
+        onStudioMessage?.({ type: "studio-error", message: errorText(message) });
+      if (message.type === "studio-ready") onStudioMessage?.({ type: "studio-ready" });
+      onBridgeMessage?.(message);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [onStudioMessage]);
+  }, [onStudioMessage, onBridgeMessage]);
 
   // A request is consumed by the frame on screen when it came: a frame mounted
   // later (a live reload, a copy, Back to the current game) never takes the

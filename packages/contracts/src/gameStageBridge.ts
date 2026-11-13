@@ -11,8 +11,8 @@ import { GameBuildId } from "./gameBuildId.ts";
  * The three.js shell (templates/runtime/three/1/shell/stage-bridge.js) is the
  * game end; Godot and Unity have none yet. A game says it has the bridge with
  * `studio-ready` carrying `bridge`. Shells from before the bridge post a bare
- * `{ type: "studio-ready" }` as their boot signal, which does not decode here:
- * that game has no bridge, and the agent can update its shell.
+ * `{ type: "studio-ready" }` as their boot signal: that game has no bridge, and
+ * the agent can update its shell. Every engine's shell answers `studio-visibility`.
  *
  * Coordinates (`x`, `y`, `rect`, trace points) are CSS pixels from the game
  * canvas's top-left corner. The shell's canvas fills its page, so they are the
@@ -144,7 +144,14 @@ export const StudioMute = Schema.Struct({
   on: Schema.Boolean,
 });
 
+/** The Stage's tab is hidden (or shown): the game holds play and sound, and acknowledges. */
+export const StudioVisibility = Schema.Struct({
+  type: Schema.Literal("studio-visibility"),
+  visible: Schema.Boolean,
+});
+
 export const GameStageToGameMessage = Schema.Union([
+  StudioVisibility,
   StudioFreeze,
   StudioSpeed,
   StudioMute,
@@ -159,10 +166,25 @@ export type GameStageToGameMessage = typeof GameStageToGameMessage.Type;
 
 // Game → Stage
 
+/** The game drew its first frame. Without `bridge` it is a shell from before the bridge. */
 export const StudioReady = Schema.Struct({
   type: Schema.Literal("studio-ready"),
-  bridge: Schema.Literal(GAME_STAGE_BRIDGE_VERSION),
-  capabilities: Schema.Array(GameStageCapability),
+  bridge: Schema.optionalKey(Schema.Literal(GAME_STAGE_BRIDGE_VERSION)),
+  capabilities: Schema.optionalKey(Schema.Array(GameStageCapability)),
+});
+/** The page's first error, once: where it came from when the page knows. */
+export const StudioError = Schema.Struct({
+  type: Schema.Literal("studio-error"),
+  message: Schema.String,
+  source: Schema.optionalKey(Schema.Union([Schema.String, Schema.Finite])),
+  line: Schema.optionalKey(Schema.Union([Schema.String, Schema.Finite])),
+});
+/** The answer to studio-visibility: what the game actually did. */
+export const StudioVisibilityAck = Schema.Struct({
+  type: Schema.Literal("studio-visibility-ack"),
+  visible: Schema.Boolean,
+  paused: Schema.Boolean,
+  muted: Schema.Boolean,
 });
 /** On boot and whenever the set changes (or a value does); at most GAME_STAGE_MAX_THINGS. */
 export const StudioThings = Schema.Struct({
@@ -204,6 +226,8 @@ export const StudioFrame = Schema.Struct({
 
 export const GameToStageMessage = Schema.Union([
   StudioReady,
+  StudioError,
+  StudioVisibilityAck,
   StudioThings,
   StudioHover,
   StudioSelected,
@@ -213,7 +237,7 @@ export const GameToStageMessage = Schema.Union([
 ]);
 export type GameToStageMessage = typeof GameToStageMessage.Type;
 
-/** The Stage's decoder for what a game page posts: None for anything else, old shells' bare ready included. */
+/** The Stage's decoder for what a game page posts: None for anything else. */
 export const decodeGameToStageMessage = Schema.decodeUnknownOption(GameToStageMessage);
 
 // Keep as a build

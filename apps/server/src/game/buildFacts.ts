@@ -68,6 +68,8 @@ export interface MachineLoad {
   readonly load: number;
   /** The harness's browser drew on the CPU (no GPU backend on this machine). */
   readonly software?: boolean;
+  /** Another game drew on this machine's GPU during the run (gameChromium's drawingAlone). */
+  readonly gpuShared?: boolean;
 }
 /** Where the facts view reads these as bad (gameFactsView in contracts). */
 const FIRST_RESPONSE_BAD = 0.5;
@@ -78,9 +80,10 @@ const BUSY_LOAD_PER_CORE = 0.75;
 /** Whether other work on the machine, not the game, can explain a slow run. */
 export const machineBusy = (machine: MachineLoad | null): boolean =>
   machine !== null &&
-  (machine.stalled !== null
-    ? machine.stalled >= BUSY_STALLED
-    : machine.load / Math.max(1, machine.cores) >= BUSY_LOAD_PER_CORE);
+  (machine.gpuShared === true ||
+    (machine.stalled !== null
+      ? machine.stalled >= BUSY_STALLED
+      : machine.load / Math.max(1, machine.cores) >= BUSY_LOAD_PER_CORE));
 
 /**
  * A timing reading that looks bad but was taken while other work held the
@@ -91,7 +94,9 @@ export const machineBusy = (machine: MachineLoad | null): boolean =>
 export const busyReading = (what: string, machine: MachineLoad | null): NotMeasured | null =>
   machineBusy(machine)
     ? notMeasured(
-        `${what} while the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so it says nothing about the game`,
+        machine!.gpuShared === true
+          ? `${what} while another game drew on this machine's GPU, so it says nothing about the game`
+          : `${what} while the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so it says nothing about the game`,
         true,
       )
     : null;
