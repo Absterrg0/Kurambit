@@ -1,4 +1,13 @@
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  createContext,
+  Fragment,
+  use,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
@@ -42,22 +51,29 @@ import {
   timelineMarks,
 } from "./gameBuildTimeline.logic";
 
-/** Below this picture height a card is compact: its name and its state, its request in the
- * tooltip. */
+/** Below this picture height a card is compact: a shorter picture, and one line of its request
+ * where a full card has two. */
 const COMPACT_CARD_PICTURE = 80;
 /** About how many characters a card's two request lines show. */
 const CARD_REQUEST_FITS = 48;
+/** About how wide a caption's character is, for the one request line of a compact card. */
+const CAPTION_CHARACTER = 6.6;
 
 /**
- * PURE. A request short enough for a card's two lines, ended at a word: a deliberate short form
- * rather than a line clamp's cut mid-word. The card's tooltip gives it whole.
+ * PURE. A request short enough for a card's caption (`fits` characters), ended at a word: a
+ * deliberate short form rather than a line clamp's cut mid-word. The card's tooltip gives it whole.
  */
-const cardRequest = (request: string) => {
-  if (request.length <= CARD_REQUEST_FITS) return request;
-  const cut = request.slice(0, CARD_REQUEST_FITS - 1);
+const cardRequest = (request: string, fits: number) => {
+  if (request.length <= fits) return request;
+  const cut = request.slice(0, fits - 1);
   const word = cut.lastIndexOf(" ");
-  return `${(word > CARD_REQUEST_FITS / 2 ? cut.slice(0, word) : cut).replace(/[\s,;:.]+$/, "")}…`;
+  // Ended on a word that carries something: never on "a" or "the" with nothing after it.
+  return `${(word > fits / 2 ? cut.slice(0, word) : cut)
+    .replace(/(\s+(a|an|the|to|of|and|or))+$/i, "")
+    .replace(/[\s,;:.]+$/, "")}…`;
 };
+/** How many characters of a request this strip's cards show. */
+const CardRequestFits = createContext(CARD_REQUEST_FITS);
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
 
@@ -340,6 +356,7 @@ export function GameBuildStrip({
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
+  const compact = cardPicture < COMPACT_CARD_PICTURE;
   const card = (build: GameBuild) => {
     const index = marks.indexOf(build);
     return (
@@ -396,109 +413,116 @@ export function GameBuildStrip({
           "--build-card-picture": `${cardPicture}px`,
         } as CSSProperties
       }
-      // Compact cards (a short window) carry a name and a state, no request: it is in the
-      // card's tooltip, and the Stage keeps the height.
-      data-compact={cardPicture < COMPACT_CARD_PICTURE ? "true" : undefined}
+      // Compact cards (a short window) have a shorter picture and one line of their request, so
+      // the Stage keeps the height and a build is still told by what was asked.
+      data-compact={compact ? "true" : undefined}
     >
-      {reelOpen ? (
-        <GameReel
-          threadRef={threadRef}
-          marks={marks}
-          onPlay={play}
-          onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
-        />
-      ) : null}
-      {picking !== null ? (
-        // Picking turns the header into one clear instruction, so the strip reads as a picker.
-        <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-accent ps-2.5 pe-1 motion-popup transition-[opacity,translate] starting:-translate-y-1 starting:opacity-0">
-          <GitCompareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <Text variant="meta" tone="strong" render={<span className="min-w-0 flex-1" />}>
-            {pickingFirstName === null
-              ? "Pick the first build to compare"
-              : `Pick a build to compare with ${pickingFirstName}`}
-          </Text>
-          <Button size="xs" variant="ghost" onClick={() => setPicking(null)}>
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <div className="flex h-7 min-w-0 items-center gap-2">
-          {/* How many builds the lane holds, so a row that scrolls says it has more. */}
-          <Text variant="meta" tone="muted" numeric>
-            {marks.length > 0 ? `Builds · ${marks.length}` : "Builds"}
-          </Text>
-          {olderNext !== null ? (
-            <Button size="xs" variant="ghost" onClick={() => setOlderCount(olderCount + 1)}>
-              Older
-            </Button>
-          ) : null}
-          <span className="min-w-0 flex-1">
-            {sought !== null ? (
-              <Text variant="caption" tone="muted">
-                Finding that build…
-              </Text>
-            ) : notFound ? (
-              <Text variant="caption" tone="muted">
-                That build is older than the strip reads; Older pages back to it.
-              </Text>
-            ) : null}
-          </span>
-          {marks.length < 2 ? null : (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() =>
-                startCompare(onStage === null ? "any" : { _tag: "build", build: onStage })
-              }
-            >
-              <GitCompareIcon aria-hidden="true" />
-              Compare
-            </Button>
-          )}
-        </div>
-      )}
-      {/* A fixed height (a picture and two caption lines), so the Stage above never jumps
-          between games whose captions wrap differently. */}
-      <div
-        ref={cardsRef}
-        onScroll={onRowScroll}
-        className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1"
-        style={clipped === "none" ? undefined : { maskImage: edgeFade(clipped) }}
+      <CardRequestFits
+        value={compact ? Math.floor(cardWidth / CAPTION_CHARACTER) : CARD_REQUEST_FITS}
       >
-        {list === null ? (
-          first.error !== null ? (
-            <Text variant="caption" tone="muted" render={<p className="py-6" />}>
-              {first.error}
-            </Text>
-          ) : (
-            // Cards at their final size, so the strip does not jump when the builds arrive.
-            [0, 1, 2].map((n) => (
-              <div key={n} className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
-                <Skeleton shape="card" className="h-(--build-card-picture) w-full" />
-                <Skeleton className="h-3 w-24" />
-              </div>
-            ))
-          )
-        ) : marks.length === 0 && slot === null ? (
-          <FirstBuildSlot still={still} gameName={gameName} />
+        {reelOpen ? (
+          <GameReel
+            threadRef={threadRef}
+            marks={marks}
+            onPlay={play}
+            onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
+          />
         ) : null}
-        {groups.map((group, index) =>
-          group.steps ? (
-            <KeepGoingBracket key={group.builds[0]?.id ?? index}>
-              {group.builds.map(card)}
-              {slotInBracket && index === groups.length - 1 ? slotCard : null}
-            </KeepGoingBracket>
-          ) : (
-            <Fragment key={group.builds[0]?.id ?? index}>{group.builds.map(card)}</Fragment>
-          ),
-        )}
-        {slotInBracket ? null : slot?.keepGoing === true ? (
-          <KeepGoingBracket>{slotCard}</KeepGoingBracket>
+        {picking !== null ? (
+          // Picking turns the header into one clear instruction, so the strip reads as a picker.
+          <div className="flex h-7 min-w-0 items-center gap-2 rounded-md bg-accent ps-2.5 pe-1 motion-popup transition-[opacity,translate] starting:-translate-y-1 starting:opacity-0">
+            <GitCompareIcon
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Text variant="meta" tone="strong" render={<span className="min-w-0 flex-1" />}>
+              {pickingFirstName === null
+                ? "Pick the first build to compare"
+                : `Pick a build to compare with ${pickingFirstName}`}
+            </Text>
+            <Button size="xs" variant="ghost" onClick={() => setPicking(null)}>
+              Cancel
+            </Button>
+          </div>
         ) : (
-          slotCard
+          <div className="flex h-7 min-w-0 items-center gap-2">
+            {/* How many builds the lane holds, so a row that scrolls says it has more. */}
+            <Text variant="meta" tone="muted" numeric>
+              {marks.length > 0 ? `Builds · ${marks.length}` : "Builds"}
+            </Text>
+            {olderNext !== null ? (
+              <Button size="xs" variant="ghost" onClick={() => setOlderCount(olderCount + 1)}>
+                Older
+              </Button>
+            ) : null}
+            <span className="min-w-0 flex-1">
+              {sought !== null ? (
+                <Text variant="caption" tone="muted">
+                  Finding that build…
+                </Text>
+              ) : notFound ? (
+                <Text variant="caption" tone="muted">
+                  That build is older than the strip reads; Older pages back to it.
+                </Text>
+              ) : null}
+            </span>
+            {marks.length < 2 ? null : (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() =>
+                  startCompare(onStage === null ? "any" : { _tag: "build", build: onStage })
+                }
+              >
+                <GitCompareIcon aria-hidden="true" />
+                Compare
+              </Button>
+            )}
+          </div>
         )}
-        {marks.length === 0 ? null : nowCard}
-      </div>
+        {/* A fixed height (a picture and two caption lines), so the Stage above never jumps
+          between games whose captions wrap differently. */}
+        <div
+          ref={cardsRef}
+          onScroll={onRowScroll}
+          className="flex min-w-0 items-start gap-3 overflow-x-auto pb-1"
+          style={clipped === "none" ? undefined : { maskImage: edgeFade(clipped) }}
+        >
+          {list === null ? (
+            first.error !== null ? (
+              <Text variant="caption" tone="muted" render={<p className="py-6" />}>
+                {first.error}
+              </Text>
+            ) : (
+              // Cards at their final size, so the strip does not jump when the builds arrive.
+              [0, 1, 2].map((n) => (
+                <div key={n} className="flex w-(--build-card-width) shrink-0 flex-col gap-1.5">
+                  <Skeleton shape="card" className="h-(--build-card-picture) w-full" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+              ))
+            )
+          ) : marks.length === 0 && slot === null ? (
+            <FirstBuildSlot still={still} gameName={gameName} />
+          ) : null}
+          {groups.map((group, index) =>
+            group.steps ? (
+              <KeepGoingBracket key={group.builds[0]?.id ?? index}>
+                {group.builds.map(card)}
+                {slotInBracket && index === groups.length - 1 ? slotCard : null}
+              </KeepGoingBracket>
+            ) : (
+              <Fragment key={group.builds[0]?.id ?? index}>{group.builds.map(card)}</Fragment>
+            ),
+          )}
+          {slotInBracket ? null : slot?.keepGoing === true ? (
+            <KeepGoingBracket>{slotCard}</KeepGoingBracket>
+          ) : (
+            slotCard
+          )}
+          {marks.length === 0 ? null : nowCard}
+        </div>
+      </CardRequestFits>
     </section>
   );
 }
@@ -559,6 +583,8 @@ function BuildCard({
 }) {
   const step = build.source._tag === "turn" ? build.source.step : null;
   const caption = buildCaption(build);
+  const requestFits = use(CardRequestFits);
+  const checks = checksLine(build.facts);
   // A saved build's caption already starts with its name.
   const name =
     build.source._tag === "saved"
@@ -631,22 +657,19 @@ function BuildCard({
               )}
               {name === null || build.source._tag === "saved"
                 ? formatBuildTime(build.at)
-                : cardRequest(caption)}
+                : cardRequest(caption, requestFits)}
             </>
           }
         />
       </TooltipTrigger>
-      {/* Over the card, never across the composer. */}
-      <TooltipPopup side="top" className="max-w-xs">
-        <span className="flex flex-col gap-0.5">
-          {/* One shape on every card: what it is in full, then how it measured and when. */}
-          <span>{caption}</span>
-          <span className="text-muted-foreground">
-            {[checksLine(build.facts), formatBuildTime(build.at)]
-              .filter((part) => part !== null)
-              .join(" · ")}
-          </span>
-        </span>
+      {/* Over the card, never across the composer; from the card's own left edge, so the first
+          card's never crosses into the sidebar. */}
+      <TooltipPopup side="top" align="start" className="max-w-xs">
+        {/* One shape on every card: what it is in full, then how it measured. One line when it
+            is short, so it sits in the gap under the Stage. Its time is in the caption or the
+            Inspector. */}
+        <span>{caption}</span>
+        {checks === null ? null : <span className="text-muted-foreground"> · {checks}</span>}
       </TooltipPopup>
     </Tooltip>
   );
@@ -668,7 +691,7 @@ function CardCaption({
 }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center gap-1.5 group-data-[compact=true]/strip:flex-col group-data-[compact=true]/strip:items-start group-data-[compact=true]/strip:gap-0.5">
+      <span className="flex min-w-0 items-center gap-1.5">
         <Text
           variant="meta"
           tone={strong ? "strong" : "default"}
@@ -677,43 +700,26 @@ function CardCaption({
         >
           {title}
         </Text>
-        {aside === null ? (
-          // A compact card's second line is its state; a card with none (Now) shows its own
-          // subtitle there, so every compact caption is two lines and the strip one height.
+        {aside === null ? null : (
           <Text
             variant="meta"
             tone="muted"
             numeric
-            render={
-              <span className="hidden min-h-lh truncate group-data-[compact=true]/strip:block" />
-            }
-          >
-            {meta}
-          </Text>
-        ) : (
-          <Text
-            variant="meta"
-            tone="muted"
-            numeric
-            render={
-              <span className="ms-auto flex shrink-0 group-data-[compact=true]/strip:ms-0 group-data-[compact=true]/strip:min-h-lh" />
-            }
+            render={<span className="ms-auto flex shrink-0" />}
           >
             {aside}
           </Text>
         )}
       </span>
-      {/* Two lines, wrapping at words, the same height on every card: a request is read, not
-          cut to a fragment, and the strip keeps one height. */}
+      {/* What was asked, wrapping at words, the same height on every card: two lines, or one on
+          a compact card. A request is read, not cut to a fragment, and the strip keeps one
+          height. */}
       <Text
         variant="meta"
         tone="muted"
         numeric
         render={
-          <span
-            className="line-clamp-2 min-w-0 group-data-[compact=true]/strip:hidden"
-            style={{ minHeight: "2lh" }}
-          />
+          <span className="line-clamp-2 min-h-[2lh] min-w-0 group-data-[compact=true]/strip:line-clamp-1 group-data-[compact=true]/strip:min-h-lh" />
         }
       >
         {meta}
@@ -721,6 +727,10 @@ function CardCaption({
     </span>
   );
 }
+
+// The base ring is inset, so both rings lie on the picture: 2px of ink at its edge over 4px of
+// page colour, which shows as a 2px gap inside the ink.
+const CHOSEN_RING = "inset-ring-2 inset-ring-strong-foreground ring-4 ring-background";
 
 /** The outline of the card on the Stage, drawn over the picture so it is never covered. */
 function CardRing({
@@ -741,13 +751,16 @@ function CardRing({
         "-outline-offset-5 group-focus-visible/card:outline-3 group-focus-visible/card:outline-solid group-focus-visible/card:outline-ring",
         // A dark hairline inside the focus ring, so it holds 3:1 on a light or a busy picture.
         "after:pointer-events-none after:absolute after:inset-[5px] after:rounded-xs after:opacity-0 after:ring-1 after:ring-black/60 group-focus-visible/card:after:opacity-100",
+        // The chosen card: an ink ring on the picture's edge and a page-colour one just inside
+        // it, so the mark reads on any picture in both themes (a dark ring alone is lost on a
+        // dark picture). Hover is one thin ring, always the weaker mark.
         pick === "picked"
-          ? "ring-2 ring-strong-foreground"
+          ? CHOSEN_RING
           : pick === "pickable"
             ? "ring-1 ring-foreground/35 group-hover/card:ring-2 group-hover/card:ring-foreground/70"
             : on
-              ? "ring-2 ring-strong-foreground"
-              : "ring-1 ring-border group-hover/card:ring-2 group-hover/card:ring-foreground/45",
+              ? CHOSEN_RING
+              : "ring-1 ring-border group-hover/card:ring-foreground/45",
       )}
     />
   );
@@ -840,6 +853,7 @@ function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: s
 
 /** The build being made: a dashed slot with its elapsed time. */
 function SlotCard({ slot }: { slot: GameBuildSlot }) {
+  const requestFits = use(CardRequestFits);
   return (
     <div
       data-game-build-slot=""
@@ -853,15 +867,10 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
       </div>
       <CardCaption
         strong={false}
+        // Its picture says what is happening to it, in the top bar's and the sidebar's words
+        // ("Making build 3"), once: the caption is its name and what was asked.
         title={slot.name}
-        // The top bar holds the turn's clock; the slot says only what it is.
-        aside={
-          <span className="flex items-center gap-1">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
-            {slot.saving === true ? "Being saved" : "Being made"}
-          </span>
-        }
-        meta={slot.caption === null ? "" : cardRequest(slot.caption)}
+        meta={slot.caption === null ? "" : cardRequest(slot.caption, requestFits)}
       />
     </div>
   );

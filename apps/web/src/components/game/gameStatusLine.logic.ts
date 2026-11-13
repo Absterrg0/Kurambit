@@ -3,8 +3,8 @@ import type { GameStagePhase } from "./gameStageLogic";
 /** One phrase of the top bar's status line. */
 export interface GameStatusPart {
   readonly text: string;
-  /** live: work in progress. */
-  readonly dot: "live" | null;
+  /** live: work in progress. failed: the build's outcome is that it does not start. */
+  readonly dot: "live" | "failed" | null;
   readonly strong: boolean;
   /** Ticks an elapsed time after the text. */
   readonly since: number | null;
@@ -81,6 +81,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
             ? part(
                 `${sentence(input.onStage)}${input.onStageDoesNotStart ? " · does not start" : ""}`,
                 {
+                  ...(input.onStageDoesNotStart ? { dot: "failed" as const } : {}),
                   hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
                 },
               )
@@ -164,6 +165,8 @@ export interface GameLibraryStatusInput {
   readonly operationRunning: boolean;
   /** A turn has ended and its build is being saved (useTurnLanding). */
   readonly saving: boolean;
+  /** The number the build being made will have, as the game screen's top bar says it. */
+  readonly nextBuild: number;
   /** The folder's build, else the newest one, as a sentence names it, with when it was made. */
   readonly build: {
     readonly name: string;
@@ -203,11 +206,11 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.keepGoing !== null)
     return input.keepGoingStartsAt === null
       ? line(input.keepGoing, "live")
-      : // Short enough for a sidebar row: the run waits for its next step's time.
-        line(`Next step at ${input.keepGoingStartsAt}`, "idle");
-  if (input.saving) return line("Saving", "live");
-  // The game screen's top bar holds the turn's clock; the library says only that it builds.
-  if (input.chats === "working") return line("Building", "live");
+      : // Short enough for a sidebar row: whose step it is, and the time the run waits for.
+        line(`Keep going at ${input.keepGoingStartsAt}`, "idle");
+  // The top bar's own words; it holds the turn's clock, the library only says what is made.
+  if (input.saving) return line(`Saving build ${input.nextBuild}`, "live");
+  if (input.chats === "working") return line(`Making build ${input.nextBuild}`, "live");
   if (input.operationRunning) return line("Building", "live");
   if (input.chats === "failed") return line("The last turn failed", "failed");
   if (input.build?.doesNotStart === true)

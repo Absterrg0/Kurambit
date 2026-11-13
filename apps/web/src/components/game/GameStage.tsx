@@ -103,6 +103,7 @@ import {
 import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
 import { buildName, buildPhrase, checksLine, doesNotStart } from "./gameBuilds.logic";
+import { nextBuildOf } from "./GameLibraryStatus";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
 import { GameElapsed } from "./GameElapsed";
@@ -199,13 +200,6 @@ const changedSincePhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, un
   return build === undefined ? null : buildPhrase(buildName(build));
 };
 
-/** The number the next person build takes: one past the newest numbered one. */
-const nextBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
-  if (!AsyncResult.isSuccess(result)) return 1;
-  const numbered = result.value.builds.find((each) => each.number !== null);
-  return (numbered?.number ?? 0) + 1;
-};
-
 const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) &&
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
@@ -216,9 +210,10 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
  * height a larger card would have taken.
  */
 const BUILD_CARD_PICTURE = 100;
-/** On a short window (under 800px tall) cards are compact, so the Stage keeps its share. */
+/** On a short window cards are compact, so the Stage keeps its share. A 1280×800 laptop is
+ * short too: with full cards its Stage would be smaller than a 1100-wide window's. */
 const BUILD_CARD_PICTURE_SHORT = 68;
-const SHORT_WINDOW = 800;
+const SHORT_WINDOW = 840;
 /**
  * The height kept above the composer for the one row that comes and goes there: the agent's line
  * (or the note that a build was undone). It appears as a turn runs and lands, and the Stage must
@@ -311,6 +306,81 @@ function NoWebGlCard() {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * The game screen's centre before its game is read: a Stage that says it is opening, the strip's
+ * label and its cards at their one size, in the fitted column of a 16:9 game (the shape most
+ * games have). Its width is the window's or what the height allows, so only the game's own shape
+ * moves it when the game is read.
+ */
+/**
+ * The loading Stage's column, given to the centre it sits in as the loaded Stage gives its own,
+ * so the composer under it already ends where the Stage ends.
+ */
+function shareColumn(column: HTMLElement | null) {
+  const centre = column?.closest<HTMLElement>("[data-game-centre]");
+  if (column == null || centre == null) return;
+  const share = () =>
+    centre.style.setProperty("--game-stage-column", `${Math.round(column.offsetWidth) + 24}px`);
+  share();
+  const stop = observeResize([column], share);
+  return () => {
+    stop();
+    centre.style.removeProperty("--game-stage-column");
+  };
+}
+
+export function GameStageLoading() {
+  // The card size the loaded strip will have at this window's height.
+  const picture =
+    typeof window !== "undefined" && window.innerHeight < SHORT_WINDOW
+      ? BUILD_CARD_PICTURE_SHORT
+      : BUILD_CARD_PICTURE;
+  return (
+    <section
+      aria-busy="true"
+      aria-label="Opening the game"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+    >
+      <div className="flex h-(--workspace-topbar-height) shrink-0 items-center px-3">
+        <Skeleton className="h-4 w-28" />
+      </div>
+      <div className="flex min-h-0 flex-1 justify-center" style={{ containerType: "size" }}>
+        <div
+          ref={shareColumn}
+          className="flex flex-col"
+          style={{
+            width: `min(100cqw - 24px, (100cqh - ${skeletonChrome(picture)}px) * 16 / 9)`,
+          }}
+        >
+          {/* Named from the first frame: the working area never sits blank after the splash. */}
+          <div className="grid aspect-video w-full place-items-center rounded-xl bg-stage-well">
+            <Text variant="meta" tone="inherit" render={<p className="text-stage-muted" />}>
+              Opening game…
+            </Text>
+          </div>
+          <div className="flex h-7 items-center pt-2.5">
+            <Text variant="meta" tone="muted">
+              Builds
+            </Text>
+          </div>
+          <div className="flex gap-3 overflow-hidden pt-1.5">
+            {[0, 1, 2].map((n) => (
+              <div
+                key={n}
+                className="flex shrink-0 flex-col gap-1.5"
+                style={{ width: (BUILD_CARD_PICTURE * 16) / 9 }}
+              >
+                <Skeleton shape="card" className="w-full" style={{ height: picture }} />
+                <Skeleton className="h-3 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -830,11 +900,6 @@ function ThreadGameStage({
     setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
   });
 
-  // The card size the loaded strip will have at this window's height.
-  const skeletonPicture =
-    typeof window !== "undefined" && window.innerHeight < SHORT_WINDOW
-      ? BUILD_CARD_PICTURE_SHORT
-      : BUILD_CARD_PICTURE;
   if (!data)
     return query.error !== null && isGameStatusFailure(query.failure) ? (
       <section className="flex min-h-0 flex-1 items-center justify-center p-6 text-body text-muted-foreground">
@@ -848,45 +913,7 @@ function ThreadGameStage({
       </section>
     ) : query.error === null ? (
       // Read but not answered yet: the Stage's own shape, so nothing moves when it lands.
-      <section
-        aria-busy="true"
-        aria-label="Loading the game"
-        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
-      >
-        <div className="flex h-(--workspace-topbar-height) shrink-0 items-center px-3">
-          <Skeleton className="h-4 w-28" />
-        </div>
-        {/* The fitted column at a 16:9 game, the shape most games have: a Stage, the strip's
-            label and its cards at their one size. Its width is the window's or what the height
-            allows, so only the game's own shape moves it when the game is read. */}
-        <div className="flex min-h-0 flex-1 justify-center" style={{ containerType: "size" }}>
-          <div
-            className="flex flex-col"
-            style={{
-              width: `min(100cqw - 24px, (100cqh - ${skeletonChrome(skeletonPicture)}px) * 16 / 9)`,
-            }}
-          >
-            <div className="aspect-video w-full rounded-xl bg-stage-well" />
-            <div className="flex h-7 items-center pt-2.5">
-              <Text variant="meta" tone="muted">
-                Builds
-              </Text>
-            </div>
-            <div className="flex gap-3 overflow-hidden pt-1.5">
-              {[0, 1, 2].map((n) => (
-                <div
-                  key={n}
-                  className="flex shrink-0 flex-col gap-1.5"
-                  style={{ width: (BUILD_CARD_PICTURE * 16) / 9 }}
-                >
-                  <Skeleton shape="card" className="w-full" style={{ height: skeletonPicture }} />
-                  <Skeleton className="h-3 w-20" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+      <GameStageLoading />
     ) : null;
   const engine = GAME_ENGINES[data.manifest.engine.name];
   const stageKind = engine.stage;
@@ -1145,6 +1172,12 @@ function ThreadGameStage({
     keepGoingStatus !== null &&
     keepGoingStatus.mode !== "off" &&
     keepGoingStatus.chat === threadRef.threadId;
+  const keepGoingStartsAt =
+    keepGoingHere &&
+    keepGoingStatus.phase === "proposed" &&
+    keepGoingStatus.proposal?.deadline != null
+      ? clockTime(keepGoingStatus.proposal.deadline)
+      : null;
   const statusLine = gameStatusLine({
     phase: shownPhase.kind,
     onStage: playTarget === null ? stageBuildName : buildPhrase(playTarget.label),
@@ -1155,12 +1188,7 @@ function ThreadGameStage({
       quietShell !== null && (quietShell.hasPendingApprovals || quietShell.hasPendingUserInput),
     keepGoingStep: keepGoingHere ? keepGoingStatus.step : null,
     keepGoingLive: keepGoingHere,
-    keepGoingStartsAt:
-      keepGoingHere &&
-      keepGoingStatus.phase === "proposed" &&
-      keepGoingStatus.proposal?.deadline != null
-        ? clockTime(keepGoingStatus.proposal.deadline)
-        : null,
+    keepGoingStartsAt,
     turnRunning,
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
     nextBuild: nextBuildNumber,
@@ -1536,9 +1564,17 @@ function ThreadGameStage({
                 {failureVisible.split("\n")[0] ?? failureVisible}
               </Text>
               <div className="mt-1 flex items-center gap-2">
-                <Button size="sm" variant="overlay" onClick={() => onAskAgent(failurePrompt)}>
-                  Ask your agent to fix it
-                </Button>
+                {keepGoingStartsAt === null ? (
+                  <Button size="sm" variant="overlay" onClick={() => onAskAgent(failurePrompt)}>
+                    Ask your agent to fix it
+                  </Button>
+                ) : (
+                  // Keep going already has the agent's next step waiting, in the row above the
+                  // composer: one route to the fix on screen, not two.
+                  <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
+                    Keep going takes its next step at {keepGoingStartsAt}
+                  </Text>
+                )}
                 {turnUndoAllowed("undo") ? (
                   <Button
                     size="sm"
@@ -1743,12 +1779,17 @@ function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
   const parts = (shortForm: boolean) =>
     status.map((part, index) => (
       <span key={part.text} className="flex min-w-0 items-center gap-1.5">
+        {/* A thin rule between what plays and the work under way: a phrase's own dots join
+            its words, the rule parts two phrases. */}
         {index > 0 ? (
-          <Text variant="meta" tone="muted" aria-hidden="true">
-            ·
-          </Text>
+          <span aria-hidden="true" className="mx-0.5 h-3 w-px shrink-0 bg-border" />
         ) : null}
-        {part.dot === "live" ? <StatusDot tone="live" pulse /> : null}
+        {part.dot === "live" ? (
+          <StatusDot tone="live" pulse />
+        ) : part.dot === "failed" ? (
+          // The mark the strip, the Stage and the Inspector give a build that does not start.
+          <TriangleAlertIcon className="size-3 shrink-0 text-destructive" aria-hidden="true" />
+        ) : null}
         <Text variant="meta" tone={part.strong ? "default" : "muted"} truncate>
           {shortForm ? (part.short ?? part.text) : part.text}
         </Text>

@@ -521,7 +521,7 @@ function StartingCard({
     // it: from first paint to the game the Stage stays one near-black, in both themes.
     <div className="absolute inset-0 z-10 grid place-items-center overflow-hidden bg-stage-well">
       {poster === null ? null : (
-        <div aria-hidden="true" className="absolute inset-0 opacity-10 blur-xs">
+        <div aria-hidden="true" className="absolute inset-0 opacity-5 blur-xs">
           {poster}
         </div>
       )}
@@ -638,15 +638,17 @@ function StageStateCard({
           // The top bar says "Making build 1" with the turn's one clock; the Stage carries what
           // the agent is doing, which nothing else on the screen says while it makes the game.
           <div className="flex max-w-md flex-col items-center gap-3">
-            {note === null ? null : (
-              <Text
-                variant="body"
-                tone="inherit"
-                render={<p className="line-clamp-3 text-stage-foreground text-balance" />}
-              >
-                {note}
-              </Text>
-            )}
+            {/* Two lines kept for the agent's words, which sit on the lower one: a line that
+                grows from one to two, or arrives, never moves the game's name above it. */}
+            <Text
+              variant="body"
+              tone="inherit"
+              render={<div className="flex min-h-[2lh] items-end justify-center" />}
+            >
+              {note === null ? null : (
+                <p className="line-clamp-3 text-stage-foreground text-balance">{note}</p>
+              )}
+            </Text>
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
               {phase.saving === true
                 ? "Build 1 is being saved and plays here in a moment."

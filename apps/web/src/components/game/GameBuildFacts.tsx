@@ -1,9 +1,10 @@
 import { ChevronRightIcon, MinusIcon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { changeWord, compareHeadline, type CompareRows } from "./gameBuilds.logic";
 
 const DELTA_TEXT = {
@@ -36,34 +37,80 @@ export function CompareSideBadge({ side }: { side: "A" | "B" }) {
  * direction and tone. Facts neither build measured close the table, one row per reason.
  */
 export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
-  // The readings that are the same fold under one counted line, so the differences fit in view
-  // and the headline's count of them is one click from its rows.
+  // The readings that are the same fold under their count, so the differences fit in view and
+  // the count is one click from its rows.
   const [sameOpen, setSameOpen] = useState(false);
-  const same = compared.rows.filter((row) => row.mark === "=").length;
+  const unmeasuredRow = useRef<HTMLTableRowElement | null>(null);
   if (compared.rows.length === 0 && compared.unmeasured.length === 0) return null;
+  const headline = compareHeadline(compared);
   return (
     <div className="flex flex-col gap-2">
-      {/* The fold's control sits on the headline, in view at every width, not under the rows. */}
-      <div className="flex items-start gap-3">
-        <Text variant="label" tone="strong" render={<p className="min-w-0 flex-1" />}>
-          {compareHeadline(compared)}
+      {headline.kind === "sentence" ? (
+        <Text variant="label" tone="strong" render={<p />}>
+          {headline.text}
         </Text>
-        {same > 0 ? (
-          <Button
-            size="xs"
-            variant="ghost"
-            className="shrink-0"
-            aria-expanded={sameOpen}
-            onClick={() => setSameOpen(!sameOpen)}
-          >
-            <ChevronRightIcon
-              className={cn("transition-transform", sameOpen && "rotate-90")}
-              aria-hidden="true"
-            />
-            {sameOpen ? "Hide the same" : "Show the same"}
-          </Button>
-        ) : null}
-      </div>
+      ) : (
+        // One count per kind of reading, each with its own control, in view at every width.
+        // Each group leads with its separator and a line's first one is clipped, so a wrap
+        // neither ends nor starts a line on it.
+        <div className="overflow-hidden">
+          <div className="-ms-4 flex flex-wrap items-center gap-y-1 *:flex *:min-h-6 *:items-center *:before:inline-block *:before:w-4 *:before:text-center *:before:text-muted-foreground *:before:content-['·']">
+            <Text variant="label" tone="strong" numeric render={<p />}>
+              {headline.differ === 0
+                ? "No measured difference"
+                : `${headline.differ} ${headline.differ === 1 ? "reading differs" : "readings differ"}`}
+            </Text>
+            {headline.same > 0 ? (
+              <span className="gap-0.5">
+                <Text variant="meta" tone="muted" numeric>
+                  {headline.same} the same
+                </Text>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-expanded={sameOpen}
+                  aria-label={sameOpen ? "Hide the same readings" : "Show the same readings"}
+                  onClick={() => setSameOpen(!sameOpen)}
+                >
+                  <ChevronRightIcon
+                    className={cn("transition-transform", sameOpen && "rotate-90")}
+                    aria-hidden="true"
+                  />
+                  {sameOpen ? "Hide" : "Show"}
+                </Button>
+              </span>
+            ) : null}
+            {headline.varies > 0 ? (
+              <Tooltip>
+                <TooltipTrigger render={<span />}>
+                  <Text variant="meta" tone="muted" numeric>
+                    {headline.varies} {headline.varies === 1 ? "varies" : "vary"} between runs
+                  </Text>
+                </TooltipTrigger>
+                <TooltipPopup side="top" className="max-w-xs">
+                  {headline.varies === 1 ? "This reading changes" : "These readings change"} from
+                  run to run by {headline.varies === 1 ? "itself" : "themselves"}, so{" "}
+                  {headline.varies === 1 ? "it is" : "they are"} not counted as a difference.
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {headline.missing > 0 ? (
+              <span>
+                {/* The row that says which, and why, may be below the fold: this goes to it. */}
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() =>
+                    unmeasuredRow.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+                  }
+                >
+                  {headline.missing} not measured
+                </Button>
+              </span>
+            ) : null}
+          </div>
+        </div>
+      )}
       {compared.oneSided
         .filter((entry) => entry.why !== "still being measured")
         .map((entry) => (
@@ -155,8 +202,12 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
               </tr>
             ),
           ])}
-          {compared.unmeasured.map((group) => (
-            <tr key={group.why} className="border-t border-border align-baseline">
+          {compared.unmeasured.map((group, index) => (
+            <tr
+              key={group.why}
+              ref={index === 0 ? unmeasuredRow : undefined}
+              className="border-t border-border align-baseline"
+            >
               <td colSpan={4} className="py-2">
                 <span className="flex items-baseline gap-2.5">
                   <MinusIcon

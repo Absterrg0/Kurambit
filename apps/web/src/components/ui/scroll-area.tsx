@@ -27,6 +27,7 @@ function ScrollArea({
   scrollFade = false,
   scrollFadePadding = true,
   scrollbarGutter = false,
+  persistentScrollbar = false,
   hideScrollbars = false,
   chainVerticalScroll = false,
   radius = "inherit",
@@ -36,6 +37,8 @@ function ScrollArea({
   scrollFade?: boolean;
   scrollFadePadding?: boolean;
   scrollbarGutter?: boolean;
+  /** The vertical thumb shows whenever there is more to scroll, not only while hovering. */
+  persistentScrollbar?: boolean;
   hideScrollbars?: boolean;
   chainVerticalScroll?: boolean;
   radius?: "inherit" | "none";
@@ -69,7 +72,10 @@ function ScrollArea({
       </ScrollAreaPrimitive.Viewport>
       {!hideScrollbars && (
         <>
-          <ScrollBar orientation="vertical" />
+          <ScrollBar
+            orientation="vertical"
+            className={persistentScrollbar ? "opacity-100" : undefined}
+          />
           <ScrollBar orientation="horizontal" />
           <ScrollAreaPrimitive.Corner data-slot="scroll-area-corner" />
         </>

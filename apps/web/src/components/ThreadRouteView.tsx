@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import ChatView from "./ChatView";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
+import { GameOpening } from "./game/GameOpening";
 import { SidebarInset } from "./ui/sidebar";
 import {
   finalizePromotedDraftThreadByRef,
@@ -184,9 +185,12 @@ export function ThreadRouteView({
     );
   }
 
+  // A thread this client has not heard of yet (a cold load): its screen's shape, saying it is
+  // opening, rather than a blank pane until the first snapshot lands.
+  const opening = view === null && target.kind === "server" && renderState === "loading";
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
-      {view}
+      {opening ? <GameOpening /> : view}
     </SidebarInset>
   );
 }

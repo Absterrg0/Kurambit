@@ -18,6 +18,7 @@ import {
   InfoIcon,
   MinusIcon,
   MoreHorizontalIcon,
+  PauseIcon,
   PlayIcon,
   RefreshCwIcon,
   ScrollTextIcon,
@@ -27,11 +28,9 @@ import {
 } from "lucide-react";
 import {
   GAME_ENGINES,
-  GAME_LEAD_FACTS,
   GAME_STYLE_FILE,
   GameStyle,
   gameChecksView,
-  gameFactName,
   gameFactsView,
   type GameBuild,
   type GameBuildFacts,
@@ -313,11 +312,12 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
         What each build is measured on
       </Text>
       <ul className="flex flex-col gap-1.5">
-        {GAME_LEAD_FACTS.map((id) => (
-          <li key={id} className="flex items-center gap-2">
+        {/* The Checks list's own names, in its order: the same checks, before they are read. */}
+        {SKELETON_CHECKS.map((name) => (
+          <li key={name} className="flex items-center gap-2">
             <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
             <Text variant="meta" tone="muted">
-              {gameFactName(id)}
+              {name}
             </Text>
           </li>
         ))}
@@ -496,13 +496,13 @@ function BuildDetail({
           <Text variant="label" tone="strong" truncate render={<h2 />}>
             {buildName(build)}
           </Text>
-          <Text variant="meta" tone="muted">
-            {/* Where it is, then when it was made; it wraps rather than cut either. */}
-            {/* The separator goes with the date, so a wrap never ends a line on it. */}
-            {onStage ? "On the Stage " : ""}
-            <span className="whitespace-nowrap">
-              {onStage ? "· " : ""}
-              {formatBuildTime(build.at)}
+          {/* Where it is, then when it was made; it wraps rather than cut either. Each part
+              leads with its separator and the line's first one is clipped, so a wrap neither
+              ends nor starts a line on it. */}
+          <Text variant="meta" tone="muted" render={<span className="overflow-hidden" />}>
+            <span className="-ms-3 flex flex-wrap *:whitespace-nowrap *:before:inline-block *:before:w-3 *:before:text-center *:before:content-['·']">
+              {onStage ? <span>On the Stage</span> : null}
+              <span>{formatBuildTime(build.at)}</span>
             </span>
           </Text>
         </div>
@@ -575,7 +575,8 @@ function BuildDetail({
                     <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
                       {name}
                     </Text>
-                    <Skeleton className="h-3 w-10" />
+                    {/* Short enough that the longest check's name keeps its one line. */}
+                    <Skeleton className="h-3 w-8" />
                     <span className="w-6 shrink-0" />
                   </div>
                 ))}
@@ -827,7 +828,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
                   ? morePending > 0
                     ? `${morePending} to measure`
                     : "None measured"
-                  : `${moreMeasured.length} of ${view.more.length}`}
+                  : `${moreMeasured.length} of ${view.more.length} measured`}
               </Text>
             </CollapsibleTrigger>
             <CollapsiblePanel>
@@ -937,7 +938,7 @@ function NotMeasured({
         <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
           {/* A list of labels is no sentence: past two, the row counts them and its popover names them. */}
           {why === DID_NOT_START
-            ? `${names.length} not measured: the game did not start`
+            ? `${names.length} not measured: it did not start`
             : names.length > 2
               ? `${names.length} not measured`
               : namesPhrase(names)}
@@ -1092,7 +1093,15 @@ function CheckRow({
             <Icon
               className={cn(
                 tone === "neutral" ? "size-3 text-muted-foreground" : "size-4",
-                tone === "good" ? "text-success" : tone === "bad" ? "text-warning" : null,
+                tone === "good"
+                  ? "text-success"
+                  : tone === "bad"
+                    ? // A game that does not start is the build's outcome, in the one red the
+                      // strip, the Stage and the sidebar give it; other checks are to look at.
+                      fact.id === "boots"
+                      ? "text-destructive"
+                      : "text-warning"
+                    : null,
               )}
               aria-hidden="true"
             />
@@ -1552,7 +1561,12 @@ function BuildActions({
                         (action.kind === "undo"
                           ? `The game goes back to ${
                               previous === undefined ? "before it" : buildName(previous)
-                            }; it stays on the strip.`
+                            }; ${
+                              // The top bar's Undo says the same sentence.
+                              list.folderEdited === true
+                                ? "it and the changes since stay"
+                                : "it stays"
+                            } on the strip.`
                           : action.kind === "redo"
                             ? "The game becomes this build again"
                             : "The game becomes this build; later ones stay on the strip")}
@@ -1813,6 +1827,15 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
     (state) => state.selected?.thing.id ?? null,
     null,
   );
+  // The Stage's own Freeze, asked from here: a person who does not use the shortcut starts
+  // pointing from the line that tells them to.
+  const requestStage = useGameWorkspaceStore((state) => state.requestStage);
+  const gameOnStage = useThreadStageBridge(threadKey, () => true, false);
+  const frozenByPerson = useThreadStageBridge(
+    threadKey,
+    (state) => state.frozen && !state.autoFrozen,
+    false,
+  );
   const [query, setQuery] = useState("");
   const words = query.trim().toLowerCase();
   const shownThings =
@@ -1854,12 +1877,23 @@ function ThingsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
                 "Play, then freeze the game to point at something."
               ) : (
                 <>
-                  Play, then press <KbdShortcut>{freezeKey}</KbdShortcut> to freeze and point at
+                  Play, then freeze the game (<KbdShortcut>{freezeKey}</KbdShortcut>) to point at
                   something.
                 </>
               )}
             </EmptyDescription>
           </EmptyHeader>
+          <EmptyContent>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!gameOnStage}
+              onClick={() => requestStage({ kind: "freeze" })}
+            >
+              {frozenByPerson ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
+              {frozenByPerson ? "Play on" : "Freeze to point at things"}
+            </Button>
+          </EmptyContent>
         </Empty>
       ) : null}
       {KIND_GROUPS.map((group) => {

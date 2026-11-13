@@ -87,7 +87,8 @@ export function useKeepGoingBanner(
               </Tooltip>
             </span>
           ),
-          description: view.detail,
+          // A separator before the time, so the action and when it starts read as two things.
+          description: `· ${view.detail}`,
           actions: (
             <>
               <Button

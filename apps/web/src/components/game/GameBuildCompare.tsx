@@ -170,8 +170,9 @@ export function GameBuildCompare({
           Close
         </Button>
       </header>
-      {/* The facts scroll under a fade, so a cut row always reads as more below. */}
-      <ScrollArea scrollFade className="min-h-0 flex-1">
+      {/* The facts scroll under a fade and beside a thumb that stays, so a cut row always reads
+          as more below. */}
+      <ScrollArea scrollFade persistentScrollbar className="min-h-0 flex-1">
         <div className="mx-auto flex w-full max-w-(--game-stage-column) flex-col gap-5 px-3 pb-4">
           {comparison === null || sides === null ? (
             query.error === null ? (

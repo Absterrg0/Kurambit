@@ -37,6 +37,13 @@ const latestBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown
   return builds.find((build) => build.id === current) ?? builds[0] ?? null;
 };
 
+/** The number the next person build takes: one past the newest numbered one. */
+export const nextBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result)) return 1;
+  const numbered = result.value.builds.find((each) => each.number !== null);
+  return (numbered?.number ?? 0) + 1;
+};
+
 /**
  * The picture a game's library row shows: its latest build's, else the newest build that has
  * one, so a new build with no picture yet never turns the row back into a letter.
@@ -86,6 +93,15 @@ export function useGameLibraryLine(input: {
   const { game, main, chats } = input;
   const mainRef = input.read && main !== null ? scopeThreadRef(game.environmentId, main.id) : null;
   const build = useGameLatestBuild(mainRef);
+  const nextBuild = useEnvironmentQuerySelector(
+    mainRef === null
+      ? null
+      : gameEnvironment.builds({
+          environmentId: mainRef.environmentId,
+          input: { threadId: mainRef.threadId },
+        }),
+    nextBuildOf,
+  );
   // Between a turn's end and its build being listed, as the game screen says it.
   const saving = useTurnLanding(mainRef, derivePhase(main?.runtime ?? null) === "running");
   // A game Keep going runs on reads its run, so a step that only waits shows no working dot.
@@ -101,6 +117,7 @@ export function useGameLibraryLine(input: {
     keepGoingStartsAt: keepGoingStartsAt(keepGoing.status),
     operationRunning: game.operation?.state === "running",
     saving,
+    nextBuild: nextBuild ?? 1,
     build:
       build == null
         ? null

@@ -280,29 +280,44 @@ export interface CompareRows {
   }>;
 }
 
+/** A compare's answer: one sentence while it cannot count yet, else its counts by kind. */
+export type CompareHeadline =
+  | { readonly kind: "sentence"; readonly text: string }
+  | {
+      readonly kind: "counts";
+      /** Readings that differ between the two builds. */
+      readonly differ: number;
+      readonly same: number;
+      /** Readings that change from run to run by themselves, outside the count of differences. */
+      readonly varies: number;
+      /** Readings neither build has, so the headline accounts for every row even where the
+       * table's end is out of view. */
+      readonly missing: number;
+    };
+
 /**
- * PURE. A compare's answer in a line: what differs, or that nothing measured does, or that a
- * side is still being measured so the answer is not in yet.
+ * PURE. A compare's answer: what differs, what is the same, what varies by itself and what
+ * neither build measured, or that a side is still being measured so the answer is not in yet.
  */
-export const compareHeadline = (compared: CompareRows): string => {
+export const compareHeadline = (compared: CompareRows): CompareHeadline => {
   const pending = compared.oneSided.find((entry) => entry.why === "still being measured");
   if (pending !== undefined)
-    return `${pending.side} is still being measured: the comparison fills in as its checks land.`;
+    return {
+      kind: "sentence",
+      text: `${pending.side} is still being measured: the comparison fills in as its checks land.`,
+    };
   const moved = compared.rows.filter((row) => row.mark !== null && row.mark !== "=");
   const differ = moved.filter((row) => !VARIES_BY_ITSELF.has(row.id)).length;
-  const varies = moved.length - differ;
   const same = compared.rows.filter((row) => row.mark === "=").length;
-  const alsoVaries =
-    varies === 0
-      ? ""
-      : `; ${varies === 1 ? "1 reading varies from run to run by itself" : `${varies} readings vary from run to run by themselves`}`;
-  // Readings neither build has are counted here too, so the headline accounts for every row
-  // even where the table's end is out of view.
-  const missing = compared.unmeasured.reduce((sum, group) => sum + group.names.length, 0);
-  const alsoMissing = missing === 0 ? "" : `; ${missing} not measured on either build`;
-  if (differ === 0 && same === 0) return "Nothing measured on both builds to compare yet.";
-  if (differ === 0) return `No measured difference${alsoVaries}${alsoMissing}.`;
-  return `${differ} ${differ === 1 ? "reading differs" : "readings differ"}${same > 0 ? `, ${same} the same` : ""}${alsoVaries}${alsoMissing}.`;
+  if (differ === 0 && same === 0)
+    return { kind: "sentence", text: "Nothing measured on both builds to compare yet." };
+  return {
+    kind: "counts",
+    differ,
+    same,
+    varies: moved.length - differ,
+    missing: compared.unmeasured.reduce((sum, group) => sum + group.names.length, 0),
+  };
 };
 
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;

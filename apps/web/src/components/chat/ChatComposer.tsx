@@ -6821,8 +6821,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     placeholderClassName={cn(
                       isComposerResting &&
                         "flex items-center overflow-hidden whitespace-nowrap leading-8",
-                      // A suggestion is words to read, not a hint: secondary text, not placeholder grey.
-                      gameThread && gamePlaceholder !== null && "text-muted-foreground",
+                      // A game's composer line is words to read (what to do here, or the agent's
+                      // suggestion), not a hint: secondary text, not placeholder grey.
+                      gameThread && "text-muted-foreground",
                     )}
                     onChange={onPromptChangeStable}
                     onVisibleSelectionChange={expandComposerForEditorChangeStable}

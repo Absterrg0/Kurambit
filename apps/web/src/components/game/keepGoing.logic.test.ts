@@ -114,7 +114,7 @@ describe("the keep-going banner", () => {
       kind: "proposal",
       lead: "Step 3:",
       line: "Try the undone step another way, or a smaller one",
-      detail: "starts at 14:32",
+      detail: "at 14:32",
       why: "after an undo",
       held: false,
     });
