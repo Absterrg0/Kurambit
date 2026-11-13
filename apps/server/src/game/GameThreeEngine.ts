@@ -143,10 +143,13 @@ export const makeThreeBackend = (
         `three-check-${NodeCrypto.randomUUID()}`,
       );
       const logPath = NodePath.join(temporary, "check.log");
-      const lines: string[] = [];
-      const log = (line: string): void => {
-        lines.push(line);
+      // The page's own errors go to the run's stderr, everything else to its stdout.
+      const lines: Array<{ readonly text: string; readonly error: boolean }> = [];
+      const log = (text: string, error = false): void => {
+        lines.push({ text, error });
       };
+      // A crashed page never reports ready: the crash is its issue, not a second one.
+      let crashed = false;
       const issues: GameCheckIssue[] = [];
       const reached: string[] = [];
       yield* Effect.tryPromise({
@@ -180,7 +183,7 @@ export const makeThreeBackend = (
         }
         if (event.kind === "pageerror") {
           const text = event.text.slice(0, 500);
-          log(`pageerror: ${text}`);
+          log(`pageerror: ${text}`, true);
           issues.push({
             file: stackToGameFile(event.stack, origin),
             message: `Page error: ${text}`,
@@ -194,7 +197,7 @@ export const makeThreeBackend = (
         // The browser's own chrome, not the game: a missing favicon is not
         // a game failure (the starter links a data-URI icon so it never fires).
         if (/favicon\.ico/i.test(text)) return;
-        log(`console ${event.level}: ${text}`);
+        log(`console ${event.level}: ${text}`, event.level === "error");
         if (event.level === "error")
           issues.push({
             file: stackToGameFile(event.url, origin),
@@ -235,6 +238,7 @@ export const makeThreeBackend = (
                 // going away is not, and fails the check below.
                 if (cause instanceof WebPageCrashed) {
                   log(`page crashed: ${cause.message}`);
+                  crashed = true;
                   issues.push({
                     file: `${ctx.projectName}/${entry === "boot" ? "index.html" : input.gameplayScene.split("?")[0]}`,
                     message: `The page crashed while it ${entry === "boot" ? "booted" : "started gameplay"} (${cause.message.slice(0, 300)}).`,
@@ -265,10 +269,7 @@ export const makeThreeBackend = (
                   playPerf = session.perf();
                 }
                 reached.push(entry);
-              } else if (
-                entry !== "boot" &&
-                !issues.some((issue) => issue.message.startsWith("The page crashed"))
-              )
+              } else if (entry !== "boot" && !crashed)
                 issues.push({
                   file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
                   message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
@@ -317,7 +318,9 @@ export const makeThreeBackend = (
         : undefined;
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
-        NodeFSP.writeFile(logPath, `${lines.join("\n")}\n`).catch(() => undefined),
+        NodeFSP.writeFile(logPath, `${lines.map((line) => line.text).join("\n")}\n`).catch(
+          () => undefined,
+        ),
       );
       const run: GameProcessResult = {
         pid: 0,
@@ -325,11 +328,11 @@ export const makeThreeBackend = (
         signal: null,
         timedOut,
         stdout: lines
-          .filter((line) => !line.startsWith("console error") && !line.startsWith("pageerror"))
+          .flatMap((line) => (line.error ? [] : [line.text]))
           .join("\n")
           .slice(-4000),
         stderr: lines
-          .filter((line) => line.startsWith("console error") || line.startsWith("pageerror"))
+          .flatMap((line) => (line.error ? [line.text] : []))
           .join("\n")
           .slice(-4000),
         logPath,

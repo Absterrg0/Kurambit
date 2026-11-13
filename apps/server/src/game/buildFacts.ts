@@ -9,6 +9,7 @@ import {
   type GameBuildFacts,
   type GameBuildFactsSummary,
   type GameCheckResult,
+  type GameFactNotMeasuredCause,
   type GameFactTone,
   type GameOperationError,
   gameChecksView,
@@ -24,18 +25,26 @@ type TierFact = Facts["idle"];
  * again. `standing`: a tool or the machine that waiting will not fix (a
  * missing program, a game too slow for the budget); a person's measure tries
  * again, since they may have fixed it. Neither: the build's own reason (it
- * reports no run state), measured again only by a new harness.
+ * reports no run state), measured again only by a new harness. `cause`: what
+ * kept it, where a person is told it apart or the harness acts on it.
  */
 type NotMeasured = {
   readonly status: "not-measured";
   readonly why: string;
+  readonly cause?: GameFactNotMeasuredCause;
   readonly retry: boolean;
   readonly standing?: true;
 };
 
-export const notMeasured = (why: string, retry: boolean, standing = false): NotMeasured => ({
+export const notMeasured = (
+  why: string,
+  retry: boolean,
+  standing = false,
+  cause?: GameFactNotMeasuredCause,
+): NotMeasured => ({
   status: "not-measured",
   why: why.slice(0, 300),
+  ...(cause === undefined ? {} : { cause }),
   retry,
   ...(standing && !retry ? { standing: true as const } : {}),
 });
@@ -98,12 +107,10 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
           ? `${what} while another game drew on this machine's GPU, so it says nothing about the game`
           : `${what} while the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so it says nothing about the game`,
         true,
+        false,
+        "busy",
       )
     : null;
-
-const SOFTWARE_TOO_SLOW = "the harness renders in software here";
-/** How the one standing fault that is the game's own begins: a step can make it faster. */
-const SLOW_ON_IDLE = "the game ran at ";
 
 /**
  * A tier this machine cannot measure until a person fixes the machine or its
@@ -113,7 +120,8 @@ const SLOW_ON_IDLE = "the game ran at ";
 export const machineFault = (
   fact: TierFact,
 ): fact is Extract<TierFact, { status: "not-measured" }> =>
-  fact.status === "not-measured" && isStanding(fact) && !fact.why.startsWith(SLOW_ON_IDLE);
+  // A game too slow on an idle machine is the one standing fault that is the game's own.
+  fact.status === "not-measured" && isStanding(fact) && fact.cause !== "slow";
 
 /** The no-input or random-input tier that is a machine fault, if either is. */
 export const unmeasurableTier = (facts: Pick<Facts, "idle" | "masher">) =>
@@ -128,19 +136,23 @@ export const unmeasurableTier = (facts: Pick<Facts, "idle" | "masher">) =>
 const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) =>
   machine?.software === true
     ? notMeasured(
-        `${SOFTWARE_TOO_SLOW}, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
+        `the harness renders in software here, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
         false,
         true,
+        "software",
       )
     : machineBusy(machine)
       ? notMeasured(
           `the machine was busy (load ${machine!.load.toFixed(1)} on ${machine!.cores} cores), so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
           true,
+          false,
+          "busy",
         )
       : notMeasured(
-          `${SLOW_ON_IDLE}${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
+          `the game ran at ${result.timeRatio.toFixed(2)}× real time on an idle machine, so ${playSeconds} s of play did not fit the run's wall budget`,
           false,
           true,
+          "slow",
         );
 
 /** What a tier bot reports in its status evidence (templates/bot-kit/tier.mjs). */
@@ -208,7 +220,7 @@ export const tierFact = (
       evidence,
     },
   });
-  if (result.played === false) return notMeasured(`the tier bot did not play: ${note}`, false);
+  if (result.played === false) return notMeasured(`the bot did not play: ${note}`, false);
   switch (status) {
     case "crashed":
       return measured(status, since(result.gameSeconds));
@@ -251,7 +263,7 @@ export const tierFact = (
       };
     }
     default:
-      return notMeasured(`the tier bot ended "${status}": ${note}`, false);
+      return notMeasured(`the bot ended "${status}": ${note}`, false);
   }
 };
 
@@ -359,10 +371,14 @@ export const winnableOf = (idle: TierFact, masher: TierFact): Facts["winnableWit
     return { status: "measured", value: false };
   }
   const missing = idle.status === "not-measured" ? idle : masher;
-  return notMeasured(
-    `needs both the no-input and the random-input run: ${missing.status === "not-measured" ? missing.why : "not measured"}`,
-    missing.status === "not-measured" ? missing.retry : true,
-  );
+  return missing.status === "not-measured"
+    ? notMeasured(
+        `needs both the no-input and the random-input run: ${missing.why}`,
+        missing.retry,
+        false,
+        missing.cause,
+      )
+    : notMeasured("needs both the no-input and the random-input run: not measured", true);
 };
 
 const TONE_ORDER: Readonly<Record<GameFactTone, number>> = { bad: 0, good: 1, neutral: 2 };

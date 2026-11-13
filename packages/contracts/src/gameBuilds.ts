@@ -212,9 +212,32 @@ export const GameBuild = Schema.Struct({
 });
 export type GameBuild = typeof GameBuild.Type;
 
+/**
+ * What kept a fact from being measured, where that changes what a person is told or what the
+ * harness does next; other reasons are the build's or the tool's own and say so in `why`.
+ * - software: the harness's browser draws without a GPU here, so plays say nothing about the game.
+ * - busy: other work held the machine; the next measure takes it again.
+ * - slow: the game itself ran below real time on an idle machine (a step can make it faster).
+ * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
+ * - no-play-bot: the game has no play bot to measure skilled play with.
+ * - deferred: the tester's bot plays only for keep going's judgment or a person's measure.
+ */
+export const GameFactNotMeasuredCause = Schema.Literals([
+  "software",
+  "busy",
+  "slow",
+  "old-shell",
+  "no-play-bot",
+  "deferred",
+]);
+export type GameFactNotMeasuredCause = typeof GameFactNotMeasuredCause.Type;
+
 export const GameFactNotMeasured = Schema.Struct({
   status: Schema.Literal("not-measured"),
+  /** For agents and logs: the full reason, with the machine's figures. */
   why: Schema.String,
+  /** Absent on a reason that is the build's own, and on facts stored before causes existed. */
+  cause: Schema.optionalKey(GameFactNotMeasuredCause),
   /** Waiting can clear it (a tool or the machine): the next measure tries again. */
   retry: Schema.Boolean,
   /** A tool or the machine that waiting will not fix (a missing program, a game too slow to play here). */
@@ -449,7 +472,10 @@ export const GameFactView = Schema.Struct({
       value: Schema.NullOr(Schema.Number),
       tone: GameFactTone,
     }),
-    Schema.TaggedStruct("not-measured", { why: Schema.String }),
+    Schema.TaggedStruct("not-measured", {
+      why: Schema.String,
+      cause: Schema.optionalKey(GameFactNotMeasuredCause),
+    }),
     Schema.TaggedStruct("pending", {}),
   ]),
   evidence: Schema.Array(
@@ -570,15 +596,24 @@ interface Reading {
 }
 type Read =
   | { readonly _tag: "measured"; readonly reading: Reading }
-  | { readonly _tag: "not-measured"; readonly why: string }
+  | {
+      readonly _tag: "not-measured";
+      readonly why: string;
+      readonly cause?: GameFactNotMeasuredCause;
+    }
   | { readonly _tag: "pending" };
+const unmeasured = (fact: typeof GameFactNotMeasured.Type): Read => ({
+  _tag: "not-measured",
+  why: fact.why,
+  ...(fact.cause === undefined ? {} : { cause: fact.cause }),
+});
 
 const from = <A>(fact: Fact<A>, read: (value: A) => Reading): Read =>
   fact.status === "measured"
     ? { _tag: "measured", reading: read(fact.value) }
     : fact.status === "pending"
       ? { _tag: "pending" }
-      : { _tag: "not-measured", why: fact.why };
+      : unmeasured(fact);
 
 const liveness = (facts: GameBuildFacts, read: (live: Liveness) => Reading) =>
   from(facts.liveness, read);
@@ -746,7 +781,11 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
       return fromScene(facts, (report): Read => {
         const empty = report.empty;
         if (empty === undefined)
-          return { _tag: "not-measured", why: "the game's shell predates the empty-view measure" };
+          return {
+            _tag: "not-measured",
+            why: "the game's shell predates the empty-view measure",
+            cause: "old-shell",
+          };
         const problem = sceneEmptyText(empty);
         return measured({
           text:
@@ -801,7 +840,7 @@ const fromScene = (facts: GameBuildFacts, read: (report: GameSceneReport) => Rea
     ? read(facts.scene.value)
     : facts.scene.status === "pending"
       ? { _tag: "pending" }
-      : { _tag: "not-measured", why: facts.scene.why };
+      : unmeasured(facts.scene);
 
 const sceneFrame = (finding: GameSceneFinding): GameFactView["evidence"] =>
   finding.frame === null
@@ -872,7 +911,11 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
             }
           : read._tag === "pending"
             ? { _tag: "pending" }
-            : { _tag: "not-measured", why: read.why },
+            : {
+                _tag: "not-measured",
+                why: read.why,
+                ...(read.cause === undefined ? {} : { cause: read.cause }),
+              },
       evidence: read._tag === "measured" ? evidenceOf(facts, id) : [],
     };
   });
@@ -898,6 +941,8 @@ export interface GameCheck extends GameFactView {
   readonly sentence: string;
   /** The reading's number or time ("at 4.4 s", "60 fps"); null when the sentence says it all. */
   readonly value: string | null;
+  /** A measured bot run's ending; null for every other fact. */
+  readonly ending: typeof GameBotEnding.Type | null;
 }
 
 export interface GameChecksView {
@@ -1122,7 +1167,14 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
     // The scene rows' readings are already sentences about what a person would see.
     const fallback =
       view.reading._tag === "measured" ? view.reading.text : (CHECK_LABELS[view.id] ?? view.label);
-    return { ...view, sentence: words?.sentence ?? fallback, value: words?.value ?? null };
+    const run =
+      view.id === "idle" || view.id === "masher" || view.id === "skilled" ? facts[view.id] : null;
+    return {
+      ...view,
+      sentence: words?.sentence ?? fallback,
+      value: words?.value ?? null,
+      ending: run?.status === "measured" ? run.value.ending : null,
+    };
   };
   const checks = GAME_LEAD_FACTS.flatMap((id) => {
     const view = views.find((entry) => entry.id === id);

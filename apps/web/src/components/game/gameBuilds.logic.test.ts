@@ -37,7 +37,7 @@ describe("a compare's rows", () => {
       reading:
         id === "boots"
           ? { _tag: "measured" as const, text: "Boots clean", value: null, tone: "good" as const }
-          : { _tag: "not-measured" as const, why: busy },
+          : { _tag: "not-measured" as const, why: busy, cause: "busy" as const },
       evidence: [],
     });
     const views = [view("boots"), view("freeze"), view("colour")];
@@ -72,8 +72,44 @@ describe("a compare's rows", () => {
     expect(groups).toEqual([
       {
         names: ["Longest still stretch", "Largest colour"],
-        why: "the picture stood still while the machine was busy, so it says nothing about the game",
+        why: "this computer was busy with other work, so the reading says nothing about the game; the next measure takes it again",
       },
+    ]);
+  });
+});
+
+describe("a compare's cells", () => {
+  it("say a run's ending and a number from the readings, not from their words", () => {
+    const measured = (value: number) =>
+      ({ _tag: "measured", text: "", value, tone: "neutral" }) as const;
+    const delta = (id: "masher" | "colour" | "freeze", a: string, b: string) =>
+      ({ id, label: id, a, b, change: "changed", tone: "neutral", why: null }) as const;
+    const check = (
+      id: "masher" | "colour" | "freeze",
+      value: number,
+      ending: "lost" | "won" | null,
+    ) => ({
+      id,
+      sentence: "Anything",
+      value: ending === null ? null : "at 4.8 s",
+      reading: measured(value),
+      ending,
+    });
+    const side = (ending: "lost" | "won", colour: number, still: number) => [
+      check("masher", 4.8, ending),
+      check("colour", colour, null),
+      check("freeze", still, null),
+    ];
+    const { rows } = compareRows(
+      [delta("masher", "x", "y"), delta("colour", "x", "y"), delta("freeze", "x", "y")],
+      [],
+      [],
+      { a: side("lost", 0.62, 0), b: side("won", 0.4, 3.4) },
+    );
+    expect(rows.map((row) => [row.id, row.a, row.b])).toEqual([
+      ["freeze", "None", "3.4 s"],
+      ["colour", "62%", "40%"],
+      ["masher", "Lost at 4.8 s", "Won at 4.8 s"],
     ]);
   });
 });
