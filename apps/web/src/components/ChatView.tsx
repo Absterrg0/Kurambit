@@ -571,6 +571,8 @@ const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 // second, and every server-side visit is a full command dispatch plus a
 // broadcast to all shell subscribers.
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
+// A game playing on the Stage: a key typed outside any field on its screen is meant for it.
+const GAME_FRAME_ON_STAGE = '[data-game-stage="true"] iframe[data-game-frame]';
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 function useDraftHeroLayoutTransition(
   isDraftHeroState: boolean,
@@ -4267,7 +4269,9 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, focusComposerStable, terminalUiState.terminalOpen, isGameThread]);
 
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
+    // A game's screen hands its keys to the game, never back to the composer.
+    if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport || isGameThread)
+      return;
     let frame: number | null = null;
     const onWindowFocus = () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
@@ -4287,7 +4291,13 @@ export default function ChatView(props: ChatViewProps) {
       window.removeEventListener("focus", onWindowFocus);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposerStable, isMobileViewport, terminalUiState.terminalOpen]);
+  }, [
+    activeThread?.id,
+    focusComposerStable,
+    isGameThread,
+    isMobileViewport,
+    terminalUiState.terminalOpen,
+  ]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -5262,7 +5272,15 @@ export default function ChatView(props: ChatViewProps) {
     scriptKeybindings,
     getShortcutContext: getShortcutContextStable,
     threadFindActive: isThreadFindActive,
-    typeIntoComposer: (key) => composerRef.current?.insertTextAtEnd(key) === true,
+    typeIntoComposer: (key) => {
+      // On a game's screen a key typed outside any field is meant for the game: it takes the
+      // keyboard as a click on it would. The composer is one click away.
+      if (isGameThread && document.querySelector(GAME_FRAME_ON_STAGE) !== null) {
+        requestGameStage({ kind: "focus" });
+        return true;
+      }
+      return composerRef.current?.insertTextAtEnd(key) === true;
+    },
     closeThreadFind: () => {
       closeThreadFindStable();
       focusComposerStable();
@@ -7756,18 +7774,7 @@ export default function ChatView(props: ChatViewProps) {
                     runtimeMode={runtimeMode}
                     interactionMode={interactionMode}
                     gameThread={isGameThread}
-                    gamePlaceholder={gameNext === null ? null : `Next: ${gameNext}`}
-                    gamePlaceholderAction={
-                      gameNext === null ? null : (
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          onClick={() => askAgentToFixStable(gameNext)}
-                        >
-                          Ask for it
-                        </Button>
-                      )
-                    }
+                    gameSuggestion={gameNext}
                     lockedProvider={modelPickerLockedProvider}
                     providerStatuses={providerStatuses as ServerProvider[]}
                     providerCatalogKnown={serverConfig !== null}
@@ -8044,11 +8051,7 @@ export default function ChatView(props: ChatViewProps) {
           )}
         </header>
         {gameLayout ? (
-          <GameInspectorPanel
-            threadRef={activeThreadRef}
-            compact={compactInspectorVisible}
-            turnRequest={gameTurnRequestWhole}
-          />
+          <GameInspectorPanel threadRef={activeThreadRef} compact={compactInspectorVisible} />
         ) : null}
 
         <div

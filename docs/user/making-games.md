@@ -279,8 +279,8 @@ takes the place of the game until you switch back.
 To change the game, write a follow-up in the chat, for example "make the rocks taller and spread
 the trees out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
 keep their references. A game's agent ends its reply with the one change it would make next; when
-it does, the composer shows it as **Next:**. **Ask for it** puts that change in the composer for you
-to edit or send, and dismissing it hides it until the next reply.
+it does, the empty composer shows it as **Next:**. Press Tab to put that change in the composer, then
+edit or send it.
 
 Stopping the agent's turn stops its Blender commands, but a game that is already running
 keeps running; use **Stop game** to close it.

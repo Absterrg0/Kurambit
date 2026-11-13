@@ -55,13 +55,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       )}
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
-      <div className="relative top-[calc(var(--workspace-controls-top)-env(safe-area-inset-top))] z-10 ml-[calc(var(--workspace-controls-left)+1px-env(safe-area-inset-left))] flex shrink-0 items-center md:hidden">
-        <SidebarTrigger
-          variant={backdropVariant ? "media-navigation" : "ghost"}
-          className="relative top-auto translate-y-0"
-          aria-label="Toggle main sidebar"
-        />
-      </div>
       <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
         <SidebarBrand onBackdrop={backdropVariant !== null} />
         {/* The build channel, as quiet as a caption: it says which Kurambit this is. */}
@@ -76,6 +69,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           </Text>
         ) : null}
       </div>
+      <SidebarToggle onBackdrop={backdropVariant !== null} className="relative z-10 shrink-0" />
     </div>
   );
 });
@@ -97,10 +91,43 @@ export function SidebarBrandWidthProbe({
       className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
       ref={observeWidth}
     >
-      <div className="ml-[var(--workspace-titlebar-content-left)] flex">
+      <div className="ml-[var(--workspace-controls-left)] flex gap-2">
         <SidebarBrandMark onBackdrop={false} />
+        {/* The toggle at the header's right end. */}
+        <span className="size-(--workspace-titlebar-control-size) shrink-0" />
       </div>
     </div>
+  );
+}
+
+/** The main sidebar's toggle, its key in the tooltip. */
+export function SidebarToggle({
+  onBackdrop = false,
+  className,
+}: {
+  onBackdrop?: boolean;
+  className?: string;
+}) {
+  const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
+    context: { usagePageOpen },
+  });
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <SidebarTrigger
+            variant={onBackdrop ? "media-navigation" : "ghost"}
+            className={className}
+            aria-label="Toggle main sidebar"
+          />
+        }
+      />
+      <TooltipPopup side="bottom">
+        <TooltipLabel shortcut={shortcutLabel}>Toggle main sidebar</TooltipLabel>
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -112,7 +139,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
           <Link
             aria-label="Go to home"
             className={cn(
-              "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden size-7 shrink-0 items-center justify-center rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
+              "relative z-10 ml-[var(--workspace-controls-left)] hidden size-7 shrink-0 items-center justify-center rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
               onBackdrop ? "text-white" : "text-foreground",
             )}
             to="/"

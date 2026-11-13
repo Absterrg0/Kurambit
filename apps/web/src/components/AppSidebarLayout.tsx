@@ -8,15 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
-import {
-  isRichTextBoldShortcut,
-  resolveShortcutCommand,
-  shortcutLabelForCommand,
-} from "../keybindings";
+import { isRichTextBoldShortcut, resolveShortcutCommand } from "../keybindings";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -25,7 +20,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
+import { useLegacySidebarEnabled } from "../hooks/useSettings";
 import {
   PanelAnimationSuppressionProvider,
   usePanelAnimationSettings,
@@ -34,9 +29,8 @@ import {
 import LegacyThreadSidebar from "./LegacySidebar";
 import { useThreadVisitedMigration } from "../hooks/useThreadVisitedMigration";
 import ThreadSidebar from "./Sidebar";
-import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
+import { SidebarBrandWidthProbe, SidebarToggle } from "./sidebar/SidebarChrome";
 import { isSettingsPage, MainAppLocationTracker } from "./sidebar/mainAppLocation";
-import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import {
   clampThreadSidebarWidth,
   resolveInitialThreadSidebarWidth,
@@ -49,17 +43,10 @@ import {
   Sidebar,
   SidebarProvider,
   SidebarRail,
-  SidebarTrigger,
   useSidebar,
   useSidebarVisibility,
 } from "./ui/sidebar";
-import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { Button } from "./ui/button";
-import {
-  navigateHistory,
-  useCanNavigateHistory,
-  type HistoryDirection,
-} from "../navigationHistory";
+import { navigateHistory } from "../navigationHistory";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
@@ -128,13 +115,6 @@ function SidebarControl() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
-  const environmentIdentificationMode = useEnvironmentIdentificationMode();
-  const stageBackdropVariant = useSidebarStageBackdropVariant(
-    environmentIdentificationMode === "artwork",
-  );
-  const shortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
-    context: { usagePageOpen },
-  });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -178,6 +158,8 @@ function SidebarControl() {
     };
   }, [keybindings, toggleSidebar, usagePageOpen]);
 
+  // An open sidebar has its toggle at the right of its own header; this one reopens it.
+  if (isSidebarVisible) return null;
   return (
     <div
       className={cn(
@@ -186,76 +168,8 @@ function SidebarControl() {
       )}
       data-sidebar-control=""
     >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarTrigger
-              variant={isSidebarVisible && stageBackdropVariant ? "media-navigation" : "ghost"}
-              className={cn(
-                "pointer-events-auto",
-                isSidebarVisible && stageBackdropVariant && "relative top-auto translate-y-0",
-              )}
-              aria-label="Toggle main sidebar"
-            />
-          }
-        />
-        <TooltipPopup side="bottom">
-          <TooltipLabel shortcut={shortcutLabel}>Toggle main sidebar</TooltipLabel>
-        </TooltipPopup>
-      </Tooltip>
-      {/* Phones keep the system back gesture; the buttons start at md. */}
-      <div className="pointer-events-auto hidden items-center [-webkit-app-region:no-drag] md:flex">
-        <NavigationHistoryButton
-          direction="back"
-          onStageBackdrop={isSidebarVisible && stageBackdropVariant !== null}
-        />
-        <NavigationHistoryButton
-          direction="forward"
-          onStageBackdrop={isSidebarVisible && stageBackdropVariant !== null}
-        />
-      </div>
+      <SidebarToggle className="pointer-events-auto" />
     </div>
-  );
-}
-
-const NAVIGATION_HISTORY_BUTTONS = {
-  back: { label: "Back", command: "navigation.back", Icon: ArrowLeftIcon },
-  forward: { label: "Forward", command: "navigation.forward", Icon: ArrowRightIcon },
-} as const;
-
-// Beside the sidebar toggle, as in T3 rd: game ↔ game ↔ settings is a history a person
-// walks back through. On the web they share the tab's history with the browser's own
-// buttons but stop at the app's first and last entries, so they never leave the app.
-function NavigationHistoryButton({
-  direction,
-  onStageBackdrop,
-}: {
-  direction: HistoryDirection;
-  onStageBackdrop: boolean;
-}) {
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const canNavigate = useCanNavigateHistory(direction);
-  const { label, command, Icon } = NAVIGATION_HISTORY_BUTTONS[direction];
-  const shortcutLabel = shortcutLabelForCommand(keybindings, command);
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant={onStageBackdrop ? "media-navigation" : "ghost"}
-            size="icon-sm"
-            aria-label={label}
-            disabled={!canNavigate}
-            onClick={() => navigateHistory(direction)}
-          />
-        }
-      >
-        <Icon />
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        <TooltipLabel shortcut={shortcutLabel}>{label}</TooltipLabel>
-      </TooltipPopup>
-    </Tooltip>
   );
 }
 
@@ -374,9 +288,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         style={sidebarProviderStyle}
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
-        {/* Fixed over the top-left corner, and first in the document so Tab reaches it first,
-            where it is drawn. */}
-        <SidebarControl />
         <Sidebar
           side="left"
           variant="inset"
@@ -399,6 +310,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
         {children}
+        {/* Fixed over the top-left corner while the sidebar is closed. After the page in the
+            document: Electron applies window drag regions in document order, so a control
+            before the top bars' drag regions would sit under them and take no clicks. */}
+        <SidebarControl />
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
       </SidebarProvider>

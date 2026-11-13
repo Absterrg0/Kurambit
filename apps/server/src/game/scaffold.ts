@@ -92,7 +92,7 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
 - **Write your last message for the person making the game:** what changed in the game and what they can do now. Name no tools or files.
-- **End every reply with one line,** \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done. The person can send your \`Next:\` with one click, so make it a request they could have typed: one change, in their words, not a plan.
+- **End every reply with one line,** \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done. The person can take your \`Next:\` into their message with one key, so make it a request they could have typed: one change, in their words, not a plan.
 `,
   // The Stage plays a Web export the turn loop rebuilds when the turn ends.
   export: `## Every turn

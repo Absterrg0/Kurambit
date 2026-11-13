@@ -53,7 +53,13 @@ import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
 import { dispatchComposerFocus } from "../../lib/desktopSnapShot";
 import { cn, randomUUID } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
+import {
+  useQuietThreadShell,
+  useThreadCheckpointSummaries,
+  useThreadProjection,
+} from "../../state/entities";
+import { readNextLine } from "@kurambit/shared/gameNextLine";
+import ChatMarkdown from "../ChatMarkdown";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
@@ -161,12 +167,9 @@ export function GameInspectorTabs({ threadRef }: { threadRef: ScopedThreadRef })
 export function GameInspectorPanel({
   threadRef,
   compact,
-  turnRequest = null,
 }: {
   threadRef: ScopedThreadRef;
   compact: boolean;
-  /** What the person asked of the turn that is running, whole; null when none runs. */
-  turnRequest?: string | null;
 }) {
   const tab = useGameWorkspaceStore((state) => state.inspectorTab);
   if (tab === "log") return null;
@@ -185,7 +188,7 @@ export function GameInspectorPanel({
           className="mx-auto w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
         >
           {tab === "build" ? (
-            <BuildPanel threadRef={threadRef} turnRequest={turnRequest} />
+            <BuildPanel threadRef={threadRef} />
           ) : (
             <ScenePanel threadRef={threadRef} />
           )}
@@ -260,13 +263,7 @@ function Rows({ children }: { children: ReactNode }) {
 // ─── Build ────────────────────────────────────────────────────────────────────
 
 /** The build the Inspector shows: the one picked on the strip, else the one on the Stage. */
-function BuildPanel({
-  threadRef,
-  turnRequest,
-}: {
-  threadRef: ScopedThreadRef;
-  turnRequest: string | null;
-}) {
+function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -333,17 +330,6 @@ function BuildPanel({
               : "Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to measure these."}
           </Text>
         </div>
-        {/* What it is being made from, whole, as every build's panel says it once it lands. */}
-        {turnRequest === null || turnRequest === "" ? null : (
-          <Section title="You asked">
-            <Text
-              variant="body"
-              render={<p className="border-l-2 border-border py-0.5 ps-2.5 break-words" />}
-            >
-              {turnRequest}
-            </Text>
-          </Section>
-        )}
         {checksToCome}
       </div>
     ) : (
@@ -460,14 +446,11 @@ function BuildDetail({
   const measureAnswer = measure.answer(build.id);
   const source = build.source;
   const step = source._tag === "turn" ? source.step : null;
+  // A keep-going step says why it was taken; a person's own request is theirs already.
   const asked =
-    source._tag === "saved"
+    source._tag === "saved" || step === null
       ? null
-      : step !== null
-        ? { title: "Why", text: buildCaption(build), verdict: stepVerdictText(step) }
-        : source.request.trim() === ""
-          ? null
-          : { title: "You asked", text: source.request, verdict: null };
+      : { title: "Why", text: buildCaption(build), verdict: stepVerdictText(step) };
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
   return (
     <div className="flex flex-col gap-5 p-4">
@@ -499,7 +482,6 @@ function BuildDetail({
           className="h-12 w-20 shrink-0 rounded-md ring-1 ring-border ring-inset"
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {/* The build's name; what was asked is quoted whole under "You asked". */}
           <Text variant="label" tone="strong" truncate render={<h2 />}>
             {buildName(build)}
           </Text>
@@ -606,17 +588,14 @@ function BuildDetail({
             <Checks threadRef={threadRef} facts={factsData} />
           </>
         )}
-        {measureAnswer !== null && measureAnswer.text !== factsData?.message ? (
-          <Text
-            variant="meta"
-            tone={measureAnswer.failed ? "destructive" : "muted"}
-            render={<p role={measureAnswer.failed ? "alert" : undefined} />}
-          >
+        {/* Only a refusal: a queued or running measurement says so in the line under the title. */}
+        {measureAnswer !== null && measureAnswer.failed ? (
+          <Text variant="meta" tone="destructive" render={<p role="alert" />}>
             {measureAnswer.text}
           </Text>
         ) : null}
       </Section>
-      <Changes threadRef={threadRef} build={build} />
+      <WhatChanged threadRef={threadRef} build={build} />
       {factsData !== null && factsData.state !== "never" ? (
         <Recordings threadRef={threadRef} build={build} facts={factsData} />
       ) : null}
@@ -755,8 +734,13 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
     ...(toJudge > 0 ? [`${toJudge} for you to judge`] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
     ...(busy && pending > 0 ? [`${pending} to measure`] : []),
-    // The step line under it already says it is measuring, and which step.
-    ...(busy && !stepLine ? ["measuring"] : []),
+    // A pending row under it says it is measuring, and which step; with none (measuring again
+    // over the last readings) the line says it.
+    ...(busy && pending === 0
+      ? [facts.state === "queued" ? "measuring again soon" : "measuring again"]
+      : busy && !stepLine
+        ? ["measuring"]
+        : []),
   ].join(" · ");
 }
 
@@ -1257,8 +1241,17 @@ function CheckRow({
  * What the build changed, in place: its files, most changed first. The code diff is a
  * deliberate second step, so a click here never turns the game screen into a code view.
  */
-function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: GameBuild }) {
-  const [open, setOpen] = useState(false);
+/** A reply's own words, without the `Next:` line it ends on (the composer offers that). */
+const withoutNextLine = (reply: string): string => {
+  const lines = reply.trimEnd().split("\n");
+  return readNextLine(reply) === null ? reply.trim() : lines.slice(0, -1).join("\n").trim();
+};
+
+/**
+ * What a build changed, in the agent's words: its reply for the turn that made the build. The
+ * code itself is the diff, one click away in the side panel.
+ */
+function WhatChanged({ threadRef, build }: { threadRef: ScopedThreadRef; build: GameBuild }) {
   const turn =
     build.source._tag === "turn" && build.source.threadId === threadRef.threadId
       ? build.source.turn
@@ -1266,78 +1259,32 @@ function Changes({ threadRef, build }: { threadRef: ScopedThreadRef; build: Game
   const runId =
     useThreadCheckpointSummaries(threadRef).find((entry) => entry.checkpointTurnCount === turn)
       ?.runId ?? null;
-  if (build.fileCount === null && build.files.length === 0) return null;
+  const reply = useThreadProjection(
+    runId === null ? null : threadRef,
+  )?.projection.messages.findLast(
+    (message) => message.role === "assistant" && !message.streaming && message.runId === runId,
+  );
+  const words = reply === undefined ? "" : withoutNextLine(reply.text);
   const count = build.fileCount ?? build.files.length;
-  const listed = build.files.length;
-  // The lines are counted over the listed files only: a total over some files is not said.
-  const complete = build.fileCount === null || build.fileCount <= listed;
-  const additions = build.files.reduce((sum, file) => sum + file.additions, 0);
-  const deletions = build.files.reduce((sum, file) => sum + file.deletions, 0);
+  if (words === "" && runId === null) return null;
   const openDiff = () => {
     if (runId === null) return;
     useDiffPanelStore.getState().selectTurn(threadRef, runId);
     useRightPanelStore.getState().open(threadRef, "diff");
   };
   return (
-    <Section title="Changes">
-      <Rows>
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          disabled={count === 0}
-          className="flex items-center gap-2.5 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent disabled:hover:bg-transparent"
-        >
-          <ChevronRightIcon
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform motion-popup",
-              open && "rotate-90",
-            )}
-            aria-hidden="true"
-          />
-          <Text variant="meta" tone="default">
-            {count === 1 ? "1 file" : `${count} files`}
-          </Text>
-          {count > 0 && complete ? (
-            <Text variant="meta" tone="inherit" numeric render={<span className="ml-auto" />}>
-              <span className="text-success-foreground">+{additions}</span>{" "}
-              <span className="text-destructive-foreground">−{deletions}</span>
-            </Text>
-          ) : null}
-        </button>
-        {open
-          ? build.files.map((file) => (
-              <div key={file.path} className="flex items-baseline gap-2 px-3 py-1.5">
-                <Text variant="caption" tone="muted" mono truncate>
-                  {file.path}
-                </Text>
-                <Text
-                  variant="caption"
-                  tone="inherit"
-                  numeric
-                  render={<span className="ml-auto" />}
-                >
-                  <span className="text-success-foreground">+{file.additions}</span>{" "}
-                  <span className="text-destructive-foreground">−{file.deletions}</span>
-                </Text>
-              </div>
-            ))
-          : null}
-        {open && (!complete || runId !== null) ? (
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <Text variant="caption" tone="muted" render={<span className="min-w-0 flex-1" />}>
-              {complete
-                ? ""
-                : `${count - listed} smaller ${count - listed === 1 ? "file" : "files"} not listed`}
-            </Text>
-            {runId !== null ? (
-              <Button size="xs" variant="ghost" onClick={openDiff}>
-                Open the code changes
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-      </Rows>
+    <Section
+      title="What changed"
+      aside={
+        runId === null ? undefined : (
+          <Button size="xs" variant="ghost" onClick={openDiff}>
+            {count === 0 ? "Code changes" : count === 1 ? "1 file" : `${count} files`}
+            <ChevronRightIcon aria-hidden="true" />
+          </Button>
+        )
+      }
+    >
+      {words === "" ? null : <ChatMarkdown text={words} cwd={undefined} threadRef={threadRef} />}
     </Section>
   );
 }

@@ -406,6 +406,7 @@ export function GameFrame({
         // Not title: Chromium shows an iframe's title as a tooltip over the
         // game wherever the pointer rests, and keyboard games leave it resting.
         aria-label={title}
+        data-game-frame=""
         allow="autoplay; fullscreen; gamepad"
         // The game is served from its own loopback origin, so the sandbox
         // keeps it out of the app's origin. It needs allow-same-origin to

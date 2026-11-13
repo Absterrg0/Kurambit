@@ -1,5 +1,4 @@
 import type { RouterHistory } from "@tanstack/react-router";
-import { useSyncExternalStore } from "react";
 
 // Back and forward stay inside the app: TanStack stamps each entry with __TSR_index,
 // and sessionStorage keeps the furthest entry so forward survives a reload. A push
@@ -11,7 +10,6 @@ export type HistoryDirection = "back" | "forward";
 
 let currentIndex = 0;
 let furthestIndex = 0;
-const listeners = new Set<() => void>();
 
 function readStampedIndex(state: { __TSR_index?: unknown } | null | undefined): number | null {
   const index = state?.__TSR_index;
@@ -81,13 +79,7 @@ export function trackNavigationHistory(history: RouterHistory): () => void {
       furthestIndex = nextFurthestIndex;
       writeStoredFurthestIndex(furthestIndex);
     }
-    for (const listener of listeners) listener();
   });
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
 }
 
 export function canNavigateHistory(direction: HistoryDirection): boolean {
@@ -100,8 +92,4 @@ export function navigateHistory(direction: HistoryDirection): boolean {
   if (direction === "back") window.history.back();
   else window.history.forward();
   return true;
-}
-
-export function useCanNavigateHistory(direction: HistoryDirection): boolean {
-  return useSyncExternalStore(subscribe, () => canNavigateHistory(direction));
 }

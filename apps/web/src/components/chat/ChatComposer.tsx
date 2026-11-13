@@ -1008,6 +1008,8 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { Kbd } from "../ui/kbd";
+import { Text } from "../ui/text";
 import { CircleAlertIcon, PaperclipIcon, PlayIcon, ShieldIcon, XIcon } from "lucide-react";
 import { proposedPlanTitle } from "@kurambit/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
@@ -1394,10 +1396,8 @@ export interface ChatComposerProps {
   interactionMode: ProviderInteractionMode;
   /** Game threads hide the coding access picker and use game copy. */
   gameThread?: boolean;
-  /** A game's placeholder in place of its usual one: the agent's suggested next change. */
-  gamePlaceholder?: string | null;
-  /** The action that takes the suggestion, shown at the end of its line while the box is empty. */
-  gamePlaceholderAction?: ReactNode | null;
+  /** The agent's suggested next change: the empty box's placeholder, and Tab takes it as the draft. */
+  gameSuggestion?: string | null;
 
   lockedProvider: ProviderDriverKind | null;
   providerStatuses: ServerProvider[];
@@ -1765,8 +1765,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     gameThread = false,
-    gamePlaceholder = null,
-    gamePlaceholderAction = null,
+    gameSuggestion = null,
     interactionMode: requestedInteractionMode,
     lockedProvider,
     providerStatuses,
@@ -2506,6 +2505,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const nonPersistedComposerImageIdSet = new Set(nonPersistedComposerImageIds);
 
   const isComposerApprovalState = activePendingApproval !== null;
+  // A question, an approval or a plan to refine owns the empty box, not the suggestion.
+  const offeredSuggestion =
+    !gameThread || isComposerApprovalState || activePendingProgress || showPlanFollowUpPrompt
+      ? null
+      : gameSuggestion;
   const composerSuggestionsVisible = composerMenuOpen && !isComposerApprovalState;
   const composerSuggestionListVisible = composerSuggestionsVisible && composerMenuItems.length > 0;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
@@ -3831,6 +3835,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive =
       !isLiteralPendingAnswer && (composerMenuOpenRef.current || trigger !== null);
+    if (
+      key === "Tab" &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !menuIsActive &&
+      offeredSuggestion !== null &&
+      promptRef.current.trim() === ""
+    ) {
+      return applyPromptReplacement(0, promptRef.current.length, offeredSuggestion);
+    }
     if (key === "Escape") {
       if (!menuIsActive || event.isComposing || event.keyCode === 229) return false;
       dismissComposerTrigger(trigger);
@@ -6848,7 +6864,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               : showProviderUnavailable
                                 ? "Enable a provider in Settings to send a message"
                                 : gameThread
-                                  ? (gamePlaceholder ?? "Tell your game what to change…")
+                                  ? offeredSuggestion !== null
+                                    ? `Next: ${offeredSuggestion}`
+                                    : "Tell your game what to change…"
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
                                     : "Ask anything, @tag files/folders, $use skills, or / for commands"
@@ -6936,13 +6954,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {/* A game's suggestion, written as the placeholder, is taken at the end of its
-                      own line: the action sits where the words it acts on are. */}
-                  {gamePlaceholderAction !== null &&
-                  prompt.trim() === "" &&
-                  gamePlaceholder !== null
-                    ? gamePlaceholderAction
-                    : null}
+                  {/* A game's suggestion, written as the placeholder: Tab takes it. */}
+                  {offeredSuggestion !== null && prompt.trim() === "" ? (
+                    <span className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
+                      <Kbd>Tab</Kbd>
+                      <Text variant="meta" tone="dim">
+                        to use
+                      </Text>
+                    </span>
+                  ) : null}
                   {showComposerAttachAction ? (
                     <>
                       <input
