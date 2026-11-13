@@ -587,10 +587,10 @@ function ProjectDetail({
             }
             description={
               hasOtherMembers
-                ? "Deletes this computer's entry for the game and its Logs. Other machines and files on disk are not touched."
+                ? "Deletes this computer's entry for the game and its chats. Other machines and files on disk are not touched."
                 : group.memberProjects.length > 1
-                  ? `Deletes all ${group.memberProjects.length} entries for the game and their Logs on every machine. Files on disk are not touched.`
-                  : "Removes the game and its Logs from Kurambit. Its folder on disk is not touched."
+                  ? `Deletes all ${group.memberProjects.length} entries for the game and their chats on every machine. Files on disk are not touched.`
+                  : "Removes the game and its chats from Kurambit. Its folder on disk is not touched."
             }
             control={
               <Button

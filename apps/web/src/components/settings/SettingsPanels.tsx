@@ -316,7 +316,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
       ? ["Diff colours"]
       : []),
-    ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Log width"] : []),
+    ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
     ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
       ? ["Panel animations"]
       : []),
@@ -334,7 +334,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["In-app alerts"]
       : []),
     ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-      ? ["Visible Logs"]
+      ? ["Visible chats"]
       : []),
     ...(settings.sidebarProjectGroupingMode !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
       ? ["Game grouping"]
@@ -346,20 +346,20 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["Working section"]
       : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-      ? ["Auto-settle inactive Logs"]
+      ? ["Auto-settle inactive chats"]
       : []),
     ...(settings.sidebarAutoSettleKeepPullRequests !==
     DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests
-      ? ["Keep Logs with a PR"]
+      ? ["Keep chats with a PR"]
       : []),
     ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-      ? ["Auto-settle merged Logs"]
+      ? ["Auto-settle merged chats"]
       : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
-      ? ["Auto-resume limited Logs"]
+      ? ["Auto-resume limited chats"]
       : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
-      ? ["Snooze limited Logs"]
+      ? ["Snooze limited chats"]
       : []),
     ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
     ...(settings.persistComposerContextStrip !==
@@ -401,11 +401,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       : []),
     ...(settings.continueThreadsAfterServerUpdate !==
     DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
-      ? ["Continue Logs after restarts"]
+      ? ["Continue chats after restarts"]
       : []),
     ...(isBackgroundActivityDirty ? ["Background activity"] : []),
     ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-      ? ["New Log mode"]
+      ? ["New chat mode"]
       : []),
     ...(settings.newWorktreesStartFromOrigin !==
     DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
@@ -1131,7 +1131,7 @@ export function AppearanceSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("composer-context")}
-          description="Keep the side-copy controls below the composer after a Log starts."
+          description="Keep the side-copy controls below the composer after a chat starts."
           resetAction={
             settings.persistComposerContextStrip !==
             DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
@@ -1152,18 +1152,18 @@ export function AppearanceSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ persistComposerContextStrip: Boolean(checked) })
               }
-              aria-label="Keep composer context visible in active Logs"
+              aria-label="Keep composer context visible in active chats"
             />
           }
         />
 
         <SettingsRow
           {...searchableSetting("chat-width")}
-          description="Set how wide a Log's messages and the composer can grow on large screens."
+          description="Set how wide a chat's messages and the composer can grow on large screens."
           resetAction={
             settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? (
               <SettingResetButton
-                label="Log width"
+                label="Chat width"
                 onClick={() => updateSettings({ chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth })}
               />
             ) : null
@@ -1177,7 +1177,7 @@ export function AppearanceSettingsPanel() {
                     updateSettings({ chatWidth: value });
                 }}
               >
-                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Log width">
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Chat width">
                   <SelectValue>{CHAT_WIDTH_LABELS[settings.chatWidth]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -2100,7 +2100,7 @@ export function GeneralSettingsPanel() {
           They still work, but nothing on a game's screen uses them, so they wait behind
           one fold instead of filling the studio's first settings page. */}
       <AdvancedSettingsFold>
-        <SettingsSection id="organization" title="Sidebar & Logs">
+        <SettingsSection id="organization" title="Sidebar & chats">
           <SettingsRow
             {...searchableSetting("project-grouping")}
             description="Combine matching repositories across environments."
@@ -2181,7 +2181,7 @@ export function GeneralSettingsPanel() {
           <SettingsRow
             serverScoped
             {...searchableSetting("auto-resume-limited-threads")}
-            description="Resume usage-limit stops at the reported reset time. Each Log can cancel its scheduled continuation."
+            description="Resume usage-limit stops at the reported reset time. Each chat can cancel its scheduled continuation."
             settingKeys={["autoResumeLimitedThreads"]}
             control={
               <ScopedSwitch
@@ -2190,7 +2190,7 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
                 }
-                aria-label="Auto-resume limited Logs"
+                aria-label="Auto-resume limited chats"
               />
             }
           />
@@ -2206,14 +2206,14 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ snoozeLimitedThreads: Boolean(checked) })
                 }
-                aria-label="Snooze limited Logs"
+                aria-label="Snooze limited chats"
               />
             }
           />
 
           <SettingsRow
             {...searchableSetting("working-shelf")}
-            description="Fold working and monitoring Logs into a Working section. They return to the top of the inbox when they need you."
+            description="Fold working and monitoring chats into a Working section. They return to the top of the inbox when they need you."
             resetAction={
               settings.sidebarWorkingShelfEnabled !==
               DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
@@ -2245,7 +2245,7 @@ export function GeneralSettingsPanel() {
                 serverScoped
                 settingKeys={["sidebarAutoSettleAfterDays"]}
                 {...searchableSetting("auto-settle-inactive-threads")}
-                description="Sidebar Logs with no activity for this long settle automatically."
+                description="Sidebar chats with no activity for this long settle automatically."
                 resetAction={
                   settings.sidebarAutoSettleAfterDays !==
                   DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ? (
@@ -2269,7 +2269,7 @@ export function GeneralSettingsPanel() {
                         sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                       })
                     }
-                    aria-label="Auto-settle inactive Logs"
+                    aria-label="Auto-settle inactive chats"
                   />
                 }
               />
@@ -2278,7 +2278,7 @@ export function GeneralSettingsPanel() {
                   serverScoped
                   settingKeys={["sidebarAutoSettleAfterDays"]}
                   title={searchableSetting("days-before-auto-settle").title}
-                  description="Any new activity un-settles a Log automatically."
+                  description="Any new activity un-settles a chat automatically."
                   control={
                     <AutoSettleDaysInput
                       value={settings.sidebarAutoSettleAfterDays}
@@ -2524,7 +2524,7 @@ export function GeneralSettingsPanel() {
           />
           <SettingsRow
             {...searchableSetting("composer-collapse")}
-            description="Rest the composer of an existing Log into a single line when you scroll the conversation. Focus the composer or start typing to expand it again."
+            description="Rest the composer of an existing chat into a single line when you scroll the conversation. Focus the composer or start typing to expand it again."
             resetAction={
               settings.composerCollapseOnScroll !==
               DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll ? (
@@ -2585,7 +2585,7 @@ export function GeneralSettingsPanel() {
             {...searchableSetting("continue-threads-after-server-update")}
             serverScoped
             settingKeys={["continueThreadsAfterServerUpdate"]}
-            description="Automatically resume interrupted Logs after an update, crash, or machine restart on the selected environments."
+            description="Automatically resume interrupted chats after an update, crash, or machine restart on the selected environments."
             status={
               !supportsRestartContinuation
                 ? "All selected connected environments must support restart continuation."
@@ -2614,7 +2614,7 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
                 }
-                aria-label="Continue Logs after restarts"
+                aria-label="Continue chats after restarts"
               />
             }
           />
@@ -2712,7 +2712,7 @@ export function GeneralSettingsPanel() {
           />
         </SettingsSection>
 
-        <SettingsSection id="projects-and-threads" title="Side copies & Logs">
+        <SettingsSection id="projects-and-threads" title="Side copies & chats">
           <SettingsRow
             serverScoped
             settingKeys={["newWorktreesStartFromOrigin"]}
@@ -2780,7 +2780,7 @@ export function GeneralSettingsPanel() {
         <SettingsSection id="confirmations" title="Confirmations">
           <SettingsRow
             {...searchableSetting("unpin-confirmation")}
-            description="Ask before unpinning a Log from the pinned section."
+            description="Ask before unpinning a chat from the pinned section."
             resetAction={
               settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin ? (
                 <SettingResetButton
@@ -2806,7 +2806,7 @@ export function GeneralSettingsPanel() {
 
           <SettingsRow
             {...searchableSetting("archive-confirmation")}
-            description="Require a second click on the inline archive action before a Log is archived."
+            description="Require a second click on the inline archive action before a chat is archived."
             resetAction={
               settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
                 <SettingResetButton
@@ -2832,7 +2832,7 @@ export function GeneralSettingsPanel() {
 
           <SettingsRow
             {...searchableSetting("delete-confirmation")}
-            description="Ask before deleting a Log and its history."
+            description="Ask before deleting a chat and its history."
             resetAction={
               settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
                 <SettingResetButton
@@ -2904,7 +2904,7 @@ export function GeneralSettingsPanel() {
             serverScoped
             settingKeys={["textGenerationModelSelection"]}
             {...searchableSetting("text-generation-model")}
-            description="Used for Log titles and other generated text on connected devices with this provider. Source control can override it."
+            description="Used for chat titles and other generated text on connected devices with this provider. Source control can override it."
             resetAction={
               hasServerTargets && isTextGenerationModelDirty ? (
                 <SettingResetButton
@@ -3200,11 +3200,11 @@ export function ArchivedThreadsPanel() {
             <Empty variant="well">
               <EmptyHeader>
                 <EmptyTitle>
-                  {archiveError ? "Could not load archived Logs" : "No archived Logs"}
+                  {archiveError ? "Could not load archived chats" : "No archived chats"}
                 </EmptyTitle>
                 <EmptyDescription>
                   {archiveError ??
-                    "A Log you archive waits here until you bring it back or delete it."}
+                    "A chat you archive waits here until you bring it back or delete it."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -3238,7 +3238,7 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Could not change the archived Log",
+                          title: "Could not change the archived chat",
                           description:
                             error instanceof Error ? error.message : "An error occurred.",
                         }),

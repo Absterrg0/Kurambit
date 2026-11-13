@@ -17,7 +17,7 @@ describe("desktop-approved window capture shortcut labels", () => {
     ["Meta+F12", ["Super", "F12"]],
     ["Super+F8", ["Super", "F8"]],
     ["<Primary><Alt>Return", ["Ctrl", "Alt", "Enter"]],
-    ["<Super>Left", ["Super", "Left"]],
+    ["<Super>Left", ["Super", "←"]],
     ["<Control>space", ["Ctrl", "Space"]],
     ["<Control>plus", ["Ctrl", "+"]],
     ["<Control>+", ["Ctrl", "+"]],

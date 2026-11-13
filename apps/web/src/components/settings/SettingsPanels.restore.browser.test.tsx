@@ -65,8 +65,8 @@ const render = () => act(async () => root.render(<Probe />));
 describe("restoring V2 settings", () => {
   it.each([
     ["persistComposerContextStrip", "Composer context"],
-    ["autoResumeLimitedThreads", "Auto-resume limited Logs"],
-    ["snoozeLimitedThreads", "Snooze limited Logs"],
+    ["autoResumeLimitedThreads", "Auto-resume limited chats"],
+    ["snoozeLimitedThreads", "Snooze limited chats"],
   ] as const)("restores %s when it is the only changed setting", async (key, label) => {
     state.settings = { ...DEFAULT_UNIFIED_SETTINGS, [key]: true };
     await render();

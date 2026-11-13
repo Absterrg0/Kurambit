@@ -9,7 +9,7 @@ import { stepVerdictText } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
 
 /**
- * A changing chat turn's build in the Log, on one line: its name, its checks,
+ * A changing chat turn's build in the chat, on one line: its name, its checks,
  * and Undo or Redo while it is the latest. The name shows it on the Stage and
  * in the Inspector, where everything else about it lives.
  */

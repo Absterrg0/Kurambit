@@ -168,7 +168,7 @@ The linked pull request participates in automatic settlement.
 
 ## Find and reference work
 
-Open the command palette with `Cmd/Ctrl+K` to search your games and their Logs.
+Open the command palette with `Cmd/Ctrl+K` to search your games and their chats.
 Projects that are not games stay out of search; **Developer…** in the palette reaches
 them. Message search starts after two characters and includes your messages and final
 agent responses.

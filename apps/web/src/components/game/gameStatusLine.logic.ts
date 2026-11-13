@@ -114,7 +114,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
     ? part("The agent needs a choice", {
         strong: true,
         dot: "live",
-        hint: "Your agent is waiting for your answer in the Log.",
+        hint: "Your agent is waiting for your answer in the chat.",
       })
     : input.keepGoingLive && input.keepGoingStep !== null && input.keepGoingStartsAt !== null
       ? // A step proposed for later is not work under way: no working dot until it starts.

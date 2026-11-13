@@ -2988,20 +2988,6 @@ code {
   }
 }
 
-@layer components {
-  /* Under the Stage the composer spans the centre column at the Stage's own inset. */
-  [data-game-direction-bar] {
-    --chat-content-max-width: none;
-  }
-  [data-game-direction-bar] .chat-composer-lane {
-    padding-inline: 0.75rem;
-  }
-  /* The Log is a narrow Inspector tab, not a page: the chat's wide gutters would starve it. */
-  [data-game-inspector-docked="true"] [data-chat-canvas] .messages-timeline-scroll {
-    padding-inline: 1rem;
-  }
-}
-
 /* Fullscreen is the game alone: edge to edge on black, letterboxed, no rounded frame. */
 [data-game-play-surface]:fullscreen {
   border-radius: 0;

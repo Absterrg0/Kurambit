@@ -533,13 +533,13 @@ export function StorageSettingsPanel() {
         {(!isProjectScope || (!mixedModes && mode === "custom")) && (
           <>
             <SettingsRow
-              title="Delete with their Log"
+              title="Delete with their chat"
               status={ruleStatus("worktreeOnDelete")}
-              description="Remove a side copy when its Log is deleted. Copies with changes of their own are kept."
+              description="Remove a side copy when its chat is deleted. Copies with changes of their own are kept."
               serverScoped={!isProjectScope}
               control={
                 <Switch
-                  aria-label="Delete with their Log"
+                  aria-label="Delete with their chat"
                   checked={settings.worktreeOnDelete}
                   onCheckedChange={(worktreeOnDelete) => updateWorktree({ worktreeOnDelete })}
                 />
@@ -551,7 +551,7 @@ export function StorageSettingsPanel() {
               description={
                 settings.worktreeAfterDays === null
                   ? "Keeps idle side copies. Turn on to remove them after a number of idle days."
-                  : "Remove side copies whose Log has been idle this many days. Their history is kept."
+                  : "Remove side copies whose chat has been idle this many days. Their history is kept."
               }
               serverScoped={!isProjectScope}
               control={
@@ -580,8 +580,8 @@ export function StorageSettingsPanel() {
                     .join(". ")}
                   description={
                     settings.worktreeSettledAfterDays === null
-                      ? "Keeps settled side copies. Turn on to remove them a number of days after their Log settles."
-                      : "Remove side copies this many days after their Log settles; 0 removes them at the next cleanup. Their history is kept."
+                      ? "Keeps settled side copies. Turn on to remove them a number of days after their chat settles."
+                      : "Remove side copies this many days after their chat settles; 0 removes them at the next cleanup. Their history is kept."
                   }
                   serverScoped={!isProjectScope}
                   control={

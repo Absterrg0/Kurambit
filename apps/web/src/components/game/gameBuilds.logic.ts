@@ -169,7 +169,7 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
 
 /**
  * PURE. A build's checks in the words every surface uses ("5 of 7 pass · 1 to
- * look at"): the lead checks a build's detail lists, so the Log, a card's
+ * look at"): the lead checks a build's detail lists, so the chat, a card's
  * tooltip and the Checks heading never disagree. Null before any reading.
  */
 export const checksPhrase = (

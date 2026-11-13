@@ -307,7 +307,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "chat-width",
-    title: "Log width",
+    title: "Chat width",
     to: "/settings/appearance",
     searchTerms: ["chat width wide full column layout messages composer monitor"],
   },
@@ -379,13 +379,13 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "snooze-limited-threads",
-    title: "Snooze limited Logs",
+    title: "Snooze limited chats",
     to: "/settings/general",
     searchTerms: ["snooze limited threads usage quota rate limit reset wake recover continue"],
   },
   {
     id: "auto-resume-limited-threads",
-    title: "Auto-resume limited Logs",
+    title: "Auto-resume limited chats",
     to: "/settings/general",
     searchTerms: ["auto-resume limited threads usage quota rate limit reset recover continue"],
   },
@@ -397,7 +397,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-inactive-threads",
-    title: "Auto-settle inactive Logs",
+    title: "Auto-settle inactive chats",
     to: "/settings/general",
     searchTerms: ["auto-settle inactive threads sidebar inactivity days no activity automatically"],
     requiresThreadAutoSettlement: true,
@@ -506,7 +506,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "continue-threads-after-server-update",
-    title: "Continue Logs after restarts",
+    title: "Continue chats after restarts",
     to: "/settings/general",
     scope: "project-defaults",
     searchTerms: [
@@ -524,7 +524,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "new-threads",
-    title: "New Logs",
+    title: "New chats",
     to: "/settings/general",
     scope: "project-defaults",
     searchTerms: ["new threads chats default workspace mode draft local worktree"],
@@ -882,7 +882,7 @@ export const SETTINGS_SEARCH_ITEMS = [
 
   {
     id: "archive",
-    title: "Archived Logs",
+    title: "Archived chats",
     to: "/settings/archived",
     searchTerms: ["archived chats restore reopen unarchive threads history games"],
   },

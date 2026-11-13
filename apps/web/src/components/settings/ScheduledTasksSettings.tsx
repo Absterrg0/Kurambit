@@ -49,7 +49,7 @@ import {
   type DraftState,
 } from "./scheduledTasksSettings.logic";
 
-const PAGE_DESCRIPTION = "Messages your agent runs on a timer, each in its game's Log.";
+const PAGE_DESCRIPTION = "Messages your agent runs on a timer, each in its game's chat.";
 
 function describeSchedule(schedule: ScheduledTask["schedule"]): string {
   if (schedule.type === "interval") {
@@ -78,7 +78,7 @@ function describeSchedule(schedule: ScheduledTask["schedule"]): string {
 const RUN_STATUS: Record<ScheduledTask["lastRunStatus"], string> = {
   never: " · not run yet",
   running: " · sending now",
-  succeeded: " · last sent to its Log",
+  succeeded: " · last sent to its chat",
   failed: " · last could not be sent",
 };
 
@@ -409,7 +409,9 @@ function DraftForm({
           )}
           {isGame ? (
             <span>
-              {editing?.threadId ? "· runs in its Log" : "· runs in a new Log in the game's folder"}
+              {editing?.threadId
+                ? "· runs in its chat"
+                : "· runs in a new chat in the game's folder"}
             </span>
           ) : null}
         </div>

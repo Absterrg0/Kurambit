@@ -467,7 +467,7 @@ export function filterCommandPaletteGroups(input: {
     if (input.threadSearchItems.length > 0) {
       searchableGroups.push({
         value: "threads-search",
-        label: "Logs",
+        label: "Chats",
         items: input.threadSearchItems,
       });
     }
