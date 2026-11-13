@@ -21,7 +21,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { MenuItem } from "../ui/menu";
 import { Text } from "../ui/text";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /**
  * Open and Show in folder for a file in the game: the system's own apps
@@ -155,71 +154,6 @@ export function SaveMediaMenuItem({
         )}
       </span>
     </MenuItem>
-  );
-}
-
-/** Keeps a generated video or image past the log cleanup, as a copy in the game's saved/. */
-export function SaveMediaButton({
-  threadRef,
-  source,
-  label,
-  text = "Save",
-  icon,
-}: {
-  threadRef: ScopedThreadRef;
-  /** Game-relative path of the generated file. */
-  source: string;
-  /** The words after the date in the saved name. */
-  label: string;
-  /** The button's words, when several files share a row. */
-  text?: string;
-  /** Shown alone, with the words in its tooltip, where a row has no room for words. */
-  icon?: ReactNode;
-}) {
-  const { canSave, saving, saved, error, run } = useSaveMedia(threadRef, source, label);
-  if (icon !== undefined) {
-    const label =
-      saved !== null ? `${text} saved` : saving ? "Saving…" : `Save the ${text.toLowerCase()}`;
-    return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label={label}
-              disabled={saved !== null || !canSave || saving}
-              onClick={() => void run()}
-            />
-          }
-        >
-          {saved !== null ? <BookmarkCheckIcon aria-hidden="true" /> : icon}
-        </TooltipTrigger>
-        <TooltipPopup side="top">{error ?? label}</TooltipPopup>
-      </Tooltip>
-    );
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {saved === null ? (
-        <Button size="xs" variant="ghost" disabled={!canSave || saving} onClick={() => void run()}>
-          <BookmarkIcon aria-hidden="true" />
-          {saving ? "Saving…" : text}
-        </Button>
-      ) : (
-        <>
-          <span className="text-2xs text-muted-foreground">
-            {text === "Save" ? "Saved" : `${text} saved`}
-          </span>
-          <SavedFileActions threadRef={threadRef} media={saved} />
-        </>
-      )}
-      {error ? (
-        <span role="alert" className="text-2xs text-destructive-foreground">
-          {error}
-        </span>
-      ) : null}
-    </div>
   );
 }
 

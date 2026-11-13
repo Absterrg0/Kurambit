@@ -375,7 +375,7 @@ export default defineConfig({
       },
       {
         files: ["apps/web/src/components/game/GameSavedMedia.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 10 }] },
+        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 8 }] },
       },
       {
         files: ["apps/web/src/components/game/GameStageOverlay.tsx"],

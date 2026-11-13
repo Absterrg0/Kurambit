@@ -92,7 +92,7 @@ export function GameArtSettingsPanel() {
  * providers that kind waits on, each with its own terms; then the daily spend limit
  * every paid generation counts against.
  */
-export function GameArtSettings({ environmentId }: { environmentId: EnvironmentId }) {
+function GameArtSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const providers = useEnvironmentQuery(gameEnvironment.artProviders({ environmentId, input: {} }));
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });

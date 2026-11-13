@@ -71,7 +71,7 @@ export type GamePictureMark = "name" | "initial" | "absent" | "none";
  * A game with no picture: its own pigment with its name as a title card, or its initial at icon
  * size, so it is never a blank box nor mistaken for a picture still loading.
  */
-export function GameTitleMark({
+function GameTitleMark({
   gameName,
   mark,
   title,

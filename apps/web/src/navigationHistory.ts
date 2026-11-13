@@ -82,7 +82,7 @@ export function trackNavigationHistory(history: RouterHistory): () => void {
   });
 }
 
-export function canNavigateHistory(direction: HistoryDirection): boolean {
+function canNavigateHistory(direction: HistoryDirection): boolean {
   return direction === "back" ? currentIndex > 0 : currentIndex < furthestIndex;
 }
 

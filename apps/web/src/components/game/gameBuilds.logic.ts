@@ -69,7 +69,7 @@ export const formatBuildTime = (at: string, now: Date = new Date()): string => {
 };
 
 /** A rail row's facts line when it has no chips to show yet; null when the chips say it all. */
-export const factsSummaryLine = (summary: GameBuildFactsSummary): string | null => {
+const factsSummaryLine = (summary: GameBuildFactsSummary): string | null => {
   switch (summary.state) {
     case "never":
       return "Not measured yet";
@@ -172,9 +172,7 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
  * look at"): the lead checks a build's detail lists, so the chat, a card's
  * tooltip and the Checks heading never disagree. Null before any reading.
  */
-export const checksPhrase = (
-  facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">,
-): string | null => {
+const checksPhrase = (facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">): string | null => {
   if (facts.good + facts.bad === 0) return null;
   const lead = facts.lead;
   const pass = lead === undefined ? `${facts.good} pass` : `${lead.pass} of ${lead.of} pass`;
@@ -249,7 +247,7 @@ const ROW_NOTES: Partial<Record<GameFactId, string>> = {
 };
 
 /** Rows that vary between runs of the same build: not counted as a difference a change made. */
-export const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher", "motion"]);
+const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher", "motion"]);
 
 /** Rows Compare names by what they measure, since their readings are numbers. */
 const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {

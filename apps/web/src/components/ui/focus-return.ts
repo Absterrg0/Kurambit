@@ -8,7 +8,7 @@ type FinalFocusHandler = Extract<Dialog.Popup.Props["finalFocus"], (...args: nev
 // it, the popup they were in went away.
 const returningFocus = new WeakSet<Document>();
 
-export function prepareFocusReturn(document: Document) {
+function prepareFocusReturn(document: Document) {
   returningFocus.add(document);
   // Base UI restores focus in a microtask after close; two hops cover it.
   queueMicrotask(() => queueMicrotask(() => returningFocus.delete(document)));

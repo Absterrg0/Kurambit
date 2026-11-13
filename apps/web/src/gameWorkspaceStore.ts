@@ -68,9 +68,9 @@ export type GameView = "collapsed" | "split" | "expanded";
 
 /** The game's share of the column's height while it shares it with the chat. */
 const GAME_STAGE_SHARE_DEFAULT = 0.58;
-export const clampGameStageShare = (share: number) => Math.min(0.85, Math.max(0.3, share));
+const clampGameStageShare = (share: number) => Math.min(0.85, Math.max(0.3, share));
 /** The game's column beside the chat, when it plays there. */
-export const GAME_COLUMN_DEFAULT_WIDTH = 640;
+const GAME_COLUMN_DEFAULT_WIDTH = 640;
 export const clampGameColumnWidth = (width: number, workspaceWidth = Number.POSITIVE_INFINITY) =>
   Math.min(Math.floor(workspaceWidth * 0.62), Math.max(360, Math.round(width)));
 

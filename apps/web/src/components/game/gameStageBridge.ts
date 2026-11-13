@@ -76,14 +76,14 @@ export const useStageBridge = create<StageBridgeState>()(() => ({
  * focus, or the person froze it), so capturing never costs a frame of play. In memory only:
  * a reload takes a new one as the game comes up and is held.
  */
-export const useStageStills = create<Readonly<Record<string, string>>>()(() => ({}));
+const useStageStills = create<Readonly<Record<string, string>>>()(() => ({}));
 
 /**
  * A build's picture taken from the Stage while it played, by build id: what its card shows
  * until a measured play gives it one, so a new build has a face from its first play. In memory
  * only, like the Stage's own still.
  */
-export const useBuildFrames = create<Readonly<Record<string, string>>>()(() => ({}));
+const useBuildFrames = create<Readonly<Record<string, string>>>()(() => ({}));
 /** The first frame kept for a build stays its picture: a picture never swaps once a build has one. */
 export const keepBuildFrame = (build: string, still: string) => {
   if (useBuildFrames.getState()[build] === undefined) useBuildFrames.setState({ [build]: still });

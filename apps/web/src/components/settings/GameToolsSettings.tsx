@@ -124,7 +124,7 @@ export function GameToolsSettingsPanel() {
   );
 }
 
-export function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) {
+function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) {
   const settings = useEnvironmentSettings(environmentId);
   const query = useEnvironmentQuery(gameEnvironment.toolchain({ environmentId, input: {} }));
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });

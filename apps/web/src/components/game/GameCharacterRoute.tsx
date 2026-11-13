@@ -22,9 +22,6 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
 import { Text } from "../ui/text";
@@ -151,19 +148,6 @@ function CharacterRouteChoices({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Text>
       ) : null}
     </>
-  );
-}
-
-/** The game's "Make characters with…" submenu, for menus that hold it. */
-export function GameCharacterRouteMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const { canSet } = useCharacterRoute(threadRef);
-  return (
-    <MenuSub>
-      <MenuSubTrigger disabled={!canSet}>Make characters with…</MenuSubTrigger>
-      <MenuSubPopup className="w-72">
-        <CharacterRouteChoices threadRef={threadRef} />
-      </MenuSubPopup>
-    </MenuSub>
   );
 }
 
