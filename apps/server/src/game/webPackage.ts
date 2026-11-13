@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Effect from "effect/Effect";
 /** The immutable web build Play serves. Written at each Web export. */
 export interface GameSelectedBuild {
   readonly buildId: string;
@@ -13,12 +14,7 @@ export interface GameSelectedBuild {
   readonly headers?: Record<string, string> | undefined;
 }
 import { ArchivePublishError, publishArchive } from "./archivePublication.ts";
-import {
-  StoredZipError,
-  throwIfAborted,
-  writeStoredZip,
-  type StoredZipEntry,
-} from "./storedZip.ts";
+import { writeZipArchive, type ZipSource } from "../zipArchive.ts";
 import { candidateBuildId, hashWebBuild, type WebBuildFile } from "./webBuild.ts";
 
 export const WEB_PACKAGES_DIRECTORY = "builds/web-packages";
@@ -89,9 +85,9 @@ const notPackaged = (path: string, detail: string) =>
   );
 
 /**
- * Opens one selected build file for one pass of the archive writer: a
- * regular file, the size the build's hash recorded. Both passes compare its
- * bytes with the recorded SHA-256, so a swap or an edit between them fails.
+ * Opens one selected build file when the archive writer reaches it: a
+ * regular file, the size the build's hash recorded. The writer checks its
+ * bytes against the recorded SHA-256, so an edit since selection fails.
  */
 const openBuildFile = (root: string, directory: string, file: WebBuildFile) => async () => {
   const absolute = NodePath.join(root, directory, file.path);
@@ -120,23 +116,7 @@ const openBuildFile = (root: string, directory: string, file: WebBuildFile) => a
       `The selected Web build file ${file.path} changed while packaging.`,
     );
   }
-  return {
-    read: async (offset: number, length: number) => {
-      const buffer = Buffer.allocUnsafe(length);
-      let read = 0;
-      while (read < length) {
-        const result = await handle.read(buffer, read, length - read, offset + read);
-        if (result.bytesRead === 0)
-          throw notPackaged(
-            file.path,
-            `The selected Web build file ${file.path} changed while packaging.`,
-          );
-        read += result.bytesRead;
-      }
-      return buffer;
-    },
-    close: () => handle.close(),
-  };
+  return handle.createReadStream();
 };
 
 const safeRelative = (path: string) =>
@@ -230,7 +210,7 @@ export const packageWebRelease = async (input: {
 
   let staged: string | null = null;
   try {
-    const entries: StoredZipEntry[] = [];
+    const entries: ZipSource[] = [];
     for (const file of hashed.files) {
       if (!safeRelative(file.path))
         throw new WebPackageError(
@@ -246,9 +226,8 @@ export const packageWebRelease = async (input: {
         );
       entries.push({
         name: file.path === selected.entry ? archiveEntry : file.path,
-        path: file.path,
         size: file.size,
-        mtimeMs: stat.mtimeMs,
+        mtime: stat.mtime,
         sha256: file.sha256,
         open: openBuildFile(root, selected.directory, file),
       });
@@ -258,12 +237,26 @@ export const packageWebRelease = async (input: {
       NodePath.dirname(archive),
       `.${selected.buildId}.${NodeCrypto.randomUUID()}.partial`,
     );
-    const written = await writeStoredZip({
-      path: staged,
-      entries,
-      signal: input.signal,
-    });
-    throwIfAborted(input.signal);
+    const written = await Effect.runPromise(
+      writeZipArchive(staged, entries, ({ source, changed, cause }) =>
+        cause instanceof WebPackageError
+          ? cause
+          : changed
+            ? new WebPackageError(
+                source?.name ?? buildDirectory,
+                "changed",
+                "The selected Web build changed while it was being packaged. Export Web again and retry; any earlier package was left alone.",
+              )
+            : new WebPackageError(
+                source?.name ?? staged ?? archive,
+                "io",
+                `The Web package could not be written: ${describe(cause)}. The previous package was left alone if one existed.`,
+                { cause },
+              ),
+      ),
+      { signal: input.signal },
+    );
+    input.signal?.throwIfAborted();
     const stagedPath = staged;
     const stagedStat = await NodeFSP.stat(stagedPath).catch((cause) => {
       throw new WebPackageError(
@@ -279,7 +272,7 @@ export const packageWebRelease = async (input: {
         "io",
         "The Web package was not written completely. The previous package was kept; export again to retry.",
       );
-    throwIfAborted(input.signal);
+    input.signal?.throwIfAborted();
     let publication: { readonly notes: readonly string[] };
     try {
       publication = await publishArchive({ stagedArchive: stagedPath, archive });
@@ -321,15 +314,7 @@ export const packageWebRelease = async (input: {
       notes,
     };
   } catch (cause) {
-    if (cause instanceof StoredZipError)
-      throw new WebPackageError(
-        cause.path,
-        cause.kind,
-        cause.kind === "changed"
-          ? "The selected Web build changed while it was being packaged. Export Web again and retry; any earlier package was left alone."
-          : cause.message,
-        { cause },
-      );
+    input.signal?.throwIfAborted();
     if (cause instanceof WebPackageError) throw cause;
     if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
     throw new WebPackageError(

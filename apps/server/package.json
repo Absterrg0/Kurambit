@@ -57,7 +57,8 @@
     "stream-json": "3.6.0",
     "undici": "catalog:",
     "yaml": "catalog:",
-    "yauzl": "^3.4.0"
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
@@ -70,6 +71,7 @@
     "@types/pngjs": "6.0.5",
     "@types/proper-lockfile": "^4.1.4",
     "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
     "effect-acp": "workspace:*",
     "effect-codex-app-server": "workspace:*",
     "jszip": "3.10.1",
