@@ -890,15 +890,18 @@ function ChecksLoading() {
     <div aria-busy="true" className="flex flex-col gap-2">
       <Rows>
         {SKELETON_CHECKS.map((check) => (
-          <div key={check.name} className="flex min-h-9 items-center gap-2.5 px-3">
-            <span className="size-4 shrink-0" />
-            <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
-              {check.name}
-            </Text>
-            {/* A reading's place only on the checks that have one, so every name keeps the
-                one line it has once the list is read. */}
-            {check.value ? <Skeleton className="h-3 w-8" /> : null}
-            <span className="w-6 shrink-0" />
+          // A loaded row's own boxes, so the list is the height it will be to the pixel.
+          <div key={check.name} className="flex flex-col gap-1 px-3 py-1.5">
+            <div className="flex min-h-6 items-center gap-2.5">
+              <span className="size-4 shrink-0" />
+              <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
+                {check.name}
+              </Text>
+              {/* A reading's place only on the checks that have one, so every name keeps the
+                  one line it has once the list is read. */}
+              {check.value ? <Skeleton className="h-3 w-8" /> : null}
+              <span className="w-6 shrink-0" />
+            </div>
           </div>
         ))}
       </Rows>

@@ -52,9 +52,6 @@ import {
   timelineMarks,
 } from "./gameBuildTimeline.logic";
 
-/** Below this picture height a card is compact: a shorter picture, and one line of its request
- * where a full card has two. */
-const COMPACT_CARD_PICTURE = 80;
 /** About how many characters a card's two request lines show. */
 const CARD_REQUEST_FITS = 48;
 /** About how wide a caption's character is, for the one request line of a compact card. */
@@ -136,6 +133,7 @@ export function GameBuildStrip({
   onCompare,
   cardWidth,
   cardPicture,
+  compact,
   onInspect,
   hidden = false,
 }: {
@@ -157,6 +155,8 @@ export function GameBuildStrip({
   cardWidth: number;
   /** The cards' picture height: 16:9 of their width, or shorter on a short window. */
   cardPicture: number;
+  /** A short window: a card's caption has one line of its request where a full card has two. */
+  compact: boolean;
   /** Shows a build in the Inspector's Build tab. */
   onInspect: (build: GameBuild) => void;
   /** Something else (a compare) has the strip's place: it stays mounted, out of sight. */
@@ -357,7 +357,6 @@ export function GameBuildStrip({
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
-  const compact = cardPicture < COMPACT_CARD_PICTURE;
   const card = (build: GameBuild) => {
     const index = marks.indexOf(build);
     return (
@@ -869,7 +868,9 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
       data-game-build-slot=""
       className={cn("flex w-(--build-card-width) shrink-0 flex-col gap-1.5", NEW_CARD_MOTION)}
     >
-      <div className="flex h-(--build-card-picture) w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-live/60 bg-live/8">
+      {/* A quiet dashed place for the build to come: the dot carries the working colour, so
+          the only large red on the screen is a build that does not start. */}
+      <div className="flex h-(--build-card-picture) w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-foreground/30">
         <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
         <Text variant="meta" tone="default">
           {slot.label}

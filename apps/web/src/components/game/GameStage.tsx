@@ -257,11 +257,16 @@ const fitStage = (
     );
     cardWidth = Math.floor(lane(stageHeight / ratio));
   }
+  // A card's picture is never taller than its whole 16:9 frame. A short window's cards start
+  // short and take whatever height the Stage leaves over: their pictures are cropped only
+  // where the Stage needs the height, and whole where it is bound by its column's width.
+  const whole = Math.floor((cardWidth * 9) / 16);
+  const spare = Math.max(0, Math.floor(height - stageHeight - picture));
   return {
     width: Math.floor(stageHeight / ratio),
     height: stageHeight,
     cardWidth,
-    cardPicture: Math.min(picture, Math.floor((cardWidth * 9) / 16)),
+    cardPicture: Math.min(whole, picture + spare),
   };
 };
 
@@ -327,10 +332,13 @@ function shareColumn(column: HTMLElement | null) {
 
 export function GameStageLoading() {
   // The card size the loaded strip will have at this window's height.
-  const picture =
-    typeof window !== "undefined" && window.innerHeight < SHORT_WINDOW
-      ? BUILD_CARD_PICTURE_SHORT
-      : BUILD_CARD_PICTURE;
+  const short = typeof window !== "undefined" && window.innerHeight < SHORT_WINDOW;
+  const picture = short ? BUILD_CARD_PICTURE_SHORT : BUILD_CARD_PICTURE;
+  const chrome = skeletonChrome(picture);
+  // On a short window the pictures take the height the Stage leaves over, as the fit gives it.
+  const pictureHeight = short
+    ? `min(${Math.floor((Math.floor((BUILD_CARD_PICTURE * 16) / 9) * 9) / 16)}px, ${picture}px + 100cqh - ${chrome}px - min((100cqw - 24px) * 9 / 16, 100cqh - ${chrome}px))`
+    : `${picture}px`;
   return (
     <section
       aria-busy="true"
@@ -345,7 +353,7 @@ export function GameStageLoading() {
           ref={shareColumn}
           className="flex flex-col"
           style={{
-            width: `min(100cqw - 24px, (100cqh - ${skeletonChrome(picture)}px) * 16 / 9)`,
+            width: `min(100cqw - 24px, (100cqh - ${chrome}px) * 16 / 9)`,
           }}
         >
           {/* Named from the first frame: the working area never sits blank after the splash. */}
@@ -367,7 +375,7 @@ export function GameStageLoading() {
                 className="flex shrink-0 flex-col gap-1.5"
                 style={{ width: (BUILD_CARD_PICTURE * 16) / 9 }}
               >
-                <Skeleton shape="card" className="w-full" style={{ height: picture }} />
+                <Skeleton shape="card" className="w-full" style={{ height: pictureHeight }} />
                 <Skeleton className="h-3 w-20" />
               </div>
             ))}
@@ -642,6 +650,8 @@ function ThreadGameStage({
     height: number;
     cardWidth: number;
     cardPicture: number;
+    /** A short window: the cards' captions take one request line. */
+    compact: boolean;
   } | null>(null);
   // The column the strip and composer share: the Stage's width, less any growth of the message
   // being written, so a longer message shrinks the Stage but never the composer under it.
@@ -698,22 +708,27 @@ function ThreadGameStage({
           ? 0
           : Math.max(0, composer.getBoundingClientRect().top - bar.getBoundingClientRect().top);
       const height = section.clientHeight + transient - TRANSIENT_ROWS_RESERVE;
-      const cardPicture =
-        window.innerHeight < SHORT_WINDOW ? BUILD_CARD_PICTURE_SHORT : BUILD_CARD_PICTURE;
+      const compact = window.innerHeight < SHORT_WINDOW;
+      const cardPicture = compact ? BUILD_CARD_PICTURE_SHORT : BUILD_CARD_PICTURE;
       // The surface's side insets (mx-3) and a breath above the strip.
-      const next = fitStage(
-        section.clientWidth - 24,
-        height - taken - stripChrome - 8,
-        viewportHeight / viewportWidth,
-        cardPicture,
-      );
+      const next = {
+        ...fitStage(
+          section.clientWidth - 24,
+          height - taken - stripChrome - 8,
+          viewportHeight / viewportWidth,
+          cardPicture,
+        ),
+        compact,
+      };
       // The strip's measured chrome rounds with its pictures' size, so a fit can flip by a
       // pixel and back on every measure: a pixel's change is no change.
       setStageFit((previous) =>
         previous !== null &&
         Math.abs(previous.width - next.width) <= 1 &&
         Math.abs(previous.height - next.height) <= 1 &&
-        Math.abs(previous.cardWidth - next.cardWidth) <= 1
+        Math.abs(previous.cardWidth - next.cardWidth) <= 1 &&
+        Math.abs(previous.cardPicture - next.cardPicture) <= 1 &&
+        previous.compact === next.compact
           ? previous
           : next,
       );
@@ -1644,6 +1659,7 @@ function ThreadGameStage({
         hidden={compare !== null}
         cardWidth={stageFit?.cardWidth ?? 160}
         cardPicture={stageFit?.cardPicture ?? 90}
+        compact={stageFit?.compact ?? false}
         threadRef={threadRef}
         gameName={gameName}
         playing={playTarget?.build ?? null}
