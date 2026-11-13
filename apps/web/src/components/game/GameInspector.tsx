@@ -297,10 +297,10 @@ function BuildDetail({
       : null,
   );
   const measure = useMeasureOnOpen(threadRef);
-  // Shown, by a card or a link: a build that never was measured is, once, and so is one an
-  // older harness measured (after an update), so its readings compare with the others'.
-  const owesMeasure =
-    build.available && (build.facts.state === "never" || build.facts.state === "stale");
+  // Shown, by a card or a link: a build that never was measured is, once. One an older harness
+  // measured waits for Measure again: the queue runs one measure at a time, and refreshing an old
+  // build on sight would hold the next turn's build behind it for minutes.
+  const owesMeasure = build.available && build.facts.state === "never";
   const sendMeasure = measure.send;
   useEffect(() => {
     if (owesMeasure) void sendMeasure(build.id);
