@@ -19,15 +19,12 @@ import {
   asNumber,
   botChildEnv,
   boundEvidence,
-  cellOf,
   botsOwnWord,
   END_FRAME,
   extractRunFrames,
-  medianOf,
   perfFrom,
   posOf,
   sleep,
-  type Jev,
   type Session,
 } from "./gameBotRuntime.ts";
 import {
@@ -55,18 +52,14 @@ export interface BotRunArgs {
   readonly root: string;
   readonly runId: string;
   readonly runDir: string;
+  /** The bot child program, from the server's templates. */
   readonly childPath: string;
   readonly videoPath: string;
   readonly tracePath: string;
   readonly botFile: string;
-  readonly decider: "policy" | "jev";
   readonly mode: GameBotMode;
-  readonly jevLive: boolean;
   readonly seconds: number;
   readonly ffmpeg: string;
-  readonly jevKey: string | null;
-  readonly jevBase: string;
-  readonly policyNote: string | null;
   readonly session: Session;
   readonly signal: AbortSignal | undefined;
   /** Where this run stands among its siblings, so runs differ. */
@@ -116,11 +109,7 @@ const clickOf = (value: unknown): Click | null => {
  * engine; what a runner does not report (a body, a sweep, node counts) its
  * detectors simply never see.
  */
-export const playBot = async (
-  jevApi: Jev,
-  launch: BotLaunch,
-  args: BotRunArgs,
-): Promise<GameBotRunResult> => {
+export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<GameBotRunResult> => {
   const { play } = launch;
   const can = play.capabilities;
   const stopped = (): boolean => args.session.stopped || args.signal?.aborted === true;
@@ -142,13 +131,7 @@ export const playBot = async (
     const owned = spawnOwned(
       args.host,
       process.execPath,
-      [
-        args.childPath,
-        NodeURL.pathToFileURL(args.botFile).href,
-        args.decider,
-        args.mode,
-        args.jevLive ? "jev-live" : "no-jev",
-      ],
+      [args.childPath, NodeURL.pathToFileURL(args.botFile).href],
       { env: botChildEnv(), cwd: args.root, stdio: ["pipe", "pipe", childLog], tree: false },
     );
     NodeFS.closeSync(childLog);
@@ -202,16 +185,11 @@ export const playBot = async (
     }
     const findings: GameBotFinding[] = [];
     const seen = new Set<string>();
-    const picks: Array<{ t: number; name: string; via: string; randomized: boolean }> = [];
+    const picks: Array<{ t: number; name: string }> = [];
     const offered: Array<{ t: number; options: string[] }> = [];
     const setStates: Array<{ t: number; target: string; values: unknown }> = [];
     const refusedSetStates: Array<{ t: number; target: string }> = [];
     const samples: Array<{ t: number; pos: [number, number, number] | null; state: unknown }> = [];
-    const jevLog: Array<{ t: number; failure: string }> = [];
-    const jevLatencies: Array<{ ms: number; warm: boolean }> = [];
-    let jevCalls = 0;
-    let jevFailures = 0;
-    let jevDecisions2Plus = 0;
     let decisions = 0;
     let ticks = 0;
     let misses = 0;
@@ -226,55 +204,6 @@ export const playBot = async (
     let moveWindow: Array<{ wall: number; pos: [number, number, number] }> = [];
     let noMoveReported = false;
     let lastHeld: string[] = [];
-    // Stuck watch (service side, positions only): the last picks with the
-    // player position at pick time. Six same-name picks inside a metre
-    // means the choice is not moving play, whatever Jev hoped.
-    const pickTrail: Array<{ name: string; pos: [number, number, number] | null }> = [];
-    const stuckOf = () => {
-      if (pickTrail.length < 6) return null;
-      const tail = pickTrail.slice(-6);
-      const name = tail[0]!.name;
-      if (!tail.every((entry) => entry.name === name)) return null;
-      const base = tail[0]!.pos;
-      if (base === null) return null;
-      let moved = 0;
-      for (const entry of tail) {
-        if (entry.pos === null) return null;
-        moved = Math.max(
-          moved,
-          Math.hypot(entry.pos[0] - base[0], entry.pos[1] - base[1], entry.pos[2] - base[2]),
-        );
-      }
-      if (moved >= 1) return null;
-      return { option: name, picks: tail.length, movedM: moved };
-    };
-    // Visited-area coverage (service side): 4 m cells over x/z plus the
-    // bounding box, from the same samples the report uses.
-    const coverageOf = () => {
-      const cells = new Set<string>();
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (const sample of samples) {
-        if (sample.pos === null) continue;
-        const [x, , z] = sample.pos;
-        if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minZ = Math.min(minZ, z);
-        maxZ = Math.max(maxZ, z);
-        cells.add(cellOf(x, z).key);
-      }
-      return {
-        cells4m: cells.size,
-        samples: samples.length,
-        bbox:
-          cells.size === 0
-            ? null
-            : ` (x ${minX.toFixed(1)}..${maxX.toFixed(1)}, z ${minZ.toFixed(1)}..${maxZ.toFixed(1)})`,
-      };
-    };
     const addFinding = (
       detector: string,
       severity: string,
@@ -479,8 +408,8 @@ export const playBot = async (
           priorRuns: args.priorRuns,
         },
       });
-      // The child answers each tick with its inputs; decide/picked/status
-      // ride the same stream and are handled here, never blocking play.
+      // The child answers each tick with its inputs; offered/picked/status
+      // ride the same stream.
       let answer: {
         held: string[];
         taps: string[];
@@ -505,95 +434,14 @@ export const playBot = async (
               ? (childMsg["setStates"] as unknown[])
               : [],
           };
-        } else if (childMsg["op"] === "decide") {
-          if (args.decider === "jev" && args.jevKey !== null) {
-            jevCalls += 1;
-            const id = childMsg["id"];
-            const decideOpts =
-              (childMsg["options"] as Array<{
-                name: string;
-                description: string;
-                facts: unknown;
-              }>) ?? [];
-            const decideFacts = childMsg["facts"] ?? null;
-            // The child's own per-option tried counts (picks, ok, fail),
-            // tracked for every run even when the bot tracks nothing.
-            const decideTried =
-              (childMsg["tried"] as Record<string, { picks: number; ok: number; fail: number }>) ??
-              {};
-            const decideNow =
-              typeof childMsg["nowDoing"] === "string" ? childMsg["nowDoing"] : null;
-            const decideFor =
-              typeof childMsg["nowDoingFor"] === "number" ? childMsg["nowDoingFor"] : null;
-            const decideRecent = (childMsg["recent"] as Array<{ name: string; ok: boolean }>) ?? [];
-            const decidePlan = childMsg["plan"] ?? null;
-            // What the bot offered, whether or not Jev was asked: the
-            // player report needs offered-but-never-picked options too.
-            try {
-              const names = (decideOpts as Array<{ name?: unknown }>)
-                .map((o) => String(o?.name ?? ""))
-                .filter((name) => name !== "");
-              if (names.length > 0) offered.push({ t, options: names.slice(0, 20) });
-            } catch {
-              /* offered is best effort */
-            }
-            // Re-warm when Jev sat idle: the next decision must not wait
-            // on a new connection.
-            const warm = jevApi.touch(args.jevBase, args.jevKey);
-            const jevKey = args.jevKey;
-            void (async () => {
-              // Each option's facts carry how many times it was tried and
-              // what happened, on top of whatever the bot put there; the
-              // state carries what has been visited and tried, where this
-              // run stands, and whether one pick is stuck without moving.
-              const enriched = decideOpts.map((o) => {
-                const name = String(o.name);
-                const base =
-                  o.facts !== null && typeof o.facts === "object" && !Array.isArray(o.facts)
-                    ? (o.facts as Record<string, unknown>)
-                    : {};
-                return {
-                  name,
-                  description: String(o.description ?? ""),
-                  facts: { ...base, tried: decideTried[name] ?? { picks: 0, ok: 0, fail: 0 } },
-                };
-              });
-              const { pick, probs, failure, latencyMs } = await jevApi.pick({
-                key: jevKey,
-                base: args.jevBase,
-                goal,
-                facts: decideFacts,
-                options: enriched,
-                nowDoing: decideNow,
-                nowDoingFor: decideFor,
-                recent: decideRecent,
-                plan: decidePlan,
-                tried: decideTried,
-                coverage: coverageOf(),
-                run:
-                  args.runTotal > 1
-                    ? { index: args.runIndex, total: args.runTotal, priorRuns: args.priorRuns }
-                    : null,
-                stuck: stuckOf(),
-              });
-              jevLatencies.push({ ms: latencyMs, warm });
-              if (pick === null) {
-                jevFailures += 1;
-                jevLog.push({ t, failure: failure ?? "unknown" });
-              }
-              writeChild({ op: "decision", id, pick, probs });
-            })();
-          } else {
-            writeChild({ op: "decision", id: childMsg["id"], pick: null, probs: {} });
-          }
+        } else if (childMsg["op"] === "offered") {
+          const names = Array.isArray(childMsg["options"])
+            ? (childMsg["options"] as unknown[]).map(String).filter((name) => name !== "")
+            : [];
+          if (names.length > 0) offered.push({ t, options: names.slice(0, 20) });
         } else if (childMsg["op"] === "picked") {
           decisions += 1;
-          const via = String(childMsg["via"] ?? "");
-          if (via === "jev" && childMsg["twoPlus"] === true) jevDecisions2Plus += 1;
-          const pickedName = String(childMsg["name"] ?? "");
-          pickTrail.push({ name: pickedName, pos });
-          if (pickTrail.length > 12) pickTrail.shift();
-          picks.push({ t, name: pickedName, via, randomized: childMsg["randomized"] === true });
+          picks.push({ t, name: String(childMsg["name"] ?? "") });
         } else if (childMsg["op"] === "status") {
           childDone = {
             state: String(childMsg["state"] ?? "error"),
@@ -718,25 +566,9 @@ export const playBot = async (
             } satisfies GameBotFinding,
           ]
         : findings;
-    const median = medianOf;
-    const jev: GameBotRunResult["jev"] =
-      args.decider === "jev" && args.jevKey !== null
-        ? {
-            calls: jevCalls,
-            failures: jevFailures,
-            medianMs: median(jevLatencies.map((entry) => entry.ms)),
-            warmMedianMs: median(
-              jevLatencies.filter((entry) => entry.warm).map((entry) => entry.ms),
-            ),
-            decisions2Plus: jevDecisions2Plus,
-            valid: jevDecisions2Plus >= 3,
-          }
-        : null;
-    const policyNote = args.decider === "jev" && args.jevKey === null ? args.policyNote : null;
     const trace = {
       runId: args.runId,
       file: NodePath.relative(args.root, args.botFile),
-      decider: args.decider,
       mode: args.mode,
       goal,
       ticks,
@@ -745,9 +577,6 @@ export const playBot = async (
       gameSeconds: Number(gameSeconds.toFixed(2)),
       wallSeconds: Number(wallSeconds.toFixed(1)),
       decisions,
-      jev,
-      jevLog: jevLog.slice(0, 20),
-      policyNote,
       usedSetState,
       setStates,
       ...(refusedSetStates.length > 0 ? { refusedSetStates } : {}),
@@ -762,20 +591,10 @@ export const playBot = async (
       ...(perf === null ? {} : { perf }),
       video: videoFacts,
     };
-    const jevLine =
-      jev === null
-        ? ""
-        : `, Jev ${jev.calls} calls/${jev.failures} failed` +
-          `, latency median ${jev.medianMs ?? "?"}ms${jev.warmMedianMs === null || jev.warmMedianMs === undefined ? "" : ` (${jev.warmMedianMs}ms warm)`}` +
-          `, ${jev.decisions2Plus ?? 0} decisions among 2+ options` +
-          (jev.valid === true ? "" : " (NOT a valid Jev run: fewer than 3)");
     const message =
-      `Bot "${trace.file}" (${args.decider}): ${status.state} — ${status.note}. ` +
+      `Bot "${trace.file}": ${status.state} — ${status.note}. ` +
       `${ticks} ticks at ${tickHz.toFixed(1)} Hz, game/wall ${timeRatio.toFixed(2)}. ` +
-      `${decisions} decisions` +
-      jevLine +
-      (policyNote !== null ? `. ${policyNote}` : "") +
-      `. ${allFindings.length} finding(s). ` +
+      `${decisions} decisions. ${allFindings.length} finding(s). ` +
       (perf === null
         ? ""
         : `Scene nodes ${perf.nodesStart} start, ${perf.nodesPeak} peak, ${perf.nodesEnd} end; ${perf.orphansEnd} orphans. `) +
@@ -818,8 +637,6 @@ export const playBot = async (
       timeRatio: Number(timeRatio.toFixed(3)),
       gameSeconds: Number(gameSeconds.toFixed(2)),
       decisions,
-      jev,
-      policyNote,
       usedSetState,
       ...(refusedStates.length > 0 ? { refusedStates } : {}),
       findings: allFindings,
@@ -849,10 +666,7 @@ export const playBot = async (
  * measured. Its trace still says which, for game_bot_view.
  */
 export const runWithoutPlay = async (
-  args: Pick<
-    BotRunArgs,
-    "root" | "runId" | "botFile" | "decider" | "mode" | "tracePath" | "videoPath"
-  >,
+  args: Pick<BotRunArgs, "root" | "runId" | "botFile" | "mode" | "tracePath" | "videoPath">,
   input: {
     readonly goal: string;
     readonly state: "bot-error" | "not-booted";
@@ -875,8 +689,6 @@ export const runWithoutPlay = async (
     timeRatio: 0,
     gameSeconds: 0,
     decisions: 0,
-    jev: null,
-    policyNote: null,
     usedSetState: false,
     findings: [],
     finalState: {},
@@ -891,7 +703,7 @@ export const runWithoutPlay = async (
   };
   await NodeFSP.writeFile(
     args.tracePath,
-    JSON.stringify({ ...result, file, decider: args.decider, samples: [] }, null, 2),
+    JSON.stringify({ ...result, file, samples: [] }, null, 2),
   ).catch(() => undefined);
   return result;
 };

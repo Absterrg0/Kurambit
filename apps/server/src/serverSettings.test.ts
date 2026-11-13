@@ -1841,7 +1841,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const secrets = yield* ServerSecretStore.ServerSecretStore;
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      yield* secrets.set("game-bot-jev-api-key", new TextEncoder().encode("jev-saved"));
+      yield* secrets.set("game-blender-sketchfab-key", new TextEncoder().encode("sk-saved"));
       yield* secrets.set("game-blender-polypizza-key", new TextEncoder().encode("  \n"));
       yield* fileSystem.writeFileString(
         serverConfig.settingsPath,
@@ -1849,18 +1849,13 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
 
       const loaded = yield* serverSettings.getSettings;
-      assert.strictEqual(loaded.gameJevApiKey, "jev-saved");
-      assert.strictEqual(loaded.gameSketchfabApiKey, "");
+      assert.strictEqual(loaded.gameSketchfabApiKey, "sk-saved");
       assert.strictEqual(loaded.gamePolyPizzaApiKey, "");
-      assert.strictEqual(
-        ServerSettingsModule.redactServerSettingsForClient(loaded).gamePolyPizzaApiKey,
-        "",
-      );
       const client = ServerSettingsModule.redactServerSettingsForClient(loaded);
-      assert.isAbove(client.gameJevApiKey.length, 0);
-      assert.strictEqual(client.gameSketchfabApiKey, "");
-      assert.notInclude(JSON.stringify(client), "jev-saved");
-      assert.notInclude(yield* fileSystem.readFileString(serverConfig.settingsPath), "jev-saved");
+      assert.isAbove(client.gameSketchfabApiKey.length, 0);
+      assert.strictEqual(client.gamePolyPizzaApiKey, "");
+      assert.notInclude(JSON.stringify(client), "sk-saved");
+      assert.notInclude(yield* fileSystem.readFileString(serverConfig.settingsPath), "sk-saved");
 
       yield* serverSettings.updateSettings(
         yield* decodeSettingsPatch({ gameSketchfabApiKey: " sk-new " }),
@@ -1872,9 +1867,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         "sk-new",
       );
 
-      yield* serverSettings.updateSettings({ gameJevApiKey: "" });
-      assert.isTrue(Option.isNone(yield* secrets.get("game-bot-jev-api-key")));
-      assert.strictEqual((yield* serverSettings.getSettings).gameJevApiKey, "");
+      yield* serverSettings.updateSettings({ gameSketchfabApiKey: "" });
+      assert.isTrue(Option.isNone(yield* secrets.get("game-blender-sketchfab-key")));
+      assert.strictEqual((yield* serverSettings.getSettings).gameSketchfabApiKey, "");
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
@@ -1911,13 +1906,13 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       return Effect.gen(function* () {
         const secrets = yield* ServerSecretStore.ServerSecretStore;
         const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-        yield* secrets.set("game-bot-jev-api-key", new TextEncoder().encode("jev-saved"));
+        yield* secrets.set("game-blender-sketchfab-key", new TextEncoder().encode("sk-saved"));
 
-        assert.strictEqual((yield* serverSettings.getSettings).gameJevApiKey, "");
+        assert.strictEqual((yield* serverSettings.getSettings).gameSketchfabApiKey, "");
         reads.fail = false;
         yield* serverSettings.updateSettings({ gameBlenderPath: "/opt/blender" });
 
-        assert.isTrue(Option.isSome(yield* secrets.get("game-bot-jev-api-key")));
+        assert.isTrue(Option.isSome(yield* secrets.get("game-blender-sketchfab-key")));
       }).pipe(Effect.provide(layerSettings));
     },
   );
@@ -1928,14 +1923,14 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const secrets = yield* ServerSecretStore.ServerSecretStore;
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      yield* secrets.set("game-bot-jev-api-key", new TextEncoder().encode("jev-saved"));
+      yield* secrets.set("game-blender-sketchfab-key", new TextEncoder().encode("sk-saved"));
       yield* fileSystem.writeFileString(serverConfig.settingsPath, "{ not json");
 
-      assert.strictEqual((yield* serverSettings.getSettings).gameJevApiKey, "");
+      assert.strictEqual((yield* serverSettings.getSettings).gameSketchfabApiKey, "");
       yield* serverSettings.updateSettings({ gameBlenderPath: "/opt/blender" });
-      yield* serverSettings.updateSettings({ gameJevApiKey: "" });
+      yield* serverSettings.updateSettings({ gameSketchfabApiKey: "" });
 
-      assert.isTrue(Option.isSome(yield* secrets.get("game-bot-jev-api-key")));
+      assert.isTrue(Option.isSome(yield* secrets.get("game-blender-sketchfab-key")));
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 

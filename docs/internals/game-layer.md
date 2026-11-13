@@ -533,8 +533,8 @@ cannot both find none.
   report carries its attempt and a derived command id, so a late or repeated report is refused or
   is a receipt.
 - **The outbox timer exception.** The outbox runs a thread's effects in order. A turn's cap and a
-  proposal's deadline wait minutes on the chat, so a pending `game-run.step.deadline`,
-  `game-run.step.resend` or `game-run.decision.deadline` holds nothing back
+  proposal's deadline wait minutes on the chat, so keep going enqueues its timers with
+  `holdsThread: false` and a pending one holds nothing back
   ([EffectOutbox.ts](../../apps/server/src/orchestration-v2/EffectOutbox.ts)); otherwise the
   person's own turns would wait out every cap. Each timer checks the run again when it fires.
 - **Recovery** (`GameRunRecovery`, at startup): a step whose job died gets it again through a

@@ -25,17 +25,12 @@ export const GAME_BOT_BOUNDS = {
   maxRuns: 20,
 } as const;
 
-export const GameBotDecider = Schema.Literals(["policy", "jev"]);
-export type GameBotDecider = typeof GameBotDecider.Type;
-
 export const GameBotMode = Schema.Literals(["play", "explore"]);
 export type GameBotMode = typeof GameBotMode.Type;
 
 export const GameBotRunInput = Schema.Struct({
   /** Bot file relative to the game root, under `.studio/bot/`, ending `.mjs`. */
   file: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)),
-  /** Who picks among the bot's options. Omitted means the bot's own policy. */
-  decider: Schema.optionalKey(GameBotDecider),
   /** Wall budget in seconds. Omitted means the default. */
   seconds: Schema.optionalKey(Schema.Number),
   /**
@@ -80,20 +75,6 @@ export const GameBotStatus = Schema.Struct({
 });
 export type GameBotStatus = typeof GameBotStatus.Type;
 
-export const GameBotJevUsage = Schema.Struct({
-  calls: Schema.Int,
-  failures: Schema.Int,
-  /** Median decide round-trip ms; null when no call completed. */
-  medianMs: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  /** Median ms of calls on the warm connection. */
-  warmMedianMs: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  /** Jev decisions made among 2+ real options. */
-  decisions2Plus: Schema.optionalKey(Schema.Int),
-  /** True once Jev made at least 3 decisions among 2+ options. */
-  valid: Schema.optionalKey(Schema.Boolean),
-});
-export type GameBotJevUsage = typeof GameBotJevUsage.Type;
-
 /**
  * Scene node counts over a Godot play run: start, peak and end, plus orphan
  * nodes (out of the tree, never freed) at the end. Counts, not timings, so
@@ -120,10 +101,6 @@ export const GameBotRunResult = Schema.Struct({
   timeRatio: Schema.Number,
   gameSeconds: Schema.Number,
   decisions: Schema.Int,
-  /** Null when the run never asked Jev (policy decider or no key). */
-  jev: Schema.NullOr(GameBotJevUsage),
-  /** Set when the run fell back to policy (no key, Jev failing). */
-  policyNote: Schema.NullOr(Schema.String),
   /** True when the bot used an explicit set-state write; the trace lists each one. */
   usedSetState: Schema.Boolean,
   /** State writes the game refused, with its reason; absent when none was. */
@@ -167,7 +144,6 @@ export const GameBotViewResult = Schema.Struct({
   tickHz: Schema.Number,
   timeRatio: Schema.Number,
   decisions: Schema.Int,
-  jev: Schema.NullOr(GameBotJevUsage),
   usedSetState: Schema.Boolean,
   /** State writes the game refused, with its reason; absent when none was. */
   refusedStates: Schema.optionalKey(

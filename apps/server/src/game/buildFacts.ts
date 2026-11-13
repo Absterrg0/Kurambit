@@ -447,7 +447,7 @@ export const bootsFact = (result: GameCheckResult, source?: string): Facts["boot
  */
 export const skilledFact = (
   result: GameBotRunResult,
-  bot: { readonly file: string; readonly hash: string; readonly decider: "policy" | "jev" },
+  bot: { readonly file: string; readonly hash: string },
   evidence: string | null,
   machine: MachineLoad | null = null,
 ): Facts["skilled"] => {

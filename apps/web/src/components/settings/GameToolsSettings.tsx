@@ -379,12 +379,6 @@ function GameToolRow({
 // Plain words first: what each key changes in a game, not the service's name.
 const KEY_ROWS = [
   {
-    key: "gameJevApiKey",
-    title: "Smarter play bot",
-    description:
-      "Optional. With a key for Jev, typesafe.ai's decision model, the play bot asks it which way to explore; without one it uses its own rules.",
-  },
-  {
     key: "gameSketchfabApiKey",
     title: "Sketchfab models",
     description: "Lets Blender search and import Sketchfab models for your games.",

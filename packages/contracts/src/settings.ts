@@ -1052,10 +1052,6 @@ export const ServerSettings = Schema.Struct({
   gameGodotPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   gameUnityPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   // Game Tools keys, under the names they were stored by before they were settings.
-  gameJevApiKey: TrimmedString.pipe(
-    Schema.withDecodingDefault(Effect.succeed("")),
-    namedSecretSetting("game-bot-jev-api-key"),
-  ),
   gameSketchfabApiKey: TrimmedString.pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
     namedSecretSetting("game-blender-sketchfab-key"),
@@ -1386,7 +1382,6 @@ export const ServerSettingsPatch = Schema.Struct({
   gameBlenderPath: Schema.optionalKey(Schema.String),
   gameGodotPath: Schema.optionalKey(Schema.String),
   gameUnityPath: Schema.optionalKey(Schema.String),
-  gameJevApiKey: Schema.optionalKey(TrimmedString),
   gameSketchfabApiKey: Schema.optionalKey(TrimmedString),
   gamePolyPizzaApiKey: Schema.optionalKey(TrimmedString),
   gameOpenAiApiKey: Schema.optionalKey(TrimmedString),

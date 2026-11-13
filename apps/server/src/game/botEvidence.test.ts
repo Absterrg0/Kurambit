@@ -13,7 +13,6 @@ const run = (runId: string, mode: string) => ({
   runId,
   file: `.studio/bot/${mode}.mjs`,
   mode,
-  decider: "policy",
   won: false,
   seconds: 30,
   findings: 0,
@@ -38,6 +37,19 @@ describe("bot evidence", () => {
         ".studio/bot/play.mjs",
       );
       expect(await BotEvidence.read(dir, "other")).toBeNull();
+      // A record written while runs named their decider still reads.
+      NodeFS.writeFileSync(
+        recordPath(dir, "old"),
+        JSON.stringify({
+          ...BotEvidence.add(BotEvidence.empty("old", "/g"), "/g", run("p", "play")),
+          play: { ...run("p", "play"), decider: "jev" },
+        }),
+      );
+      expect(
+        BotEvidence.lastPlay((await BotEvidence.read(dir, "old")) as BotEvidence.ThreadBots),
+      ).toEqual({
+        file: ".studio/bot/play.mjs",
+      });
       // Another thread's record under this thread's name is no run of its own.
       NodeFS.copyFileSync(recordPath(dir, "t"), recordPath(dir, "u"));
       expect(await BotEvidence.read(dir, "u")).toBe("damaged");

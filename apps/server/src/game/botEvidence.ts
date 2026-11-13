@@ -15,7 +15,6 @@ const BotRun = Schema.Struct({
   /** The bot file, relative to the game folder it ran in. */
   file: Schema.String,
   mode: Schema.String,
-  decider: Schema.String,
   won: Schema.Boolean,
   /** How the run ended, in the bot's words (a timeout, an error); absent on runs recorded before. */
   ending: Schema.optionalKey(Schema.String),
@@ -65,12 +64,7 @@ export const add = (record: ThreadBots, root: string, run: BotRun): ThreadBots =
 
 /** The bot a blind comparison replays: the thread's latest play-mode run. */
 export const lastPlay = (record: ThreadBots) =>
-  record.play === null
-    ? null
-    : {
-        file: record.play.file,
-        decider: record.play.decider === "jev" ? ("jev" as const) : ("policy" as const),
-      };
+  record.play === null ? null : { file: record.play.file };
 
 /**
  * The record on disk: null when there is none. A record that does not decode,

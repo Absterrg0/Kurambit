@@ -39,7 +39,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
     status: "measured",
     value: {
       ...tier("won", 40).value,
-      bot: { file: ".studio/bot/play.mjs", hash: "x", decider: "policy" },
+      bot: { file: ".studio/bot/play.mjs", hash: "x" },
       botWord: null,
     },
   },
@@ -69,7 +69,7 @@ const skilledWith = (ending: Ending, hash = "x"): Partial<GameBuildFacts> => ({
     status: "measured",
     value: {
       ...tier(ending, 40).value,
-      bot: { file: ".studio/bot/play.mjs", hash, decider: "policy" },
+      bot: { file: ".studio/bot/play.mjs", hash },
       botWord: null,
     },
   },

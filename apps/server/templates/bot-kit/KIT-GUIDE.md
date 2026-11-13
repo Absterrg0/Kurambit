@@ -12,14 +12,13 @@ The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
   tick and returns facts in the player's terms (distances, counts, what is
   held, what is in danger). `options(obs)` lists what is legal _now_, each
   with its own facts. Few options (2-8), each a whole meaningful step.
-- **Jev decides.** With decider `jev`, Jev picks among the options at tempo;
-  with `policy`, your `policy(obs, opts)` picks. The kit works with both.
+- **Your policy decides.** `policy(obs, opts)` picks among the options at
+  tempo; without one, the first option on offer runs.
 - **A fixed route is a script, not a bot.** Waypoint lists with one legal
-  option at a time give Jev nothing to choose between and do not count as a
-  Jev run (needs 3+ decisions among 2+ options). Offer real alternatives:
+  option at a time leave nothing to choose between. Offer real alternatives:
   flank vs frontal, fight vs retreat, wait vs push, which target, heal now
   or later. Executors do the fast part in code every tick (steer, time a
-  press); Jev chooses what to do.
+  press); the policy chooses what to do.
 
 ## Run types: what each run is for
 
@@ -33,11 +32,6 @@ The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
   yet — Aura's rule for "an exploration". Do not score it on wins: a run
   that never finishes still reports where play dies, stalls, or goes
   untried. Several runs (`runs: 3+`) feed one player report.
-- **Jev vs randomised policy.** With decider `jev` and a key, Jev picks.
-  Without a key the service says so plainly (`policyNote`) and an
-  exploration bot picks uniformly at random instead — which is still useful
-  coverage, but it is not Jev and must never be reported as Jev. A win bot
-  without a key falls back to your `policy`.
 - **Player report.** After exploration runs the service writes
   `.studio/player-report.md` from the run traces: endings, pick counts,
   offered-but-never-picked options, first-action times, death/stall clusters
@@ -54,7 +48,6 @@ import { makeWalkTo, driveWalk } from "./kit/walk.mjs";
 
 export const goal = "Win a run: clear both floors and take the stair.";
 export const tempo = 4;          // decisions/second (reflex play: 4-8)
-export const switchMargin = 0.25;
 export const stallSeconds = 60;
 
 const holds = makeHolds();
@@ -68,10 +61,7 @@ export function observe(api, last) {
 }
 export function options(obs) { /* 2+ legal options with facts */ }
 export function status(obs) { /* running | done | failed + note */ }
-export function policy(obs, opts) { /* fallback pick */ }
-// Optional: plan(obs) -> {done: [...], now: {step, what} | null, next: [...]}
-// The runtime offers Jev only the current step's options and tells it the
-// plan's standing, so play can't wander back to steps already done.
+export function policy(obs, opts) { /* pick one of opts by name */ }
 ```
 
 ## Option outcomes and run context (the exploration contract)
@@ -79,13 +69,11 @@ export function policy(obs, opts) { /* fallback pick */ }
 An option's `run` must return `"done"` when it arrived or has nothing left
 to do, `"failed"` when it cannot work from here, else `"running"`. The
 child then stops offering a done option until the option set changes (a
-failed one rests 30 s), so Jev cannot re-pick an arrived option hundreds of
-times. Options that always return `"running"` stay on offer: a walker that
-reached its target but never says so is how runs collapse onto one spot.
-Every decide request carries the child's tried counts per option (picks,
-ok, fail), and the service adds visited-area coverage plus whether one pick
-is stuck without moving — write options with their own facts anyway, for
-the policy fallback and the report.
+failed one rests 30 s), so the policy cannot re-pick an arrived option
+hundreds of times. Options that always return `"running"` stay on offer: a
+walker that reached its target but never says so is how runs collapse onto
+one spot. Give options their own facts: the policy reads them, and the
+report lists what was offered.
 
 Every observation carries `runContext`: `{seed, runIndex, runTotal,
 priorRuns}` where each prior run is `{topOptions, cells, ending}`. Use it
@@ -120,8 +108,8 @@ reads that step as making the game unwinnable, and keep going undoes a step
 a person might have kept. When the game reports nothing the bot needs, play
 from what it does report (progress, the player's position and whether it is
 on the ground) rather than a route. Every option gets its own facts. Reflexes (dodge a telegraphed
-hit) go in executor code every tick, never in a Jev decision: a decision
-takes ~0.3s from sight to action, too slow for a fast hit.
+hit) go in executor code every tick, never in a policy decision: a decision
+waits for the next tempo beat, too slow for a fast hit.
 
 ## Reach (what the runner gives you)
 
@@ -155,7 +143,7 @@ The harness's third tier, `skilled`, plays the game's latest play-mode bot
 (the newest `game_bot_run` with `mode: "play"`). A game with none gets one
 from a keep-going step, once: write `.studio/bot/play.mjs`, a win bot with a
 `policy` whose goal is to win one run of the core loop with the game's own
-verbs, run it with `game_bot_run` (decider `policy`) and fix it until it
+verbs, run it with `game_bot_run` and fix it until it
 plays a full run. Change no game files in that step: its build is the game
 as it was, so only `skilled` is measured again. From then on every build is
 played with it, so keep it general to the game's verbs and goal rather than

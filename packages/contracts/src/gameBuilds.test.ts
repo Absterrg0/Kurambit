@@ -24,7 +24,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
     status: "measured",
     value: {
       ...tier("won", 40).value,
-      bot: { file: ".studio/bot/win.mjs", hash: "x", decider: "policy" },
+      bot: { file: ".studio/bot/win.mjs", hash: "x" },
       botWord: null,
     },
   },

@@ -1,7 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
-import { GameBotDecider } from "./gameBot.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameAssetSource } from "./gameModel.ts";
 import {
@@ -345,7 +344,7 @@ export const GameBotTier = Schema.Struct({
 });
 export const GameSkilledTier = Schema.Struct({
   ...GameBotTier.fields,
-  bot: Schema.Struct({ file: Schema.String, hash: Schema.String, decider: GameBotDecider }),
+  bot: Schema.Struct({ file: Schema.String, hash: Schema.String }),
   /** The bot's own end word when the game reported no result. */
   botWord: Schema.NullOr(Schema.String),
 });
