@@ -168,9 +168,11 @@ export const ensureScaffold = (
   });
 
 /**
- * The studio skills brought up to this server's: a chat game has no run start
- * to refresh them, and guidance written after a game was made would otherwise
- * never reach it. A write that fails is logged, never the caller's failure.
+ * The studio skills, and the bot kit a game already has, brought up to this
+ * server's: a chat game has no run start to refresh them, and guidance written
+ * after a game was made would otherwise never reach it. The kit is Kurambit's
+ * (an agent's own bot sits beside it). A write that fails is logged, never the
+ * caller's failure.
  */
 export const refreshSkills = (
   root: string,
@@ -178,6 +180,21 @@ export const refreshSkills = (
   templates: string,
 ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
   writeSkills(templates, root, engine).pipe(
+    Effect.andThen(
+      Effect.tryPromise(async () => {
+        const kit = NodePath.join(root, ".studio", "bot", "kit");
+        const present = await NodeFSP.access(kit).then(
+          () => true,
+          () => false,
+        );
+        if (present)
+          await NodeFSP.cp(NodePath.join(templates, "bot-kit"), kit, {
+            recursive: true,
+            force: true,
+            filter: (_from, into) => writableInGame(root, into),
+          });
+      }),
+    ),
     Effect.catchCause((cause) =>
       Effect.logWarning("the game's studio skills could not be updated", { game: root, cause }),
     ),
