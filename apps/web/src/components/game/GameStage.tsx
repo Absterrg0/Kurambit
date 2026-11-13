@@ -223,7 +223,7 @@ const SHORT_WINDOW = 840;
  */
 const TRANSIENT_ROWS_RESERVE = 38;
 /** A build card in the panel's strip, at the panel's width. */
-const STRIP_CARD_WIDTH = 136;
+const STRIP_CARD_WIDTH = 120;
 /**
  * What the loading skeleton's column gives up besides its Stage, so its Stage is the size the
  * fit gives a 16:9 game and nothing moves when the game is read.

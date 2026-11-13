@@ -291,11 +291,6 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const asked = useAtomValue(stagePlayTarget(threadRef));
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   const shell = useQuietThreadShell(threadRef);
-  const gameName = useGameName(
-    threadRef.environmentId,
-    shell?.projectId ?? null,
-    useIsGameThreadStatus(threadRef).data?.manifest.name ?? "",
-  );
   const working = threadRuntimeIsActive(shell?.runtime);
   const landing = useTurnLanding(threadRef, working);
   const data = list.data;
@@ -349,7 +344,6 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
     <BuildDetail
       key={build.id}
       threadRef={threadRef}
-      gameName={gameName}
       build={build}
       list={data}
       // A compare's side is on the compare, not the Stage: it is named by its letter.
@@ -390,7 +384,6 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
 
 function BuildDetail({
   threadRef,
-  gameName,
   build,
   list,
   onStage,
@@ -398,7 +391,6 @@ function BuildDetail({
   onBackToStage,
 }: {
   threadRef: ScopedThreadRef;
-  gameName: string;
   build: GameBuild;
   list: GameBuildsResult;
   onStage: boolean;
@@ -459,15 +451,7 @@ function BuildDetail({
         list={list}
         onCompare={(other) => requestStage({ kind: "compare", pair: [refOf(other), refOf(build)] })}
       >
-        <GameBuildStill
-          threadRef={threadRef}
-          gameName={gameName}
-          build={build}
-          // The strip's stand-in for a build with no picture yet, so it looks one way everywhere.
-          title={buildName(build)}
-          mark="name"
-          className="h-12 w-20 shrink-0 rounded-md ring-1 ring-border ring-inset"
-        />
+        {/* The strip above already shows the build's picture; its name and time lead here. */}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <Text variant="label" tone="strong" truncate render={<h2 />}>
             {buildName(build)}

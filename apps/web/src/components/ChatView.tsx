@@ -7931,6 +7931,8 @@ export default function ChatView(props: ChatViewProps) {
         className={cn(
           "relative flex min-h-0 min-w-0 flex-col overflow-x-hidden",
           rightPanelMaximized || gameChatHidden ? "invisible w-0 flex-none" : "flex-1",
+          // Beside the game the chat keeps a readable width; the game's column gives way first.
+          gameLayout && !gameStageAbove && !gameChatHidden && "min-w-88",
         )}
         inert={gameChatHidden}
         aria-hidden={gameChatHidden}
@@ -8341,7 +8343,7 @@ export default function ChatView(props: ChatViewProps) {
               ? "hidden"
               : gameView === "expanded"
                 ? "flex flex-1"
-                : "flex shrink-0",
+                : "flex min-w-80 shrink",
           )}
           style={gameView === "split" ? { width: gameColumnWidth } : undefined}
           inert={gameView === "collapsed"}

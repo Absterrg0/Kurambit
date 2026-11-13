@@ -425,6 +425,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["in-app notifications toast popup completion input approval failure"],
   },
   {
+    id: "game-placement",
+    title: "Where the game plays",
+    to: "/settings/appearance",
+    searchTerms: ["game stage above chat beside right column layout panel"],
+  },
+  {
     id: "time-format",
     title: "Time format",
     to: "/settings/appearance",
