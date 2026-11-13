@@ -85,6 +85,7 @@ import {
   GameGenerationBody,
   GenerationHeading,
   useChoosingCount,
+  useGenerationCount,
   useGameGenerations,
   useGenerationActions,
 } from "./GameGenerationCard";
@@ -924,6 +925,12 @@ export function GameInspectorLoading() {
           <Skeleton className="h-3 w-24" />
         </div>
       </div>
+      {/* The room every loaded header takes before its checks (what was asked, or the build
+          the game changed from), so the named rows below it barely move when it is read. */}
+      <div className="flex flex-col gap-2">
+        <Skeleton className="my-1.5 h-3 w-20" />
+        <Skeleton shape="card" className="h-12 w-full" />
+      </div>
       <Section title="Checks" detail={<Skeleton className="my-0.5 h-3 w-36" />}>
         <ChecksLoading />
       </Section>
@@ -996,6 +1003,7 @@ function NotMeasured({
                 ) : null}
                 <Text variant="meta" tone="muted" render={<span />}>
                   {plainWhy(why).charAt(0).toUpperCase() + plainWhy(why).slice(1)}
+                  {/[.!?]$/.test(plainWhy(why)) ? "" : "."}
                 </Text>
                 {notes.map((line) => (
                   <Text key={line} variant="meta" tone="muted" render={<span />}>
@@ -1402,6 +1410,9 @@ function Recordings({
                 build={{ still: run.frame?.path ?? null }}
                 // A run with no frame says so, rather than pass its pigment off as a picture.
                 mark="absent"
+                // Its frame still loading is the game's colour under the play button, never an
+                // empty box.
+                loadingMark="none"
                 className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30"
               >
                 {run.video === null || run.ending === null ? null : (
@@ -1591,7 +1602,6 @@ function BuildActions({
                         (action.kind === "undo"
                           ? // The top bar's Undo says the same two sentences.
                             undoOutcome(
-                              buildName(build),
                               previous === undefined ? null : buildName(previous),
                               list.folderEdited === true,
                             )
@@ -1714,6 +1724,7 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const swatches = style !== null && Array.isArray(style.palette) ? style.palette : [];
   const [artOpen, setArtOpen] = useState(false);
   const choosing = useChoosingCount(threadRef);
+  const generated = useGenerationCount(threadRef);
   // The look shown, not only named: the folder's latest build as its picture.
   const builds = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -1810,7 +1821,12 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
             >
               {choosing} to pick
             </Text>
-          ) : null}
+          ) : generated === null ? null : (
+            // What is inside, like the rows above say theirs: nobody opens it to find it empty.
+            <Text variant="meta" tone="muted" numeric>
+              {generated === 0 ? "None yet" : generated === 1 ? "1 piece" : `${generated} pieces`}
+            </Text>
+          )}
           {/* The same trailing ⌄ as Characters' picker: a row that opens more has one mark. */}
           <ChevronDownIcon
             className={cn(

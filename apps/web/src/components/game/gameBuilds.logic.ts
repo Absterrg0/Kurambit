@@ -559,14 +559,13 @@ export const checksLine = (facts: GameBuild["facts"]): string =>
     : (factsSummaryLine(facts) ?? "Not measured yet");
 
 /**
- * PURE. What an Undo of `name` does, in two plain sentences, the same wherever Undo is offered:
- * where the game goes, then that nothing is lost. `base` is the build it goes back to when the
- * app knows it; `changes` is set when the folder was edited since the build.
+ * PURE. What an Undo does, in two plain sentences, the same wherever Undo is offered: where the
+ * game goes, then that nothing is lost. The build is named once, by the control; here it is
+ * "this build". `base` is the build it goes back to when the app knows it; `changes` is set
+ * when the folder was edited since the build.
  */
-export const undoOutcome = (name: string, base: string | null, changes: boolean): string => {
-  const kept = name.replace(/^build /, "Build ").replace(/^step /, "Step ");
-  return `The game goes back to ${base === null ? `before ${buildPhrase(name)}` : buildPhrase(base)}. ${kept}${changes ? " and the changes since stay" : " stays"} on the strip.`;
-};
+export const undoOutcome = (base: string | null, changes: boolean): string =>
+  `The game goes back to ${base === null ? "before this build" : buildPhrase(base)}. This build${changes ? " and the changes since stay" : " stays"} on the strip.`;
 
 /** PURE. A build's name inside a sentence: "build 5", "step 2's build", a saved build's label. */
 export const buildPhrase = (name: string): string =>

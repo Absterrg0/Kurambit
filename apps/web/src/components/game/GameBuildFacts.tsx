@@ -139,7 +139,8 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                 <span className="sr-only">B</span>
               </span>
             </th>
-            <th className="w-28 py-1.5 text-right font-normal">Change</th>
+            {/* Which way the column reads: every word and amount is B's against A's. */}
+            <th className="w-32 py-1.5 text-right font-normal">Change from A to B</th>
           </Text>
         </thead>
         <tbody>

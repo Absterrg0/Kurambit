@@ -43,6 +43,8 @@ export function GameKeyArt({
         loadedUrl === state.url ? "opacity-100" : "opacity-0",
         className,
       )}
+      // Read by a label that waits for its picture (a badge naming whose picture it is).
+      data-picture-loaded={loadedUrl === state.url ? "" : undefined}
       onLoad={() => setLoadedUrl(state.url)}
       onError={() => setFailedUrl(state.url)}
     />

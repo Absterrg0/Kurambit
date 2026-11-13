@@ -750,3 +750,9 @@ const selectChoosingCount = (result: GenerationsResult): number =>
     : 0;
 export const useChoosingCount = (threadRef: ScopedThreadRef) =>
   useEnvironmentQuerySelector(generationsTarget(threadRef), selectChoosingCount);
+
+/** How many pieces of art the game has had generated; null until that is read. */
+const selectGenerationCount = (result: GenerationsResult): number | null =>
+  AsyncResult.isSuccess(result) ? result.value.generations.length : null;
+export const useGenerationCount = (threadRef: ScopedThreadRef) =>
+  useEnvironmentQuerySelector(generationsTarget(threadRef), selectGenerationCount);

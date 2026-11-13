@@ -449,6 +449,15 @@ function ThreadGameStage({
   const [timelineRequest, setTimelineRequest] = useState<GameStripRequest | null>(null);
   const [reelOpen, setReelOpen] = useState(false);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
+  // Side A's build, for the folded Inspector's label while two builds are compared.
+  const compareA = compare?.[0];
+  const compareAName = useEnvironmentQuerySelector(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+    buildPhraseOf(compareA?._tag === "build" ? compareA.build : null),
+  );
   const [exportOpen, setExportOpen] = useState(false);
   const showInspectorTab = useGameWorkspaceStore((state) => state.showInspectorTab);
   const threadKey = scopedThreadKey(threadRef);
@@ -574,7 +583,7 @@ function ThreadGameStage({
     undoName === null
       ? "Undo the last build"
       : // The sentences the build's own menu uses: where the game goes, and that nothing is lost.
-        `Undo ${undoName}. ${undoOutcome(undoName, undoBaseName ?? null, changedSince != null)}`;
+        `Undo ${undoName}. ${undoOutcome(undoBaseName ?? null, changedSince != null)}`;
   const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
@@ -1449,7 +1458,10 @@ function ThreadGameStage({
                   Inspector
                   {compare !== null ? (
                     <Text variant="meta" tone="muted" render={<span />}>
-                      · side A
+                      {/* Which build it shows, not only which side. */}·{" "}
+                      {compareAName == null
+                        ? "side A"
+                        : `A: ${compareAName.charAt(0).toUpperCase()}${compareAName.slice(1)}`}
                     </Text>
                   ) : playTarget === null && folderChecks !== null ? (
                     <Text variant="meta" tone="muted" render={<span />}>

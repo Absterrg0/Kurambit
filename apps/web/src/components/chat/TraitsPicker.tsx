@@ -784,6 +784,22 @@ export const TraitsPicker = memo(function TraitsPicker({
     reportedModelSelection,
   });
   const isCodexStyle = provider === "codex";
+  // A lone level ("Medium") says what it is a level of; a label that already names several
+  // settings ("1M · High Fast") stays as it is.
+  const namesThinking =
+    !triggerLabel.includes(" · ") &&
+    descriptors.some(
+      (descriptor) =>
+        descriptor.type === "select" && REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
+    );
+  const triggerName = namesThinking ? `Thinking: ${triggerLabel}` : triggerLabel;
+  const triggerText = namesThinking ? (
+    <>
+      <span className="text-muted-foreground">Thinking:</span> {triggerLabel}
+    </>
+  ) : (
+    triggerLabel
+  );
 
   return (
     <Menu
@@ -799,7 +815,7 @@ export const TraitsPicker = memo(function TraitsPicker({
               render={
                 <ComposerControl
                   disabled={disabled}
-                  aria-label={triggerLabel}
+                  aria-label={triggerName}
                   data-composer-shortcut={isComposerOwned ? "composer.effort" : undefined}
                   size={size}
                   className={cn(
@@ -822,14 +838,14 @@ export const TraitsPicker = memo(function TraitsPicker({
             >
               <ComposerControlIcon icon={BrainIcon} size={size} />
               <span data-composer-control-label className="min-w-0 truncate">
-                {triggerLabel}
+                {triggerText}
               </span>
               <ComposerControlChevron size={size} />
             </span>
           ) : (
             <>
               <ComposerControlIcon icon={BrainIcon} size={size} />
-              <span data-composer-control-label>{triggerLabel}</span>
+              <span data-composer-control-label>{triggerText}</span>
               <ComposerControlChevron size={size} />
             </>
           )}

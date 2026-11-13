@@ -40,10 +40,12 @@ function TabsList({ className, children, ...props }: TabsPrimitive.List.Props) {
 }
 
 function TabsTab({ className, ...props }: TabsPrimitive.Tab.Props) {
+  // Keyboard focus is the ring on the tab's edge with a page-colour ring just inside it, so on
+  // the open tab it stands off the raised pill rather than passing for the pill's own edge.
   return (
     <TabsPrimitive.Tab
       className={cn(
-        "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
+        "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid focus-visible:ring-4 focus-visible:ring-background focus-visible:ring-inset data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
         className,
       )}
       data-slot="tabs-tab"

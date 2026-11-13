@@ -10,6 +10,7 @@ import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameKeepGoingMenuContent } from "./GameKeepGoingControl";
@@ -91,6 +92,9 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
             <GameKeepGoingMenuContent threadRef={threadRef} />
           </MenuPopup>
         </Menu>
+      ) : status == null ? (
+        // The chip's place while the game is read, so it does not arrive after its row.
+        <Skeleton className="h-6 w-24" />
       ) : null}
     </div>
   );

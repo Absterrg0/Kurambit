@@ -751,11 +751,13 @@ function CardRing({
       aria-hidden="true"
       className={cn(
         "pointer-events-none absolute inset-0 z-10 rounded-md ring-inset",
-        // Keyboard focus: a second, heavier ring just inside the one that marks the build on the
-        // Stage, drawn here above the picture so no picture covers it; it never crosses the caption.
-        "-outline-offset-5 group-focus-visible/card:outline-3 group-focus-visible/card:outline-solid group-focus-visible/card:outline-ring",
-        // A dark hairline inside the focus ring, so it holds 3:1 on a light or a busy picture.
-        "after:pointer-events-none after:absolute after:inset-[5px] after:rounded-xs after:opacity-0 after:ring-1 after:ring-black/60 group-focus-visible/card:after:opacity-100",
+        // Keyboard focus: a white frame set in from the edge, with a dark hairline on each side
+        // of it, so it reads on any picture in both themes and beside the chosen card's ring.
+        // It is drawn here above the picture, inside the card, so the scrolling lane never
+        // clips it and it never crosses the caption.
+        "-outline-offset-6 group-focus-visible/card:outline-2 group-focus-visible/card:outline-white group-focus-visible/card:outline-solid",
+        "before:pointer-events-none before:absolute before:inset-[3px] before:rounded-sm before:opacity-0 before:ring-1 before:ring-black/70 before:ring-inset group-focus-visible/card:before:opacity-100",
+        "after:pointer-events-none after:absolute after:inset-[6px] after:rounded-xs after:opacity-0 after:ring-1 after:ring-black/70 after:ring-inset group-focus-visible/card:after:opacity-100",
         // The chosen card: an ink ring on the picture's edge and a page-colour one just inside
         // it, so the mark reads on any picture in both themes (a dark ring alone is lost on a
         // dark picture). Hover is one thin ring, always the weaker mark.
@@ -940,18 +942,20 @@ function NowCard({
           gameName={gameName}
           fallback={changed ? current : null}
           threadRef={threadRef}
-          className="h-(--build-card-picture) w-full rounded-md"
+          className="group/now h-(--build-card-picture) w-full rounded-md"
         >
-          {borrowed ? (
-            // The picture is the last build's until the Stage shows the game: it says so.
+          {borrowed && current !== null ? (
+            // The picture is that build's until the Stage shows the game: it says whose, in the
+            // tooltip's words, once the picture it names is there.
             <Text
               variant="micro"
               tone="inherit"
+              truncate
               render={
-                <span className="absolute top-1.5 left-1.5 z-20 rounded-sm bg-black/55 px-1.5 py-px text-white/80" />
+                <span className="absolute top-1.5 left-1.5 z-20 max-w-[calc(100%-0.75rem)] rounded-sm bg-black/55 px-1.5 py-px text-white/80 opacity-0 transition-opacity motion-surface group-has-[[data-picture-loaded]]/now:opacity-100" />
               }
             >
-              Last build's picture
+              Picture from {buildName(current)}
             </Text>
           ) : null}
           <CardRing on={active && !picking} />

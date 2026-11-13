@@ -19,6 +19,7 @@ export function GameBuildStill({
   title,
   className,
   mark,
+  loadingMark,
   children,
 }: {
   threadRef: ScopedThreadRef;
@@ -29,6 +30,8 @@ export function GameBuildStill({
   className?: string;
   /** What stands in for a build with no picture: see GamePicture. */
   mark?: GamePictureMark;
+  /** What shows under a picture while it loads, in place of an empty well: see GamePicture. */
+  loadingMark?: GamePictureMark;
   children?: ReactNode;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
@@ -53,6 +56,7 @@ export function GameBuildStill({
       title={title}
       className={className}
       mark={mark}
+      loadingMark={loadingMark}
     >
       {children}
     </GamePicture>
@@ -129,6 +133,7 @@ export function GamePicture({
   title,
   className,
   mark = "initial",
+  loadingMark,
   children,
 }: {
   environmentId: EnvironmentId;
@@ -138,6 +143,11 @@ export function GamePicture({
   title?: string | undefined;
   className?: string | undefined;
   mark?: GamePictureMark | undefined;
+  /**
+   * Drawn under a picture until it has loaded, where an empty well would read as a broken
+   * tile (a recording with its play button already on it). Without it the well is neutral.
+   */
+  loadingMark?: GamePictureMark | undefined;
   children?: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -163,7 +173,9 @@ export function GamePicture({
     >
       {path === null || stoodIn ? (
         <GameTitleMark gameName={gameName} mark={mark} title={title} />
-      ) : null}
+      ) : loadingMark === undefined ? null : (
+        <GameTitleMark gameName={gameName} mark={loadingMark} title={title} />
+      )}
       {path !== null && seen && root !== null ? (
         <GameKeyArt
           environmentId={environmentId}
