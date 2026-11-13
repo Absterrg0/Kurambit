@@ -447,9 +447,12 @@ export async function createLook(canvas, options = {}) {
     antialias: !look.post,
     powerPreference: "high-performance",
   });
-  const devicePixels = Math.min(window.devicePixelRatio ?? 1, 2);
+  // A 2x screen drawn at 1.5x looks the same at a little over half the pixels.
+  const devicePixels = Math.min(window.devicePixelRatio ?? 1, 1.5);
   renderer.setPixelRatio(devicePixels);
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // A frame's draws are counted across all its passes: the shell resets them as a frame begins.
+  renderer.info.autoReset = false;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = look.shadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -632,6 +635,7 @@ export async function createLook(canvas, options = {}) {
     },
     /** Times the frame's GPU work and keeps the render scale on budget. The shell wraps every draw. */
     frame(work, { playing = false, realMs = 0 } = {}) {
+      renderer.info.reset();
       timer.begin();
       try {
         work();
@@ -640,7 +644,10 @@ export async function createLook(canvas, options = {}) {
       }
       const gpuMs = timer.poll();
       scale.update(gpuMs, realMs);
-      if (playing) stats.add(realMs, gpuMs, scale.value);
+      if (playing) {
+        stats.add(realMs, gpuMs, scale.value);
+        stats.draws(renderer.info.render.calls, renderer.info.render.triangles);
+      }
     },
     bake,
     /**
@@ -939,25 +946,27 @@ function createTimer(renderer) {
 const GPU_BUDGET_MS = 12.5;
 /** A 60 fps frame comes every 16.7 ms; frames later than this on average are missed ones. */
 const LATE_MS = 18.5;
-const SCALE_MIN = 0.5;
+/** The fewest screen pixels a rendered pixel may cover per side: past this the game looks blocky. */
+const MAX_STRETCH = 1.25;
 
 /**
- * The render scale: a share of the device's pixels per side. Adaptive, it steps
- * down only when frames are actually late (a GPU idling at a low clock reports
- * long frame times while it keeps up, so its time alone is no reason), by as
- * much as the GPU's time says it must (pixels cost as the square of the scale),
- * and back up when the GPU's time leaves room. Steps are 0.05, every half second
- * at most, so the frame buffers are not remade every frame; a scale that just
- * stepped down is not raised again for three seconds.
+ * The render scale: a share of the device's pixels per side. Adaptive, it steps down only when
+ * the GPU is what makes frames late: its own time says so. Frames late for any other reason (a
+ * busy page, a chat streaming beside the game) are not the GPU's, and fewer pixels would only
+ * blur the game without making it any faster. A browser that cannot time the GPU steps on
+ * frame times alone, slowly. It never goes below one rendered pixel per 1.25 screen pixels,
+ * steps by 0.05 at most every half second, and climbs back once the GPU has room again.
  */
 function createScale(renderer, look, devicePixels, onChange) {
   const fixed = look.resolution === "adaptive" ? null : Math.min(look.resolution, 1);
+  const floor = Math.min(1, Math.max(0.5, 1 / (MAX_STRETCH * devicePixels)));
   let value = fixed ?? 1;
   const gpu = [];
   const real = [];
   let since = 0;
   let settle = 0.5;
   let hold = 0;
+  let lateFor = 0;
   const apply = () => {
     renderer.setPixelRatio(devicePixels * value);
     onChange(value);
@@ -976,28 +985,36 @@ function createScale(renderer, look, devicePixels, onChange) {
       if (realMs > 0 && realMs < 250) real.push(realMs);
       since += realMs / 1000;
       if (since < 0.5) return;
+      const span = since;
       hold = Math.max(0, hold - since);
       since = 0;
       // The first half second after a change settles (new buffers, first draws).
-      // A slow frame rate still steps: three frames are enough to say frames run late.
       if (settle > 0 || real.length < 3) {
         settle = Math.max(0, settle - 0.5);
         gpu.length = 0;
         real.length = 0;
         return;
       }
-      const frame = mean(real);
+      const late = mean(real) > LATE_MS;
       const ms = gpu.length >= 3 ? median(gpu) : null;
+      lateFor = late ? lateFor + span : 0;
       let next = value;
-      if (frame > LATE_MS) {
-        const need = ms !== null && ms > GPU_BUDGET_MS ? Math.sqrt(GPU_BUDGET_MS / ms) : 0.9;
-        next = value * Math.max(0.8, need);
+      if (ms !== null) {
+        // The GPU's own time decides: over budget, fewer pixels by what the overrun needs.
+        if (ms > GPU_BUDGET_MS && late) {
+          next = value * Math.max(0.85, Math.sqrt(GPU_BUDGET_MS / ms));
+          hold = 3;
+        } else if (hold === 0 && ms < GPU_BUDGET_MS * 0.75)
+          next = value * Math.min(1.1, Math.sqrt((GPU_BUDGET_MS * 0.85) / ms));
+      } else if (lateFor >= 2) {
+        // No GPU timer: two seconds of late frames in a row, then a small step.
+        next = value * 0.95;
+        lateFor = 0;
         hold = 3;
-      } else if (hold === 0 && ms !== null && ms < GPU_BUDGET_MS * 0.6)
-        next = value * Math.min(1.1, Math.sqrt((GPU_BUDGET_MS * 0.8) / ms));
+      } else if (hold === 0 && !late) next = value * 1.05;
       gpu.length = 0;
       real.length = 0;
-      next = Math.min(1, Math.max(SCALE_MIN, Math.round(next * 20) / 20));
+      next = Math.min(1, Math.max(floor, Math.round(next * 20) / 20));
       if (next !== value) {
         value = next;
         settle = 0.5;
@@ -1015,7 +1032,15 @@ function createStats() {
   const scales = new Float32Array(CAP);
   let frames = 0;
   let gpuFrames = 0;
+  // Draw calls and triangles per frame, sampled: their median says what the scene costs.
+  const calls = [];
+  const triangles = [];
   return {
+    draws(callCount, triangleCount) {
+      if (frames % 30 !== 0 || calls.length >= 512) return;
+      calls.push(callCount);
+      triangles.push(triangleCount);
+    },
     add(realMs, gpuMs, scale) {
       if (!(realMs > 0)) return;
       real[frames % CAP] = realMs;
@@ -1026,6 +1051,8 @@ function createStats() {
     reset() {
       frames = 0;
       gpuFrames = 0;
+      calls.length = 0;
+      triangles.length = 0;
     },
     read(extra) {
       const take = (array, n) =>
@@ -1049,6 +1076,20 @@ function createStats() {
         gpuMs: round(at(gpus, 0.5), 2),
         gpuP95Ms: round(at(gpus, 0.95), 2),
         scale: round(at(take(scales, frames), 0.5), 2),
+        drawCalls:
+          calls.length === 0
+            ? null
+            : at(
+                calls.toSorted((a, b) => a - b),
+                0.5,
+              ),
+        triangles:
+          triangles.length === 0
+            ? null
+            : at(
+                triangles.toSorted((a, b) => a - b),
+                0.5,
+              ),
         ...extra,
       };
     },
