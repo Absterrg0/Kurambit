@@ -83,7 +83,6 @@ import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
-import { GameBuildStill } from "./GameBuildStill";
 import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -102,7 +101,7 @@ import {
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
-import { buildName, buildPhrase, checksLine, doesNotStart } from "./gameBuilds.logic";
+import { buildName, buildPhrase, checksLine, doesNotStart, undoOutcome } from "./gameBuilds.logic";
 import { nextBuildOf } from "./GameLibraryStatus";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
@@ -135,12 +134,6 @@ const folderBuildName = (result: AsyncResult.AsyncResult<GameBuildsResult, unkno
   if (!AsyncResult.isSuccess(result)) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
   return build === undefined ? null : buildName(build);
-};
-
-/** The folder's build's picture, for the Stage to show faintly while the game loads. */
-const folderBuildStill = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
-  if (!AsyncResult.isSuccess(result)) return null;
-  return result.value.builds.find((each) => each.id === result.value.current)?.still ?? null;
 };
 
 const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
@@ -361,7 +354,8 @@ export function GameStageLoading() {
               Opening game…
             </Text>
           </div>
-          <div className="flex h-7 items-center pt-2.5">
+          {/* The loaded strip's own spacing: its top padding, its label's row, then its cards. */}
+          <div className="flex h-7 items-center mt-2.5">
             <Text variant="meta" tone="muted">
               Builds
             </Text>
@@ -579,15 +573,12 @@ function ThreadGameStage({
   const undoLabel =
     undoName === null
       ? "Undo the last build"
-      : // The sentence the build's own menu uses: where the game goes, and that nothing is lost.
-        `Undo ${undoName}: the game goes back to ${undoBaseName ?? "before it"}; ${
-          changedSince == null ? "it stays" : "it and the changes since stay"
-        } on the strip.`;
+      : // The sentences the build's own menu uses: where the game goes, and that nothing is lost.
+        `Undo ${undoName}. ${undoOutcome(undoName, undoBaseName ?? null, changedSince != null)}`;
   const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
-  const posterStill = useEnvironmentQuerySelector(buildsAtom, folderBuildStill) ?? null;
   const stageStill = useStageStill(threadKey);
   // A frame the folder's game showed is the picture of the build the folder holds, unless a
   // turn is changing the folder under it. Only a new frame is kept, never one from before.
@@ -1551,15 +1542,21 @@ function ThreadGameStage({
         {folderDoesNotStart && failureVisible !== null && stageBuildName !== null ? (
           <div className="pointer-events-none absolute inset-x-3 inset-y-0 z-20 flex items-center justify-center p-6">
             {/* Its own dark backing: the words never depend on what the dead game painted. */}
-            <div className="pointer-events-auto flex max-w-md min-w-0 flex-col items-center gap-2 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
+            <div className="pointer-events-auto flex max-w-lg min-w-0 flex-col items-center gap-2 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
               <TriangleAlertIcon className="size-5 text-destructive" aria-hidden="true" />
               <Text variant="label" tone="inherit" render={<p role="alert" />}>
                 {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} does not start`}
               </Text>
+              {/* What happened in plain words, then the error itself as its own detail, whole. */}
+              <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
+                An error in the game's code stops it before it starts.
+              </Text>
               <Text
                 variant="caption"
                 tone="inherit"
-                render={<p className="max-w-full truncate font-mono opacity-75" />}
+                render={
+                  <p className="line-clamp-3 max-w-full rounded-md bg-white/6 px-2.5 py-1.5 text-left font-mono break-words" />
+                }
               >
                 {failureVisible.split("\n")[0] ?? failureVisible}
               </Text>
@@ -1628,19 +1625,6 @@ function ThreadGameStage({
           bridge={{ threadKey, enabled: engine.stageBridge, freezeKey }}
           overlay={<GameStageOverlay threadKey={threadKey} />}
           note={note}
-          poster={
-            stageStill !== null ? (
-              <img src={stageStill} alt="" className="size-full object-cover" />
-            ) : posterStill !== null ? (
-              <GameBuildStill
-                threadRef={threadRef}
-                gameName={gameName}
-                build={{ still: posterStill }}
-                mark="none"
-                className="size-full"
-              />
-            ) : null
-          }
         />
       </div>
       <GameBuildStrip

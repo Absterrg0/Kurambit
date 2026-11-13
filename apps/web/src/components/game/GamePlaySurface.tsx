@@ -98,11 +98,8 @@ export function GamePlaySurface({
   bridge,
   overlay,
   note = null,
-  poster = null,
 }: {
   phase: GameStagePhase;
-  /** The game's last picture, shown faintly while its page loads. */
-  poster?: ReactNode;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
   operation: { readonly name: string; readonly own: boolean } | null;
   viewport: GameViewport;
@@ -165,7 +162,6 @@ export function GamePlaySurface({
             url={previewUrl}
             title={`${gameName} on the Stage`}
             gameName={gameName}
-            poster={poster}
             hidden={hidden}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest}
@@ -260,14 +256,11 @@ export function GameFrame({
   away = false,
   freezeKey = null,
   gameName,
-  poster = null,
 }: {
   url: string;
   title: string;
   /** Said while the game's page loads, so the wait names what it waits for. */
   gameName: string;
-  /** The game's last picture, behind that wait: what is coming, not a black box. */
-  poster?: ReactNode;
   /** The game should pause and mute itself: another tab is open, or another frame has focus. */
   hidden: boolean;
   /** Hears the bridge's error and ready messages from this frame only. */
@@ -448,7 +441,7 @@ export function GameFrame({
         }}
         onBlur={() => setFrameFocused(false)}
       />
-      {loaded ? null : <StartingCard name={gameName} poster={poster} onReload={reload} />}
+      {loaded ? null : <StartingCard name={gameName} onReload={reload} />}
       {keyboardFocused ? (
         <span
           aria-hidden="true"
@@ -502,29 +495,16 @@ export function GameFrame({
  * so the Stage says what is coming. A start that runs long says so and offers a reload; it never
  * claims progress it cannot see, and nothing spins.
  */
-function StartingCard({
-  name,
-  poster,
-  onReload,
-}: {
-  name: string;
-  poster: ReactNode;
-  onReload: () => void;
-}) {
+function StartingCard({ name, onReload }: { name: string; onReload: () => void }) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setSlow(true), SLOW_START_MS);
     return () => window.clearTimeout(timer);
   }, []);
   return (
-    // The Stage's own well, the loading skeleton's colour, with the last picture a trace under
-    // it: from first paint to the game the Stage stays one near-black, in both themes.
+    // The Stage's own well, the loading skeleton's colour, and nothing under the words: from
+    // first paint to the game the Stage stays one near-black, in both themes.
     <div className="absolute inset-0 z-10 grid place-items-center overflow-hidden bg-stage-well">
-      {poster === null ? null : (
-        <div aria-hidden="true" className="absolute inset-0 opacity-5 blur-xs">
-          {poster}
-        </div>
-      )}
       <div className="relative flex max-w-sm flex-col items-center gap-2 p-6 text-center">
         <Text variant="title" tone="inherit" render={<p className="text-stage-foreground" />}>
           {name}

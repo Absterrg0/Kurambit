@@ -74,7 +74,12 @@ function ScrollArea({
         <>
           <ScrollBar
             orientation="vertical"
-            className={persistentScrollbar ? "opacity-100" : undefined}
+            // Always there, so drawn a step stronger than a thumb that only answers a hover.
+            className={
+              persistentScrollbar
+                ? "opacity-100 [--app-scrollbar-thumb:var(--app-scrollbar-thumb-strong)]"
+                : undefined
+            }
           />
           <ScrollBar orientation="horizontal" />
           <ScrollAreaPrimitive.Corner data-slot="scroll-area-corner" />

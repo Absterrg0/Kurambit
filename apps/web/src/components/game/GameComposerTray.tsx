@@ -42,9 +42,6 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     sending: keepGoing.sending,
     chosenBudget: keepGoing.chosenBudget,
   });
-  // Its row is held while the game is read, so the composer above it does not move when it fills.
-  if (status === null || status === undefined)
-    return <div aria-hidden="true" className="min-h-9 pt-1.5" data-game-composer-tray="" />;
   const current = list?.builds.find((build) => build.id === list.current) ?? null;
   // What the next message does, plainly: the top bar already says what the game changed since.
   // The agent always changes the game folder, so a copy on the Stage stays as it is, and that
@@ -54,8 +51,13 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     : copy !== null
       ? "Your next message changes the current game, not the build you're playing."
       : "Your next message changes the current game.";
+  // The sentence needs nothing the game's own read brings, so it is there with the composer;
+  // only Keep going waits to know the game's engine.
   const canKeepGoing =
-    GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null && !working;
+    status != null &&
+    GAME_ENGINES[status.manifest.engine.name].status === "active" &&
+    current !== null &&
+    !working;
   return (
     <div className="flex min-h-9 items-center gap-2 pt-1.5" data-game-composer-tray="">
       <TraySentence>{sentence}</TraySentence>

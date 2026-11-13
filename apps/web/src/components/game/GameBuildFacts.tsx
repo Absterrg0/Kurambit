@@ -1,8 +1,9 @@
-import { ChevronRightIcon, MinusIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, MinusIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Separated } from "../ui/separated";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { changeWord, compareHeadline, type CompareRows } from "./gameBuilds.logic";
@@ -53,63 +54,67 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
         // One count per kind of reading, each with its own control, in view at every width.
         // Each group leads with its separator and a line's first one is clipped, so a wrap
         // neither ends nor starts a line on it.
-        <div className="overflow-hidden">
-          <div className="-ms-4 flex flex-wrap items-center gap-y-1 *:flex *:min-h-6 *:items-center *:before:inline-block *:before:w-4 *:before:text-center *:before:text-muted-foreground *:before:content-['·']">
-            <Text variant="label" tone="strong" numeric render={<p />}>
-              {headline.differ === 0
-                ? "No measured difference"
-                : `${headline.differ} ${headline.differ === 1 ? "reading differs" : "readings differ"}`}
-            </Text>
-            {headline.same > 0 ? (
-              <span className="gap-0.5">
+        <Separated controls>
+          <Text variant="label" tone="strong" numeric render={<p />}>
+            {headline.differ === 0
+              ? "No measured difference"
+              : `${headline.differ} ${headline.differ === 1 ? "reading differs" : "readings differ"}`}
+          </Text>
+          {headline.same > 0 ? (
+            <span className="gap-0.5">
+              <Text variant="meta" tone="muted" numeric>
+                {headline.same} the same
+              </Text>
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-expanded={sameOpen}
+                aria-label={sameOpen ? "Hide the same readings" : "Show the same readings"}
+                onClick={() => setSameOpen(!sameOpen)}
+              >
+                <ChevronRightIcon
+                  className={cn("transition-transform", sameOpen && "rotate-90")}
+                  aria-hidden="true"
+                />
+                {sameOpen ? "Hide" : "Show"}
+              </Button>
+            </span>
+          ) : null}
+          {headline.varies > 0 ? (
+            <Tooltip>
+              <TooltipTrigger render={<span />}>
                 <Text variant="meta" tone="muted" numeric>
-                  {headline.same} the same
+                  {headline.varies} {headline.varies === 1 ? "varies" : "vary"} between runs
                 </Text>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  aria-expanded={sameOpen}
-                  aria-label={sameOpen ? "Hide the same readings" : "Show the same readings"}
-                  onClick={() => setSameOpen(!sameOpen)}
-                >
-                  <ChevronRightIcon
-                    className={cn("transition-transform", sameOpen && "rotate-90")}
-                    aria-hidden="true"
-                  />
-                  {sameOpen ? "Hide" : "Show"}
-                </Button>
-              </span>
-            ) : null}
-            {headline.varies > 0 ? (
-              <Tooltip>
-                <TooltipTrigger render={<span />}>
-                  <Text variant="meta" tone="muted" numeric>
-                    {headline.varies} {headline.varies === 1 ? "varies" : "vary"} between runs
-                  </Text>
-                </TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-xs">
-                  {headline.varies === 1 ? "This reading changes" : "These readings change"} from
-                  run to run by {headline.varies === 1 ? "itself" : "themselves"}, so{" "}
-                  {headline.varies === 1 ? "it is" : "they are"} not counted as a difference.
-                </TooltipPopup>
-              </Tooltip>
-            ) : null}
-            {headline.missing > 0 ? (
-              <span>
-                {/* The row that says which, and why, may be below the fold: this goes to it. */}
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() =>
-                    unmeasuredRow.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
-                  }
-                >
-                  {headline.missing} not measured
-                </Button>
-              </span>
-            ) : null}
-          </div>
-        </div>
+              </TooltipTrigger>
+              <TooltipPopup side="top" className="max-w-xs">
+                {headline.varies === 1 ? "This reading changes" : "These readings change"} from run
+                to run by {headline.varies === 1 ? "itself" : "themselves"}, so{" "}
+                {headline.varies === 1 ? "it is" : "they are"} not counted as a difference.
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+          {headline.missing > 0 ? (
+            <span className="gap-0.5">
+              {/* The row that says which, and why, may be below the fold: this goes to it,
+                    in the shape of the count beside it. */}
+              <Text variant="meta" tone="muted" numeric>
+                {headline.missing} not measured
+              </Text>
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-label="Go to the readings that were not measured"
+                onClick={() =>
+                  unmeasuredRow.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+                }
+              >
+                <ChevronDownIcon aria-hidden="true" />
+                See
+              </Button>
+            </span>
+          ) : null}
+        </Separated>
       )}
       {compared.oneSided
         .filter((entry) => entry.why !== "still being measured")
@@ -134,7 +139,7 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                 <span className="sr-only">B</span>
               </span>
             </th>
-            <th className="w-16 py-1.5 text-right font-normal">Change</th>
+            <th className="w-28 py-1.5 text-right font-normal">Change</th>
           </Text>
         </thead>
         <tbody>
@@ -186,6 +191,10 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                   }
                 >
                   {changeWord(row) ?? ""}
+                  {/* How far it moved, beside which way, so nobody subtracts by eye. */}
+                  {row.amount == null ? null : (
+                    <span className="ms-1.5 text-muted-foreground tabular-nums">{row.amount}</span>
+                  )}
                 </Text>
               </tr>
             ),

@@ -27,6 +27,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { observeResize } from "../../lib/observeResize";
 import { Button } from "../ui/button";
+import { Separated } from "../ui/separated";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -664,12 +665,16 @@ function BuildCard({
       </TooltipTrigger>
       {/* Over the card, never across the composer; from the card's own left edge, so the first
           card's never crosses into the sidebar. */}
-      <TooltipPopup side="top" align="start" className="max-w-xs">
+      <TooltipPopup side="top" align="start" className="max-w-xl">
         {/* One shape on every card: what it is in full, then how it measured. One line when it
             is short, so it sits in the gap under the Stage. Its time is in the caption or the
             Inspector. */}
-        <span>{caption}</span>
-        {checks === null ? null : <span className="text-muted-foreground"> · {checks}</span>}
+        <Separated>
+          <span>{caption}</span>
+          {checks === null ? null : (
+            <span className="whitespace-nowrap text-muted-foreground">{checks}</span>
+          )}
+        </Separated>
       </TooltipPopup>
     </Tooltip>
   );
@@ -845,8 +850,11 @@ function FirstBuildSlot({ still, gameName }: { still: string | null; gameName: s
         fallback={null}
         threadRef={null}
         className="h-(--build-card-picture) w-full rounded-md"
-      />
-      <CardCaption strong={false} title="Now" meta="The game so far" />
+      >
+        {/* It is what the Stage shows, marked as every card on the Stage is. */}
+        <CardRing on />
+      </GameNowPicture>
+      <CardCaption strong title="Now" meta="The game so far" />
     </div>
   );
 }
@@ -955,12 +963,19 @@ function NowCard({
           meta={meta}
         />
       </TooltipTrigger>
-      <TooltipPopup side="top" align="end" className="max-w-xs">
-        {changed
-          ? borrowed && current !== null
-            ? `The game as it is now, changed since ${buildName(current)}. Picture from ${buildName(current)}.`
-            : `The game as it is now, changed since ${current === null ? "the last build" : buildName(current)}.`
-          : "Back to the game as it is now."}
+      {/* The cards' tooltip shape: what it is, then what is true of it, on one line. */}
+      <TooltipPopup side="top" align="end" className="max-w-xl">
+        <Separated nowrap>
+          <span>Now</span>
+          <span className="text-muted-foreground">
+            {changed
+              ? `changed since ${current === null ? "the last build" : buildName(current)}`
+              : "the game as it is"}
+          </span>
+          {borrowed && current !== null ? (
+            <span className="text-muted-foreground">picture from {buildName(current)}</span>
+          ) : null}
+        </Separated>
       </TooltipPopup>
     </Tooltip>
   );

@@ -181,7 +181,8 @@ export interface GameLibraryStatusInput {
 /** One line for a game in the library (the sidebar and Home), read from the top bar's sources. */
 export interface GameLibraryStatus {
   readonly text: string;
-  readonly tone: "live" | "failed" | "idle" | "pending";
+  /** broken: the game's build does not start, the outcome the triangle marks everywhere. */
+  readonly tone: "live" | "failed" | "broken" | "idle" | "pending";
   /** Ticks an elapsed time after the text. */
   readonly since: string | null;
   /** A relative time after the text ("2m"). */
@@ -215,7 +216,7 @@ export const gameLibraryStatus = (input: GameLibraryStatusInput): GameLibrarySta
   if (input.chats === "failed") return line("The last turn failed", "failed");
   if (input.build?.doesNotStart === true)
     // The row already names the game; its build's outcome is the line.
-    return line("Does not start", "failed", { at: input.build.at });
+    return line("Does not start", "broken", { at: input.build.at });
   if (input.build !== null) return line(input.build.name, "idle", { at: input.build.at });
   if (!input.known) return line("", "pending");
   // A game opened from a folder plays before Kurambit has measured any build of it.

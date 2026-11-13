@@ -66,6 +66,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "
 import { KbdShortcut } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Separated } from "../ui/separated";
 import { Skeleton } from "../ui/skeleton";
 import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { Text } from "../ui/text";
@@ -100,6 +101,7 @@ import {
   VARIES_BY_ITSELF,
   formatBuildTime,
   plainWhy,
+  undoOutcome,
 } from "./gameBuilds.logic";
 import {
   clearStageSelection,
@@ -279,21 +281,7 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const landing = useTurnLanding(threadRef, working);
   const data = list.data;
   if (data === null)
-    return list.error === null ? (
-      // The build header and its check rows at their final size, so nothing jumps when they land.
-      <div className="flex flex-col gap-5 p-4">
-        <div className="flex items-center gap-3">
-          <Skeleton shape="card" className="h-12 w-20" />
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-        <Skeleton shape="card" className="h-40 w-full" />
-      </div>
-    ) : (
-      <Notice>{list.error}</Notice>
-    );
+    return list.error === null ? <GameInspectorLoading /> : <Notice>{list.error}</Notice>;
   const onStageId = stageBuildId(data, asked?.build ?? null);
   // The folder changed since its last build: the Stage plays something no build holds yet.
   const nowOnStage = onStageId === null && inspected === null;
@@ -313,11 +301,11 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
       </Text>
       <ul className="flex flex-col gap-1.5">
         {/* The Checks list's own names, in its order: the same checks, before they are read. */}
-        {SKELETON_CHECKS.map((name) => (
-          <li key={name} className="flex items-center gap-2">
+        {SKELETON_CHECKS.map((check) => (
+          <li key={check.name} className="flex items-center gap-2">
             <MinusIcon aria-hidden className="size-3.5 shrink-0 text-dim-foreground" />
             <Text variant="meta" tone="muted">
-              {name}
+              {check.name}
             </Text>
           </li>
         ))}
@@ -499,11 +487,11 @@ function BuildDetail({
           {/* Where it is, then when it was made; it wraps rather than cut either. Each part
               leads with its separator and the line's first one is clipped, so a wrap neither
               ends nor starts a line on it. */}
-          <Text variant="meta" tone="muted" render={<span className="overflow-hidden" />}>
-            <span className="-ms-3 flex flex-wrap *:whitespace-nowrap *:before:inline-block *:before:w-3 *:before:text-center *:before:content-['·']">
+          <Text variant="meta" tone="muted">
+            <Separated nowrap>
               {onStage ? <span>On the Stage</span> : null}
               <span>{formatBuildTime(build.at)}</span>
-            </span>
+            </Separated>
           </Text>
         </div>
       </BuildActions>
@@ -565,28 +553,7 @@ function BuildDetail({
           </Text>
         ) : factsData === null ? (
           facts.error === null ? (
-            // The list's own shape while it is read: every build is measured on the same
-            // checks, so their names and rows are known and nothing under them moves.
-            <div aria-busy="true" className="flex flex-col gap-2">
-              <Rows>
-                {SKELETON_CHECKS.map((name) => (
-                  <div key={name} className="flex min-h-9 items-center gap-2.5 px-3">
-                    <span className="size-4 shrink-0" />
-                    <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
-                      {name}
-                    </Text>
-                    {/* Short enough that the longest check's name keeps its one line. */}
-                    <Skeleton className="h-3 w-8" />
-                    <span className="w-6 shrink-0" />
-                  </div>
-                ))}
-              </Rows>
-              <Rows>
-                <div className="flex min-h-9 items-center px-3">
-                  <Skeleton className="h-3 w-40" />
-                </div>
-              </Rows>
-            </div>
+            <ChecksLoading />
           ) : (
             <Text variant="meta" tone="muted" render={<p />}>
               {facts.error}
@@ -744,6 +711,18 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
     (check) => check.reading._tag === "measured" && check.reading.tone === "neutral",
   ).length;
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
+  // A build that does not start is its outcome, in the words the strip and the top bar use,
+  // not one check to look at among passes.
+  if (
+    !busy &&
+    view.checks.some(
+      (check) =>
+        check.id === "boots" && check.reading._tag === "measured" && check.reading.tone === "bad",
+    )
+  )
+    return ["Does not start", ...(notMeasured > 0 ? [`${notMeasured} not measured`] : [])].join(
+      " · ",
+    );
   return [
     // While measuring, the count is what has landed so far, never a verdict out of all of them.
     ...(busy
@@ -892,14 +871,65 @@ function namesPhrase(names: ReadonlyArray<string>): string {
  * or swap places when the readings arrive.
  */
 const SKELETON_CHECKS = [
-  "Starts without errors",
-  "Can be lost with no input",
-  "Not won by random or no input",
-  "Runs smoothly",
-  "Keeps moving",
-  "Colour is varied",
-  "Can be won by the play bot",
+  { name: "Starts without errors", value: false },
+  { name: "Can be lost with no input", value: true },
+  { name: "Not won by random or no input", value: false },
+  { name: "Runs smoothly", value: true },
+  { name: "Keeps moving", value: true },
+  { name: "Colour is varied", value: true },
+  { name: "Can be won by the play bot", value: false },
 ] as const;
+
+/**
+ * The checks list's own shape while it is read: every build is measured on the same checks, so
+ * their names and rows are known and nothing under them moves.
+ */
+function ChecksLoading() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-2">
+      <Rows>
+        {SKELETON_CHECKS.map((check) => (
+          <div key={check.name} className="flex min-h-9 items-center gap-2.5 px-3">
+            <span className="size-4 shrink-0" />
+            <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
+              {check.name}
+            </Text>
+            {/* A reading's place only on the checks that have one, so every name keeps the
+                one line it has once the list is read. */}
+            {check.value ? <Skeleton className="h-3 w-8" /> : null}
+            <span className="w-6 shrink-0" />
+          </div>
+        ))}
+      </Rows>
+      <Rows>
+        <div className="flex min-h-9 items-center px-3">
+          <Skeleton className="h-3 w-40" />
+        </div>
+      </Rows>
+    </div>
+  );
+}
+
+/**
+ * The Build tab before its builds are read: a build's header and the named check rows, the
+ * shape it has once they are, from the first frame the Inspector is on screen.
+ */
+export function GameInspectorLoading() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-5 p-4">
+      <div className="flex items-center gap-3">
+        <Skeleton shape="card" className="h-12 w-20" />
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className="h-3.5 w-32" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+      </div>
+      <Section title="Checks" detail={<Skeleton className="my-0.5 h-3 w-36" />}>
+        <ChecksLoading />
+      </Section>
+    </div>
+  );
+}
 
 /** Why a build's checks could not be read when the build itself does not start. */
 const DID_NOT_START = "the game did not start, so the bots could not play it";
@@ -1559,14 +1589,12 @@ function BuildActions({
                     <Text variant="caption" tone="muted">
                       {action.blocked ??
                         (action.kind === "undo"
-                          ? `The game goes back to ${
-                              previous === undefined ? "before it" : buildName(previous)
-                            }; ${
-                              // The top bar's Undo says the same sentence.
-                              list.folderEdited === true
-                                ? "it and the changes since stay"
-                                : "it stays"
-                            } on the strip.`
+                          ? // The top bar's Undo says the same two sentences.
+                            undoOutcome(
+                              buildName(build),
+                              previous === undefined ? null : buildName(previous),
+                              list.folderEdited === true,
+                            )
                           : action.kind === "redo"
                             ? "The game becomes this build again"
                             : "The game becomes this build; later ones stay on the strip")}

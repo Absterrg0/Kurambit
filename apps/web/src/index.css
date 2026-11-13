@@ -94,6 +94,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --appearance-contrast-target: black;
   --app-scrollbar-thumb: rgb(217 217 217);
   --app-scrollbar-thumb-hover: rgb(191 191 191);
+  /* A thumb that stays on screen as the sign of more below: about 2:1 on the page. */
+  --app-scrollbar-thumb-strong: rgb(181 181 181);
   /*
    * Compact UI geometry. Keep these values semantic so sidebar, palette,
    * tooltip, and toolbar controls cannot quietly drift apart.
@@ -167,6 +169,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     --appearance-contrast-target: white;
     --app-scrollbar-thumb: rgb(255 255 255 / 8%);
     --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
+    --app-scrollbar-thumb-strong: rgb(255 255 255 / 28%);
     --glass-blur: 16px;
     --glass-saturation: 1.08;
   }

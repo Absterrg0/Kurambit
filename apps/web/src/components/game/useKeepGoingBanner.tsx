@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FastForwardIcon } from "lucide-react";
+import { FastForwardIcon, SquareIcon } from "lucide-react";
 import type { ScopedThreadRef } from "@kurambit/contracts";
 
 import { Button } from "../ui/button";
@@ -48,13 +48,17 @@ export function useKeepGoingBanner(
       ? () => void keepGoing.set({ mode: "off" })
       : null;
   if (view === null || dismissed === view.id) return { item: null, hidesNext, stop: stopRun };
+  // Ending the run is not one more thing to do with a step: it has a button's edge, and stands
+  // apart from the step's own controls.
   const stop = (
     <Button
       size="xs"
-      variant="ghost"
+      variant="outline"
+      className="ms-1.5"
       disabled={busy || !keepGoing.canOperate}
       onClick={() => stopRun?.()}
     >
+      <SquareIcon aria-hidden="true" />
       Stop
     </Button>
   );

@@ -142,6 +142,10 @@ export function GamePicture({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
+  // A picture arriving where the title card stood (a build pictured after it landed) fades in
+  // over that card: the card is never swapped for an empty well while the picture loads.
+  const [stoodIn, setStoodIn] = useState(path === null);
+  if (path === null && !stoodIn) setStoodIn(true);
   useEffect(() => {
     const node = ref.current;
     if (seen || node === null || path === null) return;
@@ -157,9 +161,10 @@ export function GamePicture({
       // A neutral well while a picture is on its way; the game's pigment only when there is none.
       className={cn("relative overflow-hidden bg-muted [container-type:inline-size]", className)}
     >
-      {path === null ? (
+      {path === null || stoodIn ? (
         <GameTitleMark gameName={gameName} mark={mark} title={title} />
-      ) : seen && root !== null ? (
+      ) : null}
+      {path !== null && seen && root !== null ? (
         <GameKeyArt
           environmentId={environmentId}
           root={root}

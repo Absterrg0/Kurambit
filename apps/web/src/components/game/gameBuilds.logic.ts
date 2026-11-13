@@ -174,6 +174,11 @@ export const checksPhrase = (
   const pass = lead === undefined ? `${facts.good} pass` : `${lead.pass} of ${lead.of} pass`;
   // Every lead check is accounted for: one with no reading is said, never left out of the count.
   const notMeasured = lead?.measured === undefined ? 0 : lead.of - lead.measured.length;
+  // A build that does not start is its outcome, not one check to look at among passes.
+  if (lead !== undefined && doesNotStart({ lead }))
+    return ["Does not start", ...(notMeasured > 0 ? [`${notMeasured} not measured`] : [])].join(
+      " · ",
+    );
   return [
     pass,
     ...(facts.bad > 0 ? [`${facts.bad} to look at`] : []),
@@ -259,6 +264,11 @@ export interface CompareRow {
   /** Why the two readings cannot be compared, under the row; null when they can. */
   readonly note: string | null;
   /**
+   * How far the reading moved from A to B, in its own unit ("+2.4 s", "+1 point"), so nobody
+   * subtracts by eye. Null for a verdict-less change, and for a reading that varies by itself.
+   */
+  readonly amount?: string | null;
+  /**
    * The check passes on one side and is one to look at on the other: only then is the move a
    * verdict, Better or Worse. A move that leaves the check where it was is just a direction.
    */
@@ -318,6 +328,18 @@ export const compareHeadline = (compared: CompareRows): CompareHeadline => {
     varies: moved.length - differ,
     missing: compared.unmeasured.reduce((sum, group) => sum + group.names.length, 0),
   };
+};
+
+/** PURE. A number's move from A to B in the reading's unit; null where a size means nothing. */
+const moveAmount = (id: GameFactId, a: number, b: number): string | null => {
+  const sign = b > a ? "+" : "−";
+  if (id === "colour") {
+    const points = Math.abs(Math.round(b * 100) - Math.round(a * 100));
+    return points === 0 ? null : `${sign}${points} ${points === 1 ? "point" : "points"}`;
+  }
+  if (!RUN_FACTS.has(id) && id !== "freeze" && id !== "first-response") return null;
+  const size = Math.abs(b - a);
+  return size < 0.05 ? null : `${sign}${size < 10 ? size.toFixed(1) : Math.round(size)} s`;
 };
 
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;
@@ -430,6 +452,12 @@ export const compareRows = (
       continue;
     }
     const line = deltaLine(delta);
+    const numberOf = (views: ReadonlyArray<GameFactView>) => {
+      const reading = views.find((view) => view.id === delta.id)?.reading;
+      return reading?._tag === "measured" ? reading.value : null;
+    };
+    const numberA = numberOf(viewsA);
+    const numberB = numberOf(viewsB);
     rows.push({
       id: delta.id,
       name,
@@ -437,6 +465,13 @@ export const compareRows = (
       mark: line.mark,
       tone: line.tone,
       note: line.mark === "=" ? null : (ROW_NOTES[delta.id] ?? null),
+      amount:
+        (line.mark === "↑" || line.mark === "↓") &&
+        !VARIES_BY_ITSELF.has(delta.id) &&
+        numberA !== null &&
+        numberB !== null
+          ? moveAmount(delta.id, numberA, numberB)
+          : null,
       flips: verdictOf("a", delta.id) !== verdictOf("b", delta.id),
     });
   }
@@ -522,6 +557,16 @@ export const checksLine = (facts: GameBuild["facts"]): string =>
   factsSettled(facts)
     ? (checksPhrase(facts) ?? "Measured")
     : (factsSummaryLine(facts) ?? "Not measured yet");
+
+/**
+ * PURE. What an Undo of `name` does, in two plain sentences, the same wherever Undo is offered:
+ * where the game goes, then that nothing is lost. `base` is the build it goes back to when the
+ * app knows it; `changes` is set when the folder was edited since the build.
+ */
+export const undoOutcome = (name: string, base: string | null, changes: boolean): string => {
+  const kept = name.replace(/^build /, "Build ").replace(/^step /, "Step ");
+  return `The game goes back to ${base === null ? `before ${buildPhrase(name)}` : buildPhrase(base)}. ${kept}${changes ? " and the changes since stay" : " stays"} on the strip.`;
+};
 
 /** PURE. A build's name inside a sentence: "build 5", "step 2's build", a saved build's label. */
 export const buildPhrase = (name: string): string =>

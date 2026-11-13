@@ -1,4 +1,5 @@
 import type { GameBuild, GameBuildsResult, ScopedThreadRef } from "@kurambit/contracts";
+import { TriangleAlertIcon } from "lucide-react";
 import { scopeThreadRef } from "@kurambit/client-runtime/environment";
 import { AsyncResult } from "effect/reactivity";
 
@@ -146,6 +147,10 @@ export function GameLibraryStatusText({
         <StatusDot tone="live" pulse />
       ) : status.tone === "failed" ? (
         <StatusDot tone="danger" />
+      ) : status.tone === "broken" ? (
+        // The mark the top bar, the strip and the Inspector give a build that does not start;
+        // a dot stays the sign of work under way.
+        <TriangleAlertIcon className="size-3 shrink-0 text-destructive" aria-hidden="true" />
       ) : null}
       <Text variant="meta" tone={status.tone === "live" ? "default" : "muted"} truncate>
         {status.text}

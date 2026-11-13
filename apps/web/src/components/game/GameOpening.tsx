@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useDockedInspectorWidth, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { Skeleton } from "../ui/skeleton";
+import { GameInspectorLoading } from "./GameInspector";
 import { GameStageLoading } from "./GameStage";
 import { useGameWorkspaceCompact } from "./useGameWorkspaceCompact";
 
@@ -35,17 +36,10 @@ export function GameOpening() {
         // The Inspector's place, in the shape its own first read has.
         <div
           aria-hidden="true"
-          className="flex shrink-0 flex-col gap-5 p-4 pt-(--workspace-topbar-height)"
+          className="flex shrink-0 flex-col pt-(--workspace-topbar-height)"
           style={{ width: inspectorWidth }}
         >
-          <div className="flex items-center gap-3 pt-4">
-            <Skeleton shape="card" className="h-12 w-20" />
-            <div className="flex flex-col gap-1.5">
-              <Skeleton className="h-3.5 w-32" />
-              <Skeleton className="h-3 w-24" />
-            </div>
-          </div>
-          <Skeleton shape="card" className="h-40 w-full" />
+          <GameInspectorLoading />
         </div>
       )}
     </div>
