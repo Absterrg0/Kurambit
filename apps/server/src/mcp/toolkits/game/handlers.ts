@@ -130,8 +130,16 @@ const handlers = {
   game_import: McpToolAccess.actsAsCaller(() =>
     withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)),
   ),
-  game_check: McpToolAccess.actsAsCaller(() =>
-    withGame(GameEngine.GameEngine, (engines, threadId) => engines.check(threadId)),
+  game_check: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      if (input.change !== undefined) {
+        const change = input.change;
+        yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+          builds.declareChange(threadId, change),
+        );
+      }
+      return yield* withGame(GameEngine.GameEngine, (engines, threadId) => engines.check(threadId));
+    }),
   ),
   game_export: McpToolAccess.actsAsCaller((input) =>
     withGame(GameExport.GameExport, (exporter, threadId) =>

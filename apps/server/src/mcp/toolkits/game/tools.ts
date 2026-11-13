@@ -408,11 +408,12 @@ const ImportTool = Tool.make("game_import", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_import"));
 const CheckTool = Tool.make("game_check", {
-  description: `Fast static and boot check for this thread's game: it imports, then boots the entry the player opens and the gameplay entry game.json declares, and reports what the game did as errors and warnings with file:line, and which entries ran. ${perEngine((t) => t.check)} \`scene\` is the scene report: a few seconds of random input on the gameplay entry, and a line for each thing a person would see is wrong (the player hidden, off screen or too small, an empty view, a character buried or inside a solid, bodies inside each other, something fallen out of the world, the camera inside a wall, sliding in idle), each naming a frame that outlines it; fix those too before you end the turn. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory). Start every build or fix loop with this; it is much faster than a playtest.`,
+  description: `Fast static and boot check for this thread's game: it imports, then boots the entry the player opens and the gameplay entry game.json declares, and reports what the game did as errors and warnings with file:line, and which entries ran. ${perEngine((t) => t.check)} \`scene\` is the scene report: a few seconds of random input on the gameplay entry, and a line for each thing a person would see is wrong (the player hidden, off screen or too small, an empty view, a character buried or inside a solid, bodies inside each other, something fallen out of the world, the camera inside a wall, sliding in idle), each naming a frame that outlines it; fix those too before you end the turn. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory). Start every build or fix loop with this; it is much faster than a playtest. \`change\`: \`new\` build, or \`fix\`, a small correction kept as the current build.`,
+  parameters: Schema.Struct({ change: Schema.optionalKey(Schema.Literals(["new", "fix"])) }),
   success: GameCheckResult,
   failure,
   failureMode: "return",
-  dependencies: on(GameEngine.GameEngine),
+  dependencies: [...on(GameEngine.GameEngine), GameBuilds.GameBuilds],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)

@@ -77,6 +77,18 @@ const NO_RUN = "game-builds";
  */
 const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
 /**
+ * A turn the harness folded into the build before it, as a fix of that build
+ * (`fixes/<build>`, pointing at the build itself): it keeps that build's number.
+ * Written as the turn lands, from what the agent declared through game_check.
+ */
+const FIXES = `${gameRunRefsFolder(NO_RUN)}fixes/`;
+/**
+ * A fix stays a fix only while it is small; a bigger change is a build of its own
+ * whatever the agent said, so a number always means a change a person can see.
+ */
+const FIX_MAX_LINES = 80;
+const FIX_MAX_FILES = 4;
+/**
  * A person's edit kept as a build outside a turn (the Stage's Keep as a
  * build): `edits/<request>-values` is the build, `edits/<request>-from` the
  * folder just before it, which restoring undoes it to.
@@ -220,6 +232,12 @@ export class GameBuilds extends Context.Service<
      */
     readonly recordTurn: (threadId: ThreadId, checkpointRef: string) => Effect.Effect<void>;
     /**
+     * What the agent says the running turn's change is (game_check's `change`): a new build,
+     * or a fix folded into the build before it. Kept until the turn lands; the harness then
+     * folds it only when the change is small and is a person's turn on an earlier build.
+     */
+    readonly declareChange: (threadId: ThreadId, change: "new" | "fix") => Effect.Effect<void>;
+    /**
      * A measure no thread waits for: a keep-going step's build as it lands,
      * or a chat turn's build, which with `supersede` replaces the game's earlier turn
      * builds still queued. `skilled` as GameFacts.measure takes it.
@@ -360,6 +378,12 @@ export const currentBuild = <E, R>(
 const TURN_PAGE = 30;
 /** Every turn row older than a page, read to number its person builds. */
 const ALL_TURNS = 1_000_000;
+
+/** A person build's number, and which fix of it it is (null for the build itself). */
+interface BuildNumber {
+  readonly number: number;
+  readonly fix: number | null;
+}
 
 const isPersonBuild = (entry: Entry) => entry.source._tag === "turn" && entry.source.step === null;
 
@@ -709,6 +733,11 @@ const make = Effect.gen(function* () {
             : [],
         ),
       );
+      const fixes: ReadonlySet<string> = new Set(
+        refs.flatMap((ref) =>
+          ref.checkpointRef.startsWith(FIXES) ? [ref.checkpointRef.slice(FIXES.length)] : [],
+        ),
+      );
       const turnPage = (rows: number, from: string | undefined) =>
         turnEntries(g, byRef, rows, from, saved, recorded, setups).pipe(
           Effect.map((page): TurnPage => ({
@@ -739,7 +768,9 @@ const make = Effect.gen(function* () {
           if (known !== undefined) return Effect.succeed(known);
           return turnEntries(g, byRef, ALL_TURNS, at, saved, recorded, setups).pipe(
             Effect.map(({ entries }) => {
-              const count = entries.filter(isPersonBuild).length;
+              const count = entries.filter(
+                (entry) => isPersonBuild(entry) && !fixes.has(entry.id),
+              ).length;
               if (personCounts.size > 200) personCounts.clear();
               personCounts.set(key, count);
               return count;
@@ -748,6 +779,7 @@ const make = Effect.gen(function* () {
         },
         refs: byRef,
         recorded,
+        fixes,
         saved,
         setups,
         // The first page as read above, then older pages of TURN_PAGE rows.
@@ -790,9 +822,18 @@ const make = Effect.gen(function* () {
         .filter(isPersonBuild)
         .toSorted((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
       const oldest = people[0];
-      if (oldest === undefined) return new Map<string, number>();
+      if (oldest === undefined) return new Map<string, BuildNumber>();
       let n = yield* listed.personBefore(oldest.at);
-      return new Map(people.map((entry) => [entry.id as string, (n += 1)] as const));
+      let fix = 0;
+      // A fix keeps the number of the build before it and counts as that build's next fix.
+      return new Map(
+        people.map((entry): readonly [string, BuildNumber] => {
+          if (listed.fixes.has(entry.id) && n > 0)
+            return [entry.id, { number: n, fix: (fix += 1) }];
+          fix = 0;
+          return [entry.id, { number: (n += 1), fix: null }];
+        }),
+      );
     });
 
   /** The content key of each build: its engine folder's tree. */
@@ -849,7 +890,7 @@ const make = Effect.gen(function* () {
     g: Game,
     entries: ReadonlyArray<Entry>,
     kept: ReadonlySet<string>,
-    numbers: ReadonlyMap<string, number>,
+    numbers: ReadonlyMap<string, BuildNumber>,
   ) =>
     Effect.gen(function* () {
       const resolved = yield* resolveOf(
@@ -869,7 +910,8 @@ const make = Effect.gen(function* () {
           id: entry.id,
           at: entry.at,
           source: entry.source,
-          number: numbers.get(entry.id) ?? null,
+          number: numbers.get(entry.id)?.number ?? null,
+          ...(numbers.get(entry.id)?.fix == null ? {} : { fix: numbers.get(entry.id)!.fix! }),
           // Only a build still kept can be restored to undo this one.
           base:
             entry.base !== null && isGameBuildId(entry.base) && kept.has(entry.base)
@@ -914,19 +956,45 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => "unknown" as const),
     );
 
+  // What the agent said each chat's running turn changes, until that turn lands. A restart
+  // between the two forgets it, and the turn is then a build of its own.
+  const declared = new Map<ThreadId, "new" | "fix">();
+  const declareChange: GameBuilds["Service"]["declareChange"] = (threadId, change) =>
+    Effect.sync(() => {
+      declared.set(threadId, change);
+    });
+
   const recordTurn: GameBuilds["Service"]["recordTurn"] = (threadId, checkpointRef) =>
     Effect.gen(function* () {
+      const said = declared.get(threadId);
+      declared.delete(threadId);
       const g = yield* gameOf(threadId);
-      const { entries, refs, recorded } = yield* allEntries(g, 50, undefined);
+      const { entries, refs, recorded, fixes } = yield* allEntries(g, 50, undefined);
       const id = refs.get(checkpointRef);
-      if (id === undefined || recorded.has(id)) return;
-      const base = entries.find((entry) => entry.id === id && entry.source._tag === "turn")?.base;
-      if (base === undefined || base === null) return;
-      yield* checkpoints.updateCheckpointRef({
-        cwd: g.root,
-        checkpointRef: CheckpointRef.make(`${BASES}${id}`),
-        oid: base,
-      });
+      if (id === undefined) return;
+      const entry = entries.find((each) => each.id === id && each.source._tag === "turn");
+      if (entry === undefined || entry.base === null) return;
+      if (!recorded.has(id))
+        yield* checkpoints.updateCheckpointRef({
+          cwd: g.root,
+          checkpointRef: CheckpointRef.make(`${BASES}${id}`),
+          oid: entry.base,
+        });
+      const lines = entry.files.reduce((sum, file) => sum + file.additions + file.deletions, 0);
+      const small =
+        entry.fileCount !== null &&
+        entry.fileCount <= FIX_MAX_FILES &&
+        entry.fileCount <= entry.files.length &&
+        lines <= FIX_MAX_LINES;
+      const earlier = entries.some(
+        (each) => each.id !== id && isPersonBuild(each) && each.at < entry.at,
+      );
+      if (said === "fix" && small && earlier && isPersonBuild(entry) && !fixes.has(id))
+        yield* checkpoints.updateCheckpointRef({
+          cwd: g.root,
+          checkpointRef: CheckpointRef.make(`${FIXES}${id}`),
+          oid: id,
+        });
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("A turn build's base could not be recorded.", { threadId, cause }),
@@ -1790,6 +1858,7 @@ const make = Effect.gen(function* () {
     measure,
     measureIn,
     recordTurn,
+    declareChange,
     play,
     restore,
     holds,

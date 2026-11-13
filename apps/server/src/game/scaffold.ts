@@ -75,6 +75,9 @@ const KEEP_GOING_SECTION = `## Keep going
 `;
 const PLAYTEST_LINE =
   "- Do not play-test with `game_explore_*` or bots to see whether the game works: the harness measures every build. Explore only when the person asks or a fact says something you cannot see in the code. Read `game_facts` when the person reports a problem.";
+// The person numbers builds by what they can see; a small fix stays inside the build it fixes.
+const CHANGE_LINE =
+  "- **Say whether the turn is a new build or a fix.** Pass `change` to your last `game_check`: `new` when the person would call it a new version of the game, `fix` for a small correction to the build they already have (a bug, a typo, a value nudged), which Kurambit keeps as that same build. When you cannot tell which they want, ask them in one short question before you end the turn.";
 const UNDO_LINE =
   "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.";
 
@@ -91,6 +94,7 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
 - **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save. A save that breaks the page shows the person the error.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
+${CHANGE_LINE}
 - **Write your last message for the person making the game:** what changed in the game and what they can do now. Name no tools or files.
 - **End every reply with one line,** \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done. The person can take your \`Next:\` into their message with one key, so make it a request they could have typed: one change, in their words, not a plan.
 `,
@@ -100,6 +104,7 @@ ${UNDO_LINE}
 - A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean with nothing left in its scene report, then end. Do not export to show it; the build is made for you.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
+${CHANGE_LINE}
 - Write your last message for the person making the game: what changed in the game and what they can do now. Name no tools or files.
 - End every reply with one line: \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done.
 `,

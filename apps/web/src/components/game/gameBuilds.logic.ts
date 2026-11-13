@@ -24,13 +24,16 @@ export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
  * label. A person's build goes by the server's number for it, never its turn's:
  * a resumed or stopped turn is no extra build.
  */
-export const buildName = (build: Pick<GameBuild, "id" | "source" | "number">): string => {
+export const buildName = (
+  build: Pick<GameBuild, "id" | "source" | "number"> & { readonly fix?: number | undefined },
+): string => {
   const source = build.source;
   switch (source._tag) {
     case "turn":
       return source.step !== null
         ? `Step ${source.step.n}'s build`
-        : `Build ${build.number ?? build.id.slice(0, 8)}`;
+        : // A small fix keeps its build's number: the person sees one build, fixed.
+          `Build ${build.number ?? build.id.slice(0, 8)}${build.fix === undefined ? "" : ` · fix ${build.fix}`}`;
     case "saved":
       return source.label;
   }

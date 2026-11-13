@@ -180,6 +180,11 @@ export const GameBuild = Schema.Struct({
    * step's build (named by its step) and a saved build (named by its label).
    */
   number: Schema.NullOr(PositiveInt),
+  /**
+   * A small fix the agent folded into the build before it: it keeps that build's number and
+   * is its `fix`th fix. Absent on a build of its own.
+   */
+  fix: Schema.optionalKey(PositiveInt),
   summary: Schema.String,
   /** At most 8, most changed first. */
   files: Schema.Array(GameBuildFile),
