@@ -9,6 +9,7 @@ import {
   GameSceneReport,
   sceneEmptyText,
   sceneFindingText,
+  scenePlayerFrame,
   scenePlayerText,
 } from "./gameScene.ts";
 
@@ -866,7 +867,7 @@ const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["eviden
       if (facts.scene.status !== "measured") return [];
       const player = facts.scene.value.player;
       if (player.kind !== "body") return [];
-      const frame = player.notVisible ? player.frame : player.small ? player.smallFrame : null;
+      const frame = scenePlayerFrame(player);
       const text = scenePlayerText(player);
       return frame === null || text === null ? [] : [{ kind: "frame", label: text, path: frame }];
     }

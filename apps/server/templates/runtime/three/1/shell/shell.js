@@ -946,6 +946,7 @@ onModelCopy(bridge.assetCopy);
 const sceneReport = createSceneReport({
   canvas,
   gl: renderer.getContext(),
+  renderer,
   view: () => (run === null ? null : view()),
   player: () => run?.ctx.player ?? null,
   bridge,

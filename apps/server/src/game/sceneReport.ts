@@ -115,6 +115,7 @@ export const keepSceneReport = async (
             blocker: clip(player.blocker),
             frame: frameOf(player.frame),
             smallFrame: frameOf(player.smallFrame),
+            ...(player.faintFrame === undefined ? {} : { faintFrame: frameOf(player.faintFrame) }),
           }
         : player,
     unseen: page.unseen.map((name) => name.slice(0, 120)),
@@ -159,6 +160,9 @@ export const readSceneFile = (
                 ...report.player,
                 frame: from(report.player.frame),
                 smallFrame: from(report.player.smallFrame),
+                ...(report.player.faintFrame === undefined
+                  ? {}
+                  : { faintFrame: from(report.player.faintFrame) }),
               }
             : report.player,
         ...(report.empty === undefined

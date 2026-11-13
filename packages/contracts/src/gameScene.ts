@@ -60,6 +60,15 @@ export const GameScenePlayer = Schema.Union([
     small: Schema.Boolean,
     frame: Schema.NullOr(Schema.String),
     smallFrame: Schema.NullOr(Schema.String),
+    /**
+     * How much it stands out from what is behind it: the colour difference (CIE ΔE) across its
+     * outline, median of the play's readings; null when it was never read. Absent from a shell
+     * that predates it.
+     */
+    contrast: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    /** Lost against what is behind it in most readings: the shell's verdict, by its own limit. */
+    faint: Schema.optionalKey(Schema.Boolean),
+    faintFrame: Schema.optionalKey(Schema.NullOr(Schema.String)),
   }),
   Schema.Struct({
     /**
@@ -141,8 +150,22 @@ export const scenePlayerText = (player: GameScenePlayer): string | null => {
       : `${player.name} is off screen for ${percent(player.offscreen)} of play${player.hidden > 0 ? ` and hidden for ${percent(player.hidden)}` : ""}`;
   if (player.small && player.heightPx !== null)
     return `${player.name} is only ${Math.round(player.heightPx)} px tall${player.widthPx == null ? "" : ` and ${Math.round(player.widthPx)} px wide`} in a ${player.canvasHeight} px view, too small to read`;
+  if (player.faint === true && player.contrast != null)
+    return `${player.name} is hard to see against what is behind it: across its outline the colours differ by ${Math.round(player.contrast)} (ΔE), where a clear silhouette is 20 or more`;
   return null;
 };
+
+/** PURE. The frame that shows the player's problem, if it has one. */
+export const scenePlayerFrame = (player: GameScenePlayer): string | null =>
+  player.kind !== "body"
+    ? null
+    : player.notVisible
+      ? player.frame
+      : player.small
+        ? player.smallFrame
+        : player.faint === true
+          ? (player.faintFrame ?? null)
+          : null;
 
 /** PURE. The empty frame's line when it is flagged; null when the view is filled. */
 export const sceneEmptyText = (empty: GameSceneEmpty): string | null =>
@@ -162,7 +185,7 @@ export const sceneLines = (
       : [
           {
             text: player,
-            frame: report.player.notVisible ? report.player.frame : report.player.smallFrame,
+            frame: scenePlayerFrame(report.player),
           },
         ]),
     ...(empty === null ? [] : [{ text: empty, frame: report.empty?.frame ?? null }]),

@@ -1,8 +1,8 @@
 // The scene report: what a person sees at a glance that the play facts miss.
 // While the harness measures a play (game_check's short play, the facts'
 // random-input play), the shell looks at the scene a few times a second and
-// keeps only what a person would agree is broken: the player out of view or
-// too small to read, most of the view empty backdrop, a body sunk into the ground or inside a solid, two bodies
+// keeps only what a person would agree is broken: the player out of view, too
+// small to read or lost against what is behind it, most of the view empty backdrop, a body sunk into the ground or inside a solid, two bodies
 // inside each other, a thing fallen out of the world, the camera inside a
 // wall, a skinned body sliding over the ground in idle or a frozen pose, and
 // things that never came on screen. Each comes with the time, the thing's name
@@ -37,6 +37,16 @@ export const LIMITS = {
   // benchmark's plays: the 29 px tank and the 44 px robot are specks a person cannot make out;
   // the 54 px ship (54 wide, 41 tall) and the 54–63 px gardener read at a glance.
   smallShare: 0.07,
+  // The player lost against what is behind it: across its outline, the colour inside and the
+  // colour just outside differ by less than this (CIE ΔE, the outline's median) in most of the
+  // play's readings. A black cat on dark roofs; a clear silhouette reads at 20 and up.
+  faintDeltaE: 12,
+  // Outline pixels a reading needs before it judges.
+  contrastEdges: 24,
+  // Readings per play, this many seconds apart: each waits for the GPU to finish its frame
+  // (a tenth of a second headless), so the play is read a few times, never every look.
+  contrastReads: 4,
+  contrastEveryS: 1.5,
   // The empty view, on a grid of rays: a cell is empty when the camera looks there at least
   // this far below the horizon (the sine of the angle, about 6°), no drawn thing's bounds lie
   // on the ray and the backdrop behind is flat. Sky above the horizon and a 2D game's backdrop
@@ -89,9 +99,10 @@ const round = (x, d = 2) => Number(x.toFixed(d));
  * The shell's side. `view()` is the scene and camera on screen (or null),
  * `player()` is ctx.player, `bridge` the Stage bridge (its things and kinds),
  * `animation(object)` the animate kit's state for a body ({ state, clip } or null), `gl` the
- * renderer's WebGL context (the empty view reads its clear colour when nothing else is behind).
+ * renderer's WebGL context (the empty view reads its clear colour when nothing else is behind)
+ * and `renderer` the renderer that draws the player alone for its contrast.
  */
-export function createSceneReport({ canvas, gl, view, player, bridge, animation }) {
+export function createSceneReport({ canvas, gl, renderer, view, player, bridge, animation }) {
   let active = false;
   let clock = 0;
   let played = 0;
@@ -159,9 +170,16 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
     blockerSeconds: new Map(),
     frame: null,
     smallFrame: null,
+    // Readings of the outline that were faint.
+    faint: 0,
+    faintFrame: null,
     kind: null,
     name: "Player",
   };
+  const contrasts = new Float32Array(LIMITS.contrastReads);
+  let contrastCount = 0;
+  // Game seconds into the play of the last reading; the first comes a second in.
+  let contrastAt = 0;
 
   const reset = () => {
     clock = 0;
@@ -186,7 +204,11 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
     playerView.blockerSeconds.clear();
     playerView.frame = null;
     playerView.smallFrame = null;
+    playerView.faint = 0;
+    contrastAt = 1 - LIMITS.contrastEveryS;
+    playerView.faintFrame = null;
     playerView.kind = null;
+    contrastCount = 0;
   };
 
   // ── Bounds ────────────────────────────────────────────────────────────
@@ -827,7 +849,125 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
     state.pose = pose;
   };
 
-  // The player: in front of the camera, not behind solids, and big enough to read.
+  // ── Contrast ──────────────────────────────────────────────────────────
+  // Whether the player stands out from what is behind it, as a person sees the frame: the
+  // player alone drawn into a target the frame's size is its silhouette, and the frame just
+  // drawn gives the colours on either side of its outline. Both are read only around the
+  // player. The read waits for the GPU; reading into GPU buffers instead loses the WebGL
+  // context on Mesa's Intel driver under Chrome, so it is synchronous and rare.
+  let mask = null;
+  const color = new THREE.Color();
+  const buffer = new THREE.Vector2();
+  const toLab = (pixels, i, out) => {
+    const lin = (c) => {
+      const v = c / 255;
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    };
+    const r = lin(pixels[i]);
+    const g = lin(pixels[i + 1]);
+    const b = lin(pixels[i + 2]);
+    const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    const x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047);
+    const y = f(0.2126 * r + 0.7152 * g + 0.0722 * b);
+    const z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
+    out[0] = 116 * y - 16;
+    out[1] = 500 * (x - y);
+    out[2] = 200 * (y - z);
+  };
+  const inLab = [0, 0, 0];
+  const outLab = [0, 0, 0];
+  const STEPS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  const contrastOf = (object, camera, rect) => {
+    if (renderer === undefined || gl == null || rect === null) return null;
+    renderer.getDrawingBufferSize(buffer);
+    const bw = buffer.x;
+    const bh = buffer.y;
+    if (bw === 0 || bh === 0) return null;
+    // The player's box and a margin around it, in the drawing buffer's pixels, rows bottom up.
+    const sx = bw / (canvas.clientWidth || 1);
+    const sy = bh / (canvas.clientHeight || 1);
+    const mx = rect.w * 0.3 + 4;
+    const my = rect.h * 0.3 + 4;
+    const x0 = Math.max(0, Math.floor((rect.x - mx) * sx));
+    const x1 = Math.min(bw, Math.ceil((rect.x + rect.w + mx) * sx));
+    const top = Math.max(0, Math.floor((rect.y - my) * sy));
+    const bottom = Math.min(bh, Math.ceil((rect.y + rect.h + my) * sy));
+    const w = x1 - x0;
+    const h = bottom - top;
+    if (w < 8 || h < 8) return null;
+    const y0 = bh - bottom;
+    if (mask === null || mask.w !== bw || mask.h !== bh) {
+      mask?.target.dispose();
+      mask = { w: bw, h: bh, target: new THREE.WebGLRenderTarget(bw, bh), size: 0 };
+    }
+    if (mask.size < w * h * 4) {
+      mask.size = w * h * 4;
+      mask.alpha = new Uint8Array(mask.size);
+      mask.frame = new Uint8Array(mask.size);
+      mask.edges = new Float32Array(w * h);
+    }
+    // The frame as the person saw it: still the canvas's until this task ends.
+    const before = renderer.getRenderTarget();
+    renderer.setRenderTarget(null);
+    gl.readPixels(x0, y0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, mask.frame);
+    // The player alone on a clear target: its alpha is the silhouette. The renderer's state
+    // and its frame counts are put back, so the play's own stats stay its own.
+    const info = renderer.info.render;
+    const counted = [info.calls, info.triangles, info.points, info.lines];
+    renderer.getClearColor(color);
+    const alpha = renderer.getClearAlpha();
+    const autoClear = renderer.autoClear;
+    const shadows = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(mask.target);
+    renderer.setClearColor(0x000000, 0);
+    renderer.autoClear = true;
+    renderer.render(object, camera);
+    renderer.readRenderTargetPixels(mask.target, x0, y0, w, h, mask.alpha);
+    renderer.setRenderTarget(before);
+    renderer.setClearColor(color, alpha);
+    renderer.autoClear = autoClear;
+    renderer.shadowMap.autoUpdate = shadows;
+    [info.calls, info.triangles, info.points, info.lines] = counted;
+    const inside = (x, y) =>
+      x >= 0 && y >= 0 && x < w && y < h && mask.alpha[(y * w + x) * 4 + 3] > 127;
+    // A big player is read every few pixels: its outline's median needs no more.
+    const step = Math.max(1, Math.round(Math.max(w, h) / 160));
+    // Inside and outside are compared a few pixels from the outline, past its own blending.
+    const reach = Math.max(2, Math.round(Math.min(bw, bh) / 360));
+    let n = 0;
+    for (let y = reach; y < h - reach; y += step)
+      for (let x = reach; x < w - reach; x += step) {
+        if (!inside(x, y)) continue;
+        for (const [dx, dy] of STEPS) {
+          if (inside(x + dx, y + dy)) continue;
+          const ox = x + reach * dx;
+          const oy = y + reach * dy;
+          const ix = x - reach * dx;
+          const iy = y - reach * dy;
+          if (inside(ox, oy) || !inside(ix, iy)) continue;
+          toLab(mask.frame, (iy * w + ix) * 4, inLab);
+          toLab(mask.frame, (oy * w + ox) * 4, outLab);
+          mask.edges[n] = Math.hypot(
+            inLab[0] - outLab[0],
+            inLab[1] - outLab[1],
+            inLab[2] - outLab[2],
+          );
+          n += 1;
+          break;
+        }
+      }
+    if (n < LIMITS.contrastEdges) return null;
+    const sorted = mask.edges.subarray(0, n).sort();
+    return sorted[n >> 1];
+  };
+
+  // The player: in front of the camera, not behind solids, big enough to read, and standing out.
   const look = (body, camera, span) => {
     const b = body.box;
     if (b.isEmpty()) {
@@ -887,6 +1027,17 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
       const name = nameOf(first);
       playerView.blockerSeconds.set(name, (playerView.blockerSeconds.get(name) ?? 0) + span);
       playerView.frame ??= capture(b, body.name);
+      return;
+    }
+    if (contrastCount >= LIMITS.contrastReads || played - contrastAt < LIMITS.contrastEveryS)
+      return;
+    contrastAt = played;
+    const contrast = contrastOf(body.object, camera, rect);
+    if (contrast === null) return;
+    contrasts[contrastCount++] = contrast;
+    if (contrast < LIMITS.faintDeltaE) {
+      playerView.faint += 1;
+      playerView.faintFrame ??= capture(b, body.name);
     }
   };
 
@@ -1043,6 +1194,17 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
         heightPx !== null &&
         Math.max(heightPx, widthPx) < LIMITS.smallShare * (canvas.clientHeight || 1);
       const unseenShare = hidden + offscreen;
+      const contrast =
+        contrastCount === 0
+          ? null
+          : round(
+              Array.from(contrasts.subarray(0, contrastCount)).sort((a, b) => a - b)[
+                contrastCount >> 1
+              ],
+              0,
+            );
+      // Faint in most readings, and read at least twice: one dark moment is not a dark game.
+      const faint = contrastCount >= 2 && playerView.faint * 2 > contrastCount;
       player = {
         kind: "body",
         name: playerView.name,
@@ -1057,6 +1219,9 @@ export function createSceneReport({ canvas, gl, view, player, bridge, animation 
         small,
         frame: unseenShare > LIMITS.hiddenShare ? keep(playerView.frame) : null,
         smallFrame: small ? keep(playerView.smallFrame) : null,
+        contrast,
+        faint,
+        faintFrame: faint ? keep(playerView.faintFrame) : null,
       };
     } else player = { kind: playerView.kind ?? "none" };
     const never = [];

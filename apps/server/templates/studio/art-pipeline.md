@@ -192,8 +192,8 @@ clips. The lock's rig never governs it and it never plays library clips; the
 palette, budgets, texture size and credits hold as for anything else. A
 humanoid that should play the library's clips goes through
 `game_blender_character` instead. Anything rigged, a door on hinges too,
-is a character to the person's route, so this needs `blender`: on another
-route say so in your reply. Every step runs headless in
+is a character to the person's route: `blender`, or `library` for a subject
+the library has no model of; on `generated` say so in your reply. Every step runs headless in
 `game_blender_code` (`import kurambit` for its helpers); write the subject's
 `art/CONCEPT.md` section first, as for any character.
 

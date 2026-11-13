@@ -90,7 +90,7 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
   // The Stage serves the folder and reloads it on every save (GamePreview.live).
   live: `## Every turn
 
-- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it each time you save. A turn is one change they can see when they play, about five minutes of work, \`game_check\` clean with nothing left in its scene report, then end the turn. If the request needs more, do the first visible part and put the rest in \`Next:\`.
+- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it each time you save. A turn is the change the person asked for, one they can see when they play, \`game_check\` clean with nothing left in its scene report, then end the turn. When a request holds several changes, do the first and put the rest in \`Next:\`, but never put off what they asked for because it takes work: a model the library lacks is made in Blender in the turn that asks for it.
 - **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save. A save that breaks the page shows the person the error.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
@@ -125,12 +125,13 @@ const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, in
 const FIRST_TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
   three: `## The first turn
 
-Goal: the person plays the brief's core loop on the Stage within ten minutes, with library art, not primitives.
+Goal: the person plays the brief's core loop on the Stage, and its player and main threat are what the brief names: library models where the library has them, made in Blender where it does not, never primitives. The loop plays on library models first, so the Stage shows the game within minutes while anything missing is made.
 
-1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, make no key art, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.
-2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief. Add the player character and one or two threats or props with \`game_assets_add\`, the first call with \`lock\` (that family and the view), which writes \`STYLE.json\`, and name them in \`ASSETS\`: the shell loads them, and compiles what draws them, behind its loading screen. Keep the default look (\`LOOK\` as it is, or the one preset the brief calls for, no lights besides \`ctx.look.sun\`): the first build then starts at once and reads clearly; extra lights and glows cost every frame. Glows are a later turn. When no pack has the brief's exact subject, take the closest character and say so in your reply; a model of its own is a later turn.
+1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document and make no key art. The comment block at the top of each kit is enough; do not read the shell's code.
+2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief. Add the player character and one or two threats or props with \`game_assets_add\`, the first call with \`lock\` (that family and the view), which writes \`STYLE.json\`, and name them in \`ASSETS\`: the shell loads them, and compiles what draws them, behind its loading screen. Keep the default look (\`LOOK\` as it is, or the one preset the brief calls for, no lights besides \`ctx.look.sun\`): the first build then starts at once and reads clearly; extra lights and glows cost every frame. Glows are a later turn. When no pack has the brief's player or main threat (a cat, a pigeon, a hover tank), add the closest model to stand in while the loop is built.
 3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action. As the recipes do, name the player and each threat with \`ctx.thing\` and read their speeds, timers and counts from \`ctx.tune\`: that is how the person selects them and drags their values live.
-4. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names). The person has watched the starter turn into your game; end the turn as soon as the core loop plays. End it with what the person can do now, plus your \`Next:\` line.
+4. Make what the library lacks: the brief's player or main threat that no pack has, in Blender (\`studio-skills/art-pipeline.md\`: Made characters for a person, Made from scratch for an animal, creature or machine), then swap it in for the model standing in. Only those two; every other missing prop waits for a later turn.
+5. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names), and look at its pictures as a player would. End the turn with what the person can do now, plus your \`Next:\` line.
 
 More waves and levels, menu art, music and polish are later turns.
 `,
@@ -140,9 +141,10 @@ More waves and levels, menu art, music and polish are later turns.
 const firstTurnSection = (manifest: GameManifest): string | undefined => {
   const section = FIRST_TURN_SECTIONS[manifest.engine.name];
   if (section === undefined || manifest.characters !== "generated") return section;
-  const lines = section.split("\n");
+  // Generated characters come from the person's providers, never Blender: no making step.
+  const lines = section.split("\n").filter((line) => !line.startsWith("4. "));
   const first = lines.findIndex((line) => line.startsWith("1. "));
-  const last = lines.findIndex((line) => line.startsWith("4. "));
+  const last = lines.findIndex((line) => line.startsWith("5. "));
   return [
     ...lines.slice(0, first),
     GENERATED_FIRST_STEP,
@@ -156,6 +158,21 @@ export const firstTurnMessage = (manifest: GameManifest): string => {
   const lead = FIRST_TURN_LEADS[FIRST_TURN_SECTIONS[manifest.engine.name] === undefined ? 0 : 1];
   const art = manifest.artDirection.trim();
   return `${manifest.brief.trim()}${art === "" ? "" : `\n\nArt direction: ${art}`}\n\n${lead}`;
+};
+
+/**
+ * A game's AGENTS.md with its "Every turn" section as Kurambit writes it now: the turn rules are
+ * the harness's contract, so a game made before a change to them plays by the new ones. The rest
+ * of the file is the game's own; null when there is nothing to change.
+ */
+export const refreshedTurnRules = (agents: string, engine: GameEngineId): string | null => {
+  const rules = everyTurnSection(engine);
+  const start = agents.indexOf("## Every turn\n");
+  if (rules === undefined || start === -1) return null;
+  const next = agents.indexOf("\n## ", start + 1);
+  const end = next === -1 ? agents.length : next + 1;
+  const updated = `${agents.slice(0, start)}${rules}${agents.slice(end)}`;
+  return updated === agents ? null : updated;
 };
 
 /**
