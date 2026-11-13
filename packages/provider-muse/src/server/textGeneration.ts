@@ -22,11 +22,13 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildGameNamePrompt,
   buildThreadTitlePrompt,
 } from "@kurambit/provider-core/server/textGenerationPrompts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
+  sanitizeGameName,
   sanitizeThreadTitle,
   toJsonSchemaObject,
 } from "@kurambit/provider-core/server/textGenerationUtils";
@@ -340,6 +342,22 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     });
     return { title: sanitizeThreadTitle(generated.title) };
   });
+  const generateGameName: ProviderTextGeneration["generateGameName"] = Effect.fn(
+    "MuseTextGeneration.generateGameName",
+  )(function* (input) {
+    const generated = yield* runMuseJson({
+      operation: "generateGameName",
+      ...buildGameNamePrompt(input),
+      modelSelection: input.modelSelection,
+    });
+    const name = sanitizeGameName(generated.name);
+    if (name === "")
+      return yield* new TextGenerationError({
+        operation: "generateGameName",
+        detail: "The model answered with no name.",
+      });
+    return { name };
+  });
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
   const generateImageReview: ProviderTextGeneration["generateImageReview"] = () =>
@@ -349,6 +367,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateGameName,
     generateReviewGuide,
     generateImageReview,
   } satisfies ProviderTextGeneration;

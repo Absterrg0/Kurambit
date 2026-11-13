@@ -191,8 +191,10 @@ function BriefBox({
     const result = await create({
       environmentId,
       input: {
-        // A working title the person renames whenever they like; the folder takes it too.
+        // The model names it from the brief; this draft stands if it cannot. The person renames
+        // it whenever they like, and the folder takes it too.
         name: draftGameName(trimmedBrief) || "Untitled Game",
+        nameFromBrief: true,
         // Empty: the server's default games folder.
         parentDirectory: "",
         brief: trimmedBrief,

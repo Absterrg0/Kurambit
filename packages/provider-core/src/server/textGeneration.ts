@@ -69,6 +69,17 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+/** A new game's brief, to name the game from: the title its player sees. */
+export interface GameNameGenerationInput {
+  cwd: string;
+  brief: string;
+  modelSelection: ModelSelection;
+}
+
+export interface GameNameGenerationResult {
+  name: string;
+}
+
 export interface ReviewGuideStackLayer {
   readonly number: number;
   readonly title: string | null;
@@ -134,6 +145,10 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateGameName: (
+    input: GameNameGenerationInput,
+  ) => Effect.Effect<GameNameGenerationResult, TextGenerationError>;
 
   readonly generateImageReview: (
     input: ImageReviewGenerationInput,

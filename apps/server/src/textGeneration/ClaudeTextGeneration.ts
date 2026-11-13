@@ -185,7 +185,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       const workingDirectory =
-        operation === "generateThreadTitle"
+        // A title or a name reads only the prompt: an empty folder keeps any project's own
+        // instructions out of it.
+        operation === "generateThreadTitle" || operation === "generateGameName"
           ? yield* fileSystem
               .makeTempDirectoryScoped({ prefix: "kurambit-claude-title-" })
               .pipe(

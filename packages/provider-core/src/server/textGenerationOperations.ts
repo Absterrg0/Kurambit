@@ -11,10 +11,12 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildReviewGuidePrompt,
+  buildGameNamePrompt,
   buildThreadTitlePrompt,
 } from "./textGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
+  sanitizeGameName,
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./textGenerationUtils.ts";
@@ -162,6 +164,24 @@ export function fromRunner(
     };
   });
 
+  const generateGameName: ProviderTextGeneration["generateGameName"] = Effect.fn(
+    `${name}.generateGameName`,
+  )(function* (input) {
+    const generated = yield* run({
+      operation: "generateGameName",
+      cwd: input.cwd,
+      modelSelection: input.modelSelection,
+      ...buildGameNamePrompt({ brief: input.brief }),
+    });
+    const title = sanitizeGameName(generated.name);
+    if (title === "")
+      return yield* new TextGenerationError({
+        operation: "generateGameName",
+        detail: "The model answered with no name.",
+      });
+    return { name: title };
+  });
+
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = Effect.fn(
     `${name}.generateReviewGuide`,
   )(function* (input) {
@@ -196,6 +216,7 @@ export function fromRunner(
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateGameName,
     generateReviewGuide,
     generateImageReview,
   } satisfies ProviderTextGeneration;

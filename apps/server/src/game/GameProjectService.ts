@@ -51,6 +51,8 @@ import { ensureScaffold, refreshSkills } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 
 /**
@@ -157,6 +159,31 @@ const make = Effect.gen(function* () {
   const vcs = yield* VcsDriverRegistry.VcsDriverRegistry;
   const templates = yield* GameTemplates.GameTemplates;
   const createLocks = yield* KeyedLock.make<string>();
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const textGeneration = yield* TextGeneration.TextGeneration;
+  /**
+   * The game's name from its brief, written by the text-generation model T3 titles threads with:
+   * the title a player sees. A slow or failing model leaves the fallback, so a new game never waits
+   * long or fails over its name.
+   */
+  const nameFromBrief = (brief: string, fallback: string) =>
+    Effect.gen(function* () {
+      const settings = yield* serverSettings.getSettings;
+      const generated = yield* textGeneration.generateGameName({
+        cwd: NodeOS.homedir(),
+        brief,
+        modelSelection: settings.textGenerationModelSelection,
+      });
+      return generated.name;
+    }).pipe(
+      Effect.timeout("15 seconds"),
+      Effect.catchCause((cause) =>
+        Effect.as(
+          Effect.logWarning("Game name generation failed; the drafted name stands", { cause }),
+          fallback,
+        ),
+      ),
+    );
   // A card says what a live run is doing. A paused or ended run reads nothing
   // here, so the row never masks "Needs attention"; the chat's banner says paused.
   const liveRun = (projectId: ProjectId) =>
@@ -322,7 +349,10 @@ const make = Effect.gen(function* () {
   });
   const create: GameProjectService["Service"]["create"] = Effect.fn("GameProjectService.create")(
     function* (input) {
-      const name = input.name.trim();
+      const name =
+        input.nameFromBrief === true
+          ? yield* nameFromBrief(input.brief, input.name.trim())
+          : input.name.trim();
       if (name === "")
         return yield* new GameOperationError({
           operation: "create-game",

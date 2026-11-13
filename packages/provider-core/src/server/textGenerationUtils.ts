@@ -46,6 +46,20 @@ export function sanitizePrTitle(raw: string): string {
 
 const MAX_THREAD_TITLE_CHARS = 120;
 
+/** A generated game name as a title: one line, no wrapping quotes or trailing punctuation; "" when none. */
+export function sanitizeGameName(raw: string): string {
+  return (
+    raw
+      .trim()
+      .split(/\r?\n/g)[0]
+      ?.replace(/^['"`“”]+|['"`“”.!:]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 40)
+      .trim() ?? ""
+  );
+}
+
 export function sanitizeThreadTitle(raw: string): string {
   // Unwrap a JSON-formatted title before truncation can cut off the closing brace.
   const decoded = decodeJsonThreadTitle(raw);

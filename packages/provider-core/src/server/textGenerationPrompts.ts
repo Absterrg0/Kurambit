@@ -433,6 +433,20 @@ function threadTitlePromptSuffix(input: ThreadTitlePromptInput): string {
   return suffix;
 }
 
+const GAME_NAME_PROMPT = `Name a new video game from the brief its maker wrote. Return JSON with the key name.
+
+The name is the title a player sees on its title screen and store page:
+- 1 to 3 words, Title Case, under 28 characters.
+- Specific to this game: its hero, its place, its goal or its feel, the way real indie games are named.
+- Never only generic words (Game, 3D, Cozy, Simple, Adventure, Quest, Simulator), never the genre, the engine or the art style.
+- No subtitle, no colon, no quotes, no emoji.`;
+
+export function buildGameNamePrompt(input: { readonly brief: string }) {
+  const prompt = `${GAME_NAME_PROMPT}\n\nBrief:\n${limitTitleMessage(input.brief, 4_000)}`;
+  const outputSchema = Schema.Struct({ name: Schema.String });
+  return { prompt, outputSchema };
+}
+
 export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   let prompt: string;
   if (input.previousTitle === undefined) {
