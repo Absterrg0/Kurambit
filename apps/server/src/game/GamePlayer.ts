@@ -12,7 +12,7 @@ import * as GameEngine from "./GameEngine.ts";
 import { publishFolder, releaseTo } from "./GameExport.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
+import { makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import { makeCheckoutOf, reuseMainPlayer, touchPlayer } from "./unityPlayerCache.ts";
 import { inGame } from "./gamePath.ts";
 
@@ -71,6 +71,7 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const operations = yield* GameOperations.GameOperations;
   const checkoutOf = yield* makeCheckoutOf;
+  const identify = yield* makeSourceIdentity;
   // One live editor runs at a time: a second prepare waits for the first's
   // build instead of failing busy.
   const prepareLock = Semaphore.makeUnsafe(1);
@@ -83,17 +84,10 @@ const make = Effect.gen(function* () {
         return yield* invalid(root, `${engine} games play no prepared player.`);
       const { player, editor } = backend;
       const known = (when: string) =>
-        Effect.flatMap(
-          Effect.promise((signal) =>
-            snapshotBuildSource(root, ctx.projectName, {
-              signal,
-              rules: backend.profile.buildInputs,
-            }),
-          ),
-          (source) =>
-            source.kind === "known"
-              ? Effect.succeed(source.sourceId)
-              : Effect.fail(sourceIdentityError(when, root, ctx.projectName, source)),
+        Effect.flatMap(identify(root, ctx.projectName, backend.profile.derivedInput), (source) =>
+          source.kind === "known"
+            ? Effect.succeed(source.sourceId)
+            : Effect.fail(sourceIdentityError(when, root, ctx.projectName, source)),
         );
       const playerOf = (sourceId: string) =>
         NodePath.join(player.cacheDir(root, sourceId), player.executable);
@@ -180,6 +174,7 @@ ${imported.message}`.slice(0, 3000),
               preset: player.playTarget,
               operation,
               stagingParent: logs,
+              identify: identify(root, ctx.projectName, backend.profile.derivedInput),
               publish: (staging, _artifact, built) =>
                 publishFolder(operation, staging, player.cacheDir(root, built)),
             });

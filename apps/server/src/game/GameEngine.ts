@@ -42,12 +42,8 @@ import { engineProfile, type GameEngineProfile, type GameExportTarget } from "./
 import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
-import {
-  comparedSource,
-  hashFile,
-  snapshotBuildSource,
-  sourceIdentityError,
-} from "./sourceSnapshot.ts";
+import { hashFile } from "./hashFile.ts";
+import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import type { WindowHost } from "./windowHost.ts";
 
 /**
@@ -343,6 +339,7 @@ const make = Effect.gen(function* () {
   const gameBrowser = yield* makeGameBrowser;
   const templates = yield* GameTemplates.GameTemplates;
   const writeAtomic = yield* makeAtomicWriter;
+  const identify = yield* makeSourceIdentity;
   const backends = new Map<string, GameEngineBackend>([
     ["godot", makeGodotBackend(processes, tools, writeAtomic)],
     ["three", makeThreeBackend(gameBrowser, Effect.map(templates.directory, runtimesDirectory))],
@@ -371,9 +368,7 @@ const make = Effect.gen(function* () {
   });
 
   const snapshot = (root: string, project: string, backend: GameEngineBackend) =>
-    Effect.promise((signal) =>
-      snapshotBuildSource(root, project, { signal, rules: backend.profile.buildInputs }),
-    );
+    identify(root, project, backend.profile.derivedInput);
 
   /**
    * Imports first: a fresh game has no .godot cache, so .tres files and
@@ -530,11 +525,10 @@ const make = Effect.gen(function* () {
   const checkedIdentity = (root: string) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const snapshot = yield* Effect.promise((signal) =>
-        snapshotBuildSource(root, manifestProject(manifest), {
-          signal,
-          rules: engineProfile(manifest.engine.name).buildInputs,
-        }),
+      const snapshot = yield* identify(
+        root,
+        manifestProject(manifest),
+        engineProfile(manifest.engine.name).derivedInput,
       );
       if (snapshot.kind !== "known") return null;
       const manifestHash = yield* Effect.promise(() =>

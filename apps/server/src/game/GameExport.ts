@@ -24,7 +24,12 @@ import { makeAtomicWriter } from "./gameFiles.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { inGame, insideGame } from "./gamePath.ts";
-import { comparedSource, snapshotBuildSource, sourceIdentityError } from "./sourceSnapshot.ts";
+import {
+  comparedSource,
+  makeSourceIdentity,
+  type SourceIdentity,
+  sourceIdentityError,
+} from "./sourceTree.ts";
 import {
   CANDIDATE_BUILDS_DIRECTORY,
   WEB_BUILD_DIRECTORY,
@@ -108,6 +113,8 @@ export const releaseTo = <P>(
     readonly operation: string;
     /** The folder the staging folder is made in: the destination's own parent. */
     readonly stagingParent: string;
+    /** The engine folder's content identity now (makeSourceIdentity). */
+    readonly identify: Effect.Effect<SourceIdentity>;
     /** Publishes the checked staging folder for the sources it was built from. */
     readonly publish: (
       staging: string,
@@ -128,9 +135,7 @@ export const releaseTo = <P>(
   GameOperationError
 > => {
   const { root, projectName } = ctx;
-  const snapshot = Effect.promise((signal) =>
-    snapshotBuildSource(root, projectName, { signal, rules: backend.profile.buildInputs }),
-  );
+  const snapshot = input.identify;
   const staging = NodePath.join(
     input.stagingParent,
     `.release-${input.target.toLowerCase()}-${NodeCrypto.randomUUID()}`,
@@ -258,6 +263,7 @@ const make = Effect.gen(function* () {
   const engines = yield* GameEngine.GameEngine;
   const preview = yield* GamePreview.GamePreview;
   const projects = yield* GameProjectService.GameProjectService;
+  const identify = yield* makeSourceIdentity;
   const writeAtomic = yield* makeAtomicWriter;
 
   const readSelectedBuild = (
@@ -403,8 +409,7 @@ const make = Effect.gen(function* () {
       yield* backend.exportReady(ctx.binary, target);
       // Import first: Godot's import writes engine-generated sidecars (*.import,
       // *.uid and .godot/) inside the project. The source identity is taken after
-      // that import and never counts those files, so a fresh tree imports
-      // cleanly and a snapshot never carries engine output.
+      // that import, so the release never sees them change under it.
       const imported = (yield* backend.importProject(ctx)).result;
       if (!imported.success) return imported;
       // The preset is part of the exported sources, so it is settled before the
@@ -424,6 +429,7 @@ const make = Effect.gen(function* () {
           preset: preset.name,
           operation,
           stagingParent: candidates,
+          identify: identify(root, ctx.projectName, backend.profile.derivedInput),
           publish: (staging, _artifact, sourceId) =>
             publishCandidate(root, ctx.projectName, staging, sourceId),
         });
@@ -443,6 +449,7 @@ const make = Effect.gen(function* () {
         preset: preset.name,
         operation,
         stagingParent: NodePath.dirname(destination),
+        identify: identify(root, ctx.projectName, backend.profile.derivedInput),
         publish: (staging, artifact) =>
           Effect.map(publishFolder(operation, staging, destination), (published) => ({
             path: NodePath.join(destination, artifact),

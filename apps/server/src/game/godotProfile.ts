@@ -17,13 +17,7 @@ export const GODOT_PROFILE: GameEngineProfile = {
     { target: "Linux", artifact: "builds/linux/game.x86_64", ships: "file", packageable: false },
     { target: "Windows", artifact: "builds/windows/game.exe", ships: "file", packageable: true },
   ],
-  buildInputs: {
-    skipDirs: [".godot"],
-    rootOutputDirs: [],
-    sidecarSuffixes: [".import", ".uid"],
-    rootOutputFiles: null,
-    derivedAssets: false,
-  },
+  derivedInput: null,
   scaffold: {
     version: "4.7.2",
     directories: ["godot/assets/models", "godot/scripts", "builds/web"],

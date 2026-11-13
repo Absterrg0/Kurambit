@@ -17,13 +17,7 @@ export const THREE_PROFILE: GameEngineProfile = {
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],
   releases: [{ target: "Web", artifact: null, ships: "folder", packageable: true }],
-  buildInputs: {
-    skipDirs: [],
-    rootOutputDirs: [],
-    sidecarSuffixes: [],
-    rootOutputFiles: null,
-    derivedAssets: false,
-  },
+  derivedInput: null,
   scaffold: {
     version: THREE_PINNED_VERSION,
     directories: ["web/assets", "builds/web"],
