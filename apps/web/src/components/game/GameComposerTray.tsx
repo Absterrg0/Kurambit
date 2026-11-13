@@ -56,7 +56,6 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
     GAME_ENGINES[status.manifest.engine.name].status === "active" && current !== null && !working;
   return (
     <div className="flex min-h-9 items-center gap-2 pt-1.5" data-game-composer-tray="">
-      <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <TraySentence>{sentence}</TraySentence>
       {canKeepGoing ? (
         <Menu>
@@ -96,15 +95,13 @@ export function GameComposerTray({ threadRef }: { threadRef: ScopedThreadRef }) 
 /** The tray's sentence; a new one fades in on the popup clock instead of swapping in a frame. */
 function TraySentence({ children }: { children: string }) {
   return (
-    <span className="min-w-0 flex-1">
-      <Text
-        key={children}
-        variant="meta"
-        tone="muted"
-        render={
-          <span className="line-clamp-2 motion-popup transition-opacity starting:opacity-0" />
-        }
-      >
+    // The arrow and its sentence arrive together, so the line is never an arrow alone.
+    <span
+      key={children}
+      className="flex min-w-0 flex-1 items-center gap-2 motion-popup transition-opacity starting:opacity-0"
+    >
+      <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <Text variant="meta" tone="muted" render={<span className="line-clamp-2" />}>
         {children}
       </Text>
     </span>

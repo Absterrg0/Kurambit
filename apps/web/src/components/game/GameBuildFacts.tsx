@@ -43,9 +43,27 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
   if (compared.rows.length === 0 && compared.unmeasured.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
-      <Text variant="label" tone="strong" render={<p />}>
-        {compareHeadline(compared)}
-      </Text>
+      {/* The fold's control sits on the headline, in view at every width, not under the rows. */}
+      <div className="flex items-start gap-3">
+        <Text variant="label" tone="strong" render={<p className="min-w-0 flex-1" />}>
+          {compareHeadline(compared)}
+        </Text>
+        {same > 0 ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="shrink-0"
+            aria-expanded={sameOpen}
+            onClick={() => setSameOpen(!sameOpen)}
+          >
+            <ChevronRightIcon
+              className={cn("transition-transform", sameOpen && "rotate-90")}
+              aria-hidden="true"
+            />
+            {sameOpen ? "Hide the same" : "Show the same"}
+          </Button>
+        ) : null}
+      </div>
       {compared.oneSided
         .filter((entry) => entry.why !== "still being measured")
         .map((entry) => (
@@ -75,24 +93,15 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
         <tbody>
           {compared.rows.map((row, index) => [
             // The readings that are the same follow the ones that differ, under their own line.
-            row.mark === "=" && compared.rows[index - 1]?.mark !== "=" ? (
+            row.mark === "=" && sameOpen && compared.rows[index - 1]?.mark !== "=" ? (
               <tr key="same-heading">
-                <td colSpan={4} className="border-t border-border pt-2 pb-1">
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    aria-expanded={sameOpen}
-                    onClick={() => setSameOpen(!sameOpen)}
-                  >
-                    <ChevronRightIcon
-                      className={cn("transition-transform", sameOpen && "rotate-90")}
-                      aria-hidden="true"
-                    />
-                    {same === 1
-                      ? "1 reading the same on both"
-                      : `${same} readings the same on both`}
-                  </Button>
-                </td>
+                <Text
+                  variant="caption"
+                  tone="muted"
+                  render={<td colSpan={4} className="border-t border-border pt-3 pb-1" />}
+                >
+                  The same on both
+                </Text>
               </tr>
             ) : null,
             row.mark === "=" && !sameOpen ? null : (

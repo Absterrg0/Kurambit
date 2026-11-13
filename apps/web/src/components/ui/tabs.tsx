@@ -43,7 +43,7 @@ function TabsTab({ className, ...props }: TabsPrimitive.Tab.Props) {
   return (
     <TabsPrimitive.Tab
       className={cn(
-        "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring focus-visible:outline-solid data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
+        "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
         className,
       )}
       data-slot="tabs-tab"

@@ -209,9 +209,11 @@ export const plainWhy = (why: string): string =>
       "the game was made before Kurambit measured speed; a new build adds it",
     )
     .replace(/\btier bot\b/g, "bot")
+    // Every wording the measurer has used for a missing play bot, stored on older builds, reads
+    // as one sentence.
     .replace(
-      "this game has no play bot yet (Keep going writes one once, or ask your agent for one)",
-      "no play bot yet; Keep going writes one, or ask your agent",
+      /(?:this game has )?no play bot yet\b.*$/i,
+      "no play bot yet; Keep going writes one, or ask your agent for one",
     );
 
 /** The bot runs, whose readings are an event and its time. */

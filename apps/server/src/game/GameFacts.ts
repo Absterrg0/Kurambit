@@ -1041,7 +1041,7 @@ const make = Effect.gen(function* () {
             yield* write({ skilled: blocked, ...(yield* useAfter("skilled", null, blocked)) });
           else if (bot === null) {
             const skilled = notMeasured(
-              "no play bot yet; Keep going writes one, or ask your agent",
+              "no play bot yet; Keep going writes one, or ask your agent for one",
               false,
             );
             // No play ran: the other plays' reason stands when they left no record either.

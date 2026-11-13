@@ -73,7 +73,7 @@ export function GameFirstChangeNote({ threadRef }: { threadRef: ScopedThreadRef 
         className="mt-1.5 size-1.5 shrink-0 rounded-full bg-dim-foreground"
       />
       <Text variant="body" tone="muted" render={<p className="min-w-0 flex-1 truncate" />}>
-        Build 1 comes from your first change, and a bot plays it to measure its checks.
+        Your first change makes build 1, and a bot measures it.
       </Text>
     </div>
   );

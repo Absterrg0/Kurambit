@@ -492,10 +492,10 @@ function BuildDetail({
           <Text variant="label" tone="strong" truncate render={<h2 />}>
             {buildName(build)}
           </Text>
-          <Text variant="meta" tone="muted" truncate>
-            {/* Where it is before when it was made: if the line is cut, the date goes. */}
+          <Text variant="meta" tone="muted">
+            {/* Where it is, then when it was made; it wraps rather than cut either. */}
             {onStage ? "On the Stage · " : ""}
-            {formatBuildTime(build.at)}
+            <span className="whitespace-nowrap">{formatBuildTime(build.at)}</span>
           </Text>
         </div>
       </BuildActions>
@@ -722,7 +722,7 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
     // While measuring, the count is what has landed so far, never a verdict out of all of them.
     ...(busy
       ? shownPass > 0
-        ? [`${shownPass} ${shownPass === 1 ? "passes" : "pass"} so far`]
+        ? [`${shownPass} pass so far`]
         : []
       : [`${shownPass} of ${view.checks.length} pass`]),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
@@ -797,7 +797,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
                   ? morePending > 0
                     ? `${morePending} to measure`
                     : "None measured"
-                  : `${moreMeasured.length} of ${view.more.length} have readings`}
+                  : `${moreMeasured.length} of ${view.more.length}`}
               </Text>
             </CollapsibleTrigger>
             <CollapsiblePanel>
