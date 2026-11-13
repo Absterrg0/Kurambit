@@ -72,7 +72,7 @@ import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
-import { GameBuildStill } from "./GameBuildStill";
+import { GameBuildStill, PictureSourceBadge } from "./GameBuildStill";
 import { GameComposerTray } from "./GameComposerTray";
 import {
   characterRouteLabel,
@@ -97,9 +97,6 @@ import {
   buildCaption,
   buildName,
   buildPhrase,
-  compareRows,
-  factsSettled,
-  VARIES_BY_ITSELF,
   formatBuildTime,
   plainWhy,
   undoOutcome,
@@ -118,6 +115,7 @@ import {
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
+import { useChangedSinceBase } from "./useChangedSinceBase";
 import { useTurnLanding } from "./useTurnLanding";
 
 const TABS: ReadonlyArray<{ readonly tab: GameInspectorTab; readonly label: string }> = [
@@ -163,9 +161,12 @@ export function GameInspectorTabs({ threadRef }: { threadRef: ScopedThreadRef })
 export function GameInspectorPanel({
   threadRef,
   compact,
+  turnRequest = null,
 }: {
   threadRef: ScopedThreadRef;
   compact: boolean;
+  /** What the person asked of the turn that is running, whole; null when none runs. */
+  turnRequest?: string | null;
 }) {
   const tab = useGameWorkspaceStore((state) => state.inspectorTab);
   if (tab === "log") return null;
@@ -184,7 +185,7 @@ export function GameInspectorPanel({
           className="mx-auto w-full max-w-160 motion-popup transition-opacity starting:opacity-0"
         >
           {tab === "build" ? (
-            <BuildPanel threadRef={threadRef} />
+            <BuildPanel threadRef={threadRef} turnRequest={turnRequest} />
           ) : (
             <ScenePanel threadRef={threadRef} />
           )}
@@ -259,7 +260,13 @@ function Rows({ children }: { children: ReactNode }) {
 // ─── Build ────────────────────────────────────────────────────────────────────
 
 /** The build the Inspector shows: the one picked on the strip, else the one on the Stage. */
-function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
+function BuildPanel({
+  threadRef,
+  turnRequest,
+}: {
+  threadRef: ScopedThreadRef;
+  turnRequest: string | null;
+}) {
   const threadKey = scopedThreadKey(threadRef);
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -326,6 +333,17 @@ function BuildPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
               : "Being made. When the agent's turn ends it plays on the Stage, and a bot plays it to measure these."}
           </Text>
         </div>
+        {/* What it is being made from, whole, as every build's panel says it once it lands. */}
+        {turnRequest === null || turnRequest === "" ? null : (
+          <Section title="You asked">
+            <Text
+              variant="body"
+              render={<p className="border-l-2 border-border py-0.5 ps-2.5 break-words" />}
+            >
+              {turnRequest}
+            </Text>
+          </Section>
+        )}
         {checksToCome}
       </div>
     ) : (
@@ -621,47 +639,49 @@ function SinceBase({
   list: GameBuildsResult;
 }) {
   const requestStage = useGameWorkspaceStore((state) => state.requestStage);
-  const base =
-    build.base === null ? null : (list.builds.find((each) => each.id === build.base) ?? null);
-  const ready =
-    base !== null && base.available && factsSettled(base.facts) && factsSettled(build.facts);
-  const compared = useEnvironmentQuery(
-    ready
-      ? gameEnvironment.buildCompare({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId, a: refOf(base), b: refOf(build) },
-        })
-      : null,
-  ).data;
-  if (!ready || compared === null) return null;
-  const differ = compareRows(
-    compared.deltas,
-    gameFactsView(compared.factsA),
-    gameFactsView(compared.factsB),
-  ).rows.filter(
-    (row) => row.mark !== null && row.mark !== "=" && !VARIES_BY_ITSELF.has(row.id),
-  ).length;
+  const since = useChangedSinceBase(threadRef, build, list);
+  if (since === null) return null;
+  const { base, changed } = since;
+  const differ = changed.length;
   const from = buildPhrase(buildName(base));
   return (
-    <div className="flex items-center gap-2 px-1">
-      <Text variant="meta" tone="muted" render={<p className="min-w-0 flex-1" />}>
-        {differ === 0
-          ? `No reading differs from ${from}.`
-          : `${differ} ${differ === 1 ? "reading differs" : "readings differ"} from ${from}.`}
-      </Text>
-      {differ === 0 ? null : (
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={() => requestStage({ kind: "compare", pair: [refOf(base), refOf(build)] })}
-        >
-          <GitCompareIcon aria-hidden="true" />
-          Compare
-        </Button>
-      )}
+    <div className="flex flex-col gap-1 px-1">
+      <div className="flex items-center gap-2">
+        <Text variant="meta" tone="muted" render={<p className="min-w-0 flex-1" />}>
+          {differ === 0
+            ? `No reading differs from ${from}.`
+            : `${differ} ${differ === 1 ? "reading differs" : "readings differ"} from ${from}:`}
+        </Text>
+        {differ === 0 ? null : (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => requestStage({ kind: "compare", pair: [refOf(base), refOf(build)] })}
+          >
+            <GitCompareIcon aria-hidden="true" />
+            Compare
+          </Button>
+        )}
+      </div>
+      {/* The count is never left to stand for the change: the readings that moved are named,
+          from the one before to this one. Compare has the rest. */}
+      {changed.slice(0, SINCE_BASE_SHOWN).map((row) => (
+        <Text key={row.id} variant="meta" tone="default" numeric render={<p />}>
+          {row.name}: <span className="text-muted-foreground">{row.a ?? "not measured"}</span> →{" "}
+          {row.b ?? "not measured"}
+        </Text>
+      ))}
+      {differ > SINCE_BASE_SHOWN ? (
+        <Text variant="meta" tone="muted" render={<p />}>
+          and {differ - SINCE_BASE_SHOWN} more in Compare
+        </Text>
+      ) : null}
     </div>
   );
 }
+
+/** How many changed readings the Build tab names before it sends the rest to Compare. */
+const SINCE_BASE_SHOWN = 2;
 
 const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextIcon } as const;
 
@@ -1405,18 +1425,31 @@ function Recordings({
                     proves.get(fact) ?? null,
                   );
               }}
-              className="group/run relative rounded-md"
+              className="group/run relative overflow-hidden rounded-md"
             >
+              {/* A recording is of a build whose picture is already here: that picture, dimmed,
+                  is the tile until the run's own frame has loaded, so the tile never changes
+                  colour as it arrives. */}
+              {run.frame === null ? null : (
+                <GameBuildStill
+                  threadRef={threadRef}
+                  gameName={gameName}
+                  build={build}
+                  mark="none"
+                  className="absolute inset-0 opacity-50"
+                />
+              )}
               <GameBuildStill
                 threadRef={threadRef}
                 gameName={gameName}
                 build={{ still: run.frame?.path ?? null }}
                 // A run with no frame says so, rather than pass its pigment off as a picture.
                 mark="absent"
-                // Its frame still loading is the game's colour under the play button, never an
-                // empty box.
-                loadingMark="none"
-                className="aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30"
+                // Clear until its frame has loaded, so the build's picture under it shows.
+                className={cn(
+                  "aspect-video w-full rounded-md ring-1 ring-border ring-inset group-hover/run:ring-foreground/30",
+                  run.frame !== null && "bg-transparent",
+                )}
               >
                 {run.video === null || run.ending === null ? null : (
                   <Text
@@ -1485,10 +1518,11 @@ function Recordings({
   );
 }
 
+// Each names its build, as the top bar's Undo does: the note under it can then say "this build".
 const RESTORE = {
-  undo: { label: "Undo this build", busy: "Undoing…" },
-  redo: { label: "Redo this build", busy: "Redoing…" },
-  "go-back": { label: "Go back to this build", busy: "Going back…" },
+  undo: { label: (name: string) => `Undo ${name}`, busy: "Undoing…" },
+  redo: { label: (name: string) => `Redo ${name}`, busy: "Redoing…" },
+  "go-back": { label: (name: string) => `Go back to ${name}`, busy: "Going back…" },
 } as const;
 
 /** Its one restore, by the strip's rules, and a compare with the build before it. */
@@ -1599,7 +1633,9 @@ function BuildActions({
                 >
                   <Undo2Icon className="mt-0.5 self-start" />
                   <span className="flex min-w-0 flex-col">
-                    {restores.restoring(action.target) ? kind.busy : kind.label}
+                    {restores.restoring(action.target)
+                      ? kind.busy
+                      : kind.label(buildPhrase(buildName(build)))}
                     <Text variant="caption" tone="muted">
                       {action.blocked ??
                         (action.kind === "undo"
@@ -1735,7 +1771,8 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
       input: { threadId: threadRef.threadId },
     }),
   ).data;
-  const buildStill = builds?.builds.find((build) => build.id === builds.current)?.still ?? null;
+  const lookBuild = builds?.builds.find((build) => build.id === builds.current) ?? null;
+  const buildStill = lookBuild?.still ?? null;
   // A game with no build still has a look: the Stage's last frame of it, once it has shown one.
   const stageStill = useStageStill(scopedThreadKey(threadRef));
   const lookStill = buildStill ?? stageStill;
@@ -1747,8 +1784,14 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
           threadRef={threadRef}
           gameName={gameName}
           build={{ still: buildStill }}
-          className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset"
-        />
+          className="group/sourced aspect-video w-full rounded-lg ring-1 ring-border ring-inset"
+        >
+          {/* The game has changed since this build: the picture says whose it is, as Now's
+              card does, rather than pass for the game as it is now. */}
+          {lookBuild !== null && builds?.folderEdited === true ? (
+            <PictureSourceBadge>Picture from {buildName(lookBuild)}</PictureSourceBadge>
+          ) : null}
+        </GameBuildStill>
       ) : stageStill !== null ? (
         <img
           src={stageStill}

@@ -1,9 +1,12 @@
 import {
   GAME_LEAD_FACTS,
+  gameChecksView,
   gameFactName,
+  gameFactsView,
   type GameAssetFacts,
   type GameAssetUse,
   type GameBuild,
+  type GameBuildFacts,
   type GameBuildFactsSummary,
   type GameCheck,
   type GameBuildsResult,
@@ -342,6 +345,26 @@ const moveAmount = (id: GameFactId, a: number, b: number): string | null => {
   return size < 0.05 ? null : `${sign}${size < 10 ? size.toFixed(1) : Math.round(size)} s`;
 };
 
+/**
+ * PURE. The readings that differ between two compared builds, lead checks first, without the
+ * ones that vary from run to run by themselves: what a turn changed, as Compare counts it.
+ */
+export const changedReadings = (compared: {
+  readonly deltas: ReadonlyArray<GameFactDelta>;
+  readonly factsA: GameBuildFacts;
+  readonly factsB: GameBuildFacts;
+}): ReadonlyArray<CompareRow> =>
+  compareRows(compared.deltas, gameFactsView(compared.factsA), gameFactsView(compared.factsB), {
+    a: allChecks(compared.factsA),
+    b: allChecks(compared.factsB),
+  }).rows.filter((row) => row.mark !== null && row.mark !== "=" && !VARIES_BY_ITSELF.has(row.id));
+
+/** Every check of a build, the lead ones and the rest, as the Inspector words them. */
+export const allChecks = (facts: GameBuildFacts) => {
+  const view = gameChecksView(facts);
+  return [...view.checks, ...view.more];
+};
+
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;
 const sideWhy = (view: GameFactView | undefined): string | null =>
   view === undefined || view.reading._tag === "measured"
@@ -560,13 +583,26 @@ export const checksLine = (facts: GameBuild["facts"]): string =>
 
 /**
  * PURE. What an Undo does, in two plain sentences, the same wherever Undo is offered: where the
- * game goes, then that nothing is lost. The build is named once, by the control; here it is
- * "this build". `base` is the build it goes back to when the app knows it; `changes` is set
- * when the folder was edited since the build.
+ * game goes, then that nothing is lost. The control over them names the build ("Undo build 2"),
+ * so here it is "this build". `base` is the build it goes back to when the app knows it;
+ * `changes` is set when the folder was edited since the build.
  */
 export const undoOutcome = (base: string | null, changes: boolean): string =>
   `The game goes back to ${base === null ? "before this build" : buildPhrase(base)}. This build${changes ? " and the changes since stay" : " stays"} on the strip.`;
 
+/**
+ * PURE. A request short enough for a caption (`fits` characters), ended at a word: a
+ * deliberate short form rather than a line clamp's cut mid-word. A tooltip gives it whole.
+ */
+export const requestShortForm = (request: string, fits: number) => {
+  if (request.length <= fits) return request;
+  const cut = request.slice(0, fits - 1);
+  const word = cut.lastIndexOf(" ");
+  // Ended on a word that carries something: never on "a" or "the" with nothing after it.
+  return `${(word > fits / 2 ? cut.slice(0, word) : cut)
+    .replace(/(\s+(a|an|the|to|of|and|or))+$/i, "")
+    .replace(/[\s,;:.]+$/, "")}…`;
+};
 /** PURE. A build's name inside a sentence: "build 5", "step 2's build", a saved build's label. */
 export const buildPhrase = (name: string): string =>
   name.replace(/^Build /, "build ").replace(/^Step /, "step ");

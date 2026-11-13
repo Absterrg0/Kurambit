@@ -3,6 +3,7 @@ import type { EnvironmentId, GameBuild, ScopedThreadRef } from "@kurambit/contra
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
+import { Text } from "../ui/text";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameKeyArt } from "./GameKeyArt";
 import { useBuildFrame } from "./gameStageBridge";
@@ -19,7 +20,6 @@ export function GameBuildStill({
   title,
   className,
   mark,
-  loadingMark,
   children,
 }: {
   threadRef: ScopedThreadRef;
@@ -30,8 +30,6 @@ export function GameBuildStill({
   className?: string;
   /** What stands in for a build with no picture: see GamePicture. */
   mark?: GamePictureMark;
-  /** What shows under a picture while it loads, in place of an empty well: see GamePicture. */
-  loadingMark?: GamePictureMark;
   children?: ReactNode;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
@@ -56,7 +54,6 @@ export function GameBuildStill({
       title={title}
       className={className}
       mark={mark}
-      loadingMark={loadingMark}
     >
       {children}
     </GamePicture>
@@ -133,7 +130,6 @@ export function GamePicture({
   title,
   className,
   mark = "initial",
-  loadingMark,
   children,
 }: {
   environmentId: EnvironmentId;
@@ -143,11 +139,6 @@ export function GamePicture({
   title?: string | undefined;
   className?: string | undefined;
   mark?: GamePictureMark | undefined;
-  /**
-   * Drawn under a picture until it has loaded, where an empty well would read as a broken
-   * tile (a recording with its play button already on it). Without it the well is neutral.
-   */
-  loadingMark?: GamePictureMark | undefined;
   children?: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -173,9 +164,7 @@ export function GamePicture({
     >
       {path === null || stoodIn ? (
         <GameTitleMark gameName={gameName} mark={mark} title={title} />
-      ) : loadingMark === undefined ? null : (
-        <GameTitleMark gameName={gameName} mark={loadingMark} title={title} />
-      )}
+      ) : null}
       {path !== null && seen && root !== null ? (
         <GameKeyArt
           environmentId={environmentId}
@@ -186,6 +175,26 @@ export function GamePicture({
       ) : null}
       {children}
     </div>
+  );
+}
+
+/**
+ * Whose picture this is, written on a picture that stands in for something newer (Now's card,
+ * the Scene's look, while the game has changed since that build). It appears once the picture
+ * it names has loaded; the picture's box carries `group/sourced`.
+ */
+export function PictureSourceBadge({ children }: { children: ReactNode }) {
+  return (
+    <Text
+      variant="micro"
+      tone="inherit"
+      truncate
+      render={
+        <span className="absolute top-1.5 left-1.5 z-20 max-w-[calc(100%-0.75rem)] rounded-sm bg-black/55 px-1.5 py-px text-white/80 opacity-0 transition-opacity motion-surface group-has-[[data-picture-loaded]]/sourced:opacity-100" />
+      }
+    >
+      {children}
+    </Text>
   );
 }
 

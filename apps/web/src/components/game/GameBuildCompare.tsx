@@ -3,10 +3,8 @@ import * as Schema from "effect/Schema";
 import { ChevronDownIcon, PlayIcon, XIcon } from "lucide-react";
 import {
   GameBuildId,
-  gameChecksView,
   gameFactsView,
   type GameBuild,
-  type GameBuildFacts,
   type GameBuildPlayResult,
   type GameBuildRef,
   type GameViewport,
@@ -23,20 +21,26 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../
 import { ScrollArea } from "../ui/scroll-area";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CompareSideBadge, GameBuildFactsDiff } from "./GameBuildFacts";
 import { GameBuildStill } from "./GameBuildStill";
 import { refOf } from "./gameBuildRef";
 import { GameFrame, GameFrameBox } from "./GamePlaySurface";
-import { buildName, compareRows, formatBuildTime } from "./gameBuilds.logic";
+import {
+  allChecks,
+  buildCaption,
+  buildName,
+  compareRows,
+  formatBuildTime,
+  requestShortForm,
+} from "./gameBuilds.logic";
 import { isUndone } from "./gameBuildTimeline.logic";
 import { useBuildPlay, useMeasureOnOpen } from "./useBuildActions";
 
 const isBuildId = Schema.is(GameBuildId);
-const allChecks = (facts: GameBuildFacts) => {
-  const view = gameChecksView(facts);
-  return [...view.checks, ...view.more];
-};
 const SIDES = ["A", "B"] as const;
+/** About how many characters of a request fit under one side's picture, on one line. */
+const PANE_REQUEST_FITS = 56;
 
 /**
  * Two builds side by side, each playable from its own copy, with the diff of their facts. It
@@ -258,6 +262,8 @@ function ComparePane({
   };
   const url = result?._tag === "web" ? result.url : null;
   const label = `${side} · ${buildName(build)}`;
+  // A saved build's caption is its name, already said; a turn's or a step's is what was asked.
+  const request = build.source._tag === "saved" ? null : buildCaption(build).trim() || null;
   return (
     <div className="flex min-w-0 flex-col gap-1.5" onPointerDown={onFocus} onFocusCapture={onFocus}>
       <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-md bg-stage-well [container-type:size]">
@@ -339,17 +345,31 @@ function ComparePane({
           )}
         />
       </div>
-      <Text variant="meta" tone="muted" numeric truncate render={<p />}>
-        {/* Name, then its states, then its time: the same order on both sides. */}
-        {[
-          buildName(build),
-          undone ? "undone" : null,
-          shown && inspectorOpen ? "in the Inspector" : null,
-          formatBuildTime(build.at),
-        ]
-          .filter((part) => part !== null)
-          .join(" · ")}
-      </Text>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <Text variant="meta" tone="muted" numeric truncate render={<p />}>
+          {/* Name, then its states, then its time: the same order on both sides. */}
+          {[
+            buildName(build),
+            undone ? "undone" : null,
+            shown && inspectorOpen ? "in the Inspector" : null,
+            formatBuildTime(build.at),
+          ]
+            .filter((part) => part !== null)
+            .join(" · ")}
+        </Text>
+        {/* What the build was asked to be, as its card says it: Compare takes the strip's
+            place, so each side carries its own request. Whole on hover and focus. */}
+        {request === null ? null : (
+          <Tooltip>
+            <TooltipTrigger render={<Text variant="meta" tone="default" truncate render={<p />} />}>
+              {requestShortForm(request, PANE_REQUEST_FITS)}
+            </TooltipTrigger>
+            <TooltipPopup side="bottom" align="start" className="max-w-sm">
+              {request}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+      </div>
     </div>
   );
 }

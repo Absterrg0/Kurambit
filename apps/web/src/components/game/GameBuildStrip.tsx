@@ -11,7 +11,13 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { FastForwardIcon, GitCompareIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  FastForwardIcon,
+  GitCompareIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import type {
   GameBuild,
   GameBuildId,
@@ -32,7 +38,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
-import { GameBuildStill, GameNowPicture } from "./GameBuildStill";
+import { GameBuildStill, GameNowPicture, PictureSourceBadge } from "./GameBuildStill";
 import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
 import {
@@ -43,6 +49,7 @@ import {
   factsSettled,
   formatBuildTime,
   passDelta,
+  requestShortForm,
 } from "./gameBuilds.logic";
 import {
   isUndone,
@@ -57,19 +64,6 @@ const CARD_REQUEST_FITS = 48;
 /** About how wide a caption's character is, for the one request line of a compact card. */
 const CAPTION_CHARACTER = 6.6;
 
-/**
- * PURE. A request short enough for a card's caption (`fits` characters), ended at a word: a
- * deliberate short form rather than a line clamp's cut mid-word. The card's tooltip gives it whole.
- */
-const cardRequest = (request: string, fits: number) => {
-  if (request.length <= fits) return request;
-  const cut = request.slice(0, fits - 1);
-  const word = cut.lastIndexOf(" ");
-  // Ended on a word that carries something: never on "a" or "the" with nothing after it.
-  return `${(word > fits / 2 ? cut.slice(0, word) : cut)
-    .replace(/(\s+(a|an|the|to|of|and|or))+$/i, "")
-    .replace(/[\s,;:.]+$/, "")}…`;
-};
 /** How many characters of a request this strip's cards show. */
 const CardRequestFits = createContext(CARD_REQUEST_FITS);
 /** How many older pages an "Open build" reads to find its build before it says so. */
@@ -219,12 +213,24 @@ export function GameBuildStrip({
   }
   // Which ends of the row have cards scrolled past them, for a fade on that edge only.
   const [clipped, setClipped] = useState<"none" | "start" | "end" | "both">("none");
+  // The side the Stage's own card has been scrolled off to, for the header's way back to it.
+  const [stageCardAway, setStageCardAway] = useState<"start" | "end" | null>(null);
   const readClipped = useStableCallback(() => {
     const row = cardsRef.current;
     if (row === null) return;
     const start = row.scrollLeft > 1;
     const end = row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
     setClipped(start && end ? "both" : start ? "start" : end ? "end" : "none");
+    const current = row.querySelector<HTMLElement>('[aria-current="true"]');
+    if (current === null) {
+      setStageCardAway(null);
+      return;
+    }
+    // Mostly out of view counts; a card only touched by the edge's fade does not.
+    const middle = current.offsetLeft - row.offsetLeft + current.offsetWidth / 2;
+    setStageCardAway(
+      middle > row.scrollLeft + row.clientWidth ? "end" : middle < row.scrollLeft ? "start" : null,
+    );
   });
   // The card a person is looking for is whole in view: the one being made while a turn runs,
   // else the one on the Stage. It is brought into view when a build lands or a turn starts,
@@ -357,6 +363,8 @@ export function GameBuildStrip({
 
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
+  const stageCard = onStage === null ? null : (marks.find((entry) => entry.id === onStage) ?? null);
+  const stageCardName = stageCard === null ? "Now" : buildName(stageCard);
   const card = (build: GameBuild) => {
     const index = marks.indexOf(build);
     return (
@@ -466,6 +474,23 @@ export function GameBuildStrip({
                 </Text>
               ) : null}
             </span>
+            {/* The Stage's card scrolled out of view: its name on the side it went, and the way
+                back to it. Gone once the card is in view again. */}
+            {stageCardAway === null ? null : (
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-label={`Show ${stageCardName} in the strip`}
+                onClick={() => {
+                  browsed.current = false;
+                  reveal();
+                }}
+              >
+                {stageCardAway === "start" ? <ChevronLeftIcon aria-hidden="true" /> : null}
+                {stageCardName}
+                {stageCardAway === "end" ? <ChevronRightIcon aria-hidden="true" /> : null}
+              </Button>
+            )}
             {marks.length < 2 ? null : (
               <Button
                 size="xs"
@@ -657,7 +682,7 @@ function BuildCard({
               )}
               {name === null || build.source._tag === "saved"
                 ? formatBuildTime(build.at)
-                : cardRequest(caption, requestFits)}
+                : requestShortForm(caption, requestFits)}
             </>
           }
         />
@@ -696,11 +721,15 @@ function CardCaption({
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
       <span className="flex min-w-0 items-center gap-1.5">
+        {/* Keyboard focus shows on the card's name too, so beside the chosen card's ring the
+            focused card is marked in two places and the chosen one in one. */}
         <Text
           variant="meta"
           tone={strong ? "strong" : "default"}
           truncate
-          render={<span className="max-w-full min-w-0" />}
+          render={
+            <span className="max-w-full min-w-0 underline-offset-2 group-focus-visible/card:text-strong-foreground group-focus-visible/card:underline" />
+          }
         >
           {title}
         </Text>
@@ -881,7 +910,7 @@ function SlotCard({ slot }: { slot: GameBuildSlot }) {
         // Its picture says what is happening to it, in the top bar's and the sidebar's words
         // ("Making build 3"), once: the caption is its name and what was asked.
         title={slot.name}
-        meta={slot.caption === null ? "" : cardRequest(slot.caption, requestFits)}
+        meta={slot.caption === null ? "" : requestShortForm(slot.caption, requestFits)}
       />
     </div>
   );
@@ -943,21 +972,12 @@ function NowCard({
           gameName={gameName}
           fallback={changed ? current : null}
           threadRef={threadRef}
-          className="group/now h-(--build-card-picture) w-full rounded-md"
+          className="group/sourced h-(--build-card-picture) w-full rounded-md"
         >
           {borrowed && current !== null ? (
             // The picture is that build's until the Stage shows the game: it says whose, in the
             // tooltip's words, once the picture it names is there.
-            <Text
-              variant="micro"
-              tone="inherit"
-              truncate
-              render={
-                <span className="absolute top-1.5 left-1.5 z-20 max-w-[calc(100%-0.75rem)] rounded-sm bg-black/55 px-1.5 py-px text-white/80 opacity-0 transition-opacity motion-surface group-has-[[data-picture-loaded]]/now:opacity-100" />
-              }
-            >
-              Picture from {buildName(current)}
-            </Text>
+            <PictureSourceBadge>Picture from {buildName(current)}</PictureSourceBadge>
           ) : null}
           <CardRing on={active && !picking} />
         </GameNowPicture>

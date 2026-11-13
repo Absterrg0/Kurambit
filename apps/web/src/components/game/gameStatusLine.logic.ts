@@ -136,7 +136,7 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
           : input.restoring !== null
             ? part(input.restoring, { strong: true, dot: "live" })
             : input.landing
-              ? part(`Saving build ${input.nextBuild}…`, {
+              ? part(`Saving build ${input.nextBuild}`, {
                   strong: true,
                   dot: "live",
                   hint: `The agent's turn has ended. Build ${input.nextBuild} is being saved, then it plays here and a bot measures it.`,

@@ -109,8 +109,10 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                   unmeasuredRow.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
                 }
               >
+                {/* One verb for both of the headline's controls; the chevron says which opens
+                    in place and which goes down the table. */}
                 <ChevronDownIcon aria-hidden="true" />
-                See
+                Show
               </Button>
             </span>
           ) : null}
@@ -230,6 +232,7 @@ export function GameBuildFactsDiff({ compared }: { compared: CompareRows }) {
                     </Text>
                     <Text variant="caption" tone="muted">
                       Not measured on either build: {group.why}
+                      {/[.!?]$/.test(group.why) ? "" : "."}
                     </Text>
                   </span>
                 </span>

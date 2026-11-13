@@ -50,7 +50,7 @@ import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/ser
 import { shortcutLabelForCommand } from "../../keybindings";
 import { shellEnvironment } from "../../state/shell";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { useEnvironmentQuerySelector } from "../../state/query";
+import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
@@ -99,6 +99,7 @@ import {
   useGameFreezeKey,
   useThreadStageBridge,
 } from "./gameStageBridge";
+import { useChangedSinceBase } from "./useChangedSinceBase";
 import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
 import { buildName, buildPhrase, checksLine, doesNotStart, undoOutcome } from "./gameBuilds.logic";
@@ -269,6 +270,28 @@ const fitStage = (
     cardPicture: Math.min(whole, picture + spare),
   };
 };
+
+/**
+ * The folded Inspector's label, after the checks: how many readings the build on the Stage
+ * changed since the one before, the Build tab's own count, so a change is known before the
+ * Inspector is opened. It reads the list itself, so the Stage does not render with it.
+ */
+function FoldedChange({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const list = useEnvironmentQuery(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  ).data;
+  const build =
+    list === null || list.folderEdited !== false
+      ? null
+      : (list.builds.find((each) => each.id === list.current) ?? null);
+  const since = useChangedSinceBase(threadRef, build, list);
+  return since === null || since.changed.length === 0 ? null : (
+    <> · {since.changed.length} changed</>
+  );
+}
 
 /** The folder's own game frame, not a build copy's. */
 const isFolderGameFrame = (target: EventTarget) =>
@@ -587,11 +610,10 @@ function ThreadGameStage({
   const folderDoesNotStart = useEnvironmentQuerySelector(buildsAtom, folderDoesNotStartOf) === true;
   const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
   // On a game changed since its build, the restore keeps those changes as a build of their own.
-  const undoLabel =
-    undoName === null
-      ? "Undo the last build"
-      : // The sentences the build's own menu uses: where the game goes, and that nothing is lost.
-        `Undo ${undoName}. ${undoOutcome(undoBaseName ?? null, changedSince != null)}`;
+  // The control names the build; the sentences under it are the build menu's own.
+  const undoLabel = undoName === null ? "Undo the last build" : `Undo ${undoName}`;
+  const undoDetail =
+    undoName === null ? null : undoOutcome(undoBaseName ?? null, changedSince != null);
   const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
@@ -1349,6 +1371,7 @@ function ThreadGameStage({
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
           <IconAction
             label={undoLabel}
+            detail={undoDetail}
             shortcut={undoKey}
             disabled={!turnUndoAllowed("undo")}
             onClick={() => handleRequest({ kind: "undo" }, 0)}
@@ -1481,6 +1504,7 @@ function ThreadGameStage({
                   ) : playTarget === null && folderChecks !== null ? (
                     <Text variant="meta" tone="muted" render={<span />}>
                       · {folderChecks}
+                      <FoldedChange threadRef={threadRef} />
                     </Text>
                   ) : null}
                 </>
@@ -1716,12 +1740,15 @@ function ThreadGameStage({
 /** A header icon button with its name in a tooltip. */
 function IconAction({
   label,
+  detail = null,
   shortcut = null,
   disabled = false,
   onClick,
   children,
 }: {
   label: string;
+  /** What it does, under its name and key in the tooltip, as a menu item's note. */
+  detail?: string | null;
   /** Its key, shown in the tooltip beside the label. */
   shortcut?: string | null;
   disabled?: boolean;
@@ -1735,7 +1762,7 @@ function IconAction({
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label={label}
+            aria-label={detail === null ? label : `${label}. ${detail}`}
             disabled={disabled}
             onClick={onClick}
           />
@@ -1743,8 +1770,11 @@ function IconAction({
       >
         {children}
       </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
+      <TooltipPopup side="bottom" className="max-w-xs">
+        <span className="flex flex-col gap-1">
+          <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
+          {detail === null ? null : <span className="text-muted-foreground">{detail}</span>}
+        </span>
       </TooltipPopup>
     </Tooltip>
   );

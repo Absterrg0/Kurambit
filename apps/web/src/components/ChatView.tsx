@@ -7608,13 +7608,11 @@ export default function ChatView(props: ChatViewProps) {
       )
     : null;
   // What the person asked of the running turn: the caption of the build slot.
-  const gameTurnRequest =
+  const gameTurnRequestWhole =
     gameLayout && phase === "running"
-      ? (timelineMessages
-          .findLast((message) => message.role === "user")
-          ?.text.split("\n")[0]
-          ?.slice(0, 140) ?? null)
+      ? (timelineMessages.findLast((message) => message.role === "user")?.text.trim() ?? null)
       : null;
+  const gameTurnRequest = gameTurnRequestWhole?.split("\n")[0]?.slice(0, 140) ?? null;
   const gameInspectorDocked = gameLayout && gameWorkspace.inspectorDocked;
   // A hidden Inspector keeps its column mounted at zero width so the Log keeps
   // its scroll, and inert so nothing in it can take focus while unseen.
@@ -8046,7 +8044,11 @@ export default function ChatView(props: ChatViewProps) {
           )}
         </header>
         {gameLayout ? (
-          <GameInspectorPanel threadRef={activeThreadRef} compact={compactInspectorVisible} />
+          <GameInspectorPanel
+            threadRef={activeThreadRef}
+            compact={compactInspectorVisible}
+            turnRequest={gameTurnRequestWhole}
+          />
         ) : null}
 
         <div
