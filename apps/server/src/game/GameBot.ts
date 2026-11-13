@@ -1,4 +1,4 @@
-// @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off globalFetch:off preferSchemaOverJson:off -- This service owns the native display/process boundary; wall-clock ticks, pids and line JSON are the domain here. Jev is one POST with an AbortSignal timeout, like the toolchain downloader.
+// @effect-diagnostics globalTimers:off globalDate:off globalDateInEffect:off nodeBuiltinImport:off preferSchemaOverJson:off -- This service owns the native display/process boundary; wall-clock ticks, pids and line JSON are the domain here.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -30,10 +30,8 @@ import {
   type ThreadId,
   manifestProject,
 } from "@kurambit/contracts";
-import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
-import * as ServerSettings from "../serverSettings.ts";
 import * as BotEvidence from "./botEvidence.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -41,7 +39,6 @@ import * as GamePlayer from "./GamePlayer.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { inGame } from "./gamePath.ts";
 import { findExecutable } from "./GameProcesses.ts";
-import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import { ProcessHost } from "./processHost.ts";
 import { findWindowHost } from "./windowHost.ts";
@@ -62,7 +59,6 @@ import {
   botEnding,
   botFinalState,
   cellOf,
-  makeJev,
   medianOf,
   opError,
   type Session,
@@ -73,8 +69,6 @@ import * as GameTemplates from "./GameTemplates.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import { PLAY_BOUNDS, bounded } from "./playSession.ts";
-
-const GAME_BOT_JEV_BASE_SECRET = "game-bot-jev-base-url";
 
 /**
  * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
@@ -91,7 +85,6 @@ const BOT_ROOM: MemoryRoom = {
 /** How long a stop waits for a bot call to end: its run's teardown is bounded well inside. */
 const STOP_WAIT_MS = 60_000;
 const STOP_WAIT = Duration.millis(STOP_WAIT_MS);
-const JEV_DEFAULT_BASE = "https://api.typesafe.ai";
 
 /** The call a run holds: the checkout's own, or one lane of it when its caller plays it several ways at once. */
 const sessionKey = (root: string, lane: string | undefined) =>
@@ -148,11 +141,9 @@ export class GameBot extends Context.Service<
      * The latest play-mode bot any thread ran on this game folder, from the
      * server's records (never the folder's own results file); null when none ran.
      */
-    readonly latestPlayBot: (root: string) => Effect.Effect<{
-      readonly file: string;
-      readonly decider: "policy" | "jev";
-      readonly at: string;
-    } | null>;
+    readonly latestPlayBot: (
+      root: string,
+    ) => Effect.Effect<{ readonly file: string; readonly at: string } | null>;
     /** Stops one game's bot call by root and waits for it to end (bounded); game_stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
     /** Stops every bot call a thread started and waits for each to end (bounded): its turn is over. */
@@ -165,23 +156,14 @@ interface RunTrace {
   /** False on a run whose bot never ran: not a run on the record, nor in a report. */
   played?: boolean;
   file: string;
-  decider: string;
   mode?: string;
   goal: string;
   ticks: number;
   gameSeconds: number;
   decisions: number;
-  jev: {
-    calls: number;
-    failures: number;
-    medianMs?: number | null;
-    decisions2Plus?: number;
-    valid?: boolean;
-  } | null;
-  policyNote: string | null;
   usedSetState: boolean;
   setStates: Array<{ t: number; target: unknown; values: unknown }>;
-  picks: Array<{ t: number; name: string; via: string; randomized?: boolean }>;
+  picks: Array<{ t: number; name: string }>;
   offered: Array<{ t: number; options: string[] }>;
   status: { state: string; note: string };
   findings: Array<{
@@ -263,18 +245,13 @@ const playerReportText = (
     "",
     "## Runs",
     "",
-    "| run | bot | decider | game s | decisions | end | findings | jev |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| run | bot | mode | game s | decisions | end | findings |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
   ];
-  for (const { trace } of ordered) {
-    const jevBit =
-      trace.jev !== null && trace.jev !== undefined
-        ? `jev ${trace.jev.calls}/${trace.jev.failures} failed${trace.jev.valid === true ? "" : " (NOT valid)"}`
-        : (trace.policyNote ?? "policy");
+  for (const { trace } of ordered)
     lines.push(
-      `| ${shortId(trace.runId)} | ${trace.file ?? "?"} | ${trace.decider ?? "?"} ${trace.mode ?? ""} | ${Number(trace.gameSeconds ?? 0).toFixed(1)} | ${trace.decisions ?? 0} | ${trace.status?.state ?? "?"} | ${trace.findings?.length ?? 0} | ${jevBit} |`,
+      `| ${shortId(trace.runId)} | ${trace.file ?? "?"} | ${trace.mode ?? ""} | ${Number(trace.gameSeconds ?? 0).toFixed(1)} | ${trace.decisions ?? 0} | ${trace.status?.state ?? "?"} | ${trace.findings?.length ?? 0} |`,
     );
-  }
   // Ending positions, in 2 m cells below. Old traces predate finalPos;
   // those fall back to their last sampled position.
   const endPosOf = (trace: RunTrace): [number, number, number] | null => {
@@ -454,18 +431,6 @@ const playerReportText = (
   lines.push(
     ...(writeLines.length > 0 ? writeLines : ["None. Runs without writes are pure input play."]),
   );
-  // Honesty footer: which runs Jev actually decided.
-  lines.push("", "## Decider honesty", "");
-  for (const { trace } of ordered) {
-    const id = shortId(trace.runId);
-    if (trace.jev !== null && trace.jev !== undefined)
-      lines.push(
-        `- ${id}: jev ${trace.jev.calls} calls/${trace.jev.failures} failed, ${trace.jev.decisions2Plus ?? 0} decisions among 2+ options${trace.jev.valid === true ? "" : " (NOT a valid Jev run)"}.`,
-      );
-    else lines.push(`- ${id}: ${trace.policyNote ?? "policy decider"}.`);
-    const randomised = (trace.picks ?? []).filter((pick) => pick.randomized === true).length;
-    if (randomised > 0) lines.push(`  randomised policy picks: ${randomised} (no key: not Jev).`);
-  }
   return { text: `${lines.join("\n")}\n`, runs: ordered.map((entry) => entry.runId) };
 };
 
@@ -491,8 +456,6 @@ const make = Effect.gen(function* () {
   const engines = yield* GameEngine.GameEngine;
   const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
-  const secrets = yield* ServerSecretStore.ServerSecretStore;
-  const settings = yield* ServerSettings.ServerSettingsService;
   const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const scheduler = yield* Scheduler.Scheduler;
@@ -603,18 +566,6 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  const readSecretText = (name: string): Effect.Effect<string | null, GameOperationError> =>
-    Effect.gen(function* () {
-      const found = yield* secrets
-        .get(name)
-        .pipe(Effect.mapError((cause) => opError("Bot secret", name, "io", undefined, cause)));
-      if (Option.isNone(found)) return null;
-      const text = Buffer.from(found.value).toString("utf8").trim();
-      return text === "" ? null : text;
-    });
-
-  const jevApi = makeJev();
-
   const isGameOperationError = Schema.is(GameOperationError);
 
   const runLocked = (
@@ -647,7 +598,6 @@ const make = Effect.gen(function* () {
         GAME_BOT_BOUNDS.maxSeconds,
         Math.max(GAME_BOT_BOUNDS.minSeconds, input.seconds ?? GAME_BOT_BOUNDS.defaultSeconds),
       );
-      const decider = input.decider ?? "policy";
       const mode: GameBotMode = input.mode ?? "play";
       // One call may make several sequential runs (exploration compares
       // across runs). Ten at most; each run gets its own directory.
@@ -665,6 +615,8 @@ const make = Effect.gen(function* () {
       const viewport = yield* backend.viewport(projectDir);
       const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;
       const runtimes = isWeb ? yield* runtimesFor(templates, manifest) : null;
+      // The child program ships with the server, never from a game's folder.
+      const childPath = NodePath.join(yield* templates.directory, "bot-child.mjs");
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
       );
@@ -689,26 +641,6 @@ const make = Effect.gen(function* () {
         saves: input.saves,
         operation: "Bot run",
       });
-      let jevKey: string | null = null;
-      let jevBase = JEV_DEFAULT_BASE;
-      let policyNote: string | null = null;
-      if (decider === "jev") {
-        // The Jev key is a settings secret (Settings → Game tools); bots never see it.
-        const { gameJevApiKey } = yield* settings.getSettings.pipe(
-          Effect.mapError((cause) =>
-            opError("Bot secret", "gameJevApiKey", "io", undefined, cause),
-          ),
-        );
-        jevKey = gameJevApiKey === "" ? null : gameJevApiKey;
-        const base = yield* readSecretText(GAME_BOT_JEV_BASE_SECRET);
-        if (base !== null) jevBase = base;
-        if (jevKey === null)
-          policyNote =
-            mode === "explore"
-              ? "No Jev key is set in Settings → Game tools; this exploration ran with randomised policy choices, not Jev."
-              : "No Jev key is set in Settings → Game tools; this run used the bot's own policy.";
-      }
-      const jevLive = decider === "jev" && jevKey !== null;
       // The game's runner imports into its sources first, and that is a write
       // of the folder: under the game's operation lock, then the memory gate,
       // through the boot (GameMemoryGate fixes the order). A browser page and
@@ -774,7 +706,6 @@ const make = Effect.gen(function* () {
               if (session.stopped) break;
               const runId = NodeCrypto.randomUUID();
               const runDir = NodePath.join(root, "builds/logs", `game-bot-${runId}`);
-              const childPath = NodePath.join(runDir, "child.mjs");
               const videoPath = NodePath.join(runDir, "run.mp4");
               const tracePath = NodePath.join(runDir, "trace.json");
               // A fresh folder of its own under a logs folder checked to be the
@@ -785,10 +716,6 @@ const make = Effect.gen(function* () {
                   await NodeFSP.mkdir(runDir);
                 },
                 catch: (cause) => opError("Bot run", runDir, "io", undefined, cause),
-              });
-              yield* Effect.tryPromise({
-                try: () => NodeFSP.writeFile(childPath, GAME_BOT_CHILD_JS),
-                catch: (cause) => opError("Bot run", childPath, "io", undefined, cause),
               });
               // Anything the run loop throws that is not already ours to name is
               // a fault of our own side: the game's ends are results.
@@ -882,7 +809,7 @@ const make = Effect.gen(function* () {
                     Effect.andThen(
                       Effect.tryPromise({
                         try: (signal) => {
-                          const run = playBot(jevApi, opened, {
+                          const run = playBot(opened, {
                             host: processHost,
                             root,
                             runId,
@@ -891,14 +818,9 @@ const make = Effect.gen(function* () {
                             videoPath,
                             tracePath,
                             botFile,
-                            decider,
                             mode,
-                            jevLive,
                             seconds,
                             ffmpeg,
-                            jevKey,
-                            jevBase,
-                            policyNote,
                             session,
                             signal,
                             runIndex: index,
@@ -977,7 +899,7 @@ const make = Effect.gen(function* () {
                   PlayDidNotBoot: (error) =>
                     Effect.promise(() =>
                       runWithoutPlay(
-                        { root, runId, botFile, decider, mode, tracePath, videoPath },
+                        { root, runId, botFile, mode, tracePath, videoPath },
                         { goal: "play the game", state: "not-booted", note: error.detail },
                       ),
                     ),
@@ -1001,7 +923,6 @@ const make = Effect.gen(function* () {
                     runId,
                     file: NodePath.relative(root, botFile),
                     mode,
-                    decider,
                     won: one.status.state === "done",
                     ending: botEnding(one.status.state),
                     seconds: one.gameSeconds,
@@ -1023,7 +944,6 @@ const make = Effect.gen(function* () {
                     video: videoPath,
                     findings: one.findings.length,
                     mode,
-                    decider,
                     file: NodePath.relative(root, botFile),
                     at,
                   })}\n`,
@@ -1095,8 +1015,8 @@ const make = Effect.gen(function* () {
         runIds,
         reportPath,
         message:
-          `${mode === "explore" ? "Exploration" : "Bot"} "${NodePath.relative(root, botFile)}" ` +
-          `(${decider}): ${each.length} runs, ending ${states}. ` +
+          `${mode === "explore" ? "Exploration" : "Bot"} "${NodePath.relative(root, botFile)}": ` +
+          `${each.length} runs, ending ${states}. ` +
           `${decisions} decisions, ${findings.length} finding(s). ` +
           (reportPath === null ? "" : `Player report: ${reportPath}. `) +
           `Last run video: ${last.videoPath}`,
@@ -1170,10 +1090,6 @@ const make = Effect.gen(function* () {
         tickHz: kept.tickHz ?? 0,
         timeRatio: kept.timeRatio ?? 0,
         decisions: trace.decisions,
-        jev:
-          trace.jev === null || trace.jev === undefined
-            ? null
-            : { calls: trace.jev.calls, failures: trace.jev.failures },
         usedSetState: trace.usedSetState ?? false,
         ...(kept.refusedStates === undefined ? {} : { refusedStates: kept.refusedStates }),
         findings: trace.findings ?? [],
@@ -1211,13 +1127,7 @@ const make = Effect.gen(function* () {
       if (latestPlays.size > 500) latestPlays.clear();
       latestPlays.set(root, play);
       return play;
-    }).pipe(
-      Effect.map((play) =>
-        play === null
-          ? null
-          : { file: play.file, decider: play.decider === "jev" ? "jev" : "policy", at: play.at },
-      ),
-    );
+    }).pipe(Effect.map((play) => (play === null ? null : { file: play.file, at: play.at })));
 
   return GameBot.of({
     // Its video lands in the game folder; the run is recorded on the thread.

@@ -26,8 +26,6 @@ const run = (
   timeRatio: 1,
   gameSeconds: 40,
   decisions: 0,
-  jev: null,
-  policyNote: null,
   usedSetState: false,
   findings: [],
   finalState,
@@ -85,7 +83,7 @@ describe("budget", () => {
       retry: false,
       standing: true,
     });
-    const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
+    const bot = { file: ".studio/bot/win.mjs", hash: "h" } as const;
     expect(skilledFact(slow, bot, null)).toMatchObject({ status: "not-measured", retry: false });
   });
 
@@ -113,7 +111,7 @@ describe("budget", () => {
       status: "not-measured",
       why: expect.stringContaining("the harness renders in software here"),
     });
-    const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
+    const bot = { file: ".studio/bot/win.mjs", hash: "h" } as const;
     expect(skilledFact(slow, bot, null, busy)).toMatchObject({ retry: true });
   });
 });
@@ -227,7 +225,7 @@ describe("winnableOf", () => {
 
 describe("skilledFact", () => {
   it("keeps the bot's own word beside an unended game and never reads it as a win", () => {
-    const bot = { file: ".studio/bot/win.mjs", hash: "h", decider: "policy" } as const;
+    const bot = { file: ".studio/bot/win.mjs", hash: "h" } as const;
     expect(skilledFact(run("done", { state: "playing" }), bot, null)).toMatchObject({
       status: "measured",
       value: { ending: "no-ending", botWord: "done" },

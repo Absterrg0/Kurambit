@@ -84,10 +84,11 @@ import { readSceneFile, SCENE_OLD_SHELL, sceneNotInEngine } from "./sceneReport.
 import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /**
- * Changes when the server's reading of a measurement changes; the bot files are hashed besides.
+ * Changes when the server's reading of a measurement, or how templates/bot-child.mjs plays a
+ * bot, changes; the tier bot files are hashed besides.
  * A new tier needs no bump: planOf measures each fact a stored row lacks, and nothing else.
  */
-const FACTS_VERSION = 3;
+const FACTS_VERSION = 4;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait for the one running. */
@@ -589,7 +590,6 @@ const make = Effect.gen(function* () {
       if (text === null) return null;
       return {
         file: latest.file,
-        decider: latest.decider,
         hash: NodeCrypto.createHash("sha256").update(text).digest("hex").slice(0, 16),
       };
     });
@@ -805,17 +805,12 @@ const make = Effect.gen(function* () {
         // work is never read as the game's slowness. Alone, it waits a while for
         // an idle machine and holds the copy's one engine step; in a lane, beside
         // another play, its caller does both for the lanes together.
-        const runBot = (
-          file: string,
-          seconds: number,
-          decider: "policy" | "jev",
-          lane?: string,
-        ) => {
+        const runBot = (file: string, seconds: number, lane?: string) => {
           const run = (work: Effect.Effect<GameBotRunResult, GameOperationError>) =>
             withMachine(lane === undefined ? step(work) : work).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
             );
-          const input = { file, seconds, mode: "play" as const, decider };
+          const input = { file, seconds, mode: "play" as const };
           return lane === undefined
             ? Effect.andThen(idleMachine, run(bots.runIn(copy, input)))
             : run(bots.runIn(copy, input, { lane }));
@@ -872,7 +867,7 @@ const make = Effect.gen(function* () {
               : notMeasured("the plays' record of what the game loaded could not be kept", true);
 
         const tier = (name: "idle" | "masher", playSeconds: number, lane?: string) =>
-          runBot(`${HARNESS_KIT}/${name}.mjs`, tierWallSeconds(playSeconds), "policy", lane).pipe(
+          runBot(`${HARNESS_KIT}/${name}.mjs`, tierWallSeconds(playSeconds), lane).pipe(
             Effect.flatMap(({ value: result, machine }) =>
               Effect.map(moveEvidence(root, key, name, result), (evidence) => ({
                 result,
@@ -1071,11 +1066,7 @@ const make = Effect.gen(function* () {
             let evidence: string | null = null;
             const skilled = !copied
               ? notMeasured("the game's bot files could not be copied", true)
-              : yield* runBot(
-                  bot.file,
-                  tierWallSeconds(GAME_FACTS_BOUNDS.skilledSeconds),
-                  bot.decider,
-                ).pipe(
+              : yield* runBot(bot.file, tierWallSeconds(GAME_FACTS_BOUNDS.skilledSeconds)).pipe(
                   Effect.flatMap(({ value: result, machine }) =>
                     Effect.map(moveEvidence(root, key, "skilled", result), (moved) => {
                       evidence = moved;

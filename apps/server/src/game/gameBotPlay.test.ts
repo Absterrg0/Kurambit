@@ -8,9 +8,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import type { GameOperationError } from "@kurambit/contracts";
-import { GAME_BOT_CHILD_JS } from "./gameBotChild.ts";
 import { playBot, type BotLaunch } from "./gameBotPlay.ts";
-import { makeJev } from "./gameBotRuntime.ts";
 import type { PlayEnd, PlayTick } from "./playSession.ts";
 
 const BOT = `export const goal = "walk right";
@@ -101,10 +99,9 @@ const runIn = (
   NodeFS.mkdirSync(NodePath.join(root, ".studio/bot"), { recursive: true });
   const botFile = NodePath.join(root, ".studio/bot/b.mjs");
   NodeFS.writeFileSync(botFile, bot);
-  const childPath = NodePath.join(runDir, "child.mjs");
-  NodeFS.writeFileSync(childPath, GAME_BOT_CHILD_JS);
+  const childPath = NodePath.join(import.meta.dirname, "../../templates/bot-child.mjs");
   const tracePath = NodePath.join(runDir, "trace.json");
-  const result = playBot(makeJev(), launch, {
+  const result = playBot(launch, {
     host: { joinJob: () => undefined },
     root,
     runId: "00000000-0000-4000-8000-000000000000",
@@ -113,14 +110,9 @@ const runIn = (
     videoPath: NodePath.join(runDir, "run.mp4"),
     tracePath,
     botFile,
-    decider: "policy",
     mode: "play",
-    jevLive: false,
     seconds,
     ffmpeg: "ffmpeg",
-    jevKey: null,
-    jevBase: "https://jev.invalid",
-    policyNote: null,
     // The very object a stop flips, as GameBot shares it with the run.
     session: Object.assign(session, { root, runId: "call" }),
     signal: undefined,
