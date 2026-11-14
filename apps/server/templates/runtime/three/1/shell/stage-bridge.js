@@ -166,8 +166,17 @@ export function createStageBridge({
     named.set(base, n);
     return { id, n: id === base ? null : n };
   };
+  // Where each id first came, so a thing the game names again (a tuned name's model loading
+  // at play) keeps its place in the Stage's lists instead of moving to the end.
+  const firstSeen = new Map();
+  let seen = 0;
   const add = (record) => {
     if (things.size >= MAX_REGISTERED) return null;
+    if (!firstSeen.has(record.id)) {
+      if (firstSeen.size >= MAX_REGISTERED * 4)
+        for (const id of firstSeen.keys()) if (!things.has(id)) firstSeen.delete(id);
+      firstSeen.set(record.id, seen++);
+    }
     things.set(record.id, { ring: null, head: 0, count: 0, ...record });
     for (const body of bodiesOf(record)) byObject.set(body, things.get(record.id));
     changed = true;
@@ -387,7 +396,10 @@ export function createStageBridge({
     if (!active) return;
     const seen = view();
     // Things the game named first, then its copies of ASSETS models.
-    const list = [...things.values()].toSorted((a, b) => Number(a.auto) - Number(b.auto));
+    const list = [...things.values()].toSorted(
+      (a, b) =>
+        Number(a.auto) - Number(b.auto) || (firstSeen.get(a.id) ?? 0) - (firstSeen.get(b.id) ?? 0),
+    );
     toStage({
       type: "studio-things",
       things: list.slice(0, MAX_THINGS).map((record) => describe(record, seen)),
