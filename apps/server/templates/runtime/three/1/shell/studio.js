@@ -26,7 +26,7 @@ const firstFrame = (stack) =>
 
 // Installed when this module first evaluates, before the game module runs,
 // so errors while the game loads land here too.
-const errors = [];
+export const errors = [];
 let told = false;
 const record = (message, stack, where) => {
   if (errors.length < 50)
@@ -70,6 +70,56 @@ window.addEventListener("unhandledrejection", (event) => {
   );
 });
 
+// What a game registers outside its run, for the QA play's Retry check (shell/qa.js): the
+// listeners on window and document, the intervals running and the animation frames asked
+// for. Counted only when the harness set window.__studioQa before any script ran; a page a
+// player opens never wraps these. Installed here, before the game module runs.
+export const outsideRun = { listeners: () => 0, intervals: () => 0, frames: 0 };
+if (window.__studioQa === true) {
+  const registry = new Map([
+    [window, new Map()],
+    [document, new Map()],
+  ]);
+  const add = EventTarget.prototype.addEventListener;
+  const remove = EventTarget.prototype.removeEventListener;
+  EventTarget.prototype.addEventListener = function (type, listener, options) {
+    const types = registry.get(this);
+    if (types !== undefined && listener != null) {
+      const set = types.get(type) ?? new Set();
+      set.add(listener);
+      types.set(type, set);
+    }
+    return add.call(this, type, listener, options);
+  };
+  EventTarget.prototype.removeEventListener = function (type, listener, options) {
+    registry.get(this)?.get(type)?.delete(listener);
+    return remove.call(this, type, listener, options);
+  };
+  outsideRun.listeners = () => {
+    let count = 0;
+    for (const types of registry.values()) for (const set of types.values()) count += set.size;
+    return count;
+  };
+  const running = new Set();
+  const setInterval = window.setInterval;
+  const clearInterval = window.clearInterval;
+  window.setInterval = (...args) => {
+    const id = setInterval(...args);
+    running.add(id);
+    return id;
+  };
+  window.clearInterval = (id) => {
+    running.delete(id);
+    return clearInterval(id);
+  };
+  outsideRun.intervals = () => running.size;
+  const requestFrame = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (callback) => {
+    outsideRun.frames += 1;
+    return requestFrame(callback);
+  };
+}
+
 function gameStateValues() {
   const values = {};
   // The shell's run state first, so a game with many values never crowds it out.
@@ -104,7 +154,7 @@ function position(player) {
  * posts the bare boot signal, and the Stage then offers no selecting.
  * `scene`, when the shell has one, is the scene report the harness reads.
  */
-export function installStudio({ ui, player, setState, hold, perf, bridge, scene }) {
+export function installStudio({ ui, player, setState, hold, perf, bridge, scene, qa }) {
   let ready = false;
   const studio = {
     engine: "three",
@@ -131,6 +181,16 @@ export function installStudio({ ui, player, setState, hold, perf, bridge, scene 
           scene: {
             start: () => scene.start(),
             read: () => scene.read(),
+          },
+        }),
+    // The QA play (shell/qa.js): every control, Retry, and the HUD on screen. Only the
+    // harness calls it, on a page it opened with its counters on.
+    ...(qa === undefined
+      ? {}
+      : {
+          qa: {
+            run: () => qa.run(),
+            hud: () => qa.hud(),
           },
         }),
     getState() {

@@ -488,6 +488,22 @@ const isSoftware = (renderer) => {
  */
 export async function createLook(canvas, options = {}) {
   const look = resolveLook(options);
+  // three's compileAsync, except that a material disposed while it compiles (a run retried at
+  // once, a reset effect) is let go instead of read: three's own throws on it.
+  const compileQuietly = (scene, camera) => {
+    const waiting = renderer.compile(scene, camera);
+    return new Promise((resolve) => {
+      const check = () => {
+        for (const material of waiting) {
+          const program = renderer.properties.get(material).currentProgram;
+          if (program === undefined || program.isReady()) waiting.delete(material);
+        }
+        if (waiting.size === 0) resolve();
+        else setTimeout(check, 10);
+      };
+      setTimeout(check, 10);
+    });
+  };
   const renderer = new THREE.WebGLRenderer({
     canvas,
     // MSAA only without the chain: under it the frame is a float target and SMAA does the edges.
@@ -730,8 +746,8 @@ export async function createLook(canvas, options = {}) {
     compile(scene, camera, waitMs = 3000) {
       dress(scene, camera);
       return Promise.race([
-        renderer.compileAsync(scene, camera).catch(() => undefined),
-        new Promise((done) => setTimeout(done, waitMs)),
+        compileQuietly(scene, camera),
+        new Promise((resolve) => setTimeout(resolve, waitMs)),
       ]);
     },
     /**
@@ -750,7 +766,7 @@ export async function createLook(canvas, options = {}) {
         camera.lookAt(0, 1, 0);
       }
       dress(scene, camera);
-      await renderer.compileAsync(scene, camera).catch(() => undefined);
+      await compileQuietly(scene, camera);
       draw(scene, camera, 0);
       renderer.clear();
       scene.remove(sun, ...models);

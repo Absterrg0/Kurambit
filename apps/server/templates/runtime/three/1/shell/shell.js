@@ -46,7 +46,8 @@
 // working, and Retry builds the run fresh. Pause is Esc or P (gamepad Start).
 // Restyle the screens in index.html and style.css.
 import * as THREE from "../vendor/three.module.js";
-import { installStudio } from "./studio.js";
+import { errors as studioErrors, installStudio } from "./studio.js";
+import { createQa } from "./qa.js";
 import { createStageBridge, loadTuning } from "./stage-bridge.js";
 import { createSceneReport } from "./scene-report.js";
 import {
@@ -995,6 +996,16 @@ const studio = installStudio({
   },
   bridge,
   scene: sceneReport,
+  // The harness's QA play: Retry is the end screen's own startRun.
+  qa: createQa({
+    controls,
+    current: () => run,
+    restart: startRun,
+    canLose: setCanLose,
+    eachThing: (fn) => bridge.eachThing(fn),
+    hudRoots: () => [hud, hudKit],
+    errors: studioErrors,
+  }),
 });
 
 loadSettings();

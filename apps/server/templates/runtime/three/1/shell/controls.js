@@ -270,11 +270,15 @@ export function createInput(controls) {
   let now = new Map();
   let was = new Map();
   let settling = true;
+  // The QA play's: actions it holds itself, and which actions the game has asked about.
+  const forced = new Set();
+  const reads = new Set();
   const read = (name) => {
     if (!controls.has(name))
       throw new Error(
         `Unknown action "${name}": declare it in main.js's ACTIONS (shell/controls.js).`,
       );
+    reads.add(name);
     return now.get(name) ?? 0;
   };
   const api = {
@@ -295,6 +299,13 @@ export function createInput(controls) {
   };
   return {
     api,
+    /** Holds an action as if its key were down, or lets it go (the QA play's press). */
+    force(name, on) {
+      if (on) forced.add(name);
+      else forced.delete(name);
+    },
+    /** The actions the game has read since this run began. */
+    reads,
     settle() {
       settling = true;
     },
@@ -307,6 +318,7 @@ export function createInput(controls) {
         for (const button of action.mouse)
           if (buttons.has(button) || clicked.has(button)) strength = 1;
         for (const name of action.pad) strength = Math.max(strength, padStrength(pad, name));
+        if (forced.has(action.name)) strength = 1;
         if (strength > 0) now.set(action.name, strength);
       }
       if (settling) {

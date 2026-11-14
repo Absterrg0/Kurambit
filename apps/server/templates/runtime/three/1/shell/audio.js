@@ -98,8 +98,12 @@ function start(buffer, output, { volume = 1, pitch = 0, loop = false } = {}) {
   return source;
 }
 
+/** How many one-shots the game has asked for, played or not: the QA play's sign of a response. */
+export const sfxAsked = { count: 0 };
+
 /** A one-shot on the sfx gain, a fresh slight pitch each time; the oldest of too many voices stops. */
 export function playSfx(sound, { volume = 1, pitch = 0.08 } = {}) {
+  sfxAsked.count += 1;
   if (context === null || context.state !== "running") return;
   const play = (buffer) => {
     if (voices.length >= MAX_VOICES) voices.shift()?.stop();
