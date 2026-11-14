@@ -98,6 +98,7 @@ import {
   formatBuildTime,
   notMeasuredWhy,
   qaLines,
+  silentControlsNote,
   undoOutcome,
 } from "./gameBuilds.logic";
 import {
@@ -566,6 +567,10 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
     (check) => check.reading._tag === "measured" && check.reading.tone === "good",
   ).length;
   const notMeasured = view.checks.filter((check) => check.reading._tag === "not-measured").length;
+  // Of the same checks as the pass count: Other measurements counts its own.
+  const toLook = view.checks.filter(
+    (check) => check.reading._tag === "measured" && check.reading.tone === "bad",
+  ).length;
   // A reading with no verdict is counted, so the counts add up to all the checks: a frame rate
   // that dips is the person's to judge, and a win the play bot never made is not yet proven.
   const neutral = view.checks.filter(
@@ -593,7 +598,7 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
         ? [`${shownPass} pass so far`]
         : []
       : [`${shownPass} of ${view.checks.length} pass`]),
-    ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
+    ...(toLook > 0 ? [`${toLook} to look at`] : []),
     ...(toJudge > 0 ? [`${toJudge} for you to judge`] : []),
     ...(unproven > 0 ? ["winning not yet proven"] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
@@ -614,6 +619,9 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
   const measured = view.checks.filter((check) => check.reading._tag === "measured");
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
   const moreMeasured = view.more.filter((more) => more.reading._tag === "measured");
+  const moreToLook = moreMeasured.filter(
+    (more) => more.reading._tag === "measured" && more.reading.tone === "bad",
+  ).length;
   const morePending = view.more.filter((more) => more.reading._tag === "pending").length;
   const detailOf = (fact: GameFactView): ReadonlyArray<string> =>
     fact.id === "assets" && facts.assets.status === "measured"
@@ -634,7 +642,9 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
           .join(" ") || null
       : fact.id === "performance" && facts.renderer
         ? `Played with ${facts.renderer}.`
-        : null;
+        : fact.id === "controls"
+          ? silentControlsNote(facts)
+          : null;
   return (
     <div className="flex flex-col gap-2">
       <Rows>
@@ -684,7 +694,12 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
                   ? morePending > 0
                     ? `${morePending} to measure`
                     : "None measured"
-                  : `${moreMeasured.length} of ${view.more.length} measured`}
+                  : [
+                      ...(moreMeasured.length < view.more.length
+                        ? [`${moreMeasured.length} of ${view.more.length} measured`]
+                        : []),
+                      ...(moreToLook > 0 ? [`${moreToLook} to look at`] : []),
+                    ].join(" · ") || `${moreMeasured.length} of ${view.more.length} measured`}
               </Text>
             </CollapsibleTrigger>
             <CollapsiblePanel>

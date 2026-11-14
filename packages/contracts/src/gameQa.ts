@@ -75,8 +75,9 @@ export const listedNames = (names: ReadonlyArray<string>) =>
 
 /**
  * PURE. A QA report as findings. `dead`, `errors`, `retry` and `hud` are certain (the check
- * fails on them); `silent` controls answered nothing the play could see, which a control that
- * works only in some places also does.
+ * fails on them). `silent` controls are read but answered nothing the play could see, which a
+ * control that works only in some places also does (a frog's "down" at its start row), so they
+ * are never a problem: agents sent to fix them broke working controls.
  */
 export const gameQaFindings = (report: GameQaReport) => {
   const dead = report.controls.filter((control) => !control.read).map((control) => control.label);
@@ -156,9 +157,4 @@ export const gameQaProblems = (findings: GameQaFindings): ReadonlyArray<string> 
     .map((error) => `Pressing ${error} (thrown while the QA play pressed it): fix the error.`),
   ...findings.retry.map((each) => `${each.said}: ${each.fix}`),
   ...findings.hud.map((each) => `${each.said}: ${each.fix}`),
-  ...(findings.silent.length === 0
-    ? []
-    : [
-        `${listedNames(findings.silent)}: pressed twice on a fresh run, nothing answered (no movement, value, Juice or sound). Give every press a visible answer; one that works only in certain places can stay.`,
-      ]),
 ];

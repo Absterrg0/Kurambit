@@ -755,7 +755,7 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
           text:
             found.silent.length === 0
               ? `All ${report.controls.length} controls answer a press`
-              : `All ${report.controls.length} controls are read; ${listedNames(found.silent)} showed no answer on a fresh run`,
+              : `All ${report.controls.length} controls are read by the game`,
           value: 0,
           tone: "good",
           kind: "clean",
@@ -1213,9 +1213,9 @@ const checkWords = (
           ? { sentence: `${found.dead.length} controls do nothing`, value: listedNames(found.dead) }
           : {
               sentence: "Every control works",
-              // Answered nothing the play could see: a control that works in some places does too.
-              value:
-                found.silent.length === 0 ? null : `${found.silent.length} with no answer seen`,
+              // Read, but answered nothing the play could see, as one that works only in some
+              // places does too: the person's to try, never a failure.
+              value: found.silent.length === 0 ? null : `${found.silent.length} to try yourself`,
             };
     }
     case "retry": {

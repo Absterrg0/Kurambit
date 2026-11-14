@@ -117,10 +117,7 @@ export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<st
   const found = gameQaFindings(facts.qa.value);
   switch (id) {
     case "controls":
-      return [
-        ...(found.dead.length > 0 ? [`Never read by the game: ${found.dead.join(", ")}`] : []),
-        ...(found.silent.length > 0 ? [`No answer seen: ${found.silent.join(", ")}`] : []),
-      ];
+      return found.dead.length > 0 ? [`Never read by the game: ${found.dead.join(", ")}`] : [];
     case "retry":
       return found.retry.map((each) => each.said);
     case "hud":
@@ -130,6 +127,18 @@ export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<st
     default:
       return [];
   }
+};
+
+/**
+ * Controls the game reads that showed no answer on a fresh run: context, never a finding, since
+ * a control that works only in some places looks the same.
+ */
+export const silentControlsNote = (facts: GameBuildFacts): string | null => {
+  if (facts.qa.status !== "measured") return null;
+  const silent = gameQaFindings(facts.qa.value).silent;
+  return silent.length === 0
+    ? null
+    : `The QA play pressed ${silent.join(", ")} on a fresh run and saw no answer. A control that works only in some places looks the same, so try them yourself.`;
 };
 
 /** The Asset use row's detail: the files the plays never loaded, and sounds never started. */
