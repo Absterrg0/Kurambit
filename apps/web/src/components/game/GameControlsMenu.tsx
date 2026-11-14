@@ -165,13 +165,8 @@ function ControlRow({
           )}
         </Button>
       )}
-      {/* The first gamepad input is the one a player reaches for; the rest are in its title. */}
-      <Text
-        variant="caption"
-        tone="muted"
-        truncate
-        render={<span className="px-1" title={control.pad.join(", ")} />}
-      >
+      {/* The first gamepad input is the one a player reaches for (the stick, before the d-pad). */}
+      <Text variant="caption" tone="muted" truncate render={<span className="px-1" />}>
         {control.pad[0] ?? ""}
       </Text>
     </>

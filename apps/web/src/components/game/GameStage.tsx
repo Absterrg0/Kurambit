@@ -90,7 +90,7 @@ import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
-import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
+import { GameBuildHistory, type GameBuildSlot, type GameStripRequest } from "./GameBuildHistory";
 import { GameControlsMenu } from "./GameControlsMenu";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -197,8 +197,6 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
   AsyncResult.isSuccess(result) &&
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
-/** A build card in the builds popover. */
-const STRIP_CARD_WIDTH = 168;
 /** The widest the game's column grows, so its chat never reads as one long line. */
 const GAME_COLUMN_MAX = 1040;
 /** The least the chat under the game keeps, whatever its share: its composer and a reply. */
@@ -545,14 +543,7 @@ function ThreadGameStage({
   // Whatever height is left over collects below the strip, above the composer.
   const viewportWidth = data?.viewport.width ?? 16;
   const viewportHeight = data?.viewport.height ?? 9;
-  const [stageFit, setStageFit] = useState<{
-    width: number;
-    height: number;
-    cardWidth: number;
-    cardPicture: number;
-    /** A short window: the cards' captions take one request line. */
-    compact: boolean;
-  } | null>(null);
+  const [stageFit, setStageFit] = useState<{ width: number; height: number } | null>(null);
   // The column the game shares with its chat and composer: the fitted game's width.
   const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
@@ -590,13 +581,7 @@ function ThreadGameStage({
         )
           taken += child.offsetHeight;
       const fit = gameColumnFit(centre, taken, viewportHeight / viewportWidth, chatShare);
-      const next = {
-        width: fit.width,
-        height: fit.height,
-        cardWidth: STRIP_CARD_WIDTH,
-        cardPicture: Math.floor((STRIP_CARD_WIDTH * 9) / 16),
-        compact: false,
-      };
+      const next = { width: fit.width, height: fit.height };
       setStageFit((previous) =>
         previous !== null &&
         Math.abs(previous.width - next.width) <= 1 &&
@@ -1523,19 +1508,15 @@ function ThreadGameStage({
             </Text>
             <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
           </PopoverTrigger>
+          {/* Below the bar, over the chat: choosing a build never covers the game. */}
           <PopoverPopup
-            side="top"
+            side="bottom"
             align="end"
             padding="compact"
             keepMounted
-            className="max-w-[min(44rem,calc(100vw-2rem))]"
+            className="w-[min(28rem,calc(100vw-2rem))]"
           >
-            <GameBuildStrip
-              hidden={false}
-              cardWidth={STRIP_CARD_WIDTH}
-              cardPicture={Math.floor((STRIP_CARD_WIDTH * 9) / 16)}
-              // One caption line beside each picture: a timeline row, so the game keeps the height.
-              compact
+            <GameBuildHistory
               threadRef={threadRef}
               gameName={gameName}
               playing={playTarget?.build ?? null}
