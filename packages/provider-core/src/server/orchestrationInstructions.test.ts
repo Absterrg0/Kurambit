@@ -88,4 +88,28 @@ describe("Kurambit orchestration provider instructions", () => {
     assert.notInclude(withoutMcp, "Kurambit collaborative browser");
     assert.notInclude(withoutMcp, "Kurambit orchestration");
   });
+
+  it("carries a thread's harness rules, and resends ACP guidance when they change", () => {
+    const rules = "## Every turn\n\n- One visible change per turn.";
+    const state = { interactionMode: "default", hasKurambitMcp: false } as const;
+    assert.include(
+      kurambitOrchestrationPromptForFirstRun({
+        prompt: "Make this game.",
+        runOrdinal: 1,
+        hasKurambitMcp: false,
+        harnessInstructions: rules,
+      }),
+      "One visible change per turn.",
+    );
+    assert.include(kurambitOrchestrationSystemPrompt(true, rules) ?? "", "Kurambit orchestration");
+    assert.include(kurambitOrchestrationSystemPrompt(false, rules) ?? "", rules);
+    assert.include(
+      kurambitAcpPromptWithInstructions({
+        prompt: "Continue.",
+        state: { ...state, harnessInstructions: rules },
+        previousState: state,
+      }),
+      rules,
+    );
+  });
 });

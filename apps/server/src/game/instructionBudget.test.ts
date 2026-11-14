@@ -23,11 +23,12 @@ import {
   GameToolkit,
   GameUnityScreenshotTool,
 } from "../mcp/toolkits/game/tools.ts";
-import { firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
+import { firstTurnMessage, gameTurnRules, scaffoldFiles } from "./scaffold.ts";
 
 /**
  * Bytes a new three.js game's first turn reads, by character route: its first message (the
- * first turn's steps), AGENTS.md, TEMPLATE.md, three.md and the art-pipeline sections they name.
+ * first turn's steps), the turn rules the harness sends, AGENTS.md, TEMPLATE.md, three.md and the
+ * art-pipeline sections they name.
  * About 10% over what they were on 2026-11-08 (library 23,981; generated 29,096).
  */
 const FIRST_TURN_BUDGET: Readonly<Record<"library" | "generated", number>> = {
@@ -73,6 +74,7 @@ const firstTurnBytes = (characters: GameCharacterRoute) => {
   const message = firstTurnMessage(JSON.parse(files["game.json"]!) as GameManifest);
   return {
     "first message": bytes(message),
+    "turn rules": bytes(gameTurnRules("three") ?? ""),
     "AGENTS.md": bytes(agents),
     "TEMPLATE.md": bytes(template("blank-three/TEMPLATE.md")),
     "three.md": bytes(template("studio/three.md")),

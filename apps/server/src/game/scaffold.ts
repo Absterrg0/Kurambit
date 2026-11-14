@@ -171,17 +171,35 @@ export const firstTurnMessage = (manifest: GameManifest): string => {
 };
 
 /**
- * A game's AGENTS.md with its "Every turn" section as Kurambit writes it now: the turn rules are
- * the harness's contract, so a game made before a change to them plays by the new ones. The rest
- * of the file is the game's own; null when there is nothing to change.
+ * The harness's rules for every turn of a game whose turns Kurambit plays: how a turn ends and
+ * what keep going does. Run execution sends them with each turn (ProviderAdapterV2TurnInput
+ * `harnessInstructions`) rather than writing them into the game, so a change to them reaches
+ * every game at once.
  */
-export const refreshedTurnRules = (agents: string, engine: GameEngineId): string | null => {
-  const rules = everyTurnSection(engine);
-  const start = agents.indexOf("## Every turn\n");
-  if (rules === undefined || start === -1) return null;
-  const next = agents.indexOf("\n## ", start + 1);
-  const end = next === -1 ? agents.length : next + 1;
-  const updated = `${agents.slice(0, start)}${rules}${agents.slice(end)}`;
+export const gameTurnRules = (engine: GameEngineId): string | undefined => {
+  const everyTurn = everyTurnSection(engine);
+  return everyTurn === undefined ? undefined : `${everyTurn}\n${KEEP_GOING_SECTION}`;
+};
+
+/** Games made before the turn rules moved out of AGENTS.md carry them as these sections. */
+const MOVED_SECTIONS = ["## Every turn\n", "## Keep going\n"];
+
+/**
+ * A game's AGENTS.md without the turn rules it was made with, every other byte as it was; null
+ * when it has none. A section runs to the next `## ` heading, which keeps the blank line before
+ * it; the last section takes the blank line before itself instead.
+ */
+export const withoutMovedSections = (agents: string): string | null => {
+  let updated = agents;
+  for (const heading of MOVED_SECTIONS) {
+    const at = updated.indexOf(`\n${heading}`);
+    if (at === -1) continue;
+    const next = updated.indexOf("\n## ", at + 1);
+    updated =
+      next === -1
+        ? updated.slice(0, at + 1).replace(/\n\n$/, "\n")
+        : `${updated.slice(0, at + 1)}${updated.slice(next + 1)}`;
+  }
   return updated === agents ? null : updated;
 };
 
@@ -195,13 +213,7 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
   return {
     "game.json": JSON.stringify(manifest, null, 2) + "\n",
     "BRIEF.md": `# ${manifest.name}\n\n${manifest.brief}\n\n## Art direction\n\n${manifest.artDirection}\n`,
-    "AGENTS.md": [
-      `# Kurambit project\n\n${engineProfile(engine).scaffold.agents}`,
-      everyTurnSection(engine),
-      engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : undefined,
-    ]
-      .filter((section) => section !== undefined)
-      .join("\n"),
+    "AGENTS.md": `# Kurambit project\n\n${engineProfile(engine).scaffold.agents}`,
     "CLAUDE.md": "@AGENTS.md\n",
     ".gitignore": `${[...GENERATED_IGNORES, ...RUN_STATE_IGNORES].join("\n")}\n`,
   };

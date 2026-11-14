@@ -421,6 +421,11 @@ export interface ProviderAdapterV2TurnInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  /**
+   * Kurambit's own rules for this thread's turns, trusted like the orchestration instructions
+   * and sent wherever an adapter sends those; unlike `appContext`, never text an MCP server wrote.
+   */
+  readonly harnessInstructions?: string;
 }
 
 export interface ProviderAdapterV2SteerInput {

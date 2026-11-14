@@ -349,6 +349,15 @@ worker and `-job-worker-count 2` (the worker count is a per-user setting in
 three import workers cost about 0.7 GB each. Packaging, preview, stop and keep going's tools stay
 outside their catalog.
 
+A game's own `AGENTS.md` holds only its engine's guidance. The harness's rules travel with the
+turn instead, so changing them needs no migration of games already made: the first turn's steps
+are in the first message (`firstTurnMessage`), and every turn's rules (`gameTurnRules`) go in the
+turn input's `harnessInstructions`, which run execution fills from the cwd's `game.json` and each
+adapter sends where it sends the orchestration text. The MCP `initialize` instructions cannot
+carry them: Codex keeps about its first line, Claude cuts at 4,096 characters, Grok at 2,048.
+Codex also cuts each `additional_context` value past 4,000 bytes, so long texts go in several keys
+(`codexContextEntries`).
+
 ## Builds and facts
 
 - **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
