@@ -52,6 +52,14 @@ export const GameThingValue = Schema.Struct({
   max: Schema.optionalKey(Schema.Finite),
   step: Schema.optionalKey(Schema.Finite),
   label: Schema.optionalKey(Schema.String),
+  /** A value that picks one of these by its index (a theme, a weapon): its names, in order. */
+  choices: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(40))).check(Schema.isMaxLength(24)),
+  ),
+  /** Its value in the game's code; tune.json holds only values that differ from it. */
+  default: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Boolean])),
+  /** What its number counts ("s", "m/s", "%"), as the game declared it. */
+  unit: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(12))),
 });
 export type GameThingValue = typeof GameThingValue.Type;
 
@@ -263,6 +271,11 @@ export const GameKeepValuesInput = Schema.Struct({
     Schema.isMaxLength(GAME_KEEP_VALUES_MAX_THINGS),
   ),
   commandId: Schema.optionalKey(Schema.String),
+  /**
+   * The Stage's tuning: fold into the tuning build the folder holds, so values tuned between two
+   * builds are one build and one Undo, instead of a build per slider let go.
+   */
+  fold: Schema.optionalKey(Schema.Boolean),
 });
 export type GameKeepValuesInput = typeof GameKeepValuesInput.Type;
 

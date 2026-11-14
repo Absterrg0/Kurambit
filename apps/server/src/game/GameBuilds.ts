@@ -66,7 +66,7 @@ import { engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { captureBuild, isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
-import { tuneFileText, tuneFileWith } from "./gameTune.ts";
+import { sameTuneFile, tuneFileText, tuneFileWith } from "./gameTune.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
@@ -105,7 +105,7 @@ const EDITS = "edits/";
  * is no build of the rail: the rail names the build it was written on.
  */
 const BOTS = `${gameRunRefsFolder(NO_RUN)}bots/`;
-const VALUES_LABEL = "Values kept";
+const VALUES_LABEL = "Tuned";
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 const MOVED_ON =
@@ -1684,6 +1684,8 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /** Each game's tuning session's base, and its tune file's text there (null: no file). */
+  const tuningBases = new Map<string, { readonly base: string; readonly text: string | null }>();
   const keepValues: GameBuilds["Service"]["keepValues"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
@@ -1728,9 +1730,36 @@ const make = Effect.gen(function* () {
           ? Effect.succeed({
               build,
               base,
-              message: `Kept as a build: ${summary}. Undo restores the game as it was.`,
+              message: `Saved as a build: ${summary}. Undo puts the game back as it was.`,
             })
           : failed("Keep values", g.root, "io", "the kept build is not one of this game's builds");
+      // The tuning build the folder still holds, with the folder it was made from: the Stage's
+      // next values fold into it, so a session of tuning stays one build and one Undo.
+      const heldTuning = Effect.gen(function* () {
+        const refs = yield* checkpoints
+          .listCheckpointRefs({ cwd: g.root, prefix: `${gameRunRefsFolder(NO_RUN)}${EDITS}` })
+          .pipe(
+            Effect.mapError((cause) =>
+              failed("Keep values", g.root, "io", "the game's builds could not be read", cause),
+            ),
+          );
+        const newest = refs
+          .filter((ref) => ref.checkpointRef.endsWith("-values"))
+          .toSorted((a, b) => b.committedAt - a.committedAt)[0];
+        if (newest === undefined || !isGameBuildId(newest.oid)) return null;
+        const from = refs.find(
+          (ref) => ref.checkpointRef === newest.checkpointRef.replace(/-values$/, "-from"),
+        );
+        if (from === undefined || !isGameBuildId(from.oid)) return null;
+        const [changed] = yield* folderAgainst(g, [newest.oid]).pipe(
+          Effect.mapError((cause) =>
+            failed("Keep values", g.root, "io", "the folder could not be compared", cause),
+          ),
+        );
+        return changed === false
+          ? { base: from.oid, refs: [from.checkpointRef, newest.checkpointRef] }
+          : null;
+      });
       const said = (things: GameKeepValuesInput["things"]) =>
         things
           .map(
@@ -1768,22 +1797,81 @@ const make = Effect.gen(function* () {
           const merged = tuneFileWith(file, existing, input.things);
           if ("refusal" in merged)
             return yield* failed("Keep values", path, "invalid-input", merged.refusal);
-          // A try cut short after its first capture keeps that one as the base.
-          const base = doneFrom ?? (yield* capture(fromRef));
+          const held = input.fold === true && doneFrom === null ? yield* heldTuning : null;
+          // A try cut short after its first capture keeps that one as the base; a fold keeps
+          // the base of the build it replaces, so Undo still goes back to before the session.
+          const base =
+            doneFrom ??
+            (held === null
+              ? yield* capture(fromRef)
+              : yield* checkpoints
+                  .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: held.base })
+                  .pipe(
+                    Effect.as(held.base),
+                    Effect.mapError((cause) =>
+                      failed(
+                        "Keep values",
+                        g.root,
+                        "io",
+                        "the game folder could not be kept",
+                        cause,
+                      ),
+                    ),
+                  ));
+          // The session's base file as it was: values put back write it again byte for byte, so
+          // the folder is the base again whatever formatting the file had. Kept in memory; after
+          // a server restart a session put back stays one build, as before.
+          if (held === null) tuningBases.set(g.root, { base, text });
+          const before = tuningBases.get(g.root);
+          const baseText = before !== undefined && before.base === base ? before.text : undefined;
+          const putBack =
+            baseText !== undefined &&
+            sameTuneFile(merged.file, baseText === null ? {} : decodeJson(baseText));
           yield* Effect.tryPromise({
             try: async () => {
+              if (putBack && baseText === null) return NodeFSP.rm(path, { force: true });
               const temporary = `${path}.${request}.tmp`;
-              await NodeFSP.writeFile(temporary, tuneFileText(merged.file));
+              await NodeFSP.writeFile(
+                temporary,
+                putBack && baseText !== undefined && baseText !== null
+                  ? baseText
+                  : tuneFileText(merged.file),
+              );
               await NodeFSP.rename(temporary, path);
             },
             catch: (cause) =>
               failed("Keep values", path, "io", `${file} could not be written`, cause),
           });
           const build = yield* capture(keptRef);
-          return { base, build, summary: merged.summary };
+          const drop = (refs: ReadonlyArray<CheckpointRef>) =>
+            checkpoints
+              .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: refs })
+              .pipe(
+                Effect.mapError((cause) =>
+                  failed("Keep values", g.root, "io", "the game's builds could not be kept", cause),
+                ),
+              );
+          // Written before the build it replaces is dropped: a stop between the two leaves two
+          // tuning builds, never none.
+          if (held !== null) yield* drop(held.refs.map((ref) => CheckpointRef.make(ref)));
+          // Every value put back: the session leaves no build, and the folder is its base again.
+          if ((yield* changeOf(g.root, g.lane, base, build)).count === 0) {
+            yield* drop([fromRef, keptRef]);
+            return { base, build: base, summary: merged.summary, unchanged: true };
+          }
+          return { base, build, summary: merged.summary, unchanged: false };
         }),
         owner,
       );
+      if (kept.unchanged) {
+        yield* nextTurnsFrom(g, threadId, kept.base);
+        yield* operations.changed(g.root, GAME_BUILDS_EVENT, "Tuned values put back.");
+        return {
+          build: kept.base,
+          base: kept.base,
+          message: "Every value is back as it was, so no build was kept.",
+        };
+      }
       const result = yield* answer(kept.build, kept.base, kept.summary);
       yield* nextTurnsFrom(g, threadId, kept.build);
       yield* operations.changed(g.root, GAME_BUILDS_EVENT, result.message);

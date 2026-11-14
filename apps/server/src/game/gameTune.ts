@@ -1,9 +1,10 @@
 // PURE. The Stage bridge's values file (web/tune.json for three.js): one
-// object per thing id, each its values by key. Keep as a build merges the
-// person's values into it after checking them against the ranges the game
+// object per thing id, each its values by key. A save merges the person's
+// values into it after checking them against the ranges the game
 // registered, so a file the game reads at boot never holds a value its own
 // sliders could not reach.
 import type { GameKeepValuesThing } from "@kurambit/contracts";
+import * as Option from "effect/Option";
 
 export type TuneFile = Record<string, Record<string, number | boolean>>;
 
@@ -51,9 +52,13 @@ export const tuneFileWith = (
         if (value.max !== undefined && value.value > value.max)
           return { refusal: `${where} = ${value.value} is above its maximum ${value.max}.` };
       }
-      kept[value.key] = value.value;
+      // The file holds what differs from the code: a value back at its default leaves it, so
+      // tuning put back leaves the file as it was and a default changed in code takes effect.
+      if (value.default !== undefined && value.default === value.value) delete kept[value.key];
+      else kept[value.key] = value.value;
     }
-    next[thing.id] = kept;
+    if (Object.keys(kept).length === 0) delete next[thing.id];
+    else next[thing.id] = kept;
     said.push(
       `${thing.id} ${thing.values.map((value) => `${value.key} ${String(value.value)}`).join(", ")}`,
     );
@@ -63,3 +68,22 @@ export const tuneFileWith = (
 };
 
 export const tuneFileText = (file: TuneFile) => `${JSON.stringify(file, null, 2)}\n`;
+
+/** Whether a merged file holds the same values as a parsed one (None: unreadable, never the same). */
+export const sameTuneFile = (file: TuneFile, other: Option.Option<unknown>): boolean => {
+  if (Option.isNone(other)) return false;
+  const parsed = other.value;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const ids = Object.keys(file);
+  if (ids.length !== Object.keys(parsed).length) return false;
+  return ids.every((id) => {
+    const mine = file[id]!;
+    const theirs = (parsed as Record<string, unknown>)[id];
+    if (theirs === null || typeof theirs !== "object" || Array.isArray(theirs)) return false;
+    const keys = Object.keys(mine);
+    return (
+      keys.length === Object.keys(theirs).length &&
+      keys.every((key) => (theirs as Record<string, unknown>)[key] === mine[key])
+    );
+  });
+};

@@ -91,7 +91,11 @@ costs nothing until the Stage asks.
 ctx.thing(cat, { name: "Cat", kind: "character" });
 ctx.thing(null, { name: "Music", kind: "sound" }); // no body
 // every number a person would tune, read every frame, never copied
-const cat = ctx.tune("Cat", { jump: 8, speed: 5 }, { jump: [2, 20], speed: [1, 12, 0.5] });
+const cat = ctx.tune(
+  "Cat",
+  { jump: 8, speed: 5, look: 0 },
+  { jump: [2, 20, 0.5, "m"], speed: [1, 12, 0.5, "m/s"], look: ["Tabby", "Ginger", "Ghost"] },
+);
 const rules = ctx.tune("Difficulty", { spawnEvery: 2.5, hard: false }, { spawnEvery: [0.5, 6] });
 // in update: cat.jump, rules.spawnEvery
 ```
@@ -101,10 +105,16 @@ const rules = ctx.tune("Difficulty", { spawnEvery: 2.5, hard: false }, { spawnEv
   `level`, `effect`, `ui`, `rule`, `sound`, `other`.
 - `ctx.tune(id, defaults, ranges)` returns one live object per id, lasting
   across retries: numbers and booleans, each number clamped to its range
-  (`[min, max, step]`). An id no `ctx.thing` names is a rule of its own.
-- `web/tune.json` holds kept values by id and key and is read once at boot
-  over the defaults. The Stage's "Keep as a build" and `game_tune` write it;
-  keep the file, even as `{}`.
+  (`[min, max, step, unit]`, the unit as a player reads it: "s", "m/s", "%").
+  A value that picks one of several (a theme, a weapon, a look) takes their
+  names instead (`["Dusk", "Snow"]`) and reads as the index: the Stage shows
+  the names, never a slider over 0 to 2. An id no `ctx.thing` names is a
+  rule of its own.
+- `web/tune.json` holds the person's values by id and key and is read once at
+  boot over the defaults: the Stage saves a value there as it is let go, and
+  `game_tune` writes it too. A value in it wins over its default in code, so
+  to change a value the person has tuned, change it in `web/tune.json`. Keep
+  the file, even as `{}`.
 
 ## The studio bridge (keep it)
 

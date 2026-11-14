@@ -46,8 +46,6 @@ interface StageBridgeState {
   readonly speed: number;
   /** The Stage silenced the game. */
   readonly muted: boolean;
-  /** What each value was before the person tuned it here and has not kept: id → key → value. */
-  readonly tunedFrom: Readonly<Record<string, Readonly<Record<string, number | boolean>>>>;
   readonly post: ((message: GameStageToGameMessage) => void) | null;
   /** Holds or resumes a game with no bridge through the visibility message every shell knows. */
   readonly hold: ((on: boolean) => void) | null;
@@ -62,7 +60,6 @@ const EMPTY: Omit<StageBridgeState, "owner" | "post" | "hold"> = {
   selected: null,
   speed: 1,
   muted: false,
-  tunedFrom: {},
 };
 
 export const useStageBridge = create<StageBridgeState>()(() => ({
@@ -316,20 +313,10 @@ export const hoverStageThing = (id: string | null) =>
 export const pointStage = (x: number, y: number, action: "hover" | "select" | "select-inner") =>
   useStageBridge.getState().post?.({ type: "studio-pointer", x, y, action });
 
-/** A live value change; the first change of a value remembers what it was, for Reset. */
-export const tuneStageValue = (
-  id: string,
-  key: string,
-  value: number | boolean,
-  before: number | boolean,
-) => {
+/** A live value change: the game plays it at once; saving it is Tune's. */
+export const tuneStageValue = (id: string, key: string, value: number | boolean) => {
   const state = useStageBridge.getState();
   if (state.post === null) return;
-  const thing = state.tunedFrom[id] ?? {};
-  if (!(key in thing))
-    useStageBridge.setState({
-      tunedFrom: { ...state.tunedFrom, [id]: { ...thing, [key]: before } },
-    });
   state.post({ type: "studio-tune", id, key, value });
   withValue(id, key, value);
 };
@@ -364,25 +351,6 @@ export const setStageMuted = (muted: boolean) => {
   if (state.post === null || !state.capabilities.includes("mute")) return;
   state.post({ type: "studio-mute", on: muted });
   useStageBridge.setState({ muted });
-};
-
-/** Puts one thing's tuned values back as they were. */
-export const resetStageValues = (id: string) => {
-  const state = useStageBridge.getState();
-  const before = state.tunedFrom[id];
-  if (before === undefined) return;
-  for (const [key, value] of Object.entries(before)) {
-    state.post?.({ type: "studio-tune", id, key, value });
-    withValue(id, key, value);
-  }
-  const { [id]: _reset, ...rest } = state.tunedFrom;
-  useStageBridge.setState({ tunedFrom: rest });
-};
-
-/** After Keep as a build: the kept values are the new baseline. */
-export const forgetStageTuning = (id: string) => {
-  const { [id]: _kept, ...rest } = useStageBridge.getState().tunedFrom;
-  useStageBridge.setState({ tunedFrom: rest });
 };
 
 /** The canvas as a PNG data URL with no outline drawn, or null when the game cannot give one. */

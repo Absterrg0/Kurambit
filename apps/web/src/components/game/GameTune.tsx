@@ -1,36 +1,113 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { GameThing, ScopedThreadRef } from "@kurambit/contracts";
+import type { GameThing, GameThingValue, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { ChevronRightIcon, CrosshairIcon, RotateCcwIcon, XIcon } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, createContext, use, useEffect, useRef, useState } from "react";
 
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn, randomUUID } from "../../lib/utils";
+import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThingLook, ThingsSection, useSelectNotice, valueLabel } from "./GameInspector";
-import { GameTuneField } from "./GameTuneField";
+import { GameTuneField, type TuneCommit } from "./GameTuneField";
 import {
   clearStageSelection,
-  forgetStageTuning,
-  resetStageValues,
   selectStageThing,
   tuneStageValue,
   useThreadStageBridge,
 } from "./gameStageBridge";
 
 const NO_THINGS: ReadonlyArray<GameThing> = [];
-const NO_TUNING: Readonly<Record<string, Readonly<Record<string, number | boolean>>>> = {};
-/** How long "Kept as build 4" stays in the footer before it folds away. */
-const SAID_MS = 6000;
+
+/** Saves a value as it is let go; the rows reach it through context, not props. */
+const TuneSave = createContext<(id: string, value: GameThingValue, how: TuneCommit) => void>(
+  () => {},
+);
+
+type SaveState =
+  | { readonly kind: "saved" }
+  | { readonly kind: "saving" }
+  /** An agent's turn is changing the game: a save then would keep its half-made work. */
+  | { readonly kind: "waiting" }
+  | { readonly kind: "failed"; readonly text: string };
+
+/**
+ * Saves tuned values into the game as they are let go, one at a time, each folding into the
+ * session's one tuning build. While the agent's turn runs they wait (they still play), and save
+ * once it ends, on top of its build. A failed save keeps its values for the next one.
+ */
+function useTuneSaver(threadRef: ScopedThreadRef) {
+  const turnRunning = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
+  const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
+  const canSave = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));
+  const queue = useRef(new Map<string, Map<string, GameThingValue>>());
+  // The last value saved per id and key: letting go where it already is saves nothing.
+  const saved = useRef(new Map<string, number | boolean>());
+  const busy = useRef(false);
+  const [state, setState] = useState<SaveState>({ kind: "saved" });
+  // One save at a time; what is let go meanwhile goes in the next, until none is left.
+  const flush = useStableCallback(async () => {
+    if (busy.current || !canSave) return;
+    busy.current = true;
+    while (queue.current.size > 0) {
+      if (turnRunning) {
+        setState({ kind: "waiting" });
+        break;
+      }
+      setState({ kind: "saving" });
+      const things = [...queue.current].map(([id, values]) => ({
+        id,
+        values: [...values.values()],
+      }));
+      queue.current = new Map();
+      const result = await keep({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, things, commandId: randomUUID(), fold: true },
+      });
+      if (result._tag === "Failure") {
+        // Back under anything tuned since, which is newer.
+        for (const thing of things) {
+          const values = queue.current.get(thing.id) ?? new Map<string, GameThingValue>();
+          for (const value of thing.values)
+            if (!values.has(value.key)) values.set(value.key, value);
+          queue.current.set(thing.id, values);
+        }
+        setState({ kind: "failed", text: String(squashAtomCommandFailure(result)) });
+        break;
+      }
+      for (const thing of things)
+        for (const value of thing.values)
+          saved.current.set(`${thing.id}\0${value.key}`, value.value);
+      setState({ kind: "saved" });
+    }
+    busy.current = false;
+  });
+  useEffect(() => {
+    if (!turnRunning) void flush();
+  }, [turnRunning, flush]);
+  const save = useStableCallback((id: string, value: GameThingValue, how: TuneCommit) => {
+    // Let go with the pointer: the game takes the keys back, so the next press plays.
+    if (how === "pointer") useGameWorkspaceStore.getState().requestStage({ kind: "focus" });
+    if (saved.current.get(`${id}\0${value.key}`) === value.value && !queue.current.has(id)) return;
+    const values = queue.current.get(id) ?? new Map<string, GameThingValue>();
+    values.set(value.key, value);
+    queue.current.set(id, values);
+    void flush();
+  });
+  return { save, state, canSave, retry: () => void flush() };
+}
 
 /**
  * The Tune tab: every value the running game tunes (`ctx.tune`), grouped by thing, changing the
- * game as they move. The thing pointed at on the paused game comes first. A footer appears only
- * while something is changed: keep the changes as a build, or put them back.
+ * game as they move and saved into it as they are let go, so a Restart keeps them and Undo takes
+ * the session back. The thing pointed at on the paused game comes first.
  */
 export function GameTunePanel({
   threadRef,
@@ -49,83 +126,79 @@ export function GameTunePanel({
   );
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
   const selected = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
-  const tunedFrom = useThreadStageBridge(threadKey, (state) => state.tunedFrom, NO_TUNING);
   const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
+  const saver = useTuneSaver(threadRef);
   const playing = status === "ready";
   const groups = things.filter(
     (thing) => (thing.values?.length ?? 0) > 0 && thing.id !== selected?.id,
   );
   const changed = [...(selected === null ? [] : [selected]), ...groups]
-    .map((thing) => ({ id: thing.id, values: changedValues(thing, tunedFrom[thing.id]) }))
+    .map((thing) => ({ thing, values: tunedValues(thing) }))
     .filter((thing) => thing.values.length > 0);
   const changedCount = changed.reduce((sum, thing) => sum + thing.values.length, 0);
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
-        {notice !== null ? (
-          <TuneNote title={notice.title} body={notice.body} />
-        ) : !playing ? (
-          <TuneNote
-            title="Play the game to tune it"
-            body="Its speeds, jump height, timers and counts show here while it runs."
-          />
-        ) : (
-          <>
-            {selected === null ? null : (
-              <PointedThing
-                threadRef={threadRef}
-                thing={selected}
-                tunedFrom={tunedFrom[selected.id]}
-                disabled={!tunable}
-              />
-            )}
-            {groups.map((thing) => (
-              <TuneGroup
-                key={thing.id}
-                thing={thing}
-                tunedFrom={tunedFrom[thing.id]}
-                disabled={!tunable}
-              />
-            ))}
-            {groups.length === 0 && selected === null ? (
-              <TuneNote
-                title="Nothing to tune on this screen"
-                body="Values show here once play starts. If none do, your agent can expose them."
-                action={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      onAsk(
-                        "Make this game's key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.",
-                      )
-                    }
-                  >
-                    Ask your agent to expose them
-                  </Button>
-                }
-              />
-            ) : null}
-            {/* Paused, everything on screen can be pointed at, tunable or not. */}
-            {paused ? (
-              <div className="px-4 py-4">
-                <ThingsSection threadRef={threadRef} />
-              </div>
-            ) : null}
-          </>
-        )}
+    <TuneSave value={saver.save}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
+          {notice !== null ? (
+            <TuneNote title={notice.title} body={notice.body} />
+          ) : !playing ? (
+            <TuneNote
+              title="Play the game to tune it"
+              body="Its speeds, jump height, timers and counts show here while it runs."
+            />
+          ) : (
+            <>
+              {selected === null ? null : (
+                <PointedThing threadRef={threadRef} thing={selected} disabled={!tunable} />
+              )}
+              {groups.map((thing) => (
+                <TuneGroup key={thing.id} thing={thing} disabled={!tunable} />
+              ))}
+              {groups.length === 0 && selected === null ? (
+                <TuneNote
+                  title="Nothing to tune on this screen"
+                  body="Values show here once play starts. If none do, your agent can expose them."
+                  action={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        onAsk(
+                          "Make this game's key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.",
+                        )
+                      }
+                    >
+                      Ask your agent to expose them
+                    </Button>
+                  }
+                />
+              ) : null}
+              {/* Paused, everything on screen can be pointed at, tunable or not. */}
+              {paused ? (
+                <div className="px-4 py-4">
+                  <ThingsSection threadRef={threadRef} />
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+        <TuneFooter
+          changed={changed}
+          changedCount={changedCount}
+          state={saver.state}
+          canSave={saver.canSave}
+          onRetry={saver.retry}
+        />
       </div>
-      <TuneFooter threadRef={threadRef} changed={changed} changedCount={changedCount} />
-    </div>
+    </TuneSave>
   );
 }
 
-const changedValues = (
-  thing: GameThing,
-  before: Readonly<Record<string, number | boolean>> | undefined,
-) =>
+/** Its values the person has tuned away from the game's own (tune.json holds just these). */
+const tunedValues = (thing: GameThing) =>
   (thing.values ?? []).filter(
-    (value) => before !== undefined && value.key in before && before[value.key] !== value.value,
+    (value) => value.default !== undefined && value.default !== value.value,
   );
 
 /** A short line where values would be, with what to do next. */
@@ -147,12 +220,10 @@ function TuneNote({ title, body, action }: { title: string; body: string; action
 function PointedThing({
   threadRef,
   thing,
-  tunedFrom,
   disabled,
 }: {
   threadRef: ScopedThreadRef;
   thing: GameThing;
-  tunedFrom: Readonly<Record<string, number | boolean>> | undefined;
   disabled: boolean;
 }) {
   return (
@@ -207,14 +278,16 @@ function PointedThing({
           <TooltipPopup side="left">Stop pointing at it (Esc)</TooltipPopup>
         </Tooltip>
       </div>
-      <Text variant="caption" tone="muted" render={<p className="px-4 pb-2" />}>
-        {thing.instance !== undefined
-          ? `One of ${thing.instance.count}. Your next message takes this one, with the frame; its values are the whole group's.`
-          : (thing.instances ?? 0) > 1
-            ? `All ${thing.instances} of them. Double-click one in the game to pick just it. Your next message takes this, with the frame.`
-            : "Your next message takes it, with this frame and its values."}
-      </Text>
-      <TuneRows thing={thing} tunedFrom={tunedFrom} disabled={disabled} />
+      {thing.instance !== undefined ? (
+        <Text variant="caption" tone="muted" render={<p className="px-4 pb-2" />}>
+          One of {thing.instance.count}; its values are the whole group's.
+        </Text>
+      ) : (thing.instances ?? 0) > 1 ? (
+        <Text variant="caption" tone="muted" render={<p className="px-4 pb-2" />}>
+          All {thing.instances} of them. Double-click one in the game to pick just it.
+        </Text>
+      ) : null}
+      <TuneRows thing={thing} disabled={disabled} />
       <div className="px-4 pt-2">
         <ThingLook threadRef={threadRef} thing={thing} />
       </div>
@@ -223,17 +296,10 @@ function PointedThing({
 }
 
 /** One thing's values under a header that folds them, the way an inspector groups components. */
-function TuneGroup({
-  thing,
-  tunedFrom,
-  disabled,
-}: {
-  thing: GameThing;
-  tunedFrom: Readonly<Record<string, number | boolean>> | undefined;
-  disabled: boolean;
-}) {
+function TuneGroup({ thing, disabled }: { thing: GameThing; disabled: boolean }) {
+  const save = use(TuneSave);
   const [open, setOpen] = useState(true);
-  const changed = changedValues(thing, tunedFrom).length;
+  const tuned = tunedValues(thing);
   return (
     <section className="border-b border-border">
       <div className="group/tune-head flex h-9 items-center gap-1 ps-2 pe-2">
@@ -253,64 +319,70 @@ function TuneGroup({
           <Text variant="meta" tone="strong" emphasis truncate>
             {thing.name}
           </Text>
-          {changed === 0 ? null : (
+          {tuned.length === 0 ? null : (
             <Text variant="caption" tone="inherit" render={<span className="text-live" />}>
-              · {changed} changed
+              · {tuned.length} tuned
             </Text>
           )}
         </button>
-        {changed === 0 ? null : (
+        {tuned.length === 0 ? null : (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={`Put ${thing.name}'s values back`}
-                  onClick={() => resetStageValues(thing.id)}
+                  aria-label={`Put ${thing.name}'s values back to the game's own`}
+                  onClick={() => {
+                    for (const value of tuned) putBack(thing, value, save);
+                  }}
                 />
               }
             >
               <RotateCcwIcon aria-hidden="true" />
             </TooltipTrigger>
-            <TooltipPopup side="left">Put {thing.name}'s values back</TooltipPopup>
+            <TooltipPopup side="left">
+              Put {thing.name}'s values back to the game's own
+            </TooltipPopup>
           </Tooltip>
         )}
       </div>
       {open ? (
         <div className="pb-2">
-          <TuneRows thing={thing} tunedFrom={tunedFrom} disabled={disabled} />
+          <TuneRows thing={thing} disabled={disabled} />
         </div>
       ) : null}
     </section>
   );
 }
 
-function TuneRows({
-  thing,
-  tunedFrom,
-  disabled,
-}: {
-  thing: GameThing;
-  tunedFrom: Readonly<Record<string, number | boolean>> | undefined;
-  disabled: boolean;
-}) {
+/** One value back at the game's own: it plays, and saving it takes it out of the tune file. */
+const putBack = (
+  thing: GameThing,
+  value: GameThingValue,
+  save: (id: string, value: GameThingValue, how: TuneCommit) => void,
+) => {
+  if (value.default === undefined) return;
+  tuneStageValue(thing.id, value.key, value.default);
+  save(thing.id, { ...value, value: value.default }, "keyboard");
+};
+
+function TuneRows({ thing, disabled }: { thing: GameThing; disabled: boolean }) {
+  const save = use(TuneSave);
   return (
     <div className="flex flex-col">
       {(thing.values ?? []).map((value) => {
-        const was = tunedFrom?.[value.key];
-        const edited = was !== undefined && was !== value.value;
+        const tuned = value.default !== undefined && value.default !== value.value;
         return (
           <GameTuneField
             key={value.key}
             label={valueLabel(value)}
             value={value}
-            was={edited ? was : undefined}
+            was={tuned ? value.default : undefined}
             disabled={disabled}
-            onChange={(next) => tuneStageValue(thing.id, value.key, next, value.value)}
-            onReset={
-              edited ? () => tuneStageValue(thing.id, value.key, was, value.value) : undefined
-            }
+            onChange={(next) => tuneStageValue(thing.id, value.key, next)}
+            onCommit={(next, how) => save(thing.id, { ...value, value: next }, how)}
+            onReset={tuned ? () => putBack(thing, value, save) : undefined}
           />
         );
       })}
@@ -319,80 +391,66 @@ function TuneRows({
 }
 
 /**
- * Only while something is changed: how many values play changed, Reset, and Keep as a build.
- * After a keep, what it made stays a moment, then the footer folds away.
+ * Only while something is tuned: how many values differ from the game's own, whether they are
+ * saved, and putting them all back. Undo in the top bar takes a session of tuning back too.
  */
 function TuneFooter({
-  threadRef,
   changed,
   changedCount,
+  state,
+  canSave,
+  onRetry,
 }: {
-  threadRef: ScopedThreadRef;
-  changed: ReadonlyArray<{ readonly id: string; readonly values: GameThing["values"] }>;
+  changed: ReadonlyArray<{
+    readonly thing: GameThing;
+    readonly values: ReadonlyArray<GameThingValue>;
+  }>;
   changedCount: number;
+  state: SaveState;
+  canSave: boolean;
+  onRetry: () => void;
 }) {
-  const canKeep = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));
-  const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
-  const [keeping, setKeeping] = useState(false);
-  const [said, setSaid] = useState<{ readonly text: string; readonly failed: boolean } | null>(
-    null,
-  );
-  useEffect(() => {
-    if (said === null || said.failed) return;
-    const timer = window.setTimeout(() => setSaid(null), SAID_MS);
-    return () => window.clearTimeout(timer);
-  }, [said]);
-  if (changedCount === 0 && said === null) return null;
-  const keepAll = async () => {
-    setKeeping(true);
-    setSaid(null);
-    const result = await keep({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        things: changed.map((thing) => ({ id: thing.id, values: thing.values ?? [] })),
-        commandId: randomUUID(),
-      },
-    });
-    setKeeping(false);
-    if (result._tag === "Failure")
-      setSaid({ text: String(squashAtomCommandFailure(result)), failed: true });
-    else {
-      for (const thing of changed) forgetStageTuning(thing.id);
-      setSaid({ text: result.value.message, failed: false });
-    }
-  };
+  const save = use(TuneSave);
+  if (changedCount === 0 && state.kind !== "failed") return null;
+  const said = !canSave
+    ? "Playing, not saved: this connection cannot change the game"
+    : state.kind === "saving"
+      ? "Saving…"
+      : state.kind === "waiting"
+        ? "Saves when the agent's turn ends"
+        : state.kind === "failed"
+          ? state.text
+          : "Saved in the game";
   return (
     <div className="flex shrink-0 flex-col gap-1 border-t border-border bg-background px-4 py-3">
-      {changedCount === 0 ? null : (
-        <div className="flex items-center gap-2">
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-live" />
-          <Text variant="meta" tone="default" render={<span className="min-w-0 flex-1" />}>
-            {changedCount === 1 ? "1 change playing" : `${changedCount} changes playing`}
-          </Text>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              for (const thing of changed) resetStageValues(thing.id);
-            }}
-          >
-            Reset
-          </Button>
-          <Button size="sm" disabled={keeping || !canKeep} onClick={() => void keepAll()}>
-            {keeping ? "Keeping…" : "Keep as a build"}
-          </Button>
-        </div>
-      )}
-      {said === null ? null : (
-        <Text
-          variant="caption"
-          tone={said.failed ? "destructive" : "muted"}
-          render={<p role={said.failed ? "alert" : "status"} />}
-        >
-          {said.text}
+      <div className="flex items-center gap-2">
+        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-live" />
+        <Text variant="meta" tone="default" render={<span className="min-w-0 flex-1" />}>
+          {changedCount === 1 ? "1 value tuned" : `${changedCount} values tuned`}
         </Text>
-      )}
+        {state.kind === "failed" ? (
+          <Button size="sm" variant="ghost" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            for (const { thing, values } of changed)
+              for (const value of values) putBack(thing, value, save);
+          }}
+        >
+          Put all back
+        </Button>
+      </div>
+      <Text
+        variant="caption"
+        tone={state.kind === "failed" ? "destructive" : "muted"}
+        render={<p role={state.kind === "failed" ? "alert" : "status"} />}
+      >
+        {said}
+      </Text>
     </div>
   );
 }

@@ -1,7 +1,8 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Keep as a build captures a real game folder in a real repository.
-// The Stage's Keep as a build writes the person's values into the game and
-// keeps the folder as a build whose Undo brings the file back as it was; a
-// value outside its range writes nothing.
+// @effect-diagnostics nodeBuiltinImport:off -- Keeping values captures a real game folder in a real repository.
+// Kept values are written into the game and kept as a build whose Undo brings
+// the file back as it was; a value outside its range writes nothing. The
+// Stage's tuning folds into one build per session, and a session put back
+// leaves no build.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -153,3 +154,49 @@ it.effect("keeps values as a build that Undo takes back, and refuses one outside
     Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
   );
 });
+
+it.effect(
+  "folds a session of tuning into one build, and keeps none once it is all put back",
+  () => {
+    const root = repo();
+    return Effect.gen(function* () {
+      const builds = yield* GameBuilds.GameBuilds;
+      const speed = { key: "speed", value: 9, min: 1, max: 12, default: 5 };
+      const first = yield* builds.keepValues(THREAD, {
+        things: [{ id: "Rover", values: [speed] }],
+        fold: true,
+      });
+      const second = yield* builds.keepValues(THREAD, {
+        things: [{ id: "Rover", values: [{ ...speed, value: 11 }] }],
+        fold: true,
+      });
+      assert.deepStrictEqual(tuneOf(root), { Rules: { hard: false }, Rover: { speed: 11 } });
+      // One build for the session, and its Undo goes back to before the session.
+      assert.strictEqual(second.base, first.base);
+      const listed = yield* builds.list(THREAD, {});
+      const tuned = listed.builds.filter((build) => build.source._tag === "saved");
+      assert.deepStrictEqual(
+        tuned.map((build) => build.id),
+        [second.build],
+      );
+      assert.strictEqual(listed.current, second.build);
+
+      // Put back to its default: the value leaves the file, which is as it was, so no build.
+      const back = yield* builds.keepValues(THREAD, {
+        things: [{ id: "Rover", values: [{ ...speed, value: 5 }] }],
+        fold: true,
+      });
+      assert.deepStrictEqual(tuneOf(root), { Rules: { hard: false } });
+      assert.strictEqual(back.build, first.base);
+      const after = yield* builds.list(THREAD, {});
+      assert.isTrue(after.builds.every((build) => build.source._tag !== "saved"));
+    }).pipe(
+      Effect.provide(
+        layerFor(root).pipe(
+          Layer.provideMerge(Layer.merge(NodeServices.layer, SqlitePersistence.layerMemory)),
+        ),
+      ),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
+    );
+  },
+);

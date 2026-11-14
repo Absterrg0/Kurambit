@@ -10,9 +10,10 @@
 //
 //   ctx.thing(object, { name: "Cat", kind: "character" }) // a thing people can select
 //   ctx.thing(null, { name: "Rules", kind: "rule" })      // one with no body
-//   const cat = ctx.tune("Cat", { jump: 8, lives: 3 }, { jump: [2, 20], lives: [1, 9, 1] });
-//   // read cat.jump every frame: the Stage's sliders change it live, and
-//   // "Keep as a build" writes it to tune.json, which this file loads at boot.
+//   const cat = ctx.tune("Cat", { jump: 8, lives: 3, look: 0 },
+//     { jump: [2, 20, 0.5, "m"], lives: [1, 9, 1], look: ["Tabby", "Ginger", "Ghost"] });
+//   // read cat.jump every frame: the Stage's sliders change it live and save it
+//   // to tune.json as they are let go; this file loads it at boot.
 import * as THREE from "../vendor/three.module.js";
 
 const BRIDGE = 1;
@@ -70,12 +71,22 @@ export async function loadTuning(url = "./tune.json") {
   }
 }
 
+// A range is [min, max, step, unit], or names to pick one of ("Dusk", "Snow"): the value is the
+// picked one's index, so code reading a number keeps working.
 const rangeOf = (range) => {
-  if (Array.isArray(range)) {
-    const [min, max, step] = range;
-    return { min, max, step };
-  }
-  return range !== null && typeof range === "object" ? range : {};
+  const spec = Array.isArray(range)
+    ? range.length > 0 && range.every((each) => typeof each === "string")
+      ? { choices: range }
+      : { min: range[0], max: range[1], step: range[2], unit: range[3] }
+    : range !== null && typeof range === "object"
+      ? { ...range }
+      : {};
+  const choices = Array.isArray(spec.choices)
+    ? spec.choices.filter((each) => text(each, 40)).slice(0, 24)
+    : [];
+  if (choices.length > 1) return { ...spec, choices, min: 0, max: choices.length - 1, step: 1 };
+  delete spec.choices;
+  return spec;
 };
 // A tuned number stays inside the range the game gave it.
 const clamp = (value, range) => {
@@ -260,10 +271,13 @@ export function createStageBridge({
       return {
         key,
         value: entry.live[key],
+        default: entry.defaults[key],
         ...(finite(range.min) ? { min: range.min } : {}),
         ...(finite(range.max) ? { max: range.max } : {}),
         ...(finite(range.step) && range.step > 0 ? { step: range.step } : {}),
         ...(entry.labels[key] === undefined ? {} : { label: entry.labels[key] }),
+        ...(range.choices === undefined ? {} : { choices: range.choices }),
+        ...(text(range.unit, 12) ? { unit: range.unit } : {}),
       };
     });
   };
@@ -888,8 +902,13 @@ export function createStageBridge({
         const entry = tunes.get(data.id);
         const fallback = entry?.defaults[data.key];
         if (entry === undefined || !fits(data.value, fallback)) return;
+        const range = entry.ranges[data.key];
         entry.live[data.key] =
-          typeof data.value === "number" ? clamp(data.value, entry.ranges[data.key]) : data.value;
+          typeof data.value !== "number"
+            ? data.value
+            : range.choices === undefined
+              ? clamp(data.value, range)
+              : clamp(Math.round(data.value), range);
         changed = true;
         if (selected?.id === data.id) postSelected();
         return redraw();

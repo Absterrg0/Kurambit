@@ -1834,10 +1834,11 @@ const layerWsRpc = (
           gameBuilds.restore(threadId, build, commandId),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
-        [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId }) =>
+        [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId, fold }) =>
           gameBuilds.keepValues(threadId, {
             things,
             ...(commandId === undefined ? {} : { commandId }),
+            ...(fold === undefined ? {} : { fold }),
           }),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
