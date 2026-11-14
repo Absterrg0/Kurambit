@@ -44,7 +44,7 @@ export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
         </Button>
       </span>
       <Text variant="caption" tone="muted" truncate>
-        Goes with your next message, with this frame and its values
+        Your next message is about this
       </Text>
     </div>
   );

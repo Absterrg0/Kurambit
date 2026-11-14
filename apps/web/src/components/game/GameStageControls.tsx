@@ -5,6 +5,7 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
+  ShieldIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react";
@@ -14,9 +15,11 @@ import { Button } from "../ui/button";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  setStageCannotLose,
   setStageMuted,
   setStageSpeed,
   toggleStageFreeze,
+  useStageCannotLose,
   useThreadStageBridge,
 } from "./gameStageBridge";
 
@@ -45,6 +48,7 @@ export function GameStagePlayControls({
   const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
   const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
+  const cannotLose = useStageCannotLose(threadKey);
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-game-play-controls="">
       <div className="flex items-center gap-0.5">
@@ -91,6 +95,19 @@ export function GameStagePlayControls({
             </Toggle>
           ))}
         </ToggleGroup>
+      ) : null}
+      {ready && capabilities.includes("cannot-lose") ? (
+        <Control
+          label={cannotLose ? "Can't lose: on, a loss does not end the run" : "Can't lose"}
+          pressed={cannotLose}
+          disabled={!playing}
+          onClick={() => {
+            setStageCannotLose(threadKey, !cannotLose);
+            onFocus();
+          }}
+        >
+          <ShieldIcon aria-hidden="true" />
+        </Control>
       ) : null}
     </div>
   );

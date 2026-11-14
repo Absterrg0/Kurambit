@@ -1883,14 +1883,8 @@ export function ThingLook({ threadRef, thing }: { threadRef: ScopedThreadRef; th
   const generations = useGameGenerations(threadRef).data;
   const actions = useGenerationActions(threadRef);
   const asset = thing.asset;
-  if (asset === undefined)
-    return (
-      <Section title="Look">
-        <Text variant="meta" tone="muted" render={<p />}>
-          Made in the game's code; it has no asset file.
-        </Text>
-      </Section>
-    );
+  // Drawn by the game's code: there is no file or generation to show.
+  if (asset === undefined) return null;
   const generation =
     generations?.generations.find(
       (entry) =>

@@ -56,6 +56,8 @@ import {
   newRun,
   onRunEnded,
   resetProgress,
+  cannotLose,
+  setCanLose,
 } from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
 import { animateShell } from "./animate.js";
@@ -194,6 +196,10 @@ function newContext() {
     thing: (object, options) => bridge.thing(object, options),
     /** The live values of a thing: web/tune.json over these defaults, changed live by the Stage. */
     tune: (id, defaults, ranges) => bridge.tune(id, defaults, ranges),
+    /** The Stage's "Can't lose" is on: the player takes no damage (a loss never ends the run). */
+    get cannotLose() {
+      return cannotLose();
+    },
   };
   ctx.look = look.forRun(ctx);
   return { ctx, input, down, pressed, buttons, clicked, listeners, timers, reported: false };
@@ -935,6 +941,7 @@ const bridge = createStageBridge({
     studioSpeed = scale;
   },
   mute: muteAudio,
+  canLose: setCanLose,
   // The Stage's Controls: the same table, rebinds and saved settings as the Controls screen.
   controls: {
     list: () =>

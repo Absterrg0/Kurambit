@@ -1,7 +1,8 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { GameStageRect, GameStageTrace, GameThing } from "@kurambit/contracts";
 
+import { observeResize } from "../../lib/observeResize";
 import { Text } from "../ui/text";
 import { pointStage, useThreadStageBridge } from "./gameStageBridge";
 
@@ -38,7 +39,17 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
   // One hover message per frame at most: the game raycasts on each.
   const pending = useRef<{ x: number; y: number } | null>(null);
   const scheduled = useRef(false);
+  const [layer, setLayer] = useState<HTMLDivElement | null>(null);
+  const [area, setArea] = useState(0);
+  useEffect(() => {
+    if (layer === null) return;
+    return observeResize(layer, () => setArea(layer.clientWidth * layer.clientHeight));
+  }, [layer]);
   if (!frozen) return null;
+  // A thing as big as the view (the level, the backdrop) needs no tag: it would only sit on
+  // the game's own HUD, and the Tune tab already names it.
+  const tagged = (rect: GameStageRect | undefined): rect is GameStageRect =>
+    rect !== undefined && (area === 0 || rect.w * rect.h < area * FILLS_VIEW);
   const at = (event: ReactPointerEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
     return { x: event.clientX - box.left, y: event.clientY - box.top };
@@ -61,6 +72,7 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
   return (
     // Covers the game while it is frozen, so a click points instead of playing.
     <div
+      ref={setLayer}
       className="absolute inset-0 z-20 overflow-hidden"
       data-game-stage-overlay=""
       onPointerMove={onMove}
@@ -80,10 +92,10 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
       }}
     >
       {selected?.trace !== undefined ? <StageTrace trace={selected.trace} /> : null}
-      {hovered !== null && hover?.rect !== undefined ? (
+      {hovered !== null && tagged(hover?.rect) ? (
         <NameTag rect={hover.rect} thing={hovered} />
       ) : null}
-      {selected?.rect !== undefined ? (
+      {selected !== null && tagged(selected.rect) ? (
         <NameTag rect={selected.rect} thing={selected.thing} selected />
       ) : null}
       {selected !== null &&
@@ -104,6 +116,8 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
 }
 
 const EMPTY_THINGS: ReadonlyArray<GameThing> = [];
+/** The share of the view a thing's box covers when it is the view itself (a level, a sky). */
+const FILLS_VIEW = 0.6;
 
 function NameTag({
   rect,

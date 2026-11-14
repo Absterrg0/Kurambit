@@ -21,6 +21,13 @@ export const GameState = {
 export const SHELL_KEYS = ["state", "result", "result_text"];
 
 let onEnded = null;
+// The Stage's "Can't lose", for tuning a fight without its round ending: lose() is ignored while
+// it is off; win() still ends the run. Only the Stage sets it, never a harness play.
+let canLose = true;
+export function setCanLose(on) {
+  canLose = on;
+}
+export const cannotLose = () => !canLose;
 let defaults = null;
 // Kept values as main.js declared them, before the saved ones loaded: what a
 // reset returns to. Empty until loadProgress ran, and nothing saves until then.
@@ -31,7 +38,9 @@ const method = (name, fn) =>
   Object.defineProperty(GameState, name, { value: fn, enumerable: false });
 
 method("win", (text = "You win!", stats = {}) => end(true, text, stats));
-method("lose", (text = "Game over", stats = {}) => end(false, text, stats));
+method("lose", (text = "Game over", stats = {}) => {
+  if (canLose) end(false, text, stats);
+});
 method("isPlaying", () => GameState.state === "playing");
 
 function end(won, text, stats) {

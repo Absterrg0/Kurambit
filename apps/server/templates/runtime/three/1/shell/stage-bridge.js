@@ -17,7 +17,16 @@
 import * as THREE from "../vendor/three.module.js";
 
 const BRIDGE = 1;
-const CAPABILITIES = ["freeze", "select", "tune", "trace", "speed", "mute", "controls"];
+const CAPABILITIES = [
+  "freeze",
+  "select",
+  "tune",
+  "trace",
+  "speed",
+  "mute",
+  "controls",
+  "cannot-lose",
+];
 const KINDS = new Set([
   "character",
   "creature",
@@ -103,8 +112,9 @@ const fits = (value, fallback) =>
  * is the scene and camera on screen (or null), `freeze(on)` holds play and
  * sound, `redraw()` asks for one frame, `drawClean()` draws one frame with no
  * outline (for a capture), `speed(scale)` sets how fast play runs, `mute(on)`
- * silences the game, and `controls` lists, rebinds and resets the game's
- * actions as its own Controls screen does, saved with its settings.
+ * silences the game, `controls` lists, rebinds and resets the game's actions as
+ * its own Controls screen does, saved with its settings, and `canLose(on)`
+ * lets a loss end the run or not (the Stage's "Can't lose" while tuning).
  */
 export function createStageBridge({
   canvas,
@@ -116,6 +126,7 @@ export function createStageBridge({
   speed,
   mute,
   controls,
+  canLose,
 }) {
   let active = false;
   let frozen = false;
@@ -860,6 +871,7 @@ export function createStageBridge({
       case "studio-speed":
         return finite(data.value) && data.value > 0 && data.value <= 4;
       case "studio-mute":
+      case "studio-cannot-lose":
         return typeof data.on === "boolean";
       case "studio-things-request":
       case "studio-capture":
@@ -884,6 +896,8 @@ export function createStageBridge({
         return speed?.(data.value);
       case "studio-mute":
         return mute?.(data.on);
+      case "studio-cannot-lose":
+        return canLose?.(!data.on);
       case "studio-pointer": {
         if (data.action === "select-inner") {
           // A double click goes into a group: one instance of it, else the thing as a click.

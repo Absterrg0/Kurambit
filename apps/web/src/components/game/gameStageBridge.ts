@@ -196,6 +196,9 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       }
       useStageBridge.setState({ status: "ready", capabilities: message.capabilities ?? [] });
       useStageBridge.getState().post?.({ type: "studio-things-request" });
+      // Can't lose outlives a Restart: the game that comes up is told again.
+      if (cannotLose.has(owner.slice(0, owner.indexOf("\0"))))
+        useStageBridge.getState().post?.({ type: "studio-cannot-lose", on: true });
       // One frame of the game as it comes up, so the build it plays has a picture at once.
       window.setTimeout(() => {
         if (useStageBridge.getState().owner === owner) void captureStageFrame();
@@ -346,6 +349,22 @@ const withValue = (id: string, key: string, value: number | boolean) => {
     selected:
       state.selected === null ? null : { ...state.selected, thing: tuned(state.selected.thing) },
   });
+};
+
+/** The threads whose Stage has Can't lose on, for the session: told to each game that comes up. */
+const cannotLose = new Set<string>();
+const useCannotLose = create<Readonly<Record<string, boolean>>>()(() => ({}));
+export const useStageCannotLose = (threadKey: string) =>
+  useCannotLose((all) => all[threadKey] ?? false);
+
+/** Can't lose, for tuning a fight without the round ending; the measures never see it. */
+export const setStageCannotLose = (threadKey: string, on: boolean) => {
+  if (on) cannotLose.add(threadKey);
+  else cannotLose.delete(threadKey);
+  useCannotLose.setState({ [threadKey]: on });
+  const state = useStageBridge.getState();
+  if (state.owner?.startsWith(`${threadKey}\0`) && state.capabilities.includes("cannot-lose"))
+    state.post?.({ type: "studio-cannot-lose", on });
 };
 
 /** Asks the game for its actions; a game without the capability never answers. */

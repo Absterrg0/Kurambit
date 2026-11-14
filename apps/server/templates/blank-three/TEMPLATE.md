@@ -82,9 +82,8 @@ Each kit's comment block shows every call; read it in
 
 ## Things and live values (the Stage)
 
-The Stage that frames the game freezes it, outlines things, tunes their
-values live and shows where a thing went over the last 10 s. The bridge
-costs nothing until the Stage asks.
+The Stage freezes the game, outlines things, tunes their values live and
+shows a thing's path over the last 10 s, at no cost until it asks.
 
 ```js
 // in start(ctx): name what a person would select
@@ -104,17 +103,13 @@ const rules = ctx.tune("Difficulty", { spawnEvery: 2.5, hard: false }, { spawnEv
   key; `ctx.thing` on it renames it. Kinds: `character`, `creature`, `prop`,
   `level`, `effect`, `ui`, `rule`, `sound`, `other`.
 - `ctx.tune(id, defaults, ranges)` returns one live object per id, lasting
-  across retries: numbers and booleans, each number clamped to its range
-  (`[min, max, step, unit]`, the unit as a player reads it: "s", "m/s", "%").
-  A value that picks one of several (a theme, a weapon, a look) takes their
-  names instead (`["Dusk", "Snow"]`) and reads as the index: the Stage shows
-  the names, never a slider over 0 to 2. An id no `ctx.thing` names is a
-  rule of its own.
-- `web/tune.json` holds the person's values by id and key and is read once at
-  boot over the defaults: the Stage saves a value there as it is let go, and
-  `game_tune` writes it too. A value in it wins over its default in code, so
-  to change a value the person has tuned, change it in `web/tune.json`. Keep
-  the file, even as `{}`.
+  across retries, each number clamped to `[min, max, step, unit]`. A pick of
+  several (a theme, a weapon) takes their names (`["Dusk", "Snow"]`) and
+  reads as the index. An id no `ctx.thing` names is a rule of its own.
+- While the Stage's "Can't lose" is on, `ctx.cannotLose` is true: the player
+  takes no damage (`if (!ctx.cannotLose) hp -= hit`).
+- `web/tune.json` (keep it, even as `{}`) holds the person's tuned values and
+  wins over your defaults: to change a tuned value, change it there.
 
 ## The studio bridge (keep it)
 

@@ -30,6 +30,7 @@ export const GameStageCapability = Schema.Literals([
   "speed",
   "mute",
   "controls",
+  "cannot-lose",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -170,6 +171,14 @@ export const StudioMute = Schema.Struct({
   on: Schema.Boolean,
 });
 
+/**
+ * The Stage's "Can't lose" while tuning: a loss does not end the run (a win still does). Only
+ * the Stage sends it; the harness's own plays never do, so no measurement sees it.
+ */
+export const StudioCannotLose = Schema.Struct({
+  type: Schema.Literal("studio-cannot-lose"),
+  on: Schema.Boolean,
+});
 /** Asks for the game's actions (answered with studio-controls). */
 export const StudioControlsRequest = Schema.Struct({
   type: Schema.Literal("studio-controls-request"),
@@ -205,6 +214,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioControlsRequest,
   StudioRebind,
   StudioControlsReset,
+  StudioCannotLose,
 ]);
 export type GameStageToGameMessage = typeof GameStageToGameMessage.Type;
 
