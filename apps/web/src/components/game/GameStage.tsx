@@ -222,8 +222,47 @@ const gameColumnFit = (centre: HTMLElement, taken: number, ratio: number, chatSh
 };
 
 /** The folder's own game frame, not a build copy's. */
-const isFolderGameFrame = (target: EventTarget) =>
+const isFolderGameFrame = (target: EventTarget | null) =>
   target instanceof HTMLIFrameElement && target.closest('[data-game-play-surface="true"]') !== null;
+
+/** How long after leaving the game the person still counts as playing it. */
+const PLAYER_GRACE_MS = 4000;
+
+/**
+ * The person is playing: the Stage's game frame has the keyboard, or had it a moment ago. A click
+ * into the frame sends no focus event to it, the app's window only blurs, so the frame is read
+ * as the document's focused element whenever focus moves.
+ */
+function usePlayerInGame(stageRef: { readonly current: HTMLElement | null }): boolean {
+  const [playerIn, setPlayerIn] = useState(false);
+  useEffect(() => {
+    let grace = 0;
+    let settle = 0;
+    const read = () => {
+      const active = document.activeElement;
+      window.clearTimeout(grace);
+      if (isFolderGameFrame(active) && stageRef.current?.contains(active) === true)
+        setPlayerIn(true);
+      else grace = window.setTimeout(() => setPlayerIn(false), PLAYER_GRACE_MS);
+    };
+    // The frame is the focused element only once the blur has settled.
+    const onBlur = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(read);
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", read);
+    document.addEventListener("focusin", read);
+    return () => {
+      window.clearTimeout(grace);
+      window.clearTimeout(settle);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("focusin", read);
+    };
+  }, [stageRef]);
+  return playerIn;
+}
 
 /**
  * The game on top of a game thread's column: its top bar, the game, and its controls with the
@@ -429,8 +468,6 @@ function ThreadGameStage({
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
   // The build the mounted frame plays, for telling a new build from a live edit of the same one.
   const [frameBuild, setFrameBuild] = useState<string | null>(null);
-  // The person is in the game: its frame is the document's focused element.
-  const [gameFocused, setGameFocused] = useState(false);
   // The live game's first page error, for the frame that threw it.
   const [studioError, setStudioError] = useState<{ key: string; text: string } | null>(null);
   // A shown live game opens itself while the server says nobody asked for it
@@ -532,6 +569,7 @@ function ThreadGameStage({
       keepBuildFrame(folderBuild, stageStill);
   }, [stageStill, folderBuild, turnRunning, asked]);
   const stageRef = useRef<HTMLElement | null>(null);
+  const playerIn = usePlayerInGame(stageRef);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const freezeKey = useGameFreezeKey();
   // A compact switch unmounts nothing, but focus would die with the hidden
@@ -873,6 +911,11 @@ function ThreadGameStage({
   // export remounts the game, unless the person is in it (the chip asks) or
   // it is not on screen (it loads when shown). Absorbed reads return the same
   // object, so this only adjusts state when the fold advanced.
+  // An Undo or Redo changes the folder before its build list says so.
+  const newBuild =
+    turnUndo.restoring ||
+    heldBuild ||
+    (frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild);
   const frame = remountOrHold(
     frameFold,
     stageKind === "live"
@@ -884,13 +927,9 @@ function ThreadGameStage({
         },
     // A frame hidden by another view or pane may keep focus without a blur.
     {
-      focused: gameFocused && !frameHidden,
+      focused: playerIn && !frameHidden,
       hidden: frameHidden,
-      // An Undo or Redo changes the folder before its build list says so.
-      newBuild:
-        turnUndo.restoring ||
-        heldBuild ||
-        (frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild),
+      newBuild,
     },
   );
   if (frame !== frameFold) {
@@ -929,7 +968,7 @@ function ThreadGameStage({
   const held =
     frame.heldFor !== "focus"
       ? null
-      : stageKind === "live"
+      : stageKind === "live" && !newBuild
         ? { label: "Your agent changed the game while you were playing", action: "Reload" }
         : {
             label: heldName === null ? "New build" : `New build from ${heldName}`,
@@ -1107,10 +1146,6 @@ function ThreadGameStage({
       aria-hidden={hidden}
       inert={hidden}
       tabIndex={-1}
-      onFocus={(event) => setGameFocused(isFolderGameFrame(event.target))}
-      onBlur={(event) => {
-        if (isFolderGameFrame(event.target)) setGameFocused(false);
-      }}
       onKeyDown={(event) => {
         // Esc clears the selection when the Stage itself has focus; a focused game sends it up
         // as studio-key. Tab is never kept here: it moves on, like everywhere else.
