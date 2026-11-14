@@ -90,7 +90,11 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
                     hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
                   },
                 )
-            : input.changedSince !== null
+            : // A turn under way is the change: its "Making build N" already says so.
+              input.changedSince !== null &&
+                !input.turnRunning &&
+                !input.landing &&
+                !input.keepGoingLive
               ? part(`Changed since ${input.changedSince} · not measured`, {
                   short: "Changed · not measured",
                   hint: `The game folder has changed since ${input.changedSince}, so the Stage plays something no build has measured yet. The next build measures it.`,
