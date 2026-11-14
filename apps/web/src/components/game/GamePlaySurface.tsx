@@ -299,7 +299,9 @@ export function GameFrame({
           setKeyboardFocused(true);
           return;
         }
-        if (pointerOver.current) return;
+        // A click in the frame activates this window too (user activation reaches ancestor
+        // frames), also when no pointerenter came: a frame swapped in under a resting pointer.
+        if (pointerOver.current || navigator.userActivation?.isActive === true) return;
         // Nothing held it (the page had just loaded): the Stage itself takes it, as a click would.
         const back =
           before !== null && before.isConnected && before !== document.body
