@@ -12,6 +12,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import * as ServerConfig from "../config.ts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -500,7 +502,11 @@ const waitPort = async (port: number, timeoutMs: number): Promise<boolean> => {
  * the spawn sites. The one-shot addon installer below is different: it
  * fetches the pinned package over the network, so it keeps proxy/cert
  * variables (see toolNetworkEnv). */
-const sessionEnv = (homeDir: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+const sessionEnv = (
+  homeDir: string,
+  userResources: string,
+  extra?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv => {
   const fakeHome = NodePath.join(homeDir, "home");
   const env: NodeJS.ProcessEnv = {
     ...GameProcesses.engineChildEnv(),
@@ -515,7 +521,7 @@ const sessionEnv = (homeDir: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessE
   // on every OS and without a version folder (Blender 4.2+): the real
   // ~/.config/blender, %APPDATA%\\Blender Foundation and ~/Library/Application
   // Support/Blender are never read or written. Unverified on Windows and macOS.
-  env.BLENDER_USER_RESOURCES = NodePath.join(homeDir, "blender");
+  env.BLENDER_USER_RESOURCES = userResources;
   env.LIBGL_ALWAYS_SOFTWARE = "1";
   env.LP_NUM_THREADS = "2";
   env.DISABLE_TELEMETRY = "true";
@@ -708,7 +714,16 @@ const make = Effect.gen(function* () {
   const templates = yield* GameTemplates.GameTemplates;
   const fileSystem = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
+  const config = yield* ServerConfig.ServerConfig;
   const sessions = new Map<string, Session>();
+  /**
+   * Blender's user folder (the pinned addon, MPFB2, preferences), one per Blender version for
+   * every game: the same files in each game's folder came to ~90 MB a game.
+   */
+  const userResourcesOf = (version: string) =>
+    NodePath.join(config.baseDir, "caches", "blender-user", version.replace(/[^\w.-]/g, "_"));
+  /** Installing into the shared folder: one session start at a time writes it. */
+  const userResourcesLock = yield* Semaphore.make(1);
   /**
    * One per game (its real root) around a review's pass and its records, and an export's
    * promotion: an export never copies a GLB a pass is still writing, and two reviews of one key
@@ -855,15 +870,15 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * MPFB2 in the session's own Blender folder (BLENDER_USER_RESOURCES), never the user's: while
+   * MPFB2 in Kurambit's own Blender folder (BLENDER_USER_RESOURCES), never the user's: while
    * Settings holds the verified zip it is installed once (a marker names the zip), and after a
    * Remove the next session takes it out again. A failed install never stops the session; an
    * mpfb body then says why.
    */
-  const installMpfb = (root: string, blender: string, homeDir: string) =>
+  const installMpfb = (root: string, blender: string, homeDir: string, userResources: string) =>
     Effect.gen(function* () {
       const zip = yield* tools.blenderExtension("mpfb");
-      const marker = NodePath.join(homeDir, "mpfb.installed");
+      const marker = NodePath.join(userResources, "mpfb.installed");
       const have = yield* Effect.promise(() => NodeFSP.readFile(marker, "utf8").catch(() => null));
       const want = zip === null ? null : NodePath.basename(zip);
       if (have === want) return want !== null;
@@ -875,7 +890,7 @@ const make = Effect.gen(function* () {
             args: ["--background", "--command", "extension", ...args],
             operation,
             timeoutMs: 180_000,
-            env: sessionEnv(homeDir),
+            env: sessionEnv(homeDir, userResources),
             envMode: "replace",
           })
           .pipe(
@@ -929,41 +944,15 @@ const make = Effect.gen(function* () {
       );
     });
 
-  const start = (root: string): Effect.Effect<Session, GameOperationError> =>
+  /** The pinned addon, enabled, and MPFB2 in the shared user folder; whether MPFB2 is there. */
+  const setUpUserResources = (
+    root: string,
+    blender: { readonly path: string; readonly version: string },
+    homeDir: string,
+    userResources: string,
+    uv: UvPaths,
+  ): Effect.Effect<boolean, GameOperationError> =>
     Effect.gen(function* () {
-      const uv = yield* resolveUv;
-      const blender = yield* tools.executable("blender");
-      const host = yield* Effect.promise(() => findWindowHost(processHost));
-      if (host === null)
-        return yield* opError(
-          "blender-live",
-          "Xvfb",
-          "tool-missing",
-          "The live Blender needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
-        );
-      const addonKeys = yield* readAddonKeyEnv;
-      const homeDir = homeDirOf(root);
-      const port = portFor(root);
-      // A session just closed (a reopen) lets its port go within its stop's grace.
-      if (!(yield* Effect.promise(() => waitPortFree(port, 10_000))))
-        return yield* opError(
-          "blender-live",
-          `${root}:${port}`,
-          "busy",
-          `The live Blender port ${port} is held by a process this server cannot verify as this game's Blender. Close it, then retry.`,
-        );
-      yield* Effect.tryPromise({
-        try: async () => {
-          // Blender's whole user folder, addon install and session record live here.
-          await ensureGameDir(root, "builds/logs/blender-live");
-          await NodeFSP.mkdir(NodePath.join(homeDir, "home/.config"), { recursive: true });
-          await NodeFSP.mkdir(NodePath.join(homeDir, "runtime"), {
-            recursive: true,
-            mode: 0o700,
-          });
-        },
-        catch: (cause) => opError("blender-live", homeDir, "io", undefined, cause),
-      });
       // Blender says where its user addons live under the isolated user folder
       // (BLENDER_USER_RESOURCES), so no version or OS layout is guessed.
       const located = yield* processes.run({
@@ -979,20 +968,20 @@ const make = Effect.gen(function* () {
         ],
         operation: "blender-live-addons-dir",
         timeoutMs: 120_000,
-        env: sessionEnv(homeDir),
+        env: sessionEnv(homeDir, userResources),
         envMode: "replace",
       });
       const addonsDir = /KURAMBIT_ADDONS=(.+)/.exec(located.stdout)?.[1]?.trim();
       if (
         located.exitCode !== 0 ||
         addonsDir === undefined ||
-        !NodePath.resolve(addonsDir).startsWith(NodePath.resolve(homeDir) + NodePath.sep)
+        !NodePath.resolve(addonsDir).startsWith(NodePath.resolve(userResources) + NodePath.sep)
       )
         return yield* opError(
           "blender-live",
           located.logPath,
           "tool-failed",
-          `Blender ${blender.version} did not report a user addon folder inside the session's own folder${addonsDir === undefined ? "" : ` (it reported ${addonsDir})`}, so the pinned addon cannot be installed without touching the user's real Blender settings.`,
+          `Blender ${blender.version} did not report a user addon folder inside Kurambit's own Blender folder${addonsDir === undefined ? "" : ` (it reported ${addonsDir})`}, so the pinned addon cannot be installed without touching the user's real Blender settings.`,
           located,
         );
       // The pinned server ships its addon; install it into the isolated
@@ -1007,7 +996,7 @@ const make = Effect.gen(function* () {
         timeoutMs: 600_000,
         env: withBinDir(
           {
-            ...sessionEnv(homeDir),
+            ...sessionEnv(homeDir, userResources),
             ...GameToolchain.uvCacheEnv(),
             BLENDERMCP_ADDONS_DIR: addonsDir,
             // Fixed installer argv, fetched over the network: proxy/cert
@@ -1043,7 +1032,7 @@ const make = Effect.gen(function* () {
         ],
         operation: "blender-live-enable",
         timeoutMs: 120_000,
-        env: sessionEnv(homeDir),
+        env: sessionEnv(homeDir, userResources),
         envMode: "replace",
       });
       if (enable.exitCode !== 0 || !enable.stdout.includes("KURAMBIT_ENABLED"))
@@ -1054,7 +1043,52 @@ const make = Effect.gen(function* () {
           `Blender ${blender.version} could not enable the pinned addon in the isolated config (it was not found or failed to load).`,
           enable,
         );
-      const mpfb = yield* installMpfb(root, blender.path, homeDir);
+      return yield* installMpfb(root, blender.path, homeDir, userResources);
+    });
+
+  const start = (root: string): Effect.Effect<Session, GameOperationError> =>
+    Effect.gen(function* () {
+      const uv = yield* resolveUv;
+      const blender = yield* tools.executable("blender");
+      const host = yield* Effect.promise(() => findWindowHost(processHost));
+      if (host === null)
+        return yield* opError(
+          "blender-live",
+          "Xvfb",
+          "tool-missing",
+          "The live Blender needs a window, and this machine has no private display. Install the system Xvfb package (or set KURAMBIT_XVFB).",
+        );
+      const addonKeys = yield* readAddonKeyEnv;
+      const homeDir = homeDirOf(root);
+      const userResources = userResourcesOf(blender.version);
+      const port = portFor(root);
+      // A session just closed (a reopen) lets its port go within its stop's grace.
+      if (!(yield* Effect.promise(() => waitPortFree(port, 10_000))))
+        return yield* opError(
+          "blender-live",
+          `${root}:${port}`,
+          "busy",
+          `The live Blender port ${port} is held by a process this server cannot verify as this game's Blender. Close it, then retry.`,
+        );
+      yield* Effect.tryPromise({
+        try: async () => {
+          // The session's record, logs and scratch live here; Blender's user folder is shared.
+          await ensureGameDir(root, "builds/logs/blender-live");
+          await NodeFSP.mkdir(NodePath.join(homeDir, "home/.config"), { recursive: true });
+          await NodeFSP.mkdir(NodePath.join(homeDir, "runtime"), {
+            recursive: true,
+            mode: 0o700,
+          });
+          await NodeFSP.mkdir(userResources, { recursive: true });
+          // The game's own copy of that folder from before it was shared: Kurambit's install only.
+          await NodeFSP.rm(NodePath.join(homeDir, "blender"), { recursive: true, force: true });
+          await NodeFSP.rm(NodePath.join(homeDir, "mpfb.installed"), { force: true });
+        },
+        catch: (cause) => opError("blender-live", homeDir, "io", undefined, cause),
+      });
+      const mpfb = yield* userResourcesLock.withPermits(1)(
+        setUpUserResources(root, blender, homeDir, userResources, uv),
+      );
       // The kit is importable in every exec (`import kurambit`): on sys.path and imported at
       // open. A kit that fails to import is said at the first call that needs it, never here.
       const kit = yield* kitDirectory.pipe(Effect.orElseSucceed(() => null));
@@ -1129,7 +1163,10 @@ const make = Effect.gen(function* () {
                       token,
                     ],
                     cwd: root,
-                    env: withBinDir({ ...sessionEnv(homeDir), ...addonKeys }, uv.binDir),
+                    env: withBinDir(
+                      { ...sessionEnv(homeDir, userResources), ...addonKeys },
+                      uv.binDir,
+                    ),
                     stdio: ["ignore", logFd, logFd],
                     token,
                   },
@@ -1510,7 +1547,7 @@ const make = Effect.gen(function* () {
             ],
             operation: `blender-pipeline-${job.entry}`,
             timeoutMs: job.timeoutMs,
-            env: sessionEnv(homeDirOf(root)),
+            env: sessionEnv(homeDirOf(root), userResourcesOf(blender.version)),
             envMode: "replace",
           }),
         )
