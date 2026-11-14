@@ -183,6 +183,14 @@ export function createControls(gameActions) {
         return MOUSE_NAMES[action.mouse[0]] ?? `Mouse ${action.mouse[0]}`;
       return action.pad.length > 0 ? padName(action.pad[0]) : "";
     },
+    /** Each binding by the name a player reads, for the Stage's Controls. */
+    parts(action) {
+      return {
+        keys: action.keys.map(keyName),
+        mouse: action.mouse.map((b) => MOUSE_NAMES[b] ?? `Mouse ${b}`),
+        pad: action.pad.map(padName),
+      };
+    },
     describe(action) {
       return {
         keyboard: [

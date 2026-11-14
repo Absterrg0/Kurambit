@@ -935,6 +935,29 @@ const bridge = createStageBridge({
     studioSpeed = scale;
   },
   mute: muteAudio,
+  // The Stage's Controls: the same table, rebinds and saved settings as the Controls screen.
+  controls: {
+    list: () =>
+      [...controls.actions.values()].map((action) => ({
+        name: action.name,
+        label: action.label,
+        codes: [...action.keys],
+        ...controls.parts(action),
+        fixed: action.fixed,
+        changed: action.keys.join() !== action.defaults.join(),
+      })),
+    rebind(name, code) {
+      const note = controls.rebind(name, code);
+      saveSettings();
+      if (openScreen === screens.controls) renderControls();
+      return note;
+    },
+    reset() {
+      controls.reset();
+      saveSettings();
+      if (openScreen === screens.controls) renderControls();
+    },
+  },
   drawClean() {
     if (run?.compiling === true) return;
     look.update();

@@ -17,7 +17,7 @@
 import * as THREE from "../vendor/three.module.js";
 
 const BRIDGE = 1;
-const CAPABILITIES = ["freeze", "select", "tune", "trace", "speed", "mute"];
+const CAPABILITIES = ["freeze", "select", "tune", "trace", "speed", "mute", "controls"];
 const KINDS = new Set([
   "character",
   "creature",
@@ -102,8 +102,9 @@ const fits = (value, fallback) =>
  * The Stage end of the bridge. The shell passes how to reach the run: `view()`
  * is the scene and camera on screen (or null), `freeze(on)` holds play and
  * sound, `redraw()` asks for one frame, `drawClean()` draws one frame with no
- * outline (for a capture), `speed(scale)` sets how fast play runs and `mute(on)`
- * silences the game.
+ * outline (for a capture), `speed(scale)` sets how fast play runs, `mute(on)`
+ * silences the game, and `controls` lists, rebinds and resets the game's
+ * actions as its own Controls screen does, saved with its settings.
  */
 export function createStageBridge({
   canvas,
@@ -114,6 +115,7 @@ export function createStageBridge({
   drawClean,
   speed,
   mute,
+  controls,
 }) {
   let active = false;
   let frozen = false;
@@ -819,6 +821,16 @@ export function createStageBridge({
     redraw();
   };
 
+  // The game's actions, as its Controls screen lists them, with what the last change did.
+  const postControls = (note) => {
+    if (controls === undefined) return;
+    toStage({
+      type: "studio-controls",
+      controls: controls.list().slice(0, 32),
+      ...(text(note, 200) ? { note } : {}),
+    });
+  };
+
   const capture = () => {
     drawClean();
     const png = canvas.toDataURL("image/png");
@@ -851,7 +863,11 @@ export function createStageBridge({
         return typeof data.on === "boolean";
       case "studio-things-request":
       case "studio-capture":
+      case "studio-controls-request":
+      case "studio-controls-reset":
         return true;
+      case "studio-rebind":
+        return text(data.name, 64) && text(data.code, 64);
       default:
         return false;
     }
@@ -929,6 +945,13 @@ export function createStageBridge({
         return postThings();
       case "studio-capture":
         return capture();
+      case "studio-controls-request":
+        return postControls();
+      case "studio-rebind":
+        return postControls(controls?.rebind(data.name, data.code));
+      case "studio-controls-reset":
+        controls?.reset();
+        return postControls("Controls are back to the game's own");
     }
   });
 

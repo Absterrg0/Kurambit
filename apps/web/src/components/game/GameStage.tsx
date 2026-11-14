@@ -91,6 +91,7 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
 import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
+import { GameControlsMenu } from "./GameControlsMenu";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
@@ -1495,13 +1496,20 @@ function ThreadGameStage({
             Show the game
           </Button>
         ) : stageKind === "live" ? (
-          <GameStagePlayControls
-            threadRef={threadRef}
-            playing={phase.kind === "playing" && compare === null}
-            canReload={data.previewUrl !== null}
-            onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
-            onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-          />
+          <>
+            <GameStagePlayControls
+              threadRef={threadRef}
+              playing={phase.kind === "playing" && compare === null}
+              canReload={data.previewUrl !== null}
+              onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
+              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+            />
+            <GameControlsMenu
+              threadRef={threadRef}
+              playing={phase.kind === "playing" && compare === null}
+              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+            />
+          </>
         ) : null}
         <span className="min-w-2 flex-1" />
         <Popover open={buildsOpen} onOpenChange={setBuildsOpen}>

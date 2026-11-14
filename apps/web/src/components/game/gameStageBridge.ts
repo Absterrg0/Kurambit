@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { create } from "zustand";
 import {
   type GameStageCapability,
+  type GameStageControl,
   type GameStageRect,
   type GameStageToGameMessage,
   type GameStageTrace,
@@ -46,6 +47,10 @@ interface StageBridgeState {
   readonly speed: number;
   /** The Stage silenced the game. */
   readonly muted: boolean;
+  /** The game's actions and their keys, once asked for; null before. */
+  readonly controls: ReadonlyArray<GameStageControl> | null;
+  /** What the last rebind or reset did, in the game's words. */
+  readonly controlsNote: string | null;
   readonly post: ((message: GameStageToGameMessage) => void) | null;
   /** Holds or resumes a game with no bridge through the visibility message every shell knows. */
   readonly hold: ((on: boolean) => void) | null;
@@ -60,6 +65,8 @@ const EMPTY: Omit<StageBridgeState, "owner" | "post" | "hold"> = {
   selected: null,
   speed: 1,
   muted: false,
+  controls: null,
+  controlsNote: null,
 };
 
 export const useStageBridge = create<StageBridgeState>()(() => ({
@@ -227,6 +234,9 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       else if (useStageBridge.getState().selected !== null) clearStageSelection();
       else toggleStageFreeze();
       return;
+    case "studio-controls":
+      useStageBridge.setState({ controls: message.controls, controlsNote: message.note ?? null });
+      return;
     case "studio-error":
     case "studio-visibility-ack":
       return;
@@ -337,6 +347,21 @@ const withValue = (id: string, key: string, value: number | boolean) => {
       state.selected === null ? null : { ...state.selected, thing: tuned(state.selected.thing) },
   });
 };
+
+/** Asks the game for its actions; a game without the capability never answers. */
+export const requestStageControls = () => {
+  const state = useStageBridge.getState();
+  if (state.post === null || !state.capabilities.includes("controls")) return;
+  useStageBridge.setState({ controlsNote: null });
+  state.post({ type: "studio-controls-request" });
+};
+
+/** Puts `code` first on an action, as the game's own Controls screen does; it saves it. */
+export const rebindStageControl = (name: string, code: string) =>
+  useStageBridge.getState().post?.({ type: "studio-rebind", name, code });
+
+export const resetStageControls = () =>
+  useStageBridge.getState().post?.({ type: "studio-controls-reset" });
 
 /** Slow motion and back: play time runs at `speed` of real time. */
 export const setStageSpeed = (speed: number) => {

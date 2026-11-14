@@ -29,6 +29,7 @@ export const GameStageCapability = Schema.Literals([
   "trace",
   "speed",
   "mute",
+  "controls",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -99,6 +100,23 @@ export const GameStageTrace = Schema.Struct({
 });
 export type GameStageTrace = typeof GameStageTrace.Type;
 
+/** One of the game's actions as its own Controls screen lists it. */
+export const GameStageControl = Schema.Struct({
+  name: Schema.String.check(Schema.isMaxLength(64)),
+  label: Schema.String.check(Schema.isMaxLength(80)),
+  /** Its keys as KeyboardEvent codes, the first the one a HUD hint names. */
+  codes: Schema.Array(Schema.String).check(Schema.isMaxLength(8)),
+  /** The same keys as a player reads them ("Space", "Left"). */
+  keys: Schema.Array(Schema.String).check(Schema.isMaxLength(8)),
+  mouse: Schema.Array(Schema.String).check(Schema.isMaxLength(4)),
+  pad: Schema.Array(Schema.String).check(Schema.isMaxLength(8)),
+  /** The shell's own (pause): never rebound. */
+  fixed: Schema.Boolean,
+  /** The player rebound it away from the game's own keys. */
+  changed: Schema.Boolean,
+});
+export type GameStageControl = typeof GameStageControl.Type;
+
 // Stage → game
 
 /** Pause the game loop, its timers and its audio, with no menu; while frozen, hovering outlines things. */
@@ -152,6 +170,21 @@ export const StudioMute = Schema.Struct({
   on: Schema.Boolean,
 });
 
+/** Asks for the game's actions (answered with studio-controls). */
+export const StudioControlsRequest = Schema.Struct({
+  type: Schema.Literal("studio-controls-request"),
+});
+/** Puts a key first on an action, as the game's Controls screen does, saved with its settings. */
+export const StudioRebind = Schema.Struct({
+  type: Schema.Literal("studio-rebind"),
+  name: Schema.String,
+  code: Schema.String,
+});
+/** Every action back on the game's own keys. */
+export const StudioControlsReset = Schema.Struct({
+  type: Schema.Literal("studio-controls-reset"),
+});
+
 /** The Stage's tab is hidden (or shown): the game holds play and sound, and acknowledges. */
 export const StudioVisibility = Schema.Struct({
   type: Schema.Literal("studio-visibility"),
@@ -169,6 +202,9 @@ export const GameStageToGameMessage = Schema.Union([
   StudioHoverThing,
   StudioThingsRequest,
   StudioCapture,
+  StudioControlsRequest,
+  StudioRebind,
+  StudioControlsReset,
 ]);
 export type GameStageToGameMessage = typeof GameStageToGameMessage.Type;
 
@@ -226,6 +262,13 @@ export const StudioKey = Schema.Struct({
   key: Schema.Literals(["Tab", "Escape"]),
 });
 
+/** The game's actions, asked for or just changed; `note` says what a rebind did. */
+export const StudioControls = Schema.Struct({
+  type: Schema.Literal("studio-controls"),
+  controls: Schema.Array(GameStageControl).check(Schema.isMaxLength(32)),
+  note: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+});
+
 /** The answer to studio-capture. */
 export const StudioFrame = Schema.Struct({
   type: Schema.Literal("studio-frame"),
@@ -242,6 +285,7 @@ export const GameToStageMessage = Schema.Union([
   StudioFrozen,
   StudioKey,
   StudioFrame,
+  StudioControls,
 ]);
 export type GameToStageMessage = typeof GameToStageMessage.Type;
 
