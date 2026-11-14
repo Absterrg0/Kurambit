@@ -90,7 +90,7 @@ const make = Effect.gen(function* () {
       const located = GameRunTurnReactor.locateIn(records, job.stepId, job.attempt);
       return located === null || located.run.id !== job.runId
         ? null
-        : { ...located, rounds: records.gameRunRounds };
+        : { ...located, rounds: records.gameRunRounds, gameLastStep: records.gameLastStep };
     });
 
   const complete = (located: GameRunTurnReactor.Located, result: GameRunStepResult) =>
@@ -246,7 +246,11 @@ const make = Effect.gen(function* () {
    * behind any turn so it never steers someone else's; then the reactor
    * follows it. A turn another chat started since the look goes first.
    */
-  const turn = (located: GameRunTurnReactor.Located, rounds: Parameters<typeof stepMessage>[0]) =>
+  const turn = (
+    located: GameRunTurnReactor.Located,
+    rounds: Parameters<typeof stepMessage>[0],
+    gameLastStep: number,
+  ) =>
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "turn") return;
@@ -270,7 +274,7 @@ const make = Effect.gen(function* () {
           );
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         yield* turnAdmission.admit(yield* projections.getThread(threadId));
-        const message = stepMessage(rounds, step.proposal);
+        const message = stepMessage(rounds, gameLastStep, step.proposal);
         yield* GameRunTurnReactor.refusedOnly(
           engine.dispatch({
             type: "message.dispatch",
@@ -363,7 +367,7 @@ const make = Effect.gen(function* () {
           case "look":
             return look(located);
           case "turn":
-            return turn(located, located.rounds);
+            return turn(located, located.rounds, located.gameLastStep);
           case "judge":
             return judge(located);
           case "undo":

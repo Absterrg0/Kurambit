@@ -111,7 +111,8 @@ const reactorWith = (runs: ReadonlyArray<OrchestrationV2Run>) => {
               gameRuns: [GAME_RUN],
               gameRunSteps: [],
               gameRunRounds: [],
-            } as unknown as ProjectionStore.GameRunThreadRecords),
+              gameLastStep: 0,
+            } as unknown as ProjectionStore.GameRunRecordsRead),
         }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadRecords: () => Effect.succeed({ runs } as never),

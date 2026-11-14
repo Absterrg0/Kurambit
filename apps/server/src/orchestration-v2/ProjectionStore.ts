@@ -349,6 +349,15 @@ export interface GameRunThreadRecords {
   readonly gameRunRounds: ReadonlyArray<GameRunRound>;
 }
 
+/** A thread's run records as read, with the number of its game's last keep-going step. */
+export interface GameRunRecordsRead extends GameRunThreadRecords {
+  /**
+   * The highest step number recorded in any chat of the thread's game, 0 before the first: steps
+   * are numbered across the game, as its builds are, so two chats never both have a step 1.
+   */
+  readonly gameLastStep: number;
+}
+
 /** A run that no longer works the game folder: it ended. */
 const gameRunSettled = (run: GameRun) => run.status === "ended";
 
@@ -442,7 +451,7 @@ export interface ProjectionStoreV2Shape {
   readonly getGameRunRecords: (
     threadId: ThreadId,
     filter?: GameRunRecordFilter,
-  ) => Effect.Effect<GameRunThreadRecords, ProjectionStoreV2Error>;
+  ) => Effect.Effect<GameRunRecordsRead, ProjectionStoreV2Error>;
   /** Creator threads with a game run that has not ended or whose ending's finish is owed, for startup recovery. */
   readonly listGameRunThreadsToRecover: () => Effect.Effect<
     ReadonlyArray<ThreadId>,
@@ -5131,13 +5140,25 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               WHERE thread_id = ${threadId}
               ORDER BY round ASC, rowid ASC
             `.pipe(Effect.flatMap(decodeRows(decodeGameRunRoundPayload, threadId))),
+            sql<{ readonly last: number }>`
+              SELECT COALESCE(MAX(round.round), 0) AS last
+              FROM orchestration_v2_projection_game_run_rounds AS round
+              JOIN orchestration_v2_projection_game_runs AS run
+                ON run.game_run_id = round.game_run_id
+              WHERE run.project_id = (
+                SELECT project_id FROM orchestration_v2_projection_threads
+                WHERE thread_id = ${threadId}
+              )
+                AND json_extract(round.payload_json, '$.round.step') IS NOT NULL
+            `,
           ]),
         )
         .pipe(
-          Effect.map(([gameRuns, gameRunSteps, gameRunRounds]) => ({
+          Effect.map(([gameRuns, gameRunSteps, gameRunRounds, last]) => ({
             gameRuns,
             gameRunSteps,
             gameRunRounds,
+            gameLastStep: last[0]?.last ?? 0,
           })),
           Effect.mapError(controlReadError(threadId)),
         );
@@ -6830,9 +6851,24 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
       getGameRunRecords: (threadId, filter) =>
         Effect.gen(function* () {
           const state = yield* Ref.get(replayState);
-          if (!state.projections.has(threadId))
+          const projection = state.projections.get(threadId);
+          if (projection === undefined)
             return yield* new ProjectionStoreThreadNotFoundError({ threadId });
-          const records = state.gameRunRecords.get(threadId) ?? emptyGameRunRecords;
+          const records = {
+            ...(state.gameRunRecords.get(threadId) ?? emptyGameRunRecords),
+            gameLastStep: [...state.gameRunRecords.values()]
+              .flatMap((each) =>
+                each.gameRunRounds.filter(
+                  (round) =>
+                    round.round.step !== undefined &&
+                    each.gameRuns.some(
+                      (run) =>
+                        run.id === round.runId && run.projectId === projection.thread.projectId,
+                    ),
+                ),
+              )
+              .reduce((last, round) => Math.max(last, round.round.round), 0),
+          };
           const steps = filter?.steps;
           if (steps === undefined) return records;
           return {

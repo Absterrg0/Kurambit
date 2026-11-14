@@ -213,9 +213,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const run = yield* projections.getProjectGameRun(projectId);
       if (run === null || run.status === "ended") return null;
-      const n = stepNumber(
-        (yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" })).gameRunRounds,
-      );
+      const records = yield* projections.getGameRunRecords(run.threadId, { steps: "in-flight" });
+      const n = stepNumber(records.gameRunRounds, records.gameLastStep);
       return { step: stepLine(n), startedAt: run.startedAt } satisfies GameSummary["run"];
     }).pipe(Effect.orElseSucceed(() => null));
   const path = yield* Path.Path;

@@ -93,6 +93,7 @@ it.effect("recovery stops what a restart left behind, and runs the cut-off step 
                 gameRuns: [runs[threadId]!],
                 gameRunSteps: steps[threadId] ?? [],
                 gameRunRounds: [],
+                gameLastStep: 0,
               }),
             getShellSnapshot: () =>
               Effect.succeed({

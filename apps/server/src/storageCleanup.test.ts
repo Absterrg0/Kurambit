@@ -283,6 +283,7 @@ const cleanupFixture = (
               .map((each) => each.run),
             gameRunSteps: [],
             gameRunRounds: [],
+            gameLastStep: 0,
           })),
       } as unknown as ProjectionStore.ProjectionStoreV2["Service"]),
       Effect.provideService(ProviderSessionManager.ProviderSessionManagerV2, {

@@ -84,14 +84,22 @@ export const isStepRecord = (round: GameRunRoundRecord): round is StepRecord =>
   round.step !== undefined;
 
 /**
- * The number the chat's next step takes: steps are numbered per chat, across
- * its runs, so "Step 4" names one turn of the chat. A step that never reached
- * a record (superseded, paused) leaves its number to the next.
+ * The number the next step takes: steps are numbered across the game's chats
+ * and runs, as its builds are, so "Step 4" names one turn of the game and its
+ * build. A step that never reached a record (superseded, paused) leaves its
+ * number to the next.
  */
-export const stepNumber = (rounds: ReadonlyArray<GameRunRound>): number =>
-  rounds.reduce((max, r) => (isStepRecord(r.round) ? Math.max(max, r.round.round) : max), 0) + 1;
+export const stepNumber = (rounds: ReadonlyArray<GameRunRound>, gameLastStep: number): number =>
+  rounds.reduce(
+    (max, r) => (isStepRecord(r.round) ? Math.max(max, r.round.round) : max),
+    gameLastStep,
+  ) + 1;
 
-const toState = (run: GameRun, rounds: ReadonlyArray<GameRunRound>): RunState => ({
+const toState = (
+  run: GameRun,
+  rounds: ReadonlyArray<GameRunRound>,
+  gameLastStep: number,
+): RunState => ({
   profile: run.profile,
   budgetMinutes: run.budgetMinutes,
   budgetEndsAt: run.budgetEndsAt,
@@ -107,7 +115,7 @@ const toState = (run: GameRun, rounds: ReadonlyArray<GameRunRound>): RunState =>
     .map((r) => r.round)
     .filter(isStepRecord)
     .toSorted((a, b) => a.round - b.round),
-  n: stepNumber(rounds),
+  n: stepNumber(rounds, gameLastStep),
 });
 
 const withState = (run: GameRun, state: RunState): GameRun => ({
@@ -252,9 +260,10 @@ export const proposalSummary = (
  */
 export const stepMessage = (
   rounds: ReadonlyArray<GameRunRound>,
+  gameLastStep: number,
   proposal: Pick<GameRunProposal, "why" | "text" | "target">,
 ): { readonly text: string; readonly summary: string } => {
-  const n = stepNumber(rounds);
+  const n = stepNumber(rounds, gameLastStep);
   const capped = rounds.find((r) => isStepRecord(r.round) && r.round.round === n - 1)?.round.step
     ?.capped;
   const cap =
@@ -961,8 +970,10 @@ export interface GameRunRecords {
   readonly projectRun: GameRun | null;
   /** The thread's runs, oldest first. */
   readonly runs: ReadonlyArray<GameRun>;
-  /** The thread's rounds across its runs: a chat's step numbers continue from run to run. */
+  /** The thread's rounds across its runs. */
   readonly rounds: ReadonlyArray<GameRunRound>;
+  /** The highest step number in any chat of the game: the next step continues from it. */
+  readonly gameLastStep: number;
   /** The latest run's step in flight, when it holds one. */
   readonly inFlight: GameRunStep | null;
   /** The thread was deleted: nothing resumes its runs. */
@@ -1240,7 +1251,8 @@ const finish = (
   completedAt: work.iso,
 });
 
-const stateOf = (work: Work, run: GameRun) => toState(run, work.records.rounds);
+const stateOf = (work: Work, run: GameRun) =>
+  toState(run, work.records.rounds, work.records.gameLastStep);
 
 // ── Commands. ───────────────────────────────────────────────────────────────
 const start = (work: Work, command: Command<"game-run.start">) => {

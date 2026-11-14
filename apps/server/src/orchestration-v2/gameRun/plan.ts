@@ -77,6 +77,7 @@ export const planGameRunCommand = (deps: PlanDeps, command: OrchestrationV2GameR
         projectRun: yield* projections.getProjectGameRun(thread.projectId),
         runs: records.gameRuns,
         rounds: records.gameRunRounds,
+        gameLastStep: records.gameLastStep,
         inFlight,
         chatDeleted: thread.deletedAt !== null,
         steps: cycle,

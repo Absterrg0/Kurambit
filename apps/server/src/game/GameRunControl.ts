@@ -232,7 +232,7 @@ const make = Effect.gen(function* () {
         turn: turnRecord?.step.kind === "turn" ? turnRecord.step : null,
         turnRun: turnRecord === null ? null : turnRunOf(turnRecord),
         undoing,
-        n: stepNumber(records.gameRunRounds),
+        n: stepNumber(records.gameRunRounds, records.gameLastStep),
       };
     });
 

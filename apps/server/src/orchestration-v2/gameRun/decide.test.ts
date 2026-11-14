@@ -70,6 +70,8 @@ class Store {
   runs: GameRun[] = [];
   steps = new Map<string, GameRunStep>();
   rounds: GameRunRound[] = [];
+  /** The game's last step in its other chats. */
+  gameLastStep = 0;
   now = T0;
   effects: Decide.GameRunDecision["effects"] = [];
   private n = 0;
@@ -96,6 +98,7 @@ class Store {
       projectRun: this.runs.at(-1) ?? null,
       runs: this.runs,
       rounds: this.rounds,
+      gameLastStep: this.gameLastStep,
       inFlight: this.inFlight,
       chatDeleted: false,
       steps: [...this.steps.values()],
@@ -616,7 +619,7 @@ describe("a keep-going run", () => {
     store.complete(turn({ outcome: "capped" }));
     store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
     expect(store.rounds.at(-1)?.round.step?.capped).toBe(15);
-    const next = Decide.stepMessage(store.rounds, {
+    const next = Decide.stepMessage(store.rounds, 0, {
       why: "next",
       text: "Add a boss.",
       target: null,
@@ -625,7 +628,21 @@ describe("a keep-going run", () => {
       "Kurambit's 15-minute time cap stopped your last keep-going step's turn",
     );
     expect(
-      Decide.stepMessage([], { why: "next", text: "Add a boss.", target: null }).text,
+      Decide.stepMessage([], 0, { why: "next", text: "Add a boss.", target: null }).text,
     ).not.toContain("time cap");
+  });
+
+  it("numbers a chat's first step after the game's steps in its other chats", () => {
+    // Builds are listed per game: two chats' steps must never share a name.
+    expect(
+      Decide.stepMessage([], 3, { why: "next", text: "Add a boss.", target: null }).text,
+    ).toMatch(/^Keep going · step 4 /);
+    const store = new Store();
+    store.gameLastStep = 3;
+    store.start("autopilot");
+    store.complete(look());
+    store.complete(turn());
+    store.complete({ kind: "judge", base: facts(), build: { ...facts(), build: BUILD } });
+    expect(store.rounds.at(-1)?.round.round).toBe(4);
   });
 });
