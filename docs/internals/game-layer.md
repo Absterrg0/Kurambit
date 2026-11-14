@@ -434,6 +434,15 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   reading sharing could explain is played again alone before it is stored (`sharedPlaySuspect`).
   In SwiftShader plays slowed from 1× to 0.08× real time beside each other, so there they take
   turns; the tester's bot always plays alone. Revisit only with new measurements.
+- **One play lane, by who waits.** A build's measure and `game_check`'s play each hold the
+  server's one [play lane](../../apps/server/src/game/playLane.ts), so no two of them share the
+  GPU and none of their readings needs a "shared" caveat; a measure's two lanes above are one
+  hold. Holds go to an agent's check, then a person's measure, then a chat turn's, then the
+  rest, first asked within each. A holder that a waiter outranks is interrupted at once and runs
+  again from its row on its next turn, so a half-played tier is never a fact, and the waiter
+  waits only for that teardown (a bot run's stop, bounded in GameBot) plus the holds of its own
+  rank ahead of it. An agent's `game_bot_run` and explore sessions are outside the lane, and
+  another program on the GPU was never visible: `sharedPlaySuspect` covers what that slows.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.

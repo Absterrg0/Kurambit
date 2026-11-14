@@ -4,9 +4,11 @@
 // one table. Nothing that matters lives only in memory: a measure writes the
 // build's row first (owed), each tier is written as it lands, and a reconcile
 // at startup measures every row with tiers still owed. In memory is only the
-// one keyed queue, one job per key, that runs one measurement at a time on
-// the server (every bot start still passes the memory gate) and that Stop
-// game clears for its game. A tool or machine fault is stored as "not
+// keyed jobs, one per key, that Stop game clears for its game. A job runs in
+// the server's one play lane (playLane.ts) at the priority of who asked: one
+// measurement at a time, the most urgent first, and one outranked gives way
+// mid-tier and plans again from its row (every bot start still passes the
+// memory gate). A tool or machine fault is stored as "not
 // measured": with `retry` when waiting may clear it (every measure tries
 // again), as `standing` when it needs a person (their measure tries again).
 import * as NodeCrypto from "node:crypto";
@@ -24,7 +26,6 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   GAME_FACTS_BOUNDS,
@@ -65,7 +66,8 @@ import {
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
-import { drawingAlone, isSoftwareRenderer, makeGameBrowser } from "./gameChromium.ts";
+import { isSoftwareRenderer, makeGameBrowser } from "./gameChromium.ts";
+import { type LaneTicket, type PlayPriority, playLane } from "./playLane.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import { insideGame } from "./gamePath.ts";
@@ -91,7 +93,7 @@ import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 const FACTS_VERSION = 4;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
-/** Measures started by a person that may wait for the one running. */
+/** Measures started by a person that may wait behind each other. */
 const QUEUE_LIMIT = 3;
 const TIER_FILES = ["tier.mjs", "idle.mjs", "masher.mjs", "sensors.mjs"];
 /** Where a copy holds the harness's own tier bots, apart from the game's kit its bot imports. */
@@ -116,19 +118,19 @@ const machineNow = (stalled: number | null): MachineLoad => ({
   stalled,
   load: NodeOS.loadavg()[0] ?? 0,
 });
-/** `work` (a play of `owner`'s) with how busy the machine was while it ran. */
-const withMachine = <A, E, R>(owner: string, work: Effect.Effect<A, E, R>) =>
+/** `work` (a play) with how busy the machine was while it ran. */
+const withMachine = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const from = yield* Clock.currentTimeMillis;
     const before = yield* cpuPressure;
-    const { value, gpuShared } = yield* drawingAlone(owner, work);
+    const value = yield* work;
     const ms = (yield* Clock.currentTimeMillis) - from;
     const after = yield* cpuPressure;
     const stalled =
       before === null || after === null || ms <= 0
         ? null
         : Math.min(1, Math.max(0, (after.total - before.total) / (ms * 1000)));
-    return { value, machine: { ...machineNow(stalled), gpuShared } };
+    return { value, machine: machineNow(stalled) };
   });
 /** Waits a while for an idle machine; a tier that plays on a busy one anyway is classified so. */
 const idleMachine = Effect.gen(function* () {
@@ -316,9 +318,11 @@ const measuringMessage = (
   return `Measuring: ${name} (step ${at + 1} of ${steps.length}).`;
 };
 
-/** One measurement asked for: queued until it holds the server's one permit, then running. */
+/** One measurement asked for: queued until it holds the play lane, then running. */
 interface Job {
   readonly build: ResolvedBuild;
+  /** Its place in the play lane, raised when someone more urgent asks for the same build. */
+  readonly ticket: LaneTicket;
   /** A person asked: standing faults are tried again. */
   person: boolean;
   /** Someone needs the tester's bot to play it: keep going's judgment or a person. */
@@ -329,6 +333,7 @@ interface Job {
   tiers: ReadonlySet<Tier> | null;
   /** Facts this measure has saved so far: each shows as it lands, not when the job ends. */
   readonly written: Set<FactName>;
+  /** Holding the lane now; false again while it waits after giving way. */
   running: boolean;
   stopped: boolean;
   fiber: Fiber.Fiber<void> | null;
@@ -350,11 +355,14 @@ export class GameFacts extends Context.Service<
      * Measures what the build lacks (never measured, not measured with a
      * reason waiting clears, an older harness, a changed tester bot; a
      * person's also what a standing fault kept) and returns at once, or after
-     * `waitFor` if it finishes sooner. A person's measure waits behind at
-     * most three others; past that it starts nothing and says so. With
-     * `supersede` (a chat turn's newest build), it drops the game's other
-     * queued measures that asked the same: only the newest turn is worth the
-     * wait. A running measure, a person's and a run's are never dropped.
+     * `waitFor` if it finishes sooner. Measures go by who asked: a person's,
+     * then a chat turn's (`supersede`), then the rest; a running one that a
+     * more urgent one outranks gives way at once and goes on after it. A
+     * person's measure waits behind at most three others of theirs; past that
+     * it starts nothing and says so. With `supersede` (a chat turn's newest
+     * build), it drops the game's other queued measures that asked the same:
+     * only the newest turn is worth the wait. A running measure, a person's
+     * and a run's are never dropped.
      */
     readonly measure: (
       build: ResolvedBuild,
@@ -408,10 +416,9 @@ const make = Effect.gen(function* () {
       hash.update(await NodeFSP.readFile(NodePath.join(kit, file)).catch(() => Buffer.from(file)));
     return hash.digest("hex").slice(0, 12);
   });
-  const permit = yield* Semaphore.make(1);
-  /** The one queue: a job per facts key, registered before anything yields, removed when it ends. */
+  /** A job per facts key, registered before anything yields, removed when it ends. */
   const jobs = new Map<string, Job>();
-  const waiting = () => [...jobs.values()].filter((job) => !job.running).length;
+  const personWaiting = () => [...jobs.values()].filter((job) => job.person && !job.running).length;
 
   const decodeRow = (row: { readonly harness: string; readonly payload_json: string }) => {
     const stored = decodeStored(row.payload_json);
@@ -491,12 +498,12 @@ const make = Effect.gen(function* () {
             : counted.every((fact) => fact.status === "measured")
               ? "measured"
               : "incomplete";
-    const ahead = Math.max(0, waiting() - 1);
+    const ahead = job === undefined ? 0 : playLane.ahead(job.ticket);
     const message =
       state === "queued"
         ? ahead > 0
-          ? `Queued behind ${ahead} other measurement${ahead === 1 ? "" : "s"}.`
-          : "Queued: it starts when the measurement before it ends."
+          ? `Queued behind ${ahead} other play${ahead === 1 ? "" : "s"}.`
+          : "Queued: it starts when the play before it ends."
         : state === "measuring"
           ? measuringMessage(job?.tiers ?? null, owedTier, build.engine, stored?.renderer ?? "")
           : state === "never"
@@ -710,23 +717,26 @@ const make = Effect.gen(function* () {
             ? found.stored
             : { build: build.build, measuredAt: null, renderer: null };
         stored = { ...stored, root, engine: build.engine };
+        // Whole or not at all, should the job give way as it saves.
         const write = (patch: Partial<Record<FactName, unknown>>) =>
-          Effect.gen(function* () {
-            const names = Object.keys(patch) as FactName[];
-            const standing = new Set(stored.standing ?? []);
-            for (const name of names)
-              if (isStanding(patch[name])) standing.add(name);
-              else standing.delete(name);
-            stored = {
-              ...stored,
-              ...(patch as Partial<Stored>),
-              standing: [...standing],
-              measuredAt: DateTime.formatIso(yield* DateTime.now),
-            };
-            yield* save(key, stored);
-            for (const name of names) written.add(name);
-            yield* announce(`Build ${build.build.slice(0, 8)}: ${names.join(", ")} measured.`);
-          });
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const names = Object.keys(patch) as FactName[];
+              const standing = new Set(stored.standing ?? []);
+              for (const name of names)
+                if (isStanding(patch[name])) standing.add(name);
+                else standing.delete(name);
+              stored = {
+                ...stored,
+                ...(patch as Partial<Stored>),
+                standing: [...standing],
+                measuredAt: DateTime.formatIso(yield* DateTime.now),
+              };
+              yield* save(key, stored);
+              for (const name of names) written.add(name);
+              yield* announce(`Build ${build.build.slice(0, 8)}: ${names.join(", ")} measured.`);
+            }),
+          );
 
         // The static tier reads the copy's files only: it needs no browser and no engine.
         if (tiers.has("assets"))
@@ -811,7 +821,7 @@ const make = Effect.gen(function* () {
         // another play, its caller does both for the lanes together.
         const runBot = (file: string, seconds: number, lane?: string) => {
           const run = (work: Effect.Effect<GameBotRunResult, GameOperationError>) =>
-            withMachine(key, lane === undefined ? step(work) : work).pipe(
+            withMachine(lane === undefined ? step(work) : work).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
             );
           const input = { file, seconds, mode: "play" as const };
@@ -1142,7 +1152,10 @@ const make = Effect.gen(function* () {
     });
 
   // A job: its row first (so the work is owed even across a restart), then
-  // the permit, then the plan read fresh, then the tiers.
+  // its turn in the play lane, then the plan read fresh, then the tiers. A
+  // job that gives way to a more urgent play is interrupted and runs this
+  // again on its next turn: the tier it was in was never written, so the
+  // fresh plan measures it again and nothing it finished.
   const runJob = (job: Job) =>
     Effect.gen(function* () {
       const { build } = job;
@@ -1155,7 +1168,8 @@ const make = Effect.gen(function* () {
           measuredAt: null,
           renderer: null,
         });
-      yield* permit.withPermits(1)(
+      yield* playLane.hold(
+        job.ticket,
         Effect.gen(function* () {
           if (job.stopped) return;
           job.running = true;
@@ -1194,7 +1208,20 @@ const make = Effect.gen(function* () {
             job.written.clear();
             if (job.tiers.size > 0) yield* measureJob(build, job.tiers, now, true, job.written);
           }
-        }),
+        }).pipe(
+          Effect.onInterrupt(() =>
+            Effect.suspend(() => {
+              job.running = false;
+              return job.stopped
+                ? Effect.void
+                : operations.changed(
+                    build.root,
+                    GAME_FACTS_EVENT,
+                    `Build ${build.build.slice(0, 8)}: measuring paused for a more urgent play.`,
+                  );
+            }),
+          ),
+        ),
       );
     }).pipe(
       Effect.catchCause((cause) =>
@@ -1232,6 +1259,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const person = options.queue === "person";
       const supersede = options.supersede === true && !person;
+      // A superseding measure is a chat turn's newest build (GameBuilds).
+      const priority: PlayPriority = person ? "person" : supersede ? "turn" : "background";
       // Decided and registered in one step, with nothing yielding between: a
       // job not yet running cannot start while it is dropped (runJob reads
       // `stopped` and sets `running` with no yield between).
@@ -1246,9 +1275,13 @@ const make = Effect.gen(function* () {
             if (person) existing.person = true;
             if (options.skilled !== false) existing.skilled = true;
             if (!supersede) existing.supersedable = false;
-            return Effect.succeed({ job: existing, dropped: [], queued: false });
+            return Effect.as(playLane.raise(existing.ticket, priority), {
+              job: existing,
+              dropped: [],
+              queued: false,
+            });
           }
-          if (person && waiting() >= QUEUE_LIMIT)
+          if (person && personWaiting() >= QUEUE_LIMIT)
             return Effect.succeed({ job: null, dropped: [], queued: false });
           const dropped = supersede
             ? [...jobs.values()].filter(
@@ -1262,6 +1295,7 @@ const make = Effect.gen(function* () {
           }
           const fresh: Job = {
             build,
+            ticket: playLane.ticket(priority),
             person,
             skilled: options.skilled !== false,
             supersedable: supersede,
