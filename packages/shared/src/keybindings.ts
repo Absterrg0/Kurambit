@@ -127,7 +127,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+alt+b", command: "rightPanel.toggle" },
   { key: "mod+shift+b", command: "threadPanel.toggle", when: "!terminalFocus" },
-  { key: "mod+alt+c", command: "game.chat.toggle", when: "gameThread" },
+  { key: "mod+alt+c", command: "game.tune.toggle", when: "gameThread" },
   {
     key: "mod+alt+z",
     command: "game.undoTurn",

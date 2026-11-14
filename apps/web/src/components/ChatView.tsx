@@ -5290,7 +5290,7 @@ export default function ChatView(props: ChatViewProps) {
         openThreadFindStable();
       },
       "rightPanel.toggle": () => toggleRightPanelStable(),
-      "game.chat.toggle": () => {
+      "game.tune.toggle": () => {
         // Only a game thread has the builds this shortcut shows and hides.
         if (!isGameThread || activeThreadRef === null) return false;
         toggleGameTab(activeThreadRef, "tune");

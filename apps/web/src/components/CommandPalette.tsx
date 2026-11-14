@@ -1573,7 +1573,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Show or hide Tune",
       searchTerms: ["tune", "values", "inspector", "panel", "hide", "show", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "game.chat.toggle",
+      shortcutCommand: "game.tune.toggle",
       run: async () => toggleGameTab(threadRef, "tune"),
     });
     const requestStage = (request: GameStageRequest) => async () => {

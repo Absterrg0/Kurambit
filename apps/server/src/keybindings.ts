@@ -116,6 +116,21 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   },
 ];
 
+/**
+ * Commands renamed since a person's keybindings.json was written. The file holds every default, so
+ * an old name would read as an invalid entry, which stops the default sync for the whole file.
+ */
+const RENAMED_KEYBINDING_COMMANDS: ReadonlyMap<string, KeybindingRule["command"]> = new Map([
+  ["game.chat.toggle", "game.tune.toggle"],
+]);
+
+const renamedEntry = (entry: unknown): unknown => {
+  if (!Predicate.isObject(entry) || !("command" in entry) || typeof entry.command !== "string")
+    return entry;
+  const command = RENAMED_KEYBINDING_COMMANDS.get(entry.command);
+  return command === undefined ? entry : { ...entry, command };
+};
+
 function keybindingShortcutContext(rule: KeybindingRule): string | null {
   const parsed = parseKeybindingShortcut(rule.key);
   if (!parsed) return null;
@@ -426,6 +441,24 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /** Rewrites renamed commands in place, keeping every other entry as the person wrote it. */
+  const renameCommands = readRawConfig.pipe(
+    Effect.flatMap(Schema.decodeEffect(RawKeybindingsEntries)),
+    Effect.flatMap((entries) => {
+      const renamed = entries.map(renamedEntry);
+      if (renamed.every((entry, index) => entry === entries[index])) return Effect.void;
+      return writeFileStringAtomically({
+        filePath: keybindingsConfigPath,
+        contents: `${JSON.stringify(renamed, null, 2)}\n`,
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+      );
+    }),
+    // A file that cannot be read or parsed is reported by the load that follows.
+    Effect.ignore,
+  );
+
   const loadConfigStateFromDisk = loadRuntimeCustomKeybindingsConfig().pipe(
     Effect.map(({ keybindings, issues }) => ({
       keybindings: mergeWithDefaultKeybindings(compileResolvedKeybindingsConfig(keybindings)),
@@ -471,6 +504,7 @@ const make = Effect.gen(function* () {
         return;
       }
 
+      yield* renameCommands;
       const runtimeConfig = yield* loadRuntimeCustomKeybindingsConfig();
       if (runtimeConfig.issues.length > 0) {
         yield* Effect.logWarning(

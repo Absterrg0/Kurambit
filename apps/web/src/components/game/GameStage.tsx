@@ -939,7 +939,7 @@ function ThreadGameStage({
   const fullscreenKey = shortcutLabelForCommand(keybindings, "game.fullscreen", {
     context: { gameThread: true },
   });
-  const inspectorKey = shortcutLabelForCommand(keybindings, "game.chat.toggle", {
+  const inspectorKey = shortcutLabelForCommand(keybindings, "game.tune.toggle", {
     context: { gameThread: true },
   });
   const undoKey = shortcutLabelForCommand(keybindings, "game.undoTurn", {

@@ -68,9 +68,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "rightPanel.toggle",
   "rightPanel.new",
   "threadPanel.toggle",
-  // Shows or hides Tune. The id is older than Tune and stays: every default is written into the
-  // person's keybindings.json, which has no rename, so a new id would leave theirs invalid.
-  "game.chat.toggle",
+  "game.tune.toggle",
   "game.undoTurn",
   "game.redoTurn",
   "game.focus",

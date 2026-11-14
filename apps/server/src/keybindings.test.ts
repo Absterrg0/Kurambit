@@ -317,6 +317,24 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("keeps a renamed command's shortcut under its new name and syncs the rest", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const keybindings = yield* Keybindings.Keybindings;
+      const old = { key: "alt+t", command: "game.chat.toggle", when: "gameThread" };
+      yield* fileSystem.writeFileString(keybindingsConfigPath, JSON.stringify([old]));
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepStrictEqual(
+        persisted.filter((entry) => entry.command.startsWith("game.") && entry.key === "alt+t"),
+        [{ ...old, command: "game.tune.toggle" }],
+      );
+      assert.ok(persisted.some((entry) => entry.command === "composer.sendBackground"));
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
