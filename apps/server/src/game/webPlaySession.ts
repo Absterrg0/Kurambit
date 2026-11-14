@@ -1026,9 +1026,12 @@ export const openWebPlaySession = async (input: {
                 perf = null;
               }
             if (sceneStarted === true) {
+              // Reading encodes up to eight frames as PNG on the page's main thread: 0.2 s on a
+              // GPU, over 3 s in software with a second play beside it (a build's idle and
+              // random-input plays), so it gets a still's bound, not one input's.
               const report = await bounded(
                 page.evaluate(READ_SCENE).catch(() => null),
-                PLAY_BOUNDS.webCallMs,
+                PLAY_BOUNDS.stillMs,
               );
               if (typeof report === "string")
                 try {
