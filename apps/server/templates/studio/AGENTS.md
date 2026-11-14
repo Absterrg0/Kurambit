@@ -1,7 +1,7 @@
 # Studio skills
 
-Craft advice, one skill per file, for the game's engine. A game whose
-AGENTS.md has "The first turn" needs only what it names there.
+Craft advice, one skill per file, for the game's engine. A game's first
+turn needs only what "The first turn" in its first message names.
 
 - `godot-game`: Godot lane: engine rules, tool discipline, export checklist.
 - `three`: three.js lane: first-turn rules, view recipes, the shell's rules, the Stage's Ask.

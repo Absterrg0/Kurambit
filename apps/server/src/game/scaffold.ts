@@ -154,10 +154,20 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
   ].join("\n");
 };
 
+/**
+ * A new game's first message: the brief, then the first turn's steps. They travel with the brief,
+ * not in the game's AGENTS.md, so they reach the one turn they are for and a change to them needs
+ * no migration of games already made.
+ */
 export const firstTurnMessage = (manifest: GameManifest): string => {
-  const lead = FIRST_TURN_LEADS[FIRST_TURN_SECTIONS[manifest.engine.name] === undefined ? 0 : 1];
+  const steps = firstTurnSection(manifest);
   const art = manifest.artDirection.trim();
-  return `${manifest.brief.trim()}${art === "" ? "" : `\n\nArt direction: ${art}`}\n\n${lead}`;
+  return [
+    manifest.brief.trim(),
+    ...(art === "" ? [] : [`Art direction: ${art}`]),
+    steps === undefined ? FIRST_TURN_LEADS.brief : FIRST_TURN_LEADS.steps,
+    ...(steps === undefined ? [] : [steps.trim()]),
+  ].join("\n\n");
 };
 
 /**
@@ -188,7 +198,6 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
     "AGENTS.md": [
       `# Kurambit project\n\n${engineProfile(engine).scaffold.agents}`,
       everyTurnSection(engine),
-      firstTurnSection(manifest),
       engineProfile(engine).turnLoop ? KEEP_GOING_SECTION : undefined,
     ]
       .filter((section) => section !== undefined)

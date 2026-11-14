@@ -7,7 +7,12 @@ import * as NodeFS from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import { McpSchema } from "effect/ai";
-import { EnvironmentId, type GameCharacterRoute, type GameCreateInput } from "@kurambit/contracts";
+import {
+  EnvironmentId,
+  type GameCharacterRoute,
+  type GameCreateInput,
+  type GameManifest,
+} from "@kurambit/contracts";
 import { McpInvocationContext } from "../mcp/McpInvocationContext.ts";
 import {
   GameAnimateTool,
@@ -18,12 +23,12 @@ import {
   GameToolkit,
   GameUnityScreenshotTool,
 } from "../mcp/toolkits/game/tools.ts";
-import { scaffoldFiles } from "./scaffold.ts";
+import { firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 
 /**
- * Bytes a new three.js game's first turn reads, by character route: AGENTS.md, TEMPLATE.md,
- * three.md and the art-pipeline sections it names. About 10% over what they were on 2026-11-08
- * (library 23,981; generated 29,096).
+ * Bytes a new three.js game's first turn reads, by character route: its first message (the
+ * first turn's steps), AGENTS.md, TEMPLATE.md, three.md and the art-pipeline sections they name.
+ * About 10% over what they were on 2026-11-08 (library 23,981; generated 29,096).
  */
 const FIRST_TURN_BUDGET: Readonly<Record<"library" | "generated", number>> = {
   library: 26_000,
@@ -56,19 +61,22 @@ const namedSkillBytes = (agents: string, file: string) => {
 };
 
 const firstTurnBytes = (characters: GameCharacterRoute) => {
-  const agents = scaffoldFiles({
+  const files = scaffoldFiles({
     name: "Budget",
     parentDirectory: "/games",
     brief: "A knight clears a dungeon of skeletons.",
     engine: "three",
     characters,
     modelSelection: { instanceId: "codex", model: "gpt-5" },
-  } as GameCreateInput)["AGENTS.md"]!;
+  } as GameCreateInput);
+  const agents = files["AGENTS.md"]!;
+  const message = firstTurnMessage(JSON.parse(files["game.json"]!) as GameManifest);
   return {
+    "first message": bytes(message),
     "AGENTS.md": bytes(agents),
     "TEMPLATE.md": bytes(template("blank-three/TEMPLATE.md")),
     "three.md": bytes(template("studio/three.md")),
-    "art-pipeline.md (named sections)": namedSkillBytes(agents, "art-pipeline.md"),
+    "art-pipeline.md (named sections)": namedSkillBytes(`${message}\n${agents}`, "art-pipeline.md"),
   };
 };
 
