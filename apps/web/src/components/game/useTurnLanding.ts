@@ -1,30 +1,29 @@
-import { useAtomValue } from "@effect/atom-react";
-import type { ScopedThreadRef } from "@kurambit/contracts";
+import type { GameBuildsResult, ScopedThreadRef } from "@kurambit/contracts";
+import { AsyncResult } from "effect/reactivity";
 
-import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
-import { turnBuild, turnsRead } from "../../state/game";
+import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuerySelector } from "../../state/query";
+
+// A list not read yet says nothing is pending.
+const hasPendingTurn = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result) && result.value.pendingTurn !== undefined;
 
 /**
  * Between a turn's end and its build being listed, the build is being saved: the Stage, the
  * strip, the top bar and the Inspector all say so, so nothing steps back to the build before or
- * says there is none. T3 holds a finished run at `waiting` (still active) until its checkpoint
- * commits, so once the turn is over its checkpoint is known; a ready one with changed files
- * lands until the builds list has read it, which then lists its build or shows it made none.
+ * says there is none. The builds list names the chat's turn that has not settled
+ * (`pendingTurn`), in the same read that lists its build; while the turn is still active it is
+ * being made, not saved.
  */
 export function useTurnLanding(threadRef: ScopedThreadRef | null, turnActive: boolean): boolean {
-  const latestRun = useQuietThreadShell(threadRef)?.latestRun ?? null;
-  const ended = latestRun !== null && !turnActive;
-  const built =
-    useAtomValue(turnBuild(ended ? threadRef : null, latestRun?.runId ?? null)) !== null;
-  const checkpoints = useThreadCheckpointSummaries(threadRef);
-  const checkpoint =
-    latestRun === null ? undefined : checkpoints.find((entry) => entry.runId === latestRun.runId);
-  const changed =
-    ended &&
-    checkpoint !== undefined &&
-    checkpoint.status === "ready" &&
-    checkpoint.files.length > 0;
-  const read = useAtomValue(turnsRead(changed ? threadRef : null, checkpoint?.completedAt ?? null));
-  // A list not loaded yet says nothing either way: a turn lands only once the list is in hand.
-  return changed && !built && read === false;
+  const pending = useEnvironmentQuerySelector(
+    threadRef === null
+      ? null
+      : gameEnvironment.builds({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId },
+        }),
+    hasPendingTurn,
+  );
+  return pending && !turnActive;
 }

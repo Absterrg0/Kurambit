@@ -37,6 +37,7 @@ import {
   type GameKeepValuesResult,
   GameOperationError,
   manifestProject,
+  type OrchestrationV2Run,
   parkedEngineMessage,
   type ProjectId,
   RESTORE_BEFORE_LABEL,
@@ -385,6 +386,20 @@ interface BuildNumber {
   readonly fix: number | null;
 }
 
+/**
+ * A chat turn whose build has not settled: still running, or over with its checkpoint, the build
+ * if it made one, still being saved. T3 holds a finished run at `waiting` until that checkpoint
+ * commits; a stopped run is terminal at once and its checkpoint follows.
+ */
+export const turnPending = (
+  run: Pick<OrchestrationV2Run, "status" | "startedAt" | "checkpointId">,
+) =>
+  run.status === "running" ||
+  run.status === "waiting" ||
+  ((run.status === "interrupted" || run.status === "cancelled") &&
+    run.startedAt !== null &&
+    run.checkpointId === null);
+
 const isPersonBuild = (entry: Entry) => entry.source._tag === "turn" && entry.source.step === null;
 
 const make = Effect.gen(function* () {
@@ -613,7 +628,6 @@ const make = Effect.gen(function* () {
       );
       return {
         scanned: rows.length,
-        newest: rows[0] === undefined ? null : DateTime.formatIso(rows[0].checkpoint.capturedAt),
         oldest:
           rows.at(-1) === undefined ? null : DateTime.formatIso(rows.at(-1)!.checkpoint.capturedAt),
         entries: entries.flat(),
@@ -761,7 +775,6 @@ const make = Effect.gen(function* () {
         entries: listed,
         kept,
         more: floor !== null || listed.length > limit,
-        turnsReadThrough: before === undefined ? turns.newest : null,
         // How many person builds the game has from before `at`: every older
         // turn read, so a page's numbers never depend on what else was loaded.
         personBefore: (at: string) => {
@@ -1003,10 +1016,22 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const pendingTurnOf = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const runId = (yield* projections.getThreadShell(threadId))?.latestRunId ?? null;
+      if (runId === null) return null;
+      const { runs } = yield* projections.getThreadRecords(threadId, ["runs"], { runIds: [runId] });
+      const run = runs.find((each) => each.id === runId);
+      return run !== undefined && turnPending(run) ? run.id : null;
+    }).pipe(Effect.orElseSucceed(() => null));
+
   const list: GameBuilds["Service"]["list"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const limit = Math.min(50, Math.max(1, input.limit ?? 30));
+      // Read before the turns: a checkpoint committing between the two reads then leaves the turn
+      // pending or listed, never neither, which would show the build before it for a moment.
+      const pending = input.before === undefined ? yield* pendingTurnOf(threadId) : null;
       const listed = yield* allEntries(g, limit, input.before);
       const { entries, kept, more } = listed;
       const page = entries.slice(0, limit);
@@ -1023,6 +1048,11 @@ const make = Effect.gen(function* () {
           : undefined;
       const restore = yield* restoreRefOf(g, entries);
       const current = input.before === undefined ? yield* currentOf(g, listed) : null;
+      const pendingTurn = listed.entries.some(
+        (entry) => entry.source._tag === "turn" && entry.source.runId === pending,
+      )
+        ? null
+        : pending;
       return {
         builds,
         next: more && page.length > 0 ? page.at(-1)!.at : null,
@@ -1030,7 +1060,7 @@ const make = Effect.gen(function* () {
         folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
         restore,
         ...(latestUse === undefined ? {} : { latestUse }),
-        ...(listed.turnsReadThrough === null ? {} : { turnsReadThrough: listed.turnsReadThrough }),
+        ...(pendingTurn === null ? {} : { pendingTurn }),
       } satisfies GameBuildsResult;
     });
 

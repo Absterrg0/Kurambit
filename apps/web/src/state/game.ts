@@ -398,30 +398,6 @@ export const turnBuild = (ref: ScopedThreadRef | null, runId: string | null) =>
     ? NO_TURN_BUILD
     : turnBuildAtom(`${ref.environmentId}\0${ref.threadId}\0${runId ?? ""}`);
 
-const NO_TURNS_READ = Atom.make<boolean | null>(null);
-const turnsReadAtom = Atom.family((key: string) => {
-  const [environmentId = "", threadId = "", at = ""] = key.split("\0");
-  return Atom.make((get) => {
-    const list = get(
-      buildsQuery({
-        environmentId: EnvironmentId.make(environmentId),
-        input: { threadId: ThreadId.make(threadId) },
-      }),
-    );
-    if (!AsyncResult.isSuccess(list)) return null;
-    const through = list.value.turnsReadThrough;
-    return through !== undefined && Date.parse(through) >= Date.parse(at);
-  }).pipe(Atom.withLabel(`game:turns-read:${key}`));
-});
-/**
- * Whether the builds list has read the turns captured by `at`: one it read and does not list made
- * no build. Null until the list has loaded.
- */
-export const turnsRead = (ref: ScopedThreadRef | null, at: string | null) =>
-  ref === null || at === null
-    ? NO_TURNS_READ
-    : turnsReadAtom(`${ref.environmentId}\0${ref.threadId}\0${at}`);
-
 /** The build copies the server is playing for this game. */
 export type GameBuildPlaying = GameStatus["buildPlays"][number];
 export const buildPlaysOf = (status: GameStatus): ReadonlyArray<GameBuildPlaying> =>

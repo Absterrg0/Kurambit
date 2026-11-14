@@ -17,8 +17,9 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameStage from "./GameStage.ts";
 
 /**
- * Keeps the Builds rail current without polling: a turn's checkpoint, a
- * run's round, a run's end and a run's restore each push "builds" to the game's clients.
+ * Keeps the Builds rail current without polling: a chat turn starting or settling
+ * (turnPending), a turn's checkpoint, a run's round, a run's end and a run's
+ * restore each push "builds" to the game's clients.
  * A run's round is measured as it lands, so its card
  * has facts without anyone opening it; Unity builds are left to an open, as
  * a measurement would take the one editor from the run.
@@ -50,6 +51,9 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const perThread = yield* KeyedLock.make<string>();
   const roles = new Map<string, boolean>();
+  // Each run's last turnPending, so only a change pushes. A run first seen after a restart pushes
+  // once, since a client may still hold the list from before it.
+  const pendingRuns = new Map<string, boolean>();
   const isRole = (threadId: OrchestrationV2DomainEvent["threadId"]) =>
     roles.has(threadId)
       ? Effect.succeed(roles.get(threadId)!)
@@ -127,14 +131,34 @@ const make = Effect.gen(function* () {
     switch (event.type) {
       case "checkpoint.captured": {
         const runId = event.payload.runId;
-        return event.payload.status !== "ready" ||
-          event.payload.files.length === 0 ||
-          runId === null
-          ? Effect.void
-          : Effect.flatMap(isRole(event.threadId), (role) =>
-              // A run's role turns are folded into its rounds: no rail changes for them.
-              role ? Effect.void : turnBuilt(event, runId),
-            );
+        if (runId === null) return Effect.void;
+        return Effect.flatMap(isRole(event.threadId), (role) =>
+          // A run's role turns are folded into its rounds: no rail changes for them.
+          role
+            ? Effect.void
+            : event.payload.status === "ready" && event.payload.files.length > 0
+              ? turnBuilt(event, runId)
+              : pushTo(event, "A turn changed nothing.").pipe(Effect.ignore),
+        );
+      }
+      case "run.created":
+      case "run.updated": {
+        const run = event.payload;
+        const pending = GameBuilds.turnPending(run);
+        const was = pendingRuns.get(run.id);
+        if (pendingRuns.size > 2000) pendingRuns.clear();
+        pendingRuns.set(run.id, pending);
+        // A run settling with its checkpoint pushes from that checkpoint instead, once its build
+        // is recorded: a read before then could list it unfolded from the build it fixes.
+        if (
+          was === pending ||
+          (was === undefined && event.type === "run.created" && !pending) ||
+          (!pending && run.checkpointId !== null)
+        )
+          return Effect.void;
+        return Effect.flatMap(isRole(event.threadId), (role) =>
+          role ? Effect.void : pushTo(event, pending ? "A turn started." : "A turn settled."),
+        ).pipe(Effect.ignore);
       }
       case "game-run-round.recorded": {
         const record = event.payload.round;
