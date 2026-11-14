@@ -38,6 +38,7 @@ import {
   GameFactNotMeasured,
   GameFactPending,
   GamePerformance,
+  GameQaReport,
   GameSceneReport,
   type GameBotRunResult,
   GameEngineId,
@@ -61,7 +62,7 @@ import {
   tierEvidenceOf,
   tierFact,
   tierWallSeconds,
-  winnableOf,
+  qaFact,
 } from "./buildFacts.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -202,6 +203,13 @@ const Stored = Schema.Struct({
       GameFactPending,
     ]),
   ),
+  qa: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GameQaReport }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
   /** Each play's own use record, so a tier measured again replaces only its own. */
   plays: Schema.optionalKey(
     Schema.Struct({
@@ -247,10 +255,12 @@ type FactName =
   | "firstResponse"
   | "use"
   | "performance"
-  | "scene";
+  | "scene"
+  | "qa";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   assets: ["assets"],
-  boots: ["boots"],
+  // The boot check plays the QA play too (GameEngine.checkIn), so its report lands with it.
+  boots: ["boots", "qa"],
   idle: ["idle", "use"],
   masher: ["masher", "liveness", "firstResponse", "performance", "scene", "use"],
   skilled: ["skilled", "use"],
@@ -262,8 +272,8 @@ const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => 
  * report from its shell; an engine whose game plays in its own process says
  * why it has none of them, and never owes them.
  */
-const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "scene"]);
-const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "scene") =>
+const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "scene", "qa"]);
+const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "scene" | "qa") =>
   engineProfile(engine).play === "browser"
     ? null
     : notMeasured(
@@ -271,7 +281,9 @@ const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "scene"
           ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for games that play in a browser`
           : fact === "performance"
             ? `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for games that play in a browser`
-            : sceneNotInEngine(engine),
+            : fact === "qa"
+              ? `${engineProfile(engine).displayName} games have no QA play yet; it is played for three.js games`
+              : sceneNotInEngine(engine),
         false,
       );
 const useNotMeasured = (engine: GameEngineId) => browserOnly(engine, "use");
@@ -463,20 +475,18 @@ const make = Effect.gen(function* () {
       TIERS.some((tier) => owedTier(tier) && TIER_FACTS[tier].includes(fact));
     const get = <K extends FactName>(fact: K): Fact<K> =>
       pending(fact) ? { status: "pending" } : ((stored?.[fact] as Fact<K> | undefined) ?? NEVER);
-    const idle = get("idle");
-    const masher = get("masher");
     const facts = {
       boots: get("boots"),
-      idle,
-      masher,
+      idle: get("idle"),
+      masher: get("masher"),
       skilled: get("skilled"),
-      winnableWithoutSkill: winnableOf(idle, masher),
       liveness: get("liveness"),
       firstResponse: get("firstResponse"),
       assets: get("assets"),
       use: useNotMeasured(build.engine) ?? get("use"),
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
       scene: browserOnly(build.engine, "scene") ?? get("scene"),
+      qa: browserOnly(build.engine, "qa") ?? get("qa"),
     };
     // An engine with no asset use or performance is not an incomplete measurement.
     const counted =
@@ -769,25 +779,31 @@ const make = Effect.gen(function* () {
         if (tiers.has("boots")) {
           // A clean game_check of these very files already booted them (GameEngine.cleanCheckOf).
           const checked = yield* engines.cleanCheckOf(copy);
-          const boots =
+          const facts =
             checked !== null
-              ? bootsFact(checked, "from game_check on the same files")
+              ? {
+                  boots: bootsFact(checked, "from game_check on the same files"),
+                  qa: qaFact(checked),
+                }
               : yield* step(engines.checkIn(copy, OWNER)).pipe(
-                  Effect.map((result) => bootsFact(result)),
+                  Effect.map((result) => ({ boots: bootsFact(result), qa: qaFact(result) })),
                   Effect.catchTags({
-                    GameOperationError: (error) =>
-                      Effect.succeed(
-                        faultOf(error) ?? {
+                    GameOperationError: (error) => {
+                      const fault = faultOf(error);
+                      return Effect.succeed({
+                        boots: fault ?? {
                           status: "measured" as const,
                           value: {
                             ok: false,
                             detail: (error.detail ?? error.reason).slice(0, 300),
                           },
                         },
-                      ),
+                        qa: fault ?? notMeasured("the boot check failed before the QA play", false),
+                      });
+                    },
                   }),
                 );
-          yield* write({ boots });
+          yield* write(browserOnly(build.engine, "qa") === null ? facts : { boots: facts.boots });
         }
         // The harness's own bots, fresh from the server's templates, never the game's.
         const kitWritten = yield* Effect.promise(async () => {

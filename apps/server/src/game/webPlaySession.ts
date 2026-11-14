@@ -137,11 +137,14 @@ export class WebBrowserGone extends Error {
  */
 /** Set before any script runs: the shell's QA counters (shell/studio.js) wrap what it watches. */
 const QA_COUNTERS = "window.__studioQa = true;";
-/** The QA play: every control, then Retry. A slow machine makes it longer, never different. */
-const QA_PLAY_MS = 90_000;
+/**
+ * The QA play: every control, then Retry. A slow machine makes it longer, never different: a
+ * game drawn in software at a few frames a second takes about a minute.
+ */
+const QA_PLAY_MS = 120_000;
 const RUN_QA = `(async () => {
   const qa = window.__studio?.qa;
-  if (qa === null || typeof qa !== "object" || typeof qa.run !== "function") return null;
+  if (qa === null || typeof qa !== "object" || typeof qa.run !== "function") return "no-qa";
   try {
     return JSON.parse(JSON.stringify(await qa.run()));
   } catch {
@@ -358,7 +361,7 @@ export interface WebPlaySession extends PlaySession {
   /**
    * The shell's QA play on a session opened with `qa` (shell/qa.js): every control, Retry,
    * and the HUD at the session's size and at a narrow 4:3, the page put back after. Null when
-   * the shell has none or the page did not answer in time.
+   * the page did not answer in time, "no-qa" when the shell has none.
    */
   readonly qa: () => Promise<unknown>;
 }
@@ -845,6 +848,7 @@ export const openWebPlaySession = async (input: {
           QA_PLAY_MS,
         );
         if (played === TIMED_OUT || played === null) return null;
+        if (played === "no-qa") return played;
         const wide = await bounded(
           page.evaluate(READ_HUD).catch(() => null),
           PLAY_BOUNDS.webCallMs,

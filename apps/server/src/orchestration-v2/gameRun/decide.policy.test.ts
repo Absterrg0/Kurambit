@@ -25,6 +25,18 @@ const tier = (ending: Ending, at: number | null = 20) => ({
   status: "measured" as const,
   value: { ending, at, played: 60, note: "", evidence: "builds/logs/x" },
 });
+const counted = { objects: 50, things: 5, listeners: 30, intervals: 0, framesPerSecond: 60 };
+const qaReport = (dead: number) => ({
+  version: 1 as const,
+  controls: ["Jump", "Dash", "Shoot"].map((label, at) => ({
+    name: label.toLowerCase(),
+    label,
+    read: at >= dead,
+    answers: at >= dead ? ["moved"] : [],
+  })),
+  retry: { before: counted, after: counted, errors: [] },
+  hud: [{ width: 1280, height: 720, off: [], over: [] }],
+});
 const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   build: BASE,
   key: "web:" + "c".repeat(40),
@@ -43,7 +55,6 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
       botWord: null,
     },
   },
-  winnableWithoutSkill: { status: "measured", value: false },
   liveness: {
     status: "measured",
     value: {
@@ -61,9 +72,12 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   use: { status: "not-measured", why: "not played", retry: false },
   performance: { status: "not-measured", why: "not played", retry: false },
   scene: { status: "not-measured", why: "not played", retry: false },
+  qa: { status: "measured", value: qaReport(0) },
   message: "",
   ...patch,
 });
+/** A build whose QA play found `dead` declared controls the game never reads. */
+const deadControls = (dead: number) => facts({ qa: { status: "measured", value: qaReport(dead) } });
 const skilledWith = (ending: Ending, hash = "x"): Partial<GameBuildFacts> => ({
   skilled: {
     status: "measured",
@@ -144,28 +158,13 @@ describe("worse", () => {
   it("counts a crossing into bad, never a fact already bad that gets worse", () => {
     const crashed = facts({ masher: tier("crashed", 12) });
     expect(Loop.regressions(facts(), crashed, false).map((r) => [r.delta.id, r.kind])).toEqual([
-      ["masher", "health"],
+      ["errors", "health"],
     ]);
-    const froze = (s: number) =>
-      facts({
-        liveness: {
-          status: "measured",
-          value: {
-            freezes: [{ at: 4, seconds: s }],
-            longestFreeze: s,
-            motion: 5,
-            detail: 40,
-            dominantColour: 0.2,
-            longestStall: 0,
-            seconds: 60,
-          },
-        },
-      });
-    expect(Loop.regressions(froze(1), froze(3.2), false).map((r) => r.delta.id)).toEqual([
-      "freeze",
-    ]);
-    // Already bad on the base: the next blocker step's business, not an undo.
-    expect(Loop.regressions(froze(3.1), froze(6), false)).toEqual([]);
+    expect(
+      Loop.regressions(deadControls(0), deadControls(1), false).map((r) => r.delta.id),
+    ).toEqual(["controls"]);
+    // Already bad on the base: the next fact step's business, not an undo.
+    expect(Loop.regressions(deadControls(1), deadControls(2), false)).toEqual([]);
   });
 
   it("never counts what cannot be compared: a renderer, a harness or a bot that changed", () => {
@@ -181,24 +180,20 @@ describe("worse", () => {
   });
 
   it("splits health from design, and a step the person asked for keeps its design", () => {
-    const easier = facts({
-      masher: tier("won", 9),
-      winnableWithoutSkill: { status: "measured", value: true },
-    });
-    expect(Loop.regressions(facts(), easier, false).map((r) => [r.delta.id, r.kind])).toEqual([
-      ["masher", "design"],
-      ["winnable-without-skill", "design"],
-    ]);
-    expect(Loop.regressions(facts(), easier, true)).toEqual([]);
+    // Random input winning is the creator's design, never a regression.
+    expect(Loop.regressions(facts(), facts({ masher: tier("won", 9) }), false)).toEqual([]);
     // Skilled stopping winning is design; skilled crashing is health and always counts.
+    expect(
+      Loop.regressions(facts(), facts(skilledWith("lost")), false).map((r) => [r.delta.id, r.kind]),
+    ).toEqual([["skilled", "design"]]);
     expect(Loop.regressions(facts(), facts(skilledWith("lost")), true)).toEqual([]);
     expect(
       Loop.regressions(facts(), facts(skilledWith("crashed")), true).map((r) => r.kind),
-    ).toEqual(["health"]);
+    ).toEqual(["health", "health"]);
   });
 
   it("undoes a regression, keeps a steer step's design change, and keeps the unmeasured", () => {
-    const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
+    const easier = facts(skilledWith("lost"));
     expect(judged(state(), facts(), easier).plan).toEqual({
       kind: "undo",
       target: BASE,
@@ -267,7 +262,7 @@ describe("gain", () => {
 });
 
 describe("never repeat", () => {
-  const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
+  const easier = deadControls(1);
   const undoOnce = (s: RunState, c: Loop.Cycle) =>
     Loop.applyUndo(
       s,
@@ -295,8 +290,8 @@ describe("never repeat", () => {
     const fact = turnStep({
       proposal: proposal({
         why: "fact",
-        target: "winnable-without-skill",
-        key: "fact:winnable-without-skill",
+        target: "controls",
+        key: "fact:controls",
       }),
     });
     const declined = Loop.applyTurn(state(), fact, turnResult({ files: 0 }), {
@@ -304,7 +299,7 @@ describe("never repeat", () => {
       since: NOW,
       started: true,
     });
-    expect(declined.state.setAside.map((s) => s.key)).toEqual(["fact:winnable-without-skill"]);
+    expect(declined.state.setAside.map((s) => s.key)).toEqual(["fact:controls"]);
     expect(Loop.propose(declined.state, look({ facts: easier, next: "none" }))).toBeNull();
 
     const skipped = Loop.applyDecided(state(), proposal(), BASE, "skip", "creator", NOW);
@@ -321,7 +316,7 @@ describe("the proposal", () => {
       "steer",
     );
     const blocker = Loop.propose(state(), look({ facts: crashing }));
-    expect(blocker).toMatchObject({ why: "blocker", target: "masher", key: "fact:masher" });
+    expect(blocker).toMatchObject({ why: "blocker", target: "errors", key: "fact:errors" });
     expect(blocker?.text).toContain("builds/logs/x/trace.json");
     expect(Loop.propose(state(), look({ next: null }))?.text).toBe(
       "Make the one change that most improves the game for BRIEF.md.",
@@ -368,6 +363,7 @@ describe("the proposal", () => {
     // A game too slow on an idle machine is the game's own fault: a step can fix it.
     const slow = {
       ...missing,
+      cause: "slow" as const,
       why: "the game ran at 0.40× real time on an idle machine, so 60 s of play did not fit the run's wall budget",
     };
     const slowGame = Loop.applyLook(
@@ -471,7 +467,7 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
   });
 
   it("never retries a step the person redid", () => {
-    const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
+    const easier = deadControls(1);
     const undone = Loop.applyUndo(
       state(),
       { ...cycle(), judge: { kind: "judge", base: facts(), build: easier } },
@@ -484,9 +480,9 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
   });
 
   it("words a failed undo as failed, and only a moved folder as moved on", () => {
-    const easier = facts({ winnableWithoutSkill: { status: "measured", value: true } });
+    const easier = deadControls(1);
     const judged = { ...cycle(), judge: { kind: "judge" as const, base: facts(), build: easier } };
-    expect(Loop.undoReason(judged)).toContain("Winnable without skill");
+    expect(Loop.undoReason(judged)).toContain("Controls");
     const failed = Loop.applyUndo(
       state(),
       judged,
@@ -495,9 +491,7 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
     );
     // Not undone either way; the reason, not the verdict, says the restore failed.
     expect(failed.record?.step).toMatchObject({ verdict: "kept-moved-on", gain: false });
-    expect(failed.record?.step.reason).toMatch(
-      /^the copy could not be made \(Winnable without skill/,
-    );
+    expect(failed.record?.step.reason).toMatch(/^the copy could not be made \(Controls/);
     const moved = Loop.applyUndo(
       state(),
       judged,

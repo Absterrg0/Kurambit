@@ -172,11 +172,11 @@ export interface GameEngineBackend {
   /**
    * Boot check of the entries the engine boots: what the player opens first, then the
    * gameplay entry. With `scene`, an engine that has a scene report plays the gameplay entry
-   * briefly with random input and returns it.
+   * briefly with random input and returns it; with `qa`, one that has a QA play plays it.
    */
   readonly runCheck: (
     ctx: GameEngineContext,
-    input: { readonly gameplayScene: string; readonly scene: boolean },
+    input: { readonly gameplayScene: string; readonly scene: boolean; readonly qa: boolean },
   ) => Effect.Effect<GameEngineCheckReport, GameOperationError>;
   /** Refuses an export the installed engine cannot make (missing export templates), before any import. */
   readonly exportReady: (
@@ -386,6 +386,7 @@ const make = Effect.gen(function* () {
     manifest: GameManifest,
     startedAt: number,
     scene: boolean,
+    qa: boolean,
   ) =>
     Effect.gen(function* () {
       const { profile } = backend;
@@ -399,6 +400,7 @@ const make = Effect.gen(function* () {
       const executed = yield* backend.runCheck(ctx, {
         gameplayScene: manifest.gameplayScene ?? "",
         scene,
+        qa,
       });
       const { run, reported } = executed;
       const errors = mergeCheckIssues(reported?.errors ?? [], [
@@ -466,7 +468,7 @@ const make = Effect.gen(function* () {
 
   const check = Effect.fn("GameEngine.check")(function* (
     root: string,
-    options?: { readonly scene?: boolean },
+    options?: { readonly scene?: boolean; readonly qa?: boolean },
   ) {
     const startedAt = yield* Clock.currentTimeMillis;
     // A failure the game's own files cause (an unreadable game.json, an editor
@@ -490,7 +492,15 @@ const make = Effect.gen(function* () {
       const backend = yield* runner(manifest);
       const project = yield* backend.resolveProject(root, manifest);
       const ctx = { root, ...project, runtime: manifestRuntime(manifest) };
-      const work = checkSources(root, backend, ctx, manifest, startedAt, options?.scene === true);
+      const work = checkSources(
+        root,
+        backend,
+        ctx,
+        manifest,
+        startedAt,
+        options?.scene === true,
+        options?.qa === true,
+      );
       // With a live editor, import and check share one hold, as export does:
       // another game cannot take the editor between them.
       return yield* backend.editor === null ? work : backend.editor.hold(root)(work);
@@ -544,7 +554,7 @@ const make = Effect.gen(function* () {
   const checkRemembered = (root: string) =>
     Effect.gen(function* () {
       const before = yield* checkedIdentity(root);
-      const result = yield* check(root, { scene: true });
+      const result = yield* check(root, { scene: true, qa: true });
       if (result.ok && before !== null && before === (yield* checkedIdentity(root)))
         yield* Cache.set(cleanChecks, before, result);
       return result;
@@ -566,7 +576,8 @@ const make = Effect.gen(function* () {
       }),
     checkIn: (root, owner) =>
       Effect.flatMap(checkLabel(root), (label) =>
-        operations.exclusive(root, label, check(root), owner),
+        // The QA play's report is a build fact of its own, measured with the boot.
+        operations.exclusive(root, label, check(root, { qa: true }), owner),
       ),
     cleanCheckOf: (root) =>
       Effect.flatMap(checkedIdentity(root), (identity) =>

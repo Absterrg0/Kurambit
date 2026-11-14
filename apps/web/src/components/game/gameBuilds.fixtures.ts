@@ -26,7 +26,7 @@ const summary = (state: GameBuild["facts"]["state"]): GameBuild["facts"] => ({
     state === "measured"
       ? [
           { id: "boots", text: "Boots", tone: "good" },
-          { id: "winnable-without-skill", text: "Masher wins at 9 s", tone: "bad" },
+          { id: "retry", text: "Retry adds 2 listeners on window or document", tone: "bad" },
         ]
       : [],
   notMeasured: state === "incomplete" ? 2 : 0,
@@ -211,10 +211,10 @@ export const FAKE_DELTAS: ReadonlyArray<GameFactDelta> = [
     why: null,
   },
   {
-    id: "freeze",
-    label: "Longest freeze",
-    a: "1 s",
-    b: "4 s",
+    id: "controls",
+    label: "Controls",
+    a: "All 4 controls answer a press",
+    b: "Jump is never read: pressing it does nothing",
     change: "up",
     tone: "worse",
     why: null,

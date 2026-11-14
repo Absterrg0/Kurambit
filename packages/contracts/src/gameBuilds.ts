@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameAssetSource } from "./gameModel.ts";
+import { GameQaReport, gameQaFindings, listedNames } from "./gameQa.ts";
 import {
   type GameSceneFinding,
   type GameSceneFindingKind,
@@ -112,19 +113,20 @@ export const GameFactsState = Schema.Literals([
 ]);
 export type GameFactsState = typeof GameFactsState.Type;
 
-/** One fact's id, in display order: the shared names of the rail, compare, card and tools. */
-export const GameFactId = Schema.Literals([
+/** The facts measured now, in display order: the shared names of the rail, compare, card and tools. */
+const MEASURED_FACT_IDS = [
   "boots",
+  "errors",
+  "controls",
+  "retry",
+  "hud",
+  "performance",
+  "skilled",
   "idle",
   "masher",
-  "skilled",
-  "winnable-without-skill",
-  "freeze",
   "motion",
   "detail",
-  "colour",
   "first-response",
-  "performance",
   "assets",
   "use",
   "player-view",
@@ -135,6 +137,18 @@ export const GameFactId = Schema.Literals([
   "camera",
   "sliding",
   "unseen",
+] as const;
+export type GameMeasuredFactId = (typeof MEASURED_FACT_IDS)[number];
+export const GAME_FACT_IDS: ReadonlyArray<GameMeasuredFactId> = MEASURED_FACT_IDS;
+/**
+ * A fact's id. Keep going's stored step records name facts no longer measured (design opinions
+ * the checks dropped), so their ids still decode; nothing reads or diffs them.
+ */
+export const GameFactId = Schema.Literals([
+  ...MEASURED_FACT_IDS,
+  "winnable-without-skill",
+  "freeze",
+  "colour",
 ]);
 export type GameFactId = typeof GameFactId.Type;
 export const GameFactTone = Schema.Literals(["good", "bad", "neutral"]);
@@ -410,7 +424,6 @@ export const GameBuildFacts = Schema.Struct({
   idle: gameFact(GameBotTier),
   masher: gameFact(GameBotTier),
   skilled: gameFact(GameSkilledTier),
-  winnableWithoutSkill: gameFact(Schema.Boolean),
   liveness: gameFact(GameLiveness),
   firstResponse: gameFact(GameFirstResponse),
   /** Static: read from the build's GLBs and sidecars, never played; Keep going does not watch it. */
@@ -453,6 +466,19 @@ export const GameBuildFacts = Schema.Struct({
       Effect.succeed({
         status: "not-measured" as const,
         why: "measured before scene reports existed",
+        retry: false,
+      }),
+    ),
+  ),
+  /**
+   * The QA play (three.js), from the build's boot check: every declared control answers, Retry
+   * starts a clean run, the HUD stays on screen, and pressing controls throws nothing.
+   */
+  qa: gameFact(GameQaReport).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before the QA play existed",
         retry: false,
       }),
     ),
@@ -510,6 +536,10 @@ type Liveness = typeof GameLiveness.Type;
 
 const LABELS: Readonly<Record<GameFactId, string>> = {
   boots: "Boots",
+  errors: "Errors in play",
+  controls: "Controls",
+  retry: "Retry",
+  hud: "HUD",
   idle: "No input",
   masher: "Random input",
   skilled: "Tester's bot",
@@ -570,12 +600,11 @@ const tierText = (id: "idle" | "masher" | "skilled", tier: BotTier) => {
       return "Did not boot";
   }
 };
-const tierTone = (id: "idle" | "masher" | "skilled", tier: BotTier): GameFactTone => {
-  if (tier.ending === "crashed" || tier.ending === "unresponsive" || tier.ending === "did-not-boot")
-    return "bad";
-  if (id === "skilled") return tier.ending === "won" ? "good" : "neutral";
-  return tier.ending === "won" ? "bad" : tier.ending === "lost" ? "good" : "neutral";
-};
+// Whether nobody or anybody can win is the creator's design, never a verdict: only a win by the
+// play bot proves something, that the game can be won. A run that broke is the errors check's,
+// so it is counted once.
+const tierTone = (id: "idle" | "masher" | "skilled", tier: BotTier): GameFactTone =>
+  id === "skilled" && tier.ending === "won" ? "good" : "neutral";
 
 /** A bot run's evidence folder as display entries. */
 const tierEvidence = (tier: BotTier): GameFactView["evidence"] =>
@@ -618,7 +647,75 @@ const from = <A>(fact: Fact<A>, read: (value: A) => Reading): Read =>
 const liveness = (facts: GameBuildFacts, read: (live: Liveness) => Reading) =>
   from(facts.liveness, read);
 
-const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
+const BROKE_ENDINGS: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
+/** The plays that can show the game breaking, the one most likely to first. */
+const PLAYS = [
+  ["masher", "with random input"],
+  ["idle", "with no input"],
+  ["skilled", "by the play bot"],
+] as const;
+/** The first play that broke (crashed, stopped answering, did not start), with who played it. */
+const brokenPlay = (facts: GameBuildFacts) => {
+  for (const [id, who] of PLAYS) {
+    const fact: Fact<BotTier> = facts[id];
+    if (fact.status === "measured" && BROKE_ENDINGS.has(fact.value.ending))
+      return { id, who, tier: fact.value };
+  }
+  return null;
+};
+const brokeText = (tier: BotTier) =>
+  tier.ending === "crashed"
+    ? "Crashed"
+    : tier.ending === "unresponsive"
+      ? "Stopped answering"
+      : "Did not start";
+
+/** No errors while playing: no play broke, and pressing every control threw nothing. */
+const readErrors = (facts: GameBuildFacts): Read => {
+  const broke = brokenPlay(facts);
+  if (broke !== null)
+    return measured({
+      text: `${brokeText(broke.tier)}${at(broke.tier)} when played ${broke.who}`,
+      value: broke.tier.at,
+      tone: "bad",
+      kind: "broke",
+    });
+  const thrown = facts.qa.status === "measured" ? (facts.qa.value.errors ?? []) : [];
+  const first = thrown[0];
+  if (first !== undefined)
+    return measured({
+      text: `Throws while playing: ${first}${thrown.length > 1 ? ` (+${thrown.length - 1} more)` : ""}`,
+      value: thrown.length,
+      tone: "bad",
+      kind: "throws",
+    });
+  // The random-input play is the long one: without it nothing says the game plays clean.
+  if (facts.masher.status === "pending" || facts.idle.status === "pending")
+    return { _tag: "pending" };
+  if (facts.masher.status !== "measured") return unmeasured(facts.masher);
+  const played = PLAYS.reduce((sum, [id]) => {
+    const fact: Fact<BotTier> = facts[id];
+    return sum + (fact.status === "measured" ? fact.value.played : 0);
+  }, 0);
+  return measured({
+    text: `No errors in ${seconds(played)} of play${facts.qa.status === "measured" ? " or pressing every control" : ""}`,
+    value: null,
+    tone: "good",
+    kind: "clean",
+  });
+};
+
+const fromQa = (
+  facts: GameBuildFacts,
+  read: (report: GameQaReport, found: ReturnType<typeof gameQaFindings>) => Read,
+): Read =>
+  facts.qa.status === "measured"
+    ? read(facts.qa.value, gameQaFindings(facts.qa.value))
+    : facts.qa.status === "pending"
+      ? { _tag: "pending" }
+      : unmeasured(facts.qa);
+
+const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
   switch (id) {
     case "boots":
       return from(facts.boots, (boots) => ({
@@ -638,23 +735,71 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
         kind: tier.ending,
       }));
     }
-    case "winnable-without-skill":
-      return from(facts.winnableWithoutSkill, (yes) => ({
-        text: yes ? "Won with no input or random input" : "Not won with no input or random input",
-        value: null,
-        tone: yes ? "bad" : "good",
-        kind: String(yes),
-      }));
-    case "freeze":
-      return liveness(facts, (live) => ({
-        text:
-          live.freezes.length === 0
-            ? "No still stretch of 2 s or more in play"
-            : `${live.freezes.length} still stretch${live.freezes.length === 1 ? "" : "es"}, longest ${seconds(live.longestFreeze)}`,
-        value: live.longestFreeze,
-        tone: live.longestFreeze >= 3 ? "bad" : "good",
-        kind: "freeze",
-      }));
+    case "errors":
+      return readErrors(facts);
+    case "controls":
+      return fromQa(facts, (report, found): Read => {
+        if (report.controls.length === 0)
+          return {
+            _tag: "not-measured",
+            why: "the QA play pressed no control: none declared, or no run started",
+          };
+        if (found.dead.length > 0)
+          return measured({
+            text: `${listedNames(found.dead)} ${found.dead.length === 1 ? "is" : "are"} never read: pressing ${found.dead.length === 1 ? "it does" : "them does"} nothing`,
+            value: found.dead.length,
+            tone: "bad",
+            kind: "dead",
+          });
+        return measured({
+          text:
+            found.silent.length === 0
+              ? `All ${report.controls.length} controls answer a press`
+              : `All ${report.controls.length} controls are read; ${listedNames(found.silent)} showed no answer on a fresh run`,
+          value: 0,
+          tone: "good",
+          kind: "clean",
+        });
+      });
+    case "retry":
+      return fromQa(facts, (report, found): Read => {
+        if (report.retry === null)
+          return { _tag: "not-measured", why: "the QA play could not start a run to end" };
+        if (!found.retried)
+          return { _tag: "not-measured", why: "the run did not end and start again in time" };
+        const first = found.retry[0];
+        return measured(
+          first === undefined
+            ? { text: "Retry starts a clean run", value: 0, tone: "good", kind: "clean" }
+            : {
+                text: `${first.said}${found.retry.length > 1 ? ` (+${found.retry.length - 1} more)` : ""}`,
+                value: found.retry.length,
+                tone: "bad",
+                kind: "leaks",
+              },
+        );
+      });
+    case "hud":
+      return fromQa(facts, (report, found): Read => {
+        if (report.hud.length === 0)
+          return { _tag: "not-measured", why: "the HUD could not be read" };
+        const first = found.hud[0];
+        return measured(
+          first === undefined
+            ? {
+                text: `HUD stays on screen at ${report.hud.map((size) => `${size.width}×${size.height}`).join(" and ")}`,
+                value: 0,
+                tone: "good",
+                kind: "clean",
+              }
+            : {
+                text: `${first.said}${found.hud.length > 1 ? ` (+${found.hud.length - 1} more)` : ""}`,
+                value: found.hud.length,
+                tone: "bad",
+                kind: "off",
+              },
+        );
+      });
     case "motion":
       return liveness(facts, (live) => ({
         text:
@@ -671,15 +816,6 @@ const readFact = (facts: GameBuildFacts, id: GameFactId): Read => {
         value: live.detail,
         tone: "neutral",
         kind: "detail",
-      }));
-    case "colour":
-      return liveness(facts, (live) => ({
-        text: `One colour fills ${Math.round(live.dominantColour * 100)}%`,
-        value: live.dominantColour,
-        // The check flags one colour filling the screen; a varied picture passes it, as a game
-        // that keeps moving passes the freeze check. Which colours is the person's to judge.
-        tone: live.dominantColour > 0.6 ? "bad" : "good",
-        kind: "colour",
       }));
     case "first-response":
       return from(facts.firstResponse, (response) => ({
@@ -847,7 +983,7 @@ const sceneFrame = (finding: GameSceneFinding): GameFactView["evidence"] =>
     ? []
     : [{ kind: "frame", label: sceneFindingText(finding), path: finding.frame }];
 
-const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["evidence"] => {
+const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView["evidence"] => {
   const tier = (fact: Fact<BotTier>) =>
     fact.status === "measured" ? tierEvidence(fact.value) : [];
   switch (id) {
@@ -855,11 +991,13 @@ const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["eviden
     case "masher":
     case "skilled":
       return tier(facts[id]);
+    case "errors": {
+      const broke = brokenPlay(facts);
+      return broke === null ? [] : tierEvidence(broke.tier);
+    }
     // Liveness and the first response are read from the random-input run.
-    case "freeze":
     case "motion":
     case "detail":
-    case "colour":
     case "first-response":
       return tier(facts.masher).filter((entry) => entry.kind === "video");
     // The scene report's frames, the problem outlined in each.
@@ -896,7 +1034,7 @@ const evidenceOf = (facts: GameBuildFacts, id: GameFactId): GameFactView["eviden
  * every surface and the agent tools share.
  */
 export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView> =>
-  GameFactId.literals.map((id) => {
+  GAME_FACT_IDS.map((id) => {
     const read = readFact(facts, id);
     return {
       id,
@@ -921,20 +1059,20 @@ export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView
   });
 
 /**
- * The facts a person reads first, in order: does it start, can it be lost
- * with no input, can it be won and does that take skill, does it run
- * smoothly, does it keep moving, and is the picture not one colour. Every
- * other fact is a further measurement.
+ * The checks a person reads first, in order: what a player would hit. Does it start, does it
+ * play without errors, does every control work, does Retry start clean, does the HUD fit, does
+ * it hold its frame rate, and can it be won at all. Each is measured, never a taste call;
+ * every other fact is a further measurement.
  */
 export const GAME_LEAD_FACTS = [
   "boots",
-  "idle",
-  "skilled",
-  "winnable-without-skill",
+  "errors",
+  "controls",
+  "retry",
+  "hud",
   "performance",
-  "freeze",
-  "colour",
-] as const satisfies ReadonlyArray<GameFactId>;
+  "skilled",
+] as const satisfies ReadonlyArray<GameMeasuredFactId>;
 
 /** A lead fact as a check: one plain sentence, its value apart for the right edge. */
 export interface GameCheck extends GameFactView {
@@ -957,14 +1095,13 @@ export interface GameChecksView {
 const CHECK_LABELS: Readonly<
   Record<(typeof GAME_LEAD_FACTS)[number], string> & Partial<Record<GameFactId, string>>
 > = {
-  boots: "Starts",
-  idle: "Can be lost with no input",
+  boots: "Starts without errors",
+  errors: "No errors while playing",
+  controls: "Every control works",
+  retry: "Retry starts clean",
+  hud: "HUD fits the screen",
+  performance: "Holds its frame rate",
   skilled: "Can be won by the play bot",
-  // What was observed, not a verdict on difficulty: the harness never judges taste.
-  "winnable-without-skill": "Not won by random or no input",
-  performance: "Runs smoothly",
-  freeze: "Keeps moving",
-  colour: "Colour is varied",
 };
 
 /**
@@ -1036,46 +1173,80 @@ const checkWords = (
             { sentence: "Does not start", value: null };
     case "idle":
       return facts.idle.status === "measured" ? tierCheck("with no input", facts.idle.value) : null;
-    case "skilled":
-      return facts.skilled.status === "measured"
-        ? tierCheck("by the play bot", facts.skilled.value)
-        : null;
-    case "winnable-without-skill":
-      return facts.winnableWithoutSkill.status !== "measured"
-        ? null
-        : facts.winnableWithoutSkill.value
-          ? { sentence: "Won by random or no input", value: null }
-          : { sentence: "Not won by random or no input", value: null };
+    case "skilled": {
+      if (facts.skilled.status !== "measured") return null;
+      const tier = facts.skilled.value;
+      // Only a win proves the game can be won; anything short of one leaves it unproven.
+      if (tier.ending === "won" || BROKE_ENDINGS.has(tier.ending))
+        return tierCheck("by the play bot", tier);
+      return {
+        sentence: "Not yet proven winnable",
+        value:
+          tier.ending === "lost"
+            ? `the play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`
+            : `the play bot found no ending in ${seconds(tier.played)}`,
+      };
+    }
+    case "errors": {
+      const broke = brokenPlay(facts);
+      if (broke !== null)
+        return {
+          sentence:
+            broke.tier.ending === "crashed"
+              ? "Crashes while playing"
+              : broke.tier.ending === "unresponsive"
+                ? "Stops answering while playing"
+                : "Does not start for a play",
+          value: [broke.who, atTime(broke.tier)].filter((part) => part !== null).join(" "),
+        };
+      const thrown = facts.qa.status === "measured" ? (facts.qa.value.errors ?? []) : [];
+      return thrown.length > 0
+        ? { sentence: "Throws errors while playing", value: plural(thrown.length, "error") }
+        : { sentence: "No errors while playing", value: null };
+    }
+    case "controls": {
+      if (facts.qa.status !== "measured") return null;
+      const found = gameQaFindings(facts.qa.value);
+      return found.dead.length === 1
+        ? { sentence: `${found.dead[0]} does nothing`, value: null }
+        : found.dead.length > 1
+          ? { sentence: `${found.dead.length} controls do nothing`, value: listedNames(found.dead) }
+          : {
+              sentence: "Every control works",
+              // Answered nothing the play could see: a control that works in some places does too.
+              value:
+                found.silent.length === 0 ? null : `${found.silent.length} with no answer seen`,
+            };
+    }
+    case "retry": {
+      if (facts.qa.status !== "measured") return null;
+      const found = gameQaFindings(facts.qa.value);
+      return found.retry.length === 0
+        ? { sentence: "Retry starts clean", value: null }
+        : {
+            sentence: "Retry keeps the last run's leftovers",
+            value: plural(found.retry.length, "problem"),
+          };
+    }
+    case "hud": {
+      if (facts.qa.status !== "measured") return null;
+      const found = gameQaFindings(facts.qa.value);
+      const off = facts.qa.value.hud.find((size) => size.off.length > 0);
+      return found.hud.length === 0
+        ? { sentence: "HUD fits the screen", value: null }
+        : off !== undefined
+          ? { sentence: "HUD runs off the screen", value: `at ${off.width}×${off.height}` }
+          : { sentence: "HUD text overlaps", value: plural(found.hud.length, "place") };
+    }
     case "performance": {
       if (facts.performance.status !== "measured") return null;
       const perf = facts.performance.value;
       const fps = `${Math.round(perf.fps)} fps`;
       return perf.fps >= 55 && perf.low1 >= 30
-        ? { sentence: "Runs smoothly", value: fps }
+        ? { sentence: "Holds its frame rate", value: fps }
         : perf.fps < 30
           ? { sentence: "Runs slowly", value: fps }
-          : { sentence: "Runs, with stutters", value: `${fps} · 1% low ${Math.round(perf.low1)}` };
-    }
-    case "freeze": {
-      if (facts.liveness.status !== "measured") return null;
-      const live = facts.liveness.value;
-      return live.freezes.length === 0
-        ? // One name in either reading; the reading is the value, as Compare shows it.
-          { sentence: "Keeps moving", value: "no still stretch" }
-        : live.longestFreeze >= 3
-          ? {
-              sentence: "Stands still for a while",
-              value: `longest ${seconds(live.longestFreeze)}`,
-            }
-          : { sentence: "Keeps moving", value: `longest still ${seconds(live.longestFreeze)}` };
-    }
-    case "colour": {
-      // One noun for the reading in either verdict, the one Compare names its row by.
-      if (facts.liveness.status !== "measured") return null;
-      const share = Math.round(facts.liveness.value.dominantColour * 100);
-      return facts.liveness.value.dominantColour > 0.6
-        ? { sentence: "One colour fills the screen", value: `largest colour ${share}%` }
-        : { sentence: "Colour is varied", value: `largest colour ${share}%` };
+          : { sentence: "Frame rate dips", value: `${fps} · 1% low ${Math.round(perf.low1)}` };
     }
     case "masher":
       return facts.masher.status === "measured"
@@ -1151,6 +1322,8 @@ const checkWords = (
         ? { sentence: "Everything named comes on screen", value: null }
         : { sentence: `${plural(count, "thing")} never came on screen`, value: null };
     }
+    default:
+      return null;
   }
 };
 
@@ -1164,9 +1337,14 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
   const lead: ReadonlySet<GameFactId> = new Set(GAME_LEAD_FACTS);
   const asCheck = (view: GameFactView): GameCheck => {
     const words = view.reading._tag === "measured" ? checkWords(facts, view.id) : null;
-    // The scene rows' readings are already sentences about what a person would see.
+    // The scene rows' readings are already sentences about what a person would see. Winning
+    // is never claimed before the play bot has won.
     const fallback =
-      view.reading._tag === "measured" ? view.reading.text : (CHECK_LABELS[view.id] ?? view.label);
+      view.reading._tag === "measured"
+        ? view.reading.text
+        : view.id === "skilled"
+          ? "Not yet proven winnable"
+          : (CHECK_LABELS[view.id] ?? view.label);
     const run =
       view.id === "idle" || view.id === "masher" || view.id === "skilled" ? facts[view.id] : null;
     return {
@@ -1192,8 +1370,9 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
 
 /** For these numbers lower is better, for these higher; the other numbers are neutral. */
 const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
-  "freeze",
-  "colour",
+  "controls",
+  "retry",
+  "hud",
   "first-response",
   "buried",
   "clipping",
@@ -1202,18 +1381,21 @@ const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
   "sliding",
 ]);
 const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance", "player-view"]);
-const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
+const BROKE = BROKE_ENDINGS;
 /** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
 const rank = (id: GameFactId, kind: string): number | null => {
   switch (id) {
     case "boots":
       return kind === "true" ? 1 : 0;
-    case "winnable-without-skill":
-      return kind === "false" ? 1 : 0;
+    case "errors":
+    case "controls":
+    case "retry":
+    case "hud":
+      return kind === "clean" ? 1 : 0;
     case "idle":
     case "masher":
-      // A player that does nothing (or anything) should lose; winning means no challenge.
-      return BROKE.has(kind) ? 0 : kind === "won" ? 1 : kind === "no-ending" ? 2 : 3;
+      // Whether nobody or anybody wins is the creator's design: only breaking is worse.
+      return BROKE.has(kind) ? 0 : null;
     case "skilled":
       return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
     case "player-view":
@@ -1254,7 +1436,7 @@ export const diffBuildFacts = (
   b: GameBuildFacts | null,
   sides: BuildSides = { a: "A", b: "B" },
 ): ReadonlyArray<GameFactDelta> =>
-  GameFactId.literals.map((id): GameFactDelta => {
+  GAME_FACT_IDS.map((id): GameFactDelta => {
     if (a === null || b === null)
       return notComparable(
         id,

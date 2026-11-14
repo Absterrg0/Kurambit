@@ -28,13 +28,13 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
       botWord: null,
     },
   },
-  winnableWithoutSkill: { status: "measured", value: true },
   liveness: { status: "not-measured", why: "ffmpeg failed", retry: true },
   firstResponse: { status: "pending" },
   assets: { status: "not-measured", why: "not built", retry: false },
   use: { status: "not-measured", why: "not built", retry: false },
   performance: { status: "not-measured", why: "not built", retry: false },
   scene: { status: "not-measured", why: "not built", retry: false },
+  qa: { status: "not-measured", why: "not built", retry: false },
   message: "",
   ...patch,
 });
@@ -68,14 +68,9 @@ describe("diffBuildFacts", () => {
     expect(byId(diffBuildFacts(facts(), newBot))["skilled"]?.change).toBe("not-comparable");
   });
 
-  it("reads a masher that stops winning as better", () => {
-    const fixed = facts({
-      masher: tier("lost", 20),
-      winnableWithoutSkill: { status: "measured", value: false },
-    });
-    const deltas = byId(diffBuildFacts(facts(), fixed));
-    expect(deltas["masher"]).toMatchObject({ change: "changed", tone: "better" });
-    expect(deltas["winnable-without-skill"]).toMatchObject({ change: "changed", tone: "better" });
+  it("leaves who wins to the creator: a masher that stops winning is no better or worse", () => {
+    const deltas = byId(diffBuildFacts(facts(), facts({ masher: tier("lost", 20) })));
+    expect(deltas["masher"]).toMatchObject({ change: "changed", tone: "neutral" });
   });
 
   it("has no reading for a build never measured", () => {

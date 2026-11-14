@@ -308,7 +308,7 @@ step carries a step sign, and the build being made waits as a dashed card with i
 appears when the game folder is not any build (edited since, or another build plays from a copy);
 until the Stage has shown the game, its picture is the last build's, dimmed.
 **Older** pages back. Clicking a picture plays that build (an older one from a copy; the game folder
-is never touched, and **Back to the current game** or the newest picture returns) and shows it in the right panel's **Build** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines (does it start, can it be lost with no input, can it be won, is it won by random or no input, does it run smoothly, does it keep moving, does one colour fill the screen) with every other measurement, each in a plain sentence, under **Other measurements**, what changed in your agent's words (with the files it changed,
+is never touched, and **Back to the current game** or the newest picture returns) and shows it in the right panel's **Build** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines, each something a player would hit (does it start, does it play without errors, does every control work, does Retry start a clean run, does the HUD fit the screen, does it hold its frame rate, and whether the play bot has proven it can be won) with every other measurement, each in a plain sentence, under **Other measurements**, what changed in your agent's words (with the files it changed,
 which open the diff), its recordings, and in the **⋯** beside the build's name:
 
 - **Undo this build** on the latest turn, which puts back the build the turn started from. After an undo,
@@ -345,8 +345,11 @@ keyboard, and its keys never reach Kurambit: click outside the game before using
 
 **Facts** are what Kurambit measured by playing the build: whether it boots, what happens when a
 player does nothing (idle) or presses keys at random (masher), what the game's own bot does
-(skilled), whether it can be won without skill, how long the picture freezes and how much it moves,
-and how soon the game answers the first input. For a three.js game it also lists which files under
+(skilled), how much the picture moves, and how soon the game answers the first input. For a
+three.js game Kurambit also plays a QA pass: it presses every control the game declares on a fresh
+run, ends a run and presses Retry, and reads the HUD at a wide and a narrow window, so a dead key,
+a Retry that keeps the last run's leftovers or text off the screen shows up as a failing check.
+Who wins with no input or random input is never a pass or a fail: that is your design. For a three.js game it also lists which files under
 its assets folder those plays loaded and which sounds started playing, so art that was made but never
 wired in shows up as unused, and how smoothly the random-input play ran: frames per second, the
 slowest 1% of frames, the GPU's time per frame and the share of the resolution the game drew at.

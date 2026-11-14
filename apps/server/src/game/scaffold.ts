@@ -90,8 +90,8 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
   // The Stage serves the folder and reloads it on every save (GamePreview.live).
   live: `## Every turn
 
-- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it each time you save. A turn is the change the person asked for, one they can see when they play, \`game_check\` clean with nothing left in its scene report, then end the turn. When a request holds several changes, do the first and put the rest in \`Next:\`, but never put off what they asked for because it takes work: a model the library lacks is made in Blender in the turn that asks for it.
-- **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save. A save that breaks the page shows the person the error.
+- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it on every save. A turn is the change the person asked for, one they can see when they play, \`game_check\` clean and nothing left in its scene report or \`qa.problems\`, then end the turn. When a request holds several changes, do the first and put the rest in \`Next:\`, but never put off what they asked for because it takes work: a model the library lacks is made in Blender in the turn that asks for it.
+- **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
 ${CHANGE_LINE}

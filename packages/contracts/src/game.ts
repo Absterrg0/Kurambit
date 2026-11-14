@@ -929,7 +929,12 @@ export const GameCheckResult = Schema.Struct({
         report: GameQaReport,
         ms: Schema.Number,
       }),
-      Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
+      Schema.Struct({
+        status: Schema.Literal("not-measured"),
+        why: Schema.String,
+        /** The game's copy of the shell predates the QA play: a new build adds it. */
+        cause: Schema.optionalKey(Schema.Literal("old-shell")),
+      }),
     ]),
   ),
 });

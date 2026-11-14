@@ -21,9 +21,10 @@ import { GameState, SHELL_KEYS } from "./run-state.js";
 import { outsideRun } from "./studio.js";
 
 const SETTLE_MS = 150;
-const BASE_MS = 350;
 const HOLD_MS = 220;
 const AFTER_MS = 380;
+/** The no-press span a press is read against: as long as the press's, so a clock ticking once a second is as likely in either. */
+const BASE_MS = HOLD_MS + AFTER_MS;
 /** After a fresh start: past a round's opening beat, when many games ignore input. */
 const OPENING_MS = 1200;
 /** Fresh run every few actions, so a player hurt by then still answers. */
@@ -31,6 +32,19 @@ const ACTIONS_PER_RUN = 3;
 const START_MS = 4000;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// A press's spans in frames too: on a slow machine a few frames outlast the span, and a press
+// the game updated once on answers too little to see. Never past FRAME_WAIT times the span.
+const HOLD_FRAMES = 4;
+const AFTER_FRAMES = 6;
+const BASE_FRAMES = HOLD_FRAMES + AFTER_FRAMES;
+const FRAME_WAIT = 4;
+const span = async (ms, frames) => {
+  const from = outsideRun.frames;
+  const started = performance.now();
+  await wait(ms);
+  while (outsideRun.frames - from < frames && performance.now() - started < ms * FRAME_WAIT)
+    await wait(30);
+};
 
 const positionOf = (player) => {
   if (player == null) return null;
@@ -101,10 +115,11 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
     };
   };
 
-  // What answered a press, over what changed in the same span with no press.
-  const answers = (s0, s1, s2) => {
+  // What answered a press, over what changed in the same span with no press. `noisy` holds the
+  // values seen changing with no press in any of this action's tries: a timer is never an answer.
+  const answers = (s0, s1, s2, noisy) => {
     const ratio = (HOLD_MS + AFTER_MS) / BASE_MS;
-    const noisy = new Set(Object.keys(s1.state).filter((key) => s0.state[key] !== s1.state[key]));
+    for (const key of Object.keys(s1.state)) if (s0.state[key] !== s1.state[key]) noisy.add(key);
     const drift = distance(s0.at, s1.at) * ratio;
     const more = (key) => s2[key] - s1[key] > (s1[key] - s0[key]) * ratio;
     return {
@@ -121,17 +136,17 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
     };
   };
 
-  const press = async (run, name) => {
+  const press = async (run, name, noisy) => {
     await wait(SETTLE_MS);
     const s0 = signature(run);
-    await wait(BASE_MS);
+    await span(BASE_MS, BASE_FRAMES);
     const s1 = signature(run);
     run.input.force(name, true);
-    await wait(HOLD_MS);
+    await span(HOLD_MS, HOLD_FRAMES);
     run.input.force(name, false);
-    await wait(AFTER_MS);
+    await span(AFTER_MS, AFTER_FRAMES);
     if (current() !== run) return null;
-    return answers(s0, s1, signature(run));
+    return answers(s0, s1, signature(run), noisy);
   };
 
   // A press's answers as kinds: "moved", "juice", "changed score" (one per value), ...
@@ -148,12 +163,15 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
   // Two silent presses are a dead control; a third settles two that disagree.
   const probe = async (run, name) => {
     const tries = [];
+    const noisy = new Set();
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const found = await press(run, name);
+      const found = await press(run, name, noisy);
       if (found === null) break;
       tries.push(kinds(found));
       const agreed = [...new Set(tries.flat())].filter(
-        (kind) => tries.filter((each) => each.includes(kind)).length >= 2,
+        (kind) =>
+          !(kind.startsWith("changed ") && noisy.has(kind.slice(8))) &&
+          tries.filter((each) => each.includes(kind)).length >= 2,
       );
       if (agreed.length > 0) return agreed;
       if (tries.length === 2 && tries.every((each) => each.length === 0)) return [];
@@ -161,6 +179,8 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
     return [];
   };
 
+  // Errors thrown while a control was pressed, each named by the control.
+  const thrown = [];
   const everyControl = async () => {
     const out = [];
     let run = null;
@@ -175,7 +195,10 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
         await wait(OPENING_MS);
       }
       onRun += 1;
+      const errorsFrom = errors.length;
       const found = await probe(run, action.name);
+      for (const error of errors.slice(errorsFrom))
+        if (thrown.length < 10) thrown.push(`${action.label}: ${error.message}`.slice(0, 240));
       out.push({
         name: action.name,
         label: action.label,
@@ -235,7 +258,7 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
       try {
         const controlsFound = await everyControl();
         const retried = await retry();
-        return { version: 1, controls: controlsFound, retry: retried };
+        return { version: 1, controls: controlsFound, retry: retried, errors: thrown };
       } finally {
         canLose(true);
       }

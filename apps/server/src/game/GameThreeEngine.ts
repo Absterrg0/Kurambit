@@ -102,11 +102,14 @@ const decodeQa = Schema.decodeUnknownOption(GameQaReport);
 /** The QA play's report as the check's: what to fix, or why it was not played. */
 const qaOf = (played: { readonly raw: unknown; readonly ms: number } | null): GameCheckQa => {
   if (played === null) return { status: "not-measured", why: "the QA play's page did not open" };
-  if (played.raw === null)
+  if (played.raw === "no-qa")
     return {
       status: "not-measured",
-      why: "the game's shell has no QA play (it predates it) or did not finish it in time",
+      why: "the game's copy of the shell predates the QA play",
+      cause: "old-shell",
     };
+  if (played.raw === null)
+    return { status: "not-measured", why: "the QA play did not finish in time" };
   const report = decodeQa(played.raw);
   if (Option.isNone(report))
     return { status: "not-measured", why: "the QA play's report did not read" };
@@ -309,7 +312,7 @@ export const makeThreeBackend = (
               }
               // The QA play: every control, Retry and the HUD, on its own page so its restarts
               // never touch the timed play above or its frame rate.
-              if (input.scene && reached.includes("gameplay") && !timedOut && !crashed) {
+              if (input.qa && reached.includes("gameplay") && !timedOut && !crashed) {
                 const started = Date.now();
                 const session = await openWebPlaySession({
                   browser,
@@ -371,7 +374,7 @@ export const makeThreeBackend = (
             sceneOf(scenePlay, temporary, NodePath.relative(ctx.root, temporary), browser),
           )
         : undefined;
-      const qa = input.scene && reached.includes("gameplay") ? qaOf(qaPlay) : undefined;
+      const qa = input.qa && reached.includes("gameplay") ? qaOf(qaPlay) : undefined;
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.map((line) => line.text).join("\n")}\n`).catch(

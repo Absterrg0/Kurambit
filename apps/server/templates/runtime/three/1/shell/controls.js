@@ -270,8 +270,12 @@ export function createInput(controls) {
   let now = new Map();
   let was = new Map();
   let settling = true;
-  // The QA play's: actions it holds itself, and which actions the game has asked about.
+  // The QA play's: actions it holds itself, and which actions the game has asked about. A
+  // press let go before any frame sampled it is held until one does: on a slow machine a
+  // frame can outlast the press.
   const forced = new Set();
+  const sampled = new Set();
+  const letGo = new Set();
   const reads = new Set();
   const read = (name) => {
     if (!controls.has(name))
@@ -301,8 +305,12 @@ export function createInput(controls) {
     api,
     /** Holds an action as if its key were down, or lets it go (the QA play's press). */
     force(name, on) {
-      if (on) forced.add(name);
-      else forced.delete(name);
+      if (on) {
+        forced.add(name);
+        sampled.delete(name);
+        letGo.delete(name);
+      } else if (sampled.has(name)) forced.delete(name);
+      else letGo.add(name);
     },
     /** The actions the game has read since this run began. */
     reads,
@@ -318,8 +326,15 @@ export function createInput(controls) {
         for (const button of action.mouse)
           if (buttons.has(button) || clicked.has(button)) strength = 1;
         for (const name of action.pad) strength = Math.max(strength, padStrength(pad, name));
-        if (forced.has(action.name)) strength = 1;
+        if (forced.has(action.name)) {
+          strength = 1;
+          sampled.add(action.name);
+        }
         if (strength > 0) now.set(action.name, strength);
+      }
+      for (const name of letGo) {
+        forced.delete(name);
+        letGo.delete(name);
       }
       if (settling) {
         was = now;

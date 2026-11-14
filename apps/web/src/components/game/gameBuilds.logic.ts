@@ -3,6 +3,7 @@ import {
   gameChecksView,
   gameFactName,
   gameFactsView,
+  gameQaFindings,
   type GameAssetFacts,
   type GameAssetUse,
   type GameBuild,
@@ -104,6 +105,30 @@ export const factLine = (view: GameFactView): FactLine => {
       return { label: view.label, text: `Not measured: ${notMeasuredWhy(reading)}`, tone: null };
     case "pending":
       return { label: view.label, text: "Not measured yet", tone: null };
+  }
+};
+
+/**
+ * A failing QA check's detail, one line a finding, as a player would hit it: the controls that
+ * do nothing, what Retry kept, the HUD text off the view, the errors pressing a control threw.
+ */
+export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<string> => {
+  if (facts.qa.status !== "measured") return [];
+  const found = gameQaFindings(facts.qa.value);
+  switch (id) {
+    case "controls":
+      return [
+        ...(found.dead.length > 0 ? [`Never read by the game: ${found.dead.join(", ")}`] : []),
+        ...(found.silent.length > 0 ? [`No answer seen: ${found.silent.join(", ")}`] : []),
+      ];
+    case "retry":
+      return found.retry.map((each) => each.said);
+    case "hud":
+      return found.hud.map((each) => each.said);
+    case "errors":
+      return found.errors.map((error) => `Pressing ${error}`);
+    default:
+      return [];
   }
 };
 
@@ -235,10 +260,7 @@ const VARIES_BY_ITSELF: ReadonlySet<GameFactId> = new Set(["masher", "motion"]);
 
 /** Rows Compare names by what they measure, since their readings are numbers. */
 const COMPARE_NAMES: Partial<Record<GameFactId, string>> = {
-  colour: "Largest colour",
   motion: "Picture change (motion)",
-  // The same quantity on both sides: the longest stretch with nothing moving.
-  freeze: "Longest still stretch",
 };
 
 export interface CompareRow {
@@ -324,11 +346,7 @@ const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 /** PURE. A number's move from A to B in the reading's unit; null where a size means nothing. */
 const moveAmount = (id: GameFactId, a: number, b: number): string | null => {
   const sign = b > a ? "+" : "−";
-  if (id === "colour") {
-    const points = Math.abs(Math.round(b * 100) - Math.round(a * 100));
-    return points === 0 ? null : `${sign}${points} ${points === 1 ? "point" : "points"}`;
-  }
-  if (!RUN_FACTS.has(id) && id !== "freeze" && id !== "first-response") return null;
+  if (!RUN_FACTS.has(id) && id !== "first-response") return null;
   const size = Math.abs(b - a);
   return size < 0.05 ? null : `${sign}${seconds(size)}`;
 };
@@ -390,13 +408,9 @@ export const compareRows = (
     // A bot run's reading names what happened, not only when: "Lost at 4.8 s".
     if (RUN_FACTS.has(id) && check.ending !== null && check.value !== null)
       return `${RUN_EVENTS[check.ending]} ${check.value}`;
-    // Colour, motion and the longest still stretch are numbers, named by the row: just the number.
+    // Motion is a number, named by the row: just the number.
     const number = check.reading._tag === "measured" ? check.reading.value : null;
-    if (number !== null) {
-      if (id === "colour") return `${Math.round(number * 100)}%`;
-      if (id === "motion") return number.toFixed(1);
-      if (id === "freeze") return number === 0 ? "None" : seconds(number);
-    }
+    if (number !== null && id === "motion") return number.toFixed(1);
     const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
     if (check.value !== null) return bad ? `${check.sentence} · ${check.value}` : check.value;
     return check.sentence.toLowerCase() === name.toLowerCase() ? "Yes" : check.sentence;
@@ -516,7 +530,6 @@ export const changeWord = (
   if (verdict && row.tone === "worse") return "Worse";
   if (row.mark === "≠") return "Changed";
   const up = row.mark === "↑";
-  if (row.id === "freeze") return up ? "Longer" : "Shorter";
   // A time moves later or earlier; an amount is more or less.
   return RUN_FACTS.has(row.id) || row.id === "first-response"
     ? up

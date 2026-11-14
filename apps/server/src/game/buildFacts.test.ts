@@ -10,7 +10,6 @@ import {
   tierFact,
   turnChangeBase,
   unmeasurableTier,
-  winnableOf,
 } from "./buildFacts.ts";
 
 const run = (
@@ -169,7 +168,6 @@ describe("sharedPlaySuspect", () => {
       sharedPlaySuspect(run("done", {}), { firstResponse: notMeasured("busy", true) }),
     ).toMatch(/waiting/);
     expect(sharedPlaySuspect(run("done", {}), { performance: perf(45) })).toMatch(/performance/);
-    expect(sharedPlaySuspect(run("done", {}), { liveness: live(20, 4) })).toMatch(/freeze/);
     expect(sharedPlaySuspect(run("done", {}), { liveness: live(0.5) })).toMatch(/motion/);
   });
 });
@@ -198,28 +196,6 @@ describe("unmeasurableTier", () => {
     const own = notMeasured("the tier bot did not play: no canvas", false);
     expect(unmeasurableTier({ idle: missing, masher: busy })).toBe(missing);
     expect(unmeasurableTier({ idle: busy, masher: own })).toBeUndefined();
-  });
-});
-
-describe("winnableOf", () => {
-  const measured = (ending: "won" | "lost") =>
-    ({
-      status: "measured",
-      value: { ending, at: 1, played: 1, note: "", evidence: null },
-    }) as const;
-  const missing = { status: "not-measured", why: "busy", retry: true } as const;
-  it("is false only when both tiers were measured and neither won", () => {
-    expect(winnableOf(measured("lost"), measured("lost"))).toEqual({
-      status: "measured",
-      value: false,
-    });
-    expect(winnableOf(measured("lost"), missing).status).toBe("not-measured");
-    expect(winnableOf(missing, measured("won"))).toEqual({ status: "measured", value: true });
-    const crashed = {
-      status: "measured",
-      value: { ending: "crashed", at: 1, played: 1, note: "", evidence: null },
-    } as const;
-    expect(winnableOf(crashed, measured("lost")).status).toBe("not-measured");
   });
 });
 

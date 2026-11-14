@@ -97,6 +97,7 @@ import {
   buildPhrase,
   formatBuildTime,
   notMeasuredWhy,
+  qaLines,
   undoOutcome,
 } from "./gameBuilds.logic";
 import {
@@ -540,13 +541,13 @@ const FACT_KEYS = [
   "idle",
   "masher",
   "skilled",
-  "winnableWithoutSkill",
   "liveness",
   "firstResponse",
   "assets",
   "performance",
   "use",
   "scene",
+  "qa",
 ] as const satisfies ReadonlyArray<keyof GameBuildFacts>;
 
 /** A measuring build's facts with each reading still to come taken from its last measure. */
@@ -565,11 +566,13 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
     (check) => check.reading._tag === "measured" && check.reading.tone === "good",
   ).length;
   const notMeasured = view.checks.filter((check) => check.reading._tag === "not-measured").length;
-  // A reading with no verdict (colour that is varied) is counted, so the counts add up to all
-  // the checks: the bot measured it and the person judges it.
-  const toJudge = view.checks.filter(
+  // A reading with no verdict is counted, so the counts add up to all the checks: a frame rate
+  // that dips is the person's to judge, and a win the play bot never made is not yet proven.
+  const neutral = view.checks.filter(
     (check) => check.reading._tag === "measured" && check.reading.tone === "neutral",
-  ).length;
+  );
+  const unproven = neutral.filter((check) => check.id === "skilled").length;
+  const toJudge = neutral.length - unproven;
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
   // A build that does not start is its outcome, in the words the strip and the top bar use,
   // not one check to look at among passes.
@@ -592,6 +595,7 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
       : [`${shownPass} of ${view.checks.length} pass`]),
     ...(view.toLook > 0 ? [`${view.toLook} to look at`] : []),
     ...(toJudge > 0 ? [`${toJudge} for you to judge`] : []),
+    ...(unproven > 0 ? ["winning not yet proven"] : []),
     ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
     ...(busy && pending > 0 ? [`${pending} to measure`] : []),
     // A pending row under it says it is measuring, and which step; with none (measuring again
@@ -641,11 +645,14 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
             fact={check}
             text={check.sentence}
             value={check.value}
-            // What stopped a game from starting is the one thing to fix first: said, not hovered.
+            // What stopped a game from starting, and what a player would hit, are the things
+            // to fix first: said, not hovered.
             detail={
               check.id === "boots" && facts.boots.status === "measured" && !facts.boots.value.ok
                 ? [facts.boots.value.detail]
-                : []
+                : check.reading._tag === "measured" && check.reading.tone === "bad"
+                  ? qaLines(facts, check.id)
+                  : []
             }
             note={noteOf(check)}
             lead
@@ -742,12 +749,12 @@ function namesPhrase(names: ReadonlyArray<string>): string {
  */
 const SKELETON_CHECKS = [
   { name: "Starts without errors", value: false },
-  { name: "Can be lost with no input", value: true },
-  { name: "Not won by random or no input", value: false },
-  { name: "Runs smoothly", value: true },
-  { name: "Keeps moving", value: true },
-  { name: "Colour is varied", value: true },
-  { name: "Can be won by the play bot", value: false },
+  { name: "No errors while playing", value: false },
+  { name: "Every control works", value: false },
+  { name: "Retry starts clean", value: false },
+  { name: "HUD fits the screen", value: false },
+  { name: "Holds its frame rate", value: true },
+  { name: "Not yet proven winnable", value: true },
 ] as const;
 
 /**

@@ -264,7 +264,6 @@ export const tierFact = (
 
 /** Rows whose reading follows how fast the machine ran the play (keep going's loop.ts leaves the scene ones unguarded for the same reason). */
 const TIMING_ROWS: ReadonlySet<string> = new Set([
-  "freeze",
   "motion",
   "first-response",
   "performance",
@@ -308,13 +307,13 @@ export const sharedPlaySuspect = (
     idle: UNREAD,
     masher: UNREAD,
     skilled: UNREAD,
-    winnableWithoutSkill: UNREAD,
     liveness: UNREAD,
     firstResponse: UNREAD,
     assets: UNREAD,
     use: UNREAD,
     performance: UNREAD,
     scene: UNREAD,
+    qa: UNREAD,
     ...patch,
   } as Facts;
   const slow = gameFactsView(facts).find(
@@ -347,34 +346,13 @@ export const firstResponseOf = (
   );
 };
 
-const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
-
-/**
- * Won without skill: the idle or the random player won. False only when both
- * played to a loss or to no ending; a run that broke says nothing about skill.
- */
-export const winnableOf = (idle: TierFact, masher: TierFact): Facts["winnableWithoutSkill"] => {
-  const won = (fact: TierFact) => fact.status === "measured" && fact.value.ending === "won";
-  if (won(idle) || won(masher)) return { status: "measured", value: true };
-  if (idle.status === "pending" || masher.status === "pending") return { status: "pending" };
-  if (idle.status === "measured" && masher.status === "measured") {
-    if (BROKE.has(idle.value.ending) || BROKE.has(masher.value.ending))
-      return notMeasured(
-        "the no-input or random-input run broke (crashed, stopped answering or did not boot)",
-        false,
-      );
-    return { status: "measured", value: false };
-  }
-  const missing = idle.status === "not-measured" ? idle : masher;
-  return missing.status === "not-measured"
-    ? notMeasured(
-        `needs both the no-input and the random-input run: ${missing.why}`,
-        missing.retry,
-        false,
-        missing.cause,
-      )
-    : notMeasured("needs both the no-input and the random-input run: not measured", true);
-};
+/** The QA play a boot check played (three.js), as the build's qa fact. */
+export const qaFact = (result: GameCheckResult): Facts["qa"] =>
+  result.qa === undefined
+    ? notMeasured("the boot check did not reach the gameplay entry", false)
+    : result.qa.status === "measured"
+      ? { status: "measured", value: result.qa.report }
+      : notMeasured(result.qa.why, false, false, result.qa.cause);
 
 const TONE_ORDER: Readonly<Record<GameFactTone, number>> = { bad: 0, good: 1, neutral: 2 };
 

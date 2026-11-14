@@ -150,20 +150,21 @@ const MISS_LIMIT = 2;
 const TEXT_MAX = 8000;
 
 /**
- * The facts keep going acts on and guards. Motion, detail and
- * colour are heuristics: shown, never proposed and never guarded. Of the scene
- * report, only what the scene's own geometry decides is watched (a body sunk in
- * the ground, a player the camera cannot see); clipping, falling, the camera in
- * a wall and sliding depend on where random input led and how fast this
- * machine ran it, so they are shown and never guarded.
+ * The facts keep going acts on and guards: what a player would hit (the lead checks), the
+ * play bot's win, and how soon the controls answer. Who wins with no input or random input
+ * is the creator's design, and motion and detail are heuristics: shown, never proposed and
+ * never guarded. Of the scene report, only what the scene's own geometry decides is watched
+ * (a body sunk in the ground, a player the camera cannot see); clipping, falling, the camera
+ * in a wall and sliding depend on where random input led and how fast this machine ran it,
+ * so they are shown and never guarded.
  */
 const WATCHED: ReadonlySet<GameFactId> = new Set([
   "boots",
-  "idle",
-  "masher",
+  "errors",
+  "controls",
+  "retry",
+  "hud",
   "skilled",
-  "winnable-without-skill",
-  "freeze",
   "first-response",
   "buried",
   "player-view",
@@ -209,11 +210,11 @@ export const headline = (proposal: Pick<GameRunProposal, "why" | "text">, max = 
 /** What a fact step asks for, in the creator's terms rather than the agent's. */
 const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
   boots: "Make the game start without errors",
-  idle: "Make the game lose when nobody plays",
-  masher: "Make random button-mashing lose",
+  errors: "Fix the errors the game hits while playing",
+  controls: "Make every declared control do something",
+  retry: "Make Retry start a clean run",
+  hud: "Keep the HUD on screen",
   skilled: "Make the game winnable by a skilled player",
-  "winnable-without-skill": "Make winning take skill",
-  freeze: "Remove the stretches where the game stands still",
   "first-response": "Make the controls respond sooner",
   buried: "Stand the characters on the ground, not in it",
   "player-view": "Keep the player in view",
@@ -291,13 +292,9 @@ const tierEnding = (facts: GameBuildFacts, id: "idle" | "masher" | "skilled") =>
   return fact.status === "measured" ? fact.value.ending : null;
 };
 
-/** The facts that block the game, in display order. */
-const blockers = (facts: GameBuildFacts, views: Views): ReadonlyArray<GameFactId> =>
-  (["boots", "idle", "masher", "skilled", "freeze"] as const).filter((id) =>
-    id === "idle" || id === "masher" || id === "skilled"
-      ? BROKE.has(tierEnding(facts, id) ?? "")
-      : toneOf(views, id) === "bad",
-  );
+/** The facts that block the game, in display order: it does not start, or it breaks in play. */
+const blockers = (views: Views): ReadonlyArray<GameFactId> =>
+  (["boots", "errors"] as const).filter((id) => toneOf(views, id) === "bad");
 
 // A step's reasons are read in the chat, where no A and B are on screen.
 const STEP_SIDES = { a: "the build before the step", b: "the step's build" } as const;
@@ -331,12 +328,12 @@ export const regressions = (
       (a !== "bad" && b === "bad") || (delta.id === "skilled" && a === "good" && b !== "good");
     if (!crossed) return [];
     const kind =
-      delta.id === "idle" || delta.id === "masher" || delta.id === "skilled"
+      delta.id === "skilled"
         ? BROKE.has(tierEnding(build, delta.id) ?? "")
           ? "health"
           : "design"
         : // An empty view can be the look the person asked for.
-          delta.id === "winnable-without-skill" || delta.id === "empty"
+          delta.id === "empty"
           ? "design"
           : "health";
     return kind === "design" && exemptDesign ? [] : [{ delta, kind }];
@@ -407,7 +404,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     () => steerProposal(state),
     ...(facts === null || views === null
       ? []
-      : blockers(facts, views).map((id) => () => factStep("blocker", id, views))),
+      : blockers(views).map((id) => () => factStep("blocker", id, views))),
     () => {
       const last = state.records.at(-1);
       if (last === undefined || last.step.verdict !== "undone") return null;
@@ -425,7 +422,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     },
     ...(facts === null || views === null
       ? []
-      : (["winnable-without-skill", "first-response", "buried", "player-view", "empty"] as const)
+      : (["controls", "retry", "hud", "first-response", "buried", "player-view", "empty"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
     () => {

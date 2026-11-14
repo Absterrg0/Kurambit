@@ -31,7 +31,7 @@ describe("a compare's rows", () => {
   it("says a reason neither side was measured for once, by the Inspector's names", () => {
     const busy =
       "the picture stood still while the machine was busy (load 10.8 on 8 cores), so it says nothing about the game";
-    const view = (id: "freeze" | "colour" | "boots"): GameFactView => ({
+    const view = (id: "motion" | "hud" | "boots"): GameFactView => ({
       id,
       label: id,
       reading:
@@ -40,8 +40,8 @@ describe("a compare's rows", () => {
           : { _tag: "not-measured" as const, why: busy, cause: "busy" as const },
       evidence: [],
     });
-    const views = [view("boots"), view("freeze"), view("colour")];
-    const unmeasured = (id: "freeze" | "colour") =>
+    const views = [view("boots"), view("motion"), view("hud")];
+    const unmeasured = (id: "motion" | "hud") =>
       ({
         id,
         label: id,
@@ -53,7 +53,7 @@ describe("a compare's rows", () => {
       }) as const;
     const { rows, unmeasured: groups } = compareRows(
       [
-        unmeasured("freeze"),
+        unmeasured("motion"),
         {
           id: "boots",
           label: "Boots",
@@ -63,15 +63,15 @@ describe("a compare's rows", () => {
           tone: "neutral",
           why: null,
         },
-        unmeasured("colour"),
+        unmeasured("hud"),
       ],
       views,
       views,
     );
-    expect(rows.map((row) => row.name)).toEqual(["Starts"]);
+    expect(rows.map((row) => row.name)).toEqual(["Starts without errors"]);
     expect(groups).toEqual([
       {
-        names: ["Longest still stretch", "Largest colour"],
+        names: ["HUD fits the screen", "Picture change (motion)"],
         why: "this computer was busy with other work, so the reading says nothing about the game; the next measure takes it again",
       },
     ]);
@@ -82,34 +82,26 @@ describe("a compare's cells", () => {
   it("say a run's ending and a number from the readings, not from their words", () => {
     const measured = (value: number) =>
       ({ _tag: "measured", text: "", value, tone: "neutral" }) as const;
-    const delta = (id: "masher" | "colour" | "freeze", a: string, b: string) =>
+    const delta = (id: "masher" | "motion", a: string, b: string) =>
       ({ id, label: id, a, b, change: "changed", tone: "neutral", why: null }) as const;
-    const check = (
-      id: "masher" | "colour" | "freeze",
-      value: number,
-      ending: "lost" | "won" | null,
-    ) => ({
+    const check = (id: "masher" | "motion", value: number, ending: "lost" | "won" | null) => ({
       id,
       sentence: "Anything",
       value: ending === null ? null : "at 4.8 s",
       reading: measured(value),
       ending,
     });
-    const side = (ending: "lost" | "won", colour: number, still: number) => [
+    const side = (ending: "lost" | "won", motion: number) => [
       check("masher", 4.8, ending),
-      check("colour", colour, null),
-      check("freeze", still, null),
+      check("motion", motion, null),
     ];
-    const { rows } = compareRows(
-      [delta("masher", "x", "y"), delta("colour", "x", "y"), delta("freeze", "x", "y")],
-      [],
-      [],
-      { a: side("lost", 0.62, 0), b: side("won", 0.4, 3.4) },
-    );
+    const { rows } = compareRows([delta("masher", "x", "y"), delta("motion", "x", "y")], [], [], {
+      a: side("lost", 3.21),
+      b: side("won", 7.5),
+    });
     expect(rows.map((row) => [row.id, row.a, row.b])).toEqual([
-      ["freeze", "None", "3.4 s"],
-      ["colour", "62%", "40%"],
       ["masher", "Lost at 4.8 s", "Won at 4.8 s"],
+      ["motion", "3.2", "7.5"],
     ]);
   });
 });

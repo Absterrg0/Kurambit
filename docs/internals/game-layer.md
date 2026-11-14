@@ -482,8 +482,9 @@ cannot both find none.
   agent's own `Next:` line (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
   the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
   blocker, a retry of an undone step, a failing fact, the agent's next line. Only
-  watched facts are proposed or guarded: motion, detail and colour are heuristics, and a space
-  game's black sky must never cost a step. Of the scene report only buried bodies, the player in
+  watched facts are proposed or guarded: what a player would hit (the lead checks: errors,
+  controls, Retry, HUD), the play bot's win and input response. Who wins with no input or random
+  input is the creator's design, and motion and detail are heuristics; none costs a step. Of the scene report only buried bodies, the player in
   view and the empty view are watched, because the scene's geometry decides them (the empty view
   counts only flat backdrop below the horizon with nothing drawn on the ray, so a sky or a space
   backdrop seen level never counts, and it is a design regression a person's step may make);
