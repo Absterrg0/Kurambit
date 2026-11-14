@@ -2149,6 +2149,9 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
             }),
             runOrdinal: turnInput.runOrdinal,
             hasKurambitMcp: mcpServers !== undefined,
+            ...(turnInput.harnessInstructions === undefined
+              ? {}
+              : { harnessInstructions: turnInput.harnessInstructions }),
           });
           const images = yield* Effect.forEach(
             turnInput.message.attachments.filter(isProviderNativeImageAttachment),

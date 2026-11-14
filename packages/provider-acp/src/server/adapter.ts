@@ -6311,6 +6311,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
             hasKurambitMcp: (yield* readMcpContext(turnInput.threadId)).servers.length > 0,
+            ...(turnInput.harnessInstructions === undefined
+              ? {}
+              : { harnessInstructions: turnInput.harnessInstructions }),
           } satisfies KurambitAcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const messageText = providerMessageTextWithAttachmentPaths({

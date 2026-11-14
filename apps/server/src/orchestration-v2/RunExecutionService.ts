@@ -37,6 +37,7 @@ import * as Stream from "effect/Stream";
 
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
+import { turnRulesForWorkspace } from "../game/gameTurnRules.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -1381,6 +1382,8 @@ export const layer: Layer.Layer<
             key: `mcp_app_${entry.itemId.replace(/[^\w.-]/g, "_")}`,
             text: entry.text,
           }));
+          // A game's turn rules come from the harness each turn, never from a copy in the game.
+          const harnessInstructions = yield* turnRulesForWorkspace(input.runtimePolicy.cwd);
           const turnInput = {
             appThread: input.appThread,
             threadId: input.run.threadId,
@@ -1402,6 +1405,7 @@ export const layer: Layer.Layer<
             modelSelection: input.modelSelection,
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),
+            ...(harnessInstructions === undefined ? {} : { harnessInstructions }),
           };
           // Check after the context read: ingestion can settle the run while
           // it awaits. A failed ownership read fails the start below.

@@ -1,6 +1,8 @@
 import { ScheduledTaskId } from "@kurambit/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { FIRST_TURN_LEADS } from "@kurambit/shared/gameFirstTurn";
+
 import { resolveUserMessagePresentation } from "./userMessage.ts";
 
 describe("resolveUserMessagePresentation", () => {
@@ -86,6 +88,19 @@ describe("resolveUserMessagePresentation", () => {
         attribution: "automation",
         scheduledTaskId: "task:daily-audit",
       });
+    }
+  });
+
+  it("shows a new game's first message as the brief alone", () => {
+    const brief = "A knight clears a dungeon.\n\nArt direction: dark and moody";
+    for (const harness of [
+      `${FIRST_TURN_LEADS.steps}\n\n## The first turn\n\n1. Read \`BRIEF.md\`.`,
+      FIRST_TURN_LEADS.brief,
+      'Make this game. Follow "The first turn" in AGENTS.md.',
+    ]) {
+      expect(
+        resolveUserMessagePresentation({ role: "user", text: `${brief}\n\n${harness}` }).text,
+      ).toBe(brief);
     }
   });
 });

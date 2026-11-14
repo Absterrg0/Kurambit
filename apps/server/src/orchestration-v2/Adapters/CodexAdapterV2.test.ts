@@ -511,7 +511,10 @@ describe("CodexAdapterV2 runtime policy", () => {
 
         assert.equal(params.collaborationMode?.mode, "default");
         assert.equal(
-          params.additionalContext?.kurambit_orchestration?.value,
+          Object.entries(params.additionalContext ?? {})
+            .filter(([key]) => key.startsWith("kurambit_orchestration"))
+            .map(([, entry]) => entry.value)
+            .join("\n"),
           KURAMBIT_ORCHESTRATION_INSTRUCTIONS,
         );
         assert.include(

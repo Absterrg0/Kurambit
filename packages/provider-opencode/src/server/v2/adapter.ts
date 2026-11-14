@@ -2987,7 +2987,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       const instructions = [
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
-        kurambitOrchestrationSystemPrompt(state.mcp !== undefined),
+        kurambitOrchestrationSystemPrompt(state.mcp !== undefined, turnInput.harnessInstructions),
       ]
         .filter((part) => part !== undefined && part.length > 0)
         .join("\n\n");

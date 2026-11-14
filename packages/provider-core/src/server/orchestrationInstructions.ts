@@ -62,6 +62,7 @@ Investigate with read-only actions and do not edit files or otherwise execute th
 export interface KurambitAcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasKurambitMcp: boolean;
+  readonly harnessInstructions?: string;
 }
 
 /**
@@ -77,7 +78,8 @@ export function kurambitAcpPromptWithInstructions(input: {
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasKurambitMcp === input.state.hasKurambitMcp
+    input.previousState.hasKurambitMcp === input.state.hasKurambitMcp &&
+    input.previousState.harnessInstructions === input.state.harnessInstructions
   ) {
     return input.prompt;
   }
@@ -88,6 +90,7 @@ export function kurambitAcpPromptWithInstructions(input: {
     ...(input.state.hasKurambitMcp
       ? [KURAMBIT_BROWSER_TOOL_INSTRUCTIONS.trim(), KURAMBIT_ORCHESTRATION_INSTRUCTIONS.trim()]
       : []),
+    ...(input.state.harnessInstructions ? [input.state.harnessInstructions.trim()] : []),
   ];
   return `<kurambit_instructions>\n${instructions.join("\n\n")}\n</kurambit_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }
@@ -95,20 +98,30 @@ export function kurambitAcpPromptWithInstructions(input: {
 /**
  * Keep the wrapper explicit so it cannot be mistaken for text authored by the user.
  */
-function prependKurambitOrchestrationInstructions(prompt: string): string {
-  return `<kurambit_orchestration_instructions>${KURAMBIT_ORCHESTRATION_INSTRUCTIONS.trim()}</kurambit_orchestration_instructions>\n\n<user_request>\n${prompt}\n</user_request>`;
-}
-
 export function kurambitOrchestrationPromptForFirstRun(input: {
   readonly prompt: string;
   readonly runOrdinal: number;
   readonly hasKurambitMcp: boolean;
+  readonly harnessInstructions?: string;
 }): string {
-  return input.runOrdinal === 1 && input.hasKurambitMcp
-    ? prependKurambitOrchestrationInstructions(input.prompt)
-    : input.prompt;
+  if (input.runOrdinal !== 1) return input.prompt;
+  const instructions = kurambitOrchestrationSystemPrompt(
+    input.hasKurambitMcp,
+    input.harnessInstructions,
+  );
+  return instructions === undefined
+    ? input.prompt
+    : `<kurambit_orchestration_instructions>${instructions.trim()}</kurambit_orchestration_instructions>\n\n<user_request>\n${input.prompt}\n</user_request>`;
 }
 
-export function kurambitOrchestrationSystemPrompt(hasKurambitMcp: boolean): string | undefined {
-  return hasKurambitMcp ? KURAMBIT_ORCHESTRATION_INSTRUCTIONS : undefined;
+/** The orchestration text when Kurambit's MCP server is attached, then the thread's harness rules. */
+export function kurambitOrchestrationSystemPrompt(
+  hasKurambitMcp: boolean,
+  harnessInstructions?: string,
+): string | undefined {
+  const parts = [
+    ...(hasKurambitMcp ? [KURAMBIT_ORCHESTRATION_INSTRUCTIONS] : []),
+    ...(harnessInstructions ? [`\n\n${harnessInstructions.trim()}\n`] : []),
+  ];
+  return parts.length === 0 ? undefined : parts.join("");
 }

@@ -3218,6 +3218,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               }
               const systemPrompt = [
                 orchestrationSystemPrompt,
+                turnInput.harnessInstructions,
                 buildRuntimeInstructions({
                   harness: "OpenCode",
                   model: turnInput.modelSelection.model,

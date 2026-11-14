@@ -48,7 +48,7 @@ import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { gameRelative, insideGame } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
-import { createEngine, firstTurnMessage, refreshedTurnRules, scaffoldFiles } from "./scaffold.ts";
+import { createEngine, firstTurnMessage, scaffoldFiles, withoutMovedSections } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -733,7 +733,8 @@ const make = Effect.gen(function* () {
         const agents = yield* fileSystem
           .readFileString(agentsFile)
           .pipe(Effect.orElseSucceed(() => null));
-        const updated = agents === null ? null : refreshedTurnRules(agents, manifest.engine.name);
+        // Games made before the turn rules came from the harness carry a copy; drop it once.
+        const updated = agents === null ? null : withoutMovedSections(agents);
         if (updated !== null)
           yield* writeFileStringAtomically({
             filePath: agentsFile,

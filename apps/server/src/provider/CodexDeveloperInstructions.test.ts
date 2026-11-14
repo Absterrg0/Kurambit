@@ -1,10 +1,12 @@
 import * as NodeAssert from "node:assert/strict";
 
 import { describe, it } from "vite-plus/test";
+import { KURAMBIT_ORCHESTRATION_INSTRUCTIONS } from "@kurambit/provider-core/server/orchestrationInstructions";
 
 import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
+  CODEX_CONTEXT_VALUE_BYTES,
 } from "./CodexDeveloperInstructions.ts";
 
 describe("buildCodexDeveloperInstructions", () => {
@@ -67,6 +69,27 @@ describe("buildCodexDeveloperInstructions", () => {
 
     NodeAssert.match(instructions, /as gpt 5\.3 codex with high effort reasoning effort/);
     NodeAssert.doesNotMatch(instructions, /<runtime_info>[^<]*\n/);
+  });
+});
+
+describe("buildCodexAdditionalContext", () => {
+  // Codex cuts an over-long value from the middle, silently dropping instructions.
+  it("sends the orchestration text whole, in keys Codex keeps uncut", () => {
+    const context = buildCodexAdditionalContext({ model: "gpt-5.4", reasoningEffort: "high" });
+    for (const [key, entry] of Object.entries(context)) {
+      NodeAssert.ok(
+        Buffer.byteLength(entry.value, "utf8") <= CODEX_CONTEXT_VALUE_BYTES,
+        `${key} is ${Buffer.byteLength(entry.value, "utf8")} bytes`,
+      );
+    }
+    const orchestration = Object.keys(context)
+      .filter((key) => key.startsWith("kurambit_orchestration"))
+      .toSorted();
+    NodeAssert.ok(orchestration.length > 1);
+    NodeAssert.equal(
+      orchestration.map((key) => context[key]!.value).join("\n"),
+      KURAMBIT_ORCHESTRATION_INSTRUCTIONS,
+    );
   });
 });
 

@@ -98,6 +98,7 @@ import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "@kurambit/provider-core/server/pathExpansion";
 import {
   buildCodexAdditionalContext,
+  codexContextEntries,
   buildCodexDeveloperInstructions,
 } from "../../provider/CodexDeveloperInstructions.ts";
 import {
@@ -722,6 +723,7 @@ export function buildCodexTurnStartParams(input: {
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
+  readonly harnessInstructions?: string;
 }) {
   return Effect.gen(function* () {
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(input.runtimePolicy.runtimeMode);
@@ -757,11 +759,18 @@ export function buildCodexTurnStartParams(input: {
       ]),
     );
     const kurambitContext =
-      input.hasKurambitMcp === true
-        ? buildCodexAdditionalContext(
-            { model: input.modelSelection.model, reasoningEffort: effort ?? "medium" },
-            input.browserToolsAvailable ?? true,
-          )
+      input.hasKurambitMcp === true || input.harnessInstructions !== undefined
+        ? {
+            ...(input.hasKurambitMcp === true
+              ? buildCodexAdditionalContext(
+                  { model: input.modelSelection.model, reasoningEffort: effort ?? "medium" },
+                  input.browserToolsAvailable ?? true,
+                )
+              : {}),
+            ...(input.harnessInstructions === undefined
+              ? {}
+              : codexContextEntries("kurambit_harness", input.harnessInstructions)),
+          }
         : undefined;
     const additionalContext =
       kurambitContext === undefined && Object.keys(appContext).length === 0
@@ -6190,6 +6199,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
+              ...(turnInput.harnessInstructions === undefined
+                ? {}
+                : { harnessInstructions: turnInput.harnessInstructions }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);

@@ -6,7 +6,7 @@ demo needs, so build the game, not the menus.
 
 ## Shortest path
 
-The first playable build, in this order (the game's AGENTS.md, "The first turn"):
+The first playable build, in this order ("The first turn" in the game's first message):
 
 1. The look: `game_assets_search` lists the library by style family;
    `game_assets_add` the player and one or two threats or props, the first
