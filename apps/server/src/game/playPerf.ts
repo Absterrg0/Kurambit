@@ -39,6 +39,11 @@ export const readPlayPerf = (root: string, evidence: string) =>
 
 /** Frames to read a frame rate from: two seconds at 60 fps. */
 const MIN_FRAMES = 120;
+/**
+ * A 1% low over fewer frames is a handful of start-up frames (shader and asset warm-up), not the
+ * play: over the check's ~6 s it read 20 to 48 on the same build, run after run.
+ */
+const LOW1_FRAMES = 1000;
 /** Below this a reading on a busy machine says nothing about the game. */
 const SMOOTH_FPS = 55;
 
@@ -128,9 +133,10 @@ export const checkPerformance = (
   const draws = finite(extra.drawCalls);
   const triangles = finite(extra.triangles);
   const gpu = record.gpuMs;
+  const low1 = record.frames >= LOW1_FRAMES ? record.low1Fps : null;
   const line = [
     `${Math.round(record.fps)} fps`,
-    record.low1Fps === null ? null : `1% low ${Math.round(record.low1Fps)}`,
+    low1 === null ? null : `1% low ${Math.round(low1)}`,
     gpu === null
       ? null
       : `GPU ${gpu.toFixed(1)} ms at ${record.scale ?? 1}× of ${Math.round(record.width)}×${Math.round(record.height)}`,
@@ -160,8 +166,7 @@ export const checkPerformance = (
       ? `${count(triangles)} triangles (budget ${count(CHECK_TRIANGLES)}): fewer or lighter copies of the densest model, nothing far away drawn at full detail`
       : null,
   ].filter((cost) => cost !== null);
-  const slow =
-    !gpuShared && (record.fps < SMOOTH_FPS || (record.low1Fps !== null && record.low1Fps < 40));
+  const slow = !gpuShared && (record.fps < SMOOTH_FPS || (low1 !== null && low1 < 40));
   const shown = gpuShared
     ? `${line} (another game drew on this GPU during the play, so its times are not this game's: check again for them)`
     : line;
