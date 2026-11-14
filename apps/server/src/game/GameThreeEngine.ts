@@ -17,7 +17,8 @@ import {
 } from "@kurambit/contracts";
 import { inGame } from "./gamePath.ts";
 import { commandDetail } from "./commandDetail.ts";
-import { drawingAlone, stackToGameFile, type GameBrowser } from "./gameChromium.ts";
+import { stackToGameFile, type GameBrowser } from "./gameChromium.ts";
+import { playLane } from "./playLane.ts";
 import { serveGameDirectory } from "./gameWebServer.ts";
 import {
   openWebPlaySession,
@@ -217,91 +218,94 @@ export const makeThreeBackend = (
       let playPerf: unknown = null;
       // The share one colour holds in play's picture, the same reading the build's facts make.
       let flatView: number | null = null;
-      const { value: played, gpuShared } = yield* drawingAlone(
-        temporary,
-        Effect.tryPromise({
-          try: async (signal) => {
-            let timedOut = false;
-            for (const [entry, entryUrl] of entries) {
-              const measure = input.scene && entry === "gameplay";
-              const session = await openWebPlaySession({
-                browser,
-                url: entryUrl,
-                ...THREE_VIEWPORT,
-                bootTimeoutMs: BOOT_TIMEOUT_MS,
-                signal,
-                onPageEvent,
-                stopOnPageError: true,
-                sceneReport: measure,
-              }).catch((cause: unknown) => {
-                // The game's page crashing is what the check measures; our browser
-                // going away is not, and fails the check below.
-                if (cause instanceof WebPageCrashed) {
-                  log(`page crashed: ${cause.message}`);
-                  crashed = true;
-                  issues.push({
-                    file: `${ctx.projectName}/${entry === "boot" ? "index.html" : input.gameplayScene.split("?")[0]}`,
-                    message: `The page crashed while it ${entry === "boot" ? "booted" : "started gameplay"} (${cause.message.slice(0, 300)}).`,
-                  });
+      // The agent waits on this play: it goes first in the play lane and is never interrupted.
+      const played = yield* playLane
+        .hold(
+          "agent",
+          Effect.tryPromise({
+            try: async (signal) => {
+              let timedOut = false;
+              for (const [entry, entryUrl] of entries) {
+                const measure = input.scene && entry === "gameplay";
+                const session = await openWebPlaySession({
+                  browser,
+                  url: entryUrl,
+                  ...THREE_VIEWPORT,
+                  bootTimeoutMs: BOOT_TIMEOUT_MS,
+                  signal,
+                  onPageEvent,
+                  stopOnPageError: true,
+                  sceneReport: measure,
+                }).catch((cause: unknown) => {
+                  // The game's page crashing is what the check measures; our browser
+                  // going away is not, and fails the check below.
+                  if (cause instanceof WebPageCrashed) {
+                    log(`page crashed: ${cause.message}`);
+                    crashed = true;
+                    issues.push({
+                      file: `${ctx.projectName}/${entry === "boot" ? "index.html" : input.gameplayScene.split("?")[0]}`,
+                      message: `The page crashed while it ${entry === "boot" ? "booted" : "started gameplay"} (${cause.message.slice(0, 300)}).`,
+                    });
+                    return null;
+                  }
+                  if (!(cause instanceof WebPageNotReady)) throw cause;
+                  if (cause.navigation !== null) log(`navigation failed: ${cause.navigation}`);
+                  timedOut = cause.timedOut;
                   return null;
-                }
-                if (!(cause instanceof WebPageNotReady)) throw cause;
-                if (cause.navigation !== null) log(`navigation failed: ${cause.navigation}`);
-                timedOut = cause.timedOut;
-                return null;
-              });
-              if (session !== null) {
-                const started = Date.now();
-                // A short random-input play the scene report watches; without one (or with a
-                // shell that has none, where nothing would watch it), one extra beat. Either
-                // way late module errors still land in the listeners above.
-                if (measure && session.scene() !== "no-shell")
-                  await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
-                else await new Promise((resolve) => setTimeout(resolve, 2000));
-                const view = NodePath.join(temporary, `view-${entry}.png`);
-                if (await session.still(view)) {
-                  views.push({ entry, path: NodePath.relative(ctx.root, view) });
-                  if (entry === "gameplay") flatView = await flatShareOf(view);
-                }
-                await session.close();
-                if (measure) {
-                  scenePlay = { page: session.scene(), ms: Date.now() - started };
-                  playPerf = session.perf();
-                }
-                reached.push(entry);
-              } else if (entry !== "boot" && !crashed)
-                issues.push({
-                  file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
-                  message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
                 });
-              if (timedOut) break;
-            }
-            return { timedOut };
-          },
-          // A browser that would not start, or that went away, says nothing
-          // about the build: the check could not be made.
-          catch: (cause) =>
-            cause instanceof WebBrowserLaunchFailed
-              ? new GameOperationError({
-                  operation: "three-check",
-                  path: ctx.projectDir,
-                  reason: "tool-missing",
-                  detail: cause.message,
-                  cause,
-                })
-              : new GameOperationError({
-                  operation: "three-check",
-                  path: ctx.projectDir,
-                  reason: "tool-failed",
-                  detail: `${cause instanceof WebBrowserGone ? "Headless Chromium went away" : "Headless Chromium failed"} during the check: ${
-                    cause instanceof Error
-                      ? cause.message.slice(0, 500)
-                      : String(cause).slice(0, 500)
-                  }`,
-                  cause,
-                }),
-        }),
-      ).pipe(Effect.ensuring(Effect.promise(() => server.close().catch(() => undefined))));
+                if (session !== null) {
+                  const started = Date.now();
+                  // A short random-input play the scene report watches; without one (or with a
+                  // shell that has none, where nothing would watch it), one extra beat. Either
+                  // way late module errors still land in the listeners above.
+                  if (measure && session.scene() !== "no-shell")
+                    await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
+                  else await new Promise((resolve) => setTimeout(resolve, 2000));
+                  const view = NodePath.join(temporary, `view-${entry}.png`);
+                  if (await session.still(view)) {
+                    views.push({ entry, path: NodePath.relative(ctx.root, view) });
+                    if (entry === "gameplay") flatView = await flatShareOf(view);
+                  }
+                  await session.close();
+                  if (measure) {
+                    scenePlay = { page: session.scene(), ms: Date.now() - started };
+                    playPerf = session.perf();
+                  }
+                  reached.push(entry);
+                } else if (entry !== "boot" && !crashed)
+                  issues.push({
+                    file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
+                    message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
+                  });
+                if (timedOut) break;
+              }
+              return { timedOut };
+            },
+            // A browser that would not start, or that went away, says nothing
+            // about the build: the check could not be made.
+            catch: (cause) =>
+              cause instanceof WebBrowserLaunchFailed
+                ? new GameOperationError({
+                    operation: "three-check",
+                    path: ctx.projectDir,
+                    reason: "tool-missing",
+                    detail: cause.message,
+                    cause,
+                  })
+                : new GameOperationError({
+                    operation: "three-check",
+                    path: ctx.projectDir,
+                    reason: "tool-failed",
+                    detail: `${cause instanceof WebBrowserGone ? "Headless Chromium went away" : "Headless Chromium failed"} during the check: ${
+                      cause instanceof Error
+                        ? cause.message.slice(0, 500)
+                        : String(cause).slice(0, 500)
+                    }`,
+                    cause,
+                  }),
+          }),
+        )
+        .pipe(Effect.ensuring(Effect.promise(() => server.close().catch(() => undefined))));
       const { timedOut } = played;
       const booted = reached.includes("boot");
       if (!booted)
@@ -356,7 +360,7 @@ export const makeThreeBackend = (
         ...(scene === undefined ? {} : { scene }),
         views,
         ...(input.scene && reached.includes("gameplay")
-          ? { performance: checkPerformance(playPerf, browser, gpuShared) }
+          ? { performance: checkPerformance(playPerf, browser) }
           : {}),
       };
     });
