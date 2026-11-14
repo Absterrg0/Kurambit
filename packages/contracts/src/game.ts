@@ -8,6 +8,7 @@ import { GameRunErrorReason } from "./gameRunReasons.ts";
 import { GameCharacterRoute } from "./gameStyle.ts";
 import { GameArtLanes } from "./gameArt.ts";
 import { GameSceneReport } from "./gameScene.ts";
+import { GameQaReport } from "./gameQa.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -916,5 +917,21 @@ export const GameCheckResult = Schema.Struct({
    * GPU 14.2 ms at 1× of 1280×720 · 420 draw calls · 2.3M triangles"), or why it was not read.
    */
   performance: Schema.optionalKey(Schema.String),
+  /**
+   * The QA play (three.js): every declared control answers, Retry starts clean, the HUD stays
+   * on screen. `problems` are what to fix, in words; not part of `ok`, which is the boot check's.
+   */
+  qa: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({
+        status: Schema.Literal("measured"),
+        problems: Schema.Array(Schema.String),
+        report: GameQaReport,
+        ms: Schema.Number,
+      }),
+      Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
+    ]),
+  ),
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
+export type GameCheckQa = NonNullable<GameCheckResult["qa"]>;

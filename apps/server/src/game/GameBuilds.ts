@@ -1826,7 +1826,7 @@ const make = Effect.gen(function* () {
           const baseText = before !== undefined && before.base === base ? before.text : undefined;
           const putBack =
             baseText !== undefined &&
-            sameTuneFile(merged.file, baseText === null ? {} : decodeJson(baseText));
+            sameTuneFile(merged.file, baseText === null ? Option.some({}) : decodeJson(baseText));
           yield* Effect.tryPromise({
             try: async () => {
               if (putBack && baseText === null) return NodeFSP.rm(path, { force: true });
@@ -1864,6 +1864,8 @@ const make = Effect.gen(function* () {
         owner,
       );
       if (kept.unchanged) {
+        if (!isGameBuildId(kept.base))
+          return yield* failed("Keep values", g.root, "io", "the game's build is not a build");
         yield* nextTurnsFrom(g, threadId, kept.base);
         yield* operations.changed(g.root, GAME_BUILDS_EVENT, "Tuned values put back.");
         return {

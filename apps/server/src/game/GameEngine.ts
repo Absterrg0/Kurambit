@@ -20,6 +20,7 @@ import {
   type GameCheckResult,
   type GameCheckView,
   type GameCheckScene,
+  type GameCheckQa,
   type GameProcessResult,
   type GameToolStatus,
   type GameViewport,
@@ -88,6 +89,8 @@ export interface GameEngineCheckReport {
   readonly views?: ReadonlyArray<GameCheckView>;
   /** How its play ran, and a warning when it missed 60 fps or spent more than a laptop has. */
   readonly performance?: { readonly line: string; readonly warning: string | null };
+  /** The QA play's report and what to fix, or why it was not played (three.js). */
+  readonly qa?: GameCheckQa;
 }
 
 /** One release the engine wrote into a staging folder. */
@@ -449,6 +452,7 @@ const make = Effect.gen(function* () {
           ? {}
           : { views: executed.views }),
         ...(executed.performance === undefined ? {} : { performance: executed.performance.line }),
+        ...(executed.qa === undefined ? {} : { qa: executed.qa }),
         ...(scene
           ? {
               scene: executed.scene ?? {

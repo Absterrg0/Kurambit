@@ -135,6 +135,28 @@ export class WebBrowserGone extends Error {
  * the way games clamp dt, so a page that stalls gains no time for the stall).
  * Both stop when the page's main thread does.
  */
+/** Set before any script runs: the shell's QA counters (shell/studio.js) wrap what it watches. */
+const QA_COUNTERS = "window.__studioQa = true;";
+/** The QA play: every control, then Retry. A slow machine makes it longer, never different. */
+const QA_PLAY_MS = 90_000;
+const RUN_QA = `(async () => {
+  const qa = window.__studio?.qa;
+  if (qa === null || typeof qa !== "object" || typeof qa.run !== "function") return null;
+  try {
+    return JSON.parse(JSON.stringify(await qa.run()));
+  } catch {
+    return null;
+  }
+})()`;
+const READ_HUD = `(() => {
+  const qa = window.__studio?.qa;
+  if (qa === null || typeof qa !== "object" || typeof qa.hud !== "function") return null;
+  try {
+    return JSON.parse(JSON.stringify(qa.hud()));
+  } catch {
+    return null;
+  }
+})()`;
 const FRAME_COUNTER = `(() => {
   let frames = 0;
   let seconds = 0;
@@ -333,6 +355,12 @@ export interface WebPlaySession extends PlaySession {
    * or was not asked for.
    */
   readonly scene: () => PageScene;
+  /**
+   * The shell's QA play on a session opened with `qa` (shell/qa.js): every control, Retry,
+   * and the HUD at the session's size and at a narrow 4:3, the page put back after. Null when
+   * the shell has none or the page did not answer in time.
+   */
+  readonly qa: () => Promise<unknown>;
 }
 
 /**
@@ -377,6 +405,8 @@ export const openWebPlaySession = async (input: {
   readonly stopOnPageError?: boolean | undefined;
   /** Starts the shell's scene report once the page is ready; `scene()` has it after close. */
   readonly sceneReport?: boolean | undefined;
+  /** Turns the shell's QA counters on before any script runs, so `qa()` can play its QA play. */
+  readonly qa?: boolean | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -432,6 +462,7 @@ export const openWebPlaySession = async (input: {
           }),
     });
     await context.addInitScript(FRAME_COUNTER);
+    if (input.qa === true) await context.addInitScript(QA_COUNTERS);
     const onSound = input.onSoundStarted;
     if (onSound !== undefined) {
       await context.exposeBinding(SOUND_BINDING, (_source, sound: unknown) => {
@@ -808,6 +839,31 @@ export const openWebPlaySession = async (input: {
       keptStorage: () => kept,
       perf: () => perf,
       scene: () => scene,
+      qa: async () => {
+        const played = await bounded(
+          page.evaluate(RUN_QA).catch(() => null),
+          QA_PLAY_MS,
+        );
+        if (played === TIMED_OUT || played === null) return null;
+        const wide = await bounded(
+          page.evaluate(READ_HUD).catch(() => null),
+          PLAY_BOUNDS.webCallMs,
+        );
+        await page.setViewportSize({
+          width: Math.round((input.height * 4) / 3),
+          height: input.height,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const narrow = await bounded(
+          page.evaluate(READ_HUD).catch(() => null),
+          PLAY_BOUNDS.webCallMs,
+        );
+        await page.setViewportSize({ width: input.width, height: input.height });
+        return {
+          ...(played as object),
+          hud: [wide, narrow].filter((each) => each !== TIMED_OUT && each !== null),
+        };
+      },
       act,
       realtime: async (frames) => {
         realtimeSeconds = pageSeconds;

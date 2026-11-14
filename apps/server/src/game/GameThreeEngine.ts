@@ -3,12 +3,18 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import {
   THREE_PINNED_VERSION,
   THREE_VIEWPORT,
   GameOperationError,
+  GameQaReport,
+  gameQaFindings,
+  gameQaProblems,
   type GameActionResult,
   type GameCheckIssue,
+  type GameCheckQa,
   type GameCheckScene,
   type GameCheckView,
   type GameProcessResult,
@@ -89,6 +95,26 @@ const sceneOf = async (
           note: `Drawn in software (${browser.renderer ?? "SwiftShader"}): this machine's GPU was not found, so the play ran slowly; what the report measures is the scene's geometry, which is the same.`,
         }
       : {}),
+  };
+};
+
+const decodeQa = Schema.decodeUnknownOption(GameQaReport);
+/** The QA play's report as the check's: what to fix, or why it was not played. */
+const qaOf = (played: { readonly raw: unknown; readonly ms: number } | null): GameCheckQa => {
+  if (played === null) return { status: "not-measured", why: "the QA play's page did not open" };
+  if (played.raw === null)
+    return {
+      status: "not-measured",
+      why: "the game's shell has no QA play (it predates it) or did not finish it in time",
+    };
+  const report = decodeQa(played.raw);
+  if (Option.isNone(report))
+    return { status: "not-measured", why: "the QA play's report did not read" };
+  return {
+    status: "measured",
+    problems: [...gameQaProblems(gameQaFindings(report.value))],
+    report: report.value,
+    ms: played.ms,
   };
 };
 
@@ -216,6 +242,8 @@ export const makeThreeBackend = (
       // What each entry looked like as the check left it: the agent judges its game from these.
       const views: Array<GameCheckView> = [];
       let playPerf: unknown = null;
+      // The QA play's report, from a page of its own after the measured play.
+      let qaPlay: { readonly raw: unknown; readonly ms: number } | null = null;
       // The share one colour holds in play's picture, the same reading the build's facts make.
       let flatView: number | null = null;
       // The agent waits on this play: it goes first in the play lane and is never interrupted.
@@ -279,6 +307,29 @@ export const makeThreeBackend = (
                   });
                 if (timedOut) break;
               }
+              // The QA play: every control, Retry and the HUD, on its own page so its restarts
+              // never touch the timed play above or its frame rate.
+              if (input.scene && reached.includes("gameplay") && !timedOut && !crashed) {
+                const started = Date.now();
+                const session = await openWebPlaySession({
+                  browser,
+                  url: new URL(input.gameplayScene, server.url).href,
+                  ...THREE_VIEWPORT,
+                  bootTimeoutMs: BOOT_TIMEOUT_MS,
+                  signal,
+                  // Errors after Retry are the report's own finding, not a second issue.
+                  onPageEvent: (event) => {
+                    if (event.kind === "pageerror")
+                      log(`QA play pageerror: ${event.text.slice(0, 300)}`);
+                  },
+                  qa: true,
+                }).catch(() => null);
+                if (session !== null) {
+                  const raw = await session.qa();
+                  await session.close();
+                  qaPlay = { raw, ms: Date.now() - started };
+                }
+              }
               return { timedOut };
             },
             // A browser that would not start, or that went away, says nothing
@@ -320,6 +371,7 @@ export const makeThreeBackend = (
             sceneOf(scenePlay, temporary, NodePath.relative(ctx.root, temporary), browser),
           )
         : undefined;
+      const qa = input.scene && reached.includes("gameplay") ? qaOf(qaPlay) : undefined;
       // The log is for people; the verdict above does not depend on it.
       yield* Effect.promise(() =>
         NodeFSP.writeFile(logPath, `${lines.map((line) => line.text).join("\n")}\n`).catch(
@@ -362,6 +414,7 @@ export const makeThreeBackend = (
         ...(input.scene && reached.includes("gameplay")
           ? { performance: checkPerformance(playPerf, browser) }
           : {}),
+        ...(qa === undefined ? {} : { qa }),
       };
     });
   return {
