@@ -1274,6 +1274,22 @@ const make = Effect.gen(function* () {
   const measure: GameFacts["Service"]["measure"] = (build, options = {}) =>
     Effect.gen(function* () {
       const person = options.queue === "person";
+      // Nothing owed starts no job: a job that plans nothing ends at once, and a reader that
+      // caught it queued would never hear that it ended unless its build's facts moved.
+      if (!jobs.has(build.key)) {
+        const found = yield* load(build.key);
+        const owes =
+          found === null ||
+          planOf(
+            found,
+            yield* currentBot(build.root),
+            person,
+            build.engine,
+            options.skilled !== false,
+            yield* runtimeOf(build.root, build.engine),
+          ).size > 0;
+        if (!owes) return yield* read(build);
+      }
       const supersede = options.supersede === true && !person;
       // A superseding measure is a chat turn's newest build (GameBuilds).
       const priority: PlayPriority = person ? "person" : supersede ? "turn" : "background";
