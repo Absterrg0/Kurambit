@@ -24,6 +24,7 @@ import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
+import * as GamePreview from "./GamePreview.ts";
 import * as GameStage from "./GameStage.ts";
 
 type GameBuildFactsShape = Effect.Success<ReturnType<GameFacts.GameFacts["Service"]["measure"]>>;
@@ -96,6 +97,12 @@ const layerFor = (root: string) =>
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameStage.GameStage)({ closeLiveEditors: () => Effect.void }),
+        Layer.mock(GamePreview.GamePreview)({
+          url: () => null,
+          liveUrl: () => null,
+          liveState: () => "off",
+          quietWrite: () => Effect.void,
+        }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
         Layer.mock(Orchestrator.OrchestratorV2)({}),
       ),

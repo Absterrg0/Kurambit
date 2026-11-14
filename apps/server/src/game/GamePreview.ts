@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Paths name the build Play serves; gameWebServer owns the loopback HTTP boundary.
 import * as NodePath from "node:path";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -18,6 +19,8 @@ import * as GameTemplates from "./GameTemplates.ts";
 
 /** A save settles before it is pushed: editors write a file in several events. */
 const LIVE_SETTLE = Duration.millis(400);
+/** How long a quiet write's text is no news: its own events, never a later restore of it. */
+const QUIET_WRITE_MS = 3_000;
 
 /**
  * Whether a change under the live-served folder is the game's: Blender's
@@ -53,6 +56,12 @@ export class GamePreview extends Context.Service<
       directory: string,
       onChange: (path: string) => Effect.Effect<void>,
     ) => Effect.Effect<string, GameOperationError>;
+    /**
+     * Kurambit is about to write `text` (null: remove it) at `path` under the game's root, which
+     * the running game already plays (the Stage's values file): for a few seconds the live
+     * watch takes that file holding that text as no change. Any other text is still one.
+     */
+    readonly quietWrite: (root: string, path: string, text: string | null) => Effect.Effect<void>;
     /** The URL of the game's live-served folder, or null when it is not served. */
     readonly liveUrl: (root: string) => string | null;
     /**
@@ -92,6 +101,18 @@ const make = Effect.gen(function* () {
   // (`retain`) or selecting one never closes the live folder's.
   const lives = new Map<string, { url: string; close: () => Promise<void> }>();
   const watches = new Map<string, Scope.Closeable>();
+  const quiet = new Map<string, { readonly text: string | null; readonly until: number }>();
+  const isQuiet = (file: string) =>
+    Effect.gen(function* () {
+      const expected = quiet.get(file);
+      if (expected === undefined) return false;
+      if ((yield* Clock.currentTimeMillis) > expected.until) {
+        quiet.delete(file);
+        return false;
+      }
+      const text = yield* fileSystem.readFileString(file).pipe(Effect.orElseSucceed(() => null));
+      return text === expected.text;
+    });
   // A game's live open and its Stop run one at a time, so a Stop that lands
   // while an open is in flight closes what the open made.
   const liveLocks = yield* KeyedLock.make<string>();
@@ -207,6 +228,11 @@ const make = Effect.gen(function* () {
         .watch(NodePath.join(root, directory), { recursive: true, onReady: settle })
         .pipe(
           Stream.filter((event) => isLiveChange(event.path)),
+          // Before the settle, which keeps a burst's last path only: a quiet write landing last
+          // must not hide the change before it.
+          Stream.filterEffect((event) =>
+            isQuiet(NodePath.join(root, directory, event.path)).pipe(Effect.map((quiet) => !quiet)),
+          ),
           // A folder made (Blender's first export makes assets/blender/) changes
           // nothing the game loads; the files then written in it each count.
           Stream.filterEffect((event) =>
@@ -278,6 +304,10 @@ const make = Effect.gen(function* () {
     liveUrl: (root) => lives.get(root)?.url ?? null,
     liveState: (root) => states.get(root) ?? "off",
     liveStates: Stream.fromPubSub(stateChanges),
+    quietWrite: (root, path, text) =>
+      Effect.map(Clock.currentTimeMillis, (now) => {
+        quiet.set(NodePath.join(root, path), { text, until: now + QUIET_WRITE_MS });
+      }),
     live: (root, directory, onChange) =>
       liveLocks.withLock(
         root,

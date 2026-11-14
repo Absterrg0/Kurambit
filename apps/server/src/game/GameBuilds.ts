@@ -60,6 +60,7 @@ import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
+import * as GamePreview from "./GamePreview.ts";
 import * as GameStage from "./GameStage.ts";
 import { BOT_DIR, BuildName } from "./run/buildNames.ts";
 import { engineCapabilities, engineProfile } from "./engineProfile.ts";
@@ -419,6 +420,7 @@ const make = Effect.gen(function* () {
   const facts = yield* GameFacts.GameFacts;
   const runs = yield* GameRunControl.GameRunControl;
   const stage = yield* GameStage.GameStage;
+  const preview = yield* GamePreview.GamePreview;
   const operations = yield* GameOperations.GameOperations;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const scope = yield* Effect.scope;
@@ -1803,6 +1805,22 @@ const make = Effect.gen(function* () {
               `${thing.id} ${thing.values.map((v) => `${v.key} ${String(v.value)}`).join(", ")}`,
           )
           .join("; ");
+      // The folder as the session found it. Still the build it holds (nothing edited since), it
+      // is that build by its own id, so Undo goes back to a build the Stage can name.
+      const sessionBase = Effect.gen(function* () {
+        const captured = yield* capture(fromRef);
+        const listed = yield* allEntries(g, 1, undefined);
+        const current = yield* currentOf(g, listed);
+        if (current === null || (yield* folderEditedSince(g, current)) !== false) return captured;
+        yield* checkpoints
+          .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: current })
+          .pipe(
+            Effect.mapError((cause) =>
+              failed("Keep values", g.root, "io", "the game folder could not be kept", cause),
+            ),
+          );
+        return current;
+      });
       // A repeat answers as the first try did.
       const [doneFrom, doneKept] = yield* Effect.all([oidOf(fromRef), oidOf(keptRef)]);
       if (doneFrom !== null && doneKept !== null)
@@ -1839,7 +1857,7 @@ const make = Effect.gen(function* () {
           const base =
             doneFrom ??
             (held === null
-              ? yield* capture(fromRef)
+              ? yield* sessionBase
               : yield* checkpoints
                   .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: held.base })
                   .pipe(
@@ -1863,16 +1881,19 @@ const make = Effect.gen(function* () {
           const putBack =
             baseText !== undefined &&
             sameTuneFile(merged.file, baseText === null ? Option.some({}) : decodeJson(baseText));
+          const written =
+            putBack && baseText === null
+              ? null
+              : putBack && baseText !== undefined
+                ? baseText
+                : tuneFileText(merged.file);
+          // The running game already plays these values: its Stage must not reload for them.
+          yield* preview.quietWrite(g.root, file, written);
           yield* Effect.tryPromise({
             try: async () => {
-              if (putBack && baseText === null) return NodeFSP.rm(path, { force: true });
+              if (written === null) return NodeFSP.rm(path, { force: true });
               const temporary = `${path}.${request}.tmp`;
-              await NodeFSP.writeFile(
-                temporary,
-                putBack && baseText !== undefined && baseText !== null
-                  ? baseText
-                  : tuneFileText(merged.file),
-              );
+              await NodeFSP.writeFile(temporary, written);
               await NodeFSP.rename(temporary, path);
             },
             catch: (cause) =>

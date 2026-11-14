@@ -30,6 +30,7 @@ import * as GameFacts from "./GameFacts.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
+import * as GamePreview from "./GamePreview.ts";
 import * as GameStage from "./GameStage.ts";
 
 const ROOT = "/games/arena";
@@ -127,6 +128,12 @@ const world = Effect.gen(function* () {
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameStage.GameStage)({}),
+        Layer.mock(GamePreview.GamePreview)({
+          url: () => null,
+          liveUrl: () => null,
+          liveState: () => "off",
+          quietWrite: () => Effect.void,
+        }),
         Layer.mock(GameOperations.GameOperations)({ current: () => null, events: Stream.empty }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
         Layer.mock(Orchestrator.OrchestratorV2)({}),
