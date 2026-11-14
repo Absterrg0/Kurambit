@@ -82,6 +82,29 @@ export const halfMadeCreate = async (root: string): Promise<boolean> => {
   );
 };
 
+/**
+ * The first of `folder`, `folder-2`, … under `parent` that holds no game, so a second game from
+ * the same brief (a retry after a failed first turn) is a new game beside the first. A name
+ * Kurambit chose from the brief follows its folder ("Name 2"); a typed name stays as typed.
+ */
+export const freeGameFolder = async (
+  parent: string,
+  folder: string,
+  name: string,
+  renumber: boolean,
+) => {
+  for (let n = 1; ; n++) {
+    const root = NodePath.join(parent, n === 1 ? folder : `${folder}-${n}`);
+    const taken = await NodeFSP.lstat(root).then(
+      () => true,
+      () => false,
+    );
+    // Past 100 the last one is returned taken, and the create says the folder exists.
+    if (!taken || n === 100 || (await halfMadeCreate(root)))
+      return { root, name: n === 1 || !renumber ? name : `${name} ${n}` };
+  }
+};
+
 const gitInitError = (root: string) => (cause: unknown) =>
   new GameOperationError({
     operation: "git-init",
@@ -380,20 +403,24 @@ const make = Effect.gen(function* () {
           detail: `Make characters with ${input.characters}: ${unavailable}`,
         });
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
-      const requestedRoot = NodePath.resolve(
-        parent.replace(/^~(?=\/|$)/, NodeOS.homedir()),
-        gameFolderName(
+      const free = yield* Effect.promise(() =>
+        freeGameFolder(
+          NodePath.resolve(parent.replace(/^~(?=\/|$)/, NodeOS.homedir())),
+          gameFolderName(
+            name,
+            // From the name itself, so one name always starts at the same folder.
+            NodeCrypto.createHash("sha256").update(name.normalize("NFC")).digest("hex").slice(0, 6),
+          ),
           name,
-          // From the name itself, so a retry or a second click names the same folder.
-          NodeCrypto.createHash("sha256").update(name.normalize("NFC")).digest("hex").slice(0, 6),
+          input.nameFromBrief === true,
         ),
       );
       // One create per folder at a time in this server, so a second click
       // cannot take the first's half-made folder for a leftover.
       // The scaffold (game.json, the page's title) and the project take the name the game got.
       return yield* createLocks.withLock(
-        requestedRoot,
-        createAt({ ...input, name }, name, requestedRoot),
+        free.root,
+        createAt({ ...input, name: free.name }, free.name, free.root),
       );
     },
   );
