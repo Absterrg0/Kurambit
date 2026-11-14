@@ -1370,10 +1370,11 @@ export const GameBuildsResult = Schema.Struct({
     }),
   ),
   /**
-   * The first page only: when the newest turn checkpoint it read was captured. A turn captured
-   * by then that `builds` does not list made no build (it changed nothing of the game's).
+   * The first page only: the run of the asking chat whose turn has not settled into a build yet,
+   * because it is still running or its checkpoint is still being saved. Read in the same pass as
+   * `builds`, so it is gone exactly when the turn's build is listed or is known to be none.
    */
-  turnsReadThrough: Schema.optionalKey(Schema.String),
+  pendingTurn: Schema.optionalKey(Schema.String),
 });
 export type GameBuildsResult = typeof GameBuildsResult.Type;
 
