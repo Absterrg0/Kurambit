@@ -154,6 +154,39 @@ Use the \`request_user_input\` tool only when it is listed in the available tool
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 </collaboration_mode>`;
 
+/**
+ * Codex keeps 1,000 tokens of each `additional_context` value, counted as 4 bytes a token, and
+ * cuts the rest from the middle (openai/codex `context-fragments/src/additional_context.rs`).
+ */
+export const CODEX_CONTEXT_VALUE_BYTES = 4_000;
+
+/**
+ * A text as `additional_context` entries that each stay whole: split where a markdown heading
+ * starts, as few entries as fit. Codex renders the entries in key order, and the first key is
+ * `key` itself, so `key`, `key_2`, `key_3` read in sequence. A single section over the cap is
+ * still cut by Codex; the Codex instructions test guards against one.
+ */
+export function codexContextEntries(
+  key: string,
+  text: string,
+): Record<string, V2TurnStartParams__AdditionalContextEntry> {
+  const chunks: Array<string> = [];
+  for (const section of text.split(/\n(?=#{1,6} )/)) {
+    const joined = chunks.length === 0 ? undefined : `${chunks[chunks.length - 1]}\n${section}`;
+    if (joined !== undefined && Buffer.byteLength(joined, "utf8") <= CODEX_CONTEXT_VALUE_BYTES) {
+      chunks[chunks.length - 1] = joined;
+    } else {
+      chunks.push(section);
+    }
+  }
+  return Object.fromEntries(
+    chunks.map((value, index) => [
+      index === 0 ? key : `${key}_${index + 1}`,
+      { kind: "application" as const, value },
+    ]),
+  );
+}
+
 export interface CodexRuntimeInfo {
   readonly model: string;
   readonly modelName?: string | undefined;
@@ -176,9 +209,8 @@ export function buildCodexAdditionalContext(
   toolsAvailable = true,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const tools = toolInstructions(toolsAvailable);
-  // Separate keys keep each value under Codex's per-entry token cap.
   return {
-    kurambit_orchestration: { kind: "application", value: KURAMBIT_ORCHESTRATION_INSTRUCTIONS },
+    ...codexContextEntries("kurambit_orchestration", KURAMBIT_ORCHESTRATION_INSTRUCTIONS),
     kurambit_runtime: {
       kind: "application",
       value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
