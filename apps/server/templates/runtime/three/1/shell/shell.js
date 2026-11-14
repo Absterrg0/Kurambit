@@ -905,10 +905,11 @@ function applyHold() {
   return holdAudio(held);
 }
 
-// One object, refilled: the bridge's trace reads it 30 times a second.
+// One object, refilled: the bridge's trace reads it 30 times a second. A game with no title of
+// its own opens on its world, whose things the Stage selects and tunes as in play.
 const stageView = { scene: null, camera: null };
 const view = () => {
-  const shown = run?.ctx ?? titleCtx;
+  const shown = run?.ctx ?? titleWorld?.ctx ?? titleCtx;
   if (shown?.camera?.isCamera !== true) return null;
   stageView.scene = shown.scene;
   stageView.camera = shown.camera;
