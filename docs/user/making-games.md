@@ -274,11 +274,11 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
   a WebAssembly export.
 - The right panel is resizable; drag its edge, or close it to give the game more room.
-- **Point at a thing.** Press Tab (or **Freeze** in the **⋯** menu) to freeze the game, then click a
-  character or prop: **Tune** shows it first, where its values tune the running game
-  live and **Keep as a build** keeps them, and it is attached to your next message as a chip. Sending
+- **Point at a thing.** Press Ctrl+Alt+F (⌘⌥F on a Mac), even while you play, or the Stage's pause
+  button to freeze the game, then click a character or prop: **Tune** shows it first, where its
+  values tune the running game live and **Keep as a build** keeps them, and it is attached to your next message as a chip. Sending
   sends the frame, what the thing is and its values with your words. The chip's **×** or Esc stops
-  pointing; Tab plays on. While frozen, the selected thing's path shows its last jumps (how high,
+  pointing; Esc again plays on. While frozen, the selected thing's path shows its last jumps (how high,
   how long in the air) and its speed over the last seconds, so you can see what a tuned value did.
 - **Replay your run (three.js).** A run you play to its end on the Stage is kept with its input.
   **Your run** in a build's checks plays it again on that build, input for input, and says how it
@@ -286,7 +286,8 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   12 s" on the next. Your agent can do the same on the game as it is now.
 - **Dev views (three.js).** The **⋯** menu's **Dev views** step a frozen game one frame at a
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
-  of the game's named things, and show the frame rate in the game's corner.
+  of the game's named things, and show the frame rate in the game's corner. They and Can't lose
+  are in the command palette too, with keys that work while you play (Settings → Keybindings).
 - **Check and playtest on three.js.** `game_check` on a three.js game loads the page headless and
   reports console and page errors instead of script errors; `game_explore_*` play it in real time
   with real keys and clicks (see the `three` studio skill for the bridge contract).

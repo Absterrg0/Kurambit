@@ -140,6 +140,11 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   },
   { key: "mod+alt+g", command: "game.focus", when: "gameThread && !terminalFocus" },
   { key: "mod+alt+f", command: "game.freeze", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+.", command: "game.stepFrame", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+o", command: "game.freeCamera.toggle", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+shift+b", command: "game.bounds.toggle", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+p", command: "game.frameRate.toggle", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+l", command: "game.cannotLose.toggle", when: "gameThread && !terminalFocus" },
   {
     key: "mod+alt+shift+f",
     command: "game.fullscreen",

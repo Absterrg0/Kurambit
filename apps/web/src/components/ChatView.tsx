@@ -2,7 +2,13 @@ import { GameStage } from "./game/GameStage";
 import { GameBuildDetail, GameLookPanel } from "./game/GameInspector";
 import { GameTunePanel } from "./game/GameTune";
 import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
-import { clearStageSelection, readThreadStageSelection } from "./game/gameStageBridge";
+import {
+  clearStageSelection,
+  readThreadStageSelection,
+  stepStageFrame,
+  toggleStageCannotLose,
+  toggleStageDevView,
+} from "./game/gameStageBridge";
 import { stageFrameAttachment } from "./game/gameStageFrame";
 import { GamePointedChip, GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
@@ -5302,6 +5308,16 @@ export default function ChatView(props: ChatViewProps) {
       "game.redoTurn": () => requestGameStage({ kind: "redo" }),
       "game.focus": () => requestGameStage({ kind: "focus" }),
       "game.freeze": () => requestGameStage({ kind: "freeze" }),
+      // A game on the Stage that answers none of these lets the key through.
+      "game.stepFrame": () => activeThreadKey !== null && stepStageFrame(activeThreadKey),
+      "game.freeCamera.toggle": () =>
+        activeThreadKey !== null && toggleStageDevView(activeThreadKey, "freeCamera"),
+      "game.bounds.toggle": () =>
+        activeThreadKey !== null && toggleStageDevView(activeThreadKey, "bounds"),
+      "game.frameRate.toggle": () =>
+        activeThreadKey !== null && toggleStageDevView(activeThreadKey, "perf"),
+      "game.cannotLose.toggle": () =>
+        activeThreadKey !== null && toggleStageCannotLose(activeThreadKey),
       "game.fullscreen": () => requestGameStage({ kind: "fullscreen" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),

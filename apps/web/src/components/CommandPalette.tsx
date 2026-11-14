@@ -49,6 +49,7 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type GameAction,
+  type GameStageCapability,
   GAME_ENGINES,
   type ProjectId,
   type SourceControlDiscoveryResult,
@@ -98,6 +99,10 @@ import {
   SwatchBookIcon,
   StepForwardIcon,
   SquarePlusIcon,
+  Rotate3dIcon,
+  SquareDashedIcon,
+  GaugeIcon,
+  ShieldIcon,
   SearchCodeIcon,
   PauseIcon,
   HashIcon,
@@ -109,6 +114,15 @@ import {
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import {
+  stepStageFrame,
+  toggleStageCannotLose,
+  toggleStageDevView,
+  useStageCannotLose,
+  useStageDevViews,
+  useThreadStageBridge,
+} from "./game/gameStageBridge";
 import {
   useDeferredValue,
   useEffect,
@@ -357,6 +371,7 @@ function errorMessage(error: unknown): string {
 
 // What a permission reads as with no thread to ask about.
 const NO_PERMISSION = Atom.make(false);
+const NO_STAGE_CAPABILITIES: ReadonlyArray<GameStageCapability> = [];
 
 const OVERLAY_MODE_BY_COMMAND = {
   "commandPalette.toggle": "command",
@@ -780,6 +795,16 @@ function OpenCommandPaletteDialog(props: {
     gameStatus !== null &&
     gameStatus !== undefined &&
     GAME_ENGINES[gameStatus.manifest.engine.name].stageBridge;
+  // What the game up on the Stage answers: its dev views and Can't lose, as its menu offers them.
+  const stageThreadKey = activeThreadRef === null ? "" : scopedThreadKey(activeThreadRef);
+  const stageCapabilities = useThreadStageBridge(
+    stageThreadKey,
+    (state) => (state.status === "ready" ? state.capabilities : NO_STAGE_CAPABILITIES),
+    NO_STAGE_CAPABILITIES,
+  );
+  const stageFrozen = useThreadStageBridge(stageThreadKey, (state) => state.frozen, false);
+  const stageDevViews = useStageDevViews(stageThreadKey);
+  const stageCannotLose = useStageCannotLose(stageThreadKey);
   const gameAction = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const canRestore = useAtomValue(
     activeThreadRef === null
@@ -1597,6 +1622,63 @@ function OpenCommandPaletteDialog(props: {
         icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.freeze",
         run: requestStage({ kind: "freeze" }),
+      });
+    if (stageCapabilities.includes("dev")) {
+      if (stageFrozen)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-step-frame",
+          title: "Step frozen game one frame",
+          searchTerms: ["step", "frame", "advance", "frozen", "dev", "stage", "game"],
+          icon: <StepForwardIcon className={ITEM_ICON_CLASS} />,
+          shortcutCommand: "game.stepFrame",
+          run: async () => void stepStageFrame(stageThreadKey),
+        });
+      actionItems.push({
+        kind: "action",
+        value: "action:game-free-camera",
+        title: stageDevViews.freeCamera ? "Turn free camera off" : "Turn free camera on",
+        searchTerms: ["free camera", "orbit", "camera", "frozen", "dev", "stage", "game"],
+        icon: <Rotate3dIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.freeCamera.toggle",
+        run: async () => void toggleStageDevView(stageThreadKey, "freeCamera"),
+      });
+      actionItems.push({
+        kind: "action",
+        value: "action:game-bounds",
+        title: stageDevViews.bounds ? "Hide bounds" : "Show bounds",
+        searchTerms: ["bounds", "boxes", "collision", "hitbox", "dev", "stage", "game"],
+        icon: <SquareDashedIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.bounds.toggle",
+        run: async () => void toggleStageDevView(stageThreadKey, "bounds"),
+      });
+      actionItems.push({
+        kind: "action",
+        value: "action:game-frame-rate",
+        title: stageDevViews.perf ? "Hide frame rate" : "Show frame rate",
+        searchTerms: ["frame rate", "fps", "performance", "perf", "draws", "dev", "stage", "game"],
+        icon: <GaugeIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.frameRate.toggle",
+        run: async () => void toggleStageDevView(stageThreadKey, "perf"),
+      });
+    }
+    if (stageCapabilities.includes("cannot-lose"))
+      actionItems.push({
+        kind: "action",
+        value: "action:game-cannot-lose",
+        title: stageCannotLose ? "Turn Can't lose off" : "Turn Can't lose on",
+        searchTerms: [
+          "can't lose",
+          "cannot lose",
+          "invincible",
+          "god mode",
+          "tune",
+          "stage",
+          "game",
+        ],
+        icon: <ShieldIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.cannotLose.toggle",
+        run: async () => void toggleStageCannotLose(stageThreadKey),
       });
     actionItems.push({
       kind: "action",

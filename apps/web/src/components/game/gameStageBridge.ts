@@ -238,6 +238,22 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       else if (useStageBridge.getState().selected !== null) clearStageSelection();
       else toggleStageFreeze();
       return;
+    case "studio-shortcut":
+      // The app's keys read the window's keydowns, so the chord is pressed there as if the
+      // app had focus.
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: message.key,
+          code: message.code,
+          ctrlKey: message.ctrlKey,
+          metaKey: message.metaKey,
+          shiftKey: message.shiftKey,
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      return;
     case "studio-controls":
       useStageBridge.setState({ controls: message.controls, controlsNote: message.note ?? null });
       return;
@@ -369,6 +385,23 @@ export const setStageCannotLose = (threadKey: string, on: boolean) => {
     state.post?.({ type: "studio-cannot-lose", on });
 };
 
+/** Whether this thread's game is up on the Stage and answers `capability`. */
+const stageCan = (threadKey: string, capability: GameStageCapability) => {
+  const state = useStageBridge.getState();
+  return (
+    state.status === "ready" &&
+    state.owner?.startsWith(`${threadKey}\0`) === true &&
+    state.capabilities.includes(capability)
+  );
+};
+
+/** Can't lose flipped, for the palette and its key; false when the game on the Stage has none. */
+export const toggleStageCannotLose = (threadKey: string): boolean => {
+  if (!stageCan(threadKey, "cannot-lose")) return false;
+  setStageCannotLose(threadKey, !(useCannotLose.getState()[threadKey] ?? false));
+  return true;
+};
+
 export interface StageDevViews {
   /** The named things' bounds, drawn over the game. */
   readonly bounds: boolean;
@@ -392,10 +425,18 @@ export const setStageDevView = (threadKey: string, view: keyof StageDevViews, on
   useDevViews.setState({ [threadKey]: { ...now, [view]: on } });
   postDevViews(threadKey);
 };
-/** One fixed step of the frozen game. */
-export const stepStageFrame = () => {
+/** A dev view flipped, for the palette and its keys; false when the game on the Stage has none. */
+export const toggleStageDevView = (threadKey: string, view: keyof StageDevViews): boolean => {
+  if (!stageCan(threadKey, "dev")) return false;
+  setStageDevView(threadKey, view, !(useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS)[view]);
+  return true;
+};
+/** One fixed step of the frozen game; false when nothing is frozen to step. */
+export const stepStageFrame = (threadKey: string): boolean => {
   const state = useStageBridge.getState();
-  if (state.frozen && state.capabilities.includes("dev")) state.post?.({ type: "studio-step" });
+  if (!state.frozen || !stageCan(threadKey, "dev")) return false;
+  state.post?.({ type: "studio-step" });
+  return true;
 };
 /** The free camera's drag and wheel, from the frozen Stage's pointer layer. */
 export const orbitStage = (dx: number, dy: number, zoom: number) =>

@@ -1114,10 +1114,19 @@ export function createStageBridge({
   // A focused game keeps every key from the Stage, so its two keys travel up: Tab
   // always, Escape only while frozen (the game's own pause otherwise). Capture
   // phase, so the shell's keys never see them. Only once the Stage has spoken.
+  // Kurambit's own chords (Ctrl or Cmd with Alt) travel up too: a game reading P for pause
+  // would take Ctrl+Alt+P for its own.
   window.addEventListener(
     "keydown",
     (event) => {
       if (!framed || !active || event.repeat) return;
+      if (event.altKey && (event.ctrlKey || event.metaKey)) {
+        const { key, code, ctrlKey, metaKey, shiftKey } = event;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        toStage({ type: "studio-shortcut", key, code, ctrlKey, metaKey, shiftKey });
+        return;
+      }
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       const key = event.key === "Tab" ? "Tab" : event.key === "Escape" && frozen ? "Escape" : null;
       if (key === null) return;

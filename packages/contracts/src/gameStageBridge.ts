@@ -322,6 +322,20 @@ export const StudioKey = Schema.Struct({
   key: Schema.Literals(["Tab", "Escape"]),
 });
 
+/**
+ * A Kurambit shortcut pressed while the game's frame has focus: Ctrl or Cmd with Alt, a chord no
+ * game means, so the Stage's keys (freeze, step a frame, the dev views) work while playing. The
+ * game never sees it: one reading P for pause would take Ctrl+Alt+P as its own.
+ */
+export const StudioShortcut = Schema.Struct({
+  type: Schema.Literal("studio-shortcut"),
+  key: Schema.String.check(Schema.isMaxLength(32)),
+  code: Schema.String.check(Schema.isMaxLength(32)),
+  ctrlKey: Schema.Boolean,
+  metaKey: Schema.Boolean,
+  shiftKey: Schema.Boolean,
+});
+
 /** The game's actions, asked for or just changed; `note` says what a rebind did. */
 export const StudioControls = Schema.Struct({
   type: Schema.Literal("studio-controls"),
@@ -350,6 +364,7 @@ export const GameToStageMessage = Schema.Union([
   StudioSelected,
   StudioFrozen,
   StudioKey,
+  StudioShortcut,
   StudioFrame,
   StudioControls,
   StudioPlay,

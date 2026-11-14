@@ -952,6 +952,13 @@ function ThreadGameStage({
   const inspectorKey = shortcutLabelForCommand(keybindings, "game.tune.toggle", {
     context: { gameThread: true },
   });
+  const devKey = (
+    command: "game.stepFrame" | `game.${"freeCamera" | "bounds" | "frameRate"}.toggle`,
+  ) => shortcutLabelForCommand(keybindings, command, { context: { gameThread: true } });
+  const stepKey = devKey("game.stepFrame");
+  const freeCameraKey = devKey("game.freeCamera.toggle");
+  const boundsKey = devKey("game.bounds.toggle");
+  const frameRateKey = devKey("game.frameRate.toggle");
   const undoKey = shortcutLabelForCommand(keybindings, "game.undoTurn", {
     context: { gameThread: true },
   });
@@ -1294,10 +1301,11 @@ function ThreadGameStage({
                     <MenuItem
                       disabled={!frozen}
                       closeOnClick={false}
-                      onClick={() => stepStageFrame()}
+                      onClick={() => stepStageFrame(threadKey)}
                     >
                       <StepForwardIcon />
                       Step one frame
+                      {stepKey === null ? null : <MenuShortcut>{stepKey}</MenuShortcut>}
                     </MenuItem>
                     <MenuCheckboxItem
                       variant="switch"
@@ -1306,6 +1314,7 @@ function ThreadGameStage({
                       onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
                     >
                       Free camera while frozen
+                      {freeCameraKey === null ? null : <MenuShortcut>{freeCameraKey}</MenuShortcut>}
                     </MenuCheckboxItem>
                     <MenuCheckboxItem
                       variant="switch"
@@ -1314,6 +1323,7 @@ function ThreadGameStage({
                       onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
                     >
                       Bounds
+                      {boundsKey === null ? null : <MenuShortcut>{boundsKey}</MenuShortcut>}
                     </MenuCheckboxItem>
                     <MenuCheckboxItem
                       variant="switch"
@@ -1322,6 +1332,7 @@ function ThreadGameStage({
                       onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
                     >
                       Frame rate
+                      {frameRateKey === null ? null : <MenuShortcut>{frameRateKey}</MenuShortcut>}
                     </MenuCheckboxItem>
                   </MenuGroup>
                 </>
