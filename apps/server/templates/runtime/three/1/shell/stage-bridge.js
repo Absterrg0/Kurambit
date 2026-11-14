@@ -431,11 +431,19 @@ export function createStageBridge({
   // last jumps (rise from where it stood, apex, back down), in world units and game seconds.
   const feelOf = (world, onCanvas) => {
     if (world.filter((each) => each !== null).length < FEEL_MIN_SAMPLES) return null;
-    const speed = world.map((each, i) => {
+    const raw = world.map((each, i) => {
       const before = world[i - 1];
       return each === null || before == null
         ? null
         : Math.hypot(each[0] - before[0], each[2] - before[2]) * TRACE_HZ;
+    });
+    // A round reset, a teleport or a knockback's first frame moves it in one sample: the median
+    // of each sample and its neighbours drops that spike and keeps any speed held for longer.
+    const speed = raw.map((each, i) => {
+      if (each === null) return null;
+      const near = [raw[i - 1], each, raw[i + 1]].filter((one) => one != null);
+      if (near.length === 1) return null;
+      return near.length === 2 ? Math.min(...near) : near.toSorted((a, b) => a - b)[1];
     });
     const speeds = [];
     const per = Math.ceil(world.length / FEEL_SPEEDS);
