@@ -74,7 +74,7 @@ export interface GameEngineProfile {
     readonly version: string;
     readonly directories: ReadonlyArray<string>;
     readonly agents: string;
-    /** .gitignore patterns for what the engine generates; every game ignores every engine's. */
+    /** .gitignore patterns for what the engine generates in its own games. */
     readonly ignores: ReadonlyArray<string>;
   };
   /** The path a game's code loads a project-relative file by (res://x, ./x, Assets/x). */

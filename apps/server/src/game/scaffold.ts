@@ -9,7 +9,7 @@ import {
 } from "@kurambit/contracts";
 import { FIRST_TURN_LEADS } from "@kurambit/shared/gameFirstTurn";
 
-import { engineProfile, PROFILES } from "./engineProfile.ts";
+import { engineProfile } from "./engineProfile.ts";
 
 // Harness output, never game content: the bot runs' log and report, kept play
 // saves and the person's saved media stay out of every build and checkpoint.
@@ -21,10 +21,10 @@ export const RUN_STATE_IGNORES = [
   "saved/",
 ] as const;
 
-/** What every engine generates in the game folder. */
-const GENERATED_IGNORES = [
+/** What the game's engine and Kurambit generate in its folder. */
+const generatedIgnores = (engine: GameEngineId) => [
   "builds/",
-  ...PROFILES.flatMap((profile) => profile.scaffold.ignores),
+  ...engineProfile(engine).scaffold.ignores,
   "*.blend1",
   // Kurambit writes and refreshes these from its own templates (server start, every turn):
   // tracked, a refresh would read as the agent's change and Undo would roll the skills back.
@@ -194,6 +194,6 @@ export function scaffoldFiles(input: GameCreateInput): Record<string, string> {
       .filter((section) => section !== undefined)
       .join("\n"),
     "CLAUDE.md": "@AGENTS.md\n",
-    ".gitignore": `${[...GENERATED_IGNORES, ...RUN_STATE_IGNORES].join("\n")}\n`,
+    ".gitignore": `${[...generatedIgnores(engine), ...RUN_STATE_IGNORES].join("\n")}\n`,
   };
 }
