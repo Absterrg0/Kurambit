@@ -701,47 +701,57 @@ const make = Effect.gen(function* () {
       const byRef = new Map(refs.map((ref) => [ref.checkpointRef as string, ref.oid]));
       const kept = new Set(refs.map((ref) => ref.oid));
       const noRunFolder = gameRunRefsFolder(NO_RUN);
+      // Saved builds of one kind are told apart by their place among the game's, oldest 1.
+      const nthOf = (ofKind: ReadonlyArray<{ readonly committedAt: number }>) => {
+        const order = ofKind.toSorted((a, b) => a.committedAt - b.committedAt);
+        return (ref: { readonly committedAt: number }) => order.indexOf(ref) + 1;
+      };
       // The folder as it was before each restore, which going back to undoes it.
-      const beforeRestores = refs.flatMap((ref): ReadonlyArray<Entry> =>
-        ref.checkpointRef.startsWith(noRunFolder) &&
-        ref.checkpointRef.endsWith("-before") &&
-        isGameBuildId(ref.oid)
-          ? [
-              {
-                id: ref.oid,
-                at: isoOfSeconds(ref.committedAt),
-                source: { _tag: "saved", label: RESTORE_BEFORE_LABEL },
-                summary: RESTORE_BEFORE_LABEL,
-                files: [],
-                fileCount: null,
-                base: null,
-              },
-            ]
-          : [],
+      const befores = refs.filter(
+        (ref) => ref.checkpointRef.startsWith(noRunFolder) && ref.checkpointRef.endsWith("-before"),
       );
+      const beforeNth = nthOf(befores);
+      const beforeRestores = befores.flatMap((ref): ReadonlyArray<Entry> => {
+        if (!isGameBuildId(ref.oid)) return [];
+        return [
+          {
+            id: ref.oid,
+            at: isoOfSeconds(ref.committedAt),
+            source: { _tag: "saved", label: RESTORE_BEFORE_LABEL, nth: beforeNth(ref) },
+            summary: "What the game folder held when a restore replaced it",
+            files: [],
+            fileCount: null,
+            base: null,
+          },
+        ];
+      });
       const editsFolder = `${noRunFolder}${EDITS}`;
-      const edits = yield* Effect.forEach(
-        refs.filter(
-          (ref) =>
-            ref.checkpointRef.startsWith(editsFolder) && ref.checkpointRef.endsWith("-values"),
-        ),
-        (ref) =>
-          Effect.gen(function* () {
-            if (!isGameBuildId(ref.oid)) return [];
-            const base = byRef.get(ref.checkpointRef.replace(/-values$/, "-from")) ?? null;
-            const change = yield* changeOf(g.root, g.lane, base, ref.oid);
-            return [
-              {
-                id: ref.oid,
-                at: isoOfSeconds(ref.committedAt),
-                source: { _tag: "saved", label: VALUES_LABEL, edit: "values" },
-                summary: VALUES_LABEL,
-                files: change.files,
-                fileCount: change.count,
-                base,
-              } satisfies Entry,
-            ];
-          }),
+      const tunings = refs.filter(
+        (ref) => ref.checkpointRef.startsWith(editsFolder) && ref.checkpointRef.endsWith("-values"),
+      );
+      const tuningNth = nthOf(tunings);
+      const edits = yield* Effect.forEach(tunings, (ref) =>
+        Effect.gen(function* () {
+          if (!isGameBuildId(ref.oid)) return [];
+          const base = byRef.get(ref.checkpointRef.replace(/-values$/, "-from")) ?? null;
+          const change = yield* changeOf(g.root, g.lane, base, ref.oid);
+          return [
+            {
+              id: ref.oid,
+              at: isoOfSeconds(ref.committedAt),
+              source: {
+                _tag: "saved",
+                label: VALUES_LABEL,
+                edit: "values",
+                nth: tuningNth(ref),
+              },
+              summary: "Values tuned on the Stage",
+              files: change.files,
+              fileCount: change.count,
+              base,
+            } satisfies Entry,
+          ];
+        }),
       ).pipe(Effect.map((each) => each.flat()));
       const saved = [...beforeRestores, ...edits];
       const setups = refs.flatMap((ref) => {
@@ -1525,10 +1535,18 @@ const make = Effect.gen(function* () {
         ),
       );
       const beforeRef = checkpointRefForGameRun(NO_RUN, BuildName.restoreBefore(record.requestId));
-      const before = yield* checkpoints.listCheckpointRefs({ cwd: root, prefix: beforeRef }).pipe(
-        Effect.map((refs) => refs.find((each) => each.checkpointRef === beforeRef)?.oid ?? null),
-        Effect.orElseSucceed(() => null),
-      );
+      const parks = yield* checkpoints
+        .listCheckpointRefs({ cwd: root, prefix: gameRunRefsFolder(NO_RUN) })
+        .pipe(
+          Effect.map((refs) =>
+            refs
+              .filter((each) => each.checkpointRef.endsWith("-before"))
+              .toSorted((a, b) => a.committedAt - b.committedAt),
+          ),
+          Effect.orElseSucceed(() => []),
+        );
+      const parked = parks.findIndex((each) => each.checkpointRef === beforeRef);
+      const before = parked === -1 ? null : parks[parked]!.oid;
       const what = `${lane}/, art/, ASSETS.md and play bot`;
       // A folder that was exactly a build already (an Undo, a Redo) needs no
       // park of its own: that build is what undoes this restore.
@@ -1543,8 +1561,8 @@ const make = Effect.gen(function* () {
         before === null
           ? ""
           : same !== null
-            ? ` What the folder held is Build ${same.slice(0, 8)}.`
-            : ` What the folder held is kept as a build ("The game before a restore").`;
+            ? " What the folder held is already a build in the history."
+            : ` What the folder held is kept as a build ("${RESTORE_BEFORE_LABEL} ${parked + 1}").`;
       const movedOn = moved.kind === "refused" && moved.why === "moved-on";
       const outcome =
         moved.kind === "current"

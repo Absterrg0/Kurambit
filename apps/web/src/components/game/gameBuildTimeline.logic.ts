@@ -24,18 +24,17 @@ const isRestoreBefore = (build: GameBuild) =>
  * PURE. Each mark's short name: a person's build its number among all of the
  * game's person builds (the server's, so it never moves as older pages load), a
  * keep-going step its step number (its mark adds a step glyph), "Before" the
- * folder a restore replaced, another saved build its label's first word ("Values").
+ * folder a restore replaced, another saved build its label's first word ("Tuned"), each saved
+ * one with its place among the game's of its kind ("Tuned 2").
  */
 export const markLabels = (marks: ReadonlyArray<GameBuild>): ReadonlyMap<string, string> => {
   const labels = new Map<string, string>();
   for (const build of marks) {
     const source = build.source;
-    if (source._tag === "saved")
-      labels.set(
-        build.id,
-        isRestoreBefore(build) ? "Before" : (source.label.split(/\s+/)[0] ?? "Saved"),
-      );
-    else if (source.step !== null) labels.set(build.id, String(source.step.n));
+    if (source._tag === "saved") {
+      const word = isRestoreBefore(build) ? "Before" : (source.label.split(/\s+/)[0] ?? "Saved");
+      labels.set(build.id, source.nth === undefined ? word : `${word} ${source.nth}`);
+    } else if (source.step !== null) labels.set(build.id, String(source.step.n));
     else labels.set(build.id, String(build.number ?? "?"));
   }
   return labels;

@@ -84,6 +84,11 @@ export const GameBuildSource = Schema.Union([
     label: Schema.String,
     /** A person's edit kept as a build outside a turn: what it kept ("values": the Stage's Keep as a build). */
     edit: Schema.optionalKey(Schema.Literals(["values"])),
+    /**
+     * Its place among the game's saved builds with the same label, oldest 1: two builds tuned
+     * on the Stage are "Tuned 1" and "Tuned 2". Absent on a saved build the server could not place.
+     */
+    nth: Schema.optionalKey(PositiveInt),
   }),
 ]);
 export type GameBuildSource = typeof GameBuildSource.Type;
@@ -93,7 +98,7 @@ export const ownsUndo = (source: GameBuildSource) =>
   source._tag === "turn" || (source._tag === "saved" && source.edit !== undefined);
 
 /** A saved build's label for what the folder held when a restore replaced it. */
-export const RESTORE_BEFORE_LABEL = "The game before a restore";
+export const RESTORE_BEFORE_LABEL = "The game before restore";
 
 export const GameBuildFile = Schema.Struct({
   path: Schema.String,

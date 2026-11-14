@@ -24,9 +24,10 @@ import {
 export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
 
 /**
- * A build named in a sentence: "Build 5", "Step 2's build", a saved build's
- * label. A person's build goes by the server's number for it, never its turn's:
- * a resumed or stopped turn is no extra build.
+ * A build named in a sentence: "Build 5", "Step 2's build", "Tuned 2". A person's build goes by
+ * the server's number for it, never its turn's: a resumed or stopped turn is no extra build. A
+ * saved build goes by its label and its place among the game's with that label, so two never
+ * share a name.
  */
 export const buildName = (
   build: Pick<GameBuild, "id" | "source" | "number"> & { readonly fix?: number | undefined },
@@ -39,7 +40,7 @@ export const buildName = (
         : // A small fix keeps its build's number: the person sees one build, fixed.
           `Build ${build.number ?? build.id.slice(0, 8)}${build.fix === undefined ? "" : ` · fix ${build.fix}`}`;
     case "saved":
-      return source.label;
+      return source.nth === undefined ? source.label : `${source.label} ${source.nth}`;
   }
 };
 
@@ -651,4 +652,7 @@ export const requestShortForm = (request: string, fits: number) => {
 };
 /** PURE. A build's name inside a sentence: "build 5", "step 2's build", a saved build's label. */
 export const buildPhrase = (name: string): string =>
-  name.replace(/^Build /, "build ").replace(/^Step /, "step ");
+  name
+    .replace(/^Build /, "build ")
+    .replace(/^Step /, "step ")
+    .replace(/^The game /, "the game ");

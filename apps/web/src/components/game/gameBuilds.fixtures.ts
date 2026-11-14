@@ -1,5 +1,6 @@
 import {
   GameBuildId,
+  RESTORE_BEFORE_LABEL,
   ThreadId,
   type GameBuild,
   type GameBuildFacts,
@@ -116,7 +117,7 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
   {
     id: BUILD_A,
     at: "2026-11-05T09:00:00.000Z",
-    source: { _tag: "saved", label: "The game before a restore" },
+    source: { _tag: "saved", label: RESTORE_BEFORE_LABEL, nth: 1 },
     number: null,
     summary: "The game before a restore",
     files: [],
