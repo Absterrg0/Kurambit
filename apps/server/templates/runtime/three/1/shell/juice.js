@@ -47,7 +47,8 @@ const MAX_BURSTS = 48;
 let trauma = 0;
 let shakeTime = 0;
 const shakeApplied = new THREE.Vector2();
-let hitUntil = 0;
+/** Real seconds of hit pause left, counted in the shell's steps so a replay pauses the same. */
+let hitLeft = 0;
 let hitScale = 1;
 let tweens = [];
 let bursts = [];
@@ -68,8 +69,7 @@ export const Juice = {
 
   hitPause(seconds = 0.06, timeScale = 0.05) {
     if (GameState.state !== "playing") return;
-    const until = performance.now() + Math.min(Math.max(seconds, 0), MAX_HIT_PAUSE_S) * 1000;
-    hitUntil = Math.max(hitUntil, until);
+    hitLeft = Math.max(hitLeft, Math.min(Math.max(seconds, 0), MAX_HIT_PAUSE_S));
     hitScale = Math.min(hitScale, timeScale);
   },
 
@@ -600,13 +600,17 @@ const wobble = (seed, t) =>
 // The shell's side: game-time ticks, the hit-pause time scale, the shake
 // around each draw and the reset between runs.
 export const juiceShell = {
-  /** The time scale a hit pause asks for now; ends on its own in real time. */
+  /** The time scale a hit pause asks for now; ends on its own after its real seconds. */
   timeScale() {
-    if (hitUntil === 0) return 1;
-    if (performance.now() < hitUntil && GameState.state === "playing") return hitScale;
-    hitUntil = 0;
+    if (hitLeft > 0 && GameState.state === "playing") return hitScale;
+    hitLeft = 0;
     hitScale = 1;
     return 1;
+  },
+
+  /** A step's slice of real time passed: a hit pause runs down in steps, never the clock. */
+  pass(seconds) {
+    if (hitLeft > 0) hitLeft = Math.max(0, hitLeft - seconds);
   },
 
   update(dt) {
@@ -648,7 +652,7 @@ export const juiceShell = {
   },
 
   endHitPause() {
-    hitUntil = 0;
+    hitLeft = 0;
     hitScale = 1;
   },
 

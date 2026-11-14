@@ -154,7 +154,7 @@ function position(player) {
  * posts the bare boot signal, and the Stage then offers no selecting.
  * `scene`, when the shell has one, is the scene report the harness reads.
  */
-export function installStudio({ ui, player, setState, hold, perf, bridge, scene, qa }) {
+export function installStudio({ ui, player, setState, hold, perf, bridge, scene, qa, replay }) {
   let ready = false;
   const studio = {
     engine: "three",
@@ -193,6 +193,9 @@ export function installStudio({ ui, player, setState, hold, perf, bridge, scene,
             hud: () => qa.hud(),
           },
         }),
+    // A play the Stage kept, run again on this build from its seed and its input at each
+    // step (shell/replay.js): how it ended, and where the run stood each second.
+    replay: (play) => replay(play),
     getState() {
       // innerText skips hidden screens, so this is the text on screen now.
       const text = typeof ui?.innerText === "string" ? ui.innerText : "";

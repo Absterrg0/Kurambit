@@ -13,6 +13,7 @@ import {
 import * as Option from "effect/Option";
 import {
   decodeGameToStageMessage,
+  type GamePlay,
   type GameStageToGameMessage,
   type GameToStageMessage,
   type GameViewport,
@@ -47,7 +48,8 @@ const visibilityMessage = (visible: boolean): GameStageToGameMessage => ({
 /** What the Stage hears of the page itself: its first error, or that the game booted. */
 export type StudioMessage =
   | { readonly type: "studio-error"; readonly message: string }
-  | { readonly type: "studio-ready" };
+  | { readonly type: "studio-ready" }
+  | { readonly type: "studio-play"; readonly play: GamePlay };
 
 const errorText = (error: typeof StudioError.Type) => {
   const field = (value: string | number | undefined) =>
@@ -354,6 +356,8 @@ export function GameFrame({
       if (message.type === "studio-error")
         onStudioMessage?.({ type: "studio-error", message: errorText(message) });
       if (message.type === "studio-ready") onStudioMessage?.({ type: "studio-ready" });
+      if (message.type === "studio-play")
+        onStudioMessage?.({ type: "studio-play", play: message.play });
       onBridgeMessage?.(message);
     };
     window.addEventListener("message", onMessage);

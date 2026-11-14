@@ -24,6 +24,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gameBuildRestore]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameBuildStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameKeepValues]: AuthOrchestrationOperateScope,
+  [WS_METHODS.gameKeepPlay]: AuthOrchestrationOperateScope,
+  [WS_METHODS.gameReplay]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameSetCharacterRoute]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameChooseGeneration]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameCancelGeneration]: AuthOrchestrationOperateScope,

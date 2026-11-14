@@ -469,6 +469,7 @@ export const makeGodotBackend = (
           )
         : Effect.succeed({ name: target, added: false }),
     release,
+    replay: null,
     playProcess,
     editor: null,
     player: null,

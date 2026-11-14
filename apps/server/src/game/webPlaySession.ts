@@ -151,6 +151,17 @@ const RUN_QA = `(async () => {
     return null;
   }
 })()`;
+/** A kept play run again (shell/replay.js): far faster than real time, so a bound on its length is generous. */
+const REPLAY_MS = (seconds: number) => 60_000 + seconds * 1_000;
+const RUN_REPLAY = `(async (play) => {
+  const replay = window.__studio?.replay;
+  if (typeof replay !== "function") return "no-replay";
+  try {
+    return JSON.parse(JSON.stringify(await replay(play)));
+  } catch {
+    return null;
+  }
+})`;
 const READ_HUD = `(() => {
   const qa = window.__studio?.qa;
   if (qa === null || typeof qa !== "object" || typeof qa.hud !== "function") return null;
@@ -364,6 +375,11 @@ export interface WebPlaySession extends PlaySession {
    * the page did not answer in time, "no-qa" when the shell has none.
    */
   readonly qa: () => Promise<unknown>;
+  /**
+   * Runs a kept play again from its seed and input (shell/replay.js) and returns what the page
+   * answered: null when it did not in time, "no-replay" when the shell has no replay.
+   */
+  readonly replay: (play: { readonly steps: number; readonly dt: number }) => Promise<unknown>;
 }
 
 /**
@@ -842,6 +858,13 @@ export const openWebPlaySession = async (input: {
       keptStorage: () => kept,
       perf: () => perf,
       scene: () => scene,
+      replay: async (play) => {
+        const answered = await bounded(
+          page.evaluate(`${RUN_REPLAY}(${JSON.stringify(play)})`).catch(() => null),
+          REPLAY_MS(play.steps * play.dt),
+        );
+        return answered === TIMED_OUT ? null : answered;
+      },
       qa: async () => {
         const played = await bounded(
           page.evaluate(RUN_QA).catch(() => null),

@@ -514,6 +514,15 @@ export const gameEnvironment = {
     label: "game:keepValues",
     tag: WS_METHODS.gameKeepValues,
   }),
+  // A person's run on the Stage, played to its end: kept for replays on later builds.
+  keepPlay: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:keepPlay",
+    tag: WS_METHODS.gameKeepPlay,
+  }),
+  replay: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:replay",
+    tag: WS_METHODS.gameReplay,
+  }),
   // Keep going's status for one chat: reread on run pushes only, so a step's
   // progress re-renders the control and the banner once per change, never on a timer.
   keepGoingStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {

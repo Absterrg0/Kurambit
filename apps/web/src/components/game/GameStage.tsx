@@ -13,6 +13,7 @@ import {
   PaletteIcon,
   DownloadIcon,
   FilmIcon,
+  StepForwardIcon,
   FolderOpenIcon,
   HistoryIcon,
   MaximizeIcon,
@@ -76,6 +77,7 @@ import {
 } from "../ui/dialog";
 import {
   Menu,
+  MenuCheckboxItem,
   MenuGroup,
   MenuGroupLabel,
   MenuItem,
@@ -105,6 +107,9 @@ import {
   captureStageFrame,
   useGameFreezeKey,
   useThreadStageBridge,
+  setStageDevView,
+  stepStageFrame,
+  useStageDevViews,
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
@@ -356,6 +361,10 @@ function ThreadGameStage({
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
+  const keepPlay = useAtomCommand(gameEnvironment.keepPlay, { reportFailure: false });
+  const canKeepPlay = useAtomValue(
+    gameEnvironment.keepPlay.permissionAtom(threadRef.environmentId),
+  );
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
@@ -388,6 +397,12 @@ function ThreadGameStage({
   const threadKey = scopedThreadKey(threadRef);
   // Paused by the person, to point at things.
   const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
+  const devCapable = useThreadStageBridge(
+    threadKey,
+    (state) => state.status === "ready" && state.capabilities.includes("dev"),
+    false,
+  );
+  const devViews = useStageDevViews(threadKey);
   const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
   const keepGoing = useKeepGoing(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
@@ -742,6 +757,15 @@ function ThreadGameStage({
     if (liveOpenAsked) openLive();
   }, [liveOpenAsked, openLive]);
   const onStudioMessage = useStableCallback((studio: StudioMessage) => {
+    if (studio.type === "studio-play") {
+      // A run played to its end: kept, so a later build can play it again.
+      if (canKeepPlay)
+        void keepPlay({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, play: studio.play },
+        });
+      return;
+    }
     const key = frameFold?.key ?? "";
     setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
   });
@@ -1262,6 +1286,46 @@ function ThreadGameStage({
                   </MenuItem>
                 ) : null}
               </MenuGroup>
+              {devCapable && stageKind === "live" ? (
+                <>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Dev views</MenuGroupLabel>
+                    <MenuItem
+                      disabled={!frozen}
+                      closeOnClick={false}
+                      onClick={() => stepStageFrame()}
+                    >
+                      <StepForwardIcon />
+                      Step one frame
+                    </MenuItem>
+                    <MenuCheckboxItem
+                      variant="switch"
+                      closeOnClick={false}
+                      checked={devViews.freeCamera}
+                      onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
+                    >
+                      Free camera while frozen
+                    </MenuCheckboxItem>
+                    <MenuCheckboxItem
+                      variant="switch"
+                      closeOnClick={false}
+                      checked={devViews.bounds}
+                      onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
+                    >
+                      Bounds
+                    </MenuCheckboxItem>
+                    <MenuCheckboxItem
+                      variant="switch"
+                      closeOnClick={false}
+                      checked={devViews.perf}
+                      onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
+                    >
+                      Frame rate
+                    </MenuCheckboxItem>
+                  </MenuGroup>
+                </>
+              ) : null}
               <MenuSeparator />
               <MenuItem
                 disabled={!canAct || !runningSomething}

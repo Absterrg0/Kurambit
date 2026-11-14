@@ -62,6 +62,7 @@ import {
   GameKeepGoingStatus,
   GameKeepValuesInput,
   GameKeepValuesResult,
+  GameReplayResult,
   GameKeepGoingSteerInput,
   GameKeepGoingSteerResult,
   GameBotRunInput,
@@ -84,6 +85,7 @@ import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GamePlays from "../../../game/GamePlays.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
@@ -663,6 +665,22 @@ const TuneTool = Tool.make("game_tune", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_tune"));
 
+const ReplayTool = Tool.make("game_replay", {
+  description:
+    "Plays the person's latest run on the Stage again on the game folder as it is now, from the run's seed and the input of each step, and says how it ended then (kept), how it ends now (now; null if it had not ended by then), and the first second it plays differently (differs: what moved or which value changed; null if never). A run is kept when the person plays it to its end on the Stage. Use it when the person asks whether their run still plays the same after a change. Fails when no run is kept yet. three.js games only.",
+  success: GameReplayResult,
+  failure,
+  failureMode: "return",
+  dependencies: [
+    GamePlays.GamePlays,
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+  ],
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_replay"));
+
 /** Keep going: the same service the composer control and the banner reach. */
 const keepGoingDependencies = [
   GameRunControl.GameRunControl,
@@ -748,6 +766,7 @@ export const GameToolkit = Toolkit.make(
   FactsTool,
   BuildRestoreTool,
   TuneTool,
+  ReplayTool,
   KeepGoingTool,
   KeepGoingStatusTool,
   KeepGoingSteerTool,
@@ -792,6 +811,7 @@ export const GameMoreTool = Tool.make("game_more", {
     GameExplore.GameExplore,
     GameBot.GameBot,
     GameBuilds.GameBuilds,
+    GamePlays.GamePlays,
     GameRunControl.GameRunControl,
     McpInvocationContext.McpInvocationContext,
     ThreadManagementService.ThreadManagementService,

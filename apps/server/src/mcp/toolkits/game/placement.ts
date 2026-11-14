@@ -33,6 +33,10 @@ export const GAME_TOOL_PLACEMENTS = {
   game_facts: chat(["play"]),
   game_build_restore: chat([], "when the person asks to undo a change or go back to a build"),
   game_tune: chat(["tune"], "when the person asks to keep the values they tried on the Stage"),
+  game_replay: chat(
+    ["tune"],
+    "when the person asks whether their run on the Stage still plays the same",
+  ),
   game_preview: chat(["play"], "when the person asks for a playable URL or player of the sources"),
   game_stop: chat(["play"], "when the person asks to stop the game's processes"),
   game_package_web: chat(["packageWeb"], "when the person asks for a downloadable Web ZIP"),

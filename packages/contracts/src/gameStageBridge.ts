@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
+import { GamePlay } from "./gamePlays.ts";
 
 /**
  * The bridge between the Stage and a running game: plain `postMessage`
@@ -31,6 +32,7 @@ export const GameStageCapability = Schema.Literals([
   "mute",
   "controls",
   "cannot-lose",
+  "dev",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -95,9 +97,33 @@ export type GameStageRect = typeof GameStageRect.Type;
 
 export const GameStagePoint = Schema.Tuple([Schema.Finite, Schema.Finite]);
 
+/** One jump of the selected thing: its arc on the canvas, its apex, and how it measured. */
+export const GameStageJump = Schema.Struct({
+  points: Schema.Array(GameStagePoint),
+  apex: GameStagePoint,
+  /** World units above where it left the ground. */
+  height: Schema.Finite,
+  /** Game seconds in the air. */
+  seconds: Schema.Finite,
+  /** World units along the ground from takeoff to landing. */
+  distance: Schema.Finite,
+});
+export type GameStageJump = typeof GameStageJump.Type;
+
 export const GameStageTrace = Schema.Struct({
   /** Oldest first; a point while the thing was off screen or not yet made is left out. */
   points: Schema.Array(GameStagePoint),
+  /**
+   * How it moved over the same seconds, for tuning its feel: ground speed (world units a game
+   * second, oldest first), the top of it, and its last jumps. Absent from older shells.
+   */
+  feel: Schema.optionalKey(
+    Schema.Struct({
+      speeds: Schema.Array(Schema.Finite).check(Schema.isMaxLength(64)),
+      top: Schema.Finite,
+      jumps: Schema.Array(GameStageJump).check(Schema.isMaxLength(3)),
+    }),
+  ),
 });
 export type GameStageTrace = typeof GameStageTrace.Type;
 
@@ -194,6 +220,27 @@ export const StudioControlsReset = Schema.Struct({
   type: Schema.Literal("studio-controls-reset"),
 });
 
+/**
+ * The Stage's dev views, all of them each time: the named things' bounds drawn over the game, a
+ * frame-rate readout in its corner, and a free camera that orbits the frozen frame.
+ */
+export const StudioDev = Schema.Struct({
+  type: Schema.Literal("studio-dev"),
+  bounds: Schema.Boolean,
+  perf: Schema.Boolean,
+  freeCamera: Schema.Boolean,
+});
+export type StudioDev = typeof StudioDev.Type;
+/** One fixed step of a frozen game, as play would take it. */
+export const StudioStep = Schema.Struct({ type: Schema.Literal("studio-step") });
+/** A free camera's drag (radians across and up) and wheel (a distance factor). */
+export const StudioOrbit = Schema.Struct({
+  type: Schema.Literal("studio-orbit"),
+  dx: Schema.Finite,
+  dy: Schema.Finite,
+  zoom: Schema.Finite,
+});
+
 /** The Stage's tab is hidden (or shown): the game holds play and sound, and acknowledges. */
 export const StudioVisibility = Schema.Struct({
   type: Schema.Literal("studio-visibility"),
@@ -215,6 +262,9 @@ export const GameStageToGameMessage = Schema.Union([
   StudioRebind,
   StudioControlsReset,
   StudioCannotLose,
+  StudioDev,
+  StudioStep,
+  StudioOrbit,
 ]);
 export type GameStageToGameMessage = typeof GameStageToGameMessage.Type;
 
@@ -285,6 +335,12 @@ export const StudioFrame = Schema.Struct({
   png: Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/)),
 });
 
+/** A person's run on the Stage ended: its play, for the Stage to keep (gamePlays.ts). */
+export const StudioPlay = Schema.Struct({
+  type: Schema.Literal("studio-play"),
+  play: GamePlay,
+});
+
 export const GameToStageMessage = Schema.Union([
   StudioReady,
   StudioError,
@@ -296,6 +352,7 @@ export const GameToStageMessage = Schema.Union([
   StudioKey,
   StudioFrame,
   StudioControls,
+  StudioPlay,
 ]);
 export type GameToStageMessage = typeof GameToStageMessage.Type;
 

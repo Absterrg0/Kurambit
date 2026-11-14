@@ -4,7 +4,7 @@ import type { GameStageRect, GameStageTrace, GameThing } from "@kurambit/contrac
 
 import { observeResize } from "../../lib/observeResize";
 import { Text } from "../ui/text";
-import { pointStage, useThreadStageBridge } from "./gameStageBridge";
+import { orbitStage, pointStage, useStageDevViews, useThreadStageBridge } from "./gameStageBridge";
 
 const KIND_WORD: Record<GameThing["kind"], string> = {
   character: "character",
@@ -41,6 +41,9 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
   const scheduled = useRef(false);
   const [layer, setLayer] = useState<HTMLDivElement | null>(null);
   const [area, setArea] = useState(0);
+  // The free camera: a drag orbits, the wheel zooms, sent once per frame; a drag never selects.
+  const flying = useStageDevViews(threadKey).freeCamera;
+  const drag = useRef({ x: 0, y: 0, moved: 0, dx: 0, dy: 0, sent: true });
   useEffect(() => {
     if (layer === null) return;
     return observeResize(layer, () => setArea(layer.clientWidth * layer.clientHeight));
@@ -55,6 +58,23 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   };
   const onMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (flying && (event.buttons & 1) === 1) {
+      const held = drag.current;
+      held.dx += event.clientX - held.x;
+      held.dy += event.clientY - held.y;
+      held.moved += Math.abs(event.clientX - held.x) + Math.abs(event.clientY - held.y);
+      held.x = event.clientX;
+      held.y = event.clientY;
+      if (!held.sent) return;
+      held.sent = false;
+      requestAnimationFrame(() => {
+        orbitStage(held.dx * ORBIT_PER_PX, held.dy * ORBIT_PER_PX, 1);
+        held.dx = 0;
+        held.dy = 0;
+        held.sent = true;
+      });
+      return;
+    }
     if (!pointable) return;
     pending.current = at(event);
     if (scheduled.current) return;
@@ -79,8 +99,14 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
       onPointerLeave={() => {
         pending.current = null;
       }}
+      onPointerDown={(event) => {
+        drag.current = { x: event.clientX, y: event.clientY, moved: 0, dx: 0, dy: 0, sent: true };
+      }}
+      onWheel={(event) => {
+        if (flying) orbitStage(0, 0, event.deltaY > 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+      }}
       onClick={(event) => {
-        if (!pointable) return;
+        if (!pointable || drag.current.moved > DRAG_PX) return;
         const point = at(event as unknown as ReactPointerEvent<HTMLDivElement>);
         pointStage(point.x, point.y, "select");
       }}
@@ -92,6 +118,9 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
       }}
     >
       {selected?.trace !== undefined ? <StageTrace trace={selected.trace} /> : null}
+      {selected?.trace?.feel !== undefined ? (
+        <FeelReadout name={selected.thing.name} feel={selected.trace.feel} />
+      ) : null}
       {hovered !== null && tagged(hover?.rect) ? (
         <NameTag rect={hover.rect} thing={hovered} />
       ) : null}
@@ -116,6 +145,10 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
 }
 
 const EMPTY_THINGS: ReadonlyArray<GameThing> = [];
+/** The free camera: radians a dragged pixel turns it, a wheel notch's zoom, a drag's least move. */
+const ORBIT_PER_PX = 0.008;
+const ZOOM_STEP = 1.12;
+const DRAG_PX = 4;
 /** The share of the view a thing's box covers when it is the view itself (a level, a sky). */
 const FILLS_VIEW = 0.6;
 
@@ -198,7 +231,77 @@ function StageTrace({ trace }: { trace: GameStageTrace }) {
         />
       ))}
       <circle cx={x0} cy={y0} r={3.5} className="fill-stage-mark" fillOpacity={0.55} />
+      {/* Each jump's arc over the path, its apex marked with how high and how long. */}
+      {/* Only the last jump is labelled: jumps side by side would print over each other. */}
+      {(trace.feel?.jumps ?? []).map((jump, index, all) => (
+        <g key={`j${jump.apex[0]},${jump.apex[1]}`}>
+          <path
+            d={smoothPath(jump.points, 0, jump.points.length - 1)}
+            fill="none"
+            className="stroke-stage-foreground"
+            strokeOpacity={0.9}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+            strokeLinecap="round"
+          />
+          <circle cx={jump.apex[0]} cy={jump.apex[1]} r={3} className="fill-stage-foreground" />
+          {index === all.length - 1 ? (
+            <text
+              x={jump.apex[0]}
+              y={jump.apex[1] - 9}
+              textAnchor="middle"
+              className="fill-stage-foreground text-micro tabular-nums"
+              stroke="var(--color-sumi)"
+              strokeWidth={3}
+              strokeOpacity={0.7}
+              paintOrder="stroke"
+            >
+              {`${jump.height.toFixed(2)} m · ${jump.seconds.toFixed(2)} s`}
+            </text>
+          ) : null}
+        </g>
+      ))}
     </svg>
+  );
+}
+
+const SPARK_W = 132;
+const SPARK_H = 28;
+
+/**
+ * The selection's ground speed over the same seconds as its path, oldest at the left, and its
+ * top speed and last jump in numbers: what a tuned speed or jump did, without a stopwatch.
+ */
+function FeelReadout({ name, feel }: { name: string; feel: NonNullable<GameStageTrace["feel"]> }) {
+  const top = Math.max(feel.top, 0.1);
+  const step = feel.speeds.length > 1 ? SPARK_W / (feel.speeds.length - 1) : 0;
+  const line = feel.speeds
+    .map(
+      (speed, i) =>
+        `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)} ${(SPARK_H - (Math.min(speed, top) / top) * SPARK_H).toFixed(1)}`,
+    )
+    .join(" ");
+  const jump = feel.jumps.at(-1);
+  return (
+    <div className="pointer-events-none absolute right-3 bottom-3 flex flex-col gap-1 rounded-md bg-black/70 px-2.5 py-2 text-stage-foreground">
+      <Text variant="caption" tone="inherit" numeric render={<span />}>
+        {name} · top speed {feel.top.toFixed(1)} m/s
+      </Text>
+      <svg width={SPARK_W} height={SPARK_H} className="overflow-visible" aria-hidden>
+        <path d={line} fill="none" className="stroke-stage-mark" strokeWidth={1.5} />
+      </svg>
+      {jump === undefined ? null : (
+        <Text
+          variant="caption"
+          tone="inherit"
+          numeric
+          render={<span className="text-stage-muted" />}
+        >
+          Last jump {jump.height.toFixed(2)} m high, {jump.seconds.toFixed(2)} s in the air,{" "}
+          {jump.distance.toFixed(1)} m long
+        </Text>
+      )}
+    </div>
   );
 }
 

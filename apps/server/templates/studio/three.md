@@ -215,7 +215,8 @@ export function update(dt, ctx) {
    codes, so the gamepad and rebinding work), the HUD through `ctx.ui`,
    listeners and timers through `ctx.listen` and `ctx.after` (a raw listener,
    `setTimeout` or `requestAnimationFrame` runs through pause and piles up
-   across retries). Answer every player action with `Juice`.
+   across retries), chance through `ctx.random()` (seeded for replays).
+   Answer every player action with `Juice`.
 3. `GameState` is the single source of truth, in public plain data (the probe
    reports it and Retry resets it); build meshes, class instances and
    functions in `start(ctx)`. Keep the values that matter on screen too, and

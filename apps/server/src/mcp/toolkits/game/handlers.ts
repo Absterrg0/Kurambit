@@ -14,6 +14,7 @@ import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GamePlays from "../../../game/GamePlays.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
@@ -229,6 +230,9 @@ const handlers = {
         ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
       }),
     ),
+  ),
+  game_replay: McpToolAccess.actsAsCaller(() =>
+    withGame(GamePlays.GamePlays, (plays, threadId) => plays.replay(threadId, "folder")),
   ),
   game_keep_going: McpToolAccess.actsAsCaller((input) =>
     withKeepGoing((runs, threadId) =>

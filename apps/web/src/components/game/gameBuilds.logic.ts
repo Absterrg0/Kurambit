@@ -4,7 +4,9 @@ import {
   gameFactName,
   gameFactsView,
   gameQaFindings,
+  playOutcomeWords,
   type GameAssetFacts,
+  type GameReplayResult,
   type GameAssetUse,
   type GameBuild,
   type GameBuildFacts,
@@ -139,6 +141,40 @@ export const silentControlsNote = (facts: GameBuildFacts): string | null => {
   return silent.length === 0
     ? null
     : `The QA play pressed ${silent.join(", ")} on a fresh run and saw no answer. A control that works only in some places looks the same, so try them yourself.`;
+};
+
+/**
+ * A replay as two lines: how the kept run ended on the build it was played on, then how it
+ * plays on this build and the first second it played differently.
+ */
+export const replayLines = (
+  result: GameReplayResult,
+  list: GameBuildsResult,
+): readonly [string, string] => {
+  const kept = result.kept;
+  const played = list.builds.find((each) => kept.build !== null && each.id === kept.build);
+  const where =
+    kept.build === null
+      ? "the game as it was then"
+      : played === undefined
+        ? "an earlier build"
+        : buildName(played);
+  const now = result.now;
+  const sameEnd =
+    now !== null &&
+    now.won === kept.outcome.won &&
+    Math.round(now.seconds * 10) === Math.round(kept.outcome.seconds * 10);
+  const differs = result.differs;
+  const how =
+    differs !== null
+      ? `, playing differently from ${Math.round(differs.seconds)} s (${differs.what})`
+      : sameEnd
+        ? ", the same run throughout"
+        : ", playing differently only in its last second";
+  return [
+    `Your run on ${where}: ${playOutcomeWords(kept.outcome)}.`,
+    `On this build: ${playOutcomeWords(now)}${how}.`,
+  ];
 };
 
 /** The Asset use row's detail: the files the plays never loaded, and sounds never started. */

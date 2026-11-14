@@ -26,6 +26,7 @@ const CAPABILITIES = [
   "mute",
   "controls",
   "cannot-lose",
+  "dev",
 ];
 const KINDS = new Set([
   "character",
@@ -44,6 +45,13 @@ const MAX_REGISTERED = 500;
 const MAX_VALUES = 64;
 const TRACE_HZ = 30;
 const TRACE_POINTS = TRACE_HZ * 10;
+// Feel: the speed trace's points, the jumps kept, and what counts as one (world units, seconds).
+const FEEL_MIN_SAMPLES = 10;
+const FEEL_SPEEDS = 60;
+const FEEL_JUMPS = 3;
+const JUMP_RISE = 0.6;
+const JUMP_MIN_HEIGHT = 0.15;
+const JUMP_MIN_SECONDS = 0.15;
 // The game folder's engine directory: ids and asset paths are game-relative.
 const LANE = "web/";
 const THINGS_EVERY_MS = 500;
@@ -113,8 +121,10 @@ const fits = (value, fallback) =>
  * sound, `redraw()` asks for one frame, `drawClean()` draws one frame with no
  * outline (for a capture), `speed(scale)` sets how fast play runs, `mute(on)`
  * silences the game, `controls` lists, rebinds and resets the game's actions as
- * its own Controls screen does, saved with its settings, and `canLose(on)`
- * lets a loss end the run or not (the Stage's "Can't lose" while tuning).
+ * its own Controls screen does, saved with its settings, `canLose(on)`
+ * lets a loss end the run or not (the Stage's "Can't lose" while tuning), and
+ * `tuned(id, key, value)` hears each value the Stage changed (a run's play keeps it), and
+ * `dev` takes the Stage's dev views (shell/dev-view.js) and a frozen run's one-frame step.
  */
 export function createStageBridge({
   canvas,
@@ -127,6 +137,8 @@ export function createStageBridge({
   mute,
   controls,
   canLose,
+  tuned,
+  dev,
 }) {
   let active = false;
   let frozen = false;
@@ -389,20 +401,104 @@ export function createStageBridge({
   const traceOf = (record, seen) => {
     if (record.ring === null || seen === null) return undefined;
     const { w, h } = size();
+    const onCanvas = (x, y, z) => {
+      at.set(x, y, z).project(seen.camera);
+      if (Math.abs(at.z) > 1 || Math.abs(at.x) > 4 || Math.abs(at.y) > 4) return null;
+      return [tenth(((at.x + 1) / 2) * w), tenth(((1 - at.y) / 2) * h)];
+    };
     const points = [];
+    // The world positions, oldest first; null where the thing was off screen or not made yet.
+    const world = [];
     for (let i = 0; i < record.count; i += 1) {
       const slot = ((record.head - record.count + i + TRACE_POINTS) % TRACE_POINTS) * 3;
-      if (Number.isNaN(record.ring[slot])) continue;
-      at.set(record.ring[slot], record.ring[slot + 1], record.ring[slot + 2]).project(seen.camera);
-      if (Math.abs(at.z) > 1 || Math.abs(at.x) > 4 || Math.abs(at.y) > 4) continue;
-      const x = tenth(((at.x + 1) / 2) * w);
-      const y = tenth(((1 - at.y) / 2) * h);
+      if (Number.isNaN(record.ring[slot])) {
+        world.push(null);
+        continue;
+      }
+      world.push([record.ring[slot], record.ring[slot + 1], record.ring[slot + 2]]);
+      const point = onCanvas(record.ring[slot], record.ring[slot + 1], record.ring[slot + 2]);
+      if (point === null) continue;
       // A thing standing still is one point, not three hundred.
       const prev = points.at(-1);
-      if (prev === undefined || Math.abs(prev[0] - x) + Math.abs(prev[1] - y) >= 1)
-        points.push([x, y]);
+      if (prev === undefined || Math.abs(prev[0] - point[0]) + Math.abs(prev[1] - point[1]) >= 1)
+        points.push(point);
     }
-    return { points };
+    const feel = feelOf(world, onCanvas);
+    return feel === null ? { points } : { points, feel };
+  };
+
+  // How the thing moved, for tuning its feel: its ground speed over the last seconds and its
+  // last jumps (rise from where it stood, apex, back down), in world units and game seconds.
+  const feelOf = (world, onCanvas) => {
+    if (world.filter((each) => each !== null).length < FEEL_MIN_SAMPLES) return null;
+    const speed = world.map((each, i) => {
+      const before = world[i - 1];
+      return each === null || before == null
+        ? null
+        : Math.hypot(each[0] - before[0], each[2] - before[2]) * TRACE_HZ;
+    });
+    const speeds = [];
+    const per = Math.ceil(world.length / FEEL_SPEEDS);
+    for (let start = 0; start < world.length; start += per) {
+      const bucket = speed.slice(start, start + per).filter((each) => each !== null);
+      speeds.push(
+        bucket.length === 0 ? 0 : tenth(bucket.reduce((a, b) => a + b, 0) / bucket.length),
+      );
+    }
+    const jumps = [];
+    let from = null;
+    let apex = null;
+    let fell = false;
+    let still = 0;
+    for (let i = 1; i < world.length; i += 1) {
+      const now = world[i];
+      const before = world[i - 1];
+      if (now === null || before === null) {
+        from = null;
+        continue;
+      }
+      const rise = (now[1] - before[1]) * TRACE_HZ;
+      if (from === null) {
+        if (rise > JUMP_RISE) {
+          from = i - 1;
+          apex = i;
+          fell = false;
+          still = 0;
+        }
+        continue;
+      }
+      if (now[1] > world[apex][1]) apex = i;
+      if (rise < -JUMP_RISE) fell = true;
+      // Landed: back at or under where it left, or level again once it came down (a ledge).
+      still = fell && Math.abs(rise) < JUMP_RISE / 2 ? still + 1 : 0;
+      const landed = now[1] <= world[from][1] + 0.02 || still >= 2;
+      if (!landed) continue;
+      const height = world[apex][1] - world[from][1];
+      const seconds = (i - from) / TRACE_HZ;
+      if (height >= JUMP_MIN_HEIGHT && seconds >= JUMP_MIN_SECONDS) {
+        const arc = [];
+        for (let k = from; k <= i; k += 1) {
+          const point = onCanvas(...world[k]);
+          if (point !== null) arc.push(point);
+        }
+        const top = onCanvas(...world[apex]);
+        if (arc.length >= 2 && top !== null)
+          jumps.push({
+            points: arc,
+            apex: top,
+            height: Math.round(height * 100) / 100,
+            seconds: Math.round(seconds * 100) / 100,
+            distance: tenth(Math.hypot(now[0] - world[from][0], now[2] - world[from][2])),
+          });
+      }
+      from = null;
+    }
+    const known = speed.filter((each) => each !== null);
+    return {
+      speeds,
+      top: tenth(Math.max(0, ...known)),
+      jumps: jumps.slice(-FEEL_JUMPS),
+    };
   };
 
   const postSelected = () => {
@@ -819,16 +915,26 @@ export function createStageBridge({
     changed = true;
   };
 
+  /** Where the selected thing stands, which a free camera orbits; null with none. */
+  const focus = () => {
+    const object = selected?.object;
+    if (object == null) return null;
+    return new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);
+  };
+
   const setFrozen = (on) => {
     if (on === frozen) return;
     frozen = on;
     freeze(on);
+    dev?.frozen(on, focus());
     if (!on && hovered !== null) {
       hovered = null;
       toStage({ type: "studio-hover", id: null });
     }
     toStage({ type: "studio-frozen", on });
     if (on) postThings();
+    // The path and feel of what is selected, as of the play that just stopped.
+    if (on && selected !== null) postSelected();
     redraw();
   };
 
@@ -847,6 +953,23 @@ export function createStageBridge({
     const png = canvas.toDataURL("image/png");
     redraw();
     toStage({ type: "studio-frame", png });
+  };
+
+  /** A thing's live value, clamped to the range the game gave it; false when it does not fit. */
+  const setTune = (id, key, value) => {
+    const entry = tunes.get(id);
+    const fallback = entry?.defaults[key];
+    if (entry === undefined || !fits(value, fallback)) return false;
+    const range = entry.ranges[key];
+    entry.live[key] =
+      typeof value !== "number"
+        ? value
+        : range.choices === undefined
+          ? clamp(value, range)
+          : clamp(Math.round(value), range);
+    changed = true;
+    if (selected?.id === id) postSelected();
+    return true;
   };
 
   const valid = (data) => {
@@ -880,6 +1003,12 @@ export function createStageBridge({
         return true;
       case "studio-rebind":
         return text(data.name, 64) && text(data.code, 64);
+      case "studio-dev":
+        return ["bounds", "perf", "freeCamera"].every((key) => typeof data[key] === "boolean");
+      case "studio-step":
+        return true;
+      case "studio-orbit":
+        return finite(data.dx) && finite(data.dy) && finite(data.zoom) && data.zoom > 0;
       default:
         return false;
     }
@@ -928,21 +1057,9 @@ export function createStageBridge({
         selectedIndex = null;
         postSelected();
         return redraw();
-      case "studio-tune": {
-        const entry = tunes.get(data.id);
-        const fallback = entry?.defaults[data.key];
-        if (entry === undefined || !fits(data.value, fallback)) return;
-        const range = entry.ranges[data.key];
-        entry.live[data.key] =
-          typeof data.value !== "number"
-            ? data.value
-            : range.choices === undefined
-              ? clamp(data.value, range)
-              : clamp(Math.round(data.value), range);
-        changed = true;
-        if (selected?.id === data.id) postSelected();
+      case "studio-tune":
+        if (setTune(data.id, data.key, data.value)) tuned?.(data.id, data.key, data.value);
         return redraw();
-      }
       case "studio-hover-thing": {
         const record = data.id === null ? null : (things.get(data.id) ?? null);
         if (record === hovered) return;
@@ -966,6 +1083,23 @@ export function createStageBridge({
       case "studio-controls-reset":
         controls?.reset();
         return postControls("Controls are back to the game's own");
+      case "studio-dev":
+        return dev?.set(
+          { bounds: data.bounds, perf: data.perf, freeCamera: data.freeCamera },
+          focus(),
+        );
+      case "studio-step":
+        if (!frozen) return;
+        dev?.step();
+        // The selection's path and feel move on with the frame.
+        if (selected !== null) postSelected();
+        return redraw();
+      case "studio-orbit":
+        if (!frozen) return;
+        dev?.orbit(data.dx, data.dy, data.zoom);
+        // The path and the name tag are drawn from the new camera's view.
+        if (selected !== null) postSelected();
+        return;
     }
   });
 
@@ -1008,6 +1142,11 @@ export function createStageBridge({
     tick,
     overlay,
     reset,
+    setTune,
+    /** A person's run ended on the Stage: its play (shell/replay.js), for the Stage to keep. */
+    play(recorded) {
+      if (active) toStage({ type: "studio-play", play: recorded });
+    },
     get frozen() {
       return frozen;
     },

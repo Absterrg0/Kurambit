@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
+import { useAtomCommand } from "../../state/use-atom-command";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { stageBuildId } from "./gameBuildTimeline.logic";
@@ -98,6 +100,7 @@ import {
   formatBuildTime,
   notMeasuredWhy,
   qaLines,
+  replayLines,
   silentControlsNote,
   undoOutcome,
 } from "./gameBuilds.logic";
@@ -458,10 +461,89 @@ function BuildDetail({
           ) : null}
         </Section>
       </div>
+      {build.available ? (
+        <div className="border-b border-border p-4">
+          <YourRun threadRef={threadRef} build={build} list={list} />
+        </div>
+      ) : null}
       <div className="p-4">
         <WhatChanged threadRef={threadRef} build={build} />
       </div>
     </div>
+  );
+}
+
+type RunState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "running" }
+  | { readonly kind: "done"; readonly lines: readonly [string, string] }
+  | { readonly kind: "failed"; readonly text: string };
+
+/**
+ * The last run the person finished on the Stage, played again on this build, input for input:
+ * only when asked, since it opens the build in a page of its own.
+ */
+function YourRun({
+  threadRef,
+  build,
+  list,
+}: {
+  threadRef: ScopedThreadRef;
+  build: GameBuild;
+  list: GameBuildsResult;
+}) {
+  const replay = useAtomCommand(gameEnvironment.replay, { reportFailure: false });
+  const canReplay = useAtomValue(gameEnvironment.replay.permissionAtom(threadRef.environmentId));
+  const [state, setState] = useState<RunState>({ kind: "idle" });
+  const start = async () => {
+    setState({ kind: "running" });
+    const result = await replay({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, build: build.id },
+    });
+    setState(
+      result._tag === "Failure"
+        ? { kind: "failed", text: String(squashAtomCommandFailure(result)) }
+        : { kind: "done", lines: replayLines(result.value, list) },
+    );
+  };
+  return (
+    <Section
+      title="Your run"
+      aside={
+        canReplay ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={state.kind === "running"}
+            onClick={() => void start()}
+          >
+            {state.kind === "running" ? "Replaying…" : "Replay on this build"}
+          </Button>
+        ) : undefined
+      }
+    >
+      {state.kind === "done" ? (
+        <div className="flex flex-col gap-0.5">
+          <Text variant="meta" tone="muted" render={<p />}>
+            {state.lines[0]}
+          </Text>
+          <Text variant="meta" tone="default" render={<p />}>
+            {state.lines[1]}
+          </Text>
+        </div>
+      ) : (
+        <Text
+          variant="meta"
+          tone={state.kind === "failed" ? "destructive" : "muted"}
+          render={<p role={state.kind === "failed" ? "alert" : undefined} />}
+        >
+          {state.kind === "failed"
+            ? state.text
+            : "The last run you played to its end on the Stage, played again here with the same input."}
+        </Text>
+      )}
+    </Section>
   );
 }
 

@@ -22,6 +22,8 @@ import {
   type GameCheckScene,
   type GameCheckQa,
   type GameProcessResult,
+  type GamePlay,
+  type GameReplayRun,
   type GameToolStatus,
   type GameViewport,
   type GameUnityRecompileResult,
@@ -221,6 +223,17 @@ export interface GameEngineBackend {
     readonly open: (ctx: GameEngineContext) => Effect.Effect<void, GameOperationError>;
   } | null;
   /**
+   * Runs a person's kept play again on the game at `ctx` (its folder or a build's copy) from
+   * the gameplay entry; "no-replay" when that game's shell has none. Null for engines whose
+   * shell keeps no plays.
+   */
+  readonly replay:
+    | ((
+        ctx: GameEngineContext,
+        input: { readonly gameplayScene: string; readonly play: GamePlay },
+      ) => Effect.Effect<GameReplayRun | "no-replay", GameOperationError>)
+    | null;
+  /**
    * How a play session (exploration or a bot) starts this engine's runner, a
    * process speaking the play-session protocol over loopback. Null for
    * engines whose games play as a browser page, which the browser host opens.
@@ -319,6 +332,14 @@ export class GameEngine extends Context.Service<
      * the copy's boot check.
      */
     readonly cleanCheckOf: (root: string) => Effect.Effect<GameCheckResult | null>;
+    /**
+     * A person's kept play run again on the game at `root` (its folder or a build's copy);
+     * refused for an engine or a shell with no replay.
+     */
+    readonly replayIn: (
+      root: string,
+      play: GamePlay,
+    ) => Effect.Effect<GameReplayRun, GameOperationError>;
     /** `game_unity_recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
     readonly recompile: (
       threadId: ThreadId,
@@ -579,6 +600,31 @@ const make = Effect.gen(function* () {
         // The QA play's report is a build fact of its own, measured with the boot.
         operations.exclusive(root, label, check(root, { qa: true }), owner),
       ),
+    replayIn: (root, play) =>
+      Effect.gen(function* () {
+        const manifest = yield* projects.read(root);
+        const { backend, ctx } = yield* context(root);
+        const refused = (detail: string) =>
+          new GameOperationError({
+            operation: "replay",
+            path: root,
+            reason: "invalid-input",
+            detail,
+          });
+        if (backend.replay === null)
+          return yield* refused(
+            `${backend.profile.displayName} games do not keep plays yet; three.js games do.`,
+          );
+        const run = yield* backend.replay(ctx, {
+          gameplayScene: manifest.gameplayScene ?? "",
+          play,
+        });
+        if (run === "no-replay")
+          return yield* refused(
+            "This build's copy of the shell predates replays, so it cannot play a kept run.",
+          );
+        return run;
+      }),
     cleanCheckOf: (root) =>
       Effect.flatMap(checkedIdentity(root), (identity) =>
         identity === null

@@ -3,6 +3,7 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
+import * as GamePlays from "./game/GamePlays.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameArt from "./game/art/GameArt.ts";
 import * as GameExport from "./game/GameExport.ts";
@@ -1193,6 +1194,7 @@ const layerWsRpc = (
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
+      const gamePlays = yield* GamePlays.GamePlays;
       const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1840,6 +1842,9 @@ const layerWsRpc = (
             ...(commandId === undefined ? {} : { commandId }),
             ...(fold === undefined ? {} : { fold }),
           }),
+        [WS_METHODS.gameKeepPlay]: ({ threadId, play }) =>
+          gamePlays.keep(threadId, { play }).pipe(Effect.as({})),
+        [WS_METHODS.gameReplay]: ({ threadId, build }) => gamePlays.replay(threadId, build),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined
@@ -2972,6 +2977,7 @@ export const layer = Layer.unwrap(
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const gameBuilds = yield* GameBuilds.GameBuilds;
+    const gamePlays = yield* GamePlays.GamePlays;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3036,6 +3042,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provide(Layer.succeed(GameBuilds.GameBuilds, gameBuilds)),
+              Layer.provide(Layer.succeed(GamePlays.GamePlays, gamePlays)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.

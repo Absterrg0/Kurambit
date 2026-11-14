@@ -10,6 +10,7 @@ import {
   THREE_VIEWPORT,
   GameOperationError,
   GameQaReport,
+  GameReplayRun,
   gameQaFindings,
   gameQaProblems,
   type GameActionResult,
@@ -99,6 +100,7 @@ const sceneOf = async (
 };
 
 const decodeQa = Schema.decodeUnknownOption(GameQaReport);
+const decodeReplay = Schema.decodeUnknownOption(GameReplayRun);
 /** The QA play's report as the check's: what to fix, or why it was not played. */
 const qaOf = (played: { readonly raw: unknown; readonly ms: number } | null): GameCheckQa => {
   if (played === null) return { status: "not-measured", why: "the QA play's page did not open" };
@@ -490,6 +492,58 @@ export const makeThreeBackend = (
           artifact: "index.html",
           notes: [],
         };
+      }),
+    replay: (ctx, input) =>
+      Effect.gen(function* () {
+        const runtimeFolder = yield* runtimeOf(ctx, "three-replay");
+        const browser = yield* gameBrowser("three-replay", ctx.projectDir);
+        const failed = (detail: string, cause?: unknown) =>
+          new GameOperationError({
+            operation: "three-replay",
+            path: ctx.projectDir,
+            reason: "tool-failed",
+            detail,
+            cause,
+          });
+        // A person waits on it: it goes before builds being measured, never beside them.
+        const raw = yield* playLane.hold(
+          "person",
+          Effect.acquireUseRelease(
+            Effect.tryPromise({
+              try: () => serveGameDirectory(ctx.root, ctx.projectName, { runtimes: runtimeFolder }),
+              catch: (cause) => failed("The static project could not be served.", cause),
+            }),
+            (server) =>
+              Effect.tryPromise({
+                try: async (signal) => {
+                  const session = await openWebPlaySession({
+                    browser,
+                    url: new URL(input.gameplayScene || "index.html", server.url).href,
+                    ...THREE_VIEWPORT,
+                    bootTimeoutMs: BOOT_TIMEOUT_MS,
+                    signal,
+                  });
+                  try {
+                    return await session.replay(input.play);
+                  } finally {
+                    await session.close();
+                  }
+                },
+                catch: (cause) =>
+                  cause instanceof WebPageNotReady || cause instanceof WebPageCrashed
+                    ? failed(`The game did not start, so the play could not run: ${cause.message}`)
+                    : failed(
+                        `Headless Chromium failed during the replay: ${cause instanceof Error ? cause.message.slice(0, 500) : String(cause).slice(0, 500)}`,
+                        cause,
+                      ),
+              }),
+            (server) => Effect.promise(() => server.close().catch(() => undefined)),
+          ),
+        );
+        if (raw === "no-replay") return "no-replay" as const;
+        const run = decodeReplay(raw);
+        if (Option.isNone(run)) return yield* failed("The game did not answer the replay in time.");
+        return run.value;
       }),
     // The browser host opens the page itself: there is no runner process.
     playProcess: null,

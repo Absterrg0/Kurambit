@@ -22,6 +22,11 @@
 //                                    // assets, look) lasts across visits; drawn every frame
 //                                    // the title is up
 //
+// Play runs in fixed steps: update(dt) is called once per display frame at the display's own
+// rate (more on a slow frame), so a run plays the same on any machine, and ctx.random() (and
+// Math.random inside update) comes from the run's seed. The Stage keeps a person's runs and
+// plays them again on a newer build (shell/replay.js).
+//
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
 // camera, player, ui (the HUD kit: counter, bar, timer, objective, toast,
 // hint; shell/hud.js), look (sun(), bake(), render(); shell/look.js), assets (model(name) / texture(name), shell/assets.js),
@@ -67,6 +72,8 @@ import { createLook } from "./look.js";
 import { createHud } from "./hud.js";
 import { assets, onModelCopy, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
+import { createPlayer, createRate, createRecorder, freshSeed, mark, seeded } from "./replay.js";
+import { createDevView } from "./dev-view.js";
 import {
   VOLUME_NAMES,
   getVolume,
@@ -149,8 +156,30 @@ let listening = null;
 let gamepad = null;
 // Where the pointer last was on the canvas; a new run starts aiming there.
 const pointer = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
+/** The display's frame time, which a new run steps at. */
+const rate = createRate();
+const nativeRandom = Math.random;
+/** A play the next run replays (window.__studio.replay), and who waits for its end. */
+let nextReplay = null;
+let replayDone = null;
+/** Most steps one frame runs: a slow frame catches up at most 0.1 s, as play always has. */
+const CATCH_UP_S = 0.1;
+/** A replay steps as fast as this much of each frame allows. */
+const REPLAY_FRAME_MS = 12;
+/** Past where the kept run ended, a replay plays on this long before it calls the run unended. */
+const REPLAY_AFTER_S = 10;
 
-function newContext() {
+/** Runs `work` with Math.random drawing from the run's seed, so a replay draws the same. */
+function seededWork(context, work) {
+  Math.random = context.random;
+  try {
+    return work();
+  } finally {
+    Math.random = nativeRandom;
+  }
+}
+
+function newContext(seed = freshSeed()) {
   const down = new Set();
   const pressed = new Set();
   const listeners = [];
@@ -201,9 +230,29 @@ function newContext() {
     get cannotLose() {
       return cannotLose();
     },
+    /** 0..1 from the run's seed: a replay of the run draws the same numbers. */
+    random: seeded(seed),
   };
   ctx.look = look.forRun(ctx);
-  return { ctx, input, down, pressed, buttons, clicked, listeners, timers, reported: false };
+  return {
+    ctx,
+    input,
+    down,
+    pressed,
+    buttons,
+    clicked,
+    listeners,
+    timers,
+    reported: false,
+    random: ctx.random,
+    seed,
+    dt: 1 / 60,
+    steps: 0,
+    time: 0,
+    left: 0,
+    recorder: null,
+    player: null,
+  };
 }
 
 const keyNames = (event) => [
@@ -270,14 +319,23 @@ function startRun() {
   clearRun();
   GameState.state = "playing";
   show(null);
-  run = newContext();
+  const replaying = nextReplay;
+  nextReplay = null;
+  run = newContext(replaying?.seed ?? freshSeed());
+  run.dt = replaying?.dt ?? rate.step();
+  if (replaying === null) {
+    run.recorder = createRecorder(run.seed, run.dt);
+    // How the Stage had play when the run began: a replay starts the same way.
+    run.recorder.event("speed", studioSpeed);
+    run.recorder.event("can-lose", !cannotLose());
+  } else run.player = createPlayer(replaying);
   Juice.stage = run.ctx.scene;
   redraw = true;
   // A throw here is reported like one in update(), so the loop still starts,
   // the menus keep working and the check sees the error itself.
   try {
     newRun(KEEP);
-    game.start?.(run.ctx);
+    seededWork(run, () => game.start?.(run.ctx));
   } catch (error) {
     reportError(error);
     run.reported = true;
@@ -424,7 +482,29 @@ onRunEnded((won, text, stats) => {
   releaseKeys();
   ending = { won, text, stats };
   endBeat = END_BEAT_S;
+  const outcome = {
+    won,
+    text: String(text ?? "").slice(0, 200),
+    seconds: Math.round(run.time * 10) / 10,
+  };
+  if (run.player !== null) finishReplay(outcome);
+  else {
+    const play = run.recorder?.finish(outcome);
+    if (play != null) bridge.play(play);
+  }
 });
+
+/** The replay's answer: how its run ended (null when it had not) and where it stood each second. */
+function finishReplay(outcome) {
+  const done = replayDone;
+  replayDone = null;
+  done?.({
+    outcome,
+    seconds: Math.round(run.time * 10) / 10,
+    steps: run.steps,
+    marks: run.player.marks,
+  });
+}
 
 function showEnd() {
   endBeat = 0;
@@ -830,25 +910,49 @@ function pollGamepad(now) {
   pad.buttons.forEach((button, i) => (padWas[i] = button.pressed));
 }
 
-function step(dt) {
+/** What the Stage changed mid-run, as a replay puts it back at the same step. */
+function replayEvent(kind, ...args) {
+  if (kind === "speed") studioSpeed = args[0];
+  else if (kind === "can-lose") setCanLose(args[0]);
+  else if (kind === "tune") bridge.setTune(args[0], args[1], args[2]);
+}
+
+/** One fixed step: this step's input, then the game, at the step's slice times the time scale. */
+function step() {
   const { down, pressed, buttons, clicked } = run;
-  run.input.sample({ down, pressed, buttons, clicked, pad: gamepad });
-  const due = [];
-  for (let i = run.timers.length - 1; i >= 0; i -= 1)
-    if ((run.timers[i].left -= dt) <= 0) due.unshift(...run.timers.splice(i, 1));
-  try {
-    for (const timer of due) timer.fn();
-    game.update?.(dt, run.ctx);
-    animateShell.update(dt);
-    cameraShell.update(dt);
-    run.ctx.ui.update(dt);
-  } catch (error) {
-    // One report a run: the loop keeps going so the menus keep working.
-    if (!run.reported) reportError(error);
-    run.reported = true;
-  }
-  juiceShell.update(dt);
+  const pad = run.player !== null ? run.player.input(run, run.steps, replayEvent) : gamepad;
+  run.recorder?.input(run, gamepad);
+  const dt = run.dt * studioSpeed * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1);
+  juiceShell.pass(run.dt);
+  run.input.sample({ down, pressed, buttons, clicked, pad });
+  const stepping = run;
+  seededWork(stepping, () => {
+    const due = [];
+    for (let i = stepping.timers.length - 1; i >= 0; i -= 1)
+      if ((stepping.timers[i].left -= dt) <= 0) due.unshift(...stepping.timers.splice(i, 1));
+    try {
+      for (const timer of due) timer.fn();
+      game.update?.(dt, stepping.ctx);
+      animateShell.update(dt);
+      cameraShell.update(dt);
+      stepping.ctx.ui.update(dt);
+    } catch (error) {
+      // One report a run: the loop keeps going so the menus keep working.
+      if (!stepping.reported) reportError(error);
+      stepping.reported = true;
+    }
+    juiceShell.update(dt);
+  });
+  if (run !== stepping) return dt;
+  run.steps += 1;
+  run.time += dt;
+  // Where the run stands once a second: a replay names the first second it plays differently.
+  const marking = run.steps % Math.max(1, Math.round(1 / run.dt)) === 0;
+  const entry = marking ? mark(run.time, run.ctx.player, GameState) : null;
+  run.recorder?.stepped(run.steps, entry);
+  if (entry !== null) run.player?.marks.push(entry);
   clearFrameInput();
+  return dt;
 }
 
 function draw(dt) {
@@ -858,17 +962,25 @@ function draw(dt) {
     else renderer.clear();
     return;
   }
-  const camera = run.ctx.camera;
-  juiceShell.beforeRender(camera, renderer);
-  if (game.render !== undefined) {
-    try {
-      game.render(run.ctx, dt);
-    } catch (error) {
-      if (!run.reported) reportError(error);
-      run.reported = true;
-    }
-  } else look.render(run.ctx.scene, camera, dt);
-  juiceShell.afterRender(camera);
+  // A frozen frame the Stage's free camera flies around is drawn from it, the game's own render
+  // included; the game's camera is back before anything else reads ctx.camera.
+  const own = run.ctx.camera;
+  const camera = devView.camera() ?? own;
+  run.ctx.camera = camera;
+  try {
+    juiceShell.beforeRender(camera, renderer);
+    if (game.render !== undefined) {
+      try {
+        game.render(run.ctx, dt);
+      } catch (error) {
+        if (!run.reported) reportError(error);
+        run.reported = true;
+      }
+    } else look.render(run.ctx.scene, camera, dt);
+    juiceShell.afterRender(camera);
+  } finally {
+    run.ctx.camera = own;
+  }
 }
 
 // Every resize, whatever the state: fullscreen is toggled from the pause menu.
@@ -915,13 +1027,33 @@ function applyHold() {
 // One object, refilled: the bridge's trace reads it 30 times a second. A game with no title of
 // its own opens on its world, whose things the Stage selects and tunes as in play.
 const stageView = { scene: null, camera: null };
-const view = () => {
+const gameView = () => {
   const shown = run?.ctx ?? titleWorld?.ctx ?? titleCtx;
-  if (shown?.camera?.isCamera !== true) return null;
+  return shown?.camera?.isCamera === true ? shown : null;
+};
+/** What is on screen, from the Stage's free camera while it flies. */
+const view = () => {
+  const shown = gameView();
+  if (shown === null) return null;
   stageView.scene = shown.scene;
-  stageView.camera = shown.camera;
+  stageView.camera = (run !== null ? devView.camera() : null) ?? shown.camera;
   return stageView;
 };
+const devView = createDevView({
+  renderer,
+  view: gameView,
+  eachBody(fn) {
+    const scene = gameView()?.scene;
+    bridge.eachThing((record) => {
+      for (const body of record.parts ?? (record.object === null ? [] : [record.object])) {
+        let root = body;
+        while (root.parent !== null) root = root.parent;
+        if (root === scene) fn(body);
+      }
+    });
+  },
+  redraw: () => (redraw = true),
+});
 // The Stage's slow motion: play time runs at this share of real time.
 let studioSpeed = 1;
 const bridge = createStageBridge({
@@ -940,9 +1072,27 @@ const bridge = createStageBridge({
   redraw: () => (redraw = true),
   speed(scale) {
     studioSpeed = scale;
+    run?.recorder?.event("speed", scale);
   },
   mute: muteAudio,
-  canLose: setCanLose,
+  canLose(on) {
+    setCanLose(on);
+    run?.recorder?.event("can-lose", on);
+  },
+  tuned(id, key, value) {
+    run?.recorder?.event("tune", id, key, value);
+  },
+  dev: {
+    set: (next, focus) => devView.set(next, focus),
+    frozen: (on, focus) => devView.frozen(on, focus),
+    orbit: (dx, dy, zoom) => devView.orbit(dx, dy, zoom),
+    // One fixed step of a frozen run, as play would take it.
+    step() {
+      if (run === null || run.compiling || GameState.state !== "playing") return;
+      step();
+      redraw = true;
+    },
+  },
   // The Stage's Controls: the same table, rebinds and saved settings as the Controls screen.
   controls: {
     list: () =>
@@ -996,6 +1146,15 @@ const studio = installStudio({
   },
   bridge,
   scene: sceneReport,
+  // A kept play, run again from its seed with its input at each step (shell/replay.js).
+  replay(play) {
+    return new Promise((resolve) => {
+      replayDone?.(null);
+      replayDone = resolve;
+      nextReplay = play;
+      startRun();
+    });
+  },
   // The harness's QA play: Retry is the end screen's own startRun.
   qa: createQa({
     controls,
@@ -1079,17 +1238,51 @@ renderer.setAnimationLoop((now) => {
   const elapsedMs = Math.max(now - last, 0);
   const realMs = Math.max(elapsedMs - measuredMs, 0);
   measuredMs = 0;
-  const real = Math.min(elapsedMs / 1000, 0.1);
+  const real = Math.min(elapsedMs / 1000, CATCH_UP_S);
   last = now;
+  if (!held && !document.hidden) rate.frame(elapsedMs);
   pollGamepad(now);
   // Only unpaused, unheld time moves the run, the end beat included.
   const moving =
     run !== null && !run.compiling && !held && (GameState.state === "playing" || endBeat > 0);
   let dt = 0;
-  if (moving) {
-    dt = real * studioSpeed * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1);
-    step(dt);
-    if (endBeat > 0 && (endBeat -= real) <= 0) showEnd();
+  if (moving && run.player !== null) {
+    // A replay: as many steps as fit in part of a frame, never waiting on real time.
+    const until = performance.now() + REPLAY_FRAME_MS;
+    const stepping = run;
+    for (;;) {
+      // A step can end the run, or start another (a game that restarts itself).
+      if (run !== stepping || performance.now() >= until) break;
+      if (GameState.state !== "playing" && endBeat <= 0) break;
+      dt += step();
+      if (endBeat > 0 && (endBeat -= run.dt) <= 0) {
+        showEnd();
+        break;
+      }
+      if (
+        replayDone !== null &&
+        stepping.steps > stepping.player.play.steps + REPLAY_AFTER_S / stepping.dt
+      ) {
+        finishReplay(null);
+        break;
+      }
+    }
+    redraw = true;
+  } else if (moving) {
+    // Whole steps of the run's slice; a frame a little early or late still takes one.
+    run.left += real;
+    const most = Math.ceil(CATCH_UP_S / run.dt);
+    const steps = Math.min(Math.round(run.left / run.dt), most);
+    run.left = steps === most ? 0 : run.left - steps * run.dt;
+    const stepping = run;
+    for (let i = 0; i < steps; i += 1) {
+      if (run !== stepping) break;
+      dt += step();
+      if (endBeat > 0 && (endBeat -= run.dt) <= 0) {
+        showEnd();
+        break;
+      }
+    }
     redraw = true;
   } else if (run === null && titleWorld !== null && !held && !document.hidden) {
     dt = real;
@@ -1116,6 +1309,7 @@ renderer.setAnimationLoop((now) => {
       },
       { playing: moving && GameState.state === "playing", realMs },
     );
+    devView.after(view()?.camera ?? null, realMs, now);
     redraw = false;
   }
   bridge.tick(dt);

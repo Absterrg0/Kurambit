@@ -253,6 +253,15 @@ export class GameBuilds extends Context.Service<
       threadId: ThreadId,
       build: GameBuildRef,
     ) => Effect.Effect<GameBuildPlayResult, GameOperationError>;
+    /**
+     * Runs `work` on the build's copy while it is leased; the folder is never touched. Not an
+     * engine step: work that only reads the copy (a replay serves its files) never waits on one.
+     */
+    readonly inCopy: <A, E, R>(
+      threadId: ThreadId,
+      build: GameBuildId,
+      work: (copy: string) => Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | GameOperationError, R>;
     /** Stops one build's Play from its copy; the folder's own Play is never touched. */
     readonly stopPlay: (
       threadId: ThreadId,
@@ -1290,6 +1299,15 @@ const make = Effect.gen(function* () {
         : ({ _tag: "window", message: result.message } as const);
     });
 
+  const inCopy: GameBuilds["Service"]["inCopy"] = (threadId, id, work) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      const build = yield* resolve(g, { _tag: "build", build: id });
+      return yield* Effect.scoped(
+        Effect.flatMap(copies.lease(g.root, { oid: build.build, key: build.key }), work),
+      );
+    });
+
   /**
    * A restore or a kept edit moved the folder outside any turn: each of the
    * game's chats lists its next turn's changes from where the folder now is,
@@ -1983,6 +2001,7 @@ const make = Effect.gen(function* () {
     recordTurn,
     declareChange,
     play,
+    inCopy,
     restore,
     holds,
     keepBotSetup,

@@ -196,9 +196,10 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       }
       useStageBridge.setState({ status: "ready", capabilities: message.capabilities ?? [] });
       useStageBridge.getState().post?.({ type: "studio-things-request" });
-      // Can't lose outlives a Restart: the game that comes up is told again.
+      // Can't lose and the dev views outlive a Restart: the game that comes up is told again.
       if (cannotLose.has(owner.slice(0, owner.indexOf("\0"))))
         useStageBridge.getState().post?.({ type: "studio-cannot-lose", on: true });
+      postDevViews(owner.slice(0, owner.indexOf("\0")));
       // One frame of the game as it comes up, so the build it plays has a picture at once.
       window.setTimeout(() => {
         if (useStageBridge.getState().owner === owner) void captureStageFrame();
@@ -242,6 +243,7 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       return;
     case "studio-error":
     case "studio-visibility-ack":
+    case "studio-play":
       return;
   }
 }
@@ -366,6 +368,38 @@ export const setStageCannotLose = (threadKey: string, on: boolean) => {
   if (state.owner?.startsWith(`${threadKey}\0`) && state.capabilities.includes("cannot-lose"))
     state.post?.({ type: "studio-cannot-lose", on });
 };
+
+export interface StageDevViews {
+  /** The named things' bounds, drawn over the game. */
+  readonly bounds: boolean;
+  /** Frame rate, frame time, draws and triangles in the game's corner. */
+  readonly perf: boolean;
+  /** While frozen, drag to orbit and wheel to zoom around the frame. */
+  readonly freeCamera: boolean;
+}
+const NO_DEV_VIEWS: StageDevViews = { bounds: false, perf: false, freeCamera: false };
+/** Each thread's dev views for the session: told to each game that comes up, as Can't lose is. */
+const useDevViews = create<Readonly<Record<string, StageDevViews>>>()(() => ({}));
+export const useStageDevViews = (threadKey: string) =>
+  useDevViews((all) => all[threadKey] ?? NO_DEV_VIEWS);
+const postDevViews = (threadKey: string) => {
+  const state = useStageBridge.getState();
+  if (state.owner?.startsWith(`${threadKey}\0`) && state.capabilities.includes("dev"))
+    state.post?.({ type: "studio-dev", ...(useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS) });
+};
+export const setStageDevView = (threadKey: string, view: keyof StageDevViews, on: boolean) => {
+  const now = useDevViews.getState()[threadKey] ?? NO_DEV_VIEWS;
+  useDevViews.setState({ [threadKey]: { ...now, [view]: on } });
+  postDevViews(threadKey);
+};
+/** One fixed step of the frozen game. */
+export const stepStageFrame = () => {
+  const state = useStageBridge.getState();
+  if (state.frozen && state.capabilities.includes("dev")) state.post?.({ type: "studio-step" });
+};
+/** The free camera's drag and wheel, from the frozen Stage's pointer layer. */
+export const orbitStage = (dx: number, dy: number, zoom: number) =>
+  useStageBridge.getState().post?.({ type: "studio-orbit", dx, dy, zoom });
 
 /** Asks the game for its actions; a game without the capability never answers. */
 export const requestStageControls = () => {
