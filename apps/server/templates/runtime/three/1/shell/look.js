@@ -581,9 +581,11 @@ async function skyProbes(renderer, look, sunDir, quality) {
     scene.add(sky);
     owned.push(sky.geometry, sky.material);
   }
+  let clouds = null;
+  let cloudUniforms = null;
   if (look.sky.clouds) {
     const c = look.sky.clouds === true ? {} : look.sky.clouds;
-    const clouds = new THREE.Mesh(
+    clouds = new THREE.Mesh(
       new THREE.SphereGeometry(90, 48, 24),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
@@ -606,6 +608,7 @@ async function skyProbes(renderer, look, sunDir, quality) {
     clouds.renderOrder = 1;
     scene.add(clouds);
     owned.push(clouds.geometry, clouds.material);
+    cloudUniforms = clouds.material.uniforms;
   }
   let background;
   let target = null;
@@ -622,6 +625,69 @@ async function skyProbes(renderer, look, sunDir, quality) {
     new THREE.CubeCamera(0.1, 400, target).update(renderer, scene);
     background = target.texture;
   } else background = pmrem.fromScene(scene, 0, 0.1, 400).texture;
+  // Under a long lens the cube's clouds are magnified past its texels. High quality also marches
+  // the band a long lens looks at (the horizon up to BAND_TOP) once into a wide panorama, and
+  // keeps the sky without clouds; the backdrop then draws from both (bandSky).
+  let band = null;
+  if (clouds !== null && quality === "high") {
+    clouds.visible = false;
+    const bareTarget = new THREE.WebGLCubeRenderTarget(512, {
+      type: THREE.HalfFloatType,
+      depthBuffer: false,
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter,
+    });
+    new THREE.CubeCamera(0.1, 400, bareTarget).update(renderer, scene);
+    const bandTarget = new THREE.WebGLRenderTarget(BAND_WIDTH, BAND_HEIGHT, {
+      depthBuffer: false,
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter,
+      wrapS: THREE.RepeatWrapping,
+    });
+    const march = new THREE.ShaderMaterial({
+      uniforms: {
+        ...cloudUniforms,
+        steps: { value: 64 },
+        bandTop: { value: BAND_TOP },
+        strip: { value: new THREE.Vector2(0, 1) },
+      },
+      vertexShader: BAND_VERTEX,
+      fragmentShader: CLOUD_FRAGMENT.replace(
+        "gl_FragColor = vec4( colour / max( 1.0 - transmit, 1e-3 ), alpha );",
+        BAND_ENCODE,
+      ),
+      depthTest: false,
+      depthWrite: false,
+    });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), march);
+    // Its vertex shader places it on the screen itself; no camera frustum applies.
+    quad.frustumCulled = false;
+    const quadScene = new THREE.Scene().add(quad);
+    const was = renderer.getRenderTarget();
+    const clear = renderer.getClearAlpha();
+    renderer.setRenderTarget(bandTarget);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    // In strips: one long draw can trip an integrated GPU's hang check. Each strip's draw must
+    // not clear the strips before it.
+    const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    for (let i = 0; i < BAND_STRIPS; i += 1) {
+      const w = BAND_WIDTH / BAND_STRIPS;
+      bandTarget.viewport.set(i * w, 0, w, BAND_HEIGHT);
+      march.uniforms.strip.value.set(i / BAND_STRIPS, 1 / BAND_STRIPS);
+      renderer.setRenderTarget(bandTarget);
+      renderer.render(quadScene, quadCamera);
+    }
+    bandTarget.viewport.set(0, 0, BAND_WIDTH, BAND_HEIGHT);
+    renderer.autoClear = autoClear;
+    renderer.setRenderTarget(was);
+    renderer.setClearAlpha(clear);
+    quad.geometry.dispose();
+    march.dispose();
+    band = { bare: bareTarget.texture, clouds: null, texture: bandTarget.texture };
+  }
   let light;
   if (look.environment === "room") {
     const { RoomEnvironment } = await import("three/addons/environments/RoomEnvironment.js");
@@ -634,10 +700,57 @@ async function skyProbes(renderer, look, sunDir, quality) {
     material.uniforms.groundShare.value = 1;
     light = pmrem.fromScene(scene, 0, 0.1, 400).texture;
   }
+  if (band !== null) band.clouds = background;
   for (const thing of owned) thing.dispose();
   pmrem.dispose();
-  return { background, light };
+  return { background, light, band };
 }
+
+/** Narrower than this, the cube's clouds are magnified enough to blur: the band takes over. */
+const BAND_FOV = 40;
+/** The band: azimuth all round, elevation from the horizon up to BAND_TOP (radians). */
+const BAND_TOP = (32 * Math.PI) / 180;
+const BAND_WIDTH = 8192;
+const BAND_HEIGHT = 1024;
+const BAND_STRIPS = 16;
+// The band's texels as directions: u all the way round, v from the horizon up to bandTop.
+const BAND_VERTEX = /* glsl */ `
+uniform float bandTop;
+uniform vec2 strip;
+varying vec3 vDir;
+void main() {
+  vec2 uv = position.xy * 0.5 + 0.5;
+  uv.x = strip.x + uv.x * strip.y;
+  float az = uv.x * 6.2831853;
+  float el = uv.y * bandTop;
+  vDir = vec3( cos( el ) * sin( az ), sin( el ), cos( el ) * cos( az ) );
+  gl_Position = vec4( position.xy, 0.0, 1.0 );
+}`;
+// Stored in 8 bits with headroom and a square root, so bright tops and grey bases both keep detail.
+const BAND_ENCODE =
+  "gl_FragColor = vec4( sqrt( clamp( colour / max( 1.0 - transmit, 1e-3 ) * 0.5, 0.0, 1.0 ) ), alpha );";
+// The sky under a long lens: the band where it reaches, the cube with clouds above it, blended.
+const BAND_SKY_FRAGMENT = /* glsl */ `
+uniform sampler2D band;
+uniform samplerCube bare;
+uniform samplerCube clouds;
+uniform float bandTop;
+varying vec3 vDir;
+void main() {
+  vec3 d = normalize( vDir );
+  vec3 high = textureCube( clouds, d ).rgb;
+  vec3 colour = high;
+  float el = asin( clamp( d.y, -1.0, 1.0 ) );
+  if ( el > 0.0 && el < bandTop ) {
+    float az = atan( d.x, d.z ) / 6.2831853;
+    vec4 b = texture2D( band, vec2( fract( az ), el / bandTop ) );
+    vec3 low = mix( textureCube( bare, d ).rgb, b.rgb * b.rgb * 2.0, b.a );
+    colour = mix( low, high, smoothstep( bandTop * 0.8, bandTop, el ) );
+  }
+  gl_FragColor = vec4( colour, 1.0 );
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
 
 const isSoftware = (renderer) => {
   const gl = renderer.getContext();
@@ -796,8 +909,50 @@ export async function createLook(canvas, options = {}) {
     });
   };
 
+  // Under a long lens the backdrop is a dome drawn from the band (bandSky) instead of the cube:
+  // one per scene, centred on the camera, drawn first and behind everything, two texture reads a
+  // pixel. Wider views keep the cube, whose clouds are sharp enough there.
+  const domes = new WeakMap();
+  const bandSky = (scene, camera) => {
+    if (sky.band === null) return;
+    let dome = domes.get(scene);
+    if (dome === undefined) {
+      if (scene.background !== sky.background) return;
+      dome = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 48, 24),
+        new THREE.ShaderMaterial({
+          side: THREE.BackSide,
+          depthTest: false,
+          depthWrite: false,
+          uniforms: {
+            band: { value: sky.band.texture },
+            bare: { value: sky.band.bare },
+            clouds: { value: sky.band.clouds },
+            bandTop: { value: BAND_TOP },
+          },
+          vertexShader: SKY_VERTEX,
+          fragmentShader: BAND_SKY_FRAGMENT,
+        }),
+      );
+      dome.name = "Sky";
+      dome.renderOrder = -1e9;
+      dome.frustumCulled = false;
+      // Part of the sky, never of the world: rays (the scene report, the Stage's picking) pass.
+      dome.raycast = () => {};
+      scene.add(dome);
+      domes.set(scene, dome);
+    }
+    const narrow = camera.isPerspectiveCamera === true && camera.fov <= BAND_FOV;
+    dome.visible = narrow;
+    scene.background = narrow ? null : sky.background;
+    if (narrow) {
+      camera.getWorldPosition(dome.position);
+      dome.scale.setScalar((camera.near + camera.far) / 2);
+    }
+  };
   const draw = (scene, camera, dt) => {
     dress(scene, camera);
+    if (!exact(camera)) bandSky(scene, camera);
     if (chain === null || exact(camera)) {
       renderer.toneMapping = exact(camera) ? THREE.NoToneMapping : TONE[look.toneMapping];
       renderer.render(scene, camera);
