@@ -194,9 +194,9 @@ export const GameBuild = Schema.Struct({
   at: IsoDateTime,
   source: GameBuildSource,
   /**
-   * A person's turn build: its place among all of the game's person builds,
-   * oldest 1, so it never moves as older pages load. Null for a keep-going
-   * step's build (named by its step) and a saved build (named by its label).
+   * Its place in the game's one sequence of builds, oldest 1: a chat's turn, a keep-going step
+   * and values kept from the Stage all count, so it never moves as older pages load. Null for a
+   * restore's parked folder (named by its label).
    */
   number: Schema.NullOr(PositiveInt),
   /**

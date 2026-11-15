@@ -33,13 +33,7 @@ import {
   formatBuildTime,
   passDelta,
 } from "./gameBuilds.logic";
-import {
-  isUndone,
-  markLabels,
-  stageBuildId,
-  stepMark,
-  timelineMarks,
-} from "./gameBuildTimeline.logic";
+import { isUndone, stageBuildId, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
@@ -135,9 +129,8 @@ export function GameBuildHistory({
       seen.add(build.id);
       loaded.push(build);
     }
-  // Oldest first, as stepping and labels read them; shown newest first.
+  // Oldest first, as stepping reads them; shown newest first.
   const marks = timelineMarks(loaded, list?.current ?? null);
-  const labels = markLabels(marks);
   const order = marks.map((build) => build.id);
   const lastPage = olderPages.at(-1);
   const olderNext =
@@ -333,7 +326,6 @@ export function GameBuildHistory({
               gameName={gameName}
               build={build}
               previous={index > 0 ? (marks[index - 1] ?? null) : null}
-              label={labels.get(build.id) ?? ""}
               onStage={onStage === build.id}
               copy={playing === build.id}
               undone={list !== null && isUndone(build, list)}
@@ -460,7 +452,6 @@ function BuildRow({
   gameName,
   build,
   previous,
-  label,
   onStage,
   copy,
   undone,
@@ -473,7 +464,6 @@ function BuildRow({
   build: GameBuild;
   /** The build before it, which its checks are read against. */
   previous: GameBuild | null;
-  label: string;
   onStage: boolean;
   /** It plays on the Stage from a copy, not the folder. */
   copy: boolean;
@@ -486,7 +476,8 @@ function BuildRow({
   const step = build.source._tag === "turn" ? build.source.step : null;
   const caption = buildCaption(build);
   const saved = build.source._tag === "saved";
-  const name = saved ? caption : step !== null ? `Step ${label}` : `Build ${label}`;
+  // A restore's parked folder has no number: its caption says what it is.
+  const name = saved && build.number === null ? caption : buildName(build);
   const files = build.fileCount ?? build.files.length;
   // A saved build's caption is its name; what it touched says what it is.
   const meta = saved

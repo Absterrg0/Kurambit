@@ -24,22 +24,24 @@ import {
 export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
 
 /**
- * A build named in a sentence: "Build 5", "Step 2's build", "Tuned 2". A person's build goes by
- * the server's number for it, never its turn's: a resumed or stopped turn is no extra build. A
- * saved build goes by its label and its place among the game's with that label, so two never
- * share a name.
+ * A build named in a sentence, in the game's one sequence: "Build 5", "Build 6 · Keep going",
+ * "Build 7 · tuned", "Build 5 · fix 1". The number is the server's, never a turn's: a resumed
+ * or stopped turn is no extra build. A restore's parked folder goes by its label and its place
+ * among the game's with that label, so two never share a name.
  */
 export const buildName = (
   build: Pick<GameBuild, "id" | "source" | "number"> & { readonly fix?: number | undefined },
 ): string => {
   const source = build.source;
+  const numbered = `Build ${build.number ?? build.id.slice(0, 8)}`;
   switch (source._tag) {
     case "turn":
       return source.step !== null
-        ? `Step ${source.step.n}'s build`
+        ? `${numbered} · Keep going`
         : // A small fix keeps its build's number: the person sees one build, fixed.
-          `Build ${build.number ?? build.id.slice(0, 8)}${build.fix === undefined ? "" : ` · fix ${build.fix}`}`;
+          `${numbered}${build.fix === undefined ? "" : ` · fix ${build.fix}`}`;
     case "saved":
+      if (source.edit !== undefined && build.number !== null) return `${numbered} · tuned`;
       return source.nth === undefined ? source.label : `${source.label} ${source.nth}`;
   }
 };
@@ -650,9 +652,6 @@ export const requestShortForm = (request: string, fits: number) => {
     .replace(/(\s+(a|an|the|to|of|and|or))+$/i, "")
     .replace(/[\s,;:.]+$/, "")}…`;
 };
-/** PURE. A build's name inside a sentence: "build 5", "step 2's build", a saved build's label. */
+/** PURE. A build's name inside a sentence: "build 5", "build 6 · Keep going", a saved build's label. */
 export const buildPhrase = (name: string): string =>
-  name
-    .replace(/^Build /, "build ")
-    .replace(/^Step /, "step ")
-    .replace(/^The game /, "the game ");
+  name.replace(/^Build /, "build ").replace(/^The game /, "the game ");

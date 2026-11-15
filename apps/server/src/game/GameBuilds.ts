@@ -387,10 +387,10 @@ export const currentBuild = <E, R>(
 
 /** Turn rows a page of the current-build walk reads. */
 const TURN_PAGE = 30;
-/** Every turn row older than a page, read to number its person builds. */
+/** Every turn row older than a page, read to number its builds. */
 const ALL_TURNS = 1_000_000;
 
-/** A person build's number, and which fix of it it is (null for the build itself). */
+/** A build's number, and which fix of it it is (null for the build itself). */
 interface BuildNumber {
   readonly number: number;
   readonly fix: number | null;
@@ -411,6 +411,14 @@ export const turnPending = (
     run.checkpointId === null);
 
 const isPersonBuild = (entry: Entry) => entry.source._tag === "turn" && entry.source.step === null;
+/**
+ * A build in the game's one numbered sequence, the way a person counts what they see land: a
+ * chat's turn, a keep-going step and values kept from the Stage. A restore's parked folder is
+ * the game as it was, not a new build.
+ */
+const isNumbered = (entry: Entry) =>
+  entry.source._tag === "turn" ||
+  (entry.source._tag === "saved" && entry.source.edit !== undefined);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -427,7 +435,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const engine = yield* Orchestrator.OrchestratorV2;
   // Older turns never change their builds: a page's count below it is read once per ref set.
-  const personCounts = new Map<string, number>();
+  const numberedCounts = new Map<string, number>();
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -796,20 +804,22 @@ const make = Effect.gen(function* () {
         entries: listed,
         kept,
         more: floor !== null || listed.length > limit,
-        // How many person builds the game has from before `at`: every older
+        // How many numbered builds the game has from before `at`: every older
         // turn read, so a page's numbers never depend on what else was loaded.
-        personBefore: (at: string) => {
+        numberedBefore: (at: string) => {
           const key = `${g.root}\0${at}\0${refs.length}`;
-          const known = personCounts.get(key);
+          const known = numberedCounts.get(key);
           if (known !== undefined) return Effect.succeed(known);
           return turnEntries(g, byRef, ALL_TURNS, at, saved, recorded, setups).pipe(
             Effect.map(({ entries }) => {
-              const count = entries.filter(
-                (entry) => isPersonBuild(entry) && !fixes.has(entry.id),
-              ).length;
-              if (personCounts.size > 200) personCounts.clear();
-              personCounts.set(key, count);
-              return count;
+              const ids = new Set(
+                [...entries, ...saved.filter((entry) => entry.at < at)]
+                  .filter((entry) => isNumbered(entry) && !fixes.has(entry.id))
+                  .map((entry) => entry.id),
+              );
+              if (numberedCounts.size > 200) numberedCounts.clear();
+              numberedCounts.set(key, ids.size);
+              return ids.size;
             }),
           );
         },
@@ -848,22 +858,22 @@ const make = Effect.gen(function* () {
       return id !== null && isGameBuildId(id) ? id : null;
     });
 
-  /** Each person build's number among `entries`, a contiguous stretch of the game's builds. */
+  /** Each numbered build's number among `entries`, a contiguous stretch of the game's builds. */
   const numbersOf = (
     listed: Effect.Success<ReturnType<typeof allEntries>>,
     entries: ReadonlyArray<Entry>,
   ) =>
     Effect.gen(function* () {
-      const people = entries
-        .filter(isPersonBuild)
+      const numbered = entries
+        .filter(isNumbered)
         .toSorted((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-      const oldest = people[0];
+      const oldest = numbered[0];
       if (oldest === undefined) return new Map<string, BuildNumber>();
-      let n = yield* listed.personBefore(oldest.at);
+      let n = yield* listed.numberedBefore(oldest.at);
       let fix = 0;
       // A fix keeps the number of the build before it and counts as that build's next fix.
       return new Map(
-        people.map((entry): readonly [string, BuildNumber] => {
+        numbered.map((entry): readonly [string, BuildNumber] => {
           if (listed.fixes.has(entry.id) && n > 0)
             return [entry.id, { number: n, fix: (fix += 1) }];
           fix = 0;

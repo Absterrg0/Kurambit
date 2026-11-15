@@ -73,7 +73,10 @@ export function GameTurnBuild({
   return (
     <div data-game-turn-build={build.id} className="mt-1.5 flex flex-col gap-1">
       <div className="-ms-2 flex min-w-0 items-center gap-x-0.5">
-        {!factsSettled(build.facts) ? (
+        {step?.verdict === "undone" || undo.action?.kind === "redo" ? (
+          // Undone: its checks, good or not, describe a game the folder no longer holds.
+          <Undo2Icon className="ms-2 size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
+        ) : !factsSettled(build.facts) ? (
           <CircleDashedIcon
             className="ms-2 size-3.5 shrink-0 text-dim-foreground"
             aria-hidden="true"

@@ -525,10 +525,12 @@ function ThreadGameStage({
   const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
   // On a game changed since its build, the restore keeps those changes as a build of their own.
   // The control names the build; the sentences under it are the build menu's own.
-  const undoLabel = undoName === null ? "Undo the last build" : `Undo ${undoName}`;
-  const undoDetail =
-    undoName === null ? null : undoOutcome(undoBaseName ?? null, changedSince != null);
-  const redoLabel = undoName === null ? "Redo the build you undid" : `Redo ${undoName}`;
+  // A control that cannot act names nothing: after an undo, "Undo build 6" would name a build
+  // the folder no longer holds.
+  const undoNamed = undoName !== null && turnUndoAllowed("undo");
+  const undoLabel = undoNamed ? `Undo ${undoName}` : "Undo";
+  const undoDetail = undoNamed ? undoOutcome(undoBaseName ?? null, changedSince != null) : null;
+  const redoLabel = undoName !== null && turnUndoAllowed("redo") ? `Redo ${undoName}` : "Redo";
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
@@ -1141,8 +1143,8 @@ function ThreadGameStage({
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking
     ? {
-        label: keepGoingStatus.step === null ? "Next step" : `Step ${keepGoingStatus.step}`,
-        name: keepGoingStatus.step === null ? "Next step" : `Step ${keepGoingStatus.step}`,
+        label: `Making build ${nextBuildNumber}`,
+        name: `Build ${nextBuildNumber} · Keep going`,
         caption: keepGoingStatus.proposal?.summary ?? null,
         keepGoing: true,
       }
