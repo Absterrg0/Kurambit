@@ -819,6 +819,7 @@ function OpenCommandPaletteDialog(props: {
   );
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
+  const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
@@ -1688,6 +1689,16 @@ function OpenCommandPaletteDialog(props: {
       icon: <MaximizeIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.fullscreen",
       run: requestStage({ kind: "fullscreen" }),
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-pause-away",
+      title: pauseWhenAway
+        ? "Keep the game playing when I click away"
+        : "Pause the game when I click away",
+      searchTerms: ["pause", "focus", "click away", "blur", "typing", "stage", "game"],
+      icon: <PauseIcon className={ITEM_ICON_CLASS} />,
+      run: async () => useGameWorkspaceStore.getState().setPauseWhenAway(!pauseWhenAway),
     });
     actionItems.push({
       kind: "action",

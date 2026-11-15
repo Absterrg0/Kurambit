@@ -57,6 +57,9 @@ interface GameWorkspaceStoreState {
   /** The game folded away: the chat takes the column, and the game pauses and mutes. */
   gameHidden: boolean;
   setGameHidden: (hidden: boolean) => void;
+  /** The game pauses when the person clicks away from it (the chat, Tune) and plays on when they click back. */
+  pauseWhenAway: boolean;
+  setPauseWhenAway: (on: boolean) => void;
 }
 
 /** The game screen's layout preferences, one set for every game. */
@@ -74,19 +77,26 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setChatShare: (share) => set({ chatShare: clampGameChatShare(share) }),
       gameHidden: false,
       setGameHidden: (hidden) => set({ gameHidden: hidden }),
+      pauseWhenAway: true,
+      setPauseWhenAway: (on) => set({ pauseWhenAway: on }),
     }),
     {
       name: "kurambit:game-workspace:v7",
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
-      partialize: (state) => ({ chatShare: state.chatShare, gameHidden: state.gameHidden }),
+      partialize: (state) => ({
+        chatShare: state.chatShare,
+        gameHidden: state.gameHidden,
+        pauseWhenAway: state.pauseWhenAway,
+      }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
         return {
           ...current,
           chatShare: clampGameChatShare(saved?.chatShare ?? current.chatShare),
           gameHidden: saved?.gameHidden === true,
+          pauseWhenAway: saved?.pauseWhenAway !== false,
         };
       },
     },

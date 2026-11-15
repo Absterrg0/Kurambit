@@ -19,6 +19,7 @@ import {
   type GameViewport,
   type StudioError,
 } from "@kurambit/contracts";
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
@@ -265,6 +266,7 @@ export function GameFrame({
   freezeKey?: string | null;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
   const setFrameRef = (node: HTMLIFrameElement | null) => {
     frameRef.current = node;
     onFrame?.(node);
@@ -335,7 +337,12 @@ export function GameFrame({
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
   const pendingAck = useRef(false);
-  const visible = !hidden;
+  // The person played, then clicked away (the chat, the composer, Tune): the game holds the way
+  // a hidden Stage does, so a run is never lost to typing, and plays on when they click back.
+  const [played, setPlayed] = useState(false);
+  if (frameFocused && !played) setPlayed(true);
+  const away = pauseWhenAway && played && !frameFocused && !hidden;
+  const visible = !hidden && !away;
   // The hint is exactly "an unconfirmed pause is outstanding".
   const [unacknowledged, setUnacknowledged] = useState(false);
 
@@ -417,6 +424,7 @@ export function GameFrame({
         onLoad={() => {
           setLoaded(true);
           setFrameFocused(false);
+          setPlayed(false);
           // The game's listener may have come up after the last message;
           // a fresh document needs the current state restated.
           frameRef.current?.contentWindow?.postMessage(visibilityMessage(visible), "*");
@@ -442,7 +450,7 @@ export function GameFrame({
       {/* One quiet line in a corner that lets every click through. The frame belongs to the
           game, so the click hint shows only while the pointer is over it; a warning or a
           freeze always shows. */}
-      {unacknowledged || frozen || !frameFocused ? (
+      {unacknowledged || frozen || away || !frameFocused ? (
         <Text
           variant="caption"
           tone="inherit"
@@ -450,7 +458,7 @@ export function GameFrame({
             <span
               className={cn(
                 "pointer-events-none absolute bottom-3 left-3 z-20 flex h-6 items-center gap-2 rounded-md bg-black/60 px-2 text-stage-foreground/85 backdrop-blur-sm transition-opacity",
-                !unacknowledged && !frozen && "opacity-0 group-hover/stage:opacity-100",
+                !unacknowledged && !frozen && !away && "opacity-0 group-hover/stage:opacity-100",
               )}
             />
           }
@@ -465,6 +473,11 @@ export function GameFrame({
             <StageHint>
               <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
               Paused · click something to point at it
+            </StageHint>
+          ) : away ? (
+            <StageHint>
+              <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
+              Paused · click to play on
             </StageHint>
           ) : frameFocused ? null : (
             <>

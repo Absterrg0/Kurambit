@@ -69,9 +69,9 @@ then makes that one in Blender in the same turn, which can take several minutes 
 after that makes it better, and what you ask for is done in that turn rather than put off.
 
 A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
-plays it, so you watch the starter turn into your game while your agent works. When the agent saves,
-the game reloads straight into play: at once when no turn is running, and while your agent's turn
-runs, at most every ten seconds and once more when the turn ends. If you are playing at that moment (you clicked into
+plays it. While the first build is being made, the stage plays the game as soon as the agent's check
+of it passes, marked **First playable**, and keeps it on screen while the agent goes on working.
+A turn's changes reach the stage when the turn ends, as its build. If you are playing at that moment (you clicked into
 the game), it is not reloaded under you: the stage says your agent changed the game while you were
 playing, with **Reload**. A hidden stage catches up when you show it. If a save breaks the game, the
 stage names the error: quietly while the turn runs, since the agent may be mid-change, and with
@@ -260,7 +260,9 @@ other tabs. `mod+Alt+C` shows or hides Tune.
 - **A three.js game is always on.** The stage plays the game folder itself, and **Restart** starts
   it again at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
   **Fullscreen** shows only the game, edge to edge. A game made from the starter opens on its title screen: choose Play there, or press
-  Enter. The game pauses and mutes while the stage is hidden and resumes when you come back.
+  Enter. The game pauses and mutes while the stage is hidden and resumes when you come back. It
+  also pauses when you click away from it, into the chat or **Tune**, and plays on when you click it
+  again; turn off **Pause when I click away** in the stage's **More** menu to keep it running.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
   game and closes its preview server. A stopped game stays stopped, in every window and for your
   agent, until **Play** starts it again.

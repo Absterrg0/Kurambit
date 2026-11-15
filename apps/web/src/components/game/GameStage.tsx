@@ -392,6 +392,8 @@ function ThreadGameStage({
   // Hidden by the person: the chat takes the column, and the game pauses and mutes.
   const collapsed = useGameWorkspaceStore((state) => state.gameHidden);
   const setGameHidden = useGameWorkspaceStore((state) => state.setGameHidden);
+  const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
+  const setPauseWhenAway = useGameWorkspaceStore((state) => state.setPauseWhenAway);
   const panelOpen = useRightPanelStore(
     (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
   );
@@ -1312,6 +1314,16 @@ function ThreadGameStage({
                     {frozen ? "Play on" : "Freeze to point at things"}
                     {freezeKey === null ? null : <MenuShortcut>{freezeKey}</MenuShortcut>}
                   </MenuItem>
+                ) : null}
+                {stageKind !== "window" ? (
+                  <MenuCheckboxItem
+                    variant="switch"
+                    closeOnClick={false}
+                    checked={pauseWhenAway}
+                    onCheckedChange={setPauseWhenAway}
+                  >
+                    Pause when I click away
+                  </MenuCheckboxItem>
                 ) : null}
                 {stageKind === "live" ? (
                   <MenuItem

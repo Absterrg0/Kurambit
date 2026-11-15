@@ -317,8 +317,8 @@ const setStageFrozen = (on: boolean) => {
 };
 
 /**
- * Pauses or plays on. Only the person pauses: the game keeps playing while they tune it, read
- * the chat or write, the way an engine's play mode does, so a change shows as it is made.
+ * Freezes or plays on, to point at things. Clicking away from the game holds it separately
+ * (GameFrame's pause when away), so a freeze is always the person's own.
  */
 export const toggleStageFreeze = () => setStageFrozen(!useStageBridge.getState().frozen);
 
