@@ -239,7 +239,7 @@ export function ocean(
   // One tile of the normal map is about 25 m of sea at wave 1.
   material.uniforms.size.value = 4 / Math.max(wave, 0.05);
   const points = Array.from({ length: MAX_WAKE_POINTS }, () => new THREE.Vector4());
-  const links = new Array(MAX_WAKE_POINTS).fill(0);
+  const links = Array.from({ length: MAX_WAKE_POINTS }, () => 0);
   material.uniforms.wakePoints = { value: points };
   material.uniforms.wakeLinks = { value: links };
   material.uniforms.crestFoam = { value: foam };
