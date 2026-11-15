@@ -8,15 +8,17 @@ demo needs, so build the game, not the menus.
 
 The first playable build, in this order ("The first turn" in the game's first message):
 
-1. The look: `game_assets_search` lists the library by style family;
-   `game_assets_add` the player and one or two threats or props, the first
-   call with `lock` (the family and view), which writes `STYLE.json`. They land under `web/assets/library/<pack>/`; name them in `ASSETS`
-   by the path the add reports. The shell loads them and compiles their
-   shaders behind the loading screen, so play never starts on a freeze; keep
-   the default look (or name one preset; no lights besides `ctx.look.sun`).
+1. The models, the way the first message says for this game: in code with
+   `shell/model.js`, each looked at alone with `game_model_sheet`; or from the
+   library: `game_assets_search` lists it by style family, `game_assets_add`
+   the player and one or two threats, the first call with `lock` (the family
+   and view), which writes `STYLE.json`, named in `ASSETS` by the path the add
+   reports. The shell loads `ASSETS` and compiles what draws behind the loading
+   screen, so play never starts on a freeze; keep the default look (or name
+   one preset; no lights besides `ctx.look.sun`).
 2. The game: paste the recipe for your view from `studio-skills/three.md`
-   (third person, top-down, side view) over `web/main.js`, swap in your
-   models, and grow it into the brief's core loop with the kits below.
+   (third person, top-down, side view) over `web/main.js`, put your models
+   where it uses the library's, and grow it into the brief's core loop.
 3. A win and a lose through `GameState`, the HUD through `ctx.ui`, `Juice` on
    every action, then `game_check` clean, with each problem its scene report
    lists fixed. Ending the turn plays the build.
@@ -49,6 +51,7 @@ Each kit's comment block shows every call; read it in
 | `camera.js`       | `followCamera2D`, `followCamera3D` (shoulder, orbit, walls, focus on a foe)           |
 | `level.js`        | `buildLevel` from a text map: spawns, bounds, walls, `move`, a ground to the horizon  |
 | `look.js`         | `LOOK` presets (`day`, `golden`, `night`, `interior`, `flat`), the sun, baked shadows |
+| `model.js`        | models in code: palette, rounded boxes, lathe, loft, merge, scatter, tuned, `rig`     |
 | `audio.js`        | `playMusic`, `playAmbience`, `playSfx` on the volume sliders                          |
 | `stage-bridge.js` | `ctx.thing` and `ctx.tune` for the Stage                                              |
 

@@ -12,6 +12,12 @@
 //     ambient: 1,             // that light's strength
 //     sky: { top: 0x4a6ea8, horizon: 0xf2b27a, ground: 0x5a4a3c, light: 0.45 }, // the drawn sky;
 //                             // its light is the same sky at `light` saturation
+//     // physical: true draws the sky by scattering from the sun instead (three's Sky:
+//     // { turbidity: 2, rayleigh: 1.2, mie: 0.005 } to tune it), and clouds lays a cloud deck
+//     // over either: { cover: 0.45 (0..1), scale: 1 (bigger is smaller clouds), shade: 0x8d96a6 }.
+//     // Both are drawn once into the backdrop and the light, so they cost nothing per frame.
+//     quality: "auto",        // "high", "low": how much the water, clouds and shadows spend;
+//                             // auto is high on a GPU, low drawn in software
 //     sun: { direction: { x: -0.6, y: 0.22, z: 0.75 }, color: 0xffc98a, intensity: 3.6 },
 //     fog: { density: 0.008, height: 0.05, color: 0xf2b27a }, // height fog: thick low, thin high;
 //                             // false: none
@@ -154,6 +160,7 @@ export function resolveLook(options = {}) {
     shadows: options.shadows !== false,
     ground: options.ground !== false,
     resolution: options.resolution ?? "adaptive",
+    quality: options.quality ?? "auto",
     // A 2D game's exact colours: an orthographic camera with nothing about the look named.
     exactWhenOrthographic: options.preset === undefined && options.toneMapping === undefined,
   };
@@ -161,6 +168,8 @@ export function resolveLook(options = {}) {
     throw new Error(`LOOK.toneMapping must be one of ${Object.keys(TONE).join(", ")}.`);
   if (!ENVIRONMENTS.has(look.environment))
     throw new Error('LOOK.environment must be "sky", "room" or false.');
+  if (!["auto", "high", "low"].includes(look.quality))
+    throw new Error('LOOK.quality must be "auto", "high" or "low".');
   if (look.resolution !== "adaptive" && !(look.resolution > 0))
     throw new Error('LOOK.resolution must be "adaptive" or a scale such as 0.75.');
   // The chain runs only for what needs whole-frame passes; tone mapping and the grade
@@ -427,6 +436,48 @@ void main() {
   gl_FragColor = vec4( c, 1.0 );
 }`;
 
+// A cloud deck on a dome over the sky: fbm on the sky's plane, lit from the sun's side by how
+// much thinner the cloud is a step toward it, faded into the haze at the horizon.
+const CLOUD_FRAGMENT = /* glsl */ `
+uniform vec3 sunDir;
+uniform vec3 sunColor;
+uniform vec3 shade;
+uniform vec3 lit;
+uniform float cover;
+uniform float scale;
+varying vec3 vDir;
+float hash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+float noise( vec2 p ) {
+  vec2 i = floor( p ), f = fract( p );
+  vec2 u = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( hash( i ), hash( i + vec2( 1, 0 ) ), u.x ), mix( hash( i + vec2( 0, 1 ) ), hash( i + vec2( 1, 1 ) ), u.x ), u.y );
+}
+float fbm( vec2 p ) {
+  float v = 0.0, a = 0.5;
+  for ( int i = 0; i < 6; i ++ ) { v += a * noise( p ); p = p * 2.03 + vec2( 17.1, 9.2 ); a *= 0.5; }
+  return v;
+}
+float density( vec2 p ) {
+  float n = fbm( p + 0.8 * vec2( fbm( p * 0.6 ), fbm( p * 0.6 + 5.2 ) ) );
+  // Big rounded heaps: the low octaves decide where a cloud is, the high ones its edge.
+  return smoothstep( 1.0 - cover, 1.0 - cover + 0.22, n );
+}
+void main() {
+  vec3 d = normalize( vDir );
+  if ( d.y <= 0.0 ) discard;
+  vec2 p = d.xz / ( d.y + 0.12 ) * 1.6 * scale;
+  float c = density( p );
+  if ( c < 0.003 ) discard;
+  vec2 toward = normalize( sunDir.xz + 1e-4 ) * 0.22;
+  float ahead = density( p + toward );
+  float light = clamp( 0.62 + ( c - ahead ) * 2.2, 0.0, 1.0 );
+  vec3 col = mix( shade, lit * sunColor, light );
+  float s = max( dot( d, sunDir ), 0.0 );
+  col += sunColor * pow( s, 10.0 ) * 0.6 * ( 1.0 - c );
+  float fade = smoothstep( 0.0, 0.18, d.y );
+  gl_FragColor = vec4( col, c * fade );
+}`;
+
 // How far the backdrop below the horizon goes from the horizon's haze toward the sky's ground
 // tone. The ground tones are dark so the light from below stays dim; drawn at full strength
 // behind a board seen from above, the tone mapping's toe and the grade's contrast crush them
@@ -438,7 +489,7 @@ const BACKDROP_GROUND = 0.5;
  * desaturated, so a blue sky does not turn every model blue (library models are
  * coloured for neutral light) while the backdrop keeps its colour.
  */
-async function skyProbes(renderer, look, sunDir) {
+async function skyProbes(renderer, look, sunDir, quality) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const material = new THREE.ShaderMaterial({
     side: THREE.BackSide,
@@ -457,18 +508,84 @@ async function skyProbes(renderer, look, sunDir) {
   });
   const sphere = new THREE.Mesh(new THREE.SphereGeometry(100, 48, 24), material);
   const scene = new THREE.Scene().add(sphere);
-  const background = pmrem.fromScene(scene, 0, 0.1, 400).texture;
+  const owned = [sphere.geometry, material];
+  if (look.sky.physical) {
+    const { Sky } = await import("three/addons/objects/Sky.js");
+    const sky = new Sky();
+    sky.scale.setScalar(150);
+    const tune = look.sky.physical === true ? {} : look.sky.physical;
+    const u = sky.material.uniforms;
+    u.turbidity.value = tune.turbidity ?? 2;
+    u.rayleigh.value = tune.rayleigh ?? 1.2;
+    u.mieCoefficient.value = tune.mie ?? 0.005;
+    u.mieDirectionalG.value = 0.8;
+    u.sunPosition.value.copy(sunDir);
+    // Below the horizon the gradient's hazy ground stays (the Sky alone goes black there), and
+    // the scattering is brought to the scale of the look's exposure.
+    sky.material.uniforms.lookGain = { value: tune.gain ?? 0.5 };
+    sky.material.fragmentShader = `uniform float lookGain;\n${sky.material.fragmentShader.replace(
+      "gl_FragColor = vec4( retColor, 1.0 );",
+      "gl_FragColor = vec4( retColor * lookGain, smoothstep( -0.01, 0.05, direction.y ) );",
+    )}`;
+    sky.material.transparent = true;
+    sky.material.depthTest = false;
+    sky.renderOrder = -1;
+    sphere.renderOrder = -2;
+    material.uniforms.groundShare.value = BACKDROP_GROUND;
+    scene.add(sky);
+    owned.push(sky.geometry, sky.material);
+  }
+  if (look.sky.clouds) {
+    const c = look.sky.clouds === true ? {} : look.sky.clouds;
+    const clouds = new THREE.Mesh(
+      new THREE.SphereGeometry(90, 48, 24),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        transparent: true,
+        depthWrite: false,
+        depthTest: false,
+        uniforms: {
+          sunDir: { value: sunDir.clone() },
+          sunColor: { value: new THREE.Color(look.sun.color) },
+          shade: { value: new THREE.Color(c.shade ?? 0x8d96a6) },
+          lit: { value: new THREE.Color(c.lit ?? 0xffffff).multiplyScalar(1.15) },
+          cover: { value: c.cover ?? 0.45 },
+          scale: { value: c.scale ?? 1 },
+        },
+        vertexShader: SKY_VERTEX,
+        fragmentShader: CLOUD_FRAGMENT,
+      }),
+    );
+    clouds.renderOrder = 1;
+    scene.add(clouds);
+    owned.push(clouds.geometry, clouds.material);
+  }
+  let background;
+  let target = null;
+  if (look.sky.physical || look.sky.clouds) {
+    // Drawn once at full detail into a cube the backdrop shows as it is: a PMREM's top level
+    // is too soft for a cloud's edge.
+    target = new THREE.WebGLCubeRenderTarget(quality === "low" ? 512 : 1024, {
+      type: THREE.HalfFloatType,
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter,
+    });
+    new THREE.CubeCamera(0.1, 400, target).update(renderer, scene);
+    background = target.texture;
+  } else background = pmrem.fromScene(scene, 0, 0.1, 400).texture;
   let light;
   if (look.environment === "room") {
     const { RoomEnvironment } = await import("three/addons/environments/RoomEnvironment.js");
     light = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  } else if (target !== null) {
+    // A sky this real lights the scene in its own colours: reflections show the clouds.
+    light = pmrem.fromCubemap(target.texture).texture;
   } else {
     material.uniforms.saturation.value = look.sky.light ?? 0.45;
     material.uniforms.groundShare.value = 1;
     light = pmrem.fromScene(scene, 0, 0.1, 400).texture;
   }
-  sphere.geometry.dispose();
-  material.dispose();
+  for (const thing of owned) thing.dispose();
   pmrem.dispose();
   return { background, light };
 }
@@ -537,7 +654,9 @@ export async function createLook(canvas, options = {}) {
   shared.lookSunDir.value.copy(sunDir);
   if (look.fog !== false)
     shared.lookSunGlow.value.set(look.sun.color).multiplyScalar(look.sun.intensity * 0.25);
-  const sky = await skyProbes(renderer, look, sunDir);
+  // Auto spends where a GPU draws, and saves where the browser draws in software.
+  look.quality = look.quality === "auto" ? (gpu.software ? "low" : "high") : look.quality;
+  const sky = await skyProbes(renderer, look, sunDir, look.quality);
   const backgroundColor = look.background === null ? null : new THREE.Color(look.background);
 
   // A 1×1 depth map stands in until a bake, so the shadow sampler always has a depth texture.

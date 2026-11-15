@@ -705,6 +705,7 @@ export const makeUnityBackend = (
     },
     // The prepared player of the current sources plays; the editor is not needed again.
     replay: null,
+    modelSheet: null,
     playProcess: (input) =>
       Effect.gen(function* () {
         if (input.player === null)

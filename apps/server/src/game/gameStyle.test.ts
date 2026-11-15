@@ -18,6 +18,7 @@ import {
   readGameStyle,
   characterRoute,
   lockCharacterRouteRefusal,
+  modelChoice,
   styleBudgets,
   styleFromLock,
   styleHash,
@@ -211,13 +212,26 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
 });
 
 it("makes in Blender what the library lacks, never what the person's providers own", () => {
-  expect(lockCharacterRouteRefusal("mpfb-body", characterRoute({}))).toBeNull();
-  expect(lockCharacterRouteRefusal("unstamped-mesh", "library")).toBeNull();
-  expect(lockCharacterRouteRefusal("unstamped-mesh", "generated")).toMatch(/with generated/);
-  expect(lockCharacterRouteRefusal("generated-body", "library")).toMatch(/Make characters with/);
+  // A game from before the library was opt-in keeps its library and its Blender fallback.
+  expect(lockCharacterRouteRefusal("mpfb-body", modelChoice({}))).toBeNull();
   expect(
-    lockCharacterRouteRefusal("mpfb-body", characterRoute({ characters: "blender" })),
+    lockCharacterRouteRefusal("unstamped-mesh", modelChoice({ characters: "library" })),
   ).toBeNull();
+  expect(
+    lockCharacterRouteRefusal("unstamped-mesh", { route: "generated", library: true }),
+  ).toMatch(/with generated/);
+  expect(lockCharacterRouteRefusal("generated-body", modelChoice({}))).toMatch(/Make models with/);
+  expect(
+    lockCharacterRouteRefusal("mpfb-body", modelChoice({ characters: "blender", library: false })),
+  ).toBeNull();
+  // Code with the library off builds its characters in code.
+  expect(
+    lockCharacterRouteRefusal(
+      "unstamped-mesh",
+      modelChoice({ characters: "code", library: false }),
+    ),
+  ).toMatch(/three\.js code/);
+  expect(characterRoute({ characters: "library" })).toBe("code");
 });
 
 it("derives a lock from a family, and choosing again keeps what the person set", () => {

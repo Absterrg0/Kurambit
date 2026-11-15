@@ -61,7 +61,7 @@ const layer = (input: {
           packPicture: () => Effect.die("no library in tests"),
           standardBody: Effect.die("no library in tests"),
           gameRoot: (threadId) => Effect.succeed(threadId),
-          characterRoute: () => Effect.succeed(input.route ?? "library"),
+          characterRoute: () => Effect.succeed({ route: input.route ?? "code", library: true }),
         }),
         Layer.mock(GameOperations.GameOperations)({
           current: () => null,
@@ -231,7 +231,7 @@ describe("GameArt", () => {
               .generate(inGame(root), { lane, prompt: "a knight", name: "knight" })
               .pipe(Effect.flip);
             assert.match(refused.message, /Nothing was asked of a provider or spent/);
-            assert.match(refused.message, /only the person changes how characters are made/);
+            assert.match(refused.message, /Make models with/);
           }
           const listed = yield* art.list(inGame(root));
           assert.deepStrictEqual(listed.generations, []);

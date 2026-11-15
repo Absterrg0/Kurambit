@@ -6,18 +6,18 @@ add a model to `ASSETS` only once its file is in place.
 
 ## The first turn
 
-- Real art from the first build: the player, threats and level pieces are
-  library models (sprites in 2D) named in `ASSETS`. When the library has no
-  model that is the brief's subject (its player, its threat, a prop it names),
-  make that one in Blender (art-pipeline skill) instead of standing in
-  something else. A Box, Sphere or Cylinder never stands in for a character,
-  an enemy or a prop; effects (`Juice.burst`, a glow) are fine.
+- Real models from the first build, made the way the game's route says (the
+  first message): in code (`shell/model.js`), or library models (sprites in
+  2D) named in `ASSETS`, or made in Blender. A bare Box, Sphere or Cylinder
+  never stands in for a character, an enemy or a prop the brief names;
+  effects (`Juice.burst`, a glow) are fine.
 - Packs differ in scale (a Kenney blocky character stands several times a
   mini one): when you mix packs, size each model with `root.scale.setScalar(n)`.
 - In a 3D view the look draws the sky, its light and the fog: do not set
   `scene.background` or `scene.fog` over them.
 - Start from the recipe for your view below and grow it into the brief's
-  loop. Each is pasted whole over `web/main.js` and passes `game_check`.
+  loop. Each is pasted whole over `web/main.js` and passes `game_check`;
+  each uses library models, so put your own where it calls `ctx.assets.model`.
 
 ## View recipes
 

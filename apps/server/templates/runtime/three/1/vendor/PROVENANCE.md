@@ -40,3 +40,8 @@
 - Keep this pin within the runtime's major: games of this major rely on it. A
   newer three.js is a new runtime major (`../../2/`), vendored with its
   licenses the same way and said here.
+- `addons/geometries/RoundedBoxGeometry.js` (the modelling kit's rounded boxes, `shell/model.js`),
+  `addons/objects/Sky.js` (the look's physical sky, `shell/look.js`) and
+  `addons/objects/Water.js` (the ocean kit, `shell/water.js`): the same release's
+  `examples/jsm` files from the npm tarball three-0.180.0.tgz (sha512 integrity matches the
+  registry), added 2026-11-15. They pass through the repository's formatter like the files above.

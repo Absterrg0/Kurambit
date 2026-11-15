@@ -18,6 +18,7 @@ import {
   ThreadId,
   GameManifest,
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
+  gameModelChoice,
   isGameEngineActive,
   parkedEngineMessage,
   GameOperationError,
@@ -150,12 +151,13 @@ export class GameProjectService extends Context.Service<
       options?: { readonly owner?: string | undefined; readonly waitUntil?: number | undefined },
     ) => Effect.Effect<A, E | GameOperationError>;
     /**
-     * The person's choice of how this game's characters are made, written into game.json.
-     * Only the person makes it: the client's control, or the agent when they asked in chat.
+     * The person's choice of how this game's models are made and whether the library is on,
+     * written into game.json; an omitted part stays as it is. Only the person makes it: the
+     * client's control, or the agent when they asked in chat.
      */
     readonly setCharacterRoute: (
       threadId: ThreadId,
-      route: GameCharacterRoute,
+      choice: { readonly route?: GameCharacterRoute; readonly library?: boolean },
     ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
     /** Between turns: the game's studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
@@ -686,18 +688,22 @@ const make = Effect.gen(function* () {
         ),
       ),
     setCharacterRoute: Effect.fn("GameProjectService.setCharacterRoute")(
-      function* (threadId, route) {
+      function* (threadId, choice) {
         const root = yield* resolve(threadId);
-        const unavailable = GAME_CHARACTER_ROUTE_UNAVAILABLE[route];
+        const unavailable =
+          choice.route === undefined ? undefined : GAME_CHARACTER_ROUTE_UNAVAILABLE[choice.route];
         if (unavailable !== undefined)
           return yield* new GameOperationError({
             operation: "set-characters",
             path: NodePath.join(root, "game.json"),
             reason: "invalid-input",
-            detail: `${route}: ${unavailable}`,
+            detail: `${choice.route}: ${unavailable}`,
           });
-        // A valid manifest first; the write keeps every key it holds, only characters changes.
-        yield* read(root);
+        // A valid manifest first; the write keeps every key it holds, only the choice changes, and
+        // both parts are written as read so an old game's "library" route becomes what it means.
+        const current = gameModelChoice(yield* read(root));
+        const route = choice.route ?? current.route;
+        const library = choice.library ?? current.library;
         const file = NodePath.join(root, "game.json");
         const raw = yield* Effect.tryPromise({
           try: () => NodeFSP.readFile(file, "utf8"),
@@ -726,7 +732,7 @@ const make = Effect.gen(function* () {
         yield* writeFileStringAtomically({
           filePath: file,
           // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
-          contents: `${JSON.stringify({ ...raw, characters: route }, null, 2)}\n`,
+          contents: `${JSON.stringify({ ...raw, characters: route, library }, null, 2)}\n`,
           followLink: false,
         }).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -742,8 +748,12 @@ const make = Effect.gen(function* () {
           ),
         );
         // Every client's status signal rereads on an operation push.
-        yield* operations.changed(root, "characters", `Make characters with ${route}`);
-        return { route };
+        yield* operations.changed(
+          root,
+          "characters",
+          `Make models with ${route}, library ${library ? "on" : "off"}`,
+        );
+        return { route, library };
       },
     ),
     refreshGuidance: (root) =>

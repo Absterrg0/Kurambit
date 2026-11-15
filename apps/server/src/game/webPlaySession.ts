@@ -162,6 +162,17 @@ const RUN_REPLAY = `(async (play) => {
     return null;
   }
 })`;
+/** One model sheet (shell/sheet.js): four draws, which in software on a big model take seconds. */
+const SHEET_MS = 20_000;
+const DRAW_SHEET = `((name) => {
+  const sheet = window.__studio?.sheet;
+  if (sheet === null || typeof sheet !== "object" || typeof sheet.draw !== "function") return "no-sheet";
+  try {
+    return JSON.parse(JSON.stringify(sheet.draw(name)));
+  } catch (error) {
+    return { error: String(error).slice(0, 300) };
+  }
+})`;
 const READ_HUD = `(() => {
   const qa = window.__studio?.qa;
   if (qa === null || typeof qa !== "object" || typeof qa.hud !== "function") return null;
@@ -380,6 +391,12 @@ export interface WebPlaySession extends PlaySession {
    * answered: null when it did not in time, "no-replay" when the shell has no replay.
    */
   readonly replay: (play: { readonly steps: number; readonly dt: number }) => Promise<unknown>;
+  /**
+   * Lays the model sheet of one named thing over the page (shell/sheet.js) and returns its
+   * measures; with null, the things it could draw. Null when the page did not answer in time,
+   * "no-sheet" when the shell has none. `still` then takes the picture.
+   */
+  readonly sheet: (name: string | null) => Promise<unknown>;
 }
 
 /**
@@ -862,6 +879,13 @@ export const openWebPlaySession = async (input: {
         const answered = await bounded(
           page.evaluate(`${RUN_REPLAY}(${JSON.stringify(play)})`).catch(() => null),
           REPLAY_MS(play.steps * play.dt),
+        );
+        return answered === TIMED_OUT ? null : answered;
+      },
+      sheet: async (name) => {
+        const answered = await bounded(
+          page.evaluate(`${DRAW_SHEET}(${JSON.stringify(name)})`).catch(() => null),
+          SHEET_MS,
         );
         return answered === TIMED_OUT ? null : answered;
       },

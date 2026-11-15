@@ -43,7 +43,6 @@ import {
   type GameBlenderRenderSpritesResult,
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
-  type GameCharacterRoute,
   type GameManifest,
   type GameStyle,
   type GameStyleView,
@@ -103,6 +102,8 @@ import { recordProvenance, renderSprites } from "./blenderSprites.ts";
 import { LIBRARY_LICENCES } from "./assetLibraryFiles.ts";
 import {
   characterRoute,
+  type GameModelChoice,
+  modelChoice,
   lockArmatureRefusal,
   lockCharacterRouteRefusal,
   ownRigRefusal,
@@ -407,7 +408,7 @@ const MPFB_MISSING = `An mpfb body needs MPFB2, which is not installed. Only the
  * The person's route refuses a made character on library: an MPFB2 body, or a mesh no library
  * or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
  */
-const routeRefusalOf = (candidate: Candidate, route: GameCharacterRoute) =>
+const routeRefusalOf = (candidate: Candidate, route: GameModelChoice) =>
   candidate.kind !== "character"
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
@@ -1726,7 +1727,7 @@ const make = Effect.gen(function* () {
       if (source.lane === "creature") {
         const refused = lockCharacterRouteRefusal(
           "generated-body",
-          characterRoute(yield* projects.read(root)),
+          modelChoice(yield* projects.read(root)),
         );
         if (refused !== null) return yield* refuse(refused);
       }
@@ -1879,7 +1880,7 @@ const make = Effect.gen(function* () {
         reviewed(root, realRoot, style, input),
       );
       const imageRel = `${PIPELINE_DIR}/${key}/${NodePath.basename(rendered.image)}`;
-      const route = characterRoute(yield* projects.read(root));
+      const route = modelChoice(yield* projects.read(root));
       const routeRefusal =
         routeRefusalOf(candidate, route) ?? (yield* creatureRefusal(root, candidate));
       const refusing = [
@@ -2416,7 +2417,7 @@ const make = Effect.gen(function* () {
             } else if ("mpfb" in input.body) {
               const refused = lockCharacterRouteRefusal(
                 "mpfb-body",
-                characterRoute(yield* projects.read(root)),
+                modelChoice(yield* projects.read(root)),
               );
               if (refused !== null) return yield* fail("invalid-input", refused);
               if ((yield* tools.blenderExtension("mpfb")) === null)
@@ -2446,7 +2447,7 @@ const make = Effect.gen(function* () {
                 );
               const refused = lockCharacterRouteRefusal(
                 "generated-body",
-                characterRoute(yield* projects.read(root)),
+                modelChoice(yield* projects.read(root)),
               );
               if (refused !== null) return yield* fail("invalid-input", refused);
               body = { game: generated.file, source: generated.source.stamp };
@@ -2801,7 +2802,7 @@ const make = Effect.gen(function* () {
               );
             // The person's route is read now, not at the review: they may have changed it since.
             const routeRefusal =
-              routeRefusalOf(candidate, characterRoute(manifest)) ??
+              routeRefusalOf(candidate, modelChoice(manifest)) ??
               (yield* creatureRefusal(root, candidate));
             if (routeRefusal !== null)
               return yield* opError("blender-export", root, "invalid-input", routeRefusal);

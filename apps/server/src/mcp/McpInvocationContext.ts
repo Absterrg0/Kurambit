@@ -45,8 +45,11 @@ export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   /** The engine of the calling thread's game; null when the thread works in no game. */
   readonly gameEngine?: GameEngineId | null;
-  /** How the calling thread's game makes its characters (game.json `characters`); null outside a game. */
-  readonly gameCharacters?: GameCharacterRoute | null;
+  /** How the calling thread's game makes its models and whether its library is on; null outside a game. */
+  readonly gameModels?: {
+    readonly route: GameCharacterRoute;
+    readonly library: boolean;
+  } | null;
   /** Why this machine has no Blender the game's tools can run, or null when it has one (or the engine uses none). */
   readonly blenderMissing?: string | null;
   /** The calling thread is keep going's play-bot setup session, whose task is to run its bot. */

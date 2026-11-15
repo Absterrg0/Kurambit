@@ -46,23 +46,29 @@ is the person's to read and edit too.
 
 ## Characters
 
-How this game's characters are made is the person's choice, shown by
-game_status as `characters`: `library` (the default), `blender` or
-`generated`. Read it before any character; you cannot change it. A message
-asking for one made character does not change the route. An unrigged model
-is a prop on every route.
+How this game's models are made is the person's choice, shown by game_status
+as `characters`: `code` (the default), `blender` or `generated`, and whether
+the free library is on, `library` (off by default). Read both before any
+model. Change them only when the person asks you to (`game_models_route`); a
+message asking for one made model does not change the route. An unrigged
+model is a prop on every route.
 
-- `library`: the library first, Blender for what it lacks. Characters from
-  the lock's packs, played by state with the engine's character animator. On
+- `code`: models built in three.js code with `shell/model.js` (its comment
+  block), each looked at alone with `game_model_sheet`. A humanoid is built
+  on the clip library's skeleton (`rig`) and plays its clips. With the library
+  on, library models come first and code builds what the library lacks.
+- Library on, on any route: characters from the lock's packs, played by
+  state with the engine's character animator. On
   `standard-humanoid`, `game_blender_character` with a library body
   (`quaternius-universal-base-characters`) puts it on the skeleton with the
   library's clips. Animals and creatures (Quaternius' animals and monsters,
   animated Poly Pizza models) each come on a skeleton of their own with their
   own clips: play a model's clips on that model only. When the library has no
   model that is the brief's subject (a robot, a particular animal, a named
-  machine), make that one in Blender (Made characters, Made from scratch)
-  rather than standing something else in for it: a knight is not a robot.
-  The same goes for a prop the brief names.
+  machine), make that one the route's way rather than standing something
+  else in for it: a knight is not a robot. The same goes for a prop the brief
+  names. With the library off, its models, textures and sprites are refused;
+  its clips and sounds still come in.
 - `blender`: made characters: on the standard skeleton with the library's
   clips (Made characters), or on their own rig with their own clips (Made
   from scratch).
@@ -192,8 +198,9 @@ clips. The lock's rig never governs it and it never plays library clips; the
 palette, budgets, texture size and credits hold as for anything else. A
 humanoid that should play the library's clips goes through
 `game_blender_character` instead. Anything rigged, a door on hinges too,
-is a character to the person's route: `blender`, or `library` for a subject
-the library has no model of; on `generated` say so in your reply. Every step runs headless in
+is a character to the person's route: `blender`, or `code` with the library
+on for a subject the library has no model of; on `generated`, or `code` with
+the library off, say so in your reply. Every step runs headless in
 `game_blender_code` (`import kurambit` for its helpers); write the subject's
 `art/CONCEPT.md` section first, as for any character.
 
@@ -265,7 +272,7 @@ needs a lock with no hex palette.
 On the `generated` route the person has the art made by providers through
 `game_generate`, and this pipeline makes it one look. The person picks every
 candidate; you never pick taste for them. Never block the playable on art:
-library stand-ins play until each piece arrives. Start a generation, keep
+stand-ins (library models, or quick ones in code) play until each piece arrives. Start a generation, keep
 building, and pick it up with `game_generate_wait`.
 
 1. **Key art, in the first turn.** Lane `image`, name `key_art`,

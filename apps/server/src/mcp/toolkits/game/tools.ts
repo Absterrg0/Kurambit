@@ -41,6 +41,10 @@ import {
   GameBuildRestoreResult,
   GameBuildsResult,
   GameCheckResult,
+  GameModelSheetInput,
+  GameModelSheetResult,
+  GameSetCharacterRouteResult,
+  GameCharacterRoute,
   GameUnityConsoleInput,
   GameUnityEditInput,
   GameUnityEvalInput,
@@ -432,6 +436,23 @@ export const GameCheckTool = Tool.make("game_check", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_check"));
 export const GameCheckToolkit = Toolkit.make(GameCheckTool);
+const GameModelSheetToolResult = Schema.Struct({
+  ...GameModelSheetResult.fields,
+  screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+});
+export const GameModelSheetTool = Tool.make("game_model_sheet", {
+  description:
+    "Look at a model alone: each named thing (a ctx.thing name or an ASSETS key; up to 4, or omit for the first few characters, creatures and props) drawn by the running game from the front, right side, back and above at three quarters, beside a grey 1.8 m figure on a 1 m grid, in the pose it holds a moment into play, with its size in metres, triangles and draw calls. The sheets are attached as images. Use it on every model you build or change before you build the game around it, and fix what reads wrong: proportions, scale against the figure, a side you never looked at, faces missing, parts floating or sunk, too many draw calls (merge it).",
+  parameters: GameModelSheetInput,
+  success: GameModelSheetToolResult,
+  failure,
+  failureMode: "return",
+  dependencies: [...on(GameEngine.GameEngine), GameProjectService.GameProjectService],
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_model_sheet"));
+export const GameModelSheetToolkit = Toolkit.make(GameModelSheetTool);
 const ExportTool = Tool.make("game_export", {
   description: `Import and export this thread's game for one target; a target its engine does not make is refused. ${perEngine((t) => t.export)} A release is staged and checked, then replaces the previous one only when the sources did not change while it was made, so a failed export leaves the last good build in place. Web exports to a content-addressed build. Returns the published artifact's path and the command output, or why it failed.`,
   parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
@@ -727,7 +748,24 @@ const KeepGoingSteerTool = Tool.make("game_keep_going_steer", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_keep_going_steer"));
 
+const ModelsRouteTool = Tool.make("game_models_route", {
+  description:
+    "Change how this game's models are made, only because the person asked you to in chat: route code (three.js code with shell/model.js), blender, or generated (the person's art providers); library true or false turns the free asset library's models on or off (clips and sounds are always allowed). Omitted parts stay. Returns the choice now in game.json.",
+  parameters: Schema.Struct({
+    route: Schema.optionalKey(GameCharacterRoute),
+    library: Schema.optionalKey(Schema.Boolean),
+  }),
+  success: GameSetCharacterRouteResult,
+  failure,
+  failureMode: "return",
+  dependencies: on(GameProjectService.GameProjectService),
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_models_route"));
+
 export const GameToolkit = Toolkit.make(
+  ModelsRouteTool,
   GameStatusTool,
   BlenderCodeTool,
   BlenderSceneTool,

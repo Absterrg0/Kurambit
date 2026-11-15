@@ -74,6 +74,8 @@ import { assets, onModelCopy, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
 import { createPlayer, createRate, createRecorder, freshSeed, mark, seeded } from "./replay.js";
 import { createDevView } from "./dev-view.js";
+import { modelShell } from "./model.js";
+import { createSheet } from "./sheet.js";
 import {
   VOLUME_NAMES,
   getVolume,
@@ -148,6 +150,8 @@ let held = false;
 // Play holds while the Stage's tab is hidden or the Stage has frozen it.
 let hidden = false;
 let frozen = false;
+/** The harness's model sheet is over the page (shell/sheet.js): play holds under it. */
+let sheetShown = false;
 let redraw = true;
 let hadPointerLock = false;
 /** The action whose key the Controls screen is waiting for, or null. */
@@ -296,6 +300,7 @@ function clearRun() {
   juiceShell.reset();
   animateShell.reset();
   cameraShell.reset();
+  modelShell.reset();
   look.reset();
   bridge.reset();
   if (run !== null) {
@@ -470,6 +475,7 @@ function disposeTitleWorld(world) {
   juiceShell.reset();
   animateShell.reset();
   cameraShell.reset();
+  modelShell.reset();
   look.reset();
   bridge.reset();
   Juice.stage = null;
@@ -914,7 +920,7 @@ function pollGamepad(now) {
 function replayEvent(kind, ...args) {
   if (kind === "speed") studioSpeed = args[0];
   else if (kind === "can-lose") setCanLose(args[0]);
-  else if (kind === "tune") bridge.setTune(args[0], args[1], args[2]);
+  else if (kind === "tune" && bridge.setTune(args[0], args[1], args[2])) modelShell.tuned(args[0]);
 }
 
 /** One fixed step: this step's input, then the game, at the step's slice times the time scale. */
@@ -1019,7 +1025,7 @@ function fit(camera, aspect) {
 }
 
 function applyHold() {
-  held = hidden || frozen;
+  held = hidden || frozen || sheetShown;
   releaseKeys();
   return holdAudio(held);
 }
@@ -1081,6 +1087,8 @@ const bridge = createStageBridge({
   },
   tuned(id, key, value) {
     run?.recorder?.event("tune", id, key, value);
+    // A model built from these values (shell/model.js tuned) is built again, frozen or not.
+    modelShell.tuned(id);
   },
   dev: {
     set: (next, focus) => devView.set(next, focus),
@@ -1135,8 +1143,42 @@ const sceneReport = createSceneReport({
   animation: (object) => animateShell.stateOf(object),
 });
 
+/** A named thing's record, by its Stage id or name (case aside), with a body to draw. */
+const thingNamed = (wanted) => {
+  const lower = wanted.toLowerCase();
+  let loose = null;
+  let exact = null;
+  bridge.eachThing((record) => {
+    if (exact !== null || record.object?.isObject3D !== true) return;
+    if (record.id === wanted || record.name === wanted) exact = record;
+    else if (
+      loose === null &&
+      (record.id.toLowerCase() === lower || record.name.toLowerCase() === lower)
+    )
+      loose = record;
+  });
+  return exact ?? loose;
+};
+const sheet = createSheet({
+  renderer,
+  find: thingNamed,
+  names() {
+    const listed = [];
+    bridge.eachThing((record) => {
+      if (record.object?.isObject3D === true && listed.length < 60)
+        listed.push({ name: record.name, kind: record.kind });
+    });
+    return listed;
+  },
+  hold(on) {
+    sheetShown = on;
+    applyHold();
+  },
+});
+
 const studio = installStudio({
   ui,
+  sheet,
   perf: () => look.stats(),
   player: () => run?.ctx.player ?? null,
   setState: (target, values) => game.setState?.(target, values, run?.ctx ?? null),

@@ -40,7 +40,6 @@ import {
   type GameArtProviderId,
   type GameArtProviderStatus,
   type GameArtProvidersResult,
-  type GameCharacterRoute,
   type GameGenerateInput,
   type GameImageEditInput,
   imageEditName,
@@ -71,7 +70,7 @@ import { motionClipName } from "../generatedSource.ts";
 import { glbJson, gltfMeshSize, readGltfJson } from "../gltfJson.ts";
 import * as GameOperations from "../GameOperations.ts";
 import { ensureGameDir } from "../gameKeptSaves.ts";
-import { characterRoute, lockCharacterRouteRefusal } from "../gameStyle.ts";
+import { type GameModelChoice, lockCharacterRouteRefusal, modelChoice } from "../gameStyle.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import { insideGame, staysInsideGame } from "../gamePath.ts";
 import {
@@ -203,9 +202,7 @@ export class GameArtHost extends Context.Service<
     /** The game folder a thread works in. */
     readonly gameRoot: (threadId: ThreadId) => Effect.Effect<string, GameOperationError>;
     /** How the person chose to make this game's characters, from its game.json. */
-    readonly characterRoute: (
-      root: string,
-    ) => Effect.Effect<GameCharacterRoute, GameOperationError>;
+    readonly characterRoute: (root: string) => Effect.Effect<GameModelChoice, GameOperationError>;
   }
 >()("kurambit/game/art/GameArt/GameArtHost") {}
 
@@ -1522,7 +1519,7 @@ const make = Effect.gen(function* () {
     root: string,
     threadId: ThreadId,
     input: GameGenerateInput,
-    chosenRoute: GameCharacterRoute,
+    chosenRoute: GameModelChoice,
   ): Effect.Effect<GameGenerateResult, GameOperationError> =>
     Effect.gen(function* () {
       // Before any provider is asked: the person's route decides who makes characters.
@@ -2166,7 +2163,7 @@ const layerHost = Layer.effect(
     const projects = yield* GameProjectService.GameProjectService;
     return GameArtHost.of({
       gameRoot: (threadId) => projects.resolve(threadId),
-      characterRoute: (root) => projects.read(root).pipe(Effect.map(characterRoute)),
+      characterRoute: (root) => projects.read(root).pipe(Effect.map(modelChoice)),
       packPicture: library.packPicture,
       standardBody: library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
       codex: Effect.gen(function* () {

@@ -1,6 +1,9 @@
 import {
   DEFAULT_GAME_ENGINE,
+  GAME_STYLE_DEFAULT_CHARACTERS,
+  GAME_STYLE_DEFAULT_LIBRARY,
   GAME_TEMPLATES,
+  gameModelChoice,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameEngineId,
@@ -58,7 +61,9 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
     // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
     godotProject: engineProfile(engine).projectDirectory,
     assets: [],
-    ...(input.characters === undefined ? {} : { characters: input.characters }),
+    // Both written, always: a game.json with no library key is one made before it was opt-in.
+    characters: input.characters ?? GAME_STYLE_DEFAULT_CHARACTERS,
+    library: input.library ?? GAME_STYLE_DEFAULT_LIBRARY,
   };
 }
 
@@ -90,7 +95,7 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
   // The Stage serves the folder and reloads it on every save (GamePreview.live).
   live: `## Every turn
 
-- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it on every save. A turn is the change the person asked for, one they can see when they play, \`game_check\` clean and nothing left in its scene report or \`qa.problems\`, then end the turn. When a request holds several changes, do the first and put the rest in \`Next:\`, but never put off what they asked for because it takes work: a model the library lacks is made in Blender in the turn that asks for it.
+- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it on every save. A turn is the change the person asked for, one they can see when they play, \`game_check\` clean and nothing left in its scene report or \`qa.problems\`, then end the turn. When a request holds several changes, do the first and put the rest in \`Next:\`, but never put off what they asked for because it takes work: a model the game lacks is made in the turn that asks for it, the way its route says.
 - **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
@@ -115,34 +120,75 @@ const everyTurnSection = (engine: GameEngineId): string | undefined => {
 };
 
 /**
- * On the generated route the first turn also starts the key art, builds on library stand-ins while
- * it renders, and ends on the person's pick: the look is theirs, and art never blocks the playable.
+ * On the generated route the first turn also starts the key art, builds on stand-ins while it
+ * renders, and ends on the person's pick: the look is theirs, and art never blocks the playable.
  */
-const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ (rendering, palette, shape language), each one this game can reach in its engine, drawn as an in-game screenshot, each grounded with a \`style\`: a library pack id that ships a picture of its look (a Kenney low-poly kit, Quaternius Monsters; KayKit ships none), or the person's own reference image, so the key art never promises a look the game cannot reach (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with library art. Then read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.`;
-const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names), and fix what a player would call wrong at a glance in its pictures (the player small, seen only from behind or hard to make out, a view washed out or too dark), then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the library models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
+const GENERATED_GOAL =
+  "Goal: the person plays the brief's core loop on the Stage while its art is generated from the look they pick: the loop plays first on stand-ins, so the Stage shows the game within minutes, never primitives.";
+const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ (rendering, palette, shape language), each one this game can reach in its engine, drawn as an in-game screenshot, each grounded with a \`style\`: a library pack id that ships a picture of its look (a Kenney low-poly kit, Quaternius Monsters; KayKit ships none), or the person's own reference image, so the key art never promises a look the game cannot reach (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with the stand-ins. Then read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.`;
+const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names), and fix what a player would call wrong at a glance in its pictures (the player small, seen only from behind or hard to make out, a view washed out or too dark), then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
 
-/** A new game's first turn, per engine; an engine without one gets the brief alone. */
-const FIRST_TURN_SECTIONS: Partial<Record<GameEngineId, string>> = {
-  three: `## The first turn
+const READ_STEP = (also: string) =>
+  `1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`${also}. Write no plan or design document and make no key art. The comment block at the top of each kit is enough; do not read the shell's code.`;
+const LOOP_STEP = `3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action. As the recipes do, name the player and each threat with \`ctx.thing\` and read their speeds, timers and counts from \`ctx.tune\`: that is how the person selects them and drags their values live.`;
+const CHECK_STEP = `5. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names). Then look at its pictures as a player would and fix what they would call wrong at a glance: the player small, seen only from behind or hard to make out, a view washed out by haze or too dark to read. This build is the person's first look at their game. End the turn with what the person can do now, plus your \`Next:\` line.`;
+const LATER = "More waves and levels, menu art, music and polish are later turns.";
+/** Models in code: what the kit offers and how the agent sees one, said once for every route that builds them. */
+const CODE_MODELS = `with \`shell/model.js\`: one \`palette\` for the game, real shapes (\`box\` with rounded edges, \`lathe\`, \`extrude\`, \`loft\`, \`tube\`) and the details a person names each by, each model in its own module under \`web/models/\`, \`merge\`d, its main dimensions \`tuned\`. A humanoid is built on the clips' skeleton (\`rig\`): \`game_assets_add\` pack \`quaternius-universal-animation-library\`, path \`Unreal-Godot/UAL1_Standard.glb\`, named in \`ASSETS\`. Look at each with \`game_model_sheet\` and fix what reads wrong`;
 
-Goal: the person plays the brief's core loop on the Stage, and its player and main threat are what the brief names: library models where the library has them, made in Blender where it does not, never primitives. The loop plays on library models first, so the Stage shows the game within minutes while anything missing is made.
+/** The library first, then what it lacks made the route's way: the old default, and any game with the library on. */
+const libraryTurn = (lacking: string) => `## The first turn
 
-1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document and make no key art. The comment block at the top of each kit is enough; do not read the shell's code.
+Goal: the person plays the brief's core loop on the Stage, and its player and main threat are what the brief names: library models where the library has them, ${lacking} where it does not, never primitives. The loop plays on library models first, so the Stage shows the game within minutes while anything missing is made.
+
+${READ_STEP("")}
 2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief. Add the player character and one or two threats or props with \`game_assets_add\`, the first call with \`lock\` (that family and the view), which writes \`STYLE.json\`, and name them in \`ASSETS\`: the shell loads them, and compiles what draws them, behind its loading screen. Keep the default look (\`LOOK\` as it is, or the one preset the brief calls for, no lights besides \`ctx.look.sun\`): the first build then starts at once and reads clearly; extra lights and glows cost every frame. Glows are a later turn. When no pack has the brief's player or main threat (a cat, a pigeon, a hover tank), add the closest model to stand in while the loop is built.
-3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action. As the recipes do, name the player and each threat with \`ctx.thing\` and read their speeds, timers and counts from \`ctx.tune\`: that is how the person selects them and drags their values live.
-4. Make what the library lacks: the brief's player or main threat that no pack has, in Blender (each Blender tool names its recipe), then swap it in for the model standing in. Only those two; every other missing prop waits for a later turn.
-5. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names). Then look at its pictures as a player would and fix what they would call wrong at a glance: the player small, seen only from behind or hard to make out, a view washed out by haze or too dark to read. This build is the person's first look at their game. End the turn with what the person can do now, plus your \`Next:\` line.
+${LOOP_STEP}
+4. Make what the library lacks: the brief's player or main threat that no pack has, ${lacking === "made in Blender" ? "in Blender (each Blender tool names its recipe)" : "in three.js code with `shell/model.js` (its comment block shows every call; look at it alone with `game_model_sheet`)"}, then swap it in for the model standing in. Only those two; every other missing prop waits for a later turn.
+${CHECK_STEP}
 
-More waves and levels, menu art, music and polish are later turns.
-`,
-};
+${LATER}
+`;
 
-/** The first turn for this game: its engine's, with the generated route's key-art steps. */
+/** The code route with the library off: every model in code, looked at alone before the game is built round it. */
+const CODE_TURN = `## The first turn
+
+Goal: the person plays the brief's core loop on the Stage, and its player, main threat and world are models you build in three.js code, never bare primitives standing in for them.
+
+${READ_STEP(", and the comment block of `studio-skills/runtime/shell/model.js`")}
+2. Build the player and the main threat ${CODE_MODELS} before step 3.
+${LOOP_STEP}
+4. Build the world the brief names the same way: the ground and the one or two set pieces it names, repeats with \`scatter\`. Keep the default look (\`LOOK\` as it is, or the one preset the brief calls for, no lights besides \`ctx.look.sun\`).
+${CHECK_STEP}
+
+${LATER}
+`;
+
+/** Blender with the library off: quick code stand-ins carry the loop while the real models are made. */
+const STAND_IN_TURN = `## The first turn
+
+Goal: the person plays the brief's core loop on the Stage, and its player and main threat are made in Blender, never primitives. The loop plays first on quick stand-ins built in code, so the Stage shows the game within minutes while they are made.
+
+${READ_STEP("")}
+2. Stand-ins: the player and the main threat as quick models in code with \`shell/model.js\` (a \`palette\`, rounded \`box\`es, the right size and colours), named in the game as the real ones will be. Keep the default look (\`LOOK\` as it is, no lights besides \`ctx.look.sun\`).
+${LOOP_STEP}
+4. Make the player and the main threat in Blender (its tools each name their recipe), then swap them in for the stand-ins. Only those two; every other prop waits for a later turn.
+${CHECK_STEP}
+
+${LATER}
+`;
+
+/** The first turn for this game's engine and model choice; an engine without one gets the brief alone. */
 const firstTurnSection = (manifest: GameManifest): string | undefined => {
-  const section = FIRST_TURN_SECTIONS[manifest.engine.name];
-  if (section === undefined || manifest.characters !== "generated") return section;
+  if (manifest.engine.name !== "three") return undefined;
+  const { route, library } = gameModelChoice(manifest);
+  if (route === "code") return library ? libraryTurn("built in code") : CODE_TURN;
+  if (route === "blender") return library ? libraryTurn("made in Blender") : STAND_IN_TURN;
   // Generated characters come from the person's providers, never Blender: no making step.
-  const lines = section.split("\n").filter((line) => !line.startsWith("4. "));
+  const lines = (library ? libraryTurn("made in Blender") : STAND_IN_TURN)
+    .split("\n")
+    .filter((line) => !line.startsWith("4. "))
+    .map((line) => (line.startsWith("Goal: ") ? GENERATED_GOAL : line));
   const first = lines.findIndex((line) => line.startsWith("1. "));
   const last = lines.findIndex((line) => line.startsWith("5. "));
   return [

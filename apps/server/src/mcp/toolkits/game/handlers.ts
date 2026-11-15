@@ -30,6 +30,7 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
   GameToolkit,
   GameCheckToolkit,
+  GameModelSheetToolkit,
   GameAnimateToolkit,
   GameAssetsSearchToolkit,
   GameBlenderLookToolkit,
@@ -72,6 +73,11 @@ const withKeepGoing = <A>(
 const TOOL_FACTS_WAIT = "30 seconds";
 
 const handlers = {
+  game_models_route: McpToolAccess.actsAsCaller((input) =>
+    withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+      projects.setCharacterRoute(threadId, input),
+    ),
+  ),
   game_status: McpToolAccess.readsAsCaller((input) =>
     withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
       statuses.status(threadId, { checkSources: input.checkSources }),
@@ -342,6 +348,37 @@ const checkHandlers = {
   ),
 } satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
 export const layerCheck = McpToolAccess.toLayer(GameCheckToolkit, checkHandlers);
+
+/** Registered like the Blender look, so each model sheet becomes real image content. */
+const modelSheetHandlers = {
+  game_model_sheet: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
+        engines.modelSheet(threadId, input),
+      );
+      const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+        projects.resolve(threadId),
+      );
+      const screenshots = yield* Effect.promise(() =>
+        Promise.all(
+          result.sheets.map((sheet) =>
+            NodeFSP.readFile(NodePath.join(root, sheet.image)).then(
+              (bytes) => ({
+                mimeType: "image/png" as const,
+                data: bytes.toString("base64"),
+                ...THREE_VIEWPORT,
+              }),
+              () => null,
+            ),
+          ),
+        ),
+      );
+      const shown = screenshots.filter((shot) => shot !== null);
+      return shown.length === 0 ? result : { ...result, screenshots: shown };
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameModelSheetToolkit.tools>;
+export const layerModelSheet = McpToolAccess.toLayer(GameModelSheetToolkit, modelSheetHandlers);
 
 /** Registered like the Blender look, so the contact sheet becomes real image content. */
 const assetsSearchHandlers = {

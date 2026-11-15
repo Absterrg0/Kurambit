@@ -6,6 +6,8 @@ import {
   GameAssetsSearchToolkit,
   GameCheckTool,
   GameCheckToolkit,
+  GameModelSheetTool,
+  GameModelSheetToolkit,
   GameAnimateTool,
   GameAnimateToolkit,
   GameBlenderLookTool,
@@ -33,7 +35,7 @@ import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import {
-  GAME_STYLE_DEFAULT_CHARACTERS,
+  gameModelChoice,
   OrchestratorMcpFailure,
   PreviewAutomationError,
 } from "@kurambit/contracts";
@@ -204,8 +206,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameEngine,
-        gameCharacters:
-          manifest === null ? null : (manifest.characters ?? GAME_STYLE_DEFAULT_CHARACTERS),
+        gameModels: manifest === null ? null : gameModelChoice(manifest),
         blenderMissing,
         gameBotSetup:
           invocation.thread !== undefined && isBotSetupThread(invocation.thread.threadId),
@@ -898,6 +899,21 @@ const registerGameCheck = Effect.fn("McpHttpServer.registerGameCheck")(function*
   );
 });
 
+const registerGameModelSheet = Effect.fn("McpHttpServer.registerGameModelSheet")(function* () {
+  const services = yield* registrationServices(GameModelSheetTool);
+  const built = yield* GameModelSheetToolkit;
+  yield* registerImageTool(
+    GameModelSheetTool,
+    (payload, options) =>
+      built
+        .handle("game_model_sheet", payload, undefined, options)
+        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+    (effect) => effect.pipe(Effect.provideContext(services)),
+    "model-sheet",
+    (error) => (error instanceof Error ? error.message : "Model sheet failed."),
+  );
+});
+
 const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
   const services = yield* registrationServices(GameAssetsSearchTool);
   const built = yield* GameAssetsSearchToolkit;
@@ -1060,12 +1076,18 @@ const layerGameAssetsSearch = imageToolRegistration(
 
 const layerGameCheck = imageToolRegistration(registerGameCheck(), GameHandlers.layerCheck);
 
+const layerGameModelSheet = imageToolRegistration(
+  registerGameModelSheet(),
+  GameHandlers.layerModelSheet,
+);
+
 const layerGameToolkit = Layer.mergeAll(
   layerGameBlenderLook,
   layerGameAnimate,
   layerGameBlenderRenderSprites,
   layerGameAssetsSearch,
   layerGameCheck,
+  layerGameModelSheet,
   layerGameUnityScreenshot,
   toolkitRegistration(GameToolkit, GameHandlers.layer),
   imageToolRegistration(registerGameMore(), GameHandlers.layerMore),

@@ -25,7 +25,7 @@ export type GameAssetPart = typeof GameAssetPart.Type;
 
 export const GameAssetSource = Schema.Struct({
   /** The game's character route when it was exported; where each part came from is in parts. */
-  route: Schema.Literals(["blender", "library", "generated"]),
+  route: Schema.Literals(["code", "blender", "library", "generated"]),
   parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   /** The named subject a placeholder stands in for; null when it is the real thing. Nothing writes one yet. */
   standIn: Schema.NullOr(Schema.String.check(Schema.isMaxLength(140))),

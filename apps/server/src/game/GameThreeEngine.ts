@@ -18,6 +18,8 @@ import {
   type GameCheckQa,
   type GameCheckScene,
   type GameCheckView,
+  type GameModelSheet,
+  type GameModelSheetResult,
   type GameProcessResult,
   sceneLines,
   manifestProject,
@@ -34,6 +36,7 @@ import {
   WebPageCrashed,
   WebPageNotReady,
   type WebPageEvent,
+  type WebPlaySession,
 } from "./webPlaySession.ts";
 import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
 import { copyRuntimeInto, hasRuntime } from "./gameRuntime.ts";
@@ -64,6 +67,65 @@ const flatShareOf = (path: string) =>
   );
 
 const BOOT_TIMEOUT_MS = 60_000;
+/** Play before the sheet is drawn: start() has built the run and the clips have begun. */
+const SHEET_SETTLE_MS = 1_500;
+/** With no names: this many things, characters and creatures first. */
+const SHEET_DEFAULT_COUNT = 4;
+const SHEET_FIRST_KINDS = ["character", "creature", "prop"];
+
+const PageSheet = Schema.Struct({
+  name: Schema.String,
+  kind: Schema.String,
+  size: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+  triangles: Schema.Number,
+  drawCalls: Schema.Number,
+});
+const PageThings = Schema.Struct({
+  things: Schema.Array(Schema.Struct({ name: Schema.String, kind: Schema.String })),
+});
+const decodeSheet = Schema.decodeUnknownOption(PageSheet);
+const decodeThings = Schema.decodeUnknownOption(PageThings);
+const fileSafe = (name: string) => name.replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 60) || "thing";
+
+/** Each named thing's sheet from the open page; with no names, the first few it has. */
+const drawSheets = async (
+  session: WebPlaySession,
+  input: { readonly things: ReadonlyArray<string> | null; readonly folder: string },
+  root: string,
+): Promise<GameModelSheetResult | "no-sheet"> => {
+  const listed = await session.sheet(null);
+  if (listed === "no-sheet") return "no-sheet";
+  const things = Option.match(decodeThings(listed), {
+    onNone: () => [],
+    onSome: (value) => value.things,
+  });
+  const wanted =
+    input.things ??
+    things
+      .toSorted(
+        (a, b) =>
+          (SHEET_FIRST_KINDS.indexOf(a.kind) + 1 || 9) -
+          (SHEET_FIRST_KINDS.indexOf(b.kind) + 1 || 9),
+      )
+      .slice(0, SHEET_DEFAULT_COUNT)
+      .map((thing) => thing.name);
+  const sheets: Array<GameModelSheet> = [];
+  const missing: Array<string> = [];
+  for (const [index, name] of wanted.entries()) {
+    const drawn = decodeSheet(await session.sheet(name));
+    if (Option.isNone(drawn)) {
+      missing.push(name);
+      continue;
+    }
+    const image = NodePath.join(input.folder, `${index + 1}-${fileSafe(name)}.png`);
+    if (!(await session.still(image))) {
+      missing.push(name);
+      continue;
+    }
+    sheets.push({ ...drawn.value, image: NodePath.relative(root, image) });
+  }
+  return { sheets, missing, things };
+};
 
 /** The check's scene report, its frames kept in the check's own log folder. */
 const sceneOf = async (
@@ -544,6 +606,60 @@ export const makeThreeBackend = (
         const run = decodeReplay(raw);
         if (Option.isNone(run)) return yield* failed("The game did not answer the replay in time.");
         return run.value;
+      }),
+    modelSheet: (ctx, input) =>
+      Effect.gen(function* () {
+        const runtimeFolder = yield* runtimeOf(ctx, "model-sheet");
+        const browser = yield* gameBrowser("model-sheet", ctx.projectDir);
+        const failed = (detail: string, cause?: unknown) =>
+          new GameOperationError({
+            operation: "model-sheet",
+            path: ctx.projectDir,
+            reason: "tool-failed",
+            detail,
+            cause,
+          });
+        yield* Effect.tryPromise({
+          try: () => NodeFSP.mkdir(input.folder, { recursive: true }),
+          catch: (cause) => failed("The sheet's folder could not be made.", cause),
+        });
+        // The agent waits on it, as on its check.
+        return yield* playLane.hold(
+          "agent",
+          Effect.acquireUseRelease(
+            Effect.tryPromise({
+              try: () => serveGameDirectory(ctx.root, ctx.projectName, { runtimes: runtimeFolder }),
+              catch: (cause) => failed("The static project could not be served.", cause),
+            }),
+            (server) =>
+              Effect.tryPromise({
+                try: async (signal) => {
+                  const session = await openWebPlaySession({
+                    browser,
+                    url: new URL(input.gameplayScene || "index.html?play", server.url).href,
+                    ...THREE_VIEWPORT,
+                    bootTimeoutMs: BOOT_TIMEOUT_MS,
+                    signal,
+                  });
+                  try {
+                    // A beat of play, so what start() builds and the first clips are in place.
+                    await new Promise((resolve) => setTimeout(resolve, SHEET_SETTLE_MS));
+                    return await drawSheets(session, input, ctx.root);
+                  } finally {
+                    await session.close();
+                  }
+                },
+                catch: (cause) =>
+                  cause instanceof WebPageNotReady || cause instanceof WebPageCrashed
+                    ? failed(`The game did not start, so nothing could be drawn: ${cause.message}`)
+                    : failed(
+                        `Headless Chromium failed during the sheet: ${cause instanceof Error ? cause.message.slice(0, 500) : String(cause).slice(0, 500)}`,
+                        cause,
+                      ),
+              }),
+            (server) => Effect.promise(() => server.close().catch(() => undefined)),
+          ),
+        );
       }),
     // The browser host opens the page itself: there is no runner process.
     playProcess: null,

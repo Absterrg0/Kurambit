@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The check reads the source tree around the engine's run.
+import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -25,6 +26,8 @@ import {
   type GameProcessResult,
   type GamePlay,
   type GameReplayRun,
+  type GameModelSheetInput,
+  type GameModelSheetResult,
   type GameToolStatus,
   type GameViewport,
   type GameUnityRecompileResult,
@@ -235,6 +238,20 @@ export interface GameEngineBackend {
       ) => Effect.Effect<GameReplayRun | "no-replay", GameOperationError>)
     | null;
   /**
+   * Model sheets of things the game named, drawn by its shell in a page of their own (images
+   * kept under `folder`). Null for engines whose games have no such shell.
+   */
+  readonly modelSheet:
+    | ((
+        ctx: GameEngineContext,
+        input: {
+          readonly gameplayScene: string;
+          readonly things: ReadonlyArray<string> | null;
+          readonly folder: string;
+        },
+      ) => Effect.Effect<GameModelSheetResult | "no-sheet", GameOperationError>)
+    | null;
+  /**
    * How a play session (exploration or a bot) starts this engine's runner, a
    * process speaking the play-session protocol over loopback. Null for
    * engines whose games play as a browser page, which the browser host opens.
@@ -343,6 +360,11 @@ export class GameEngine extends Context.Service<
       root: string,
       play: GamePlay,
     ) => Effect.Effect<GameReplayRun, GameOperationError>;
+    /** `game_model_sheet`: the named things alone, from four sides, with their size and cost. */
+    readonly modelSheet: (
+      threadId: ThreadId,
+      input: GameModelSheetInput,
+    ) => Effect.Effect<GameModelSheetResult, GameOperationError>;
     /** `game_unity_recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
     readonly recompile: (
       threadId: ThreadId,
@@ -632,6 +654,34 @@ const make = Effect.gen(function* () {
           );
         return run;
       }),
+    modelSheet: (threadId, input) =>
+      projects.exclusive(threadId, "Model sheet", (root) =>
+        Effect.gen(function* () {
+          const manifest = yield* projects.read(root);
+          const { backend, ctx } = yield* context(root);
+          const refused = (detail: string) =>
+            new GameOperationError({
+              operation: "model-sheet",
+              path: root,
+              reason: "invalid-input",
+              detail,
+            });
+          if (backend.modelSheet === null)
+            return yield* refused(
+              `${backend.profile.displayName} games have no model sheet; three.js games do.`,
+            );
+          const sheets = yield* backend.modelSheet(ctx, {
+            gameplayScene: manifest.gameplayScene ?? "",
+            things: input.things ?? null,
+            folder: NodePath.join(root, "builds/logs", `model-sheet-${NodeCrypto.randomUUID()}`),
+          });
+          if (sheets === "no-sheet")
+            return yield* refused(
+              "This game's copy of the shell predates model sheets (an older game that carries its own shell).",
+            );
+          return sheets;
+        }),
+      ),
     cleanCheckOf: (root) =>
       Effect.flatMap(checkedIdentity(root), (identity) =>
         identity === null

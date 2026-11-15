@@ -5,7 +5,7 @@ import { PositiveInt, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
-import { GameCharacterRoute } from "./gameStyle.ts";
+import { GameCharacterRoute, GameStoredCharacterRoute } from "./gameStyle.ts";
 import { GameArtLanes } from "./gameArt.ts";
 import { GameSceneReport } from "./gameScene.ts";
 import { GameQaReport } from "./gameQa.ts";
@@ -260,10 +260,13 @@ export const GameManifest = Schema.Struct({
    */
   families: Schema.optionalKey(Schema.Array(GameAssetFamily).check(Schema.isMaxLength(16))),
   /**
-   * The person's choice of how characters are made: from the library's packs, built in
-   * Blender, or generated with Tripo. Default library. Only the person changes it.
+   * The person's choice of how models are made: in three.js code, in Blender, or generated.
+   * Read through gameModelChoice: "library" is the old default (code with the library on).
+   * Only the person changes it, or the agent when they ask.
    */
-  characters: Schema.optionalKey(GameCharacterRoute),
+  characters: Schema.optionalKey(GameStoredCharacterRoute),
+  /** Whether models may come from the free library. Absent on games made before it was opt-in: on. */
+  library: Schema.optionalKey(Schema.Boolean),
   /**
    * The Kurambit runtime major the game loads, by engine ({ three: 1 }): Kurambit serves it
    * at _kurambit/runtime/<engine>/<major>/ and copies it into exports, and every minor and
@@ -646,11 +649,10 @@ export const GameStatus = Schema.Struct({
    * Always "off" for engines not staged live.
    */
   live: Schema.Literals(["off", "serving", "stopped"]),
-  /**
-   * How the person chose to make this game's characters (game.json's characters, default
-   * library). Only the person changes it.
-   */
+  /** How the person chose to make this game's models (gameModelChoice). */
   characters: GameCharacterRoute,
+  /** Whether the person let this game take models from the free library. */
+  library: Schema.Boolean,
   /**
    * Generated art: per lane, the provider game_generate would use now (a key saved, Codex
    * signed in); null when nothing can make that lane. Absent when it could not be read.
@@ -705,8 +707,10 @@ export const GameCreateInput = Schema.Struct({
   artDirection: Schema.optionalKey(Schema.String),
   /** Which engine to build in; a parked one is refused. Omitted means DEFAULT_GAME_ENGINE. */
   engine: Schema.optionalKey(GameEngineId),
-  /** How the person chose to make its characters, before the first turn builds them. Omitted: library. */
+  /** How the person chose to make its models, before the first turn builds them. Omitted: code. */
   characters: Schema.optionalKey(GameCharacterRoute),
+  /** Whether it may take models from the free library. Omitted: off. */
+  library: Schema.optionalKey(Schema.Boolean),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
@@ -745,14 +749,48 @@ export const GameThreadInput = Schema.Struct({
    */
   checkSources: Schema.optionalKey(Schema.Boolean),
 });
-/** The person's choice of how this game's characters are made, written into its game.json. */
+/** The person's choice of how this game's models are made, written into its game.json; omitted parts stay. */
 export const GameSetCharacterRouteInput = Schema.Struct({
   threadId: ThreadId,
-  route: GameCharacterRoute,
+  route: Schema.optionalKey(GameCharacterRoute),
+  library: Schema.optionalKey(Schema.Boolean),
 });
 export type GameSetCharacterRouteInput = typeof GameSetCharacterRouteInput.Type;
-export const GameSetCharacterRouteResult = Schema.Struct({ route: GameCharacterRoute });
+export const GameSetCharacterRouteResult = Schema.Struct({
+  route: GameCharacterRoute,
+  library: Schema.Boolean,
+});
 export type GameSetCharacterRouteResult = typeof GameSetCharacterRouteResult.Type;
+/** game_model_sheet: the things to draw alone, by the names the game gave them (ctx.thing, ASSETS keys). */
+export const GameModelSheetInput = Schema.Struct({
+  things: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(4),
+    ),
+  ),
+});
+export type GameModelSheetInput = typeof GameModelSheetInput.Type;
+/** One thing's sheet, as the game's shell measured it in the pose it held. */
+export const GameModelSheet = Schema.Struct({
+  name: Schema.String,
+  kind: Schema.String,
+  /** Metres: wide (x), tall (y), long (z). */
+  size: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+  triangles: Schema.Number,
+  drawCalls: Schema.Number,
+  /** The sheet picture, game-relative. */
+  image: Schema.String,
+});
+export type GameModelSheet = typeof GameModelSheet.Type;
+export const GameModelSheetResult = Schema.Struct({
+  sheets: Schema.Array(GameModelSheet),
+  /** Names asked for that the game has no thing with a body by. */
+  missing: Schema.Array(Schema.String),
+  /** The things the game named, with a body, that a sheet can draw (at most 60). */
+  things: Schema.Array(Schema.Struct({ name: Schema.String, kind: Schema.String })),
+});
+export type GameModelSheetResult = typeof GameModelSheetResult.Type;
 export const GameAction = Schema.Literals([
   "preview",
   "rebuild",

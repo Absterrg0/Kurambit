@@ -11,7 +11,6 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import {
   GAME_STYLE_DEFAULT_BUDGET,
-  GAME_STYLE_DEFAULT_CHARACTERS,
   GAME_STYLE_DEFAULT_MUSIC_LUFS,
   GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   GAME_STYLE_FILE,
@@ -21,6 +20,7 @@ import {
   GameOperationError,
   GameStyle,
   type GameStyleLock,
+  gameModelChoice,
 } from "@kurambit/contracts";
 import { awaitsMirror, type LibraryFile, type LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
@@ -435,36 +435,48 @@ export const styleHash = (style: GameStyle | null): string =>
     ? "none"
     : NodeCrypto.createHash("sha256").update(stableStringify(style)).digest("hex");
 
-/** How the person chose to make this game's characters: game.json's choice, or library. */
-export const characterRoute = (manifest: Pick<GameManifest, "characters">): GameCharacterRoute =>
-  manifest.characters ?? GAME_STYLE_DEFAULT_CHARACTERS;
+/** How the person chose to make this game's models, and whether the library is on (gameModelChoice). */
+export const modelChoice = (
+  manifest: Pick<GameManifest, "characters" | "library">,
+): GameModelChoice => gameModelChoice(manifest);
+export type GameModelChoice = ReturnType<typeof gameModelChoice>;
+
+/** How the person chose to make this game's models. */
+export const characterRoute = (manifest: Pick<GameManifest, "characters" | "library">) =>
+  gameModelChoice(manifest).route;
 
 /**
- * The routes whose characters may be made in Blender. Library means the library first: a subject
- * it has no model of (a robot, a cat) is made in Blender rather than stood in by something else.
- * Generated ships only what the person's providers made, or library and stamped sources.
+ * Whether characters may be made in Blender: on the Blender route, and wherever the library is on,
+ * which means the library first and Blender for a subject it has no model of (a robot, a cat), as
+ * the old library route did. Code with the library off makes them in code; generated ships only
+ * what the person's providers made, or library and stamped sources.
  */
-const MAKES_CHARACTERS: Record<GameCharacterRoute, boolean> = {
-  library: true,
-  blender: true,
-  generated: false,
+const makesInBlender = (choice: GameModelChoice) =>
+  choice.route === "blender" || (choice.route === "code" && choice.library);
+
+const ROUTE_USE: Record<GameCharacterRoute, string> = {
+  code: "build it in three.js code (shell/model.js)",
+  blender: "make it in Blender",
+  generated: "use a generated character (game_generate)",
 };
 
 /**
- * Why the person's character route refuses a character, or null: on the generated route, an
- * MPFB2 body or a character mesh that came from no stamped source is not theirs to ship; off
- * the generated route, neither is a generated character or creature.
+ * Why the person's model choice refuses a character, or null: on the generated route, an MPFB2
+ * body or a character mesh that came from no stamped source is not theirs to ship; off the
+ * generated route, neither is a generated character or creature; on the code route with the
+ * library off, neither is a Blender-made one.
  */
 export const lockCharacterRouteRefusal = (
   what: "mpfb-body" | "unstamped-mesh" | "generated-body",
-  route: GameCharacterRoute,
+  choice: GameModelChoice,
 ): string | null => {
-  if (what === "generated-body" ? route === "generated" : MAKES_CHARACTERS[route]) return null;
+  if (what === "generated-body" ? choice.route === "generated" : makesInBlender(choice))
+    return null;
   const thing =
     what === "mpfb-body"
       ? "An MPFB2 body is a Blender-made character"
       : what === "generated-body"
         ? "A generated character or creature (an AI provider made its body)"
         : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and the person chose to make this game's characters with ${route}. Use ${route === "generated" ? "a generated character (game_generate) or a library body" : route === "library" ? "a library body, or make the character in Blender" : "a library body or the lock's packs"}, and if the request needs another kind of character, say so in your reply: only the person changes how characters are made, in the game's "Make characters with" setting.`;
+  return `${thing}, and the person chose to make this game's models with ${choice.route}${choice.library ? " and the library" : ""}. Instead ${ROUTE_USE[choice.route]}${choice.library ? " or use a library model" : ""}. If the request needs another kind of model, say so in your reply: the person changes how models are made in the game's "Make models with" setting, or asks you to (game_models_route).`;
 };

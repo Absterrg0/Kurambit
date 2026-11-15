@@ -19,28 +19,34 @@ import {
   GameAssetsSearchTool,
   GameBlenderLookTool,
   GameBlenderRenderSpritesTool,
+  GameModelSheetTool,
   GameMoreTool,
   GameToolkit,
   GameUnityScreenshotTool,
 } from "../mcp/toolkits/game/tools.ts";
 import { firstTurnMessage, gameTurnRules, scaffoldFiles } from "./scaffold.ts";
 
+/** The model choices whose first turns differ. */
+const CHOICES = {
+  code: { characters: "code", library: false },
+  "code with the library": { characters: "code", library: true },
+  generated: { characters: "generated", library: false },
+} as const satisfies Record<string, { characters: GameCharacterRoute; library: boolean }>;
 /**
- * Bytes a new three.js game's first turn reads, by character route: its first message (the
- * first turn's steps), the turn rules the harness sends, AGENTS.md, TEMPLATE.md, three.md and the
+ * Bytes a new three.js game's first turn reads, by model choice: its first message (the first
+ * turn's steps), the turn rules the harness sends, AGENTS.md, TEMPLATE.md, three.md and the
  * art-pipeline sections they name.
- * About 10% over what they were on 2026-11-08 (library 23,981; generated 29,096).
+ * About 10% over what they were on 2026-11-08 (library 23,981; generated 29,096); the code
+ * route's on 2026-11-15 (30,316) the same way, and generated's raised by the kit it now reads: the stand-ins are built from the modelling kit's comment block where
+ * the library route read the library's listing.
  */
-const FIRST_TURN_BUDGET: Readonly<Record<"library" | "generated", number>> = {
-  library: 26_000,
-  generated: 32_000,
+const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
+  code: 33_000,
+  "code with the library": 33_000,
+  generated: 36_000,
 };
-/**
- * Bytes of tool descriptions a library-route three.js chat is handed every turn: 19,988 on
- * 2026-11-15, once the Blender tools were listed wherever Blender is found (asked for through
- * game_more, they cost a round trip each and reached the agent without their schemas).
- */
-const LISTED_TOOLS_BUDGET = 21_000;
+/** Bytes of tool descriptions a code-route three.js chat is handed every turn (10,918 on 2026-11-08). */
+const LISTED_TOOLS_BUDGET = 12_000;
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");
@@ -65,13 +71,13 @@ const namedSkillBytes = (agents: string, file: string) => {
   }, 0);
 };
 
-const firstTurnBytes = (characters: GameCharacterRoute) => {
+const firstTurnBytes = (choice: (typeof CHOICES)[keyof typeof CHOICES]) => {
   const files = scaffoldFiles({
     name: "Budget",
     parentDirectory: "/games",
     brief: "A knight clears a dungeon of skeletons.",
     engine: "three",
-    characters,
+    ...choice,
     modelSelection: { instanceId: "codex", model: "gpt-5" },
   } as GameCreateInput);
   const agents = files["AGENTS.md"]!;
@@ -83,6 +89,10 @@ const firstTurnBytes = (characters: GameCharacterRoute) => {
     "TEMPLATE.md": bytes(template("blank-three/TEMPLATE.md")),
     "three.md": bytes(template("studio/three.md")),
     "art-pipeline.md (named sections)": namedSkillBytes(`${message}\n${agents}`, "art-pipeline.md"),
+    // A kit the first message sends the agent to read, by its comment block.
+    "model.js (comment block)": message.includes("shell/model.js`")
+      ? bytes(template("runtime/three/1/shell/model.js").split("\nimport ")[0]!)
+      : 0,
   };
 };
 
@@ -92,12 +102,13 @@ const GAME_TOOLS = [
   GameAnimateTool,
   GameBlenderRenderSpritesTool,
   GameAssetsSearchTool,
+  GameModelSheetTool,
   GameUnityScreenshotTool,
   GameMoreTool,
 ];
 
 /** Each tool the MCP server would list for a three.js chat on this route, by its own EnabledWhen. */
-const listedTools = (characters: GameCharacterRoute) =>
+const listedTools = (route: GameCharacterRoute) =>
   Effect.sync(() =>
     GAME_TOOLS.filter(
       (tool) =>
@@ -113,7 +124,7 @@ const listedTools = (characters: GameCharacterRoute) =>
     Effect.provideService(McpInvocationContext, {
       environmentId: EnvironmentId.make("budget"),
       gameEngine: "three",
-      gameCharacters: characters,
+      gameModels: { route, library: false },
       blenderMissing: null,
       capabilities: new Set<never>(),
       issuedAt: 0,
@@ -135,9 +146,9 @@ const over = (what: string, parts: Record<string, number>, budget: number, cut: 
 
 it("keeps a three.js game's first-turn reading within its budget", () => {
   for (const [route, budget] of Object.entries(FIRST_TURN_BUDGET) as Array<
-    [GameCharacterRoute, number]
+    [keyof typeof CHOICES, number]
   >) {
-    const parts = firstTurnBytes(route);
+    const parts = firstTurnBytes(CHOICES[route]);
     const total = Object.values(parts).reduce((sum, part) => sum + part, 0);
     expect(
       total,
@@ -151,9 +162,9 @@ it("keeps a three.js game's first-turn reading within its budget", () => {
   }
 });
 
-it.effect("keeps the tool descriptions a library-route three.js chat lists within its budget", () =>
+it.effect("keeps the tool descriptions a code-route three.js chat lists within its budget", () =>
   Effect.gen(function* () {
-    const tools = yield* listedTools("library");
+    const tools = yield* listedTools("code");
     const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
     const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
     expect(

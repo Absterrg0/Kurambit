@@ -26,7 +26,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import { characterRoute } from "./gameStyle.ts";
+import { modelChoice } from "./gameStyle.ts";
 import { makeSourceIdentity } from "./sourceTree.ts";
 import { COPY_OF } from "./unityPlayerCache.ts";
 
@@ -224,7 +224,8 @@ const make = Effect.gen(function* () {
         previewUrl: live ? preview.liveUrl(root) : preview.url(root),
         // The serve's state, held by GamePreview.
         live: live ? preview.liveState(root) : ("off" as const),
-        characters: characterRoute(manifest),
+        characters: modelChoice(manifest).route,
+        library: modelChoice(manifest).library,
         ...(yield* art.lanes.pipe(
           Effect.map((artLanes) => ({ artLanes })),
           Effect.orElseSucceed(() => ({})),
