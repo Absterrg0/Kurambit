@@ -218,9 +218,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       for (const name of ["game_import", "game_preview", "game_bot_run", "game_unity_edit"]) {
         expect(toolNames).not.toContain(name);
       }
-      // The library route asks for the Blender tools through game_more; the Blender route lists them.
+      // With Blender found, every route lists its tools.
       for (const name of ["game_blender_look", "game_blender_code", "game_animate"]) {
-        expect(toolNames).not.toContain(name);
+        expect(toolNames).toContain(name);
       }
       const blender = yield* listTools(blenderThread);
       for (const name of ["game_blender_look", "game_blender_code", "game_animate"]) {
