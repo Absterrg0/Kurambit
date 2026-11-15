@@ -25,4 +25,8 @@ env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY CLAUDE_CODE_DISABLE_AUTO_MEMORY=
   --disable-slash-commands --dangerously-skip-permissions --output-format stream-json --verbose \
   "$(cat "$R/prompt.txt")" < /dev/null > "$R/run.jsonl" 2> "$R/run.err"
 echo $? > "$R/exit"; date +%s > "$R/end"
+# A server the agent left on its port when the cap stopped it: only one serving this run's folder.
+for pid in $(ss -H -ltnp "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2); do
+  [ "$(readlink "/proc/$pid/cwd")" = "$R/work" ] && kill "$pid"
+done
 "$L/measure.sh" "$R" "$PORT"
