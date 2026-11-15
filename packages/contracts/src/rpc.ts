@@ -40,6 +40,7 @@ import {
   GameBuildComparison,
   GameBuildFacts,
   GameBuildPlayResult,
+  GameBuildMeasureInput,
   GameBuildRefInput,
   GameBuildRestoreInput,
   GameBuildRestoreResult,
@@ -1567,7 +1568,7 @@ const WsGameBuildFactsRpc = Rpc.make(WS_METHODS.gameBuildFacts, {
   error: gameError,
 });
 const WsGameBuildMeasureRpc = Rpc.make(WS_METHODS.gameBuildMeasure, {
-  payload: GameBuildRefInput,
+  payload: GameBuildMeasureInput,
   success: GameBuildFacts,
   error: gameError,
 });

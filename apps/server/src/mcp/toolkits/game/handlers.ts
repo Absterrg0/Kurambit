@@ -235,7 +235,11 @@ const handlers = {
         return yield* builds.measure(
           threadId,
           { _tag: "build", build },
-          { waitFor: TOOL_FACTS_WAIT, queue: "background" },
+          {
+            waitFor: TOOL_FACTS_WAIT,
+            queue: "background",
+            ...(input.skilled === true ? { skilled: true } : {}),
+          },
         );
       }),
     ),

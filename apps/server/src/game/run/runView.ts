@@ -114,7 +114,7 @@ export interface StatusInput {
   /** While undoing: what the step made worse (loop.undoReason). */
   readonly undoing: string | null;
   readonly blocked: string | null;
-  /** The run's play bot setup (botSetupView); null when it needed none. */
+  /** The play bot an earlier Kurambit's run wrote as setup; null for every run since. */
   readonly botSetup: GameKeepGoingBotSetup | null;
 }
 
@@ -186,19 +186,16 @@ export const keepGoingStatus = (input: StatusInput): GameKeepGoingStatus => {
         ]
       : [];
   const done = input.records.map(({ record, at }) => refOf(record, at)).toReversed();
-  const settingUp = live && input.botSetup?.state === "running";
   const message = live
-    ? settingUp
-      ? "Kurambit is writing its play bot in a session of its own, so it can show whether a player can win. Its minutes are not your budget's."
-      : phase === "waiting"
-        ? "Keep going waits for this turn to end."
-        : phase === "looking"
-          ? "Keep going is reading the current build's facts."
-          : proposal !== null
-            ? `Step ${n} · ${proposal.summary}`
-            : phase === "undoing"
-              ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
-              : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
+    ? phase === "waiting"
+      ? "Keep going waits for this turn to end."
+      : phase === "looking"
+        ? "Keep going is reading the current build's facts."
+        : proposal !== null
+          ? `Step ${n} · ${proposal.summary}`
+          : phase === "undoing"
+            ? `Keep going · undoing step ${n}${input.undoing === null || input.undoing === "" ? "" : `: ${input.undoing}`}`
+            : `Keep going · step ${n} · ${current[0]?.reason ?? "working"}`
     : endingMessage(run, records);
   return {
     runId: run.id,

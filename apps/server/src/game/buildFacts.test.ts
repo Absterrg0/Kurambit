@@ -1,16 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { GameOperationError, type GameBotRunResult } from "@kurambit/contracts";
 
-import {
-  faultOf,
-  firstResponseOf,
-  notMeasured,
-  sharedPlaySuspect,
-  skilledFact,
-  tierFact,
-  turnChangeBase,
-  unmeasurableTier,
-} from "./buildFacts.ts";
+import { faultOf, skilledFact, tierFact, turnChangeBase } from "./buildFacts.ts";
 
 const run = (
   state: string,
@@ -128,48 +119,6 @@ describe("a busy machine", () => {
       value: { ending: "unresponsive" },
     });
   });
-  it("makes a slow first response not measured, and keeps a fast one", () => {
-    const probe = (seconds: number | null) =>
-      run("done", { state: "playing" }, { response: { positions: true, seconds, window: 1 } });
-    expect(firstResponseOf(probe(0.9), busy)).toMatchObject({ status: "not-measured" });
-    expect(firstResponseOf(probe(null), busy)).toMatchObject({ status: "not-measured" });
-    expect(firstResponseOf(probe(0.1), busy)).toMatchObject({ status: "measured" });
-    expect(firstResponseOf(probe(0.9), quiet)).toMatchObject({ status: "measured" });
-  });
-});
-
-describe("sharedPlaySuspect", () => {
-  const live = (motion: number, longestFreeze = 0) => ({
-    status: "measured" as const,
-    value: {
-      freezes: [],
-      longestFreeze,
-      motion,
-      detail: 40,
-      dominantColour: 0.3,
-      longestStall: 0,
-      seconds: 60,
-    },
-  });
-  const perf = (fps: number) => ({
-    status: "measured" as const,
-    value: { fps, low1: fps, gpuMs: 4, scale: 1, width: 1280, height: 720, frames: 3000 },
-  });
-
-  it("keeps a shared play whose readings are at their best", () => {
-    expect(sharedPlaySuspect(run("done", {}), { liveness: live(20), performance: perf(60) })).toBe(
-      null,
-    );
-  });
-
-  it("plays alone again what sharing could explain", () => {
-    expect(sharedPlaySuspect({ ...run("done", {}), timeRatio: 0.8 }, {})).toMatch(/0\.80/);
-    expect(
-      sharedPlaySuspect(run("done", {}), { firstResponse: notMeasured("busy", true) }),
-    ).toMatch(/waiting/);
-    expect(sharedPlaySuspect(run("done", {}), { performance: perf(45) })).toMatch(/performance/);
-    expect(sharedPlaySuspect(run("done", {}), { liveness: live(0.5) })).toMatch(/motion/);
-  });
 });
 
 describe("faultOf", () => {
@@ -179,23 +128,6 @@ describe("faultOf", () => {
     expect(faultOf(error("low-memory"))).toMatchObject({ retry: true });
     expect(faultOf(error("tool-missing"))).toMatchObject({ retry: false });
     expect(faultOf(error("command-failed"))).toBeNull();
-  });
-});
-
-describe("unmeasurableTier", () => {
-  it("is a tier a missing tool kept from playing, never one waiting or the build itself can clear", () => {
-    const missing = faultOf(
-      new GameOperationError({
-        operation: "Bot run",
-        path: "ffmpeg",
-        reason: "tool-missing",
-        detail: "ffmpeg is needed for the run video.",
-      }),
-    )!;
-    const busy = notMeasured("the machine was busy", true);
-    const own = notMeasured("the tier bot did not play: no canvas", false);
-    expect(unmeasurableTier({ idle: missing, masher: busy })).toBe(missing);
-    expect(unmeasurableTier({ idle: busy, masher: own })).toBeUndefined();
   });
 });
 

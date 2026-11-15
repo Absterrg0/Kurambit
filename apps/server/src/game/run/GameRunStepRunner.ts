@@ -8,15 +8,13 @@
 // - look: waits for the game to be idle (GameRunTurnReactor wakes it when a
 //   turn ends), then reads the folder's build and whether the folder still
 //   holds it, the facts measured on it so far (never waited for: a step starts
-//   at once, and its judge measures the build it starts from), the chat's
-//   newest `Next:` line and whether a play bot exists. Once a step of the run
-//   has landed, a booting game with no play bot gets one, written once per run
-//   in a session of its own (botSetup.ts); its minutes are not the budget's.
+//   at once), the chat's newest `Next:` line and whether a play bot exists.
 // - turn: posts the step's message in the chat as an ordinary queued turn in a
 //   fresh provider session (`freshContext`), the message carrying a compact
 //   briefing; GameRunTurnReactor follows that turn to its build.
 // - judge: measures the step's build and its base, never superseded, and
-//   waits for both.
+//   waits only for their boot checks and QA plays; the random-input play goes
+//   on behind the next step.
 // - undo: once the game is idle, restores the base only while the folder
 //   still holds the step's build.
 import * as NodeFSP from "node:fs/promises";
@@ -53,17 +51,15 @@ import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
-import { unmeasurableTier } from "../buildFacts.ts";
 import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
-import { makeBotSetup } from "./botSetup.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
 
-/** How long a judge waits for a build's facts before the step ends unmeasured. */
-const FACTS_WAIT = "10 minutes";
+/** How long a judge waits for a build's boot check before the step ends unmeasured. */
+const FACTS_WAIT = "5 minutes";
 /** How many of the chat's latest replies the look reads for the newest `Next:` line. */
 const NEXT_LOOKBACK = 20;
 /** A final game_check's declaration about the reference, as the tool's input carries it. */
@@ -98,7 +94,6 @@ const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const turns = yield* GameRunTurnReactor.GameRunTurnReactor;
-  const botSetup = makeBotSetup({ engine, threads, projections, turnAdmission, bots, builds });
 
   /** The run and its step in flight, if this job's attempt still holds it. */
   const current = (job: GameRunJobs.GameRunStepJob) =>
@@ -140,12 +135,16 @@ const make = Effect.gen(function* () {
       (shells) => !shells.some((shell) => shell.activeRunId !== null || BUSY.has(shell.status)),
     );
 
-  /** The facts of a build, waited for; null when they cannot be read. */
+  /** The facts of a build once its boot check is in; null when they cannot be read. */
   const factsOf = (threadId: ThreadId, build: GameBuildId | null) =>
     build === null
       ? Effect.succeed<GameBuildFacts | null>(null)
       : builds
-          .measure(threadId, { _tag: "build", build }, { waitFor: FACTS_WAIT, queue: "background" })
+          .measure(
+            threadId,
+            { _tag: "build", build },
+            { waitFor: FACTS_WAIT, queue: "background", upTo: "boots" },
+          )
           .pipe(
             Effect.map((facts): GameBuildFacts | null => facts),
             Effect.catchCause((cause) =>
@@ -236,70 +235,31 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "look") return;
-      const setup = yield* botSetup.sessions(located);
-      // Never two writers: the person's turn goes first. A turn that ends wakes
-      // this job again, as does a setup session's end or cap.
-      if (!(yield* gameIdle(located))) return yield* botSetup.cap(located, setup);
+      // Never two writers: the person's turn goes first. A turn that ends wakes this job again.
+      if (!(yield* gameIdle(located))) return;
       yield* startStep(located);
       const threadId = located.run.threadId;
       const root = yield* projects.resolve(threadId);
-      // Before the folder is read: a setup's bot is no edit once it is kept.
-      const finished = yield* botSetup.finish(located, root, setup);
-      if (finished === "wait") return;
       const { build, edited } = yield* builds.current(threadId);
       const facts = edited ? null : yield* factsSoFar(threadId, build);
-      const bot = yield* botSetup.played(root, 0);
-      const stepped = rounds.some((r) => r.runId === located.run.id && r.round.step !== undefined);
-      // Once per run, after its first step landed (so it never delays the
-      // first), a booting game with no play bot gets one: the skilled tier is
-      // shown beside the facts, never a reason to undo.
-      if (
-        stepped &&
-        located.run.botSetup === undefined &&
-        finished === null &&
-        !edited &&
-        !bot &&
-        facts !== null &&
-        facts.boots.status === "measured" &&
-        facts.boots.value.ok &&
-        // Whether this machine can measure skilled play is known only once these
-        // have played: a later look of the run decides it then.
-        facts.masher.status !== "pending" &&
-        facts.idle.status !== "pending"
-      ) {
-        // A bot nobody can measure here is tokens spent on nothing.
-        const unmeasurable = unmeasurableTier(facts);
-        const started =
-          unmeasurable === undefined
-            ? yield* botSetup.start(located)
-            : ({
-                thread: threadId,
-                state: "skipped",
-                tokens: null,
-                minutes: null,
-                reason: `${unmeasurable.why.replace(/[.\s]+$/, "")}, so skilled play cannot be measured on this machine and keep going goes on without it`,
-              } as const);
-        if (started === "wait") return;
-        return yield* complete(located, {
-          kind: "look",
-          current: build,
-          facts,
-          next: yield* nextLine(threadId),
-          critique: yield* referenceCritique(threadId),
-          bot,
-          edited,
-          botSetup: started,
-        });
-      }
+      // The step build this one came from, while this one's random-input play still measures:
+      // an error that play found there is the next blocker.
+      const made = rounds
+        .map((r) => r.round)
+        .findLast((record) => record.build !== undefined && record.build === build)?.step?.base;
+      const earlier =
+        facts !== null && facts.masher.status === "pending" && made != null
+          ? yield* factsSoFar(threadId, made)
+          : null;
       yield* complete(located, {
         kind: "look",
         current: build,
         facts,
+        ...(earlier === null ? {} : { earlier }),
         next: yield* nextLine(threadId),
         critique: yield* referenceCritique(threadId),
-        bot,
+        bot: (yield* bots.latestPlayBot(root)) !== null,
         edited,
-        ...(finished === null ? {} : { botSetup: finished }),
       });
     });
 
@@ -380,7 +340,7 @@ const make = Effect.gen(function* () {
       if (step.kind !== "judge") return;
       yield* startStep(located);
       const threadId = located.run.threadId;
-      // Both register at once and wait on the server's one facts permit (no
+      // Both register at once and wait on the server's one play lane (no
       // supersede, so the reactor's own measure of the build is kept too).
       const [base, build] = yield* Effect.all(
         [factsOf(threadId, step.base), factsOf(threadId, step.build)],

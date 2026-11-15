@@ -183,8 +183,7 @@ check that matters.
   [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
   engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether a
   chat lists it only when asked; the MCP auth middleware puts the thread's engine, its model route,
-  whether this machine has Blender and whether the thread is a play-bot setup session in the
-  invocation, and
+  and whether this machine has Blender in the invocation, and
   `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A provider reads
   the list once per session, so nothing waits for a request to appear: what a chat uses only when
   the person asks stays reachable through `game_more`, which runs it through its own handler. The
@@ -500,19 +499,17 @@ cannot both find none.
   chat's newest `Next:` line, so a reply without one never wipes the plan (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
   the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
   blocker, a retry of an undone step, a failing fact, the agent's next line. Only
-  watched facts are proposed: what a player would hit (the lead checks: errors,
-  controls, Retry, HUD), the play bot's win and input response. Who wins with no input or random
-  input is the creator's design, and motion and detail are heuristics; none costs a step. Of the scene report only buried bodies, the player in
-  view and the empty view are watched, because the scene's geometry decides them (the empty view
-  counts only flat backdrop below the horizon with nothing drawn on the ray, so a sky or a space
-  backdrop seen level never counts, and it is a design regression a person's step may make);
-  clipping, falling, the camera in a
-  wall and sliding follow where random input led and how fast the machine ran it, and an undo
-  must never hang on a path.
-- **The look never waits.** It reads the facts measured on the folder's build so far, so step 1
-  starts at once from the newest `Next:`; the judge measures the base the step started from
-  anyway. **The look reads the folder's build.** The current build is the newest turn build that changed
-  game files, or a later kept edit, restore target or bot setup point; turns that changed only notes are no builds,
+  what a player would hit is proposed (errors, controls, Retry, HUD). A build is measured only
+  for what a person acts on: it boots, the QA play, one random-input play for errors, freezes and
+  frame rate. Endings with no or random input, motion, input response, the scene report's rows and
+  asset counts were cut: nobody acted on them, and the plays cost minutes between steps.
+- **Nothing between steps waits on a play.** The look reads the facts measured on the folder's
+  build so far, so step 1 starts at once from the newest `Next:`. The judge waits only for the
+  boot check and the QA play (`upTo: "boots"`), usually the step's own clean `game_check` on the
+  same files; the random-input play goes on behind the next step. While the current build's play
+  is still measuring, the look also reads the build it was made from (`earlier`), so an error that
+  play found there is the next blocker rather than an undo. **The look reads the folder's build.** The current build is the newest turn build that changed
+  game files, or a later kept edit or restore target; turns that changed only notes are no builds,
   so it is found by walking the turns page by page however far back (`GameBuilds.currentBuild`),
   never in a fixed window. A folder whose game files are no build's (edited outside a turn) pauses
   the run, since a step's undo would take those edits.
@@ -523,11 +520,10 @@ cannot both find none.
   and a turn that started on any other build (a Redo, a restore, a person's turn landing during the
   look) is never judged or undone, so the run looks again. A step the person redid is never
   retried. A person's turn is never judged or undone.
-- **Only health undoes.** A step is undone when it stops booting, errors or freezes in play, or can
-  no longer be won or lost at all (every comparable play reached an ending on the base, none does
-  now). Every other fact is shown on the record and proposed when bad, never guarded: one noisy run
-  of QA, the scene report or the play bot the harness itself wrote is not evidence to throw away
-  work, and guarding them biased steps away from bosses, harder waves and new verbs. Health is a
+- **Only health undoes.** A step is undone when it stops booting or errors in play, as far as the
+  judge measured. Every other fact is shown on the record and proposed when bad, never guarded:
+  one noisy run of a check is not evidence to throw away work, and guarding them biased steps away
+  from bosses, harder waves and new verbs. Health is a
   crossing into bad on a comparable delta, never a change: a fact already bad that gets worse is
   the next blocker; not-comparable (another harness, renderer or bot) never undoes. The reason is
   written for a person ("it stopped booting: …") and reaches the next step's briefing.
@@ -543,33 +539,20 @@ cannot both find none.
   started on another build) pause it `stalled` with why, so no mix of supersedes and looks runs
   without bound; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
   otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
-  The budget is checked before each turn against a typical step (8 min), and it is what bounds an
+  The budget is checked before each turn against a typical step (6 min), and it is what bounds an
   Autopilot that keeps adding content. Every ending but `done` resumes.
 - **Never repeat.** Each proposal has a key (`fact:<id>`, `steer:<fnv>`, `next:<fnv>`; a retry
   carries the undone step's). Two misses of a key (undone, or kept with its target still bad), any
   step that changed nothing (it is never sent again as it was), or Skip set the key aside for the
   run.
-- **The play bot is setup, never a step.** A step must change what a person sees or fix a measured
-  fault; the bot is the harness's instrument. So once a step of the run has landed (never before
-  step 1), a look that finds a booting game with no play bot has it written once per run in a
-  session of its own ([botSetup.ts](../../apps/server/src/game/run/botSetup.ts)): a
-  `game-round.task.request` child of the chat's last finished turn (`completionWake: "never"`, so
-  it never wakes the chat, and its checkpoint is no build). The look waits on the game being busy,
-  caps each session, sends at most one fix-up session, and reports the outcome, which the run keeps
-  (`GameRun.botSetup`); its minutes extend the budget's end, so the person's budget buys steps only.
-  A failed setup leaves the skilled fact unmeasured and the run goes on. It decides only once the
-  idle and random-input tiers have played: they play the skilled tier's span, so when they ran out
-  of time because the harness draws in software (`tooSlowInSoftware`), the setup is kept as skipped
-  instead. The kept setup point is the chat's next-turn base
-  (`CheckpointService.nextTurnBaseRefForThread`), so the next turn's chat diff, like the rail,
-  does not list the bot as its change.
-- **An undo includes the bot.** `.studio/bot` (without the kits Kurambit writes) is in
-  `restoredPaths`, the one rule for what a restore writes, what a build is and when the folder is
-  edited, so an undo is exactly as before and a build's skilled fact is its own bot's. The setup's
-  bot would then make the folder differ from its build, and undoing the first step would delete
-  it: the setup instead keeps the folder as a hidden point (`game-builds/bots/<run>`, with `-from`
-  naming the build it was written on). The point stands in the folder's history like a restore
-  target (current build, and the next turn's base) but is no row of the rail, which shows `-from`.
+- **The play bot plays only when asked.** Writing one cost 4 to 10 minutes between steps and its
+  one real-time run was noise, so no build's measure and no step plays it. The person asks with
+  the Inspector's Measure button, or asks their agent to prove the game can be won: it writes
+  `.studio/bot/play.mjs` with the bot kit, wins one run with `game_bot_run`, and calls
+  `game_facts` with `skilled: true`. Otherwise the skilled fact reads not measured with why
+  (`deferred`, `no-play-bot`). `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own
+  bot. Games from earlier runs keep their `game-builds/bots/<run>` setup points, which list as the
+  build they were written on.
 - **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
   start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
   (superseded, stopped) gives them back ahead of newer notes. A note only ever appends, so Slice 2
@@ -603,7 +586,7 @@ batches renders because the pinned server gives each Blender command 180 s. The 
 
 A model left alone grades its own work, stops when it feels done, and says it tested things. The
 harness makes the facts true regardless of what the model says: every turn's build is played and
-measured by the harness's own bots (boots, the idle, masher and skilled tiers, liveness, response),
+measured by the harness's own bots (boots, the QA play, a random-input play),
 and keep going undoes a step that broke the game's health and stops when steps stop landing
 changes. Taste stays with the person; the harness never judges it for them. Craft advice lives in the skill pack under `apps/server/templates/studio/` and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product.

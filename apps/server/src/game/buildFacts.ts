@@ -19,7 +19,7 @@ import {
 } from "@kurambit/contracts";
 
 type Facts = GameBuildFacts;
-type TierFact = Facts["idle"];
+type TierFact = Facts["masher"];
 /**
  * Not measured, and why. `retry`: waiting can clear it, so any measure tries
  * again. `standing`: a tool or the machine that waiting will not fix (a
@@ -78,9 +78,6 @@ export interface MachineLoad {
   /** The harness's browser drew on the CPU (no GPU backend on this machine). */
   readonly software?: boolean;
 }
-/** Where the facts view reads these as bad (gameFactsView in contracts). */
-const FIRST_RESPONSE_BAD = 0.5;
-export const FREEZE_BAD = 3;
 const BUSY_STALLED = 0.2;
 const BUSY_LOAD_PER_CORE = 0.75;
 
@@ -106,21 +103,6 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
         "busy",
       )
     : null;
-
-/**
- * A tier this machine cannot measure until a person fixes the machine or its
- * tools (a missing program such as ffmpeg, a browser drawing in software).
- * The skilled tier plays the same way, so it would not be measured either.
- */
-export const machineFault = (
-  fact: TierFact,
-): fact is Extract<TierFact, { status: "not-measured" }> =>
-  // A game too slow on an idle machine is the one standing fault that is the game's own.
-  fact.status === "not-measured" && isStanding(fact) && fact.cause !== "slow";
-
-/** The no-input or random-input tier that is a machine fault, if either is. */
-export const unmeasurableTier = (facts: Pick<Facts, "idle" | "masher">) =>
-  [facts.masher, facts.idle].find(machineFault);
 
 /**
  * A run below real time: its span of play did not fit the wall budget. In a
@@ -154,31 +136,13 @@ const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: Machine
 interface TierEvidence {
   readonly playingAt: number | null;
   readonly endedAt: number | null;
-  readonly response?: {
-    readonly positions: boolean;
-    readonly seconds: number | null;
-    readonly window: number;
-  };
 }
 
-export const tierEvidenceOf = (value: unknown): TierEvidence | null => {
+const tierEvidenceOf = (value: unknown): TierEvidence | null => {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
   const num = (key: string) => (typeof record[key] === "number" ? (record[key] as number) : null);
-  const response = record["response"] as Record<string, unknown> | undefined;
-  return {
-    playingAt: num("playingAt"),
-    endedAt: num("endedAt"),
-    ...(typeof response === "object" && response !== null
-      ? {
-          response: {
-            positions: response["positions"] === true,
-            seconds: typeof response["seconds"] === "number" ? response["seconds"] : null,
-            window: typeof response["window"] === "number" ? response["window"] : 1,
-          },
-        }
-      : {}),
-  };
+  return { playingAt: num("playingAt"), endedAt: num("endedAt") };
 };
 
 const round = (value: number) => Number(value.toFixed(1));
@@ -260,90 +224,6 @@ export const tierFact = (
     default:
       return notMeasured(`the bot ended "${status}": ${note}`, false);
   }
-};
-
-/** Rows whose reading follows how fast the machine ran the play (keep going's loop.ts leaves the scene ones unguarded for the same reason). */
-const TIMING_ROWS: ReadonlySet<string> = new Set([
-  "motion",
-  "first-response",
-  "performance",
-  "clipping",
-  "fell",
-  "camera",
-  "sliding",
-]);
-/** Timing rows whose best reading is neutral, never good. */
-const NEUTRAL_AT_BEST: ReadonlySet<string> = new Set(["motion"]);
-/** A play beside another that kept at least this share of real time ran as it would alone. */
-const SHARED_REAL_TIME = 0.9;
-const UNREAD = notMeasured("not part of this play", false);
-
-/**
- * Why a play that ran beside another may owe its reading to it, or null when
- * it cannot: the game ran below real time, a reading only waiting clears, or
- * a timing row reads worse than its best. Such a play is played again alone
- * before anything is stored. A good reading stands: sharing the machine never
- * made a game faster or smoother.
- */
-export const sharedPlaySuspect = (
-  result: GameBotRunResult | null,
-  patch: Partial<Facts>,
-): string | null => {
-  if (result !== null && result.timeRatio < SHARED_REAL_TIME)
-    return `it ran at ${result.timeRatio.toFixed(2)}× real time`;
-  for (const fact of Object.values(patch))
-    if (typeof fact === "object" && fact !== null && "status" in fact)
-      if (fact.status === "not-measured" && fact.retry)
-        return `a reading only waiting clears: ${fact.why}`;
-  const facts: Facts = {
-    build: "",
-    key: "",
-    harness: "",
-    state: "measuring",
-    measuredAt: null,
-    renderer: null,
-    message: "",
-    boots: UNREAD,
-    idle: UNREAD,
-    masher: UNREAD,
-    skilled: UNREAD,
-    liveness: UNREAD,
-    firstResponse: UNREAD,
-    assets: UNREAD,
-    use: UNREAD,
-    performance: UNREAD,
-    scene: UNREAD,
-    qa: UNREAD,
-    ...patch,
-  } as Facts;
-  const slow = gameFactsView(facts).find(
-    (row) =>
-      TIMING_ROWS.has(row.id) &&
-      row.reading._tag === "measured" &&
-      (row.reading.tone === "bad" ||
-        (row.reading.tone === "neutral" && !NEUTRAL_AT_BEST.has(row.id))),
-  );
-  return slow === undefined || slow.reading._tag !== "measured"
-    ? null
-    : `its ${slow.id} reading is below its best (${slow.reading.text})`;
-};
-
-/** The masher's first-response probe as a fact. */
-export const firstResponseOf = (
-  result: GameBotRunResult,
-  machine: MachineLoad | null = null,
-): Facts["firstResponse"] => {
-  const response = tierEvidenceOf(result.status.evidence)?.response;
-  if (response === undefined) return notMeasured("the random-input run reported no probe", false);
-  if (!response.positions)
-    return notMeasured("the game reports no player position, so a response cannot be seen", false);
-  const slow = response.seconds === null || response.seconds > FIRST_RESPONSE_BAD;
-  return (
-    (slow ? busyReading("movement answered slowly or not at all", machine) : null) ?? {
-      status: "measured",
-      value: { seconds: response.seconds, window: response.window, resolution: 0.1 },
-    }
-  );
 };
 
 /** The QA play a boot check played (three.js), as the build's qa fact. */

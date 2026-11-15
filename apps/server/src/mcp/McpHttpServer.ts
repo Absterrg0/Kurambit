@@ -45,7 +45,6 @@ import * as ServerConfig from "../config.ts";
 import { engineCapabilities } from "../game/engineProfile.ts";
 import * as GameProjectService from "../game/GameProjectService.ts";
 import * as GameToolchain from "../game/GameToolchain.ts";
-import { isBotSetupThread } from "../game/run/botSetup.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -208,8 +207,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         gameEngine,
         gameModels: manifest === null ? null : gameModelChoice(manifest),
         blenderMissing,
-        gameBotSetup:
-          invocation.thread !== undefined && isBotSetupThread(invocation.thread.threadId),
       }),
       Effect.map(normalizeMcpHttpResponse),
     );

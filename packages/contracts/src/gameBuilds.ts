@@ -2,17 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
-import { GameAssetSource } from "./gameModel.ts";
 import { GameQaReport, gameQaFindings, listedNames } from "./gameQa.ts";
-import {
-  type GameSceneFinding,
-  type GameSceneFindingKind,
-  GameSceneReport,
-  sceneEmptyText,
-  sceneFindingText,
-  scenePlayerFrame,
-  scenePlayerText,
-} from "./gameScene.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -20,6 +10,7 @@ export { GameBuildId } from "./gameBuildId.ts";
 
 /** Bounds of one measurement, the same for every engine. */
 export const GAME_FACTS_BOUNDS = {
+  /** No harness play uses it now; kept because the tier bots' bounds file still names it. */
   idleSeconds: 60,
   masherSeconds: 60,
   skilledSeconds: 60,
@@ -27,11 +18,14 @@ export const GAME_FACTS_BOUNDS = {
 } as const;
 
 /**
- * Why a build's skilled fact was not measured while its game has a play bot: the
- * play bot Kurambit wrote plays only for keep going's judgment and a person's measure.
+ * Why a build's skilled fact was not measured: the play bot plays only when the person or
+ * their agent asks to prove the game can be won, never as part of a build's measure.
  */
 export const GAME_FACTS_SKILLED_DEFERRED =
-  "Kurambit's play bot plays a build when keep going judges it or when you measure it; this build was not asked for yet";
+  "not asked for: the play bot plays only when you or your agent ask to prove the game can be won";
+/** The skilled fact of a game with no play bot yet. */
+export const GAME_FACTS_NO_PLAY_BOT =
+  "no play bot: ask your agent to prove the game can be won, and it writes one";
 
 /** Push names on the game's operation stream: the list changed, or a build's facts did. */
 export const GAME_BUILDS_EVENT = "builds";
@@ -118,7 +112,12 @@ export const GameFactsState = Schema.Literals([
 ]);
 export type GameFactsState = typeof GameFactsState.Type;
 
-/** The facts measured now, in display order: the shared names of the rail, compare, card and tools. */
+/**
+ * The facts measured now, in display order: the shared names of the rail, compare, card and
+ * tools. Only what a person acts on: does it start, does it play without errors, do the QA
+ * play's controls, Retry and HUD hold, does it keep its frame rate, and (only when someone
+ * asks) can Kurambit's play bot win it.
+ */
 const MEASURED_FACT_IDS = [
   "boots",
   "errors",
@@ -127,6 +126,16 @@ const MEASURED_FACT_IDS = [
   "hud",
   "performance",
   "skilled",
+] as const;
+export type GameMeasuredFactId = (typeof MEASURED_FACT_IDS)[number];
+const GAME_FACT_IDS: ReadonlyArray<GameMeasuredFactId> = MEASURED_FACT_IDS;
+/**
+ * A fact's id. Keep going's stored step records name facts no longer measured (rows nobody
+ * acted on: endings with no or random input, motion, the scene report's rows, asset counts),
+ * so their ids still decode; nothing reads or diffs them.
+ */
+export const GameFactId = Schema.Literals([
+  ...MEASURED_FACT_IDS,
   "idle",
   "masher",
   "motion",
@@ -142,15 +151,6 @@ const MEASURED_FACT_IDS = [
   "camera",
   "sliding",
   "unseen",
-] as const;
-export type GameMeasuredFactId = (typeof MEASURED_FACT_IDS)[number];
-const GAME_FACT_IDS: ReadonlyArray<GameMeasuredFactId> = MEASURED_FACT_IDS;
-/**
- * A fact's id. Keep going's stored step records name facts no longer measured (design opinions
- * the checks dropped), so their ids still decode; nothing reads or diffs them.
- */
-export const GameFactId = Schema.Literals([
-  ...MEASURED_FACT_IDS,
   "winnable-without-skill",
   "freeze",
   "colour",
@@ -239,7 +239,7 @@ export type GameBuild = typeof GameBuild.Type;
  * - slow: the game itself ran below real time on an idle machine (a step can make it faster).
  * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
  * - no-play-bot: the game has no play bot to measure skilled play with.
- * - deferred: Kurambit's play bot plays only for keep going's judgment or a person's measure.
+ * - deferred: the play bot plays only when the person or their agent asks for it.
  */
 export const GameFactNotMeasuredCause = Schema.Literals([
   "software",
@@ -269,45 +269,6 @@ const gameFact = <S extends Schema.Top>(value: S) =>
     GameFactNotMeasured,
     GameFactPending,
   ]);
-
-export const GameModelFact = Schema.Struct({
-  /** Game-relative GLB. */
-  path: Schema.String,
-  /** Read from the GLB's JSON. */
-  triangles: NonNegativeInt,
-  bytes: NonNegativeInt,
-  maxTextureSide: NonNegativeInt,
-  /** The rig id whose joints its skin holds (aliases resolved); null when unskinned or on no known rig. */
-  skeleton: Schema.NullOr(Schema.String),
-  clips: NonNegativeInt,
-  /** The export's measurement, valid only while the GLB's bytes match its sidecar. */
-  pipeline: Schema.Union([
-    Schema.Struct({
-      status: Schema.Literal("measured"),
-      sidecar: Schema.String,
-      kind: Schema.Literals(["character", "prop"]),
-      height: Schema.Number,
-      reviewedAt: IsoDateTime,
-      groundSpeeds: Schema.Array(
-        Schema.Struct({ clip: Schema.String, speed: Schema.NullOr(Schema.Number) }),
-      ).check(Schema.isMaxLength(16)),
-      seamsBroken: Schema.Array(Schema.String).check(Schema.isMaxLength(16)),
-      drifting: Schema.Array(Schema.String).check(Schema.isMaxLength(16)),
-      source: GameAssetSource,
-    }),
-    GameFactNotMeasured,
-  ]),
-});
-export type GameModelFact = typeof GameModelFact.Type;
-export const GameAssetFacts = Schema.Struct({
-  /** Models under the engine's assets folder, outside library/, path order. */
-  models: Schema.Array(GameModelFact).check(Schema.isMaxLength(24)),
-  /** Models past the cap, counted only. */
-  more: NonNegativeInt,
-  /** Library files ASSETS.md credits; not measured one by one. */
-  libraryFiles: NonNegativeInt,
-});
-export type GameAssetFacts = typeof GameAssetFacts.Type;
 
 /** How many paths each of the use fact's lists holds. */
 export const GAME_ASSET_USE_CAP = 64;
@@ -368,29 +329,6 @@ export const GameSkilledTier = Schema.Struct({
   /** The bot's own end word when the game reported no result. */
   botWord: Schema.NullOr(Schema.String),
 });
-export const GameLiveness = Schema.Struct({
-  freezes: Schema.Array(Schema.Struct({ at: Schema.Number, seconds: Schema.Number })).check(
-    Schema.isMaxLength(10),
-  ),
-  longestFreeze: Schema.Number,
-  /** Mean temporal information (ITU-T P.910). */
-  motion: Schema.Number,
-  /** Mean spatial information. */
-  detail: Schema.Number,
-  /** Share of the frame held by one colour, 0–1. */
-  dominantColour: Schema.Number,
-  /** Seconds, from the engine's own frame counter. */
-  longestStall: Schema.Number,
-  /** Seconds of play analysed. */
-  seconds: Schema.Number,
-});
-export const GameFirstResponse = Schema.Struct({
-  /** Null: nothing moved within the window. */
-  seconds: Schema.NullOr(Schema.Number),
-  window: Schema.Number,
-  resolution: Schema.Number,
-});
-
 /**
  * How the random-input play ran, as the game's shell measured it while the harness
  * played (three.js): play's frame rate, its 1% low, the GPU's time per frame and the
@@ -426,21 +364,10 @@ export const GameBuildFacts = Schema.Struct({
    */
   runtime: Schema.optionalKey(Schema.String),
   boots: gameFact(Schema.Struct({ ok: Schema.Boolean, detail: Schema.String })),
-  idle: gameFact(GameBotTier),
+  /** The random-input play: whether it crashes or stops answering (errors), and its frame times. */
   masher: gameFact(GameBotTier),
+  /** Kurambit's play bot, only when the person or their agent asks to prove it can be won. */
   skilled: gameFact(GameSkilledTier),
-  liveness: gameFact(GameLiveness),
-  firstResponse: gameFact(GameFirstResponse),
-  /** Static: read from the build's GLBs and sidecars, never played; Keep going does not watch it. */
-  assets: gameFact(GameAssetFacts).pipe(
-    Schema.withDecodingDefault(
-      Effect.succeed({
-        status: "not-measured" as const,
-        why: "measured before asset facts existed",
-        retry: false,
-      }),
-    ),
-  ),
   /** Measured during the random-input play: frame rate, 1% low, GPU time and render scale. */
   performance: gameFact(GamePerformance).pipe(
     Schema.withDecodingDefault(
@@ -451,26 +378,15 @@ export const GameBuildFacts = Schema.Struct({
       }),
     ),
   ),
-  /** Measured during the plays: which shipped files the game loaded and which sounds played. */
+  /**
+   * Measured during the plays: which shipped files the game loaded and which sounds played. No
+   * row: the generation cards read which generations a build loaded (`latestUse`).
+   */
   use: gameFact(GameAssetUse).pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
         status: "not-measured" as const,
         why: "measured before asset use was measured",
-        retry: false,
-      }),
-    ),
-  ),
-  /**
-   * Measured during the random-input play by the game's shell: what a person sees at a
-   * glance (the player in view, bodies buried, inside each other or fallen out of the
-   * world, the camera inside a wall, sliding, things never on screen), with frames.
-   */
-  scene: gameFact(GameSceneReport).pipe(
-    Schema.withDecodingDefault(
-      Effect.succeed({
-        status: "not-measured" as const,
-        why: "measured before scene reports existed",
         retry: false,
       }),
     ),
@@ -537,7 +453,6 @@ type Fact<A> =
   | typeof GameFactNotMeasured.Type
   | typeof GameFactPending.Type;
 type BotTier = typeof GameBotTier.Type;
-type Liveness = typeof GameLiveness.Type;
 
 const LABELS: Readonly<Record<GameFactId, string>> = {
   boots: "Boots",
@@ -567,37 +482,18 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   unseen: "Never on screen",
 };
 
-/** The scene rows past the player's, the finding kinds each shows, and its clean reading. */
-const SCENE_ROWS: Readonly<
-  Record<
-    "buried" | "clipping" | "fell" | "camera" | "sliding",
-    { readonly kinds: ReadonlyArray<GameSceneFindingKind>; readonly clean: string }
-  >
-> = {
-  buried: { kinds: ["buried", "inside"], clean: "Nothing buried or inside a solid" },
-  clipping: { kinds: ["clipping"], clean: "No bodies inside each other" },
-  fell: { kinds: ["fell"], clean: "Nothing fell out of the world" },
-  camera: { kinds: ["camera"], clean: "The camera stays out of walls" },
-  sliding: { kinds: ["sliding"], clean: "Nothing slides in idle or a frozen pose" },
-};
-const sceneFindingsOf = (report: GameSceneReport, id: keyof typeof SCENE_ROWS) =>
-  report.findings.filter((finding) => SCENE_ROWS[id].kinds.includes(finding.kind));
-
 const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 const at = (tier: BotTier) => (tier.at === null ? "" : ` at ${seconds(tier.at)}`);
 
-// What each tier's ending says about the game: an idle or random player that
-// wins means no challenge, one that loses means there is pressure.
-const tierText = (id: "idle" | "masher" | "skilled", tier: BotTier) => {
-  const who =
-    id === "idle" ? "With no input" : id === "masher" ? "Random input" : "Kurambit's play bot";
+/** Kurambit's play bot's ending; a run that broke is the errors check's, so it is counted once. */
+const tierText = (tier: BotTier) => {
   switch (tier.ending) {
     case "won":
-      return `${who} wins${at(tier)}`;
+      return `Kurambit's play bot wins${at(tier)}`;
     case "lost":
-      return `${who} loses${at(tier)}`;
+      return `Kurambit's play bot loses${at(tier)}`;
     case "no-ending":
-      return `${who}: no ending in ${seconds(tier.played)}`;
+      return `Kurambit's play bot: no ending in ${seconds(tier.played)}`;
     case "crashed":
       return `Crashed${at(tier)}`;
     case "unresponsive":
@@ -606,11 +502,6 @@ const tierText = (id: "idle" | "masher" | "skilled", tier: BotTier) => {
       return "Did not boot";
   }
 };
-// Whether nobody or anybody can win is the creator's design, never a verdict: only a win by the
-// play bot proves something, that the game can be won. A run that broke is the errors check's,
-// so it is counted once.
-const tierTone = (id: "idle" | "masher" | "skilled", tier: BotTier): GameFactTone =>
-  id === "skilled" && tier.ending === "won" ? "good" : "neutral";
 
 /** A bot run's evidence folder as display entries. */
 const tierEvidence = (tier: BotTier): GameFactView["evidence"] =>
@@ -650,14 +541,10 @@ const from = <A>(fact: Fact<A>, read: (value: A) => Reading): Read =>
       ? { _tag: "pending" }
       : unmeasured(fact);
 
-const liveness = (facts: GameBuildFacts, read: (live: Liveness) => Reading) =>
-  from(facts.liveness, read);
-
 const BROKE_ENDINGS: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 /** The plays that can show the game breaking, the one most likely to first. */
 const PLAYS = [
   ["masher", "with random input"],
-  ["idle", "with no input"],
   ["skilled", "by Kurambit's play bot"],
 ] as const;
 /** The first play that broke (crashed, stopped answering, did not start), with who played it. */
@@ -696,8 +583,7 @@ const readErrors = (facts: GameBuildFacts): Read => {
       kind: "throws",
     });
   // The random-input play is the long one: without it nothing says the game plays clean.
-  if (facts.masher.status === "pending" || facts.idle.status === "pending")
-    return { _tag: "pending" };
+  if (facts.masher.status === "pending") return { _tag: "pending" };
   if (facts.masher.status !== "measured") return unmeasured(facts.masher);
   const played = PLAYS.reduce((sum, [id]) => {
     const fact: Fact<BotTier> = facts[id];
@@ -730,17 +616,14 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
         tone: boots.ok ? "good" : "bad",
         kind: String(boots.ok),
       }));
-    case "idle":
-    case "masher":
-    case "skilled": {
-      const fact: Fact<BotTier> = facts[id];
-      return from(fact, (tier) => ({
-        text: tierText(id, tier),
+    case "skilled":
+      // Only a win proves something: that the game can be won.
+      return from(facts.skilled, (tier) => ({
+        text: tierText(tier),
         value: tier.at,
-        tone: tierTone(id, tier),
+        tone: tier.ending === "won" ? "good" : "neutral",
         kind: tier.ending,
       }));
-    }
     case "errors":
       return readErrors(facts);
     case "controls":
@@ -806,38 +689,6 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
               },
         );
       });
-    case "motion":
-      return liveness(facts, (live) => ({
-        text:
-          live.motion < 1
-            ? `Almost no motion (${live.motion.toFixed(1)})`
-            : `Motion ${live.motion.toFixed(1)}`,
-        value: live.motion,
-        tone: live.motion < 1 ? "bad" : "neutral",
-        kind: "motion",
-      }));
-    case "detail":
-      return liveness(facts, (live) => ({
-        text: `Detail ${Math.round(live.detail)}`,
-        value: live.detail,
-        tone: "neutral",
-        kind: "detail",
-      }));
-    case "first-response":
-      return from(facts.firstResponse, (response) => ({
-        text:
-          response.seconds === null
-            ? `No movement answered a held key within ${seconds(response.window)}`
-            : `Moves ${response.seconds.toFixed(1)} s after a held key`,
-        value: response.seconds,
-        tone:
-          response.seconds === null || response.seconds > 0.5
-            ? "bad"
-            : response.seconds <= 0.2
-              ? "good"
-              : "neutral",
-        kind: response.seconds === null ? "none" : "moved",
-      }));
     case "performance":
       return from(facts.performance, (perf) => {
         const ms = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
@@ -857,179 +708,18 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
           kind: "performance",
         };
       });
-    case "assets":
-      return from(facts.assets, (assets) => {
-        const measured = assets.models.filter(
-          (model) => model.pipeline.status === "measured",
-        ).length;
-        const notMeasured = assets.models.length - measured;
-        const text = `${measured} made model${measured === 1 ? "" : "s"} measured${notMeasured > 0 ? `, ${notMeasured} not measured` : ""}`;
-        // A triangle count is not taste: the reading is never better or worse, only different.
-        return { text, value: measured, tone: "neutral", kind: text };
-      });
-    case "use":
-      return from(facts.use, (use) => {
-        const shipped = use.used.length + use.unused.length + use.more;
-        // Past the caps the overflow is the used list's while the unused one is not full.
-        const exact = use.unused.length < GAME_ASSET_USE_CAP;
-        const used = exact ? use.used.length + use.more : use.used.length;
-        const parts = [
-          `Uses ${used}${exact ? "" : "+"} of ${shipped} file${shipped === 1 ? "" : "s"}`,
-          ...(use.unused.length > 0 ? [`${use.unused.length}${exact ? "" : "+"} unused`] : []),
-          ...(use.silent.length > 0
-            ? [`${use.silent.length} sound${use.silent.length === 1 ? "" : "s"} never played`]
-            : []),
-        ];
-        const text = parts.join(" · ");
-        // Evidence for the next step, never a verdict: unused art is no worse a game.
-        return { text, value: used, tone: "neutral", kind: "use" };
-      });
-    case "player-view":
-      return fromScene(facts, (report): Read => {
-        const player = report.player;
-        switch (player.kind) {
-          case "none":
-            return { _tag: "not-measured", why: "the game sets no ctx.player" };
-          case "point":
-            return { _tag: "not-measured", why: "ctx.player is a position, not a body on screen" };
-          case "hidden-by-game":
-            return {
-              _tag: "not-measured",
-              why: "the game kept the player hidden or out of the scene the whole play",
-            };
-          case "no-body":
-          case "first-person":
-            return measured({
-              text: "First person: the player has no body on screen",
-              value: null,
-              tone: "neutral",
-              kind: "first-person",
-            });
-          case "body": {
-            const problem = scenePlayerText(player);
-            const visible = Math.max(0, 1 - player.hidden - player.offscreen);
-            return measured({
-              text:
-                problem ??
-                `In view ${Math.round(visible * 100)}% of play${player.heightPx === null ? "" : ` · ${Math.round(player.heightPx)} px tall`}`,
-              value: Math.round(visible * 100),
-              tone: problem === null ? "good" : "bad",
-              kind: problem === null ? "clean" : "flagged",
-            });
-          }
-        }
-      });
-    case "empty":
-      return fromScene(facts, (report): Read => {
-        const empty = report.empty;
-        if (empty === undefined)
-          return {
-            _tag: "not-measured",
-            why: "the game's shell predates the empty-view measure",
-            cause: "old-shell",
-          };
-        const problem = sceneEmptyText(empty);
-        return measured({
-          text:
-            problem ??
-            (empty.share === 0
-              ? "Something is drawn across the view"
-              : `${Math.round(empty.share * 100)}% of the view is empty backdrop`),
-          value: Math.round(empty.share * 100),
-          tone: problem === null ? "good" : "bad",
-          kind: problem === null ? "clean" : "flagged",
-        });
-      });
-    case "buried":
-    case "clipping":
-    case "fell":
-    case "camera":
-    case "sliding":
-      return fromScene(facts, (report) => {
-        const found = sceneFindingsOf(report, id);
-        const first = found[0];
-        return measured(
-          first === undefined
-            ? { text: SCENE_ROWS[id].clean, value: 0, tone: "good", kind: "clean" }
-            : {
-                text: `${sceneFindingText(first)}${found.length > 1 ? ` (+${found.length - 1} more)` : ""}`,
-                value: found.length,
-                tone: "bad",
-                kind: "flagged",
-              },
-        );
-      });
-    case "unseen":
-      return fromScene(facts, (report) => {
-        const count = report.unseen.length + report.unseenMore;
-        // Things may come later than a minute of random play reaches: evidence, never a verdict.
-        return measured({
-          text:
-            count === 0
-              ? `Every named thing came on screen in ${Math.round(report.seconds)} s of play`
-              : `${count} never on screen in ${Math.round(report.seconds)} s of play: ${report.unseen.slice(0, 4).join(", ")}${count > 4 ? ", …" : ""}`,
-          value: count,
-          tone: "neutral",
-          kind: "unseen",
-        });
-      });
   }
 };
 
 const measured = (reading: Reading): Read => ({ _tag: "measured", reading });
-const fromScene = (facts: GameBuildFacts, read: (report: GameSceneReport) => Read): Read =>
-  facts.scene.status === "measured"
-    ? read(facts.scene.value)
-    : facts.scene.status === "pending"
-      ? { _tag: "pending" }
-      : unmeasured(facts.scene);
-
-const sceneFrame = (finding: GameSceneFinding): GameFactView["evidence"] =>
-  finding.frame === null
-    ? []
-    : [{ kind: "frame", label: sceneFindingText(finding), path: finding.frame }];
-
 const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView["evidence"] => {
-  const tier = (fact: Fact<BotTier>) =>
-    fact.status === "measured" ? tierEvidence(fact.value) : [];
   switch (id) {
-    case "idle":
-    case "masher":
     case "skilled":
-      return tier(facts[id]);
+      return facts.skilled.status === "measured" ? tierEvidence(facts.skilled.value) : [];
     case "errors": {
       const broke = brokenPlay(facts);
       return broke === null ? [] : tierEvidence(broke.tier);
     }
-    // Liveness and the first response are read from the random-input run.
-    case "motion":
-    case "detail":
-    case "first-response":
-      return tier(facts.masher).filter((entry) => entry.kind === "video");
-    // The scene report's frames, the problem outlined in each.
-    case "player-view": {
-      if (facts.scene.status !== "measured") return [];
-      const player = facts.scene.value.player;
-      if (player.kind !== "body") return [];
-      const frame = scenePlayerFrame(player);
-      const text = scenePlayerText(player);
-      return frame === null || text === null ? [] : [{ kind: "frame", label: text, path: frame }];
-    }
-    case "empty": {
-      const empty = facts.scene.status === "measured" ? facts.scene.value.empty : undefined;
-      const text = empty === undefined ? null : sceneEmptyText(empty);
-      return empty?.frame == null || text === null
-        ? []
-        : [{ kind: "frame", label: text, path: empty.frame }];
-    }
-    case "buried":
-    case "clipping":
-    case "fell":
-    case "camera":
-    case "sliding":
-      return facts.scene.status === "measured"
-        ? sceneFindingsOf(facts.scene.value, id).flatMap(sceneFrame).slice(0, 4)
-        : [];
     default:
       return [];
   }
@@ -1091,8 +781,6 @@ export interface GameCheck extends GameFactView {
 
 export interface GameChecksView {
   readonly checks: ReadonlyArray<GameCheck>;
-  /** Every other fact, each as a judged sentence like a check; the raw reading stays on the view. */
-  readonly more: ReadonlyArray<GameCheck>;
   /** Measured facts reading good and bad, over every fact: the build card's two counts. */
   readonly pass: number;
   readonly toLook: number;
@@ -1121,30 +809,17 @@ const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.
 
 /** A bot tier's ending as a check: who played and what it came to. */
 const tierCheck = (
-  who: "with no input" | "with random input" | "by Kurambit's play bot",
+  who: "with random input" | "by Kurambit's play bot",
   tier: BotTier,
 ): { sentence: string; value: string | null } => {
   switch (tier.ending) {
     case "won":
-      return who === "with no input"
-        ? { sentence: "Wins itself with no input", value: atTime(tier) }
-        : who === "with random input"
-          ? { sentence: "Random input wins it", value: atTime(tier) }
-          : { sentence: "Can be won by Kurambit's play bot", value: atTime(tier) };
+      return { sentence: "Can be won by Kurambit's play bot", value: atTime(tier) };
     case "lost":
-      return who === "with no input"
-        ? { sentence: "Can be lost with no input", value: atTime(tier) }
-        : who === "with random input"
-          ? { sentence: "Random input loses", value: atTime(tier) }
-          : { sentence: "Kurambit's play bot loses", value: atTime(tier) };
+      return { sentence: "Kurambit's play bot loses", value: atTime(tier) };
     case "no-ending":
       return {
-        sentence:
-          who === "with no input"
-            ? "Not lost with no input"
-            : who === "with random input"
-              ? "Random input finds no ending"
-              : "Kurambit's play bot finds no ending",
+        sentence: "Kurambit's play bot finds no ending",
         value: `in ${seconds(tier.played)}`,
       };
     case "crashed":
@@ -1177,8 +852,6 @@ const checkWords = (
           : // The check's name, as every check has one; what stopped it is in the row's
             // tooltip and on the Stage's error bar.
             { sentence: "Does not start", value: null };
-    case "idle":
-      return facts.idle.status === "measured" ? tierCheck("with no input", facts.idle.value) : null;
     case "skilled": {
       if (facts.skilled.status !== "measured") return null;
       const tier = facts.skilled.value;
@@ -1254,105 +927,27 @@ const checkWords = (
           ? { sentence: "Runs slowly", value: fps }
           : { sentence: "Frame rate dips", value: `${fps} · 1% low ${Math.round(perf.low1)}` };
     }
-    case "masher":
-      return facts.masher.status === "measured"
-        ? tierCheck("with random input", facts.masher.value)
-        : null;
-    case "motion": {
-      if (facts.liveness.status !== "measured") return null;
-      return facts.liveness.value.motion < 1
-        ? { sentence: "Almost nothing moves on screen", value: null }
-        : { sentence: "The picture moves in play", value: null };
-    }
-    case "detail":
-      return facts.liveness.status === "measured"
-        ? { sentence: "Picture detail, kept to compare builds", value: null }
-        : null;
-    case "first-response": {
-      if (facts.firstResponse.status !== "measured") return null;
-      const response = facts.firstResponse.value.seconds;
-      return response === null
-        ? { sentence: "Nothing moves when a key is held", value: null }
-        : response <= 0.2
-          ? { sentence: "Answers a held key at once", value: null }
-          : response > 0.5
-            ? { sentence: "Answers a held key late", value: `${response.toFixed(1)} s` }
-            : { sentence: "Answers a held key", value: `${response.toFixed(1)} s` };
-    }
-    case "assets": {
-      if (facts.assets.status !== "measured") return null;
-      const assets = facts.assets.value;
-      const made = assets.models.length + assets.more;
-      return made === 0
-        ? {
-            sentence:
-              assets.libraryFiles > 0 ? "Its art comes from the library" : "Has no made models",
-            value: null,
-          }
-        : { sentence: `Makes ${plural(made, "model")} of its own`, value: null };
-    }
-    case "use": {
-      if (facts.use.status !== "measured") return null;
-      const use = facts.use.value;
-      return use.unused.length === 0 && use.silent.length === 0
-        ? { sentence: "Every file it ships is used", value: null }
-        : use.unused.length > 0
-          ? { sentence: `Ships ${plural(use.unused.length, "file")} it never loads`, value: null }
-          : { sentence: `${plural(use.silent.length, "sound")} never played`, value: null };
-    }
-    case "player-view": {
-      if (facts.scene.status !== "measured") return null;
-      const player = facts.scene.value.player;
-      return player.kind === "body" && scenePlayerText(player) === null
-        ? { sentence: "The player stays in view", value: null }
-        : player.kind === "no-body" || player.kind === "first-person"
-          ? { sentence: "First person, with no body on screen", value: null }
-          : null;
-    }
-    case "empty": {
-      const empty = facts.scene.status === "measured" ? facts.scene.value.empty : undefined;
-      return empty !== undefined && sceneEmptyText(empty) === null
-        ? { sentence: "Little of the view is empty backdrop", value: null }
-        : null;
-    }
-    case "buried":
-    case "clipping":
-    case "fell":
-    case "camera":
-    case "sliding":
-      return null;
-    case "unseen": {
-      if (facts.scene.status !== "measured") return null;
-      const count = facts.scene.value.unseen.length + facts.scene.value.unseenMore;
-      return count === 0
-        ? { sentence: "Everything named comes on screen", value: null }
-        : { sentence: `${plural(count, "thing")} never came on screen`, value: null };
-    }
     default:
       return null;
   }
 };
 
 /**
- * PURE. A build's facts as a person reads them: the lead checks in plain
- * sentences, then the rest as further measurements. The same readings and
- * tones as `gameFactsView`; only the lead facts' words differ.
+ * PURE. A build's facts as a person reads them: the checks in plain
+ * sentences. The same readings and tones as `gameFactsView`; only the words differ.
  */
 export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
   const views = gameFactsView(facts);
-  const lead: ReadonlySet<GameFactId> = new Set(GAME_LEAD_FACTS);
   const asCheck = (view: GameFactView): GameCheck => {
     const words = view.reading._tag === "measured" ? checkWords(facts, view.id) : null;
-    // The scene rows' readings are already sentences about what a person would see. Winning
-    // is never claimed before the play bot has won.
+    // Winning is never claimed before the play bot has won.
     const fallback =
       view.reading._tag === "measured"
         ? view.reading.text
         : view.id === "skilled"
           ? "Not yet proven winnable"
           : (CHECK_LABELS[view.id] ?? view.label);
-    const run =
-      view.id === "idle" || view.id === "masher" || view.id === "skilled" ? facts[view.id] : null;
+    const run = view.id === "skilled" ? facts.skilled : null;
     return {
       ...view,
       sentence: words?.sentence ?? fallback,
@@ -1368,25 +963,14 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
     views.filter((view) => view.reading._tag === "measured" && view.reading.tone === wanted).length;
   return {
     checks,
-    more: views.filter((view) => !lead.has(view.id)).map(asCheck),
     pass: tone("good"),
     toLook: tone("bad"),
   };
 };
 
 /** For these numbers lower is better, for these higher; the other numbers are neutral. */
-const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
-  "controls",
-  "retry",
-  "hud",
-  "first-response",
-  "buried",
-  "clipping",
-  "fell",
-  "camera",
-  "sliding",
-]);
-const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance", "player-view"]);
+const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["controls", "retry", "hud"]);
+const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance"]);
 const BROKE = BROKE_ENDINGS;
 /** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
 const rank = (id: GameFactId, kind: string): number | null => {
@@ -1398,19 +982,8 @@ const rank = (id: GameFactId, kind: string): number | null => {
     case "retry":
     case "hud":
       return kind === "clean" ? 1 : 0;
-    case "idle":
-    case "masher":
-      // Whether nobody or anybody wins is the creator's design: only breaking is worse.
-      return BROKE.has(kind) ? 0 : null;
     case "skilled":
       return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
-    case "player-view":
-    case "buried":
-    case "clipping":
-    case "fell":
-    case "camera":
-    case "sliding":
-      return kind === "clean" ? 1 : kind === "flagged" ? 0 : null;
     default:
       return null;
   }
@@ -1582,6 +1155,11 @@ export type GameBuildComparison = typeof GameBuildComparison.Type;
 
 /** facts (read only), measure and play name one build. */
 export const GameBuildRefInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });
+/** A measure the person asked for; `skilled` also plays the game's play bot, to prove it can be won. */
+export const GameBuildMeasureInput = Schema.Struct({
+  ...GameBuildRefInput.fields,
+  skilled: Schema.optionalKey(Schema.Boolean),
+});
 export const GameBuildPlayResult = Schema.Union([
   Schema.TaggedStruct("web", { url: Schema.String }),
   Schema.TaggedStruct("window", { message: Schema.String }),

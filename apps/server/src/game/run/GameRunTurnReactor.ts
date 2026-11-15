@@ -49,7 +49,6 @@ import { forkParked } from "../../serverActivation.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameOperations from "../GameOperations.ts";
 import * as GameProjectService from "../GameProjectService.ts";
-import { stopBotSetup } from "./botSetup.ts";
 import { providerEnding } from "./handBack.ts";
 import {
   type Located,
@@ -567,12 +566,8 @@ const make = Effect.gen(function* () {
       const run = records.gameRuns.at(-1);
       if (run === undefined) return;
       yield* operations.runChanged(root, run.status === "ended" ? null : stepLine());
-      // A run that ended has no work left: Off, a pause or the end stop its jobs
-      // and its bot setup's session.
-      if (run.status === "ended") {
-        yield* jobs.stopRun(run.id);
-        yield* stopBotSetup(engine, threads, run);
-      }
+      // A run that ended has no work left: Off, a pause or the end stop its jobs.
+      if (run.status === "ended") yield* jobs.stopRun(run.id);
     });
 
   /**

@@ -62,9 +62,9 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameStage from "./GameStage.ts";
-import { BOT_DIR, BuildName } from "./run/buildNames.ts";
+import { BuildName } from "./run/buildNames.ts";
 import { engineCapabilities, engineProfile } from "./engineProfile.ts";
-import { captureBuild, isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
+import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
 import { sameTuneFile, tuneFileText, tuneFileWith } from "./gameTune.ts";
@@ -91,13 +91,11 @@ const FIXES = `${gameRunRefsFolder(NO_RUN)}fixes/`;
  */
 const EDITS = "edits/";
 /**
- * Where the folder stood once a keep-going run's setup wrote its play bot
- * (BuildName.botSetup), with the build it was written on (`-from`, written
- * last, so a setup point counts only once it is whole). The bot is part of
- * what a build is (restoredPaths), so this point is the folder's current build
- * until the next turn and the base that turn's undo restores: the look reads
- * the folder unedited and an undo of the first step keeps the setup's bot. It
- * is no build of the rail: the rail names the build it was written on.
+ * Where the folder stood once an earlier Kurambit's keep going wrote its play
+ * bot as setup (`bots/<run>`), with the build it was written on (`-from`,
+ * written last, so a setup point counts only once it is whole). Still read so
+ * those games list as before: it is no build of the rail, which names the
+ * build it was written on.
  */
 const BOTS = `${gameRunRefsFolder(NO_RUN)}bots/`;
 const VALUES_LABEL = "Tuned";
@@ -120,7 +118,6 @@ const noPlayReason = (engine: GameEngineId) =>
 /** Whether a build of this engine's game is measured: never for a parked engine. */
 const measurable = (engine: GameEngineId) => engineCapabilities(engine).has("play");
 const isGameBuildId = Schema.is(GameBuildId);
-const isGameOperationError = Schema.is(GameOperationError);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 /** One build before its facts are read. */
@@ -217,7 +214,14 @@ export class GameBuilds extends Context.Service<
     readonly measure: (
       threadId: ThreadId,
       build: GameBuildRef,
-      options?: { readonly waitFor?: Duration.Input; readonly queue?: "person" | "background" },
+      options?: {
+        readonly waitFor?: Duration.Input;
+        readonly queue?: "person" | "background";
+        /** Wait only for the boot check and the QA play (GameFacts.measure). */
+        readonly upTo?: "boots";
+        /** Also play the game's play bot, to prove it can be won (GameFacts.measure). */
+        readonly skilled?: boolean;
+      },
     ) => Effect.Effect<GameBuildFacts, GameOperationError>;
     /** Measures the work owed by data (rows owing tiers, live runs' rounds) and settles cut-short restores. */
     readonly reconcile: Effect.Effect<void>;
@@ -230,12 +234,12 @@ export class GameBuilds extends Context.Service<
     /**
      * A measure no thread waits for: a keep-going step's build as it lands,
      * or a chat turn's build, which with `supersede` replaces the game's earlier turn
-     * builds still queued. `skilled` as GameFacts.measure takes it.
+     * builds still queued.
      */
     readonly measureIn: (
       root: string,
       build: string,
-      options?: { readonly supersede?: boolean; readonly skilled?: boolean },
+      options?: { readonly supersede?: boolean },
     ) => Effect.Effect<void>;
     /** Plays the build from its copy; the game folder is never touched. Measures it if it never was. */
     readonly play: (
@@ -282,14 +286,6 @@ export class GameBuilds extends Context.Service<
       { readonly build: GameBuildId | null; readonly edited: boolean },
       GameOperationError
     >;
-    /**
-     * Keeps the folder as keep going's bot setup left it (BOTS), once per run;
-     * null when kept, else why not (it changed more than the bot, or wrote none).
-     */
-    readonly keepBotSetup: (
-      threadId: ThreadId,
-      runId: string,
-    ) => Effect.Effect<string | null, GameOperationError>;
     /** The folder still holds `build` in what a restore covers (restoredPaths), read under the game's lock. */
     readonly holds: (
       threadId: ThreadId,
@@ -897,25 +893,24 @@ const make = Effect.gen(function* () {
 
   /**
    * A frame of the build playing, for its card: the earliest grid frame of the
-   * random-input run (it moves the most), else of the no-input run, before any
-   * later one or the run's last screen, which is often its ending. Only a file
-   * still there.
+   * random-input run, before any later one or the run's last screen, which is
+   * often its ending. Only a file still there.
    */
   const stillOf = (root: string, read: GameBuildFacts | undefined) =>
     Effect.promise(async () => {
       if (read === undefined) return null;
       // The earliest frame of play first: a bot's later frames are usually its loss, and every
       // build's game-over screen looks alike, so builds could not be told apart by picture.
-      for (const name of ["frame-001.png", "frame-002.png", END_FRAME])
-        for (const fact of [read.masher, read.idle]) {
-          if (fact.status !== "measured" || fact.value.evidence === null) continue;
-          const path = `${fact.value.evidence}/frames/${name}`;
-          const there = await NodeFSP.access(NodePath.join(root, path)).then(
-            () => true,
-            () => false,
-          );
-          if (there) return path;
-        }
+      for (const name of ["frame-001.png", "frame-002.png", END_FRAME]) {
+        const fact = read.masher;
+        if (fact.status !== "measured" || fact.value.evidence === null) return null;
+        const path = `${fact.value.evidence}/frames/${name}`;
+        const there = await NodeFSP.access(NodePath.join(root, path)).then(
+          () => true,
+          () => false,
+        );
+        if (there) return path;
+      }
       return null;
     });
 
@@ -1066,62 +1061,6 @@ const make = Effect.gen(function* () {
     return from !== undefined && isGameBuildId(from) ? from : id;
   };
 
-  const keepBotSetup: GameBuilds["Service"]["keepBotSetup"] = (threadId, runId) =>
-    Effect.gen(function* () {
-      const g = yield* gameOf(threadId);
-      const ref = checkpointRefForGameRun(NO_RUN, BuildName.botSetup(runId));
-      const fromRef = checkpointRefForGameRun(NO_RUN, BuildName.botSetupFrom(runId));
-      if (yield* checkpoints.hasCheckpointRef({ cwd: g.root, checkpointRef: fromRef })) return null;
-      const listed = yield* allEntries(g, 1, undefined);
-      const from = yield* currentOf(g, listed);
-      if (from === null) return "the game had no build to write its bot on";
-      const lock = { operations, owner: String(threadId), waitUntil: null };
-      const sha = yield* captureBuild(
-        { checkpoints, lock },
-        g.root,
-        NO_RUN,
-        BuildName.botSetup(runId),
-      );
-      const covered = isRestored(g.lane);
-      const inBot = (path: string) => path.startsWith(`${BOT_DIR}/`);
-      const [game, bot] = yield* Effect.all([
-        measureChange(checkpoints, g.root, (path) => covered(path) && !inBot(path), from, sha),
-        measureChange(checkpoints, g.root, (path) => covered(path) && inBot(path), from, sha),
-      ]);
-      const refused = game.changed
-        ? "the setup changed game files, not only its bot"
-        : !bot.changed
-          ? "the setup wrote no bot"
-          : null;
-      if (refused !== null) {
-        yield* checkpoints
-          .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: [ref] })
-          .pipe(Effect.ignore);
-        return refused;
-      }
-      // The chat's next turn (keep going's step) lists its changes from here, as the rail does.
-      yield* checkpoints.updateCheckpointRef({
-        cwd: g.root,
-        checkpointRef: yield* nextTurnBaseRefForThread(threadId).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-        ),
-        oid: sha,
-      });
-      // Last: the point counts only once its `-from` names the build the rail shows for it.
-      yield* checkpoints.updateCheckpointRef({
-        cwd: g.root,
-        checkpointRef: fromRef,
-        oid: shownAs(listed, from) ?? from,
-      });
-      return null;
-    }).pipe(
-      Effect.mapError((cause) =>
-        isGameOperationError(cause)
-          ? cause
-          : failed("Bot setup", threadId, "io", "the folder could not be kept", cause),
-      ),
-    );
-
   const restoreRefOf = (g: Game, entries: ReadonlyArray<Entry>) =>
     Effect.gen(function* () {
       const newerThan = (at: string) =>
@@ -1229,7 +1168,6 @@ const make = Effect.gen(function* () {
         {
           queue: "background",
           ...(options.supersede === true ? { supersede: true } : {}),
-          ...(options.skilled === undefined ? {} : { skilled: options.skilled }),
         },
       );
     }).pipe(Effect.ignore);
@@ -2014,7 +1952,6 @@ const make = Effect.gen(function* () {
     inCopy,
     restore,
     holds,
-    keepBotSetup,
     current,
     keepValues,
     turnBuild,

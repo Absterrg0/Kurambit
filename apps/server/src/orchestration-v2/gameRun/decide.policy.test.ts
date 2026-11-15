@@ -45,7 +45,6 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   measuredAt: null,
   renderer: "GPU",
   boots: { status: "measured", value: { ok: true, detail: "" } },
-  idle: tier("lost", 30),
   masher: tier("lost", 20),
   skilled: {
     status: "measured",
@@ -55,23 +54,8 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
       botWord: null,
     },
   },
-  liveness: {
-    status: "measured",
-    value: {
-      freezes: [],
-      longestFreeze: 0,
-      motion: 5,
-      detail: 40,
-      dominantColour: 0.2,
-      longestStall: 0,
-      seconds: 60,
-    },
-  },
-  firstResponse: { status: "measured", value: { seconds: 0.1, window: 2, resolution: 0.05 } },
-  assets: { status: "measured", value: { models: [], more: 0, libraryFiles: 0 } },
   use: { status: "not-measured", why: "not played", retry: false },
   performance: { status: "not-measured", why: "not played", retry: false },
-  scene: { status: "not-measured", why: "not played", retry: false },
   qa: { status: "measured", value: qaReport(0) },
   message: "",
   ...patch,
@@ -157,15 +141,13 @@ const judged = (s: RunState, base: GameBuildFacts, build: GameBuildFacts, c = cy
 describe("worse", () => {
   const broke = (base: GameBuildFacts, build: GameBuildFacts) =>
     Loop.regressions(base, build).map((r) => [r.delta.id, r.why]);
-  const noEnding = (patch: Partial<GameBuildFacts> = {}) =>
-    facts({ idle: tier("no-ending", null), masher: tier("no-ending", null), ...patch });
 
   it("undoes only on health, in words a person reads", () => {
     expect(broke(facts(), facts({ masher: tier("crashed", 12) }))).toEqual([
       ["errors", "it crashed: crashed at 12 s when played with random input"],
     ]);
-    expect(broke(facts(), facts({ idle: tier("unresponsive", 8) }))).toEqual([
-      ["errors", "it froze: stopped answering at 8.0 s when played with no input"],
+    expect(broke(facts(), facts({ masher: tier("unresponsive", 8) }))).toEqual([
+      ["errors", "it froze: stopped answering at 8.0 s when played with random input"],
     ]);
     expect(
       broke(
@@ -185,21 +167,6 @@ describe("worse", () => {
     expect(broke(facts(), facts(skilledWith("lost")))).toEqual([]);
     expect(broke(deadControls(0), deadControls(1))).toEqual([]);
     expect(broke(facts(), facts({ masher: tier("won", 9) }))).toEqual([]);
-  });
-
-  it("undoes a step after which no play reaches an ending", () => {
-    expect(broke(facts(), noEnding(skilledWith("no-ending")))).toEqual([
-      [
-        "skilled",
-        "it can no longer be won or lost: Kurambit's play bot: no ending in 60 s (before: Kurambit's play bot wins at 40 s)",
-      ],
-    ]);
-    // One play still ends: the game still ends.
-    expect(broke(facts(), noEnding())).toEqual([]);
-    // Nothing ended before either: nothing was lost.
-    expect(broke(noEnding(skilledWith("no-ending")), noEnding(skilledWith("no-ending")))).toEqual(
-      [],
-    );
   });
 
   it("never counts what cannot be compared: a renderer, a harness or a bot that changed", () => {
@@ -348,59 +315,25 @@ describe("the proposal", () => {
     expect(Loop.propose(state(), look({ facts: crashing, critique }))?.why).toBe("blocker");
   });
 
-  // The bot is the harness's instrument, written once as setup: never a step.
-  it("never proposes a play bot, and the run keeps the setup a look reports", () => {
+  it("never proposes a play bot", () => {
     expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("next");
-    const setup = {
-      thread: ThreadId.make("thread:bot-setup"),
-      state: "failed" as const,
-      tokens: 1200,
-      minutes: 4,
-      reason: "its session failed",
-    };
-    const next = Loop.applyLook(state(), look({ bot: false, botSetup: setup }), NOW);
-    expect(next.state.botSetup).toEqual(setup);
-    expect(next.plan).toMatchObject({ kind: "turn" });
-    expect(next.log).toContain("goes on without the skilled fact");
   });
 
-  it("ends rather than start a step no play tier here could judge", () => {
-    const missing = {
-      status: "not-measured" as const,
-      why: "Bot run: ffmpeg is needed to record the play.",
-      retry: false,
-      standing: true as const,
-    };
-    const blind = Loop.applyLook(
-      state(),
-      look({ facts: facts({ idle: missing, masher: missing }) }),
-      NOW,
-    );
-    expect(blind.plan).toBeNull();
-    expect(blind.state.ending).toBe("tool-failed");
-    expect(blind.state.lastFailure).toBe(
-      "it can't judge steps here: Bot run: ffmpeg is needed to record the play; then measure the build again",
-    );
-    // One tier still measured judges a step.
-    const oneTier = Loop.applyLook(state(), look({ facts: facts({ idle: missing }) }), NOW);
-    expect(oneTier.plan).toMatchObject({ kind: "turn" });
-    // A game too slow on an idle machine is the game's own fault: a step can fix it.
-    const slow = {
-      ...missing,
-      cause: "slow" as const,
-      why: "the game ran at 0.40× real time on an idle machine, so 60 s of play did not fit the run's wall budget",
-    };
-    const slowGame = Loop.applyLook(
-      state(),
-      look({ facts: facts({ idle: slow, masher: slow }) }),
-      NOW,
-    );
-    expect(slowGame.plan).toMatchObject({ kind: "turn" });
+  // The judge waits only for the boot check, so the random-input play of a step's build may
+  // land after the next look: an error it found is that look's blocker while the current
+  // build still measures, and never once the current build's own reading is in.
+  it("proposes an error the earlier build's random-input play found while the current one measures", () => {
+    const crashed = facts({ masher: tier("crashed", 12) });
+    const measuring = facts({ masher: { status: "pending" } });
+    const step = Loop.propose(state(), look({ facts: measuring, earlier: crashed }));
+    expect(step).toMatchObject({ why: "blocker", target: "errors", key: "fact:errors" });
+    expect(step?.text).toContain("the build before the last step");
+    expect(Loop.propose(state(), look({ facts: facts(), earlier: crashed }))?.why).toBe("next");
   });
 
   it("checks the budget before each turn and caps the turn at the time left", () => {
     const ends = (minutes: number) => state({ budgetEndsAt: NOW + minutes * 60_000 });
-    expect(Loop.applyLook(ends(7), look(), NOW).state.ending).toBe("budget");
+    expect(Loop.applyLook(ends(5), look(), NOW).state.ending).toBe("budget");
     expect(Loop.applyLook(ends(10), look(), NOW).plan).toMatchObject({
       kind: "turn",
       capMs: 10 * 60_000,

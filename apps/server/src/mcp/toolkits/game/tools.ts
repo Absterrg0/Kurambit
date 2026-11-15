@@ -660,8 +660,11 @@ const BuildsTool = Tool.make("game_builds", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_builds"));
 const FactsTool = Tool.make("game_facts", {
   description:
-    "What the harness measured on one build of this game (the newest when build is omitted), the facts the Builds rail shows: whether it boots; errors while playing; the QA play (qa: controls, Retry, HUD, as game_check reports them); how it ends with no input (idle), random input (masher) and the game's latest play-mode bot (skilled); motion and detail in the random-input video; input response; and where the engine reports them, asset use (use.unused: shipped files no play loaded, so wire them in or delete them; use.silent: sounds never started) and performance (one not measured because the harness drew in software is Kurambit's machine, never the game); and scene: the scene report game_check shows, over the random-input play. Each is measured, or not measured with why. A build is measured once, in a copy, in about 3 to 5 minutes; this call measures what is missing, waits up to 30 s, and otherwise returns with the rest pending: call again later. Facts are of builds (a turn's end), not of uncommitted work.",
-  parameters: Schema.Struct({ build: Schema.optionalKey(GameBuildId) }),
+    "What the harness measured on one build of this game (the newest when build is omitted), as the Builds rail shows it: whether it boots, errors while playing, the QA play (controls, Retry, HUD), performance, and the play bot's run when one was asked for. Each is measured, or not measured with why. This call measures what is missing, waits up to 30 s, and otherwise returns with the rest pending. Facts are of builds (a turn's end), not of uncommitted work. skilled: true also plays the game's play bot, only when the person asks you to prove the game can be won: first write a policy bot at .studio/bot/play.mjs with the bot kit (.studio/bot/kit/KIT-GUIDE.md) that steers by what the game reports, and get one run to a win with game_bot_run.",
+  parameters: Schema.Struct({
+    build: Schema.optionalKey(GameBuildId),
+    skilled: Schema.optionalKey(Schema.Boolean),
+  }),
   success: GameBuildFacts,
   failure,
   failureMode: "return",

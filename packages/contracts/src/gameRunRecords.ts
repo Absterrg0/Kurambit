@@ -238,6 +238,11 @@ export const GameRunStepResult = Schema.Union([
     current: Schema.NullOr(GameBuildId),
     /** Null when the current build could not be measured. */
     facts: Schema.NullOr(GameBuildFacts),
+    /**
+     * While the current build's random-input play is still measuring, the facts of the step build
+     * it was made from: an error that play found there is the next blocker. Absent otherwise.
+     */
+    earlier: Schema.optionalKey(GameBuildFacts),
     /** The chat's latest settled reply's line (packages/shared readNextLine). */
     next: NextLine,
     /**

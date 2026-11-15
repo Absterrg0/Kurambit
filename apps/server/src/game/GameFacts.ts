@@ -30,8 +30,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   GAME_FACTS_BOUNDS,
   GAME_FACTS_EVENT,
+  GAME_FACTS_NO_PLAY_BOT,
   GAME_FACTS_SKILLED_DEFERRED,
-  GameAssetFacts,
   GameAssetUse,
   GameBuildFacts,
   GameBuildId,
@@ -39,7 +39,6 @@ import {
   GameFactPending,
   GamePerformance,
   GameQaReport,
-  GameSceneReport,
   type GameBotRunResult,
   GameEngineId,
   GameManifest,
@@ -49,17 +48,12 @@ import {
 } from "@kurambit/contracts";
 import {
   bootsFact,
-  busyReading,
-  FREEZE_BAD,
   faultOf,
-  firstResponseOf,
   isStanding,
   machineBusy,
   type MachineLoad,
   notMeasured,
-  sharedPlaySuspect,
   skilledFact,
-  tierEvidenceOf,
   tierFact,
   tierWallSeconds,
   qaFact,
@@ -67,7 +61,7 @@ import {
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
-import { isSoftwareRenderer, makeGameBrowser } from "./gameChromium.ts";
+import { makeGameBrowser } from "./gameChromium.ts";
 import { type LaneTicket, type PlayPriority, playLane } from "./playLane.ts";
 import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
@@ -75,16 +69,11 @@ import { insideGame } from "./gamePath.ts";
 import { copyTree } from "./gameFiles.ts";
 import { isPathInside } from "./gameNativeUserDir.ts";
 import * as GameOperations from "./GameOperations.ts";
-import * as GameProcesses from "./GameProcesses.ts";
-import { findExecutable } from "./GameProcesses.ts";
 import { HOST_OS } from "./processHost.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
-import { measureAssets } from "./assetFacts.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
-import { readSceneFile, SCENE_OLD_SHELL, sceneNotInEngine } from "./sceneReport.ts";
-import { measureVideo, playSpan, stallWithin } from "./videoSignals.ts";
 
 /**
  * Changes when the server's reading of a measurement, or how templates/bot-child.mjs plays a
@@ -144,14 +133,6 @@ const idleMachine = Effect.gen(function* () {
   }
 });
 
-/** The random-input play's scene record as the scene fact. */
-const sceneOf = (record: GameSceneReport | "no-shell" | null): Fact<"scene"> =>
-  record === "no-shell"
-    ? notMeasured(SCENE_OLD_SHELL, false, false, "old-shell")
-    : record === null
-      ? notMeasured("the random-input play's scene report could not be read", true)
-      : { status: "measured", value: record };
-
 /** A build GameBuilds resolved: its game, its commit and its content key. */
 export interface ResolvedBuild {
   readonly root: string;
@@ -170,18 +151,8 @@ const Stored = Schema.Struct({
   renderer: Schema.NullOr(Schema.String),
   runtime: Schema.optionalKey(Schema.String),
   boots: Schema.optionalKey(GameBuildFacts.fields.boots),
-  idle: Schema.optionalKey(GameBuildFacts.fields.idle),
   masher: Schema.optionalKey(GameBuildFacts.fields.masher),
   skilled: Schema.optionalKey(GameBuildFacts.fields.skilled),
-  liveness: Schema.optionalKey(GameBuildFacts.fields.liveness),
-  firstResponse: Schema.optionalKey(GameBuildFacts.fields.firstResponse),
-  assets: Schema.optionalKey(
-    Schema.Union([
-      Schema.Struct({ status: Schema.Literal("measured"), value: GameAssetFacts }),
-      GameFactNotMeasured,
-      GameFactPending,
-    ]),
-  ),
   use: Schema.optionalKey(
     Schema.Union([
       Schema.Struct({ status: Schema.Literal("measured"), value: GameAssetUse }),
@@ -196,13 +167,6 @@ const Stored = Schema.Struct({
       GameFactPending,
     ]),
   ),
-  scene: Schema.optionalKey(
-    Schema.Union([
-      Schema.Struct({ status: Schema.Literal("measured"), value: GameSceneReport }),
-      GameFactNotMeasured,
-      GameFactPending,
-    ]),
-  ),
   qa: Schema.optionalKey(
     Schema.Union([
       Schema.Struct({ status: Schema.Literal("measured"), value: GameQaReport }),
@@ -213,7 +177,6 @@ const Stored = Schema.Struct({
   /** Each play's own use record, so a tier measured again replaces only its own. */
   plays: Schema.optionalKey(
     Schema.Struct({
-      idle: Schema.optionalKey(PlayUse),
       masher: Schema.optionalKey(PlayUse),
       skilled: Schema.optionalKey(PlayUse),
     }),
@@ -227,53 +190,30 @@ const StoredJson = Schema.fromJsonString(Stored);
 const decodeStored = Schema.decodeUnknownOption(StoredJson);
 const encodeStored = Schema.encodeSync(StoredJson);
 
-/** What the run video's sidecar says (frameVideo.ts): each frame's counter, game time and wall ms. */
-const decodeSidecar = Schema.decodeUnknownOption(
-  Schema.fromJsonString(
-    Schema.Struct({
-      frames: Schema.optionalKey(
-        Schema.Array(Schema.Tuple([Schema.Number, Schema.Number, Schema.Number])),
-      ),
-    }),
-  ),
-);
-
 const decodeCopyManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
 
 /**
- * The facts a tier's run writes. assets is static: read from the copy, never played. use is
- * every play's together: each play tier writes it again with its own record added.
+ * The facts a tier's run writes: only what a person acts on. The boot check (with the QA play),
+ * then the random-input play (errors, freezes, frame rate), and the play bot only when someone
+ * asks to prove the game can be won. use is every play's together: each play tier writes it
+ * again with its own record added (the generation cards read it).
  */
-type Tier = "assets" | "boots" | "idle" | "masher" | "skilled";
-type FactName =
-  | "assets"
-  | "boots"
-  | "idle"
-  | "masher"
-  | "skilled"
-  | "liveness"
-  | "firstResponse"
-  | "use"
-  | "performance"
-  | "scene"
-  | "qa";
+type Tier = "boots" | "masher" | "skilled";
+type FactName = "boots" | "masher" | "skilled" | "use" | "performance" | "qa";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
-  assets: ["assets"],
   // The boot check plays the QA play too (GameEngine.checkIn), so its report lands with it.
   boots: ["boots", "qa"],
-  idle: ["idle", "use"],
-  masher: ["masher", "liveness", "firstResponse", "performance", "scene", "use"],
+  masher: ["masher", "performance", "use"],
   skilled: ["skilled", "use"],
 };
-const TIERS: ReadonlyArray<Tier> = ["assets", "boots", "idle", "masher", "skilled"];
+const TIERS: ReadonlyArray<Tier> = ["boots", "masher", "skilled"];
 const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => TIER_FACTS[tier]))];
 /**
- * Asset use is read from a browser page's requests, performance and the scene
- * report from its shell; an engine whose game plays in its own process says
- * why it has none of them, and never owes them.
+ * Asset use is read from a browser page's requests, performance from its shell; an engine whose
+ * game plays in its own process says why it has none of them, and never owes them.
  */
-const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "scene", "qa"]);
-const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "scene" | "qa") =>
+const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "qa"]);
+const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "qa") =>
   engineProfile(engine).play === "browser"
     ? null
     : notMeasured(
@@ -281,9 +221,7 @@ const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "scene"
           ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for games that play in a browser`
           : fact === "performance"
             ? `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for games that play in a browser`
-            : fact === "qa"
-              ? `${engineProfile(engine).displayName} games have no QA play yet; it is played for three.js games`
-              : sceneNotInEngine(engine),
+            : `${engineProfile(engine).displayName} games have no QA play yet; it is played for three.js games`,
         false,
       );
 const useNotMeasured = (engine: GameEngineId) => browserOnly(engine, "use");
@@ -293,41 +231,21 @@ const factsOf = (engine: GameEngineId | undefined): ReadonlyArray<FactName> =>
     : FACT_NAMES;
 /** Each tier's step as the measuring line names it. */
 const TIER_STEP: Readonly<Record<Tier, string>> = {
-  assets: "reading its files",
   boots: "checking it starts",
-  idle: "playing it with no input",
   masher: "playing it with random input",
   skilled: "letting the play bot play it",
 };
 
-/**
- * What a running measure is doing, by the step it is on and how many are done: never a time
- * left, which the machine's load makes a guess. On a GPU a browser game's no-input and
- * random-input plays run at once (measureJob), so they are one step.
- */
+/** What a running measure is doing, by the step it is on and how many are done: never a time left. */
 const measuringMessage = (
   tiers: ReadonlySet<Tier> | null,
   owed: (tier: Tier) => boolean,
-  engine: GameEngineId,
-  renderer: string,
 ): string => {
   if (tiers === null) return "Measuring: getting a copy of the build ready.";
-  const planned = TIERS.filter((tier) => tiers.has(tier));
-  const together =
-    tiers.has("idle") &&
-    tiers.has("masher") &&
-    engineProfile(engine).play === "browser" &&
-    !isSoftwareRenderer(renderer);
-  const steps: Array<ReadonlyArray<Tier>> = [];
-  for (const tier of planned)
-    if (together && tier === "masher") continue;
-    else steps.push(together && tier === "idle" ? ["idle", "masher"] : [tier]);
-  const at = steps.findIndex((step) => step.some(owed));
+  const steps = TIERS.filter((tier) => tiers.has(tier));
+  const at = steps.findIndex(owed);
   if (at === -1) return "Measuring: saving the readings.";
-  const step = steps[at]!;
-  const name =
-    step.length === 2 ? "playing it with no input and with random input" : TIER_STEP[step[0]!];
-  return `Measuring: ${name} (step ${at + 1} of ${steps.length}).`;
+  return `Measuring: ${TIER_STEP[steps[at]!]} (step ${at + 1} of ${steps.length}).`;
 };
 
 /** One measurement asked for: queued until it holds the play lane, then running. */
@@ -337,7 +255,7 @@ interface Job {
   readonly ticket: LaneTicket;
   /** A person asked: standing faults are tried again. */
   person: boolean;
-  /** Someone needs the tester's bot to play it: keep going's judgment or a person. */
+  /** The person or their agent asked the play bot to play it, to prove it can be won. */
   skilled: boolean;
   /** Only a newer turn build's measure asked: a newer one drops it while it waits. */
   supersedable: boolean;
@@ -350,6 +268,8 @@ interface Job {
   stopped: boolean;
   fiber: Fiber.Fiber<void> | null;
   readonly done: Deferred.Deferred<void>;
+  /** Its boot check (with the QA play) is in, or it had none to do: what keep going judges by. */
+  readonly booted: Deferred.Deferred<void>;
 }
 
 export class GameFacts extends Context.Service<
@@ -374,7 +294,9 @@ export class GameFacts extends Context.Service<
      * it starts nothing and says so. With `supersede` (a chat turn's newest
      * build), it drops the game's other queued measures that asked the same:
      * only the newest turn is worth the wait. A running measure, a person's
-     * and a run's are never dropped.
+     * and a run's are never dropped. `upTo: "boots"` waits only for the
+     * boot check and the QA play, the readings keep going judges a step by;
+     * the random-input play goes on behind it.
      */
     readonly measure: (
       build: ResolvedBuild,
@@ -382,10 +304,10 @@ export class GameFacts extends Context.Service<
         readonly waitFor?: Duration.Input;
         readonly queue?: "person" | "background";
         readonly supersede?: boolean;
+        readonly upTo?: "boots";
         /**
-         * Whether the tester's bot plays the build (default true). Only keep
-         * going's judgment and a person need it; a chat turn's build outside
-         * keep going says so instead, until one of them asks.
+         * Whether the game's play bot plays the build (default false): only
+         * when the person or their agent asks to prove the game can be won.
          */
         readonly skilled?: boolean;
       },
@@ -405,7 +327,6 @@ const make = Effect.gen(function* () {
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const bots = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
-  const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const scope = yield* Effect.scope;
   // Missing templates fail a measure (its bots cannot be copied), never the server's start.
@@ -477,15 +398,10 @@ const make = Effect.gen(function* () {
       pending(fact) ? { status: "pending" } : ((stored?.[fact] as Fact<K> | undefined) ?? NEVER);
     const facts = {
       boots: get("boots"),
-      idle: get("idle"),
       masher: get("masher"),
       skilled: get("skilled"),
-      liveness: get("liveness"),
-      firstResponse: get("firstResponse"),
-      assets: get("assets"),
       use: useNotMeasured(build.engine) ?? get("use"),
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
-      scene: browserOnly(build.engine, "scene") ?? get("scene"),
       qa: browserOnly(build.engine, "qa") ?? get("qa"),
     };
     // An engine with no asset use or performance is not an incomplete measurement.
@@ -515,7 +431,7 @@ const make = Effect.gen(function* () {
           ? `Queued behind ${ahead} other play${ahead === 1 ? "" : "s"}.`
           : "Queued: it starts when the play before it ends."
         : state === "measuring"
-          ? measuringMessage(job?.tiers ?? null, owedTier, build.engine, stored?.renderer ?? "")
+          ? measuringMessage(job?.tiers ?? null, owedTier)
           : state === "never"
             ? "Not measured yet: opening or playing the build measures it."
             : state === "stale"
@@ -545,7 +461,7 @@ const make = Effect.gen(function* () {
           () => true,
           () => false,
         );
-      const tier = async <F extends GameBuildFacts["idle"] | GameBuildFacts["skilled"]>(
+      const tier = async <F extends GameBuildFacts["masher"] | GameBuildFacts["skilled"]>(
         fact: F,
       ): Promise<F> =>
         fact.status !== "measured" ||
@@ -562,7 +478,6 @@ const make = Effect.gen(function* () {
             } as F);
       return {
         ...facts,
-        idle: await tier(facts.idle),
         masher: await tier(facts.masher),
         skilled: await tier(facts.skilled),
       };
@@ -713,6 +628,7 @@ const make = Effect.gen(function* () {
     found: Found | null,
     skilledWanted: boolean,
     written: Set<FactName>,
+    booted: Deferred.Deferred<void>,
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -748,24 +664,15 @@ const make = Effect.gen(function* () {
             }),
           );
 
-        // The static tier reads the copy's files only: it needs no browser and no engine.
-        if (tiers.has("assets"))
-          yield* write({
-            assets: {
-              status: "measured",
-              value: yield* measureAssets(copy, build.engine, yield* projectOf(copy, build.engine)),
-            },
-          });
         // A browser game's bots draw with the backend the server probed; its
         // renderer is recorded, so facts from the GPU and from SwiftShader are
-        // never compared as alike. A static-only measure plays nothing and probes nothing.
-        const plays = TIERS.some((tier) => tier !== "assets" && tiers.has(tier));
+        // never compared as alike.
         const backend =
-          plays && engineProfile(build.engine).play === "browser"
+          engineProfile(build.engine).play === "browser"
             ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
             : Option.none();
         const software = Option.isSome(backend) && backend.value.software;
-        if (plays) {
+        {
           const { runtime: _measuredWith, ...rest } = stored;
           const runtime = yield* runtimeOf(copy, build.engine);
           stored = {
@@ -805,6 +712,7 @@ const make = Effect.gen(function* () {
                 );
           yield* write(browserOnly(build.engine, "qa") === null ? facts : { boots: facts.boots });
         }
+        yield* Deferred.succeed(booted, undefined);
         // The harness's own bots, fresh from the server's templates, never the game's.
         const kitWritten = yield* Effect.promise(async () => {
           const dir = NodePath.join(copy, HARNESS_KIT);
@@ -832,19 +740,15 @@ const make = Effect.gen(function* () {
               : null;
 
         // Each bot run says how busy the machine was, so a run slowed by other
-        // work is never read as the game's slowness. Alone, it waits a while for
-        // an idle machine and holds the copy's one engine step; in a lane, beside
-        // another play, its caller does both for the lanes together.
-        const runBot = (file: string, seconds: number, lane?: string) => {
-          const run = (work: Effect.Effect<GameBotRunResult, GameOperationError>) =>
-            withMachine(lane === undefined ? step(work) : work).pipe(
+        // work is never read as the game's slowness; it waits a while for an
+        // idle machine first and holds the copy's one engine step.
+        const runBot = (file: string, seconds: number) =>
+          Effect.andThen(
+            idleMachine,
+            withMachine(step(bots.runIn(copy, { file, seconds, mode: "play" as const }))).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
-            );
-          const input = { file, seconds, mode: "play" as const };
-          return lane === undefined
-            ? Effect.andThen(idleMachine, run(bots.runIn(copy, input)))
-            : run(bots.runIn(copy, input, { lane }));
-        };
+            ),
+          );
         const didNotBoot = (error: GameOperationError) =>
           ({
             status: "measured",
@@ -859,7 +763,7 @@ const make = Effect.gen(function* () {
         // Asset use after each play tier: every play's record so far, against what the build
         // ships. A browser engine only; the view says why the others have none.
         const useAfter = (
-          play: "idle" | "masher" | "skilled",
+          play: "masher" | "skilled",
           evidence: string | null,
           none: ReturnType<typeof notMeasured>,
         ) =>
@@ -867,8 +771,8 @@ const make = Effect.gen(function* () {
             if (useNotMeasured(build.engine) !== null) return {};
             const record =
               evidence === null ? null : yield* Effect.promise(() => readPlayUse(root, evidence));
-            const plays: { [K in "idle" | "masher" | "skilled"]?: PlayUse } = {};
-            for (const each of ["idle", "masher", "skilled"] as const) {
+            const plays: { [K in "masher" | "skilled"]?: PlayUse } = {};
+            for (const each of ["masher", "skilled"] as const) {
               const kept = each === play ? record : stored.plays?.[each];
               if (kept !== null && kept !== undefined) plays[each] = kept;
             }
@@ -889,100 +793,48 @@ const make = Effect.gen(function* () {
             };
           });
         // Why a build has no use when no play left a record: the plays' own reason.
-        const noRecord = (fact: Fact<"idle"> | Fact<"masher"> | Fact<"skilled">) =>
+        const noRecord = (fact: Fact<"masher"> | Fact<"skilled">) =>
           fact.status === "not-measured"
             ? notMeasured(`its plays were not measured: ${fact.why}`, fact.retry, false, fact.cause)
             : fact.status === "measured" && fact.value.ending === "did-not-boot"
               ? notMeasured("no play loaded the game's page: it did not boot", false)
               : notMeasured("the plays' record of what the game loaded could not be kept", true);
 
-        const tier = (name: "idle" | "masher", playSeconds: number, lane?: string) =>
-          runBot(`${HARNESS_KIT}/${name}.mjs`, tierWallSeconds(playSeconds), lane).pipe(
-            Effect.flatMap(({ value: result, machine }) =>
-              Effect.map(moveEvidence(root, key, name, result), (evidence) => ({
-                result,
-                evidence,
-                machine,
-                fact: tierFact(result, playSeconds, evidence, machine),
-              })),
-            ),
-            Effect.catchTags({
-              GameOperationError: (error) =>
-                Effect.succeed({
-                  result: null,
-                  evidence: null,
-                  machine: null,
-                  fact: faultOf(error) ?? didNotBoot(error),
-                }),
-            }),
-          );
-
-        type TierRun = Effect.Success<ReturnType<typeof tier>>;
-        // On a GPU, a browser game's no-input and random-input plays run at once,
-        // each in its own lane of the copy. In software they take turns: plays
-        // beside each other in SwiftShader slowed a game from 1× to 0.08× real time.
-        const lanes =
-          blocked === null &&
-          tiers.has("idle") &&
-          tiers.has("masher") &&
-          engineProfile(build.engine).play === "browser" &&
-          !software
-            ? yield* Effect.andThen(
-                idleMachine,
-                step(
-                  Effect.all(
-                    [
-                      tier("idle", GAME_FACTS_BOUNDS.idleSeconds, "idle"),
-                      tier("masher", GAME_FACTS_BOUNDS.masherSeconds, "masher"),
-                    ],
-                    { concurrency: 2 },
-                  ),
-                ),
-              )
-            : null;
-        // A play from a lane keeps its facts unless sharing could explain one of
-        // them (sharedPlaySuspect); then it is played again alone, before anything is stored.
-        const settle = <P extends Partial<GameBuildFacts>>(
-          name: "idle" | "masher",
-          playSeconds: number,
-          shared: TierRun | undefined,
-          factsOf: (run: TierRun) => Effect.Effect<P>,
-        ) =>
-          Effect.gen(function* () {
-            if (shared !== undefined) {
-              const patch = yield* factsOf(shared);
-              const why = sharedPlaySuspect(shared.result, patch);
-              if (why === null) return { run: shared, patch };
-              yield* Effect.logInfo("game facts: a shared play is played again alone", {
-                key,
-                play: name,
-                why,
-              });
-            }
-            const run = yield* tier(name, playSeconds);
-            return { run, patch: yield* factsOf(run) };
-          });
-
-        if (tiers.has("idle")) {
+        if (tiers.has("masher")) {
           if (blocked !== null)
-            yield* write({ idle: blocked, ...(yield* useAfter("idle", null, blocked)) });
-          else {
-            const { run, patch } = yield* settle(
-              "idle",
-              GAME_FACTS_BOUNDS.idleSeconds,
-              lanes?.[0],
-              (each) => Effect.succeed({ idle: each.fact }),
-            );
             yield* write({
-              ...patch,
-              ...(yield* useAfter("idle", run.evidence, noRecord(run.fact))),
+              masher: blocked,
+              ...(browserOnly(build.engine, "performance") === null
+                ? { performance: blocked }
+                : {}),
+              ...(yield* useAfter("masher", null, blocked)),
             });
-          }
-        }
-
-        const masherFacts = (run: TierRun) =>
-          Effect.gen(function* () {
-            const notFromRun = (what: string) =>
+          else {
+            const playSeconds = GAME_FACTS_BOUNDS.masherSeconds;
+            const run = yield* runBot(
+              `${HARNESS_KIT}/masher.mjs`,
+              tierWallSeconds(playSeconds),
+            ).pipe(
+              Effect.flatMap(({ value: result, machine }) =>
+                Effect.map(moveEvidence(root, key, "masher", result), (evidence) => ({
+                  result,
+                  evidence,
+                  machine,
+                  fact: tierFact(result, playSeconds, evidence, machine),
+                })),
+              ),
+              Effect.catchTags({
+                GameOperationError: (error) =>
+                  Effect.succeed({
+                    result: null,
+                    evidence: null,
+                    machine: null,
+                    fact: faultOf(error) ?? didNotBoot(error),
+                  }),
+              }),
+            );
+            const measuredRun = run.fact.status === "measured" && run.result !== null;
+            const notFromRun =
               run.fact.status === "not-measured"
                 ? notMeasured(
                     `the random-input run was not measured: ${run.fact.why}`,
@@ -990,21 +842,7 @@ const make = Effect.gen(function* () {
                     isStanding(run.fact),
                     run.fact.cause,
                   )
-                : notMeasured(what, true);
-            const measuredRun = run.fact.status === "measured" && run.result !== null;
-            const firstResponse =
-              measuredRun && run.result !== null
-                ? firstResponseOf(run.result, run.machine)
-                : notFromRun("the random-input run was not measured");
-            const read = !measuredRun
-              ? notFromRun("the random-input run was not measured")
-              : run.evidence === null
-                ? notMeasured("the random-input run's video could not be kept", true)
-                : yield* step(livenessOf(copy, NodePath.join(root, run.evidence), run.result!));
-            const liveness =
-              read.status === "measured" && read.value.longestFreeze >= FREEZE_BAD
-                ? (busyReading("the picture stood still", run.machine) ?? read)
-                : read;
+                : notMeasured("the random-input run was not measured", true);
             // Performance is the page's own stats from the same play, on a browser engine.
             const performance =
               browserOnly(build.engine, "performance") !== null
@@ -1014,7 +852,7 @@ const make = Effect.gen(function* () {
                       Option.isSome(backend) && backend.value.software
                         ? performanceOf(null, backend.value, run.machine)
                         : !measuredRun || run.evidence === null
-                          ? notFromRun("the random-input run was not measured")
+                          ? notFromRun
                           : performanceOf(
                               yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
                               Option.isSome(backend)
@@ -1023,39 +861,9 @@ const make = Effect.gen(function* () {
                               run.machine,
                             ),
                   };
-            // The scene report is the page's own, from the same play, on a browser engine.
-            const scene =
-              browserOnly(build.engine, "scene") !== null
-                ? {}
-                : {
-                    scene:
-                      !measuredRun || run.evidence === null
-                        ? notFromRun("the random-input run was not measured")
-                        : sceneOf(yield* Effect.promise(() => readSceneFile(root, run.evidence!))),
-                  };
-            return { masher: run.fact, liveness, firstResponse, ...performance, ...scene };
-          });
-
-        if (tiers.has("masher")) {
-          if (blocked !== null)
             yield* write({
-              masher: blocked,
-              liveness: blocked,
-              firstResponse: blocked,
-              ...(browserOnly(build.engine, "performance") === null
-                ? { performance: blocked, scene: blocked }
-                : {}),
-              ...(yield* useAfter("masher", null, blocked)),
-            });
-          else {
-            const { run, patch } = yield* settle(
-              "masher",
-              GAME_FACTS_BOUNDS.masherSeconds,
-              lanes?.[1],
-              masherFacts,
-            );
-            yield* write({
-              ...patch,
+              masher: run.fact,
+              ...performance,
               ...(yield* useAfter("masher", run.evidence, noRecord(run.fact))),
             });
           }
@@ -1066,19 +874,15 @@ const make = Effect.gen(function* () {
           if (blocked !== null)
             yield* write({ skilled: blocked, ...(yield* useAfter("skilled", null, blocked)) });
           else if (bot === null) {
-            const skilled = notMeasured(
-              "no play bot yet; Keep going writes one, or ask your agent for one",
-              false,
-              false,
-              "no-play-bot",
-            );
+            const skilled = notMeasured(GAME_FACTS_NO_PLAY_BOT, false, false, "no-play-bot");
             // No play ran: the other plays' reason stands when they left no record either.
             const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
             yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
           } else if (!skilledWanted) {
-            // Only keep going's judgment and a person need the tester's bot (GameFacts.measure).
+            // The play bot plays only when the person or their agent asks (GameFacts.measure).
             const skilled = notMeasured(GAME_FACTS_SKILLED_DEFERRED, false, false, "deferred");
-            yield* write({ skilled, ...(yield* useAfter("skilled", null, noRecord(skilled))) });
+            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
+            yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
           } else {
             // The game's own bot and its copy of the kit, beside the harness's kit.
             // Links out of the game are left behind, so the copy never runs or reads what they point at.
@@ -1125,48 +929,6 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  // Liveness and the stall over the span of play only: from the start of play
-  // to its end, or to the end of the tier's span when the game never ended.
-  const livenessOf = (copy: string, evidence: string, result: GameBotRunResult) =>
-    Effect.gen(function* () {
-      const ffmpeg = yield* Effect.promise(() =>
-        findExecutable("ffmpeg", {
-          pathEnv: process.env.PATH ?? "",
-          override: process.env.KURAMBIT_FFMPEG,
-        }),
-      );
-      if (ffmpeg === null) return notMeasured("ffmpeg is not installed", false, true);
-      const sidecar = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(evidence, "run.frames.json"), "utf8").catch(() => null),
-      ).pipe(Effect.map((text) => (text === null ? null : Option.getOrNull(decodeSidecar(text)))));
-      const frames = sidecar?.frames ?? [];
-      // A missing or empty frame record is the encoder's failure, not the game's.
-      if (frames.length === 0) return notMeasured("the run video's frame record is missing", true);
-      const times = tierEvidenceOf(result.status.evidence);
-      const from = times?.playingAt;
-      if (from === null || from === undefined)
-        return notMeasured("the random-input run reported no start of play", false);
-      const to = times?.endedAt ?? from + GAME_FACTS_BOUNDS.masherSeconds;
-      const span = playSpan(frames, from, to);
-      if (span === null) return notMeasured("the run video has no frames of play", false);
-      return yield* measureVideo(processes, {
-        root: copy,
-        ffmpeg,
-        video: NodePath.join(evidence, "run.mp4"),
-        span,
-        workDir: NodePath.join(evidence, "signals"),
-      }).pipe(
-        Effect.map((signals): Fact<"liveness"> => ({
-          status: "measured",
-          value: { ...signals, longestStall: stallWithin(frames, from, to) },
-        })),
-        Effect.catchTags({
-          GameOperationError: (error) =>
-            Effect.succeed(faultOf(error) ?? notMeasured(error.message, true)),
-        }),
-      );
-    });
-
   // A job: its row first (so the work is owed even across a restart), then
   // its turn in the play lane, then the plan read fresh, then the tiers. A
   // job that gives way to a more urgent play is interrupted and runs this
@@ -1201,14 +963,15 @@ const make = Effect.gen(function* () {
           );
           job.tiers = tiers;
           job.written.clear();
+          if (!tiers.has("boots")) yield* Deferred.succeed(job.booted, undefined);
           if (tiers.size === 0) return;
           yield* operations.changed(
             build.root,
             GAME_FACTS_EVENT,
             `Measuring build ${build.build.slice(0, 8)}.`,
           );
-          yield* measureJob(build, tiers, found, skilled, job.written);
-          // Keep going or a person asked for the tester's bot while this measure
+          yield* measureJob(build, tiers, found, skilled, job.written, job.booted);
+          // The person or their agent asked for the play bot while this measure
           // ran without it: only its play is owed, the rest was just measured.
           if (!skilled && job.skilled && !job.stopped) {
             const now = yield* load(build.key);
@@ -1222,7 +985,8 @@ const make = Effect.gen(function* () {
             );
             job.tiers = again.has("skilled") ? new Set<Tier>(["skilled"]) : new Set<Tier>();
             job.written.clear();
-            if (job.tiers.size > 0) yield* measureJob(build, job.tiers, now, true, job.written);
+            if (job.tiers.size > 0)
+              yield* measureJob(build, job.tiers, now, true, job.written, job.booted);
           }
         }).pipe(
           Effect.onInterrupt(() =>
@@ -1249,6 +1013,7 @@ const make = Effect.gen(function* () {
         Effect.suspend(() => {
           if (jobs.get(job.build.key) === job) jobs.delete(job.build.key);
           Deferred.doneUnsafe(job.done, Effect.void);
+          Deferred.doneUnsafe(job.booted, Effect.void);
           return operations.changed(
             job.build.root,
             GAME_FACTS_EVENT,
@@ -1285,7 +1050,7 @@ const make = Effect.gen(function* () {
             yield* currentBot(build.root),
             person,
             build.engine,
-            options.skilled !== false,
+            options.skilled === true,
             yield* runtimeOf(build.root, build.engine),
           ).size > 0;
         if (!owes) return yield* read(build);
@@ -1305,7 +1070,7 @@ const make = Effect.gen(function* () {
           const existing = jobs.get(build.key);
           if (existing !== undefined) {
             if (person) existing.person = true;
-            if (options.skilled !== false) existing.skilled = true;
+            if (options.skilled === true) existing.skilled = true;
             if (!supersede) existing.supersedable = false;
             return Effect.as(playLane.raise(existing.ticket, priority), {
               job: existing,
@@ -1329,7 +1094,7 @@ const make = Effect.gen(function* () {
             build,
             ticket: playLane.ticket(priority),
             person,
-            skilled: options.skilled !== false,
+            skilled: options.skilled === true,
             supersedable: supersede,
             tiers: null,
             written: new Set(),
@@ -1337,6 +1102,7 @@ const make = Effect.gen(function* () {
             stopped: false,
             fiber: null,
             done: Deferred.makeUnsafe<void>(),
+            booted: Deferred.makeUnsafe<void>(),
           };
           jobs.set(build.key, fresh);
           return Effect.forkIn(runJob(fresh), scope).pipe(
@@ -1365,7 +1131,10 @@ const make = Effect.gen(function* () {
         };
       }
       if (options.waitFor !== undefined)
-        yield* Deferred.await(job.done).pipe(Effect.timeoutOption(options.waitFor), Effect.ignore);
+        yield* Deferred.await(options.upTo === "boots" ? job.booted : job.done).pipe(
+          Effect.timeoutOption(options.waitFor),
+          Effect.ignore,
+        );
       return yield* read(build);
     });
 

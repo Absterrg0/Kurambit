@@ -1,6 +1,6 @@
 // Which game tools a thread's agent is offered. Each tool says what it needs
 // of its game's engine and whether it waits to be asked for; the thread's game,
-// engine, model route, Blender and whether it is a bot setup session come from the MCP invocation
+// engine, model route and Blender come from the MCP invocation
 // (McpHttpServer's auth middleware). A tool the listing hides is also refused
 // when called by name, by Effect's MCP core.
 import { ACTIVE_GAME_ENGINES } from "@kurambit/contracts";
@@ -59,7 +59,10 @@ export const GAME_TOOL_PLACEMENTS = {
   ),
   game_explore_act: chat(["play"], "in a session game_explore_start opened"),
   game_explore_close: chat(["play"], "to end that session"),
-  game_bot_run: chat(["play"], "when the person asks for a bot to play the game"),
+  game_bot_run: chat(
+    ["play"],
+    "when the person asks for a bot to play the game or to prove it can be won",
+  ),
   game_bot_view: chat(["play"], "to look at a finished bot run"),
   game_bot_report: chat(["play"], "to rebuild the player report across bot runs"),
   game_generate: chat(["play"]),
@@ -117,9 +120,6 @@ export const refusal = (
 const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
   refusal(placement, scope) === null;
 
-/** Listed in keep going's play-bot setup session, whose task is to run the bot it writes. */
-const LISTED_FOR_BOT_SETUP: ReadonlySet<GameToolName> = new Set(["game_bot_run"]);
-
 /**
  * The Blender tools are listed directly only on the Blender route (once Blender is found), whose
  * chats make their models there; on code and generated they wait behind game_more, so those
@@ -138,11 +138,7 @@ const askedIn = (placement: GameToolPlacement, scope: McpInvocationScope | undef
 /** Whether it is in the listing: it fits, and is not waiting to be asked for. */
 const listed = (name: GameToolName, scope: McpInvocationScope | undefined) => {
   const placement: GameToolPlacement = GAME_TOOL_PLACEMENTS[name];
-  return (
-    fits(placement, scope) &&
-    (askedIn(placement, scope) === undefined ||
-      (scope?.gameBotSetup === true && LISTED_FOR_BOT_SETUP.has(name)))
-  );
+  return fits(placement, scope) && askedIn(placement, scope) === undefined;
 };
 
 /** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread now. */

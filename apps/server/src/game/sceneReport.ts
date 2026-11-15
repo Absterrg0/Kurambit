@@ -1,7 +1,7 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off -- Writes a scene report's frames beside its play's evidence, reads it back, and plays game_check's short random input in real time.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off -- Writes a scene report's frames beside its play's evidence, and plays game_check's short random input in real time.
 // The scene report, measured inside the running game by the three.js shell
 // (templates/runtime/three/1/shell/scene-report.js, which holds every threshold) while the
-// harness plays it: game_check's short play and the facts' random-input play. What the page
+// harness plays it: game_check's short play and bot runs. What the page
 // says is checked here before it becomes evidence, and its frames become files.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -12,9 +12,7 @@ import {
   GameSceneFinding,
   GameScenePlayer,
   GameSceneReport,
-  type GameEngineId,
 } from "@kurambit/contracts";
-import { engineProfile } from "./engineProfile.ts";
 
 /** Beside a bot run's trace: its play's scene report, frames named relative to the run folder. */
 export const SCENE_FILE = "scene.json";
@@ -67,7 +65,6 @@ const decodePageReport = Schema.decodeUnknownOption(PageReport);
 const SceneFile = Schema.fromJsonString(
   Schema.Union([Schema.Struct({ shell: Schema.Literal("none") }), GameSceneReport]),
 );
-const decodeSceneFile = Schema.decodeUnknownOption(SceneFile);
 const writeSceneFile = Schema.encodeSync(SceneFile);
 
 const clip = (text: string | null) => (text === null ? null : text.slice(0, 120));
@@ -137,46 +134,8 @@ export const keepSceneReport = async (
 export const encodeSceneFile = (scene: GameSceneReport | "no-shell") =>
   `${writeSceneFile(scene === "no-shell" ? { shell: "none" } : scene)}\n`;
 
-/**
- * A run's scene report, its frames named from the game root: "none" when the game's shell has
- * no scene report, null when the run left no readable record.
- */
-export const readSceneFile = (
-  root: string,
-  evidence: string,
-): Promise<GameSceneReport | "no-shell" | null> =>
-  NodeFSP.readFile(NodePath.join(root, evidence, SCENE_FILE), "utf8").then(
-    (text) => {
-      const report = Option.getOrNull(decodeSceneFile(text));
-      if (report === null) return null;
-      if ("shell" in report) return "no-shell" as const;
-      const from = (frame: string | null) => (frame === null ? null : `${evidence}/${frame}`);
-      return {
-        ...report,
-        findings: report.findings.map((finding) => ({ ...finding, frame: from(finding.frame) })),
-        player:
-          report.player.kind === "body"
-            ? {
-                ...report.player,
-                frame: from(report.player.frame),
-                smallFrame: from(report.player.smallFrame),
-                ...(report.player.faintFrame === undefined
-                  ? {}
-                  : { faintFrame: from(report.player.faintFrame) }),
-              }
-            : report.player,
-        ...(report.empty === undefined
-          ? {}
-          : { empty: { ...report.empty, frame: from(report.empty.frame) } }),
-      };
-    },
-    () => null,
-  );
-
-/** Why there is no scene report: the shell predates it, or the engine has none yet. */
+/** Why there is no scene report: the shell predates it. */
 export const SCENE_OLD_SHELL = "the game's shell predates scene reports";
-export const sceneNotInEngine = (engine: GameEngineId) =>
-  `${engineProfile(engine).displayName} games have no scene report yet; it is measured for three.js games`;
 
 /** How long game_check plays the gameplay entry for its scene report. */
 export const SCENE_CHECK_PLAY_MS = 6_000;

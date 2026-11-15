@@ -52,8 +52,6 @@ export interface McpInvocationScope {
   } | null;
   /** Why this machine has no Blender the game's tools can run, or null when it has one (or the engine uses none). */
   readonly blenderMissing?: string | null;
-  /** The calling thread is keep going's play-bot setup session, whose task is to run its bot. */
-  readonly gameBotSetup?: boolean;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
   readonly requestNamespace: string;

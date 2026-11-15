@@ -223,12 +223,8 @@ Pick a budget in the same menu (1 hour unless you change it); while keep going r
 when it ends. Choose **Off**, or press `mod+Alt+X`, to stop it: a step that is running stops and
 still becomes a build.
 
-The first step starts at once, from your agent's latest `Next:` line. After a step has landed, a
-game that boots but has no play bot yet gets one written, once, in a session of its own that shows
-as a card in the chat: Kurambit's play bot shows whether a player can win, so it is no step,
-changes nothing you see, and its minutes are not taken from your budget. If it cannot write one in
-about ten minutes, keep going goes on without it and its status says why. On a computer that draws
-the game in software too slowly for its plays to finish, no bot is written; the status says so.
+The first step starts at once, from your agent's latest `Next:` line, and each step starts as soon
+as the one before it is checked to still start cleanly; the rest of its measuring goes on behind.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
 and why: notes you left for it first, then a crash or freeze, then a step that was undone, then,
@@ -240,9 +236,9 @@ own messages keep your agent's session, and it is told what the steps did. The s
 played and measured like any turn. Its builds sit under one **Keep going** bracket in the builds
 list, and its line in the chat says what the step did and what happened to it:
 
-- **kept**: the game still boots, plays without errors or freezing, and can still be won or lost.
-  Every other fact (controls, the HUD, whether the play bot wins) is shown and, when it is bad,
-  proposed as a later step, but never a reason to undo;
+- **kept**: the game still boots and plays without errors. Every other fact (controls, Retry, the
+  HUD) is shown and, when it is bad, proposed as a later step, but never a reason to undo; an error
+  the longer random-input play finds after a step was kept becomes the next step;
 - **undone**: the step broke the game, so Kurambit put back the build the step started from. The
   chat says why ("undone: it stopped booting: …"), and the next step is told too. **Redo** in the
   chat or the build's tab puts the step back if you want it anyway, and keep going goes on from
@@ -374,28 +370,21 @@ game); `mod+Alt+G` puts the keyboard in the game. The command palette has each o
 **Compare builds…**, **Export…** and **Go back to a build…**. A game you clicked into owns the
 keyboard, and its keys never reach Kurambit: click outside the game before using these.
 
-**Facts** are what Kurambit measured by playing the build: whether it boots, what happens when a
-player does nothing (idle) or presses keys at random (masher), what the game's own bot does
-(skilled), how much the picture moves, and how soon the game answers the first input. For a
-three.js game Kurambit also plays a QA pass: it presses every control the game declares on a fresh
-run, ends a run and presses Retry, and reads the HUD at a wide and a narrow window, so a dead key,
-a Retry that keeps the last run's leftovers or text off the screen shows up as a failing check.
-Who wins with no input or random input is never a pass or a fail: that is your design. For a three.js game it also lists which files under
-its assets folder those plays loaded and which sounds started playing, so art that was made but never
-wired in shows up as unused, and how smoothly the random-input play ran: frames per second, the
-slowest 1% of frames, the GPU's time per frame and the share of the resolution the game drew at.
-On a machine where Kurambit's browser cannot use the GPU, performance says so instead of guessing.
-The same play also looks at the scene the way you would: whether the player stays in view and big
-enough to read, whether a character stands in the ground instead of on it or sits inside another
-one, whether something falls out of the world, whether the camera ends up inside a wall, whether a
-character slides along in its idle pose, and which named things never came on screen. Each problem
-comes with a frame that outlines it, and your agent's `game_check` shows the same lines before it
-ends its turn. Opening or playing a build that was never measured
-measures it, one build at a time; a run measures its builds itself, and a three.js game measures
-each turn's build in the background when the turn ends. The game's own bot plays a turn's build
-while keep going is on, or when you measure it. A fact Kurambit could not
-measure says **Not measured** and why, and never counts as a result: if a tool failed, **Measure
-again** tries once more. Your agent sees the same builds and facts.
+**Facts** are what Kurambit measured by playing the build, only what you would act on: whether
+it boots, whether it crashes or stops answering in a minute of random input, and for a three.js
+game a QA pass (it presses every control the game declares on a fresh run, ends a run and presses
+Retry, and reads the HUD at a wide and a narrow window, so a dead key, a Retry that keeps the last
+run's leftovers or text off the screen shows up as a failing check) and how smoothly the game ran:
+frames per second, the slowest 1% of frames, the GPU's time per frame and the share of the
+resolution it drew at. On a machine where Kurambit's browser cannot use the GPU, performance says
+so instead of guessing.
+
+**Can it be won** is measured only when you ask: ask your agent to prove the game can be won, and
+it writes a play bot for it and has Kurambit play it; after that, **Measure again** plays it too.
+Opening or playing a build that was never measured measures it, one build at a time, and a
+three.js game measures each turn's build in the background when the turn ends. A fact Kurambit
+could not measure says **Not measured** and why, and never counts as a result: if a tool failed,
+**Measure again** tries once more. Your agent sees the same builds and facts.
 
 ## Keep a video or image
 

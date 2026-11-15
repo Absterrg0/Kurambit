@@ -5,9 +5,7 @@ import {
   gameFactsView,
   gameQaFindings,
   playOutcomeWords,
-  type GameAssetFacts,
   type GameReplayResult,
-  type GameAssetUse,
   type GameBuild,
   type GameBuildFacts,
   type GameBuildFactsSummary,
@@ -179,39 +177,6 @@ export const replayLines = (
     `On this build: ${playOutcomeWords(now)}${how}.`,
   ];
 };
-
-/** The Asset use row's detail: the files the plays never loaded, and sounds never started. */
-export const assetUseLines = (use: GameAssetUse): ReadonlyArray<string> => [
-  ...(use.unused.length > 0 ? [`Never loaded: ${use.unused.join(", ")}`] : []),
-  ...(use.silent.length > 0 ? [`Loaded, never started playing: ${use.silent.join(", ")}`] : []),
-];
-
-/**
- * The Assets row's detail: one line per made model, then how many more. A
- * model's numbers are measurements, never a verdict on its look.
- */
-export const assetLines = (assets: GameAssetFacts): ReadonlyArray<string> => [
-  ...assets.models.map((model) => {
-    const triangles = `${model.triangles.toLocaleString("en-US")} triangles`;
-    const pipeline = model.pipeline;
-    if (pipeline.status === "not-measured")
-      return `${model.path}: ${triangles}; not measured: ${pipeline.why}`;
-    const notes = [
-      pipeline.seamsBroken.length > 0 ? `loop seams in ${pipeline.seamsBroken.join(", ")}` : null,
-      pipeline.drifting.length > 0 ? `root drifts in ${pipeline.drifting.join(", ")}` : null,
-    ].filter((note) => note !== null);
-    return `${model.path}: ${pipeline.kind}, ${pipeline.height.toFixed(2)} m, ${triangles}, reviewed${
-      notes.length > 0 ? `; ${notes.join("; ")}` : ""
-    }`;
-  }),
-  ...(assets.more > 0 ? [`${assets.more} more not listed`] : []),
-];
-
-/** Where the rest of the Assets row's art comes from: said on hover, it is never a finding. */
-export const assetLibraryNote = (assets: GameAssetFacts): string | null =>
-  assets.libraryFiles > 0
-    ? `${assets.libraryFiles} library file${assets.libraryFiles === 1 ? " is" : "s are"} credited in ASSETS.md.`
-    : null;
 
 export interface DeltaLine {
   readonly label: string;
@@ -416,7 +381,7 @@ export const changedReadings = (compared: {
 /** Every check of a build, the lead ones and the rest, as the Inspector words them. */
 export const allChecks = (facts: GameBuildFacts) => {
   const view = gameChecksView(facts);
-  return [...view.checks, ...view.more];
+  return view.checks;
 };
 
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;

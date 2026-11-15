@@ -11,9 +11,6 @@ export const BuildName = {
   /** The folder before and after a restore. */
   restoreBefore: (requestId: string) => `restores/${part(requestId)}-before`,
   restoreAfter: (requestId: string) => `restores/${part(requestId)}-after`,
-  /** The folder once a keep-going run's setup wrote its play bot, and the build it was written on. */
-  botSetup: (runId: string) => `bots/${part(runId)}`,
-  botSetupFrom: (runId: string) => `bots/${part(runId)}-from`,
 } as const;
 
 /** The play bot: the measuring instrument the skilled fact plays with. */

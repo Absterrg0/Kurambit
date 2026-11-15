@@ -62,7 +62,6 @@ import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Input } from "../ui/input";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { KbdShortcut } from "../ui/kbd";
@@ -74,11 +73,7 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill, PictureSourceBadge } from "./GameBuildStill";
-import {
-  GameCharacterRoutePicker,
-  modelChoiceLabel,
-  useCharacterRoute,
-} from "./GameCharacterRoute";
+import { GameCharacterRoutePicker } from "./GameCharacterRoute";
 import { useGameName } from "./GameName";
 import { GameGeneratedArt } from "./GameGeneratedArt";
 import {
@@ -91,9 +86,6 @@ import {
 } from "./GameGenerationCard";
 import { GameFileActions, SaveMediaMenuItem } from "./GameSavedMedia";
 import {
-  assetLibraryNote,
-  assetLines,
-  assetUseLines,
   buildCaption,
   buildName,
   buildPhrase,
@@ -621,15 +613,10 @@ const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextI
  */
 const FACT_KEYS = [
   "boots",
-  "idle",
   "masher",
   "skilled",
-  "liveness",
-  "firstResponse",
-  "assets",
   "performance",
   "use",
-  "scene",
   "qa",
 ] as const satisfies ReadonlyArray<keyof GameBuildFacts>;
 
@@ -696,37 +683,16 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
 }
 
 function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
-  const { route: characters, library } = useCharacterRoute(threadRef);
   const view = gameChecksView(facts);
   const measured = view.checks.filter((check) => check.reading._tag === "measured");
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
-  const moreMeasured = view.more.filter((more) => more.reading._tag === "measured");
-  const moreToLook = moreMeasured.filter(
-    (more) => more.reading._tag === "measured" && more.reading.tone === "bad",
-  ).length;
-  const morePending = view.more.filter((more) => more.reading._tag === "pending").length;
-  const detailOf = (fact: GameFactView): ReadonlyArray<string> =>
-    fact.id === "assets" && facts.assets.status === "measured"
-      ? assetLines(facts.assets.value)
-      : fact.id === "use" && facts.use.status === "measured"
-        ? assetUseLines(facts.use.value)
-        : [];
   // Context that changes how to read a row, never a finding of its own: said on hover.
   const noteOf = (fact: GameFactView): string | null =>
-    fact.id === "assets" && facts.assets.status === "measured"
-      ? [
-          assetLibraryNote(facts.assets.value),
-          characters === null
-            ? null
-            : `This game makes models with ${modelChoiceLabel(characters, library)}; change it in the Scene tab.`,
-        ]
-          .filter((line) => line !== null)
-          .join(" ") || null
-      : fact.id === "performance" && facts.renderer
-        ? `Played with ${facts.renderer}.`
-        : fact.id === "controls"
-          ? silentControlsNote(facts)
-          : null;
+    fact.id === "performance" && facts.renderer
+      ? `Played with ${facts.renderer}.`
+      : fact.id === "controls"
+        ? silentControlsNote(facts)
+        : null;
   return (
     <div className="flex flex-col gap-2">
       <Rows>
@@ -758,52 +724,6 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
         ) : null}
         <NotMeasured facts={view.checks} note={noteOf} />
       </Rows>
-      {view.more.length > 0 ? (
-        <Rows>
-          <Collapsible>
-            <CollapsibleTrigger className="group flex min-h-9 w-full items-center gap-2.5 px-3 text-left hover:bg-accent focus-visible:bg-accent">
-              <ChevronRightIcon
-                className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
-                aria-hidden="true"
-              />
-              <Text variant="meta" tone="default" render={<span className="flex-1" />}>
-                Other measurements
-              </Text>
-              {/* How much of this group was measured, so its scope never reads as a second
-                  total of the checks above; what passed is in its rows. */}
-              <Text variant="meta" tone="muted" numeric>
-                {moreMeasured.length === 0
-                  ? morePending > 0
-                    ? `${morePending} to measure`
-                    : "None measured"
-                  : [
-                      ...(moreMeasured.length < view.more.length
-                        ? [`${moreMeasured.length} of ${view.more.length} measured`]
-                        : []),
-                      ...(moreToLook > 0 ? [`${moreToLook} to look at`] : []),
-                    ].join(" · ") || `${moreMeasured.length} of ${view.more.length} measured`}
-              </Text>
-            </CollapsibleTrigger>
-            <CollapsiblePanel>
-              <div className="flex flex-col divide-y divide-border border-t border-border">
-                {moreMeasured.map((fact) => (
-                  <CheckRow
-                    key={fact.id}
-                    threadRef={threadRef}
-                    fact={fact}
-                    text={fact.sentence}
-                    value={fact.value}
-                    detail={detailOf(fact)}
-                    note={noteOf(fact)}
-                  />
-                ))}
-                {morePending > 0 ? <PendingRow count={morePending} /> : null}
-                <NotMeasured facts={view.more} note={noteOf} />
-              </div>
-            </CollapsiblePanel>
-          </Collapsible>
-        </Rows>
-      ) : null}
     </div>
   );
 }
@@ -1315,7 +1235,7 @@ function Recordings({
   // How the bot's play ended, in the game's own seconds. Said as an ending ("Lost at 3.6 s"),
   // never a bare time, which would read as the video's length.
   const endingOf = (id: GameFactId): string | null => {
-    if (id !== "idle" && id !== "masher" && id !== "skilled") return null;
+    if (id !== "masher" && id !== "skilled") return null;
     const tier = facts[id];
     if (tier.status !== "measured") return null;
     const { ending, at, played } = tier.value;
@@ -1328,7 +1248,7 @@ function Recordings({
   // The check a run proves, as its row in Checks says it.
   const checks = gameChecksView(facts);
   const checkOf = (id: GameFactId): string | null => {
-    const check = [...checks.checks, ...checks.more].find((entry) => entry.id === id);
+    const check = checks.checks.find((entry) => entry.id === id);
     return check === undefined
       ? null
       : check.value === null

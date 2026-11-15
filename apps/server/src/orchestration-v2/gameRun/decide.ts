@@ -38,7 +38,6 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 
-import { machineFault } from "../../game/buildFacts.ts";
 import type { OrchestrationEffectRequestV2 } from "../EffectOutbox.ts";
 
 // ── The run as the policy reads it. ─────────────────────────────────────────
@@ -138,8 +137,8 @@ export type JudgeResult = StepResult<"judge">;
 export type UndoResult = StepResult<"undo">;
 
 const MIN = 60_000;
-/** A typical step: a turn of about 5 min, then facts of about 3. */
-const STEP_TYPICAL_MS = 8 * MIN;
+/** A typical step: a turn of about 5 min, then its boot check. */
+const STEP_TYPICAL_MS = 6 * MIN;
 const CAP_FLOOR_MS = 5 * MIN;
 const CAP_CEILING_MS = 15 * MIN;
 /** Guided starts its proposal after this unless the person answers. */
@@ -157,25 +156,10 @@ const MISS_LIMIT = 2;
 const TEXT_MAX = 8000;
 
 /**
- * The facts keep going shows on a step's record and proposes when bad: what a player would hit
- * (the lead checks), the play bot's win, and how soon the controls answer. Who wins with no input
- * or random input is the creator's design, and motion and detail are heuristics: shown, never
- * proposed. Of the scene report, only what the scene's own geometry decides is watched (a body
- * sunk in the ground, a player the camera cannot see); clipping, falling, the camera in a wall and
- * sliding depend on where random input led and how fast this machine ran it.
+ * The facts keep going shows on a step's record and proposes when bad: what a player would hit.
+ * The play bot plays only when someone asks, so it is never watched.
  */
-const WATCHED: ReadonlySet<GameFactId> = new Set([
-  "boots",
-  "errors",
-  "controls",
-  "retry",
-  "hud",
-  "skilled",
-  "first-response",
-  "buried",
-  "player-view",
-  "empty",
-]);
+const WATCHED: ReadonlySet<GameFactId> = new Set(["boots", "errors", "controls", "retry", "hud"]);
 
 // ── The step's text: four templates, the facts' own wording and the agent's own line.
 const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
@@ -220,11 +204,6 @@ const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
   controls: "Make every declared control do something",
   retry: "Make Retry start a clean run",
   hud: "Keep the HUD on screen",
-  skilled: "Make the game winnable by a skilled player",
-  "first-response": "Make the controls respond sooner",
-  buried: "Stand the characters on the ground, not in it",
-  "player-view": "Keep the player in view",
-  empty: "Fill the empty part of the view",
 };
 
 /**
@@ -364,11 +343,6 @@ const textOf = (views: Views, id: GameFactId) => {
   const view = views.get(id);
   return view?.reading._tag === "measured" ? `${view.label}: ${view.reading.text}` : "";
 };
-const tierEnding = (facts: GameBuildFacts, id: "idle" | "masher" | "skilled") => {
-  const fact = facts[id];
-  return fact.status === "measured" ? fact.value.ending : null;
-};
-
 /** The facts that block the game, in display order: it does not start, or it breaks in play. */
 const blockers = (views: Views): ReadonlyArray<GameFactId> =>
   (["boots", "errors"] as const).filter((id) => toneOf(views, id) === "bad");
@@ -383,41 +357,15 @@ interface Regression {
 }
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
-const ENDING_TIERS: ReadonlySet<GameFactId> = new Set(["idle", "masher", "skilled"]);
-const ended = (facts: GameBuildFacts, id: GameFactId) =>
-  id === "idle" || id === "masher" || id === "skilled"
-    ? tierEnding(facts, id) === "won" || tierEnding(facts, id) === "lost"
-    : false;
-
 /**
- * Every play that can be compared reached an ending (won or lost) on the base
- * at least once, and none does on the step's build: the game no longer ends.
- * A play that broke is the errors fact's, so it is counted once.
- */
-const endingLost = (
-  base: GameBuildFacts,
-  build: GameBuildFacts,
-  deltas: ReadonlyArray<GameFactDelta>,
-): Regression | null => {
-  const plays = deltas.filter((d) => ENDING_TIERS.has(d.id) && d.change !== "not-comparable");
-  const was = plays.find((d) => ended(base, d.id));
-  if (was === undefined) return null;
-  if (!plays.every((d) => tierEnding(build, d.id as "idle" | "masher" | "skilled") === "no-ending"))
-    return null;
-  return {
-    delta: was,
-    why: `it can no longer be won or lost: ${was.b ?? "no ending"} (before: ${was.a ?? "?"})`,
-  };
-};
-
-/**
- * What the step broke from `base` to `build`: it stopped booting, it errors or
- * freezes in play, or it can no longer be won or lost at all. Only these undo a
- * step. Every other fact is shown on the record and, when bad, proposed as the
- * next step; one noisy run of a check (QA, the scene report, the play bot the
- * harness wrote) is no evidence to throw away a person's or an agent's work.
- * Only a comparable delta counts, and only a crossing into bad: a fact already
- * bad that gets worse is the next blocker, not an undo.
+ * What the step broke from `base` to `build`: it stopped booting, or it errors
+ * or freezes in play. Only these undo a step. Every other fact is shown on the
+ * record and, when bad, proposed as the next step; one noisy run of a check is
+ * no evidence to throw away a person's or an agent's work. Only a comparable
+ * delta counts, and only a crossing into bad: a fact already bad that gets
+ * worse is the next blocker, not an undo. The judge waits only for the boot
+ * check and the QA play, so an error the random-input play finds later is the
+ * next look's blocker (`earlier`), never an undo.
  */
 export const regressions = (
   base: GameBuildFacts,
@@ -446,8 +394,7 @@ export const regressions = (
       },
     ];
   });
-  const lost = endingLost(base, build, deltas);
-  return lost === null ? crossed : [...crossed, lost];
+  return crossed;
 };
 
 const watchedDeltas = (base: GameBuildFacts, build: GameBuildFacts) =>
@@ -469,16 +416,22 @@ const chips = (
 };
 
 // ── Choosing the next step. ─────────────────────────────────────────────────
-const factStep = (why: "blocker" | "fact", id: GameFactId, views: Views): GameRunProposal => {
+const factStep = (
+  why: "blocker" | "fact",
+  id: GameFactId,
+  views: Views,
+  earlier = false,
+): GameRunProposal => {
   const evidence = (views.get(id)?.evidence ?? [])
     .filter((e) => e.kind === "log" || e.kind === "frame")
     .slice(0, 2)
     .map((e) => e.path);
-  const seen = `Kurambit measured the current build. ${textOf(views, id)}${evidence.length === 0 ? "" : ` (${evidence.join(", ")})`}.`;
+  const seen = `Kurambit measured ${earlier ? "the build before the last step" : "the current build"}. ${textOf(views, id)}${evidence.length === 0 ? "" : ` (${evidence.join(", ")})`}.`;
   return {
     why,
-    text:
-      why === "blocker"
+    text: earlier
+      ? `${seen} The current build is still being measured: check whether it still happens, and fix it.`
+      : why === "blocker"
         ? `${seen} Fix it.`
         : `${seen} Fix it. If this is intended for this game, change nothing and say why in one line.`,
     target: id,
@@ -524,17 +477,25 @@ const referenceProposal = (look: LookResult): GameRunProposal | null => {
  * a failing fact, then the agent's own next line. Every
  * candidate whose key is set aside is passed over. Null: nothing left to
  * propose. The play bot is no candidate: a step must change what a person
- * sees or fix a measured fault, so the look writes it once as setup.
+ * sees or fix a measured fault.
  */
 export const propose = (state: RunState, look: LookResult): GameRunProposal | null => {
   const aside = new Set(state.setAside.map((entry) => entry.key));
   const facts = look.facts;
   const views = facts === null ? null : viewsOf(facts);
+  const earlier = look.earlier === undefined ? null : viewsOf(look.earlier);
   const candidates: Array<() => GameRunProposal | null> = [
     () => steerProposal(state),
     ...(facts === null || views === null
       ? []
       : blockers(views).map((id) => () => factStep("blocker", id, views))),
+    // The random-input play of this build is still measuring, and the one before it broke.
+    () =>
+      earlier !== null &&
+      views?.get("errors")?.reading._tag === "pending" &&
+      toneOf(earlier, "errors") === "bad"
+        ? factStep("blocker", "errors", earlier, true)
+        : null,
     () => {
       const last = state.records.at(-1);
       if (last === undefined || last.step.verdict !== "undone") return null;
@@ -553,7 +514,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     () => referenceProposal(look),
     ...(facts === null || views === null
       ? []
-      : (["controls", "retry", "hud", "first-response", "buried", "player-view", "empty"] as const)
+      : (["controls", "retry", "hud"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
     () => {
@@ -672,35 +633,18 @@ const startTurn = (
 };
 
 /**
- * The no-input and random-input tiers both a fault of this machine (ffmpeg
- * missing, say): every step would be kept on Boots alone, which is tokens spent
- * on nothing. Stored facts re-measure such a fault only on a person's measure,
- * hence the ending's "measure again".
- */
-const bothTiersMachineFaults = ({ idle, masher }: GameBuildFacts) =>
-  machineFault(idle) && machineFault(masher) ? masher : null;
-
-/**
  * The look's evidence becomes a proposal: Autopilot starts it at once; Guided
  * shows it with a deadline, except the person's own note, which they already
  * asked for. A folder edited outside any build pauses the run: a step's undo
  * restores a build and would take those edits.
  */
-const proposeFrom = (state: RunState, look: LookResult, now: number): Next => {
+export const applyLook = (state: RunState, look: LookResult, now: number): Next => {
   if (look.edited)
     return end(
       state,
       "stalled",
       "the game folder has changes no build holds, and an undo would take them; send them in a turn first",
       "the folder holds no build",
-    );
-  const unjudgeable = look.facts === null ? null : bothTiersMachineFaults(look.facts);
-  if (unjudgeable !== null)
-    return end(
-      state,
-      "tool-failed",
-      `it can't judge steps here: ${unjudgeable.why.trim().replace(/[.\s]+$/, "")}; then measure the build again`,
-      "no play tier can be measured on this machine, so no step could be judged",
     );
   if (!fitsBudget(state, now)) return end(state, "budget", "", "the budget holds no other step");
   const proposal = propose(state, look);
@@ -721,32 +665,6 @@ const proposeFrom = (state: RunState, look: LookResult, now: number): Next => {
     { kind: "propose", proposal, deadline: now + PROPOSAL_WAIT_MS },
     `step ${state.n} proposed (${proposal.why}): ${headline(proposal)}`,
   );
-};
-
-/** A look that finished the run's bot setup records it on the run, then proposes as any look. */
-export const applyLook = (state: RunState, look: LookResult, now: number): Next => {
-  const setup = look.botSetup;
-  if (setup === undefined) return proposeFrom(state, look, now);
-  // The run keeps the setup this look finished, so no later look sets up again.
-  // The setup is Kurambit's own instrument: its minutes never come out of the
-  // person's budget.
-  const spent = Math.round((setup.minutes ?? 0) * MIN);
-  const next = proposeFrom(
-    {
-      ...state,
-      botSetup: setup,
-      budgetEndsAt: state.budgetEndsAt === null ? null : state.budgetEndsAt + spent,
-    },
-    look,
-    now,
-  );
-  const line =
-    setup.state === "written"
-      ? "the play bot is written"
-      : setup.state === "skipped"
-        ? `no play bot: ${setup.reason}`
-        : `the play bot setup failed (${setup.reason}); keep going goes on without the skilled fact`;
-  return { ...next, log: `${line}; ${next.log}` };
 };
 
 const setAside = (state: RunState, entry: SetAside): RunState =>
