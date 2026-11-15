@@ -19,7 +19,14 @@
       // Knip loads its preprocessor through a CLI option; native verification and
       // worktree setup (from kurambit.json) run directly, as do the maintainer
       // reports and the CLI archive smoke (docs/operations/release.md).
-      "entry": ["knip-schemas.ts", "setup-worktree.ts", "game-run-cost.ts", "smoke-cli-archive.ts"],
+      "entry": [
+        "knip-schemas.ts",
+        "setup-worktree.ts",
+        "game-run-cost.ts",
+        "smoke-cli-archive.ts",
+        // The bench's bare lane hands this screenshot script to the agent it runs.
+        "bench/bare/shot.mjs",
+      ],
       // The `kurambit` npm package's files: copied into the package, never imported.
       "ignore": ["npm-launcher/**"],
     },
