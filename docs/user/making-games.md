@@ -17,10 +17,10 @@ way you install your coding agents: Kurambit finds them, checks their versions, 
 button for the vendor's download page when it is missing or the wrong version. After installing
 something, press **Check again**.
 
-- **Blender** makes game art. Use Blender 4.2 or later from
+- **Blender** makes game art on the Blender route. Use Blender 4.2 or later from
   [blender.org/download](https://www.blender.org/download/).
 - **MPFB2** is optional: it gives characters built in Blender a human body. See
-  [Characters](#characters).
+  [Models](#models).
 - **ffmpeg** records bot plays. Install it with your package manager (`sudo apt install ffmpeg`
   on Debian and Ubuntu, `sudo dnf install ffmpeg` on Fedora with RPM Fusion, `brew install ffmpeg`
   on macOS, `winget install ffmpeg` on Windows), or get it from
@@ -97,18 +97,31 @@ it: art from other packs, characters on another skeleton and sprites in another 
 until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
 then have the art redone. Delete it to lift the lock.
 
-## Characters
+## Models
 
-Each game has one setting for how its characters are made, **Make characters with**: **Library**
-(the default), **Blender** or **Generated**. Pick it under the home screen box's options button, so the first turn builds the cast your way, and change it later under **Look…** in the game's menu
-(**Characters**) or the command palette's **Make characters with…**. On **Library** the agent takes characters from the asset library, and builds
-in Blender only what the library has no model of, such as a robot when the brief asks for one. On **Blender** it builds each character in Blender: a body on the shared skeleton, then the
-head, clothes, tail or ears it models itself, with the library's animations already fitted. On
-**Generated** an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy on your
-own key makes rigged 3D characters, and with Codex alone they are images, such as character sheets
-and sprites. Generated can be picked once a 3D provider
-or Codex is ready; until then the choice says what to set up. The agent never changes the setting itself: when the chosen way cannot make
-something, it says so and names the others, and you switch the setting when you want to.
+Each game has one setting for how its models are made, **Make models with**: **Code** (the
+default), **Blender** or **Generated**, and a separate **Library models** switch, off by default.
+Pick them under the home screen box's options button, so the first turn builds your way, and change
+them later in the Scene tab's **Models** row or the command palette's **Make models with…**. You can
+also ask your agent in chat to switch; it never switches on its own.
+
+- **Code**: the agent builds every model in three.js code inside the game: hulls, buildings,
+  vehicles, props, terrain, and characters on the same skeleton the animation library's clips play
+  on. They cost nothing to install, download tiny, and their main dimensions show up on the Stage
+  as values you can drag, so "make the hull longer" is a slider. The agent looks at each model alone
+  (from four sides, beside a 1.8 m figure, with its size and cost) before building the game round
+  it. Give it a picture to aim for and it compares its work against it: the key art you picked, or
+  any picture you attach, which it saves as `art/reference.png`.
+- **Blender**: it builds each model in Blender: a character is a body on the shared skeleton, then
+  the head, clothes, tail or ears it models itself, with the library's animations already fitted.
+- **Generated**: an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy
+  on your own key makes rigged 3D characters, and with Codex alone they are images, such as
+  character sheets and sprites. Generated can be picked once a 3D provider or Codex is ready; until
+  then the choice says what to set up.
+- **Library models** on: the free CC0 asset library's models come first, and the route makes what
+  it has no model of. Off, its models, textures and sprites stay out of the game; its animations and
+  sounds are always available. Games made before this setting existed keep the library on.
+
 Blender building needs Blender installed (Settings › Game tools).
 
 Human bodies on **Blender** come from MPFB2, which you install once: **Settings → Game tools**, under

@@ -156,9 +156,9 @@ const CODE_TURN = `## The first turn
 Goal: the person plays the brief's core loop on the Stage, and its player, main threat and world are models you build in three.js code, never bare primitives standing in for them.
 
 ${READ_STEP(", and the comment block of `studio-skills/runtime/shell/model.js`")}
-2. Build the player and the main threat ${CODE_MODELS} before step 3.
+2. Build the player and the main threat ${CODE_MODELS} before step 3. A picture the person attached to aim for is saved first as \`art/reference.png\`: the sheet shows it beside yours.
 ${LOOP_STEP}
-4. Build the world the brief names the same way: the ground and the one or two set pieces it names, repeats with \`scatter\`. Keep the default look (\`LOOK\` as it is, or the one preset the brief calls for, no lights besides \`ctx.look.sun\`).
+4. Build the world the brief names the same way: the ground and the one or two set pieces it names, repeats with \`scatter\`, open water with \`shell/water.js\`. Choose the look the brief calls for in \`LOOK\` (its comment block in \`shell/look.js\`: a preset, a physical sky with clouds outdoors, or a flat stylised one), no lights besides \`ctx.look.sun\`.
 ${CHECK_STEP}
 
 ${LATER}

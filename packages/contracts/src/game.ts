@@ -763,6 +763,10 @@ export const GameSetCharacterRouteResult = Schema.Struct({
 export type GameSetCharacterRouteResult = typeof GameSetCharacterRouteResult.Type;
 /** game_model_sheet: the things to draw alone, by the names the game gave them (ctx.thing, ASSETS keys). */
 export const GameModelSheetInput = Schema.Struct({
+  /** A game-relative PNG to show beside the sheets; omitted, STYLE.json's anchor or art/reference.png. */
+  reference: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
+  ),
   things: Schema.optionalKey(
     Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))).check(
       Schema.isMinLength(1),
@@ -789,6 +793,8 @@ export const GameModelSheetResult = Schema.Struct({
   missing: Schema.Array(Schema.String),
   /** The things the game named, with a body, that a sheet can draw (at most 60). */
   things: Schema.Array(Schema.Struct({ name: Schema.String, kind: Schema.String })),
+  /** The reference picture attached after the sheets, game-relative; absent when the game has none. */
+  reference: Schema.optionalKey(Schema.String),
 });
 export type GameModelSheetResult = typeof GameModelSheetResult.Type;
 export const GameAction = Schema.Literals([

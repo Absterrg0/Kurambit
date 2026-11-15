@@ -40,6 +40,7 @@ import {
   GameMoreToolkit,
 } from "./tools.ts";
 import { GAME_TOOL_PLACEMENTS, refusal } from "./placement.ts";
+import { gameReference } from "../../../game/gameReference.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
@@ -342,7 +343,12 @@ const checkHandlers = {
           ),
         ),
       );
-      const shown = screenshots.filter((shot) => shot !== null);
+      // The target beside the views, when the game has one: the agent compares, not judges alone.
+      const reference = yield* gameReference(root);
+      const shown = [
+        ...screenshots.filter((shot) => shot !== null),
+        ...(reference === null ? [] : [reference.image]),
+      ];
       return shown.length === 0 ? result : { ...result, screenshots: shown };
     }),
   ),
@@ -373,8 +379,16 @@ const modelSheetHandlers = {
           ),
         ),
       );
-      const shown = screenshots.filter((shot) => shot !== null);
-      return shown.length === 0 ? result : { ...result, screenshots: shown };
+      const reference = yield* gameReference(root, input.reference);
+      const shown = [
+        ...screenshots.filter((shot) => shot !== null),
+        ...(reference === null ? [] : [reference.image]),
+      ];
+      return {
+        ...result,
+        ...(reference === null ? {} : { reference: reference.path }),
+        ...(shown.length === 0 ? {} : { screenshots: shown }),
+      };
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameModelSheetToolkit.tools>;
