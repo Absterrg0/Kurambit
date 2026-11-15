@@ -339,9 +339,38 @@ export function GameFrame({
   const pendingAck = useRef(false);
   // The person played, then clicked away (the chat, the composer, Tune): the game holds the way
   // a hidden Stage does, so a run is never lost to typing, and plays on when they click back.
+  // Read from the window's blur and the active element: a click into the frame sends the frame
+  // element no focus event. A page that focused itself as it loaded was never played.
+  const [inGame, setInGame] = useState(false);
   const [played, setPlayed] = useState(false);
-  if (frameFocused && !played) setPlayed(true);
-  const away = pauseWhenAway && played && !frameFocused && !hidden;
+  useEffect(() => {
+    let settle = 0;
+    const read = () => {
+      const inside = frameRef.current !== null && document.activeElement === frameRef.current;
+      setInGame(inside);
+      if (
+        inside &&
+        (pointerOver.current ||
+          navigator.userActivation?.isActive === true ||
+          performance.now() - invitedAt.current < 1000)
+      )
+        setPlayed(true);
+    };
+    const onBlur = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(read);
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", read);
+    document.addEventListener("focusin", read);
+    return () => {
+      window.clearTimeout(settle);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("focusin", read);
+    };
+  }, []);
+  const away = pauseWhenAway && played && !inGame && !frameFocused && !hidden;
   const visible = !hidden && !away;
   // The hint is exactly "an unconfirmed pause is outstanding".
   const [unacknowledged, setUnacknowledged] = useState(false);
