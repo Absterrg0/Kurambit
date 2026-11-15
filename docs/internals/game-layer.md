@@ -187,10 +187,11 @@ check that matters.
   the subject the library lacks, and a tool reached through `game_more` reaches the agent without
   its schema. `game_more` is an image tool, so an asked-for look or move still arrives as pictures.
 - A game thread's provider session gets Kurambit's MCP server and the provider's built-in tools,
-  never the person's own MCP servers or account connectors (`kurambitToolsOnly` on the turn input):
-  they cost context on every call and could reach the person's mail or files. Claude enforces it
-  with its strict MCP config; Codex, Cursor, Grok, OpenCode and Antigravity have no per-session way
-  to drop the person's servers yet, so there it is not enforced.
+  never the person's own MCP servers, account connectors or synced account skills
+  (`kurambitToolsOnly` on the turn input): they cost context on every call and could reach the
+  person's mail or files. Claude enforces it with its strict MCP config and per-invocation
+  settings; Codex, Cursor, Grok, OpenCode and Antigravity have no per-session way to drop the
+  person's servers yet, so there it is not enforced.
 - Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
   checked by the driver, compared with the sources before and after (an unidentifiable tree is
   refused before the engine runs), then published by `publishStaged`, which moves the incumbent
