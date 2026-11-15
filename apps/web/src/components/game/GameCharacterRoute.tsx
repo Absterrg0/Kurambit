@@ -75,7 +75,7 @@ export function useGeneratedRouteNote(environmentId: EnvironmentId | null): stri
   return generatedRouteNote(providers.data);
 }
 
-export const characterRouteLabel = (route: GameCharacterRoute) =>
+const characterRouteLabel = (route: GameCharacterRoute) =>
   CHARACTER_ROUTES.find((option) => option.route === route)?.label ?? route;
 
 const NO_PERMISSION = Atom.make(false);
