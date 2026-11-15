@@ -458,9 +458,13 @@ float fbm( vec2 p ) {
   return v;
 }
 float density( vec2 p ) {
-  float n = fbm( p + 0.8 * vec2( fbm( p * 0.6 ), fbm( p * 0.6 + 5.2 ) ) );
-  // Big rounded heaps: the low octaves decide where a cloud is, the high ones its edge.
-  return smoothstep( 1.0 - cover, 1.0 - cover + 0.22, n );
+  // Big rounded heaps: a low, warped field decides where a cloud is, the fine octaves only
+  // break its edge, so they read as cumulus rather than streaks.
+  vec2 q = p * 0.55;
+  float base = fbm( q + 0.3 * vec2( fbm( q * 0.7 + 3.1 ), fbm( q * 0.7 + 8.3 ) ) );
+  float edge = fbm( p * 3.1 ) - 0.5;
+  float n = base + edge * 0.12;
+  return smoothstep( 1.0 - cover * 0.95, 1.0 - cover * 0.95 + 0.09, n );
 }
 void main() {
   vec3 d = normalize( vDir );
@@ -468,10 +472,16 @@ void main() {
   vec2 p = d.xz / ( d.y + 0.12 ) * 1.6 * scale;
   float c = density( p );
   if ( c < 0.003 ) discard;
-  vec2 toward = normalize( sunDir.xz + 1e-4 ) * 0.22;
+  vec2 toward = normalize( sunDir.xz + 1e-4 ) * 0.18;
   float ahead = density( p + toward );
-  float light = clamp( 0.62 + ( c - ahead ) * 2.2, 0.0, 1.0 );
-  vec3 col = mix( shade, lit * sunColor, light );
+  float behind = density( p - toward );
+  // Out along p is down toward the horizon: where the cloud ends that way is its flat base.
+  vec2 down = normalize( p + 1e-4 ) * 0.3;
+  float base = 1.0 - density( p + down );
+  float top = 1.0 - density( p - down );
+  // Lit toward the sun and on its top, grey under its base.
+  float light = clamp( 0.75 + ( behind - ahead ) * 0.45 + top * 0.25 - base * 0.35, 0.0, 1.0 );
+  vec3 col = mix( shade, lit * mix( vec3( 1.0 ), sunColor, 0.45 ), light );
   float s = max( dot( d, sunDir ), 0.0 );
   col += sunColor * pow( s, 10.0 ) * 0.6 * ( 1.0 - c );
   float fade = smoothstep( 0.0, 0.18, d.y );
@@ -547,10 +557,10 @@ async function skyProbes(renderer, look, sunDir, quality) {
         uniforms: {
           sunDir: { value: sunDir.clone() },
           sunColor: { value: new THREE.Color(look.sun.color) },
-          shade: { value: new THREE.Color(c.shade ?? 0x8d96a6) },
+          shade: { value: new THREE.Color(c.shade ?? 0xa3adbb) },
           lit: { value: new THREE.Color(c.lit ?? 0xffffff).multiplyScalar(1.15) },
           cover: { value: c.cover ?? 0.45 },
-          scale: { value: c.scale ?? 1 },
+          scale: { value: (c.scale ?? 1) * 1.5 },
         },
         vertexShader: SKY_VERTEX,
         fragmentShader: CLOUD_FRAGMENT,

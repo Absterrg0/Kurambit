@@ -1,0 +1,215 @@
+// Open water: a sea, a lake or a harbour that mirrors the world and the sky, with the sun's
+// glitter on it, foam on its crests and a wake behind whatever moves through it. It is three's
+// Water (three/addons/objects/Water.js) with foam and wakes added, lit by the look's sun.
+//
+//   import { ocean } from "./shell/water.js";
+//   const sea = ocean(ctx, { colour: "#1f8f9a" });  // a sea to the horizon at y 0
+//   sea.wake(boat, { width: 3 });                   // foam behind it as it moves; stern:
+//                                                   // how far behind its centre it starts (m)
+//   const lake = ocean(ctx, { size: 200, colour: "#2a4a3a", waves: 0.4, foam: 0 });
+//   // options: size (m across), colour, waves (how rough, 1), wave (the swell's length, 1:
+//   // bigger is longer), foam (crests, 0..1, 0.35), glitter (the sun on it, 1), clear (how much
+//   // of its own colour shows under the reflection, 0..1, 0.6: a tropical shallow high, a dark
+//   // lake low), at (y)
+//   sea.mesh;                                       // the Mesh, in ctx.scene
+//
+// What it costs follows LOOK.quality: high mirrors the world at 512 px, low at 256. The mirror
+// draws the scene a second time each frame; a game that needs every millisecond keeps
+// `quality: "low"`. Water is a surface: set boats on it at y 0 and bob them in update().
+import * as THREE from "../vendor/three.module.js";
+import { Water } from "three/addons/objects/Water.js";
+
+const MAX_WAKE_POINTS = 48;
+const WAKE_LIFE_S = 9;
+const WAKE_EVERY_M = 1.5;
+
+let normals = null;
+
+/**
+ * A tileable water normal map, made once: crossing swells of whole-tile wavelengths (so it
+ * repeats with no seam) and a little chop, as the normal map three's example ships would be.
+ */
+function waterNormals() {
+  if (normals !== null) return normals;
+  const size = 256;
+  const height = new Float32Array(size * size);
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const waves = [];
+  for (let i = 0; i < 28; i += 1) {
+    const k = 1 + Math.floor(rand() * (i < 8 ? 4 : 14));
+    const a = rand() * Math.PI * 2;
+    waves.push({
+      kx: Math.round(Math.cos(a) * k),
+      ky: Math.round(Math.sin(a) * k),
+      amp: 1 / (k * 0.7 + 1),
+      phase: rand() * Math.PI * 2,
+    });
+  }
+  for (let y = 0; y < size; y += 1)
+    for (let x = 0; x < size; x += 1) {
+      let h = 0;
+      for (const w of waves)
+        h += w.amp * Math.sin(((w.kx * x + w.ky * y) / size) * Math.PI * 2 + w.phase);
+      height[y * size + x] = h;
+    }
+  const data = new Uint8Array(size * size * 4);
+  const at = (x, y) => height[((y + size) % size) * size + ((x + size) % size)];
+  for (let y = 0; y < size; y += 1)
+    for (let x = 0; x < size; x += 1) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * 2.6;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * 2.6;
+      const n = new THREE.Vector3(-dx, -dy, 1).normalize();
+      const i = (y * size + x) * 4;
+      data[i] = (n.x * 0.5 + 0.5) * 255;
+      data[i + 1] = (n.y * 0.5 + 0.5) * 255;
+      data[i + 2] = (n.z * 0.5 + 0.5) * 255;
+      data[i + 3] = 255;
+    }
+  normals = new THREE.DataTexture(data, size, size);
+  normals.wrapS = normals.wrapT = THREE.RepeatWrapping;
+  normals.generateMipmaps = true;
+  normals.minFilter = THREE.LinearMipmapLinearFilter;
+  normals.needsUpdate = true;
+  return normals;
+}
+
+// Foam: on the crests, where the normal map tilts most, and along each wake's trail of points,
+// in two bands at the trail's spreading edge and churned water down its middle.
+const FOAM_PARS = /* glsl */ `
+uniform vec4 wakePoints[${MAX_WAKE_POINTS}];
+uniform float wakeLinks[${MAX_WAKE_POINTS}];
+uniform float crestFoam;
+uniform float glitter;
+uniform float body;
+float foamHash( vec2 p ) { return fract( sin( dot( p, vec2( 41.3, 289.1 ) ) ) * 43758.5453 ); }
+float foamNoise( vec2 p ) {
+  vec2 i = floor( p ), f = fract( p );
+  vec2 u = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( foamHash( i ), foamHash( i + vec2( 1, 0 ) ), u.x ), mix( foamHash( i + vec2( 0, 1 ) ), foamHash( i + vec2( 1, 1 ) ), u.x ), u.y );
+}
+float wakeFoam( vec2 p ) {
+  // The nearest point of the trail decides: measured once, the wake is one smooth V that widens
+  // with age, never a string of beads.
+  float best = 1e9, age = 0.0, width = 1.0;
+  for ( int i = 0; i < ${MAX_WAKE_POINTS - 1}; i ++ ) {
+    if ( wakeLinks[ i ] < 0.5 ) continue;
+    vec4 a = wakePoints[ i ];
+    vec4 b = wakePoints[ i + 1 ];
+    vec2 ab = b.xy - a.xy;
+    float t = clamp( dot( p - a.xy, ab ) / max( dot( ab, ab ), 1e-4 ), 0.0, 1.0 );
+    float d = length( p - a.xy - ab * t );
+    if ( d < best ) { best = d; age = mix( a.z, b.z, t ); width = mix( a.w, b.w, t ); }
+  }
+  if ( best > 1e8 ) return 0.0;
+  float spread = width * ( 0.5 + age * 0.55 );
+  float fade = exp( - age / 3.0 );
+  float edge = smoothstep( spread * 0.3, 0.0, abs( best - spread ) ) * 0.9;
+  float churn = smoothstep( spread * 0.8, 0.0, best ) * exp( - age / 1.5 );
+  return max( edge, churn ) * fade;
+}`;
+const FOAM_MIX = /* glsl */ `
+  // The water's own colour under the mirror: a shallow tropical sea reads by it, a mirror never.
+  albedo = mix( albedo, waterColor * ( 0.45 + diffuseLight * 0.5 ) * getShadowMask() + specularLight * 0.5, body * ( 0.4 + 0.6 * ( 1.0 - reflectance ) ) );
+  // Whitecaps where the surface tilts most, scattered by a slow field so they come and go in
+  // patches; the wake is laced by the same small waves.
+  float lookFoam = crestFoam * smoothstep( 0.3, 0.55, length( surfaceNormal.xz ) )
+    * smoothstep( 0.45, 0.8, foamNoise( worldPosition.xz * 0.05 + time * 0.02 ) );
+  float lookWake = wakeFoam( worldPosition.xz );
+  lookWake *= 0.55 + 0.45 * smoothstep( 0.05, 0.25, length( surfaceNormal.xz ) );
+  lookFoam = max( lookFoam, lookWake );
+  // Foam is the brightest thing on the water: white, lit, a little blue in its shade.
+  vec3 foamColour = mix( vec3( 0.62, 0.72, 0.78 ), vec3( 1.0 ), getShadowMask() ) * ( 0.85 + diffuseLight * 0.3 );
+  albedo = mix( albedo, foamColour, clamp( lookFoam * 1.3, 0.0, 1.0 ) );
+  albedo += specularLight * reflectionSample * ( glitter - 1.0 ) * ( 1.0 - lookFoam );
+  vec3 outgoingLight = albedo;`;
+
+/** A sheet of water in ctx.scene, with `wake(object, options)` to trail foam behind a thing. */
+export function ocean(
+  ctx,
+  {
+    size = 4000,
+    colour = "#1f8f9a",
+    waves = 1,
+    wave = 1,
+    foam = 0.35,
+    glitter = 1,
+    clear = 0.6,
+    at = 0,
+  } = {},
+) {
+  const look = ctx.look.settings;
+  const low = look.quality === "low";
+  const sun = look.sun.direction;
+  const water = new Water(new THREE.PlaneGeometry(size, size), {
+    textureWidth: low ? 256 : 512,
+    textureHeight: low ? 256 : 512,
+    waterNormals: waterNormals(),
+    sunDirection: new THREE.Vector3(sun.x, sun.y, sun.z).normalize(),
+    sunColor: look.sun.color,
+    waterColor: new THREE.Color(colour),
+    distortionScale: 3.2 * waves,
+    fog: ctx.scene.fog !== null || look.fog !== false,
+  });
+  const material = water.material;
+  // One tile of the normal map is about 25 m of sea at wave 1.
+  material.uniforms.size.value = 4 / Math.max(wave, 0.05);
+  const points = Array.from({ length: MAX_WAKE_POINTS }, () => new THREE.Vector4());
+  const links = new Array(MAX_WAKE_POINTS).fill(0);
+  material.uniforms.wakePoints = { value: points };
+  material.uniforms.wakeLinks = { value: links };
+  material.uniforms.crestFoam = { value: foam };
+  material.uniforms.glitter = { value: glitter };
+  material.uniforms.body = { value: clear };
+  material.fragmentShader = material.fragmentShader
+    .replace("void main() {", `${FOAM_PARS}\nvoid main() {`)
+    .replace("vec3 outgoingLight = albedo;", FOAM_MIX);
+  water.rotation.x = -Math.PI / 2;
+  water.position.y = at;
+  water.receiveShadow = true;
+  water.name = "Water";
+  ctx.scene.add(water);
+
+  // Each wake keeps its own run of points; all of them share the shader's list.
+  const wakes = [];
+  let clock = 0;
+  let last = performance.now();
+  const mirror = water.onBeforeRender;
+  water.onBeforeRender = (renderer, scene, camera, ...rest) => {
+    const now = performance.now();
+    // Real time between drawn frames: a paused game draws none, so its sea holds still.
+    const dt = Math.min((now - last) / 1000, 0.1);
+    last = now;
+    clock += dt;
+    material.uniforms.time.value = clock * 0.6 * waves;
+    let n = 0;
+    for (const w of wakes) {
+      w.object.getWorldPosition(stern);
+      w.object.getWorldDirection(ahead);
+      stern.addScaledVector(ahead, -w.stern);
+      const head = w.trail.at(-1);
+      if (head === undefined || Math.hypot(stern.x - head.x, stern.z - head.z) > WAKE_EVERY_M)
+        w.trail.push({ x: stern.x, z: stern.z, born: clock });
+      while (w.trail.length > 0 && clock - w.trail[0].born > WAKE_LIFE_S) w.trail.shift();
+      // The newest point follows the stern, so the wake starts right behind it.
+      const shown = [...w.trail, { x: stern.x, z: stern.z, born: clock }];
+      for (let i = Math.max(0, shown.length - (MAX_WAKE_POINTS - n)); i < shown.length; i += 1) {
+        const p = shown[i];
+        points[n].set(p.x, p.z, clock - p.born, w.width);
+        links[n] = i < shown.length - 1 ? 1 : 0;
+        n += 1;
+      }
+    }
+    for (let i = n; i < MAX_WAKE_POINTS; i += 1) links[i] = 0;
+    mirror(renderer, scene, camera, ...rest);
+  };
+  const stern = new THREE.Vector3();
+  const ahead = new THREE.Vector3();
+  return {
+    mesh: water,
+    /** Foam behind `object` as it moves: `width` metres at the stern, `stern` metres behind its centre. */
+    wake(object, { width = 2, stern: behind = 0 } = {}) {
+      wakes.push({ object, width, stern: behind, trail: [] });
+    },
+  };
+}

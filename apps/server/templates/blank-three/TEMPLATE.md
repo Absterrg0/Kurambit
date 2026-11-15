@@ -50,8 +50,9 @@ Each kit's comment block shows every call; read it in
 | `locomotion.js`   | idle, walk, run and air from the speed the body moved                                 |
 | `camera.js`       | `followCamera2D`, `followCamera3D` (shoulder, orbit, walls, focus on a foe)           |
 | `level.js`        | `buildLevel` from a text map: spawns, bounds, walls, `move`, a ground to the horizon  |
-| `look.js`         | `LOOK` presets (`day`, `golden`, `night`, `interior`, `flat`), the sun, baked shadows |
-| `model.js`        | models in code: palette, rounded boxes, lathe, loft, merge, scatter, tuned, `rig`     |
+| `look.js`         | `LOOK` presets, a physical sky with clouds, `quality`, the sun, baked shadows         |
+| `model.js`        | models in code: PBR palette, canvas textures, shapes, rails, merge, scatter, `rig`    |
+| `water.js`        | `ocean`: a sea or lake that mirrors the sky, with whitecaps and wakes                 |
 | `audio.js`        | `playMusic`, `playAmbience`, `playSfx` on the volume sliders                          |
 | `stage-bridge.js` | `ctx.thing` and `ctx.tune` for the Stage                                              |
 
