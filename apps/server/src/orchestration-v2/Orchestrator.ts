@@ -4679,6 +4679,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ? {}
             : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
           ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
+          ...(command.freshContext === true ? { freshContext: true } : {}),
         };
         const attempt: OrchestrationV2RunAttempt = {
           id: attemptId,
@@ -5023,6 +5024,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             : {}),
           ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
           ...wakeWorkStartedAt(projection.runs, command),
+          ...(command.freshContext === true ? { freshContext: true } : {}),
         };
         const attempt: OrchestrationV2RunAttempt = {
           id: attemptId,
@@ -5717,6 +5719,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
         ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
         ...wakeWorkStartedAt(projection.runs, command),
+        ...(command.freshContext === true ? { freshContext: true } : {}),
       };
       const attempt: OrchestrationV2RunAttempt = {
         id: attemptId,

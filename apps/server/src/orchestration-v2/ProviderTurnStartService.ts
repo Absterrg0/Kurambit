@@ -79,6 +79,71 @@ const restartContinuationBaseline = (
   return source === undefined ? {} : { baselineFromOrdinal: Math.max(0, source.ordinal - 1) };
 };
 
+/** The run asked for a fresh context, or carries on one that did across a restart. */
+const inFreshSession = (
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  run: OrchestrationV2Run,
+): boolean => {
+  let current: OrchestrationV2Run | undefined = run;
+  for (let hops = 0; current !== undefined && hops <= runs.length; hops += 1) {
+    if (current.freshContext === true) return true;
+    const from: RunId | undefined = current.restartContinuationOfRunId;
+    current = from === undefined ? undefined : runs.find((each) => each.id === from);
+  }
+  return false;
+};
+
+/**
+ * PURE. What a run that is no fresh session resumes when fresh runs used its
+ * provider thread since the thread's own last run: that run's native session,
+ * and the fresh runs since it, whose work it has not seen. Null when the
+ * provider thread's latest native session is already the thread's own.
+ */
+export const resumeAfterFreshRuns = (input: {
+  readonly runs: ReadonlyArray<OrchestrationV2Run>;
+  readonly attempts: ReadonlyArray<OrchestrationV2RunAttempt>;
+  readonly providerThreadId: OrchestrationV2ProviderThread["id"];
+  readonly run: OrchestrationV2Run;
+}): {
+  readonly nativeThreadId: string;
+  readonly freshRuns: ReadonlyArray<OrchestrationV2Run>;
+} | null => {
+  const ordinal = (attempt: OrchestrationV2RunAttempt) =>
+    input.runs.find((each) => each.id === attempt.runId)?.ordinal ?? 0;
+  const native = input.attempts
+    .filter(
+      (attempt) =>
+        attempt.providerThreadId === input.providerThreadId &&
+        attempt.nativeThreadId !== undefined &&
+        attempt.runId !== input.run.id &&
+        ordinal(attempt) < input.run.ordinal,
+    )
+    .toSorted((a, b) => ordinal(a) - ordinal(b) || a.attemptOrdinal - b.attemptOrdinal);
+  const runOf = (attempt: OrchestrationV2RunAttempt) =>
+    input.runs.find((each) => each.id === attempt.runId);
+  const fresh = (attempt: OrchestrationV2RunAttempt) => {
+    const source = runOf(attempt);
+    return source !== undefined && inFreshSession(input.runs, source);
+  };
+  const latest = native.at(-1);
+  if (latest === undefined || !fresh(latest)) return null;
+  const own = native.findLast((attempt) => !fresh(attempt));
+  if (own?.nativeThreadId === undefined) return null;
+  const since = ordinal(own);
+  return {
+    nativeThreadId: own.nativeThreadId,
+    freshRuns: input.runs
+      .filter(
+        (each) =>
+          each.ordinal > since &&
+          each.ordinal < input.run.ordinal &&
+          each.providerThreadId === input.providerThreadId &&
+          inFreshSession(input.runs, each),
+      )
+      .toSorted((a, b) => a.ordinal - b.ordinal),
+  };
+};
+
 /** Claude refuses to replace a process running background work before it reads the prompt. */
 const refusedBeforePrompt = (error: unknown): boolean =>
   Predicate.isTagged(error, "ClaudeBackgroundWorkBlocksQueryReplacementError") ||
@@ -246,7 +311,7 @@ export const layer: Layer.Layer<
       }
       const rootNode = projection.nodes.find((candidate) => candidate.id === run.rootNodeId);
       const attempt = projection.attempts.find((candidate) => candidate.id === run.activeAttemptId);
-      const providerThread = projection.providerThreads.find(
+      const storedProviderThread = projection.providerThreads.find(
         (candidate) => candidate.id === run.providerThreadId,
       );
       const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
@@ -284,8 +349,8 @@ export const layer: Layer.Layer<
       if (
         rootNode === undefined ||
         attempt === undefined ||
-        providerThread === undefined ||
-        providerThread.providerSessionId === null ||
+        storedProviderThread === undefined ||
+        storedProviderThread.providerSessionId === null ||
         message === undefined ||
         checkpointScope === undefined
       ) {
@@ -294,6 +359,32 @@ export const layer: Layer.Layer<
           cause: `Run ${runId} is missing its execution projection state.`,
         });
       }
+      // A fresh run binds a new native session to the provider thread, as a
+      // failed resume does below, and is given only its own message. A later
+      // run that is not fresh resumes the native session the thread's own runs
+      // used, and is told the fresh runs' work as missed runs.
+      const freshStart = run.freshContext === true;
+      const backFromFresh = inFreshSession(projection.runs, run)
+        ? null
+        : resumeAfterFreshRuns({
+            runs: projection.runs,
+            attempts: projection.attempts,
+            providerThreadId: storedProviderThread.id,
+            run,
+          });
+      const providerThread = {
+        ...storedProviderThread,
+        providerSessionId: storedProviderThread.providerSessionId,
+        ...(backFromFresh === null || storedProviderThread.nativeThreadRef === null
+          ? {}
+          : {
+              nativeThreadRef: {
+                ...storedProviderThread.nativeThreadRef,
+                nativeId: backFromFresh.nativeThreadId,
+              },
+              nativeConversationHeadRef: null,
+            }),
+      };
       const settleRunBeforeStart = Effect.fn("orchestrationV2.providerTurnStart.settleBeforeStart")(
         function* (input: {
           readonly signal: string;
@@ -606,7 +697,10 @@ export const layer: Layer.Layer<
           });
           return undefined;
         });
-      let effectiveHandoffs = handoffs;
+      // A fresh run takes only what was prepared for it, never the thread's own history.
+      let effectiveHandoffs = freshStart
+        ? handoffs.filter((handoff) => handoff.targetRunId === run.id)
+        : handoffs;
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
           const sourceProjection = yield* projectionStore.getThreadRecords(
@@ -646,6 +740,17 @@ export const layer: Layer.Layer<
             }),
           );
         }
+        if (freshStart)
+          return yield* loadFromProvider(
+            session.ensureThread({
+              threadId: projection.thread.id,
+              title: projection.thread.title,
+              modelSelection: run.modelSelection,
+              runtimePolicy: resolvedRuntimePolicy,
+              providerSessionId,
+              existingProviderThread: { ...providerThread, nativeThreadRef: null },
+            }),
+          );
         if (providerThread.nativeThreadRef === null) {
           // Hand the run's provider thread to the adapter so it adopts this
           // row's identity when attaching native state. An adapter that mints
@@ -1066,13 +1171,19 @@ export const layer: Layer.Layer<
         ...runningProviderThread,
         contextUsage: handoffUsage,
       };
-      const missedRuns = projection.runs.filter(
-        (source) =>
-          source.ordinal < run.ordinal &&
-          source.providerThreadId === providerThread.id &&
-          (source.status === "failed" || source.status === "interrupted") &&
-          !deliveredAttemptIds.has(source.activeAttemptId),
-      );
+      const missedRuns = freshStart
+        ? []
+        : projection.runs.filter(
+            (source) =>
+              source.ordinal < run.ordinal &&
+              source.providerThreadId === providerThread.id &&
+              (((source.status === "failed" || source.status === "interrupted") &&
+                !deliveredAttemptIds.has(source.activeAttemptId)) ||
+                (backFromFresh?.freshRuns.some((fresh) => fresh.id === source.id) === true &&
+                  (source.status === "completed" ||
+                    source.status === "failed" ||
+                    source.status === "interrupted"))),
+          );
       const missedRunIds = new Set(missedRuns.map((source) => source.id));
       const missedItems =
         missedRunIds.size === 0
