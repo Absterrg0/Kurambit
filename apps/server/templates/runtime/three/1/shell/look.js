@@ -85,12 +85,14 @@ const PRESETS = {
     toneMapping: "aces",
     exposure: 1,
     ambient: 0.9,
-    sky: { top: 0x46689e, horizon: 0xf0ae78, ground: 0x3a3029 },
+    // Warm light over a clear sky: the haze thin enough that islands a few hundred metres off
+    // keep their colour, the sky's top still blue.
+    sky: { top: 0x3d64a8, horizon: 0xeeb07e, ground: 0x3a3029 },
     sun: { direction: { x: -0.6, y: 0.22, z: 0.75 }, color: 0xffc58a, intensity: 3.4 },
-    fog: { density: 0.008, height: 0.05 },
+    fog: { density: 0.0045, height: 0.05 },
     ao: { radius: 1.5, intensity: 2.4 },
     bloom: { strength: 0.5, threshold: 0.95 },
-    grade: { saturation: 1.08, contrast: 1.06, warmth: 0.05, vignette: 0.5 },
+    grade: { saturation: 1.1, contrast: 1.08, warmth: 0.04, vignette: 0.4 },
   },
   // Night must still read: a warm key so the player stands out from a blue world, a lower and
   // less saturated blue around it, a light vignette. The old blue key tinted every model navy.
@@ -132,7 +134,34 @@ const PRESETS = {
 };
 
 /** What a LOOK export asks for, with its preset filled in. */
+// Every setting LOOK takes; anything else is named back to the game rather than ignored.
+const LOOK_KEYS = new Set([
+  "preset",
+  "toneMapping",
+  "exposure",
+  "ambient",
+  "environment",
+  "sky",
+  "sun",
+  "fog",
+  "shadows",
+  "ao",
+  "bloom",
+  "grade",
+  "resolution",
+  "quality",
+  "ground",
+]);
+const SKY_KEYS = new Set(["physical", "clouds", "top", "horizon", "ground", "light"]);
+
 export function resolveLook(options = {}) {
+  // A misplaced setting would otherwise do nothing, silently: say where it belongs. The check
+  // reports console warnings with the turn's other findings.
+  for (const key of Object.keys(options))
+    if (!LOOK_KEYS.has(key))
+      console.warn(
+        `LOOK.${key} is not a look setting, so it does nothing${SKY_KEYS.has(key) ? `: it belongs under LOOK.sky (LOOK.sky.${key})` : ""}. The settings are ${[...LOOK_KEYS].join(", ")}.`,
+      );
   const name = options.preset ?? "day";
   const preset = PRESETS[name];
   if (preset === undefined)
