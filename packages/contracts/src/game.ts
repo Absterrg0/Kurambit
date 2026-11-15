@@ -660,6 +660,11 @@ export const GameStatus = Schema.Struct({
   buildPlays: Schema.Array(
     Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),
   ),
+  /**
+   * A live-staged game: when a chat's check of the folder last came back clean (this server's
+   * memory). A turn making the first build plays the folder on the Stage from then on.
+   */
+  cleanCheckAt: Schema.optionalKey(Schema.String),
   operation: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,

@@ -55,6 +55,8 @@ export interface GameStatusInput {
   readonly changedSince: string | null;
   /** The game has at least one measured build. */
   readonly measured: boolean;
+  /** No build yet, and the turn making the first passed a clean check: its game plays. */
+  readonly firstPlayable?: boolean;
   /** The turn has ended and its build is being saved, before it is listed. */
   readonly landing: boolean;
   /** An Undo or Redo the person asked for, while it restores: "Undoing build 2". */
@@ -90,20 +92,24 @@ export const gameStatusLine = (input: GameStatusInput): ReadonlyArray<GameStatus
                     hint: `The Stage plays ${input.onStage}, and the Inspector shows its checks.`,
                   },
                 )
-            : // A turn under way is the change: its "Making build N" already says so.
-              input.changedSince !== null &&
-                !input.turnRunning &&
-                !input.landing &&
-                !input.keepGoingLive
-              ? part(`Changed since ${input.changedSince} · not measured`, {
-                  short: "Changed · not measured",
-                  hint: `The game folder has changed since ${input.changedSince}, so the Stage plays something no build has measured yet. The next build measures it.`,
+            : input.firstPlayable === true
+              ? part("First playable", {
+                  hint: `Your agent's check passed, so its game plays here while it keeps working. When the turn ends, build ${input.nextBuild} takes its place.`,
                 })
-              : input.measured || input.landing
-                ? null
-                : part("Not measured yet", {
-                    hint: "No build of this game has been measured. Your agent's next change becomes its first build, measured by a bot.",
+              : // A turn under way is the change: its "Making build N" already says so.
+                input.changedSince !== null &&
+                  !input.turnRunning &&
+                  !input.landing &&
+                  !input.keepGoingLive
+                ? part(`Changed since ${input.changedSince} · not measured`, {
+                    short: "Changed · not measured",
+                    hint: `The game folder has changed since ${input.changedSince}, so the Stage plays something no build has measured yet. The next build measures it.`,
                   })
+                : input.measured || input.landing
+                  ? null
+                  : part("Not measured yet", {
+                      hint: "No build of this game has been measured. Your agent's next change becomes its first build, measured by a bot.",
+                    })
       : input.phase === "stopped"
         ? part("Stopped")
         : input.phase === "ready"

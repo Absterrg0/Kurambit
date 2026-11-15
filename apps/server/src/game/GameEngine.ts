@@ -2,6 +2,7 @@
 import * as NodePath from "node:path";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -325,6 +326,8 @@ export class GameEngine extends Context.Service<
       root: string,
       owner: string,
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
+    /** When a chat's `check` of the folder last came back clean (ISO), or null; memory only. */
+    readonly cleanCheckAt: (root: string) => Effect.Effect<string | null>;
     /**
      * A clean `check` this server made of the very files `root` holds (its
      * engine project and game.json, byte for byte), or null. That check booted
@@ -571,11 +574,14 @@ const make = Effect.gen(function* () {
       );
       return `${manifest.engine.name}:${snapshot.sourceId}:${manifestHash.sha256}`;
     }).pipe(Effect.orElseSucceed(() => null));
+  // Set before the check's operation ends, so the status its end rereads has it.
+  const cleanCheckTimes = new Map<string, string>();
   /** The thread's check, remembered when it is clean and its files held still throughout. */
   const checkRemembered = (root: string) =>
     Effect.gen(function* () {
       const before = yield* checkedIdentity(root);
       const result = yield* check(root, { scene: true, qa: true });
+      if (result.ok) cleanCheckTimes.set(root, DateTime.formatIso(yield* DateTime.now));
       if (result.ok && before !== null && before === (yield* checkedIdentity(root)))
         yield* Cache.set(cleanChecks, before, result);
       return result;
@@ -595,6 +601,7 @@ const make = Effect.gen(function* () {
         const label = yield* checkLabel(yield* projects.resolve(threadId));
         return yield* projects.exclusive(threadId, label, checkRemembered, { owner });
       }),
+    cleanCheckAt: (root) => Effect.sync(() => cleanCheckTimes.get(root) ?? null),
     checkIn: (root, owner) =>
       Effect.flatMap(checkLabel(root), (label) =>
         // The QA play's report is a build fact of its own, measured with the boot.

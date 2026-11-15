@@ -203,6 +203,7 @@ const make = Effect.gen(function* () {
           : statusOptions?.checkSources !== true
             ? "unknown"
             : (matchesSelected ?? "unknown");
+      const cleanCheckAt = live ? yield* engines.cleanCheckAt(root) : null;
       return {
         root,
         manifest: inventory.manifest,
@@ -230,6 +231,7 @@ const make = Effect.gen(function* () {
         )),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
+        ...(cleanCheckAt === null ? {} : { cleanCheckAt }),
       };
     }),
   });

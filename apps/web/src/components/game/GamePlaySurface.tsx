@@ -610,7 +610,7 @@ function StageStateCard({
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
               {phase.saving === true
                 ? "Build 1 is being saved and plays here in a moment."
-                : "Build 1 plays here as soon as the agent's turn ends."}
+                : "The game plays here as soon as the agent's check of it passes."}
             </Text>
           </div>
         ) : null}

@@ -499,21 +499,7 @@ function ThreadGameStage({
       turnBuild(sawTurnEnd && latestRun !== null ? threadRef : null, latestRun?.runId ?? null),
     ) !== null;
   const landing = useTurnLanding(threadRef, turnRunning);
-  // Which live change the frame shows: held while this chat's turn runs and its build is saved,
-  // so the Stage switches games together with its label; the latest otherwise.
   const [liveShown, setLiveShown] = useState<number | null>(null);
-  const liveRevision = liveToShow({
-    latest: live.revision,
-    shown: liveShown,
-    turnRunning: turnRunning || landing,
-  });
-  if (liveRevision !== liveShown) setLiveShown(liveRevision);
-  // Changes held back through a turn are its build: the remount that applies them is a new one.
-  const [heldBuild, setHeldBuild] = useState(false);
-  if ((turnRunning || landing) && liveShown !== null && live.revision !== liveShown && !heldBuild)
-    setHeldBuild(true);
-  // An Undo or Redo is a new build too, though its build list may update after the folder does.
-  if (turnUndo.restoring && !heldBuild) setHeldBuild(true);
   // The request that made the slot, kept past the turn's end for the slot's last moments.
   const [slotRequest, setSlotRequest] = useState(turnRequest);
   if (turnRequest !== null && turnRequest !== slotRequest) setSlotRequest(turnRequest);
@@ -527,7 +513,6 @@ function ThreadGameStage({
         }),
     folderBuildName,
   );
-  // Before the first build the Stage plays only the starter shell: no game is paused.
   const buildsAtom = gameEnvironment.builds({
     environmentId: threadRef.environmentId,
     input: { threadId: threadRef.threadId },
@@ -547,6 +532,37 @@ function ThreadGameStage({
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
+  // Which live change the frame shows: held while this chat's turn runs and its build is saved,
+  // so the Stage switches games together with its label; the latest otherwise.
+  const liveRevision = liveToShow({
+    latest: live.revision,
+    shown: liveShown,
+    turnRunning: turnRunning || landing,
+  });
+  if (liveRevision !== liveShown) setLiveShown(liveRevision);
+  // Changes held back through a turn are its build: the remount that applies them is a new one.
+  const [heldBuild, setHeldBuild] = useState(false);
+  if ((turnRunning || landing) && liveShown !== null && live.revision !== liveShown && !heldBuild)
+    setHeldBuild(true);
+  // An Undo or Redo is a new build too, though its build list may update after the folder does.
+  if (turnUndo.restoring && !heldBuild) setHeldBuild(true);
+  // The turn making the first build passed a clean check: from then its game plays here while
+  // the turn goes on, said "First playable"; the turn's end swaps build 1 in like any new build.
+  const cleanCheckAt = query.data?.cleanCheckAt ?? null;
+  const [firstPlayableTurn, setFirstPlayableTurn] = useState<string | null>(null);
+  const firstPlayableReady =
+    buildsRead &&
+    !hasBuild &&
+    turnRunning &&
+    turnStartedAt !== null &&
+    cleanCheckAt !== null &&
+    Date.parse(cleanCheckAt) >= Date.parse(turnStartedAt);
+  if (firstPlayableReady && firstPlayableTurn !== turnStartedAt) {
+    setFirstPlayableTurn(turnStartedAt);
+    setLiveShown(live.revision);
+  }
+  const firstPlayable =
+    firstPlayableTurn !== null && firstPlayableTurn === turnStartedAt && buildsRead && !hasBuild;
   const stageStill = useStageStill(threadKey);
   // A frame the folder's game showed is the picture of the build the folder holds, unless a
   // turn is changing the folder under it. Only a new frame is kept, never one from before.
@@ -1075,6 +1091,7 @@ function ThreadGameStage({
     stageKind === "live" &&
     buildsRead &&
     !hasBuild &&
+    !firstPlayable &&
     (turnRunning || landing) &&
     phase.kind === "playing"
       ? {
@@ -1113,6 +1130,7 @@ function ThreadGameStage({
     live: stageKind === "live",
     changedSince: playTarget === null ? (changedSince ?? null) : null,
     measured: hasBuild,
+    firstPlayable,
     landing,
     restoring:
       turnUndo.restoring && turnUndo.view !== null && turnUndo.action !== null
