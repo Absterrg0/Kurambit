@@ -5,7 +5,7 @@
 //   import { ocean } from "./shell/water.js";
 //   const sea = ocean(ctx, { colour: "#1fa3a8", deep: "#0a3f6e" }); // a sea to the horizon at
 //     // y 0: colour looking down into it, deep toward the horizon
-//   sea.wake(boat, { width: 3 });                   // foam behind it as it moves; stern:
+//   const stop = sea.wake(boat, { width: 3 });      // foam behind it as it moves (stop() ends it); stern:
 //                                                   // how far behind its centre it starts (m)
 //   const lake = ocean(ctx, { size: 200, colour: "#2a4a3a", waves: 0.4, foam: 0 });
 //   // options: size (m across), colour, waves (how rough, 1), wave (the swell's length, 1:
@@ -28,6 +28,15 @@ const WAKE_LIFE_S = 9;
 const WAKE_EVERY_M = 1.5;
 
 let normals = null;
+// Each ctx's oceans (a run's, the title's), stepped with it; they go when the ctx does.
+const oceans = new WeakMap();
+
+/** The shell's side: steps a ctx's seas with that ctx's own step. */
+export const waterShell = {
+  update(dt, ctx) {
+    for (const sea of oceans.get(ctx) ?? []) sea.advance(dt);
+  },
+};
 
 // The swell: a few long crossing waves, the same in the shader and in height(), so what floats
 // on the water rides what is drawn. [direction x, direction z, wavelength m, height m]; each
@@ -297,15 +306,16 @@ export function ocean(
 
   // Each wake keeps its own run of points; all of them share the shader's list.
   const wakes = [];
+  // Game time: the shell steps every ocean with play (waterShell), so a replay's swell and wakes
+  // are the live play's, and a paused game's sea holds still.
   let clock = 0;
-  let last = performance.now();
+  let drawnAt = 0;
+  if (!oceans.has(ctx)) oceans.set(ctx, new Set());
+  oceans.get(ctx).add({ advance: (dt) => (clock += dt) });
   const reflect = water.onBeforeRender;
   water.onBeforeRender = (renderer, scene, camera, ...rest) => {
-    const now = performance.now();
-    // Real time between drawn frames: a paused game draws none, so its sea holds still.
-    const dt = Math.min((now - last) / 1000, 0.1);
-    last = now;
-    clock += dt;
+    const dt = clock - drawnAt;
+    drawnAt = clock;
     material.uniforms.time.value = clock * 0.6 * waves;
     material.uniforms.swellTime.value = clock;
     // The disc follows the camera; the waves stay where they are in the world.
@@ -370,7 +380,13 @@ export function ocean(
      * its centre. The wash grows with its speed; at rest it leaves none.
      */
     wake(object, { width = 2, stern: behind = 0 } = {}) {
-      wakes.push({ object, width, stern: behind, trail: [], last: null, speed: 0 });
+      const wake = { object, width, stern: behind, trail: [], last: null, speed: 0 };
+      wakes.push(wake);
+      // The way out: a sunk or removed boat stops feeding the shared trail.
+      return () => {
+        const at = wakes.indexOf(wake);
+        if (at >= 0) wakes.splice(at, 1);
+      };
     },
   };
 }

@@ -75,6 +75,7 @@ import { createControls, createInput } from "./controls.js";
 import { createPlayer, createRate, createRecorder, freshSeed, mark, seeded } from "./replay.js";
 import { createDevView } from "./dev-view.js";
 import { modelShell } from "./model.js";
+import { waterShell } from "./water.js";
 import { createSheet } from "./sheet.js";
 import {
   VOLUME_NAMES,
@@ -446,6 +447,7 @@ function stepTitleWorld(real) {
   } catch {
     // An animation the title cannot play leaves the pose as it is.
   }
+  waterShell.update(real, world.ctx);
   clearTitleInput(world);
   placeTitleCamera(real);
 }
@@ -940,6 +942,7 @@ function step() {
       for (const timer of due) timer.fn();
       game.update?.(dt, stepping.ctx);
       animateShell.update(dt);
+      waterShell.update(dt, stepping.ctx);
       cameraShell.update(dt);
       stepping.ctx.ui.update(dt);
     } catch (error) {
@@ -1335,6 +1338,7 @@ renderer.setAnimationLoop((now) => {
     dt = real;
     try {
       game.title(real, titleCtx);
+      waterShell.update(real, titleCtx);
     } catch (error) {
       if (!titleError) reportError(error);
       titleError = true;
