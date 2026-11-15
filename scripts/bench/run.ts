@@ -542,16 +542,18 @@ async function toCap(
   if (turnEnded && left >= 1) {
     log(`${id}: keep going on Autopilot for the ${left} min left`);
     now = await keepGoing("autopilot", left);
-    let seen = 0;
+    // The status lists steps newest first: each one is logged once, by its number.
+    const logged = new Set<number>();
     while (now.mode !== "off" && Date.now() < capAt) {
       await sleep(5);
       now = await call(server, cookie, (client) =>
         client[WS_METHODS.gameKeepGoingStatus]({ threadId: game.threadId }),
       );
-      const settled = now.steps.filter((step) => step.verdict !== null);
-      for (const step of settled.slice(seen))
+      for (const step of now.steps.toSorted((a, b) => a.n - b.n)) {
+        if (step.verdict === null || logged.has(step.n)) continue;
+        logged.add(step.n);
         log(`${id}: step ${step.n} ${step.verdict}: ${step.reason ?? step.text}`);
-      seen = settled.length;
+      }
     }
     if (now.mode === "off") log(`${id}: keep going stopped itself: ${now.ending ?? "no reason"}`);
   }
