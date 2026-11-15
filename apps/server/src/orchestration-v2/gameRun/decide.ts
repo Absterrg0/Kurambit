@@ -520,7 +520,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
       return {
         why: "regression",
         text: clip(
-          `Your last step (${last.move}) was undone: ${last.step.reason}. Reach the same goal another way, or take a smaller step.`,
+          `Your last step (${last.move.replace(/[.\s]+$/, "")}) was undone: ${last.step.reason.replace(/[.\s]+$/, "")}. Reach the same goal another way, or take a smaller step.`,
           TEXT_MAX,
         ),
         target: null,

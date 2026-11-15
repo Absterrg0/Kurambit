@@ -270,7 +270,7 @@ describe("gain", () => {
 });
 
 describe("never repeat", () => {
-  const easier = deadControls(1);
+  const easier = facts({ masher: tier("crashed", 12) });
   const undoOnce = (s: RunState, c: Loop.Cycle) =>
     Loop.applyUndo(
       s,
@@ -284,7 +284,9 @@ describe("never repeat", () => {
     expect(first.record?.step).toMatchObject({ verdict: "undone", key: "next:1" });
     const retry = Loop.propose(first.state, look());
     expect(retry).toMatchObject({ why: "regression", key: "next:1" });
-    expect(retry?.text).toContain("Add a second enemy type.");
+    expect(retry?.text).toBe(
+      "Your last step (Add a second enemy type) was undone: it crashed: crashed at 12 s when played with random input. Reach the same goal another way, or take a smaller step.",
+    );
     const second = undoOnce(first.state, cycle(turnStep({ proposal: retry! })));
     expect(second.state.setAside.map((s) => s.key)).toEqual(["next:1"]);
     // The retry is not proposed again; the agent's own line comes instead.
@@ -308,7 +310,7 @@ describe("never repeat", () => {
       started: true,
     });
     expect(declined.state.setAside.map((s) => s.key)).toEqual(["fact:controls"]);
-    expect(Loop.propose(declined.state, look({ facts: easier, next: "none" }))).toBeNull();
+    expect(Loop.propose(declined.state, look({ facts: deadControls(1), next: "none" }))).toBeNull();
 
     const skipped = Loop.applyDecided(state(), proposal(), BASE, "skip", "creator", NOW);
     expect(skipped.state.setAside).toEqual([
