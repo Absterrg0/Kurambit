@@ -488,7 +488,7 @@ void main() {
   if ( d.y <= 0.015 ) discard;
   float t0 = 1.0 / d.y, t1 = 2.4 / d.y;
   // Far decks thin into the horizon's haze; the march spans no more than a few cloud lengths.
-  float far = min( t1, t0 + 9.0 );
+  float far = min( t1, t0 + 14.0 );
   int n = int( steps );
   float dt = ( far - t0 ) / steps;
   float transmit = 1.0;
@@ -510,7 +510,7 @@ void main() {
     colour += transmit * a * here;
     transmit *= 1.0 - a;
   }
-  float alpha = ( 1.0 - transmit ) * smoothstep( 0.015, 0.16, d.y );
+  float alpha = ( 1.0 - transmit ) * smoothstep( 0.012, 0.06, d.y );
   if ( alpha < 0.003 ) discard;
   gl_FragColor = vec4( colour / max( 1.0 - transmit, 1e-3 ), alpha );
 }`;
