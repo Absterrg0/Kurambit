@@ -277,8 +277,7 @@ other tabs. `mod+Alt+C` shows or hides Tune.
 
 - **A three.js game is always on.** The stage plays the game folder itself, and **Restart** starts
   it again at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
-  **Fullscreen** shows only the game, edge to edge. A game made from the starter opens on its title screen: choose Play there, or press
-  Enter. The game pauses and mutes while the stage is hidden and resumes when you come back. It
+  **Fullscreen** shows only the game, edge to edge. A game opens on its own title screen when it has one. The game pauses and mutes while the stage is hidden and resumes when you come back. It
   also pauses when you click away from it, into the chat or **Tune**, and plays on when you click it
   again; turn off **Pause when I click away** in the stage's **More** menu to keep it running.
 - **Stop game**, in the stage's **More** menu, ends only the processes Kurambit started for this
@@ -432,11 +431,10 @@ Each game is a self-contained git repository you can move, back up, or open on a
   `runtime`: Kurambit brings fixes to them without changing the game, and every Web export carries
   its own copy, so a release plays from any web server. Games made before the runtime keep their
   own copy in `web/shell/` and `web/vendor/`. A new game starts as an empty page: the agent makes
-  everything a player sees, its title, menus, HUD, light and look, for your brief, while the
+  the whole game, its title, menus, HUD, light and look included, for your brief, while the
   bridge gives the Stage, Tune, Controls, the checks and replays what they need. Games made on the
-  older demo shell keep its title, pause, settings and end screens. The game's icon
-  (`web/assets/ui/icon.png`) shows on the browser tab, and `web/credits.txt` lists the credits
-  its assets' licences ask for.
+  older demo shell keep its title, pause, settings and end screens. `web/credits.txt` lists the
+  credits its library assets' licences ask for.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the game's bots, their reports and kept play saves.

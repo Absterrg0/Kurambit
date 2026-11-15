@@ -107,6 +107,14 @@ export const serveGameDirectory = async (
           );
     if (runtimeFile !== null) return yield* serveFile(runtimeFile, "no-cache");
     const file = yield* Effect.promise(() => gameRequestFile(webRoot, request.url));
+    // A new game is an empty folder until its first turn writes main.js, which the runtime's page
+    // imports: until then the page runs nothing rather than failing to load. A static import
+    // keeps a broken main.js's file and line in the error, so the gap is answered here.
+    if (file === 404 && runtimes !== null && request.url.split("?")[0] === "/main.js")
+      return HttpServerResponse.text("export {};\n", {
+        contentType: "text/javascript; charset=utf-8",
+        headers: { "cache-control": "no-store" },
+      });
     if (typeof file === "number") return HttpServerResponse.empty({ status: file });
     const response = yield* serveFile(file, "no-store");
     if (request.method === "GET" && (response.status === 200 || response.status === 206))

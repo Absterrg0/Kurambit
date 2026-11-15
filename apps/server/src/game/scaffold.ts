@@ -4,6 +4,7 @@ import {
   GAME_STYLE_DEFAULT_LIBRARY,
   GAME_TEMPLATES,
   gameModelChoice,
+  type GameCharacterRoute,
   gameTemplateForEngine,
   type GameCreateInput,
   type GameEngineId,
@@ -126,75 +127,40 @@ const everyTurnSection = (engine: GameEngineId): string | undefined => {
 };
 
 /**
- * On the generated route the first turn also starts the key art, builds on stand-ins while it
- * renders, and ends on the person's pick: the look is theirs, and art never blocks the playable.
+ * The first turn hands the agent the brief, the bridge contract and the person's own choices
+ * (how models are made), and nothing about how to make the game: no starter, no recipe, no kit.
+ * How a turn ends and what the loop's tools say travel with the turn rules and the tools.
  */
-const GENERATED_GOAL =
-  "Goal: the person plays the brief's core loop on the Stage while its art is generated from the look they pick: the loop plays first on stand-ins, so the Stage shows the game within minutes, never primitives.";
-const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ (rendering, palette, shape language), each one this game can reach in its engine, drawn as an in-game screenshot, each grounded with a \`style\`: a library pack id that ships a picture of its look (a Kenney low-poly kit, Quaternius Monsters; KayKit ships none), or the person's own reference image, so the key art never promises a look the game cannot reach (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with the stand-ins. Then read \`BRIEF.md\` and the bridge contract in \`TEMPLATE.md\`. Write no plan or design document, and do not open Blender.`;
-const GENERATED_LAST_STEP = `4. Look with \`game_check\` and fix what a player would call wrong at a glance in its frame (the player small, seen only from behind or hard to make out, a view washed out or too dark), then \`game_check\` with \`final: true\` clean, including each problem its scene report lists (open the frame it names), then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
-
-const READ_STEP = `1. Read \`BRIEF.md\` and the bridge contract in \`TEMPLATE.md\`: what the harness needs from the game, and nothing about how it looks. Write no plan or design document and make no key art.`;
-/** The game is the agent's to design, everything a player sees included; the harness only runs it. */
-const LOOP_STEP = `3. Replace the starter in \`web/main.js\` (a placeholder) with the game the brief asks for, and make everything a player sees for it yourself: its title, HUD and endings, its camera, and light and atmosphere for the mood the brief describes. It wins and loses through \`GameState.win\` and \`lose\` when the brief has an end. Build only what the brief asks; your ideas go in \`Next:\`.`;
-const CHECK_STEP = `5. Look at the game with \`game_check\` as often as you need, and fix what a player would call wrong at a glance: the player small, seen only from behind or hard to make out, a view washed out by haze or too dark to read. When the game has a reference picture, match it like for like: frame the play camera as the picture is framed, then write a numbered critique of the game's frame beside the picture, biggest difference first (composition, silhouette, proportions, colour and light, surface), fix the first, and look again, until the critique finds nothing major: each check's \`review\` says how. Once it does, run \`game_check\` with \`final: true\` and fix until it is clean, including each problem its scene report lists (open the frame it names). End the turn with what the person can do now, plus your \`Next:\` line.`;
-
-/** The library first, then what it lacks made the route's way: the old default, and any game with the library on. */
-const libraryTurn = (lacking: string) => `## The first turn
-
-Goal: the person plays the brief's core loop on the Stage, and its player and main threat are what the brief names: library models where the library has them, ${lacking} where it does not, never primitives. The loop plays on library models first, so the Stage shows the game within minutes while anything missing is made.
-
-${READ_STEP}
-2. Choose the look: \`game_assets_search\` with no words lists the library by style family. Pick one that fits the brief. Add the player character and one or two threats or props with \`game_assets_add\`, the first call with \`lock\` (that family and the view), which writes \`STYLE.json\`, and name them in \`ASSETS\`. When no pack has the brief's player or main threat (a cat, a pigeon, a hover tank), add the closest model to stand in while the loop is built.
-${LOOP_STEP}
-4. Make what the library lacks: the brief's player or main threat that no pack has, ${lacking === "made in Blender" ? "in Blender (each Blender tool names its recipe)" : "in three.js code (look at it alone with `game_model_sheet`)"}, then swap it in for the model standing in. Only those two; every other missing prop waits for a later turn.
-${CHECK_STEP}
-`;
-
-/** The code route with the library off: every model in code, looked at alone before the game is built round it. */
-const CODE_TURN = `## The first turn
-
-Goal: the person plays the brief's core loop on the Stage, and its player, main threat and world are models you build in three.js code, never bare primitives standing in for them.
-
-${READ_STEP}
-2. Build the player and the main threat as models in three.js code, each in its own module under \`web/models/\`: silhouette first, then the details a person names each by. Look at each alone with \`game_model_sheet\` and fix what reads wrong before step 3.
-${LOOP_STEP}
-4. Build the world the brief names the same way: the ground and the one or two set pieces it names.
-${CHECK_STEP}
-`;
-
-/** Blender with the library off: quick code stand-ins carry the loop while the real models are made. */
-const STAND_IN_TURN = `## The first turn
-
-Goal: the person plays the brief's core loop on the Stage, and its player and main threat are made in Blender, never primitives. The loop plays first on quick stand-ins built in code, so the Stage shows the game within minutes while they are made.
-
-${READ_STEP}
-2. Stand-ins: the player and the main threat as quick models in code (the right size and colours), named in the game as the real ones will be.
-${LOOP_STEP}
-4. Make the player and the main threat in Blender (its tools each name their recipe), then swap them in for the stand-ins. Only those two; every other prop waits for a later turn.
-${CHECK_STEP}
-`;
+const FIRST_TURN_GOAL =
+  "Goal: the person plays the game the brief describes on the Stage, made as well as you can make it: every part a player sees is yours to design.";
+const READ_LINE =
+  "Read `BRIEF.md` and the bridge contract in `TEMPLATE.md` (what the harness needs from the game, nothing about how it looks), then build the game in `web/`. Write no plan or design document.";
+/** The person's model route and library choice, said once: how the game's models are made. */
+const routeLine = (route: GameCharacterRoute, library: boolean): string => {
+  const made =
+    route === "blender"
+      ? "made in Blender (each Blender tool names its recipe), with quick models in code standing in while they are made"
+      : route === "generated"
+        ? "generated from the key art below by the person's providers, with quick models in code standing in until they arrive"
+        : "built in three.js code, never bare primitives standing in for them";
+  return library
+    ? `The person turned the asset library on: use its models where it has what the brief names (\`game_assets_search\`; the first \`game_assets_add\` takes \`lock\`), and the rest are ${made}.`
+    : `The person chose how the game's models are made: its player, main threat and world are ${made}.`;
+};
+/** On the generated route the first turn also starts the key art, so art never blocks the playable. */
+const GENERATED_LINE = `Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ, each one this game can reach, each grounded with a \`style\` (a library pack id that ships a picture of its look, or the person's own reference image; \`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it, and if it is refused, say so and go on. Before you end the turn, \`game_generate_wait\` for it: ask the person to pick one of its candidates in the chat, or say it is still rendering, and say what it cost.`;
 
 /** The first turn for this game's engine and model choice; an engine without one gets the brief alone. */
 const firstTurnSection = (manifest: GameManifest): string | undefined => {
   if (manifest.engine.name !== "three") return undefined;
   const { route, library } = gameModelChoice(manifest);
-  if (route === "code") return library ? libraryTurn("built in code") : CODE_TURN;
-  if (route === "blender") return library ? libraryTurn("made in Blender") : STAND_IN_TURN;
-  // Generated characters come from the person's providers, never Blender: no making step.
-  const lines = (library ? libraryTurn("made in Blender") : STAND_IN_TURN)
-    .split("\n")
-    .filter((line) => !line.startsWith("4. "))
-    .map((line) => (line.startsWith("Goal: ") ? GENERATED_GOAL : line));
-  const first = lines.findIndex((line) => line.startsWith("1. "));
-  const last = lines.findIndex((line) => line.startsWith("5. "));
   return [
-    ...lines.slice(0, first),
-    GENERATED_FIRST_STEP,
-    ...lines.slice(first + 1, last),
-    GENERATED_LAST_STEP,
-    ...lines.slice(last + 1),
-  ].join("\n");
+    "## The first turn",
+    FIRST_TURN_GOAL,
+    ...(route === "generated" ? [GENERATED_LINE] : []),
+    READ_LINE,
+    routeLine(route, library),
+  ].join("\n\n");
 };
 
 /** Said when the person attached a picture to the new game (GameCreateInput `reference`). */

@@ -617,10 +617,17 @@ The build-source identity reads that list as derived (the Unity profile's `deriv
 counting it failed the first boot after every warm-up. Domain reload stays on (`EditorSettings` enter-play-mode options
 off): the kits keep static state, and a second play session in one editor would otherwise
 reach objects the previous session destroyed.
-The three.js shell does the same: it owns the render loop and calls
-the gameplay module `web/main.js` through `start`/`update`/`stop`. Its page opens on the title,
-so the template's `gameplayScene` is `index.html?play` (boots straight into a run) and the
-three.js check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
+The three.js runtime owns the render loop too and calls the gameplay module `web/main.js`
+through `start`/`update`/`stop`, because fixed steps, seeded chance and recorded input are what
+replays, the Stage's freeze and the QA play stand on. It draws nothing a player sees: a new game
+starts as an empty page (the template is the bridge's `index.html` and `tune.json`; the game server
+answers a missing `main.js` with an empty module so the page boots) and draws its own title, HUD
+and look, entering its title through `GameState.title()` in `start`. The runtime tells the two
+kinds of page apart by markup, not a flag: a page carrying all of the old demo shell's
+`section.screen` elements gets that shell's screens, slow end beat and default look; any other page
+gets none, and the shell never touches its elements, whatever their ids. The template's
+`gameplayScene` is `index.html?play` (boots straight into a run, past any title) and the three.js
+check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
 `godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
 exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
 manifest, and every engine question the run has is the lane's engine profile.

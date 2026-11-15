@@ -7,7 +7,8 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
 
 1. The game is yours: its title, menus, HUD, endings, camera, light, sky and post, made for the
    brief. TEMPLATE.md's contract is all the harness needs (a run, an end, the run's moves,
-   controls, tunable values); the kits in `./shell/` are helpers to use only where they help. A
+   controls, tunable values). The runtime also has optional helper modules, each documented at
+   its top in `studio-skills/runtime/shell/`; none is needed. A
    game made on the older demo shell (its `index.html` has the shell's `section.screen`
    elements) keeps those screens: restyle them, or remove every one of them to draw the page
    yourself under the contract. An older game with no `runtime` in game.json keeps its own copy
