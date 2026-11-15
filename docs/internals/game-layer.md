@@ -94,7 +94,7 @@ check that matters.
   every standard clip plays on every made or library body on it.
 - `STYLE.json` at the game root records the game's look (`packages/contracts/src/gameStyle.ts`),
   read by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an
-  edit takes effect at once. `game_assets_add`'s optional `lock` writes it from a style family
+  edit takes effect at once. `game_assets` op `add`'s optional `lock` writes it from a style family
   (`styleFromLock`), so agents never hand-write its shape. Tools fill defaults from it (sprite
   palette and views, export budgets, loudness targets, the clip packs a character gets) and search
   ranks its packs first, but nothing is refused for falling outside it: refusals that kept a game
@@ -108,15 +108,17 @@ check that matters.
   models are made (code, Blender or generated) and whether the free library's models may come in
   are the person's choice, kept in `game.json` (`characters`, `library`) rather than STYLE.json, so
   they can be set before the first turn writes one; the tools enforce them, and the agent changes
-  them only when the person asks (`game_models_route`, refused in keep-going steps). The code route
+  them in `game.json` only when the person asks. A keep-going step is no one asking: while one
+  runs, its art and Blender ops refuse a `game.json` whose choice moved since the step started
+  (`GameProjectService.stepModelChoice`, kept in memory, so a restart mid-step forgets it). The code route
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and
   `generated`, still opens the game; a game.json with no `library` key predates the switch and
   keeps its library on (`gameModelChoice`).
-- Made characters are conformed, not retargeted: `game_blender_character` fits the standard
+- Made characters are conformed, not retargeted: `game_blender` op `character` fits the standard
   armature to the body once, keeping the standard rest frames, so library clips play unchanged
   and a body off those frames is refused at export rather than playing broken. An asset ships
-  only as reviewed: `game_blender_look` mode review runs the style pass and measurement in a
-  separate one-shot Blender on a saved copy of the live scene, and `game_blender_export` writes
+  only as reviewed: `game_blender` op `look` mode review runs the style pass and measurement in a
+  separate one-shot Blender on a saved copy of the live scene, and `game_blender` op `export` writes
   exactly that candidate or refuses when the scene changed since; a refusal is only for what the
   agent or person must change, while the pass fixes what it can (it scales over-budget textures
   and says so). Where the player downloads the GLB itself (three.js, `compressedModels` in the
@@ -125,10 +127,10 @@ check that matters.
   the sidecar names the shipped bytes and triangles, which keeps the asset fact valid. The asset is its sidecar `<name>.asset.json` (skeleton, clips with ground speed,
   springs, height, source and licence), which the three.js shell reads from `ASSETS` and which
   Godot and Unity can read later; GLB extras are not used because those engines drop them.
-  Painting from a sheet (`game_blender_paint`) and carving (`game_blender_carve`) run in a
+  Painting from a sheet (`game_blender` op `paint`) and carving (`game_blender` op `carve`) run in a
   one-shot Blender too, since their bakes outlast the live server's 180 s per command; the live
   scene only adopts the result, after checking its objects did not change meanwhile.
-  `game_animate` compiles a move spec in the live scene itself (a pass takes seconds) and keeps
+  `game_blender` op `animate` compiles a move spec in the live scene itself (a pass takes seconds) and keeps
   each pass's spec, numbers and pictures under `builds/logs/animate/<clip>/<n>`. Its clips follow
   the library's conventions so every consumer treats them alike: travel rides the pelvis (the
   root bone stays at rest; `rootDrift` measures it), and spring chains stay unkeyed because the
@@ -170,18 +172,19 @@ check that matters.
   three.js is active. A parked engine keeps its profile, driver and tests, and compiles; nothing
   new is made in it, its tool is not detected, and engine work on its existing games is refused
   `engine-parked` (`GameEngine`'s runner), while their chats, builds and history still open.
-  The game tools an agent is listed follow from the same data: each declares in
-  [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
-  engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether a
-  chat lists it only when asked; the MCP auth middleware puts the thread's engine, its model route,
-  and whether this machine has Blender in the invocation, and
-  `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A provider reads
-  the list once per session, so nothing waits for a request to appear: what a chat uses only when
-  the person asks stays reachable through `game_more`, which runs it through its own handler. The
-  Blender tools are listed directly only on the Blender route, once Blender is found: its chats make
-  their models there, and a tool reached through `game_more` reaches the agent without its schema.
-  On code and generated they wait behind `game_more`, so those chats keep a small listing (the
-  listing budgets in `instructionBudget.test.ts` are per route). `game_more` is an image tool, so an asked-for look or move still arrives as pictures.
+  The game tools an agent is listed follow from the same data. There are six, each one schema
+  whose keys are its ops ([gameTools.ts](../../packages/contracts/src/gameTools.ts)); the op is the
+  key rather than a tagged union because providers refuse a tool input that is not one object at
+  the top. [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) says what each op
+  needs of the engine (`engineCapabilities`, derived from the profile, empty for a parked engine).
+  A tool is listed from a game thread's first turn whenever its engine runs any of its ops: a
+  provider reads the list once per session and keeps the schemas it loaded first, so the listing
+  never changes with the model route, a missing Blender or what the person asked. An op the game
+  or machine cannot run is refused when called, with why. A retired tool name stays registered,
+  never listed: the MCP auth middleware reads a `tools/call`'s name from the request body
+  (`calledTool`), only that call can see the retired name, and it answers with the tool and op
+  that do its work now. Clients that kept an older listing reach it; the rest refuse an unlisted
+  name themselves.
 - A game thread's provider session gets Kurambit's MCP server and the provider's built-in tools,
   never the person's own MCP servers, account connectors or synced account skills
   (`kurambitToolsOnly` on the turn input): they cost context on every call and could reach the
@@ -243,7 +246,7 @@ check that matters.
   `StudioProbe.cs` is Unity's play-session runner; input is queued on virtual Input System
   devices, which is why the lane asks games to read input through the Input System.
 - `GameExplore` routes by the engine's play kind with an explicit target override:
-  `game_explore_start` defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
+  `game_play` op `start` defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
   content-addressed export machinery (hash, compare, move into place, select) serves both lanes;
   the expected-files check is engine-aware.
 
@@ -341,9 +344,9 @@ Agents reach the services through the `game_*` MCP toolkit; the client reaches t
 over RPC. A tool and its RPC twin call the same method of the service that owns the operation
 (GameBlender, GameExport, GameStage, ...); there is no facade between them. Thread-keyed methods
 resolve the thread's game and take its operation lock themselves (`GameProjectService.exclusive`),
-so a new operation touches one service. The `game_unity_*` tools
-are a curated front for `unity mcp`: a fixed allowlist of editing tools behind one
-`game_unity_edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
+so a new operation touches one service. `game_unity`'s ops
+are a curated front for `unity mcp`: a fixed allowlist of editing tools behind its op
+`edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
 editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
 worker and `-job-worker-count 2` (the worker count is a per-user setting in
 `UserSettings/EditorUserSettings.asset`, rewritten before every start), because Unity's default
@@ -363,8 +366,8 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
 
 - **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
   reads the rail each time from the turn checkpoints and the restore refs; a build's id is its
-  commit. Every surface (its RPCs, the `game_builds`, `game_facts`, `game_build_restore` and
-  `game_tune` tools) is one method of that service.
+  commit. Every surface (its RPCs, `game_builds`' list, compare and restore, `game_check`'s
+  facts) is one method of that service.
 - **A turn's change is its own.** T3 diffs a turn's checkpoint against its thread's previous
   one, which in a game includes whatever another chat or a restore did in between. A turn build
   counts from the newest build of the game captured before the turn began.
@@ -442,7 +445,7 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   rest, first asked within each. A holder that a waiter outranks is interrupted at once and runs
   again from its row on its next turn, so a half-played tier is never a fact, and the waiter
   waits only for that teardown (a bot run's stop, bounded in GameBot) plus the holds of its own
-  rank ahead of it. An agent's `game_bot_run` and explore sessions are outside the lane, and
+  rank ahead of it. An agent's `game_play` op `bot` and explore sessions are outside the lane, and
   another program on the GPU was never visible: `sharedPlaySuspect` covers what that slows.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
@@ -451,7 +454,7 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   literal beside `why`; the client words the cause and the harness branches on it, and neither
   reads meaning out of `why`, which is the agents' text and free to change.
 - **Facts skip what is already known or not needed.** The boot check is not run again when this
-  server's own final `game_check` (`final: true`, the one that also plays the scene report and the
+  server's own final `game_check` (op `final`, the one that also plays the scene report and the
   QA play) booted the same bytes (engine folder and `game.json`) clean, and the
   tester's bot plays a chat turn's build only while keep going, which judges by it, is on; a
   person's measure and keep going's own measures always play it.
@@ -539,8 +542,8 @@ cannot both find none.
 - **The play bot plays only when asked.** Writing one cost 4 to 10 minutes between steps and its
   one real-time run was noise, so no build's measure and no step plays it. The person asks with
   the Inspector's Measure button, or asks their agent to prove the game can be won: it writes
-  `.studio/bot/play.mjs` with the bot kit, wins one run with `game_bot_run`, and calls
-  `game_facts` with `skilled: true`. Otherwise the skilled fact reads not measured with why
+  `.studio/bot/play.mjs` with the bot kit, wins one run with `game_play` op `bot`, and calls
+  `game_check` op `facts` with `skilled: true`. Otherwise the skilled fact reads not measured with why
   (`deferred`, `no-play-bot`). `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own
   bot. Games from earlier runs keep their `game-builds/bots/<run>` setup points, which list as the
   build they were written on.
@@ -565,7 +568,7 @@ cannot both find none.
   again on resume. A step turn T3 carried over a restart that its run no longer wants (Off, an
   ended run, a step moved past) is interrupted, so nothing edits a game the person stopped.
 
-`game_blender_render_sprites` exists because weak models cannot write sprite framing: their
+`game_blender` op `sprites` exists because weak models cannot write sprite framing: their
 renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed
 orthographic camera per view to the subject's evaluated geometry across every frame, renders in a
 throwaway scene that links the live objects (the live scene and its .blend never change), and

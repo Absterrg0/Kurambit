@@ -60,7 +60,7 @@ import type { SheetView } from "./webPlaySession.ts";
  * when it is needed and costs the turn's instructions nothing.
  */
 const MODEL_REVIEW =
-  "Before you change the model, write a numbered critique of these sheets against the brief, biggest difference first: 1. silhouette (the side profile, then the plan: a bow's rake, a roof line, how a shape tapers), 2. proportions (length to height to width, each part against the 1.8 m figure), 3. the main parts and how they meet (fronts that curve and step back, bands that follow the walls they sit on), 4. surface (materials, glass, rails, small details). Fix the first item, call game_model_sheet again, and repeat until the critique finds nothing major. Draw from curves, not boxes: the side profile first (curve), then the plan (mirrored, outline, inset), then the sections (loft, wall), so every part follows the same lines.";
+  "Before you change the model, write a numbered critique of these sheets against the brief, biggest difference first: 1. silhouette (the side profile, then the plan: a bow's rake, a roof line, how a shape tapers), 2. proportions (length to height to width, each part against the 1.8 m figure), 3. the main parts and how they meet (fronts that curve and step back, bands that follow the walls they sit on), 4. surface (materials, glass, rails, small details). Fix the first item, call game_play op model_sheet again, and repeat until the critique finds nothing major. Draw from curves, not boxes: the side profile first (curve), then the plan (mirrored, outline, inset), then the sections (loft, wall), so every part follows the same lines.";
 
 /** The same review against a reference picture, drawn from the side and from the picture's angle. */
 const REFERENCE_REVIEW = MODEL_REVIEW.replace(
@@ -360,7 +360,7 @@ export class GameEngine extends Context.Service<
     >;
     /** The engine's import of the game's project, as an action result. */
     readonly importProject: (root: string) => Effect.Effect<GameActionResult, GameOperationError>;
-    /** `game_import`: the engine's import of the thread's game, as the game's operation. */
+    /** `game_assets` op `import`: the engine's import of the thread's game, as the game's operation. */
     readonly import: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
      * The game's boot check, as the thread's game's operation (`owner` names
@@ -402,12 +402,12 @@ export class GameEngine extends Context.Service<
       root: string,
       play: GamePlay,
     ) => Effect.Effect<GameReplayRun, GameOperationError>;
-    /** `game_model_sheet`: the named things alone, from four sides, with their size and cost. */
+    /** `game_play` op `model_sheet`: the named things alone, from four sides, with their size and cost. */
     readonly modelSheet: (
       threadId: ThreadId,
       input: GameModelSheetInput,
     ) => Effect.Effect<GameModelSheetResult, GameOperationError>;
-    /** `game_unity_recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
+    /** `game_unity` op `recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
     readonly recompile: (
       threadId: ThreadId,
     ) => Effect.Effect<GameUnityRecompileResult, GameOperationError>;
@@ -761,7 +761,7 @@ const make = Effect.gen(function* () {
               operation: "Unity recompile",
               path: root,
               reason: "invalid-input",
-              detail: "The game_unity_* tools work on Unity games; this game runs another engine.",
+              detail: "The game_unity tool works on Unity games; this game runs another engine.",
             });
           const imported = yield* backend.importProject(ctx);
           return {

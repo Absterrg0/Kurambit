@@ -254,7 +254,7 @@ export const GameArtDirection = Schema.Struct({
 });
 export type GameArtDirection = typeof GameArtDirection.Type;
 
-/** game_generate: one asset, or 2-4 distinct directions of it for the person to pick from. */
+/** game_assets op generate: one asset, or 2-4 distinct directions of it for the person to pick from. */
 export const GameGenerateInput = Schema.Struct({
   lane: GameArtLane,
   /** What to make, the thing itself; the game's look comes from references and the style anchor. */
@@ -343,8 +343,8 @@ export const GameGeneration = Schema.Struct({
 export type GameGeneration = typeof GameGeneration.Type;
 
 /**
- * game_image_edit: a change, in words, to an image the game already has. The same generation as
- * game_generate's image lane with options.edit, under a name an agent finds when asked to change
+ * game_assets op image_edit: a change, in words, to an image the game already has. The same generation as
+ * game_assets op generate's image lane with options.edit, under a name an agent finds when asked to change
  * an image.
  */
 export const GameImageEditInput = Schema.Struct({
@@ -376,7 +376,7 @@ export const GameGenerateResult = Schema.Struct({
 });
 export type GameGenerateResult = typeof GameGenerateResult.Type;
 
-/** game_generate_wait: until the generation is done, waits on the person's pick, fails, or `seconds` pass. */
+/** game_assets op wait: until the generation is done, waits on the person's pick, fails, or `seconds` pass. */
 export const GameGenerateWaitInput = Schema.Struct({
   id: Schema.String,
   seconds: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 1, maximum: 540 }))),
@@ -405,7 +405,7 @@ export type GameCancelGenerationInput = typeof GameCancelGenerationInput.Type;
 export const GameGenerationChangeResult = Schema.Struct({ generation: GameGeneration });
 export type GameGenerationChangeResult = typeof GameGenerationChangeResult.Type;
 
-/** One provider's standing, for Settings and game_status. */
+/** One provider's standing, for Settings and game_check op status. */
 export const GameArtProviderStatus = Schema.Struct({
   provider: GameArtProviderId,
   /** A key is saved (or none is needed and the tool it uses is there). */

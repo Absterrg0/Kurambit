@@ -78,18 +78,19 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
  */
 const KEEP_GOING_SECTION = `## Keep going
 
-- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Each step runs in a session of its own, so the message carries what you need: the brief, the chat's last reply, the facts and the steps before it. Do that one step, like any turn: the last \`game_check\` with \`final: true\` clean, then end with your \`Next:\` line, or \`Next: none\` when nothing worth doing for the brief is left.
+- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Each step runs in a session of its own, so the message carries what you need: the brief, the chat's last reply, the facts and the steps before it. Do that one step, like any turn: the last \`game_check\` op \`final\` clean, then end with your \`Next:\` line, or \`Next: none\` when nothing worth doing for the brief is left.
 - Kurambit measures the step's build, and undoes the step itself only when it breaks the game (it stops booting, errors or freezes in play, or can no longer be won or lost); the person can redo it. Do not put an undone change back unless they ask.
 - A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line. Kurambit sets that step aside.
 - The person's own messages always come first. Turn keep going on or off (\`game_keep_going\`) only when they ask.
 `;
 const PLAYTEST_LINE =
-  "- Explore (`game_explore_*`) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. Read `game_facts` when the person reports a problem.";
+  "- Play it yourself (`game_play` ops `start`, `act`, `close`) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. Read `game_check` op `facts` when the person reports a problem.";
 /** What a turn is: the person's whole request, done and looked at. */
 const SCOPE_LINES = `- **Do everything the person asked in this message,** and only that: your own ideas go in \`Next:\`. The turn ends when that work is done and you have looked at it, not when the check is clean. When the game has a reference picture, keep going until your critique of the game's frame beside it finds nothing major.
-- **A value they ask to change** that a \`ctx.tune\` already holds: set it with \`game_tune\`, say so, and that is the turn.
+- **A value they ask to change** that a \`ctx.tune\` already holds: set it in \`web/tune.json\` under the id its \`ctx.tune\` uses, say so, and that is the turn.
+- **How models are made** (game.json's \`characters\`: code, blender or generated, and \`library\`) is the person's choice: change it only when they ask in chat.
 - **A question:** answer it and change nothing; your previous \`Next:\` line stands, so repeat it.
-- **Look as often as you need; check in full once the work is done.** \`game_check\` is a quick look: a frame of play, its errors and frame rate. Before you end the turn, run \`game_check\` with \`final: true\`, which also plays the scene report and the QA play, and fix what they list. A clean check says the game runs, not that the work is done.
+- **Look as often as you need; check in full once the work is done.** \`game_check\` is a quick look: a frame of play, its errors and frame rate. Before you end the turn, run its op \`final\`, which also plays the scene report and the QA play, and fix what they list. A clean check says the game runs, not that the work is done.
 - Install nothing the person did not ask for; the game_* tools are your toolchain.`;
 const UNDO_LINE =
   "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.";
@@ -144,11 +145,11 @@ const routeLine = (route: GameCharacterRoute, library: boolean): string => {
         ? "generated from the key art below by the person's providers, with quick models in code standing in until they arrive"
         : "built in three.js code, never bare primitives standing in for them";
   return library
-    ? `The person turned the asset library on: use its models where it has what the brief names (\`game_assets_search\`; the first \`game_assets_add\` takes \`lock\`), and the rest are ${made}.`
+    ? `The person turned the asset library on: use its models where it has what the brief names (\`game_assets\` op \`search\`; the first \`add\` takes \`lock\`), and the rest are ${made}.`
     : `The person chose how the game's models are made: its player, main threat and world are ${made}.`;
 };
 /** On the generated route the first turn also starts the key art, so art never blocks the playable. */
-const GENERATED_LINE = `Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ, each one this game can reach, each grounded with a \`style\` (a library pack id that ships a picture of its look, or the person's own reference image; \`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it, and if it is refused, say so and go on. Before you end the turn, \`game_generate_wait\` for it: ask the person to pick one of its candidates in the chat, or say it is still rendering, and say what it cost.`;
+const GENERATED_LINE = `Start the key art first: \`game_assets\` op \`generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ, each one this game can reach, each grounded with a \`style\` (a library pack id that ships a picture of its look, or the person's own reference image; \`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it, and if it is refused, say so and go on. Before you end the turn, op \`wait\` for it: ask the person to pick one of its candidates in the chat, or say it is still rendering, and say what it cost.`;
 
 /** The first turn for this game's engine and model choice; an engine without one gets the brief alone. */
 const firstTurnSection = (manifest: GameManifest): string | undefined => {

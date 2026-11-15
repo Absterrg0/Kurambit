@@ -45,7 +45,7 @@
 //   ctx.scene.add(boat); // a Group; move and turn it, its insides are rebuilt in place
 //
 // A character in code, on the standard humanoid skeleton the animation library's clips play on
-// (ASSETS names the library's clip file: game_assets_add quaternius-universal-animation-library
+// (ASSETS names the library's clip file: game_assets op add quaternius-universal-animation-library
 // with Unreal-Godot/UAL1_Standard.glb, allowed with the library off). Parts are placed in the
 // body's own metres, feet at y 0, facing +z, at the skeleton's rest pose; each rides one bone.
 //   const body = M.rig(ctx.assets.model("rig"));  // the clips' copy, its mannequin taken off
@@ -58,7 +58,7 @@
 //   // body.bones lists the bone names; hero.play("run") plays the library's clips on it.
 //
 // Models face +z, like the library's, so face the move with rotation.y = Math.atan2(dir.x, dir.z).
-// Look at each one alone with game_model_sheet before building the game around it.
+// Look at each one alone with game_play op model_sheet before building the game around it.
 import * as THREE from "../vendor/three.module.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";

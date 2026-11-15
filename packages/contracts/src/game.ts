@@ -654,7 +654,7 @@ export const GameStatus = Schema.Struct({
   /** Whether the person let this game take models from the free library. */
   library: Schema.Boolean,
   /**
-   * Generated art: per lane, the provider game_generate would use now (a key saved, Codex
+   * Generated art: per lane, the provider game_assets op generate would use now (a key saved, Codex
    * signed in); null when nothing can make that lane. Absent when it could not be read.
    */
   artLanes: Schema.optionalKey(GameArtLanes),
@@ -776,7 +776,7 @@ export const GameSetCharacterRouteResult = Schema.Struct({
   library: Schema.Boolean,
 });
 export type GameSetCharacterRouteResult = typeof GameSetCharacterRouteResult.Type;
-/** game_model_sheet: the things to draw alone, by the names the game gave them (ctx.thing, ASSETS keys). */
+/** game_play op model_sheet: the things to draw alone, by the names the game gave them (ctx.thing, ASSETS keys). */
 export const GameModelSheetInput = Schema.Struct({
   /** A game-relative PNG to show beside the sheets; omitted, STYLE.json's anchor or art/reference.png. */
   reference: Schema.optionalKey(

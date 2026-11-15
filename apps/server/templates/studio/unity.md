@@ -4,19 +4,19 @@ The Unity lane: one Unity 6 project under `unity/`, edited in one live editor
 and checked, played and exported with the same `game_*` tools as a Godot game.
 
 1. You have no local Unity binary: never look for one or run it. The
-   `game_unity_*` tools drive this game's one live batchmode editor (the
+   `game_unity` drives this game's one live batchmode editor (the
    first call opens it; that can take a few minutes on a fresh project).
    Kurambit runs it lean: one asset import worker and two job threads, so
    imports are serial; keep imported files few and small.
 2. Write C# yourself under `unity/Assets/Scripts/` (gameplay) and
    `unity/Assets/Editor/` (the scene builder). After a script change run
-   `game_unity_recompile` (or `game_check`) and fix every `file:line` error
+   `game_unity` op `recompile` (or `game_check`) and fix every `file:line` error
    before anything else: a project that does not compile cannot play.
 3. Every file Unity should use sits under `unity/Assets/`, capital A: models
    as GLB in `unity/Assets/Blender/`, library packs in
    `unity/Assets/Library/`, textures and sprites as PNG in
    `unity/Assets/Art/`, sound in `unity/Assets/Audio/`. Unity never sees
-   `unity/assets/`. Run `game_import` after adding files. Never write or edit
+   `unity/assets/`. Run `game_assets` op `import` after adding files. Never write or edit
    `.meta` files; Unity makes them. A model changed after Unity imported it
    goes out under a new file name (`hero_v2.glb`) and is loaded by that
    name; Unity keeps drawing the old one otherwise.
@@ -70,33 +70,33 @@ and checked, played and exported with the same `game_*` tools as a Godot game.
 ## Building the scene
 
 11. Build Game.unity's content in `unity/Assets/Editor/BuildGame.cs` and run
-    it with `game_unity_eval` (`return BuildGame.Run();`): camera, lights,
+    it with `game_unity` op `eval` (`return BuildGame.Run();`): camera, lights,
     level, player, props, their components and references. It saves the
     scene. Keep scene setup in that builder, not in one-off eval calls, so it
     survives a revert and runs again; `Ensure` keeps objects that exist.
 12. Build levels and scene content into the saved scene, not only at
     runtime: a scene filled only when play starts is empty in every still,
     in the editor and on its first frame.
-13. For a small change, `game_unity_tools` lists the editing tools (scene,
+13. For a small change, `game_unity` op `tools` lists the editing tools (scene,
     gameobject, component, prefab, material, settings) with their inputs;
-    call one with `game_unity_edit` (open scenes are saved after each call).
+    call one with `game_unity` op `edit` (open scenes are saved after each call).
     Never hand-edit `.unity`, `.prefab` or `.asset` YAML. Attach your scripts
     with `script_attach` after they compile, or add them in the builder.
 
 ## Check, play, export
 
-14. Look at the scene with `game_unity_screenshot` (the Game view), read
-    errors with `game_unity_console`. `game_unity_play` enters and exits
-    play mode for a quick look; real playtests use `game_explore_*`, which
+14. Look at the scene with `game_unity` op `screenshot` (the Game view), read
+    errors with `game_unity` op `console`. `game_unity` op `play` enters and exits
+    play mode for a quick look; real playtests use `game_play` ops `start`, `act` and `close`, which
     build and run a Linux player of the current sources with real keys and
     mouse, paused between acts. The game opens on the title: press `Enter`
     or click `Shell/Title/Play`.
 15. `game_check` recompiles, then plays Game.unity for 120 frames (the shell
     starts a run around it) and reports runtime exceptions with `file:line`.
     A clean check proves it compiles and boots, not that it is fun.
-16. Export checklist: `game_export` Linux builds `builds/linux/` (the
+16. Export checklist: `game_builds` op `export` Linux builds `builds/linux/` (the
     executable, `game_Data/` and `UnityPlayer.so` together); Windows builds
     `builds/windows/`. Web is refused. Bot runs play the same Linux player as
-    `game_explore_*`, at normal speed; they take no `setState` writes.
+    `game_play` ops `start`, `act` and `close`, at normal speed; they take no `setState` writes.
 17. Never touch `Library/`, `Temp/`, `Logs/` or `UserSettings/`; they are
     the editor's caches.

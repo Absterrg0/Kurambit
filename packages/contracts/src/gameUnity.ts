@@ -6,11 +6,12 @@ import { GameCheckIssue } from "./game.ts";
 export const GameUnityEditInput = Schema.Struct({
   tool: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)).annotate({
     description:
-      "One editor tool from game_unity_tools, such as a gameobject or component tool. Builds, tests, packages and editor lifecycle are not reachable here.",
+      "One editor tool from game_unity op tools, such as a gameobject or component tool. Builds, tests, packages and editor lifecycle are not reachable here.",
   }),
   arguments: Schema.optionalKey(
     Schema.Record(Schema.String, Schema.Unknown).annotate({
-      description: "The tool's arguments, exactly as game_unity_tools describes its input schema.",
+      description:
+        "The tool's arguments, exactly as game_unity op tools describes its input schema.",
     }),
   ),
 });

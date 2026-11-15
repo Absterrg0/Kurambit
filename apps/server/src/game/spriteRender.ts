@@ -1,5 +1,5 @@
 // Pure pixel work on decoded PNGs; pngjs encodes.
-// The deterministic half of game_blender_render_sprites: Blender renders large, this turns the
+// The deterministic half of game_blender op sprites: Blender renders large, this turns the
 // renders into pixel art (downscale, hard alpha, a palette shared by every frame, an outline) and
 // draws the contact sheet. Same input, same bytes.
 import { PNG } from "pngjs";

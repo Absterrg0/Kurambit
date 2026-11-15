@@ -22,7 +22,7 @@
   pass through the repository's code formatter on commit, which changes whitespace and quotes,
   not code.
 - `addons/libs/meshopt_decoder.module.js` (the decoder for the meshopt-compressed
-  models game_blender_export ships, `shell/assets.js`): the same tarball's file,
+  models game_blender op export ships, `shell/assets.js`): the same tarball's file,
   unmodified, added 2026-11-08. meshoptimizer, MIT License, copyright (c)
   2016-2024 Arseny Kapoulkine; the notice is in the file's header.
 - `postprocessing/index.js` + `postprocessing/LICENSE.md`: postprocessing 6.38.3 (pmndrs),

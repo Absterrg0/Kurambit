@@ -676,7 +676,7 @@ const make = Effect.gen(function* () {
         message:
           `${input.opening} exploration session ${input.id.slice(0, 8)} opened on ${input.plays} ${input.sourceId.slice(0, 12)} ` +
           `at ${input.viewport.width}x${input.viewport.height} (${held ? "paused between calls" : "real time: the game keeps running between calls"}). ` +
-          `${savesNote}${opened.inputNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_explore_close. ` +
+          `${savesNote}${opened.inputNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_play op close. ` +
           `${noPicture}This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
@@ -1104,7 +1104,7 @@ const make = Effect.gen(function* () {
       if (session === undefined)
         return yield* exploreInvalid(
           input.sessionId,
-          "That exploration session is unknown or expired; start a new one with game_explore_start.",
+          "That exploration session is unknown or expired; start a new one with game_play op start.",
         );
       const root = yield* projects.resolve(threadId);
       const lease = exploreLease(session, root, threadId);
@@ -1139,7 +1139,7 @@ const make = Effect.gen(function* () {
           if (session.closed || exploreLive.get(session.root) !== session)
             return yield* exploreInvalid(
               session.id,
-              "That exploration session is closed or expired; start a new one with game_explore_start.",
+              "That exploration session is closed or expired; start a new one with game_play op start.",
             );
           const now = yield* Clock.currentTimeMillis;
           if (
@@ -1150,7 +1150,7 @@ const make = Effect.gen(function* () {
             yield* exploreFinalize(session, reason);
             return yield* exploreInvalid(
               session.id,
-              `That exploration session ${reason}. Start a new exploration with game_explore_start.`,
+              `That exploration session ${reason}. Start a new exploration with game_play op start.`,
             );
           }
           // Budgets are checked under the session lock so concurrent acts
@@ -1196,7 +1196,7 @@ const make = Effect.gen(function* () {
       if (session === undefined)
         return yield* exploreInvalid(
           input.sessionId,
-          "That exploration session is unknown or expired; start a new one with game_explore_start.",
+          "That exploration session is unknown or expired; start a new one with game_play op start.",
         );
       const lease = exploreLease(session, root, threadId);
       if (lease !== null) return yield* lease;
@@ -1218,7 +1218,7 @@ const make = Effect.gen(function* () {
           if (result !== null) return result;
           return yield* exploreInvalid(
             input.sessionId,
-            "That exploration session is closed or expired; start a new one with game_explore_start.",
+            "That exploration session is closed or expired; start a new one with game_play op start.",
           );
         }),
       );

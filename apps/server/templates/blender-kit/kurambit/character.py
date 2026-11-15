@@ -28,7 +28,7 @@ from . import fit, helpers, skeleton
 from .protocol import Refused, entry
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
-LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_assets_search lists them) need no install."
+LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_assets op search lists them) need no install."
 
 
 MADE_BODY = {"what": "body", "from": "made", "licence": "made in this game", "ai": False, "credits": None}
@@ -166,7 +166,7 @@ def _game_source(path):
         raw = None
     parts = [_part(p) for p in raw] if isinstance(raw, list) and raw else [None]
     if None in parts:
-        raise Refused("invalid-input", f"{os.path.basename(sidecar)} has no ledger that reads as one (source.parts), so the body's credits are unknown: export that model again with game_blender_export, or use a library body")
+        raise Refused("invalid-input", f"{os.path.basename(sidecar)} has no ledger that reads as one (source.parts), so the body's credits are unknown: export that model again with game_blender op export, or use a library body")
     body = next((p for p in parts if p["what"] == "body"), None)
     rest = [p for p in parts if p is not body]
     return (body if body is not None else dict(MADE_BODY)), rest
@@ -366,7 +366,7 @@ def character(params):
         has = {name_map.get(b.name, b.name) for b in body_arm.data.bones}
         missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
         if missing:
-            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_blender_assets_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
+            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_assets op blender_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
         own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
         # Its clips move the pelvis in the body's own units.
         unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z

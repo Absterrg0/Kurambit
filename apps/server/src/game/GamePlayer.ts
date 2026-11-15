@@ -42,7 +42,7 @@ export class GamePlayer extends Context.Service<
     /**
      * The Linux player of the game's current sources: the one it has, a copy
      * of its main checkout's of identical sources, or a build that runs as
-     * the game's exclusive operation (so it never races game_export or
+     * the game's exclusive operation (so it never races game_builds op export or
      * game_check for the editor), outside any explore start lock.
      */
     readonly playerFor: (

@@ -15,7 +15,7 @@
 // A copy is safe to add, move and animate on its own (skinned characters keep
 // their own skeleton), so every Retry gets new copies without reloading.
 // Copies share materials: clone a material before changing its colour.
-// A `.asset.json` entry is the sidecar game_blender_export writes beside its
+// A `.asset.json` entry is the sidecar game_blender op export writes beside its
 // GLB: the GLB it names loads in its place, and every copy carries the sidecar
 // as `copy.userData.asset` (clips' ground speeds, spring chains, height), which
 // animate() reads.
@@ -95,7 +95,7 @@ export async function preloadAssets(manifest, onProgress) {
     if (!listed.has(url))
       reportError(new Error(`${url} did not load: a file an ASSETS model references is missing.`));
   };
-  // game_blender_export ships meshopt-compressed geometry (its WebP images three reads natively).
+  // game_blender op export ships meshopt-compressed geometry (its WebP images three reads natively).
   const gltfLoader = new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder);
   const textureLoader = new THREE.TextureLoader(manager);
   await Promise.all(

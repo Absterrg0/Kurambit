@@ -122,7 +122,7 @@ shows each call.
 
 - Build Game.unity's content (camera, lights, level, player, props, their
   components and references) in `Assets/Editor/BuildGame.cs` and run it with
-  `game_unity_eval` (`return BuildGame.Run();`). It saves the scene. Keep the
+  `game_unity` op `eval` (`return BuildGame.Run();`). It saves the scene. Keep the
   builder in the project and extend it rather than making one-off edits, so
   it survives a revert and runs again.
 - Build levels and scene content into the saved scene, not only at runtime:
@@ -160,14 +160,14 @@ the game.
 
 ## Edit, check and play
 
-Edit scenes through the builder or the `game_unity_*` tools; they drive one
+Edit scenes through the builder or the `game_unity` tool; they drive one
 live editor for this game. Write C# files directly, then use
-`game_unity_recompile` or `game_check` for compile errors with file:line.
+`game_unity` op `recompile` or `game_check` for compile errors with file:line.
 `game_check` plays Game.unity briefly (the shell starts a run around it) and
 reports runtime exceptions. A clean check says the project compiles and
 boots; it cannot establish that the game is good to play.
 
-Use `game_explore_start`, `game_explore_act` and `game_explore_close` to play a
+Use `game_play` ops `start`, `act` and `close` to play a
 real Linux build of the current sources. The game opens on the title: press
 `Enter` (Play is selected) or click `Shell/Title/Play` with a `ui` step.
 Inspect the frames, try real inputs, and report what you reached and what

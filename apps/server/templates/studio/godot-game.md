@@ -10,15 +10,15 @@ Adapted from OhMyGame's godot-game skill (Apache-2.0), plus local rules.
    move bodies in `_physics_process`, and after a teleport call
    `reset_physics_interpolation()` on the moved node.
 2. You have no local Godot binary: never look for one or run it. Check
-   with `game_check`, re-import after asset changes with `game_import`,
-   play with `game_explore_*`, build with `game_export`.
+   with `game_check`, re-import after asset changes with `game_assets` op `import`,
+   play with `game_play` ops `start`, `act` and `close`, build with `game_builds` op `export`.
 3. Keep the boot clean: no script errors, no parse errors. Engine shutdown
    noise after quit is not failure; anything while the game runs is.
 4. Main scene set in project.godot. Controls are the named actions in
    project.godot `[input]` (TEMPLATE.md): read them with `Input.get_vector`
    and `Input.is_action_*`, never key codes, so the gamepad and the
    player's rebinding work.
-5. Export checklist before calling it done: `game_export` succeeds for Web
+5. Export checklist before calling it done: `game_builds` op `export` succeeds for Web
    and Linux, and `game_check` reports every entry clean.
 
 ## The shell and the feel kit
@@ -55,7 +55,7 @@ Never hand-write clip switching or camera follow; the shell kits do it.
   prints which clip each state got: read that line after `game_check`.
   Library models face +Z: rotate the model child 180 degrees so the body's -Z
   faces where it moves.
-- 2D character from `game_blender_render_sprites`: `SpriteStrips.apply(sprite,
+- 2D character from `game_blender` op `sprites`: `SpriteStrips.apply(sprite,
 {"idle": "res://assets/sprites/hero_idle.sprite.json", "walk": ...}, "right")`
   loads the strips at their own fps with the feet on the node origin; then
   `sprite.play(state)` every frame and `flip_h` to face left.

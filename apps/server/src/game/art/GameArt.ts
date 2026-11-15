@@ -134,7 +134,7 @@ export class GameArt extends Context.Service<
       path: string,
     ) => Effect.Effect<GameArtDelivered | null, GameOperationError>;
     readonly providers: Effect.Effect<GameArtProvidersResult, GameOperationError>;
-    /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_status. */
+    /** The lane map alone, from saved keys and Codex's sign-in: no network, for game_check op status. */
     readonly lanes: Effect.Effect<GameArtLanes, GameOperationError>;
     /**
      * Who renders the pictures on a card: a landed motion's strip, a model's views before its rig.
@@ -781,7 +781,7 @@ const make = Effect.gen(function* () {
         if (missing.length > 0)
           return yield* opError(
             "art-generate",
-            `${options.character} is not a character on the standard skeleton (it lacks ${missing.slice(0, 6).join(", ")}${missing.length > 6 ? ` and ${missing.length - 6} more` : ""}), so a motion made on it would not play on the game's humanoids. Pass a character game_blender_export wrote after game_blender_character, or leave character out for the standard body. Nothing was asked of a provider or spent.`,
+            `${options.character} is not a character on the standard skeleton (it lacks ${missing.slice(0, 6).join(", ")}${missing.length > 6 ? ` and ${missing.length - 6} more` : ""}), so a motion made on it would not play on the game's humanoids. Pass a character game_blender op export wrote after game_blender op character, or leave character out for the standard body. Nothing was asked of a provider or spent.`,
             "invalid-input",
             options.character,
           );
@@ -828,7 +828,7 @@ const make = Effect.gen(function* () {
       const joints = (doc.skins ?? []).reduce((sum, skin) => sum + (skin.joints ?? []).length, 0);
       if ((doc.skins ?? []).length > 0)
         return yield* refuse(
-          `is already rigged (${joints} joints): rigging it again would replace its skeleton. Keep its rig: game_blender_assets_import brings a library model in with its own rig and clips, and a rigged file already in the game is used as it is.`,
+          `is already rigged (${joints} joints): rigging it again would replace its skeleton. Keep its rig: game_assets op blender_import brings a library model in with its own rig and clips, and a rigged file already in the game is used as it is.`,
         );
       return absolute;
     });
@@ -878,7 +878,7 @@ const make = Effect.gen(function* () {
         ? Effect.fail(
             opError(
               "art-generate",
-              `Style ${style} is no library pack; pass a pack id game_assets_search lists, or a game image path.`,
+              `Style ${style} is no library pack; pass a pack id game_assets op search lists, or a game image path.`,
               "invalid-input",
               style,
             ),
@@ -1373,7 +1373,7 @@ const make = Effect.gen(function* () {
           spent !== null && limit !== null
             ? ` (${usd(spent)} of the ${usd(limit)} daily limit used today${g.estimateUsd === null ? "" : ", counting this estimate"})`
             : ""
-        }. Files land in ${where}/.${lookText(row)} Wait with game_generate_wait id ${g.id}.`;
+        }. Files land in ${where}/.${lookText(row)} Wait with game_assets op wait id ${g.id}.`;
       case "choosing":
         if (g.filesUndone === true)
           return `The candidates of "${g.name}" are no longer in the game: ${UNDONE}`;
@@ -1384,7 +1384,7 @@ const make = Effect.gen(function* () {
             g.estimateUsd !== null && g.costUsd !== null && g.estimateUsd > g.costUsd
               ? `; the rig and its clips add about ${usd(roundUsd(g.estimateUsd - g.costUsd))}`
               : ""
-          }. After "${RIG_THIS_LABEL}", game_generate_wait id ${g.id} waits for the rig.`;
+          }. After "${RIG_THIS_LABEL}", game_assets op wait id ${g.id} waits for the rig.`;
         return `${g.candidates.length} ${g.candidates.length === 1 ? "candidate" : "candidates"} of "${g.name}" ${g.candidates.length === 1 ? "is" : "are"} ready (${g.candidates
           .map((candidate) => candidate.preview)
           .join(", ")})${refusedText(g)}; the person picks one in the chat. Cost ${costText(row)}.`;
@@ -1444,17 +1444,17 @@ const make = Effect.gen(function* () {
     if (g.lane === "motion") {
       const clips = g.files.filter((file) => /\.glb$/i.test(file));
       const names = clips.map((file) => motionClipName(g.name, file));
-      return ` Clip${clips.length === 1 ? "" : "s"} ${names.join(", ")}, on the standard skeleton: every humanoid in the game can play ${clips.length === 1 ? "it" : "them"}. Next: game_blender_character with clips that list ${clips.length === 1 ? "this file" : "the files the game needs"} beside the clips the character keeps (replace: true rebuilds one already made): ${clips.map((file) => JSON.stringify(file)).join(", ")}.`;
+      return ` Clip${clips.length === 1 ? "" : "s"} ${names.join(", ")}, on the standard skeleton: every humanoid in the game can play ${clips.length === 1 ? "it" : "them"}. Next: game_blender op character with clips that list ${clips.length === 1 ? "this file" : "the files the game needs"} beside the clips the character keeps (replace: true rebuilds one already made): ${clips.map((file) => JSON.stringify(file)).join(", ")}.`;
     }
     // The model the person looked at before its rig is not what the game takes.
     const model =
       g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file) && !/\.model\.[a-z]+$/i.test(file)) ??
       g.files.find((file) => /\.(glb|gltf|fbx)$/i.test(file));
     if (model === undefined)
-      return " Next: load it in the game from where it is (game_import first where the engine has an import step).";
+      return " Next: load it in the game from where it is (game_assets op import first where the engine has an import step).";
     return g.lane === "character"
-      ? ` Next: game_blender_character with body {game: "${model}"}.`
-      : ` Next: game_blender_assets_import with source "generated" and path "${model}".`;
+      ? ` Next: game_blender op character with body {game: "${model}"}.`
+      : ` Next: game_assets op blender_import with source "generated" and path "${model}".`;
   };
   const refusedText = (g: GameGeneration) =>
     (g.refused ?? []).length === 0

@@ -27,7 +27,7 @@ const THREE_D_LANES: ReadonlySet<GameArtLane> = new Set(["character", "creature"
 const AUDIO_LANES: ReadonlySet<GameArtLane> = new Set(["sfx", "music", "voice"]);
 
 /**
- * Lanes whose files reach the game as delivered (game_import copies them), so a build that ships
+ * Lanes whose files reach the game as delivered (game_assets op import copies them), so a build that ships
  * none of their bytes does not have them. A 3D lane's model is exported through Blender, which
  * rewrites the bytes: it joins through its export's sidecar, and a miss (an export from before
  * sidecars named generations) says nothing.
@@ -171,14 +171,29 @@ export const chatGenerationCardKey = (
     .map((generation) => `${generation.id}\u0001${generation.createdAt}`)
     .join("\u0002");
 
+/** The game_assets ops that start, wait on or edit a generation. */
+const GENERATION_OPS = ["generate", "wait", "image_edit"];
+
 /**
- * Whether a tool call is the agent's game_generate, game_image_edit or game_generate_wait, as
- * any provider names it (`mcp__kurambit__game_generate`, `kurambit.game_generate`,
- * `kurambit-<thread>_game_generate_wait`).
+ * Whether a tool call is the agent's generation call, as any provider names the tool
+ * (`mcp__kurambit__game_assets`, `kurambit.game_assets`, `kurambit-<thread>_game_assets`):
+ * game_assets with op generate, wait or image_edit, or, in chats from before the tool took ops,
+ * game_generate, game_image_edit or game_generate_wait.
  */
-export const isGameGenerationTool = (toolName: string | null | undefined): boolean =>
-  toolName != null &&
-  /(?:^|[_.:/\s-])game_(?:generate(?:_wait)?|image_edit)$/i.test(toolName.trim());
+export const isGameGenerationTool = (
+  toolName: string | null | undefined,
+  input: unknown,
+): boolean => {
+  if (toolName == null) return false;
+  const name = toolName.trim();
+  if (/(?:^|[_.:/\s-])game_(?:generate(?:_wait)?|image_edit)$/i.test(name)) return true;
+  return (
+    /(?:^|[_.:/\s-])game_assets$/i.test(name) &&
+    typeof input === "object" &&
+    input !== null &&
+    GENERATION_OPS.some((op) => op in input)
+  );
+};
 
 /** The person's pick, as the message the agent goes on from. */
 export const pickMessage = (generation: GameGeneration, candidate: number): string =>
@@ -226,4 +241,4 @@ export const changeableImage = (generation: GameGeneration): string | null =>
 
 /** The person's "Change…", as their message to the agent, which makes the edit generation. */
 export const changeMessage = (path: string, words: string): string =>
-  `Change ${path}: ${words.trim()}\n\nEdit that image (game_image_edit) rather than making a new one, so I can pick between the change and the image as it was.`;
+  `Change ${path}: ${words.trim()}\n\nEdit that image (game_assets op image_edit) rather than making a new one, so I can pick between the change and the image as it was.`;

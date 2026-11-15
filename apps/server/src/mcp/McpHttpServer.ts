@@ -1,22 +1,17 @@
 import {
-  GameToolkit,
-  GameMoreTool,
-  GameMoreToolkit,
-  GameAssetsSearchTool,
-  GameAssetsSearchToolkit,
+  GameAssetsTool,
+  GameAssetsToolkit,
+  GameBlenderTool,
+  GameBlenderToolkit,
   GameCheckTool,
   GameCheckToolkit,
-  GameModelSheetTool,
-  GameModelSheetToolkit,
-  GameAnimateTool,
-  GameAnimateToolkit,
-  GameBlenderLookTool,
-  GameBlenderLookToolkit,
-  GameBlenderRenderSpritesTool,
-  GameBlenderRenderSpritesToolkit,
-  GameUnityScreenshotTool,
-  GameUnityScreenshotToolkit,
+  GamePlayTool,
+  GamePlayToolkit,
+  GameToolkit,
+  GameUnityTool,
+  GameUnityToolkit,
 } from "./toolkits/game/tools.ts";
+import { RETIRED_GAME_TOOLS, retiredToolMessage } from "./toolkits/game/placement.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -34,11 +29,7 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import {
-  gameModelChoice,
-  OrchestratorMcpFailure,
-  PreviewAutomationError,
-} from "@kurambit/contracts";
+import { OrchestratorMcpFailure, PreviewAutomationError } from "@kurambit/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -155,6 +146,19 @@ export const normalizeMcpHttpResponse = (
     : response;
 };
 
+/**
+ * A `tools/call` request's tool name. The body is read once and kept by the request, so the MCP
+ * server reads the same text after this.
+ */
+const decodeToolCall = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      method: Schema.Literal("tools/call"),
+      params: Schema.Struct({ name: Schema.String }),
+    }),
+  ),
+);
+
 // Session tokens are `<payload>.<signature>`; registry tokens are a bare base64url secret.
 const looksLikeProviderToken = (token: string) => token.length > 0 && !token.includes(".");
 
@@ -201,12 +205,20 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
             Effect.catch((error) => Effect.succeed(error.detail ?? error.message)),
           )
         : null;
+    const calledTool =
+      request.method === "POST"
+        ? yield* request.text.pipe(
+            Effect.flatMap(decodeToolCall),
+            Effect.map((call) => call.params.name),
+            Effect.orElseSucceed(() => undefined),
+          )
+        : undefined;
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameEngine,
-        gameModels: manifest === null ? null : gameModelChoice(manifest),
         blenderMissing,
+        ...(calledTool === undefined ? {} : { calledTool }),
       }),
       Effect.map(normalizeMcpHttpResponse),
     );
@@ -818,130 +830,57 @@ const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 const registrationServices = <T extends Tool.Any>(_tool: T) =>
   Effect.context<Exclude<Tool.HandlerServices<T>, McpInvocationContext.McpInvocationContext>>();
 
-const registerGameBlenderLook = Effect.fn("McpHttpServer.registerGameBlenderLook")(function* () {
-  const services = yield* registrationServices(GameBlenderLookTool);
-  const built = yield* GameBlenderLookToolkit;
-  yield* registerImageTool(
-    GameBlenderLookTool,
-    (payload, options) =>
-      built
-        .handle("game_blender_look", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "blender-look",
-    (error) => (error instanceof Error ? error.message : "Game blender look failed."),
-  );
-});
-
-const registerGameBlenderRenderSprites = Effect.fn(
-  "McpHttpServer.registerGameBlenderRenderSprites",
-)(function* () {
-  const services = yield* registrationServices(GameBlenderRenderSpritesTool);
-  const built = yield* GameBlenderRenderSpritesToolkit;
-  yield* registerImageTool(
-    GameBlenderRenderSpritesTool,
-    (payload, options) =>
-      built
-        .handle("game_blender_render_sprites", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "blender-render-sprites",
-    (error) => (error instanceof Error ? error.message : "Game blender sprite render failed."),
-  );
-});
-
-const registerGameAnimate = Effect.fn("McpHttpServer.registerGameAnimate")(function* () {
-  const services = yield* registrationServices(GameAnimateTool);
-  const built = yield* GameAnimateToolkit;
-  yield* registerImageTool(
-    GameAnimateTool,
-    (payload, options) =>
-      built
-        .handle("game_animate", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "animate",
-    (error) => (error instanceof Error ? error.message : "Game animate failed."),
-  );
-});
-
-/** game_more runs asked-for tools, the Blender look and game_animate among them, so it carries images too. */
-const registerGameMore = Effect.fn("McpHttpServer.registerGameMore")(function* () {
-  const services = yield* registrationServices(GameMoreTool);
-  const built = yield* GameMoreToolkit;
-  yield* registerImageTool(
-    GameMoreTool,
-    (payload, options) =>
-      built
-        .handle("game_more", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "more",
-    (error) => (error instanceof Error ? error.message : "game_more failed."),
-  );
-});
-
-const registerGameCheck = Effect.fn("McpHttpServer.registerGameCheck")(function* () {
-  const services = yield* registrationServices(GameCheckTool);
-  const built = yield* GameCheckToolkit;
-  yield* registerImageTool(
-    GameCheckTool,
-    (payload, options) =>
-      built
-        .handle("game_check", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "check",
-    (error) => (error instanceof Error ? error.message : "Game check failed."),
-  );
-});
-
-const registerGameModelSheet = Effect.fn("McpHttpServer.registerGameModelSheet")(function* () {
-  const services = yield* registrationServices(GameModelSheetTool);
-  const built = yield* GameModelSheetToolkit;
-  yield* registerImageTool(
-    GameModelSheetTool,
-    (payload, options) =>
-      built
-        .handle("game_model_sheet", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "model-sheet",
-    (error) => (error instanceof Error ? error.message : "Model sheet failed."),
-  );
-});
-
-const registerGameAssetsSearch = Effect.fn("McpHttpServer.registerGameAssetsSearch")(function* () {
-  const services = yield* registrationServices(GameAssetsSearchTool);
-  const built = yield* GameAssetsSearchToolkit;
-  yield* registerImageTool(
-    GameAssetsSearchTool,
-    (payload, options) =>
-      built
-        .handle("game_assets_search", payload, undefined, options)
-        .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
-    (effect) => effect.pipe(Effect.provideContext(services)),
-    "assets-search",
-    (error) => (error instanceof Error ? error.message : "Game assets search failed."),
-  );
-});
-
-const registerGameUnityScreenshot = Effect.fn("McpHttpServer.registerGameUnityScreenshot")(
-  function* () {
-    const services = yield* registrationServices(GameUnityScreenshotTool);
-    const built = yield* GameUnityScreenshotToolkit;
+/** A game tool whose answers carry pictures, registered so they become image content. */
+const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
+  tool: Tools[keyof Tools],
+  toolkit: Toolkit.Toolkit<Tools>,
+) =>
+  Effect.gen(function* () {
+    const services = yield* registrationServices(tool);
+    const built = yield* toolkit;
     yield* registerImageTool(
-      GameUnityScreenshotTool,
+      tool,
       (payload, options) =>
         built
-          .handle("game_unity_screenshot", payload, undefined, options)
+          .handle(tool.name as keyof Tools, payload as never, undefined, options)
           .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
       (effect) => effect.pipe(Effect.provideContext(services)),
-      "unity-screenshot",
-      (error) => (error instanceof Error ? error.message : "Game Unity screenshot failed."),
+      tool.name,
+      (error) => (error instanceof Error ? error.message : `${tool.name} failed.`),
     );
-  },
-);
+  });
+
+/**
+ * The game tools older games and chats still name: never listed, and callable only by a game
+ * thread's request that names one (the auth middleware's `calledTool`), which answers with the
+ * tool and op that do its work now. Clients that kept an earlier listing reach them; the rest refuse an unlisted name
+ * themselves.
+ */
+const registerRetiredGameTools = Effect.gen(function* () {
+  const server = yield* McpServer.McpServer;
+  for (const name of Object.keys(RETIRED_GAME_TOOLS)) {
+    const message = retiredToolMessage(name);
+    yield* server.addTool({
+      tool: new McpSchema.Tool({
+        name,
+        description: message,
+        inputSchema: { type: "object", properties: {} },
+      }),
+      annotations: Context.make(McpSchema.EnabledWhen, () => {
+        const invocation = McpInvocationContext.currentInvocation();
+        return invocation?.calledTool === name && invocation.gameEngine != null;
+      }),
+      handle: () =>
+        Effect.succeed(
+          new McpSchema.CallToolResult({
+            isError: true,
+            structuredContent: { error: { _tag: "RetiredGameTool", message } },
+            content: [{ type: "text", text: message }],
+          }),
+        ),
+    });
+  }
+});
 
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
   const htmlRender = yield* HtmlRender.HtmlRender;
@@ -1049,45 +988,29 @@ export const layerMcpTransport = McpServer.layerHttp({
   allowSessionTermination: true,
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
-const layerGameBlenderLook = imageToolRegistration(
-  registerGameBlenderLook(),
-  GameHandlers.layerBlenderLook,
-);
-
-const layerGameBlenderRenderSprites = imageToolRegistration(
-  registerGameBlenderRenderSprites(),
-  GameHandlers.layerBlenderRenderSprites,
-);
-
-const layerGameAnimate = imageToolRegistration(registerGameAnimate(), GameHandlers.layerAnimate);
-
-const layerGameUnityScreenshot = imageToolRegistration(
-  registerGameUnityScreenshot(),
-  GameHandlers.layerUnityScreenshot,
-);
-
-const layerGameAssetsSearch = imageToolRegistration(
-  registerGameAssetsSearch(),
-  GameHandlers.layerAssetsSearch,
-);
-
-const layerGameCheck = imageToolRegistration(registerGameCheck(), GameHandlers.layerCheck);
-
-const layerGameModelSheet = imageToolRegistration(
-  registerGameModelSheet(),
-  GameHandlers.layerModelSheet,
-);
-
 const layerGameToolkit = Layer.mergeAll(
-  layerGameBlenderLook,
-  layerGameAnimate,
-  layerGameBlenderRenderSprites,
-  layerGameAssetsSearch,
-  layerGameCheck,
-  layerGameModelSheet,
-  layerGameUnityScreenshot,
+  imageToolRegistration(
+    registerGameImageTool(GameCheckTool, GameCheckToolkit),
+    GameHandlers.layerCheck,
+  ),
+  imageToolRegistration(
+    registerGameImageTool(GamePlayTool, GamePlayToolkit),
+    GameHandlers.layerPlay,
+  ),
+  imageToolRegistration(
+    registerGameImageTool(GameAssetsTool, GameAssetsToolkit),
+    GameHandlers.layerAssets,
+  ),
+  imageToolRegistration(
+    registerGameImageTool(GameBlenderTool, GameBlenderToolkit),
+    GameHandlers.layerBlender,
+  ),
+  imageToolRegistration(
+    registerGameImageTool(GameUnityTool, GameUnityToolkit),
+    GameHandlers.layerUnity,
+  ),
   toolkitRegistration(GameToolkit, GameHandlers.layer),
-  imageToolRegistration(registerGameMore(), GameHandlers.layerMore),
+  Layer.effectDiscard(registerRetiredGameTools),
 );
 
 export const layer = Layer.mergeAll(

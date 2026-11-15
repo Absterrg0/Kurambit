@@ -46,7 +46,7 @@ getting better.
 - Blender and Godot. Kurambit installs pinned, checksum-verified copies for you from the Game panel
   or **Settings → General → Game tools**: Blender 4.5.14 LTS and Godot 4.7.2 (with its export
   templates), into `~/.local/share/kurambit/tools`. You can point it at your own executables instead.
-- `uvx` (or `uv`) on PATH for the live Blender view behind the `game_blender_*` tools. The
+- `uvx` (or `uv`) on PATH for the live Blender view behind the `game_blender` tool. The
   **Install tools** button does not install it; get it from https://docs.astral.sh/uv/.
 
 <a id="run-it"></a>

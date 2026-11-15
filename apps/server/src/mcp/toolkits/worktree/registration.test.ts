@@ -154,7 +154,12 @@ const serveMcp = HttpRouter.serve(
   Layer.build,
 );
 
-const listTools = Effect.fn("test.listTools")(function* (threadId: ThreadId) {
+/** One MCP request as the thread's agent, after an initialize: the reply body's JSON text. */
+const request = Effect.fn("test.request")(function* (
+  threadId: ThreadId,
+  method: string,
+  params: Record<string, unknown>,
+) {
   const credential = yield* McpSessionRegistry.issueActiveMcpCredential({
     threadId,
     providerInstanceId: ProviderInstanceId.make("claudeAgent"),
@@ -176,7 +181,7 @@ const listTools = Effect.fn("test.listTools")(function* (threadId: ThreadId) {
   expect(initResponse.status).toBe(200);
   const sessionId = initResponse.headers["mcp-session-id"];
 
-  const listResponse = yield* httpClient.post("/mcp", {
+  const response = yield* httpClient.post("/mcp", {
     headers: {
       accept: "application/json, text/event-stream",
       authorization: auth,
@@ -184,12 +189,16 @@ const listTools = Effect.fn("test.listTools")(function* (threadId: ThreadId) {
       ...(sessionId ? { "mcp-session-id": sessionId } : {}),
     },
     body: HttpBody.text(
-      `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method, params }),
       "application/json",
     ),
   });
-  const bodyText = yield* listResponse.text;
-  const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
+  const bodyText = yield* response.text;
+  return bodyText.match(/\{.*\}/s)![0];
+});
+
+const listTools = Effect.fn("test.listTools")(function* (threadId: ThreadId) {
+  const payload = yield* decodeToolsListPayload(yield* request(threadId, "tools/list", {}));
   return payload.result.tools;
 });
 
@@ -211,33 +220,39 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("kurambit_worktree_status");
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
-      // A three.js chat: its engine's tools, and the asked-for ones only through game_more.
-      for (const name of ["game_status", "game_check", "game_export", "game_more"]) {
-        expect(toolNames).toContain(name);
-      }
-      for (const name of ["game_import", "game_preview", "game_bot_run", "game_unity_edit"]) {
-        expect(toolNames).not.toContain(name);
-      }
-      // On the code route the Blender tools wait behind game_more; the Blender route lists them.
-      for (const name of ["game_blender_look", "game_blender_code", "game_animate"]) {
-        expect(toolNames).not.toContain(name);
-      }
+      // A three.js chat lists the six game tools from its first turn, whatever its model route.
+      const six = [
+        "game_assets",
+        "game_blender",
+        "game_builds",
+        "game_check",
+        "game_keep_going",
+        "game_play",
+      ];
+      expect(toolNames.filter((name) => name.startsWith("game_")).toSorted()).toEqual(six);
       const blender = yield* listTools(blenderThread);
-      for (const name of ["game_blender_look", "game_blender_code", "game_animate"]) {
-        expect(blender.map((tool) => tool.name)).toContain(name);
-      }
-      expect(blender.map((tool) => tool.name)).not.toContain("game_blender_paint");
-      for (const tool of [
-        tools.find((tool) => tool.name === "game_status"),
-        blender.find((tool) => tool.name === "game_blender_look"),
-      ]) {
-        expect(tool?.annotations?.readOnlyHint).toBe(true);
-      }
-      for (const name of ["game_check", "game_export"]) {
-        expect(tools.find((tool) => tool.name === name)?.annotations?.readOnlyHint).toBe(false);
-      }
+      expect(
+        blender
+          .map((tool) => tool.name)
+          .filter((name) => name.startsWith("game_"))
+          .toSorted(),
+      ).toEqual(six);
       const noGame = (yield* listTools(noGameThread)).map((tool) => tool.name);
       expect(noGame.filter((name) => name.startsWith("game_"))).toEqual([]);
+
+      // A retired game tool is never listed, and a game thread that still calls it by name hears
+      // where its work went; outside a game it is not found.
+      expect(toolNames).not.toContain("game_preview");
+      const retired = yield* request(ThreadId.make("thread-scratch"), "tools/call", {
+        name: "game_preview",
+        arguments: {},
+      });
+      expect(retired).toContain("game_play op preview");
+      const outside = yield* request(noGameThread, "tools/call", {
+        name: "game_preview",
+        arguments: {},
+      });
+      expect(outside).toMatch(/not found/i);
 
       const handoff = tools.find((tool) => tool.name === "kurambit_worktree_handoff");
       expect(handoff?.annotations?.readOnlyHint).toBe(false);

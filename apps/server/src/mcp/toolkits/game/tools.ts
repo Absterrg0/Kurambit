@@ -1,95 +1,30 @@
+// The game tools an agent is handed: six, each one schema whose keys are its ops (gameTools.ts in
+// contracts), plus game_unity in Unity games. A tool earns its place only with what an agent
+// cannot get from its files, shell and code: the running game, measurements, builds and undo,
+// the person's keys, and managed Blender. Each op's answer is encoded by its own schema in the
+// handler, so the tool's success is that answer as it is.
 import { McpSchema, Tool, Toolkit } from "effect/ai";
-import type * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import {
-  GAME_EXPLORE_BOUNDS,
-  GameActionResult,
-  GameBlenderCarveInput,
-  GameBlenderCarveResult,
-  GameAnimateInput,
-  GameAnimateResult,
-  GameBlenderCharacterInput,
-  GameBlenderCharacterResult,
-  GameBlenderPaintInput,
-  GameBlenderPaintResult,
-  GameGenerateInput,
-  GameGenerateResult,
-  GameImageEditInput,
-  GameGenerateWaitInput,
-  GameBlenderCodeInput,
-  GameBlenderCodeResult,
-  GameBlenderExportInput,
-  GameBlenderExportResult,
-  GameBlenderLookInput,
-  GameBlenderLookResult,
-  GameBlenderLookScreenshot,
-  GameBlenderRenderSpritesInput,
-  GameBlenderRenderSpritesResult,
-  GameBlenderSceneInput,
-  GameBlenderSceneResult,
-  GameBlenderAssetsSearchInput,
-  GameBlenderAssetsSearchResult,
-  GameBlenderAssetsImportInput,
-  GameBlenderAssetsImportResult,
-  GameAssetsAddInput,
-  GameAssetsAddResult,
-  GameAssetsSearchInput,
-  GameAssetsSearchResult,
-  GameBuildComparison,
-  GameBuildFacts,
-  GameBuildId,
-  GameBuildRestoreResult,
-  GameBuildsResult,
-  GameCheckResult,
-  GameModelSheetInput,
-  GameModelSheetResult,
-  GameSetCharacterRouteResult,
-  GameCharacterRoute,
-  GameUnityConsoleInput,
-  GameUnityEditInput,
-  GameUnityEvalInput,
-  GameUnityPlayInput,
-  GameUnityRecompileResult,
-  GameUnityScreenshotInput,
-  GameUnityScreenshotResult,
-  GameUnityTextResult,
-  GameUnityToolsResult,
+  GameAssetsToolInput,
+  GameBlenderToolInput,
+  GameBuildsToolInput,
+  GameCheckToolInput,
+  GameKeepGoingToolInput,
   GameOperationFailure,
-  GameStatus,
-  GameExploreStartInput,
-  GameExploreActInput,
-  GameExploreCloseInput,
-  GameExploreStartResult,
-  GameExploreActResult,
-  GameExploreCloseResult,
-  GameKeepGoingInput,
-  GameKeepGoingStatus,
-  GameKeepValuesInput,
-  GameKeepValuesResult,
-  GameReplayResult,
-  GameKeepGoingSteerInput,
-  GameBotRunInput,
-  GameBotRunResult,
-  GameBotViewInput,
-  GameBotViewResult,
-  GameMediaSaveFields,
-  GameSavedDeleteFields,
-  GameSavedListResult,
-  GameWebPackage,
-  GameWindowsPackage,
+  GamePlayToolInput,
+  GameUnityToolInput,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
-import { PROFILES, type GameEngineProfile } from "../../../game/engineProfile.ts";
-import { isGameEngineActive } from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
-import * as GamePlays from "../../../game/GamePlays.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
+import * as GamePlays from "../../../game/GamePlays.ts";
 import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
@@ -97,701 +32,132 @@ import * as GameStage from "../../../game/GameStage.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
 import * as GameUnity from "../../../game/GameUnity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import { ASKABLE_TOOLS, listedFor } from "./placement.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
-/** A game tool's services: the one that owns its operation, and the caller's thread. */
-const on = <I, S>(owner: Context.Key<I, S>) => [
-  owner,
+import { listedFor } from "./placement.ts";
+
+const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
+
+/** Every game op acts as the calling thread's agent. */
+const caller = [
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService.ThreadManagementService,
-];
-const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
-/** Each active engine's own sentence for a tool whose behaviour differs by engine, from its profile. */
-const perEngine = (line: (tools: GameEngineProfile["tools"]) => string) =>
-  PROFILES.filter((profile) => isGameEngineActive(profile.id))
-    .map((profile) => line(profile.tools))
-    .join(" ");
-const GameStatusTool = Tool.make("game_status", {
-  description:
-    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes, playable preview URL and `characters` and `library`: how the person chose to make this game's models (code, blender or generated) and whether the free library's models are on (only they change these), and `artLanes`: per art lane, the provider game_generate would use now, or null when the person has set none up for it. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
-  parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
-  success: GameStatus,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameStatusService.GameStatusService),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_status"));
-const BlenderCodeTool = Tool.make("game_blender_code", {
-  description:
-    'Run Python bpy code in this game\'s live Blender scene (pinned mcp-for-blender execute_blender_code, adapted). The scene stays alive across calls on a private display; the first call starts it. Anything Blender can do, you can do, including rendering PNGs and writing WAVs with numpy and wave. Relative paths resolve from the game root; print every path you write. The live Blender has its own private home, so ~ in a path is not yours: write game-relative or absolute paths. A Python error fails the call with its traceback. The .blend source is saved in the game after each successful call. Use game_blender_look to see the result and game_blender_scene for counts, sizes and positions. You can make any asset from the ground up here: model (sculpt brushes need a viewport, so sculpt with modifiers and code), UV and texture, rig, key named actions, look, export (art-pipeline skill, Made from scratch). An armature you rig and animate yourself enters on its own rig when its armature carries its own clips and is marked arm["kurambit_rig"] = "<rig name>"; every action keying its bones ships with it.',
-  parameters: GameBlenderCodeInput,
-  success: GameBlenderCodeResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_code"));
-export const GameBlenderLookTool = Tool.make("game_blender_look", {
-  description:
-    "See the live Blender scene as one image: from the viewport (default), the scene camera, angles around the target, or frames over the animation; shading solid, material, rendered, wireframe or xray. For counts, sizes and positions use game_blender_scene. mode review shows exactly what game_blender_export would write: the objects go through the style pass and are measured in a separate Blender, and one image shows a turnaround, silhouettes, the model at game distance (gamePx), each walk, run and jump clip, the palette and art/concepts/<name>.png; the text gives the concept, the measurements and what the export would refuse. Fix what is wrong and review again before exporting. A review refuses an image painted in the scene but never saved or packed, and a model whose credits cannot fit one sidecar.",
-  parameters: GameBlenderLookInput,
-  success: GameBlenderLookResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_look"));
-const BlenderSceneTool = Tool.make("game_blender_scene", {
-  description:
-    "Facts about the live Blender scene as text (pinned mcp-for-blender get_scene_info, adapted): object counts, active object, then one line per object with location, size and children. No image; use game_blender_look to see the scene. For anything else about an object, read it with game_blender_code.",
-  parameters: GameBlenderSceneInput,
-  success: GameBlenderSceneResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_scene"));
-const BlenderAssetsSearchTool = Tool.make("game_blender_assets_search", {
-  description:
-    "Search a library of existing assets for the live Blender scene (pinned mcp-for-blender search_assets, adapted). Sources: polyhaven (HDRIs, PBR textures and realistic models, all CC0, no key), sketchfab (user-made models; needs the user's Sketchfab API key in the scene) and polypizza (stylised low-poly, CC0 or CC-BY; needs the user's Poly Pizza API key). Pass the result id to game_blender_assets_import.",
-  parameters: GameBlenderAssetsSearchInput,
-  success: GameBlenderAssetsSearchResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_assets_search"));
-const BlenderAssetsImportTool = Tool.make("game_blender_assets_import", {
-  description:
-    "Bring an asset into the live Blender scene, marked with its source and licence, and save the .blend; review and export it like anything you build. source library takes id (a game_assets_search entry) and path (its .glb, .gltf or .fbx): the way an FBX-only pack, or any library model to change in Blender, reaches the game as a reviewed GLB; a rigged model that brings clips of its own (an animal, a creature) enters on its own rig with them. source generated takes path: a model or creature game_generate delivered under art/generated/ (a creature keeps its own rig, clips and size; a generated humanoid goes through game_blender_character instead). The other sources import a game_blender_assets_search result by id; Poly Haven textures need applyTo object names or the material is unused. Models arrive at their own scale and facing: check the reported size, stand them on the ground facing -Y, and look at them. A generated creature is refused unless the person's character route (characters in game_status) is generated.",
-  parameters: GameBlenderAssetsImportInput,
-  success: GameBlenderAssetsImportResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_assets_import"));
-const GenerateTool = Tool.make("game_generate", {
-  description:
-    "Start making art with a provider the person set up in Settings (their own keys, or Codex on their ChatGPT plan), by lane: image (key art, concepts, character sheets, sprites, UI art), texture (options.seamless; options.edit changes one from words), character (a humanoid, rigged on the standard skeleton so it plays the clip library), creature (any other body: options.body, options.clips), model (a prop, vehicle or building; options.parts for moving parts), motion (a clip every humanoid plays; look in the clip library first: game_assets_search pack quaternius-universal-animation-library), sfx, music, voice (options.seconds, options.loop); options.lowPoly with options.polycount asks for game topology. To change an image the game has, use game_image_edit. prompt says what the thing itself is; the look comes from references: an image or texture takes the key art, while a character, creature or model takes only the picked picture of that one subject, never the key art, because a 3D generator models everything its picture shows. directions (2-4) makes one candidate per look for the person to pick in the chat (Keep going takes the first); style grounds a direction in a library pack id or a reference image. options.mesh rigs an unrigged GLB the game has instead of making one. It answers at once with the generation's id: pick it up with game_generate_wait, and never start the same one again. A character or creature made while the person directs stops after its paid model for their \"Rig this\" or Cancel. character and creature are refused unless the person's character route (characters in game_status) is generated. A refusal names the key, limit or route missing: say so in your reply rather than making it another way. Say in your reply what the generations cost. What follows each lane is in the art-pipeline skill (Generated art).",
-  parameters: GameGenerateInput,
-  success: GameGenerateResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameArt.GameArt),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_generate"));
-const ImageEditTool = Tool.make("game_image_edit", {
-  description:
-    'Change an image the game already has from words, keeping everything else in it; with transparent, cut its subject out onto a transparent background. Use it whenever the person asks to change an image ("Change <file>: …", "make the cat orange"), never game_generate with the image as a reference, which makes a new image. The person then picks "Changed" or "As it was" in the chat: the original file is never touched, and Keep going takes "Changed". It answers at once with the generation\'s id: pick it up with game_generate_wait. After "Changed", point the game at the new file where it used the original, and if the original is STYLE.json\'s anchor, read the palette again from the new file. It costs one image, against the person\'s daily limit.',
-  parameters: GameImageEditInput,
-  success: GameGenerateResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameArt.GameArt),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_image_edit"));
-const GenerateWaitTool = Tool.make("game_generate_wait", {
-  description:
-    "Wait for a generation from game_generate: it returns when the files are in the game (done), when its candidates wait for the person's pick (choosing: tell the person to pick one in the chat, and end your turn unless other work remains; their pick arrives as their next message; a direction the provider refused is named with its reason), when it failed or was cancelled, or after seconds (default 120, up to 540) with it still making. Never start the same generation again while one is making: each start is paid.",
-  parameters: GameGenerateWaitInput,
-  success: GameGenerateResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameArt.GameArt),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_generate_wait"));
-const BlenderCharacterTool = Tool.make("game_blender_character", {
-  description:
-    "Build a rigged, animated character in the live Blender scene on the standard skeleton, correct by construction: for a humanoid that plays the library's clips, use this instead of rigging or retargeting yourself (a model that plays only clips you key on your own rig is made with game_blender_code: art-pipeline skill, Made from scratch). body is a library body ({library: {pack, file}}, as game_assets_search lists them), an MPFB2 human ({mpfb: {age, gender, weight, …}}; needs MPFB2, which the person installs in Settings → Game tools) or a rigged humanoid in this game ({game: path}: an earlier export or a character game_generate delivered, whatever its bones are named). Every library clip plays on it unchanged, and the body's own clips and skinned extra bones (hair, a robe) are kept. clips are names from the library's animation packs on the standard skeleton (pack:Clip picks one) or a motion GLB's game path (the standard set when omitted); chains are extra bones the game springs (a tail, ears). fit (arms, calm) changes clips only when you ask; replace: true rebuilds the body and armature and keeps your parts. An MPFB2 body needs the person's character route (characters in game_status) to be blender, a generated body that it is generated. Then model the rest with game_blender_code, then game_blender_look mode review, then game_blender_export (art-pipeline skill, Made characters).",
-  parameters: GameBlenderCharacterInput,
-  success: GameBlenderCharacterResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_character"));
-const BlenderPaintTool = Tool.make("game_blender_paint", {
-  description:
-    "Paint models in the live Blender scene from their turnaround sheet, so a model with the right silhouette and big forms looks like the picture. sheet is a game path: a character sheet game_generate made (front, side and back on a plain background, nothing overlapping) or the person's own picture; the texture is credited to it. objects are the meshes, or a character's armature for all its meshes; leave out what keeps its own material. The sheet's views are measured (views overrides the reading) and fitted to the model's silhouette; the overlap is reported with an image of the outlines, and under 50% it is refused before anything is baked: pose the model as the sheet shows it (pose: {arms, legs} sets a standard-skeleton character's A-pose for the projection only). One side view paints both sides; noMirror lists sheet pixel boxes of one-sided details. Writes the textures under art/blender/textures/<name>/. Then game_blender_look mode review, then game_blender_export (art-pipeline skill, Painted from a sheet).",
-  parameters: GameBlenderPaintInput,
-  success: GameBlenderPaintResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_paint"));
-const BlenderCarveTool = Tool.make("game_blender_carve", {
-  description:
-    "Carve an organic hard prop (a statue, a carving, a rock, a tree trunk) into the live Blender scene from its three-view sheet (front, side and back on a plain background, like a character sheet): a visual hull of the views with rounded sections, a relief sculpted from the painting's light and dark, decimated to triangles (default STYLE.json's budget.prop), then painted from the sheet with a normal map baked from the sculpt. It lands as name, in a collection of that name, height metres tall, standing at the origin facing -Y, credited to the sheet's source. box keeps sections below that height square (a plinth); relief scales the carved depth (default 1). Not for buildings, vehicles or anything with straight edges and holes: model those. replace: true carves a name again, where the old one stood. Then game_blender_look mode review, then game_blender_export.",
-  parameters: GameBlenderCarveInput,
-  success: GameBlenderCarveResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_carve"));
-const BlenderExportTool = Tool.make("game_blender_export", {
-  description:
-    "Export the objects you last reviewed (game_blender_look mode review), exactly as reviewed, as a GLB under the game's engine directory with its sidecar <stem>.asset.json (skeleton, clips with ground speed, springs, height, measurements and where every part came from), and record it in ASSETS.md; file defaults to <engine dir>/assets/blender/<name>.glb. Refused when these objects changed since their review, or when the review's measurements show a fault (an armature off STYLE.json's rig and not marked on its own, one marked on its own rig without clips of its own, rest frames off the standard skeleton, triangles or texture size over the budget, a character with no idle clip) or break the person's character route. A model on its own rig ships every clip keyed on it, and its sidecar names the rig as its skeleton. Where the game loads the GLB itself it ships compressed: never compress it again; simplify caps its triangles (a character drawn small rarely needs over 20000). The result says how the game loads it.",
-  parameters: GameBlenderExportInput,
-  success: GameBlenderExportResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_export"));
-export const GameBlenderLookToolkit = Toolkit.make(GameBlenderLookTool);
-export const GameAnimateTool = Tool.make("game_animate", {
-  description:
-    'Author a move no library clip has (a combo, a dodge roll, a boss\'s slam) on a character game_blender_character made, when no clip in the library (game_assets_search pack quaternius-universal-animation-library) fits. You write poses on beats as JSON; the kit adds the craft (easing, anticipation, arcs, foot locking, root motion, overlap, a held prop\'s swing) and keys the clip as <character>|<clip>. spec: {name?, start?: a named pose, poses?: {name: pose}, loop?: true, craft?: {ease, antic, over, lift, clearance, overlap: {chest: [hz, damping, clamp°], head: [...], hand: [hz, damping]}, arcs, pivot, lock_feet, hip_drop}, beats: [{at: frame (30 fps), pose?: name, ease?: linear|in|out|inout|in2|out2, antic?, over?, pivot?: foot_l|foot_r, lift?, note?, ...pose keys}]}. Leave ease out: the default curve carries the motion on through a beat and settles only where a value holds or turns back; a named ease breaks the motion at that beat (in arrives at full speed: a hit). loop: true makes a cycle (a walk, a run): write the last beat as the first one cycle on, moved forward by one cycle\'s travel; it is keyed in place and played with moveSpeed. Body space: x the character\'s right, y forward, z up, metres; yaw + turns left, degrees. Pose keys, each carried over from the beat before when left out: root [x, y, yaw] (where the move is on the ground), hips {at: [x, y, z], turn: [yaw, pitch, roll]}, chest [yaw, pitch, roll], head [yaw, pitch, roll], look [x, y, z] or null, prop {grip: [x, y, z], tip: [x, y, z] (the direction it points), edge?, space?: root|chest, way?: cw|ccw} for a prop modelled in a hand (parented to hand_r or skinned rigidly to it), hand_l / hand_r "grip" (on the prop\'s handle) or {at, space?: root|chest, turn?}, foot_l / foot_r {at: [x, y, 0], yaw, heel (degrees up on the ball), space?: ground|root|hips, orbit?}, elbow_l / elbow_r / knee_l / knee_r (the direction each points). Named poses: stand (this body\'s own), spec.poses, and any clip the character has (its first frame): start the move from the idle the game plays and end it there ("start": "Sword_Idle", the last beat {pose: "Sword_Idle", root: where it ended}), so the crossfades into and out of it slide nothing. Every call returns pictures and numbers (foot slide, balance, joint limits, limbs through the body, strike frames, pops and spins, which the game shows worse than the pictures) beside a library clip\'s on this body (bar), and warnings: a warning means the spec asked for what this body cannot do. Change the spec and call again with the same clip until neither improves. Stances and strike frames go into the sidecar at export. Then game_blender_look mode review and game_blender_export.',
-  parameters: GameAnimateInput,
-  success: GameAnimateResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_animate"));
-export const GameAnimateToolkit = Toolkit.make(GameAnimateTool);
-export const GameBlenderRenderSpritesTool = Tool.make("game_blender_render_sprites", {
-  description:
-    "Render 2D sprite strips from the live Blender scene, framed by construction: use this instead of writing camera, light and render code. A fixed orthographic camera per view fits the objects across every frame, so the scale and the feet's pixel row stay the same in every frame and view; a clip with root motion is refused (render an in-place one). Pass objects, an animation (action with frameCount, frameStart/frameEnd, or frames; nothing renders the current pose), views (front, back, left, right, top, isometric or {name, azimuth, elevation}), size, anchor, margin and lighting, and for a character's later strips the pixelsPerUnit its first strip reports. pixelArt quantizes every frame to one palette (palette, colors) with an optional outline. A STYLE.json pixel look fills pixelArt, size and views when you leave them out. Writes <output>_N.png under the engine's assets, credited in ASSETS.md, and returns the anchor and a contact sheet to look at (art-pipeline skill, 2D sprites from 3D).",
-  parameters: GameBlenderRenderSpritesInput,
-  success: GameBlenderRenderSpritesResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBlender.GameBlender),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_blender_render_sprites"));
-export const GameBlenderRenderSpritesToolkit = Toolkit.make(GameBlenderRenderSpritesTool);
-export const GameAssetsSearchTool = Tool.make("game_assets_search", {
-  description:
-    "Search Kurambit's pinned open asset library: every Kenney 3D kit, Quaternius' packs (animated animals, monsters and people, each on its own skeleton with its own clips, and megakits), KayKit, Poly Haven (photo-real models, materials, HDR skies), ambientCG (materials, skies, decals), sound and 2D packs, and Poly Pizza's low-poly models live when the person set their Poly Pizza key. Licences are CC0 or, where an entry says so, CC BY with its credit line, which game_assets_add credits for you. With words, it ranks packs and single assets together (filter by kind, family, animated or licence cc0) and attaches a contact sheet of the sources' own pictures numbered like the list; with no words and no kind, it lists the whole library by style family (a STYLE.json's packs come first). Pass pack to look inside one entry: matching files come with a contact sheet, or the pack's own preview pictures when you pass no query and no kind. Page through long lists with offset. Only formats this game's engine loads are listed. Look at the sheet before adding. Add files with game_assets_add by the exact paths listed.",
-  parameters: GameAssetsSearchInput,
-  success: GameAssetsSearchResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameAssetLibrary.GameAssetLibrary),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_assets_search"));
-export const GameAssetsSearchToolkit = Toolkit.make(GameAssetsSearchTool);
-const AssetsAddTool = Tool.make("game_assets_add", {
-  description:
-    "Copy files or whole folders from a library pack (paths as game_assets_search lists them) into this game's assets under library/<pack>/, with names made path-safe: use the paths the result reports. Models bring the textures they load; a folder add keeps one format per model, the one search shows. Never overwrites a file that differs; files already there are left alone. Appends each file's entry, source page, licence and pin to ASSETS.md, gives the game's credits file (the credits screen) one line per entry with the source's own credit wording when its licence asks for credit, and measures each added sound's loudness against STYLE.json's targets. An entry is fetched once into a shared, size-capped cache and checked against its pin. Optional lock (a style family and the view) records that look in STYLE.json (its rig, pixel palette and tile, its packs), which other art tools fill defaults from; nothing is refused for being outside it. Where the engine has an import step, run game_import after.",
-  parameters: GameAssetsAddInput,
-  success: GameAssetsAddResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameAssetLibrary.GameAssetLibrary),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_assets_add"));
-const UnityToolsTool = Tool.make("game_unity_tools", {
-  description:
-    "List the editing tools of this Unity game's live editor (Unity's official `unity mcp`): scene, GameObject, component, prefab, material, settings and lighting tools, each with its input schema. Call one with game_unity_edit. The first game_unity_* call opens the editor on a private display, which can take a few minutes on a fresh project.",
-  success: GameUnityToolsResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameUnity.GameUnity),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_tools"));
-const UnityEditTool = Tool.make("game_unity_edit", {
-  description:
-    "Call one editing tool from game_unity_tools in this Unity game's live editor, such as gameobject_create, gameobject_set_transform, component_add, component_set_field, script_attach or scene_get_hierarchy, with its arguments. Open scenes are saved after every call. Never hand-edit .unity, .prefab or .asset YAML; edit through this.",
-  parameters: GameUnityEditInput,
-  success: GameUnityTextResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameUnity.GameUnity),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_edit"));
-const UnityEvalTool = Tool.make("game_unity_eval", {
-  description:
-    "Evaluate C# in this Unity game's live editor on its main thread (Pipeline script eval); `return <value>;` sends a value back. UnityEngine and UnityEditor are available, and in play mode the running game is reachable. Use it for anything the editing tools do not cover; save scenes you change with UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes().",
-  parameters: GameUnityEvalInput,
-  success: GameUnityTextResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameUnity.GameUnity),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_eval"));
-const UnityRecompileTool = Tool.make("game_unity_recompile", {
-  description:
-    "Import changed files and recompile this Unity game's scripts in the live editor. Returns every C# compiler error with file and line. Run it after writing C# and fix errors before anything else.",
-  success: GameUnityRecompileResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameEngine.GameEngine),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_recompile"));
-const UnityPlayTool = Tool.make("game_unity_play", {
-  description:
-    "Enter (start) or leave (stop) play mode in this Unity game's live editor, for a quick look with game_unity_screenshot, game_unity_console or game_unity_eval. Real playtests with input use game_explore_*.",
-  parameters: GameUnityPlayInput,
-  success: GameUnityTextResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameUnity.GameUnity),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_play"));
-const UnityConsoleTool = Tool.make("game_unity_console", {
-  description:
-    "Read recent console entries of this Unity game's live editor, with stack traces. level is a minimum severity (log, warn, error).",
-  parameters: GameUnityConsoleInput,
-  success: GameUnityTextResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameUnity.GameUnity),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_console"));
-export const GameUnityScreenshotTool = Tool.make("game_unity_screenshot", {
-  description:
-    "See this Unity game's Game view through its main camera as one image (Pipeline capture game_view, camera source). Works in and out of play mode; Screen Space Overlay UI only shows in game_explore_* pictures.",
-  parameters: GameUnityScreenshotInput,
-  success: GameUnityScreenshotResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameUnity.GameUnity),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity_screenshot"));
-export const GameUnityScreenshotToolkit = Toolkit.make(GameUnityScreenshotTool);
-const ImportTool = Tool.make("game_import", {
-  description: `Import this thread's game in its engine. ${perEngine((t) => t.import)} Call after every asset transfer or engine change. Returns success=false on parse errors, missing resources, compile or import errors, with the output and log path; a tool Kurambit runs failing on its own is an error with reason tool-failed instead, which says nothing about the game. Fix failures before export.`,
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameEngine.GameEngine),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_import"));
-/** game_check's answer, with its pictures attached as images (the views' PNGs, title then play). */
-const GameCheckToolResult = Schema.Struct({
-  ...GameCheckResult.fields,
-  screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
-  /** How to judge the frame (beside the reference, when the game has one) before ending. */
-  review: Schema.optionalKey(Schema.String),
-});
+] as const;
+/** Each op's answer is encoded by its own schema in the handler; the tool passes it on as it is. */
+const answers = { success: Schema.Unknown, failure, failureMode: "return" } as const;
+
+const ONE_OP = 'Pass one op as the only key, with its input: {"<op>": {...}}.';
+
 export const GameCheckTool = Tool.make("game_check", {
-  description: `Look at this thread's game: a quick look by default, a full check with \`final: true\`. ${perEngine((t) => t.check)} A look opens the gameplay entry, plays a moment of random input and reports what the game did as errors and warnings with file:line, \`performance\` (the game must hold 60 fps on this machine's GPU; a warning names what to cut), and \`views\`, attached as images: play's frame, and when the game has a reference picture (STYLE.json's anchor or art/reference.png), play's frame above it at the same size, so you match its camera and composition like for like. Look at the frame as the player will and say what you saw. Once the work is done, before you end the turn, run it with \`final: true\`: it also boots the entry the player opens and plays \`scene\`, the scene report (a line with a frame for what may look wrong: the player hidden, off screen or too small, an empty view, bodies buried or inside each other, something fallen out of the world, the camera inside a wall, sliding in idle; fix what is not meant to be), and \`qa\`, the QA play (every control in ACTIONS, Retry, the HUD at 16:9 and 4:3), whose \`qa.problems\` are bugs to fix before you end the turn. Files a clean final check already played answer with that check. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory).`,
-  parameters: Schema.Struct({
-    final: Schema.optionalKey(Schema.Boolean),
-    critique: Schema.optionalKey(
-      Schema.Struct({
-        major: Schema.Boolean,
-        biggest: Schema.String.check(Schema.isMaxLength(400)),
-      }).annotate({
-        description:
-          "On a final check, when the person asked the game to match its reference picture: the biggest difference your critique of the frame against it finds, in one line, and whether it is still major. While it is, Keep going takes its next step from it.",
-      }),
-    ),
-  }),
-  success: GameCheckToolResult,
-  failure,
-  failureMode: "return",
-  dependencies: [...on(GameEngine.GameEngine), GameProjectService.GameProjectService],
+  description: `Facts on this game, measured in its running build. ${ONE_OP} With no op, look. look: a quick check: a moment of random input, errors and warnings with file:line, frame rate, and play's frame as an image, beside the reference picture when the game has one. final: the full check to run before you end a turn: also the entry the player opens, the scene report (what may look wrong, with frames) and the QA play (every control in ACTIONS, Retry, the HUD at 16:9 and 4:3), whose problems are bugs to fix. facts: what the harness measured on a build (the newest when omitted), as the Builds rail shows it; skilled also plays the game's play bot. status: the manifest, engine tool readiness, managed processes, the preview URL, how the person chose to make models and which art providers they set up.`,
+  parameters: GameCheckToolInput,
+  ...answers,
+  dependencies: [
+    GameEngine.GameEngine,
+    GameProjectService.GameProjectService,
+    GameBuilds.GameBuilds,
+    GameStatusService.GameStatusService,
+    ...caller,
+  ],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_check"));
-export const GameCheckToolkit = Toolkit.make(GameCheckTool);
-const GameModelSheetToolResult = Schema.Struct({
-  ...GameModelSheetResult.fields,
-  screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
-});
-export const GameModelSheetTool = Tool.make("game_model_sheet", {
-  description:
-    "Look at a model alone: each named thing (a ctx.thing name or an ASSETS key; up to 4, or omit for the first few characters, creatures and props) drawn by the running game in six views (side profile, low front three-quarter, front, back, plan from above, three-quarter from above), beside a grey 1.8 m figure on a metre grid (5 m past 20 m), in the pose it holds a moment into play, with its size in metres, triangles and draw calls. The sheets are attached as images. With a reference picture (`reference`, else STYLE.json's anchor, else art/reference.png: save a picture the person attaches there), each sheet draws the side profile and the picture's angle (`view`), larger, and the picture follows: say what still differs and fix that. Use it to see a model you built or changed from every side before the game depends on it.",
-  parameters: GameModelSheetInput,
-  success: GameModelSheetToolResult,
-  failure,
-  failureMode: "return",
-  dependencies: [...on(GameEngine.GameEngine), GameProjectService.GameProjectService],
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_model_sheet"));
-export const GameModelSheetToolkit = Toolkit.make(GameModelSheetTool);
-const ExportTool = Tool.make("game_export", {
-  description: `Import and export this thread's game for one target; a target its engine does not make is refused. ${perEngine((t) => t.export)} A release is staged and checked, then replaces the previous one only when the sources did not change while it was made, so a failed export leaves the last good build in place. Web exports to a content-addressed build. Returns the published artifact's path and the command output, or why it failed.`,
-  parameters: Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) }),
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameExport.GameExport),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_export"));
-const PackageTool = Tool.make("game_package", {
-  description:
-    "Package a release this game already has as a downloadable ZIP, for the target the person asks for. web: the exact Web build Play serves now, every served file at its relative path with index.html at the root, for an ordinary static host (serve it over HTTP: WebAssembly does not load from file://). windows: the exported builds/windows/game.exe (and game.pck for a non-embedded preset) at the root; a Windows release that is a whole folder is refused: ship the folder. It never exports or rebuilds: anything missing, changed or unchecked returns the exact reason and leaves earlier packages untouched. Returns the archive path, bytes, SHA-256 and per-file hashes; the person downloads it from Export… in the Stage's More menu.",
-  parameters: Schema.Struct({ target: Schema.Literals(["web", "windows"]) }),
-  success: Schema.Union([GameWebPackage, GameWindowsPackage]),
-  failure,
-  failureMode: "return",
-  dependencies: on(GameExport.GameExport),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_package"));
-const SavedTool = Tool.make("game_saved", {
-  description:
-    "The videos and images kept in this game's saved/ folder (ignored by git), newest first with absolute paths. save keeps one Kurambit generated, when the person wants it: source is the game-relative or absolute path a game tool returned inside builds/logs (a bot run's run.mp4 or frames, explore screenshots, a sprite render), which the storage cleanup would delete after a while; label gives the words after the date (\"level 2 bot run\"); a taken name gets a number. delete removes one file directly in saved/ by the name the list gives, only when the person asks. Returns the list after.",
-  parameters: Schema.Struct({
-    save: Schema.optionalKey(Schema.Struct(GameMediaSaveFields)),
-    delete: Schema.optionalKey(GameSavedDeleteFields.name),
-  }),
-  success: GameSavedListResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameSavedMediaService.GameSavedMediaService),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_saved"));
-const PreviewTool = Tool.make("game_preview", {
-  description:
-    "A playable build of this thread's current sources. For a three.js game the folder is served live: it returns the loopback URL of web/ itself, which reloads on the person's Stage as you save, with no export (game_export Web makes a release without changing what Play shows). For an engine with a Web build (Godot): when the selected build is missing, damaged or exported from other sources than the folder holds now, it exports Web again (the same export the Stage's Rebuild runs), then serves it from a managed loopback static server and returns the playable URL; a build of the current sources is served without another export. This is the actual game, not a screenshot. For an engine whose games play as a built player (Unity), it prepares that player of the current sources and returns its path; game_explore_start and game_bot_run play it. game_stop closes the server.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameStage.GameStage),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_preview"));
-const StopTool = Tool.make("game_stop", {
-  description:
-    "Stop only this game's processes spawned by Kurambit, including running operations, live editors, bot runs and native play, and close its Web preview server. On a three.js game this also stops the live game on the person's Stage: it stays stopped, for every client, until Play opens it again. Returns after managed processes exit and says which did not stop (success false). Does not kill external editors or other games.",
-  success: GameActionResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameStage.GameStage),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_stop"));
-/**
- * Bounded persistent exploration: open one paused session on the current game sources, poke it with short act/observe cycles across turns, then close it
- */
-const ExploreStartTool = Tool.make("game_explore_start", {
-  description:
-    `Open a bounded exploration session on this thread's game. ${perEngine((t) => t.explore)}` +
-    " Probes, visible text, interactive controls, errors and a picture (native games need a window for it: Xvfb on Linux, a window kept off-screen on Windows and macOS; web games always have one). Nothing is exported. Pass target native or web to pick the runner, or omit it for the game's own engine. Returns a session id for game_explore_act. Only one live session exists per game: its owning thread must close it before that game starts another. Sessions start with no saved data; saves keep reuses one save location across kept sessions, to check that what the game saves (best scores, settings, unlocks) survives a relaunch.",
-  parameters: GameExploreStartInput,
-  success: GameExploreStartResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameExplore.GameExplore),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_explore_start"));
-const ExploreActTool = Tool.make("game_explore_act", {
-  description: `Run one input batch (1–${GAME_EXPLORE_BOUNDS.maxStepsPerCall} steps, at most ${GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall / 1000} s nominal) in an exploration session and observe what happened: the current probe, one persisted screenshot path (null with a reason when the session has no display) and bounded console text, plus visible screenText, interactive ui controls, script/engine errors, per-ui-step receipt and per-inspect-step read-only values; use ui {id, action} for real mouse input at a listed control and inspect {path} for read-only reflection. A session allows ${GAME_EXPLORE_BOUNDS.maxCalls} calls, ${GAME_EXPLORE_BOUNDS.maxTotalSteps} steps and ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, so the calls spend that input only at about ${Math.round(GAME_EXPLORE_BOUNDS.maxTotalNominalMs / GAME_EXPLORE_BOUNDS.maxCalls / 1000)} s per call: after one short hold shows how a control responds, send 2–3 held steps per call, at most ${GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall / 1000} s of input per call in total. Each result says the input used and the seconds per remaining call that spend the rest. Native games stay paused between calls; three.js games keep running in real time. Descriptive only, never a verdict.`,
-  parameters: GameExploreActInput,
-  success: GameExploreActResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameExplore.GameExplore),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_explore_act"));
-const ExploreCloseTool = Tool.make("game_explore_close", {
-  description:
-    "Close an exploration session, releasing its runner and profile. Idle and wall-clock expiry close the same way with the reason saved.",
-  parameters: GameExploreCloseInput,
-  success: GameExploreCloseResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameExplore.GameExplore),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_explore_close"));
-const BotRunTool = Tool.make("game_bot_run", {
-  description:
-    "Play this thread's game in real time with a model-written bot file under .studio/bot/ (goal, observe, options with facts and executors, status, optional policy). Godot games run continuously at normal speed in a window the user never sees, Unity games as a player of the current sources in one; three.js games run in headless Chromium. Holds and releases go out at 10 Hz, one continuous video per run is recorded from the game's own frames, and in-game detectors report findings with time and position. The bot's own policy picks among its options. mode play (default) tries to finish with a win bot; mode explore wanders with an exploration bot (broad options, no win goal) and may make several sequential runs when runs is set (1-10, default 1), writing a facts-only player report to .studio/player-report.md. The service records every run itself, with a readable copy in .studio/bot-results.jsonl. The bot may write state only through an explicit set-state call; a run that did is marked and is not pure play. Runs start with no saved data; saves keep carries the game's saved data across kept runs and exploration sessions, to check it survives a relaunch. Pass the bot file, seconds budget, mode and runs.",
-  parameters: GameBotRunInput,
-  success: GameBotRunResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBot.GameBot),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_bot_run"));
-const BotViewTool = Tool.make("game_bot_view", {
-  description:
-    "Take a quick look at a finished bot run: goal status, measured tick rate and game/wall ratio, decisions, findings and server-owned paths to the trace, video and frames. Pass the runId from game_bot_run.",
-  parameters: GameBotViewInput,
-  success: GameBotViewResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBot.GameBot),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_bot_view"));
-const commandId = Schema.optionalKey(
-  Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)).annotate({
-    description:
-      "Any id of yours for this request. Pass the same one when you retry a call that may have gone through, so it applies once.",
-  }),
-);
-/** The studio toolkit: status, export and play-level tools for every thread. */
-const buildDependencies = [
-  GameBuilds.GameBuilds,
-  McpInvocationContext.McpInvocationContext,
-  ThreadManagementService.ThreadManagementService,
-];
-const BuildsTool = Tool.make("game_builds", {
-  description:
-    "This game's builds, newest first: every turn of any chat that changed the engine project, art, ASSETS.md or the play bot (.studio/bot), each with when, which turn or round, what changed, its base and its facts once measured (facts.chips, and how many were not measured). base is the build it was made from, so restoring base undoes that build (null when unknown); current is the build the folder was last made from; restore is the latest restore, whose undo build undoes it. Pass before with a next cursor for older builds, or compare with two build ids to diff their facts: each delta reads up, down, same, changed or not-comparable with why. Facts are read as measured; game_facts measures. Read-only.",
-  parameters: Schema.Struct({
-    compare: Schema.optionalKey(Schema.Tuple([GameBuildId, GameBuildId])),
-    before: Schema.optionalKey(Schema.String),
-    limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
-  }),
-  success: Schema.Union([GameBuildsResult, GameBuildComparison]),
-  failure,
-  failureMode: "return",
-  dependencies: buildDependencies,
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_builds"));
-const FactsTool = Tool.make("game_facts", {
-  description:
-    "What the harness measured on one build of this game (the newest when build is omitted), as the Builds rail shows it: whether it boots, errors while playing, the QA play (controls, Retry, HUD), performance, and the play bot's run when one was asked for. Each is measured, or not measured with why. This call measures what is missing, waits up to 30 s, and otherwise returns with the rest pending. Facts are of builds (a turn's end), not of uncommitted work. skilled: true also plays the game's play bot, only when the person asks you to prove the game can be won: first write a policy bot at .studio/bot/play.mjs with the bot kit (.studio/bot/kit/KIT-GUIDE.md) that steers by what the game reports, and get one run to a win with game_bot_run.",
-  parameters: Schema.Struct({
-    build: Schema.optionalKey(GameBuildId),
-    skilled: Schema.optionalKey(Schema.Boolean),
-  }),
-  success: GameBuildFacts,
-  failure,
-  failureMode: "return",
-  dependencies: buildDependencies,
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_facts"));
-const BuildRestoreTool = Tool.make("game_build_restore", {
-  description:
-    "Put one of this game's builds (an id from game_builds) back in the game folder when the creator asks: its engine project, art, ASSETS.md and play bot (.studio/bot) return, and what the folder held before is kept first as a build of its own, so restoring that one undoes it (game_builds `restore.undo`). To undo a turn, restore its build's `base`; to go back to an older build, restore that build. The result says whether the folder has moved (`done`).",
-  parameters: Schema.Struct({ build: GameBuildId, commandId }),
-  success: GameBuildRestoreResult,
-  failure,
-  failureMode: "return",
-  dependencies: buildDependencies,
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_build_restore"));
-const TuneTool = Tool.make("game_tune", {
-  description:
-    "Keep live values as a build, as the Stage does with the values the person tunes: writes each thing's values (by the id its ctx.tune uses) into web/tune.json, which the game reads at boot, and keeps the game folder as a build whose `base` (the folder just before) game_build_restore restores to undo it. Pass min and max with a number to have it checked against the range; values merge with the file's others. Use it when the person asks to keep values; to change what a value means or its defaults, edit the code. three.js games only.",
-  parameters: Schema.Struct({ things: GameKeepValuesInput.fields.things, commandId }),
-  success: GameKeepValuesResult,
-  failure,
-  failureMode: "return",
-  dependencies: buildDependencies,
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_tune"));
 
-const ReplayTool = Tool.make("game_replay", {
-  description:
-    "Plays the person's latest run on the Stage again on the game folder as it is now, from the run's seed and the input of each step, and says how it ended then (kept), how it ends now (now; null if it had not ended by then), and the first second it plays differently (differs: what moved or which value changed; null if never). A run is kept when the person plays it to its end on the Stage. Use it when the person asks whether their run still plays the same after a change. Fails when no run is kept yet. three.js games only.",
-  success: GameReplayResult,
-  failure,
-  failureMode: "return",
+export const GamePlayTool = Tool.make("game_play", {
+  description: `Drive this game as it runs. ${ONE_OP} preview: the playable URL of the current sources (a three.js game's folder is served live on the person's Stage). start, act, close: a bounded session that sends input batches and returns each moment's picture path, visible text, controls and errors. bot: plays the game in real time with a bot file under .studio/bot/, recording a video and findings; bot_view: a finished run. replay: the person's last run on the Stage played again on the folder as it is now, and the first second it plays differently. model_sheet: named models drawn by the running game from six sides beside a 1.8 m figure, with size and cost, as images.`,
+  parameters: GamePlayToolInput,
+  ...answers,
   dependencies: [
+    GameStage.GameStage,
+    GameExplore.GameExplore,
+    GameBot.GameBot,
     GamePlays.GamePlays,
-    McpInvocationContext.McpInvocationContext,
-    ThreadManagementService.ThreadManagementService,
+    GameEngine.GameEngine,
+    GameProjectService.GameProjectService,
+    ...caller,
   ],
 })
   .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_replay"));
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_play"));
 
-/** Keep going: the same service the composer control and the banner reach. */
-const KeepGoingTool = Tool.make("game_keep_going", {
-  description:
-    "Keep going on this game, only when the person asks about it. With nothing else it returns what Keep going is doing: off, guided or autopilot, its phase, its last 10 steps with each verdict and reason, the notes and set-aside steps waiting, when its budget ends and why it last stopped. mode turns it off (a step's turn in flight ends and still becomes a build), guided (proposes each step, starting it after a minute unless the person changes it) or autopilot (takes each step itself); choosing a mode while it is paused resumes it; budgetMinutes (null for no limit; a new run's is 60) applies when it starts or resumes. steer gives its next step the person's words, one request per call, when they ask for that from another chat or after the step in flight. It runs only on games Kurambit plays after every turn (three.js); elsewhere, or while it is on in another chat of the game, it is refused with why. A message that starts \"Keep going · step N\" is a step: do that one change as it asks.",
-  parameters: Schema.Struct({
-    mode: Schema.optionalKey(GameKeepGoingInput.fields.mode),
-    budgetMinutes: GameKeepGoingInput.fields.budgetMinutes,
-    steer: Schema.optionalKey(GameKeepGoingSteerInput.fields.text),
-    commandId,
-  }),
-  success: GameKeepGoingStatus,
-  failure,
-  failureMode: "return",
+export const GameAssetsTool = Tool.make("game_assets", {
+  description: `Art and sound from outside the game's code. ${ONE_OP} search: Kurambit's pinned open library (CC0, or CC BY with its credit), with a contact sheet image; add: copies its files into the game, credited in ASSETS.md. generate: starts art with the providers the person set up (lanes image, texture, character, creature, model, motion, sfx, music, voice) and answers with an id at once; each start is paid, so never start one twice. wait: waits for a generation, or says its candidates wait for the person's pick in the chat. image_edit: changes an image the game has from words, for the person to pick changed or as it was. import: the engine's import step. blender_search, blender_import: Poly Haven, Sketchfab or Poly Pizza assets, or a library or generated model, into the live Blender scene. A refusal names the key, limit or route missing: say so to the person.`,
+  parameters: GameAssetsToolInput,
+  ...answers,
   dependencies: [
+    GameAssetLibrary.GameAssetLibrary,
+    GameArt.GameArt,
+    GameEngine.GameEngine,
+    GameBlender.GameBlender,
     GameRunControl.GameRunControl,
-    McpInvocationContext.McpInvocationContext,
-    ThreadManagementService.ThreadManagementService,
+    GameProjectService.GameProjectService,
+    ...caller,
   ],
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_assets"));
+
+export const GameBlenderTool = Tool.make("game_blender", {
+  description: `This game's managed Blender: a live scene on a private display, saved as the game's .blend after each change. ${ONE_OP} code: runs bpy Python in it. look: the scene as an image; mode review shows what export would write, measured. scene: object counts, sizes and positions as text. export: the reviewed objects as a GLB with its sidecar, refused when they changed since review or break the budget or rig. character: a rigged humanoid on the standard skeleton that plays the library's clips. paint: textures models from a turnaround sheet. carve: an organic prop from a three-view sheet. sprites: 2D sprite strips framed by construction. animate: keys a move written as poses on beats, with pictures and numbers beside a library clip. How to use each: studio-skills/art-pipeline.md.`,
+  parameters: GameBlenderToolInput,
+  ...answers,
+  dependencies: [
+    GameBlender.GameBlender,
+    GameRunControl.GameRunControl,
+    GameProjectService.GameProjectService,
+    ...caller,
+  ],
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_blender"));
+
+export const GameBuildsTool = Tool.make("game_builds", {
+  description: `This game's builds and undo. ${ONE_OP} With no op, list. list: every turn that changed the game, newest first, with its base, facts and the latest restore. compare: two builds' facts, each up, down or same. restore: puts a build back in the folder when the person asks, keeping what was there as a build, so restoring a build's base undoes it. saved: the videos and images kept in saved/; save keeps one a tool made, delete removes one when the person asks. export: a release for Web, Linux or Windows. package: a release as a downloadable ZIP. stop: stops the processes Kurambit started for this game, the Stage's live game included.`,
+  parameters: GameBuildsToolInput,
+  ...answers,
+  dependencies: [
+    GameBuilds.GameBuilds,
+    GameSavedMediaService.GameSavedMediaService,
+    GameExport.GameExport,
+    GameStage.GameStage,
+    ...caller,
+  ],
+})
+  .annotate(Tool.Strict, true)
+  .annotate(Tool.Readonly, false)
+  .annotate(McpSchema.EnabledWhen, listedFor("game_builds"));
+
+export const GameKeepGoingTool = Tool.make("game_keep_going", {
+  description:
+    'Keep going, only when the person asks about it. With nothing it says what Keep going is doing and its last steps. mode turns it off, guided (proposes each step) or autopilot; budgetMinutes (null for none) applies when it starts or resumes; steer gives its next step the person\'s words. A message that starts "Keep going · step N" is a step: do that one change.',
+  parameters: GameKeepGoingToolInput,
+  ...answers,
+  dependencies: [GameRunControl.GameRunControl, ...caller],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_keep_going"));
 
-const ModelsRouteTool = Tool.make("game_models_route", {
-  description:
-    "Change how this game's models are made, only because the person asked you to in chat (refused in a keep-going step): route code (three.js code with shell/model.js), blender, or generated (the person's art providers); library true or false turns the free asset library's models on or off (clips and sounds are always allowed). Omitted parts stay. Returns the choice now in game.json.",
-  parameters: Schema.Struct({
-    route: Schema.optionalKey(GameCharacterRoute),
-    library: Schema.optionalKey(Schema.Boolean),
-  }),
-  success: GameSetCharacterRouteResult,
-  failure,
-  failureMode: "return",
-  dependencies: [...on(GameProjectService.GameProjectService), GameRunControl.GameRunControl],
+export const GameUnityTool = Tool.make("game_unity", {
+  description: `This Unity game's live editor on a private display. ${ONE_OP} tools: its editing tools with their schemas; edit: calls one, saving open scenes. eval: C# on its main thread. recompile: imports and compiles, with every C# error at file:line. play: enters or leaves play mode. console: recent entries. screenshot: the Game view as an image.`,
+  parameters: GameUnityToolInput,
+  ...answers,
+  dependencies: [GameUnity.GameUnity, GameEngine.GameEngine, ...caller],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_models_route"));
-
-export const GameToolkit = Toolkit.make(
-  ModelsRouteTool,
-  GameStatusTool,
-  BlenderCodeTool,
-  BlenderSceneTool,
-  BlenderAssetsSearchTool,
-  BlenderAssetsImportTool,
-  BlenderExportTool,
-  BlenderCharacterTool,
-  BlenderPaintTool,
-  BlenderCarveTool,
-  GenerateTool,
-  ImageEditTool,
-  GenerateWaitTool,
-  AssetsAddTool,
-  UnityToolsTool,
-  UnityEditTool,
-  UnityEvalTool,
-  UnityRecompileTool,
-  UnityPlayTool,
-  UnityConsoleTool,
-  ImportTool,
-  ExportTool,
-  PackageTool,
-  SavedTool,
-  PreviewTool,
-  StopTool,
-  ExploreStartTool,
-  ExploreActTool,
-  ExploreCloseTool,
-  BotRunTool,
-  BotViewTool,
-  BuildsTool,
-  FactsTool,
-  BuildRestoreTool,
-  TuneTool,
-  ReplayTool,
-  KeepGoingTool,
-);
+  .annotate(McpSchema.EnabledWhen, listedFor("game_unity"));
 
 /**
- * The tools a chat uses only when the person asks for them stay out of every
- * turn's tool list (placement.ts `asked`); this one tool names them and runs them.
+ * Tools whose answers carry pictures are registered over the HTTP transport so they become image
+ * content (McpHttpServer.registerGameImageTool); the rest go through the plain toolkit.
  */
-export const GameMoreTool = Tool.make("game_more", {
-  description: [
-    "Reach a game tool kept out of your list until it is needed. Pass tool alone to read its description and parameters, then tool and input to run it exactly as the tool itself runs. A tool this game or machine cannot run is refused with why.",
-    // Tools reached for the same reason share one line.
-    ...Object.entries(Object.groupBy(ASKABLE_TOOLS, ([, asked]) => asked)).map(
-      ([asked, tools = []]) => `- ${tools.map(([name]) => name).join(", ")}: ${asked}.`,
-    ),
-  ].join("\n"),
-  parameters: Schema.Struct({
-    tool: Schema.Literals(ASKABLE_TOOLS.map(([name]) => name)),
-    input: Schema.optionalKey(
-      Schema.Record(Schema.String, Schema.Unknown).annotate({
-        description: "The tool's parameters, as its description gives them. Omit to read them.",
-      }),
-    ),
-  }),
-  success: Schema.Unknown,
-  // The tool's own failure as it would have returned it, under its message.
-  failure: Schema.Struct({ message: Schema.String, failure: Schema.optionalKey(Schema.Unknown) }),
-  failureMode: "return",
-  // It runs any game tool, so it stands on every service they do.
-  dependencies: [
-    GameStatusService.GameStatusService,
-    GameProjectService.GameProjectService,
-    GameBlender.GameBlender,
-    GameArt.GameArt,
-    GameAssetLibrary.GameAssetLibrary,
-    GameUnity.GameUnity,
-    GameEngine.GameEngine,
-    GameExport.GameExport,
-    GameSavedMediaService.GameSavedMediaService,
-    GameStage.GameStage,
-    GameExplore.GameExplore,
-    GameBot.GameBot,
-    GameBuilds.GameBuilds,
-    GamePlays.GamePlays,
-    GameRunControl.GameRunControl,
-    McpInvocationContext.McpInvocationContext,
-    ThreadManagementService.ThreadManagementService,
-  ],
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_more"));
-export const GameMoreToolkit = Toolkit.make(GameMoreTool);
+export const GameCheckToolkit = Toolkit.make(GameCheckTool);
+export const GamePlayToolkit = Toolkit.make(GamePlayTool);
+export const GameAssetsToolkit = Toolkit.make(GameAssetsTool);
+export const GameBlenderToolkit = Toolkit.make(GameBlenderTool);
+export const GameUnityToolkit = Toolkit.make(GameUnityTool);
+export const GameToolkit = Toolkit.make(GameBuildsTool, GameKeepGoingTool);

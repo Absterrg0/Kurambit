@@ -84,7 +84,7 @@ export interface GameEngineProfile {
    * project (Unity's case-sensitive Assets/); null when anywhere under it does.
    */
   readonly importRoot: string | null;
-  /** Whether game_import does work here; false when the project's files are the game as they are. */
+  /** Whether game_assets op import does work here; false when the project's files are the game as they are. */
   readonly importStep: boolean;
   /**
    * Whether a Blender export ships compressed (WebP images, meshopt geometry and clips): true where
@@ -97,13 +97,6 @@ export interface GameEngineProfile {
   readonly stripLoad: ((key: string, resource: string, view: string) => string) | null;
   /** How the game loads an exported model's sidecar; null when the engine imports the GLB itself. */
   readonly sidecarLoad: ((key: string, sidecar: string) => string) | null;
-  /** One sentence each for the game tools whose behaviour differs by engine. */
-  readonly tools: {
-    readonly import: string;
-    readonly check: string;
-    readonly export: string;
-    readonly explore: string;
-  };
   /** Under the engine project directory: the game's art, its icon and title art, library packs and Blender exports. */
   readonly layout: {
     readonly assets: string;
@@ -162,7 +155,7 @@ export const engineProfile = (id: GameEngineId): GameEngineProfile => BY_ID[id];
 
 /** What an agent runs after it brought a file into the engine project. */
 export const afterAddingArt = (profile: GameEngineProfile) =>
-  profile.importStep ? "Run game_import, then game_check." : "Run game_check.";
+  profile.importStep ? "Run game_assets op import, then game_check." : "Run game_check.";
 
 /**
  * What a game tool can need of its game's engine. `play` is every active

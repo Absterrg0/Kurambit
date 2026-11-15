@@ -683,7 +683,7 @@ def model_views(params):
 
 
 # ------------------------------------------------------------------------------ a move's pictures
-# game_animate's pictures after every pass: the contact sheet (front, side and three-quarter of the
+# game_blender op animate's pictures after every pass: the contact sheet (front, side and three-quarter of the
 # beats and frames between, one fixed camera per view, so root motion shows), the onion strip
 # (ghosts every few frames, blue early to orange late), the footprint plot (top down: the feet,
 # stances thick with their slide, the centre of mass, the support, a held prop's tip and its
@@ -970,7 +970,7 @@ def _runs_of(flags):
 
 
 def motion_pictures(arm, body, act, res, curves, beats, notes, out, title, motion):
-    """game_animate's four pictures of a clip on its character, written under out; their paths."""
+    """game_blender op animate's four pictures of a clip on its character, written under out; their paths."""
     folder = tempfile.mkdtemp(prefix="kurambit-motion-")
     before = {t: set(getattr(bpy.data, t)) for t in ID_TYPES}
     window = bpy.context.window

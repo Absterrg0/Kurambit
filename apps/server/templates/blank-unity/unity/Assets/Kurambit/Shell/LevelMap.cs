@@ -220,7 +220,7 @@ public sealed class LevelMap : MonoBehaviour
                 entry.scale = piece.scale;
                 return entry;
             case null:
-                Report($"legend \"{ch}\" is null (a prefab that did not load? check its path and run game_import)");
+                Report($"legend \"{ch}\" is null (a prefab that did not load? check its path and run game_assets op import)");
                 return entry;
             default:
                 Report($"legend \"{ch}\" is a {raw.GetType().Name}; use \"spawn\", \"floor\", \"void\", a GameObject, a Color or a LevelMap.Piece");

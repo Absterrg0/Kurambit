@@ -253,18 +253,24 @@ function lastMessageOf(projection: OrchestrationV2ThreadProjection): string | nu
   return last?.type === "assistant_message" ? last.text.slice(0, 1200) : null;
 }
 
-/** The last `game_check` the agent ran in its turn, as the agent saw it. */
+/** The last `game_check` look or final check the agent ran in its turn, as the agent saw it. */
 async function lastCheck(
   server: BenchmarkServer,
   cookie: string,
   threadId: ThreadId,
   projection: OrchestrationV2ThreadProjection,
 ): Promise<{ readonly calls: number; readonly result: unknown }> {
+  // A look or a final check: game_check's facts and status ops answer something else.
   const checks = projection.turnItems.filter(
     (item) =>
       item.type === "dynamic_tool" &&
       typeof item.toolName === "string" &&
-      item.toolName.endsWith("game_check"),
+      item.toolName.endsWith("game_check") &&
+      !(
+        typeof item.input === "object" &&
+        item.input !== null &&
+        ("facts" in item.input || "status" in item.input)
+      ),
   );
   const last = checks.at(-1);
   if (last === undefined || last.type !== "dynamic_tool") return { calls: 0, result: null };

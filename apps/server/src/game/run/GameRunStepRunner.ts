@@ -54,6 +54,7 @@ import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
+import { modelChoice } from "../gameStyle.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
@@ -62,12 +63,16 @@ import { retrying } from "./retrying.ts";
 const FACTS_WAIT = "5 minutes";
 /** How many of the chat's latest replies the look reads for the newest `Next:` line. */
 const NEXT_LOOKBACK = 20;
-/** A final game_check's declaration about the reference, as the tool's input carries it. */
+const Critique = Schema.Struct({ major: Schema.Boolean, biggest: Schema.String });
+/**
+ * A final game_check's declaration about the reference, as the call's input carries it: the op
+ * `{final: {critique}}`, or `{final: true, critique}` from calls made before the tool took ops.
+ */
 const decodeCritique = Schema.decodeUnknownOption(
-  Schema.Struct({
-    final: Schema.optionalKey(Schema.Boolean),
-    critique: Schema.Struct({ major: Schema.Boolean, biggest: Schema.String }),
-  }),
+  Schema.Union([
+    Schema.Struct({ final: Schema.Struct({ critique: Critique }) }),
+    Schema.Struct({ final: Schema.Literal(true), critique: Critique }),
+  ]),
 );
 
 /** A thread whose turn is running, queued or being captured keeps the game busy. */
@@ -220,9 +225,9 @@ const make = Effect.gen(function* () {
             if (item.type !== "dynamic_tool" || !(item.toolName ?? "").endsWith("game_check"))
               return [];
             const declaration = decodeCritique(item.input);
-            return Option.isSome(declaration) && declaration.value.final === true
-              ? [declaration.value.critique]
-              : [];
+            if (Option.isNone(declaration)) return [];
+            const { value } = declaration;
+            return ["critique" in value ? value.critique : value.final.critique];
           })
           .at(-1);
         if (declared === undefined) continue;
@@ -298,6 +303,14 @@ const make = Effect.gen(function* () {
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         yield* turnAdmission.admit(yield* projections.getThread(threadId));
         const root = yield* projects.resolve(threadId);
+        // The person's model choice as the step starts: its art ops are held to it. A game.json
+        // that cannot be read holds them to nothing rather than stopping the step.
+        yield* projects.read(root).pipe(
+          Effect.flatMap((manifest) =>
+            projects.noteStepModelChoice(threadId, modelChoice(manifest)),
+          ),
+          Effect.ignore,
+        );
         const message = stepMessage(rounds, gameLastStep, step.proposal, {
           brief: yield* Effect.promise(() =>
             NodeFSP.readFile(NodePath.join(root, "BRIEF.md"), "utf8").catch(() => null),

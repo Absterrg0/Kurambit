@@ -144,7 +144,7 @@ def paint(params):
         raise Refused("invalid-input", "nothing to paint: name the meshes (or the character's armature, which brings its meshes)")
     shared = {o.data.name for o in targets if o.data.users > 1}
     if shared:
-        raise Refused("invalid-input", f"{', '.join(sorted(shared)[:4])} is a mesh several objects share: painting it would paint them all alike. Make it single-user first (game_blender_code: obj.data = obj.data.copy())")
+        raise Refused("invalid-input", f"{', '.join(sorted(shared)[:4])} is a mesh several objects share: painting it would paint them all alike. Make it single-user first (game_blender op code: obj.data = obj.data.copy())")
     if any(m.type == "MIRROR" for o in targets for m in o.modifiers):
         notes.append("a Mirror modifier maps both halves to the same texels: one half's paint shows on both. Apply it first for a model whose sides differ")
     if params.get("pose"):

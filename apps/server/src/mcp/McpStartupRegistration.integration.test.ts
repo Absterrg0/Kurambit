@@ -203,7 +203,7 @@ it(
         origin: server.url,
         token,
         method: "tools/call",
-        params: { name: "game_package", arguments: { target: "windows" } },
+        params: { name: "game_builds", arguments: { package: { target: "windows" } } },
         allowError: true,
         ...(initialized.sessionId === null ? {} : { sessionId: initialized.sessionId }),
       });
@@ -230,7 +230,7 @@ it("exports every game tool's input as a root object schema", () => {
       }
     }
   }
-  expect(gameTools.map((tool) => tool.name)).toContain("game_package");
+  expect(gameTools.map((tool) => tool.name)).toContain("game_builds");
   for (const tool of gameTools) {
     const schema = Tool.getJsonSchema(tool) as AdvertisedTool["inputSchema"];
     expect(schema.type, `inputSchema.type of ${tool.name}`).toBe("object");

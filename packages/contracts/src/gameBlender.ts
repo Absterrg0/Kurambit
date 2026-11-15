@@ -5,7 +5,10 @@ import { GameModelMeasure, GameModelRefusal } from "./gameModel.ts";
 /** Live Blender through the pinned mcp-for-blender server, behind GameBlender. */
 
 export const GameBlenderCodeInput = Schema.Struct({
-  code: Schema.NonEmptyString.check(Schema.isMaxLength(20_000)),
+  code: Schema.NonEmptyString.check(Schema.isMaxLength(20_000)).annotate({
+    description:
+      "bpy Python. Relative paths resolve from the game root, and ~ is the live Blender's own home, not yours; print every path you write. A Python error fails the call with its traceback.",
+  }),
 });
 export type GameBlenderCodeInput = typeof GameBlenderCodeInput.Type;
 export const GameBlenderCodeResult = Schema.Struct({ output: Schema.String });
@@ -35,7 +38,7 @@ export const GameBlenderLookScreenshot = Schema.Struct({
 });
 export type GameBlenderLookScreenshot = typeof GameBlenderLookScreenshot.Type;
 export const GameBlenderReview = Schema.Struct({
-  /** The candidate's key; game_blender_export promotes exactly this. */
+  /** The candidate's key; game_blender op export promotes exactly this. */
   key: Schema.String,
   objects: Schema.Array(Schema.String),
   /** Game-relative composite PNG under builds/logs/blender-pipeline/<key>/ (also the screenshot). */
@@ -77,8 +80,8 @@ export type GameBlenderAssetsSearchResult = typeof GameBlenderAssetsSearchResult
 
 export const GameBlenderAssetsImportInput = Schema.Struct({
   /**
-   * generated: a file game_generate delivered, by its game path (`path`), not a download.
-   * library: a model file of a game_assets_search entry (`id` the entry, `path` the file).
+   * generated: a file game_assets op generate delivered, by its game path (`path`), not a download.
+   * library: a model file of a game_assets op search entry (`id` the entry, `path` the file).
    */
   source: Schema.Literals(["polyhaven", "sketchfab", "polypizza", "generated", "library"]),
   /** The source's asset id, or the library entry id; every source but generated needs it. */
@@ -95,7 +98,7 @@ export const GameBlenderAssetsImportResult = Schema.Struct({
   text: Schema.String,
   /** Game-relative .blend source that stays in the game. */
   blend: Schema.optionalKey(Schema.String),
-  /** Game-relative GLB under the engine directory the game can load; run game_import after. */
+  /** Game-relative GLB under the engine directory the game can load; run game_assets op import after. */
   export: Schema.optionalKey(Schema.String),
 });
 export type GameBlenderAssetsImportResult = typeof GameBlenderAssetsImportResult.Type;
@@ -125,7 +128,7 @@ export const GameBlenderExportResult = Schema.Struct({
   text: Schema.String,
   /** Game-relative .blend source that stays in the game. */
   blend: Schema.String,
-  /** Game-relative GLB under the engine directory the game can load; run game_import after. */
+  /** Game-relative GLB under the engine directory the game can load; run game_assets op import after. */
   export: Schema.String,
   /** Game-relative sidecar written beside the GLB. */
   sidecar: Schema.String,
@@ -135,7 +138,7 @@ export type GameBlenderExportResult = typeof GameBlenderExportResult.Type;
 const Unit = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
 
 export const GameBlenderBody = Schema.Union([
-  /** A library body on the standard skeleton (UBC, a UAL mannequin): pack-relative path as game_assets_search lists it. */
+  /** A library body on the standard skeleton (UBC, a UAL mannequin): pack-relative path as game_assets op search lists it. */
   Schema.Struct({
     library: Schema.Struct({
       pack: GameLibraryPackId,
@@ -214,15 +217,15 @@ export const GameBlenderCharacterResult = Schema.Struct({
 export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
 
 /**
- * game_animate: a move written as poses on beats, compiled onto a standard-skeleton character as a
+ * game_blender op animate: a move written as poses on beats, compiled onto a standard-skeleton character as a
  * clip, then measured and pictured beside a library clip.
  */
 export const GameAnimateInput = Schema.Struct({
-  /** The character's armature in the live scene: game_blender_character's name. */
+  /** The character's armature in the live scene: game_blender op character's name. */
   character: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
   /** The clip's name in the game; animating it again replaces it. */
   clip: Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,47}$/)),
-  /** The move: {start?, poses?, craft?, beats: [{at, pose?, ease?, ...pose keys}]}, as the tool describes. */
+  /** The move: {start?, poses?, craft?, beats: [{at, pose?, ease?, ...pose keys}]}, as studio-skills/art-pipeline.md describes it. */
   spec: Schema.Record(Schema.String, Schema.Unknown),
   /**
    * The library clip measured beside it: "Sword_Regular_Combo" or "<pack-id>:<clip>". Omitted:

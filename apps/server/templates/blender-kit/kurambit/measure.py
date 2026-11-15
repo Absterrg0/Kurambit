@@ -287,7 +287,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
 
 
 # ------------------------------------------------------------------------------------ motion metrics
-# The numbers game_animate returns after every pass, measured on a clip as Blender plays it on the
+# The numbers game_blender op animate returns after every pass, measured on a clip as Blender plays it on the
 # character, so a compiled move and a library clip are measured by the same code on the same body.
 # The same stances and strikes go into the sidecar per clip (_contacts), so a game reads its hit
 # windows and planted feet instead of guessing.

@@ -127,7 +127,7 @@ waits for the next tempo beat, too slow for a fast hit.
 ## The harness's tiers (idle and masher)
 
 `kit/idle.mjs` and `kit/masher.mjs` are the bots the harness plays every
-build with for its facts; you can run them yourself with `game_bot_run`
+build with for its facts; you can run them yourself with `game_play` op `bot`
 (`file: ".studio/bot/kit/idle.mjs"`). Both press Enter at the title until a
 run starts, then: idle sends nothing, masher holds each direction for a
 second (its first-response probe) and then presses the shell's keys at
@@ -140,10 +140,10 @@ plays itself.
 ## A keep-going bot step
 
 The harness's third tier, `skilled`, plays the game's latest play-mode bot
-(the newest `game_bot_run` with `mode: "play"`). A game with none gets one
+(the newest `game_play` op `bot` with `mode: "play"`). A game with none gets one
 from a keep-going step, once: write `.studio/bot/play.mjs`, a win bot with a
 `policy` whose goal is to win one run of the core loop with the game's own
-verbs, run it with `game_bot_run` and fix it until it
+verbs, run it with `game_play` op `bot` and fix it until it
 plays a full run. Change no game files in that step: its build is the game
 as it was, so only `skilled` is measured again. From then on every build is
 played with it, so keep it general to the game's verbs and goal rather than

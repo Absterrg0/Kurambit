@@ -536,7 +536,7 @@ const layerGameOperations = GameStage.layer.pipe(
   Layer.provideMerge(GameExport.layer),
   Layer.provide(GamePlayer.layer),
   Layer.provideMerge(GameEngine.layer),
-  // After GameEngine, so the engine backend and the game_unity_* tools share one live editor.
+  // After GameEngine, so the engine backend and the game_unity tool share one live editor.
   Layer.provideMerge(GameUnity.layer),
   Layer.provideMerge(GameBlender.layer),
   Layer.provideMerge(GameArt.layer),

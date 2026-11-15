@@ -5,7 +5,7 @@ import { GameStyleLock } from "./gameStyle.ts";
 
 export { GameLibraryPackId } from "./gameLibraryPackId.ts";
 
-/** The pinned open asset library behind game_assets_search and game_assets_add. */
+/** The pinned open asset library behind game_assets op search and game_assets op add. */
 export const GameLibraryKind = Schema.Literals([
   "sprite",
   "tile",
@@ -56,7 +56,7 @@ export type GameAssetsSearchResult = typeof GameAssetsSearchResult.Type;
 
 export const GameAssetsAddInput = Schema.Struct({
   pack: GameLibraryPackId,
-  /** Pack-relative files or folders, as game_assets_search lists them. */
+  /** Pack-relative files or folders, as game_assets op search lists them. */
   paths: Schema.Array(packPath).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   /**
    * Record the game's look as a style family before these files come in: writes STYLE.json

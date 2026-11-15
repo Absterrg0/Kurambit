@@ -1,7 +1,7 @@
 # Art pipeline
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
-The live Blender behind the `game_blender_*` tools is your renderer and your
+The live Blender behind `game_blender` is your renderer and your
 modeller; you have no local Blender, Godot or image tools.
 `<assets>` is your lane's asset folder: `web/assets/`, `godot/assets/`, or
 `unity/Assets/Art/` for Unity (capital A: Unity imports nothing else).
@@ -14,10 +14,10 @@ modeller; you have no local Blender, Godot or image tools.
 
 ## Lock the look: STYLE.json
 
-`game_assets_search` with no words lists the library by style family; with
+`game_assets` op `search` with no words lists the library by style family; with
 words it ranks packs and single assets (Poly Haven, ambientCG, Poly Pizza)
 with their pictures. Look at the contact sheet before choosing, then pass
-the family and the view as `lock` with the first `game_assets_add`: it
+the family and the view as `lock` with the first `game_assets` op `add`: it
 writes `STYLE.json` at the game root with the family, its rig and pixel
 palette. Every pack of the family fits the lock; `packs` lists the curated
 ones and whatever you add beyond the family on purpose (a source such as
@@ -42,20 +42,20 @@ is the person's to read and edit too.
 
 ## Characters
 
-How this game's models are made is the person's choice, shown by game_status
-as `characters`: `code` (the default), `blender` or `generated`, and whether
-the free library is on, `library` (off by default). Read both before any
-model. Change them only when the person asks you to (`game_models_route`); a
+How this game's models are made is the person's choice, kept in game.json
+as `characters`: `code` (the default, no key), `blender` or `generated`, and
+whether the free library is on, `library` (off by default). Read both before
+any model. Change them in game.json only when the person asks you to; a
 message asking for one made model does not change the route. An unrigged
 model is a prop on every route.
 
 - `code`: models built in three.js code with `shell/model.js` (its comment
-  block), each looked at alone with `game_model_sheet`. A humanoid is built
+  block), each looked at alone with `game_play` op `model_sheet`. A humanoid is built
   on the clip library's skeleton (`rig`) and plays its clips. With the library
   on, library models come first and code builds what the library lacks.
 - Library on, on any route: characters from the lock's packs, played by
   state with the engine's character animator. On
-  `standard-humanoid`, `game_blender_character` with a library body
+  `standard-humanoid`, `game_blender` op `character` with a library body
   (`quaternius-universal-base-characters`) puts it on the skeleton with the
   library's clips. Animals and creatures (Quaternius' animals and monsters,
   animated Poly Pizza models) each come on a skeleton of their own with their
@@ -65,7 +65,7 @@ model is a prop on every route.
   else in for it: a knight is not a robot. The same goes for a prop the brief
   names. With the library off, its models, textures and sprites are refused
   (in Blender's imports too); its clips and sounds still come in, and
-  `game_blender_character` may still start from a library body: a base
+  `game_blender` op `character` may still start from a library body: a base
   mesh reshaped in Blender, not a library model in the game.
 - `blender`: made characters: on the standard skeleton with the library's
   clips (Made characters), or on their own rig with their own clips (Made
@@ -95,7 +95,7 @@ through the review and the export is not finished.
    prop that says the role; and three finishes at least (cuffs, a buckle,
    stitching, an emblem): they read as made rather than generated.
    `art/concepts/<name>.png`, when it exists, is shown beside every review.
-2. **Body.** `game_blender_character`. Pick the body by the concept's
+2. **Body.** `game_blender` op `character`. Pick the body by the concept's
    proportions, not the subject's age: the scale pass sets the height, the
    body sets head share and limb length. A small, round or chibi character
    (a cat, a gnome, a mascot) takes a child body (`age` 0.1 to 0.25); a lean
@@ -105,7 +105,7 @@ through the review and the export is not finished.
    when the character fights. Choose `fit` from the review's strips: `arms:
 true` swings arms out of the torso, `calm` (0..1) calms a waddle or a
    rolling head on a wide or big-headed body.
-3. **Parts** with `game_blender_code`, in world space at the rest pose.
+3. **Parts** with `game_blender` op `code`, in world space at the rest pose.
    `import kurambit` first in each call (every call starts afresh):
    - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
    - `kurambit.skin_rigid(obj, "Head")`, or a `{bone: weight}` dict, or a
@@ -147,18 +147,52 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
 
 4. **Moves the clip library lacks.** Use a library clip whenever one fits:
    mocap commits harder than any authored move. For a combo, a dodge into
-   guard or a stagger, author it with `game_animate` (its description gives
-   the spec), read its pictures and numbers against the library clip's,
-   change one thing, and call again until neither improves. A warning (hip
-   drop, reach, clearance) means the spec asked for what this body cannot
-   do: move the feet in, the grip closer or the hips down.
+   guard or a stagger, author it with `game_blender` op `animate`, read its
+   pictures and numbers against the library clip's (`bar`), change one
+   thing, and call again with the same clip until neither improves. A
+   warning (hip drop, reach, clearance) means the spec asked for what this
+   body cannot do: move the feet in, the grip closer or the hips down.
+
+   The spec is poses on beats; the kit adds easing, anticipation, arcs,
+   foot locking, root motion and overlap, and keys `<character>|<clip>`:
+
+   ```
+   {name?, start?: <named pose>, poses?: {<name>: <pose>}, loop?: true,
+    craft?: {ease, antic, over, lift, clearance, arcs, pivot, lock_feet, hip_drop,
+             overlap: {chest: [hz, damping, clamp°], head: [...], hand: [hz, damping]}},
+    beats: [{at: <frame at 30 fps>, pose?, ease?: linear|in|out|inout|in2|out2,
+             antic?, over?, pivot?: foot_l|foot_r, lift?, note?, ...pose keys}]}
+   ```
+
+   Leave `ease` out: the default carries the motion through a beat and
+   settles only where a value holds or turns back; a named ease breaks it
+   there (`in` arrives at full speed: a hit). `loop: true` makes a cycle (a
+   walk): write the last beat as the first one cycle on, moved forward by one
+   cycle's travel; it is keyed in place and played with moveSpeed. Body
+   space: x the character's right, y forward, z up, metres; yaw + turns left,
+   degrees. Pose keys, each carried from the beat before when left out:
+
+   ```
+   root [x, y, yaw]                 hips {at: [x, y, z], turn: [yaw, pitch, roll]}
+   chest, head [yaw, pitch, roll]   look [x, y, z] or null
+   prop {grip, tip, edge?, space?: root|chest, way?: cw|ccw}  (a prop modelled in a hand)
+   hand_l, hand_r "grip" or {at, space?, turn?}
+   foot_l, foot_r {at: [x, y, 0], yaw, heel, space?: ground|root|hips, orbit?}
+   elbow_l, elbow_r, knee_l, knee_r  (the direction each points)
+   ```
+
+   Named poses: `stand`, `spec.poses`, and any clip the character has (its
+   first frame). Start from the idle the game plays and end there (`start`
+   `"Sword_Idle"`, the last beat's `pose` `"Sword_Idle"` with `root` where it
+   ended), so the crossfades slide nothing. Stances and strike frames go into
+   the sidecar at export.
 
    For a small change to a library pose, `kurambit.key_pose("Pounce", frame,
 {"base": "Idle_Loop", "turn": {"pelvis": ((1, 0, 0), 14)}}, arm)` keys one
    pose by world directions (the character faces -Y, +X is its left), and
    `kurambit.mirror_pose(pose)` the other side.
 
-5. **Review:** `game_blender_look` with `mode: "review"`. Fix what the text
+5. **Review:** `game_blender` op `look` with `mode: "review"`. Fix what the text
    says the export would refuse first. Then walk the image in this order:
    1. Silhouette: the primary shape and the two features read in black.
    2. Game distance: at 1x, can you tell what it is and which way it faces?
@@ -184,7 +218,7 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
    Stop when nothing blocking is left, or after 8 reviews with what is left
    named in your reply. A background prop needs one reading.
 
-6. **Export:** `game_blender_export` writes exactly the reviewed model and
+6. **Export:** `game_blender` op `export` writes exactly the reviewed model and
    its sidecar; any change after the review needs a new review. Name it in
    the game by its sidecar (TEMPLATE.md).
 
@@ -195,11 +229,11 @@ vehicle or machine with moving parts, or a humanoid that plays only its own
 clips. The lock's rig never governs it and it never plays library clips; the
 palette, budgets, texture size and credits hold as for anything else. A
 humanoid that should play the library's clips goes through
-`game_blender_character` instead. Anything rigged, a door on hinges too,
+`game_blender` op `character` instead. Anything rigged, a door on hinges too,
 is a character to the person's route: `blender`, or `code` with the library
 on for a subject the library has no model of; on `generated`, or `code` with
 the library off, say so in your reply. Every step runs headless in
-`game_blender_code` (`import kurambit` for its helpers); write the subject's
+`game_blender` op `code` (`import kurambit` for its helpers); write the subject's
 `art/CONCEPT.md` section first, as for any character.
 
 1. **Model or sculpt.** Sculpt brushes need a viewport and do not run here:
@@ -212,7 +246,7 @@ the library off, say so in your reply. Every step runs headless in
    (a decimate modifier).
 2. **UV and texture.** Colours by palette role (`kurambit.material`) need no
    UVs. For a texture, `bpy.ops.uv.smart_project()` in edit mode, then paint
-   the image's pixels with numpy or bake into it, or `game_blender_paint`
+   the image's pixels with numpy or bake into it, or `game_blender` op `paint`
    from a turnaround sheet. Save or pack every image.
 3. **Rig.** An armature whose bones follow the body, standing on the ground
    at the origin, facing -Y. `bpy.ops.object.parent_set(type="ARMATURE_AUTO")`
@@ -225,11 +259,11 @@ the library off, say so in your reply. Every step runs headless in
    `Hop`, `Peck`, `Walk`). A loop's last key equals its first, and keeps its
    travel in place: the game moves it. Every action that keys the armature's
    bones ships with it, assigned or not.
-5. **Look.** `game_blender_look` mode `angles` for the shape; for a clip,
+5. **Look.** `game_blender` op `look` mode `angles` for the shape; for a clip,
    assign it (`arm.animation_data.action`) and look with mode `frames` and
    `frames` from its range. Mode `review` shows the turnaround and a strip
    of every clip, and says what the export would refuse.
-6. **Export** with `game_blender_export`. In three.js
+6. **Export** with `game_blender` op `export`. In three.js
    `animate(ctx.assets.model("owl"))` plays the clips by name or word:
    `owl.play("Wake", { once: true })`, then `owl.play("idle")`.
 
@@ -237,7 +271,7 @@ the library off, say so in your reply. Every step runs headless in
 
 On the Blender route a model looks like its picture when the picture is its
 texture. Model the silhouette and the big forms as smooth shells and paint
-the detail from the subject's turnaround sheet with `game_blender_paint`:
+the detail from the subject's turnaround sheet with `game_blender` op `paint`:
 plates, cords, weave, eyes, brows and the nose as geometry fight the paint.
 
 1. **The sheet.** Lane `image` (the person picks it), the key art as
@@ -258,7 +292,7 @@ plates, cords, weave, eyes, brows and the nose as geometry fight the paint.
    outfit: ..."): it comes back aligned, so the body, clips and paint carry
    over. A new enemy for one image.
 4. **Carve organic props** (a statue, a carved lion, a rock, a trunk): a
-   three-view sheet of the prop, then `game_blender_carve` with its
+   three-view sheet of the prop, then `game_blender` op `carve` with its
    `height`. Model buildings, vehicles and anything with straight edges,
    holes or thin parts instead.
 
@@ -268,10 +302,11 @@ needs a lock with no hex palette.
 ## Generated art
 
 On the `generated` route the person has the art made by providers through
-`game_generate`, and this pipeline makes it one look. The person picks every
+`game_assets` op `generate`, and this pipeline makes it one look. The person picks every
 candidate; you never pick taste for them. Never block the playable on art:
 stand-ins (library models, or quick ones in code) play until each piece arrives. Start a generation, keep
-building, and pick it up with `game_generate_wait`.
+building, and pick it up with `game_assets` op `wait`. Say in your reply what
+the generations cost.
 
 1. **Key art, in the first turn.** Lane `image`, name `key_art`,
    `options.aspect` `"16:9"`, a prompt holding the game's world and moment in
@@ -295,12 +330,12 @@ building, and pick it up with `game_generate_wait`.
 
 2. **After the pick, lock the look to it.** Copy the picked file to
    `art/key-art.png`, read its colours with
-   `print(kurambit.palette_of("art/key-art.png", 8))` in `game_blender_code`,
+   `print(kurambit.palette_of("art/key-art.png", 8))` in `game_blender` op `code`,
    and write STYLE.json's `palette` (that hex list; for a painted or
    realistic key art leave `palette` out, so models keep their textures) and
    `anchor`. Pass the key art in `references` of every later image and
    texture. It is also the title backdrop (TEMPLATE.md).
-3. **Characters.** First read `artLanes` in `game_status`: when `character`
+3. **Characters.** First read `artLanes` in `game_check` op `status`: when `character`
    (or `creature`) is null, nothing can model it, so make no sheet for it
    and tell the person what Settings → Art providers needs. Then a character
    sheet: lane `image`, two or three `directions` when the design is open
@@ -309,33 +344,35 @@ building, and pick it up with `game_generate_wait`.
    down and apart. The person picks. Then lane `character` or `creature`
    with the picked sheet as its only reference; after the person's "Rig
    this":
-   - a humanoid: `game_blender_character` with `body: {game: "<the .glb it
+   - a humanoid: `game_blender` op `character` with `body: {game: "<the .glb it
 delivered>"}` and the clips;
-   - a creature: `game_blender_assets_import` with `source: "generated"`.
+   - a creature: `game_assets` op `blender_import` with `source: "generated"`.
      One that came with clips but no idle gets `Idle_Loop` holding its rest
      pose, which you may key into a breath;
    - then stand it on the ground facing -Y, review and export it (Made
      characters 5 and 6).
    - **Moves the library lacks** (a boss's slam, a pounce): lane `motion`
      with `options.character` the game's exported character, so the feet and
-     reach fit it; then `game_blender_character` with `replace: true` and the
+     reach fit it; then `game_blender` op `character` with `replace: true` and the
      motion's GLB among the clips, on every humanoid that should play it.
 4. **Props.** A concept first when the look matters (lane `image`, the key
    art as reference, the prop alone on a plain background), then lane
    `model` with the picked concept as its only reference, then
-   `game_blender_assets_import` with `source: "generated"`, review and
+   `game_assets` op `blender_import` with `source: "generated"`, review and
    export. Moving parts (`options.parts`) get their origin at the hinge.
 5. **Images and sound.** Sprites, UI art, backgrounds and textures: lane
    `image` or `texture` with the key art as reference; effects and music
    from the brief's mood. A picked image the person wants changed goes
-   through `game_image_edit`, which keeps what they liked.
+   through `game_assets` op `image_edit`, which keeps what they liked; after
+   they pick "Changed", point the game at the new file where it used the
+   original, and read the palette again if it was STYLE.json's anchor.
 6. **In the game.** Add generated images and sounds unchanged where you
    can: their cards know them in the game by their bytes. Never switch route
    or lane to get past a refusal.
 
 ## 2D sprites from 3D
 
-Render every sprite, strip and icon with `game_blender_render_sprites`, never
+Render every sprite, strip and icon with `game_blender` op `sprites`, never
 your own render code, and look at its contact sheet. To render a library character, import its GLB into the live
 Blender, list its clips (`[a.name for a in bpy.data.actions]`), hide what it
 should not carry (`ob.hide_render = True`), then render with `"objects":
@@ -355,15 +392,15 @@ should not carry (`ob.hide_render = True`), then render with `"objects":
 
 Library pieces from the lock's packs come first; an organic hard prop with a
 three-view sheet is carved. What no pack has, build in the live Blender:
-`game_blender_code` to model, `game_blender_scene` to measure,
-`game_blender_look` with `mode: "review"` to see exactly what will ship,
-`game_blender_export`, then `game_check`. Match the family's look: its
+`game_blender` op `code` to model, `game_blender` op `scene` to measure,
+`game_blender` op `look` with `mode: "review"` to see exactly what will ship,
+`game_blender` op `export`, then `game_check`. Match the family's look: its
 proportions, its bevel (never flat boxes) and colours by palette role
 (`kurambit.material("#RRGGBB")`). Design set pieces for the camera: a
 third-person or top-down camera needs low partitions (about 1.8 m in a 4 m
 cell), not full-height walls. Realistic models and materials (Poly Haven
-and ambientCG in `game_assets_search`; Sketchfab in
-`game_blender_assets_search` with the person's key) belong only in a
+and ambientCG in `game_assets` op `search`; Sketchfab in
+`game_assets` op `blender_search` with the person's key) belong only in a
 realistic lock; an HDR sky that only lights the scene suits any 3D look.
 A CC BY entry is credited by the add; keep its line in the credits file.
 

@@ -308,7 +308,7 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose
   are in the command palette too, with keys that work while you play (Settings → Keybindings).
 - **Check and playtest on three.js.** `game_check` on a three.js game loads the page headless and
-  reports console and page errors instead of script errors; `game_explore_*` play it in real time
+  reports console and page errors instead of script errors; `game_play` ops `start`, `act` and `close` play it in real time
   with real keys and clicks (see the `three` studio skill for the bridge contract).
 
 To change the game, write a follow-up in the chat, for example "make the rocks taller and spread

@@ -105,7 +105,7 @@ export class GameBot extends Context.Service<
   GameBot,
   {
     /**
-     * `game_bot_run`: a model-written bot file against the thread's game in
+     * `game_play` op `bot`: a model-written bot file against the thread's game in
      * real time at normal speed on a private display. Holds and releases go
      * out at 10 Hz, one continuous video is recorded, and detectors' findings
      * carry time and position. Each run is recorded on the thread's bot
@@ -141,7 +141,7 @@ export class GameBot extends Context.Service<
     readonly latestPlayBot: (
       root: string,
     ) => Effect.Effect<{ readonly file: string; readonly at: string } | null>;
-    /** Stops one game's bot call by root and waits for it to end (bounded); game_stop calls this. */
+    /** Stops one game's bot call by root and waits for it to end (bounded); game_builds op stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
     /** Stops every bot call a thread started and waits for each to end (bounded): its turn is over. */
     readonly stopOwned: (threadId: ThreadId) => Effect.Effect<void>;
@@ -1008,7 +1008,7 @@ const make = Effect.gen(function* () {
                   "Bot run",
                   root,
                   "busy",
-                  "A bot run is already in progress for this game. Stop it with game_stop first.",
+                  "A bot run is already in progress for this game. Stop it with game_builds op stop first.",
                 ),
               ),
         ),

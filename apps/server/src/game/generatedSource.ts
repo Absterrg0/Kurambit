@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the record is a file in the game folder, read beside the model it describes.
-// Where a generated file came from: the `<name>.generation.json` game_generate writes beside its
+// Where a generated file came from: the `<name>.generation.json` game_assets op generate writes beside its
 // files under art/generated/<lane>/<name>/. The Blender pipeline stamps an import with it, so the
 // review, the export's sidecar and ASSETS.md credit the provider, the AI flag and the cost. The
 // record only names the generation: what is stamped comes from the server's own row of it, so a
@@ -64,13 +64,13 @@ export const generatedSource = (
     const normal = NodePath.posix.normalize(relative.replaceAll("\\", "/"));
     if (!normal.startsWith(`${GENERATED_DIR}/`) || !(kind === "model" ? MODEL : IMAGE).test(normal))
       return yield* refuse(
-        `${relative} is not ${kind === "model" ? "a model" : "an image"} game_generate delivered: give the game-relative ${kind === "model" ? ".glb, .gltf or .fbx" : ".png, .jpg or .webp"} under ${GENERATED_DIR}/<lane>/<name>/, as the generation's files list it.`,
+        `${relative} is not ${kind === "model" ? "a model" : "an image"} game_assets op generate delivered: give the game-relative ${kind === "model" ? ".glb, .gltf or .fbx" : ".png, .jpg or .webp"} under ${GENERATED_DIR}/<lane>/<name>/, as the generation's files list it.`,
       );
     const absolute = NodePath.join(realRoot, normal);
     const real = yield* Effect.promise(() => NodeFSP.realpath(absolute).catch(() => null));
     if (real === null || real !== absolute)
       return yield* refuse(
-        `${relative} is not a file in this game${real === null ? "" : " (it is a link)"}: pick the generation up with game_generate_wait, which lists its files.`,
+        `${relative} is not a file in this game${real === null ? "" : " (it is a link)"}: pick the generation up with game_assets op wait, which lists its files.`,
       );
     const dir = NodePath.dirname(real);
     const records = yield* Effect.promise(() =>
@@ -82,7 +82,7 @@ export const generatedSource = (
     const name = records.includes(own) ? own : records.length === 1 ? records[0] : undefined;
     if (name === undefined)
       return yield* refuse(
-        `${NodePath.posix.dirname(normal)} holds ${records.length === 0 ? "no" : "more than one"} generation record (<name>.generation.json), so the ledger cannot say where ${NodePath.basename(normal)} came from. Only files game_generate delivered are imported as generated.`,
+        `${NodePath.posix.dirname(normal)} holds ${records.length === 0 ? "no" : "more than one"} generation record (<name>.generation.json), so the ledger cannot say where ${NodePath.basename(normal)} came from. Only files game_assets op generate delivered are imported as generated.`,
       );
     const text = yield* Effect.promise(() =>
       NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => ""),
@@ -95,7 +95,7 @@ export const generatedSource = (
     const row = yield* delivered(decoded.success.id, normal);
     if (row === null)
       return yield* refuse(
-        `${normal} is not a file a finished generation of this game delivered (its record names generation ${decoded.success.id.slice(0, 64)}). Only what game_generate delivered is imported as generated: game_generate_wait lists a generation's files.`,
+        `${normal} is not a file a finished generation of this game delivered (its record names generation ${decoded.success.id.slice(0, 64)}). Only what game_assets op generate delivered is imported as generated: game_assets op wait lists a generation's files.`,
       );
     const generation = row.generation;
     return {

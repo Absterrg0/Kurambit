@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Writes PNGs into the game folder; the Blender script answers with one JSON line.
-// game_blender_render_sprites: 2D sprites from the live Blender scene, correct by construction.
+// game_blender op sprites: 2D sprites from the live Blender scene, correct by construction.
 // A weak model's hand-written camera, light and anchor code crops heads, drifts and renders
 // near-black; here the camera is fitted to the subject across every frame, so none of that can happen.
 import * as NodeFSP from "node:fs/promises";
@@ -41,7 +41,7 @@ import {
 } from "./spriteRenderPy.ts";
 
 const OP = "blender-render-sprites";
-const TOOL = "game_blender_render_sprites";
+const TOOL = "game_blender op sprites";
 const BLEND_REL = "art/blender/live.blend";
 const SCRATCH = "builds/logs/sprite-render";
 /** Sprite contact sheets a game keeps; older ones go as new renders land. */
@@ -163,7 +163,7 @@ const paletteOf = (realRoot: string, library: string, spec: string) =>
       return yield* fail(
         relative,
         "invalid-input",
-        `No palette at ${relative}. Pass a PNG or folder in this game, or a pack id added with game_assets_add.`,
+        `No palette at ${relative}. Pass a PNG or folder in this game, or a pack id added with game_assets op add.`,
       );
     if (!real.startsWith(`${realRoot}${NodePath.sep}`))
       return yield* fail(relative, "invalid-path", "The palette must be inside the game.");
@@ -385,7 +385,7 @@ export const renderSprites = (
       return yield* fail(
         (fitted.objects ?? []).join(", "),
         "invalid-input",
-        `${(fitted.objects ?? []).join(", ")} ${(fitted.objects ?? []).length === 1 ? "is" : "are"} in NLA tweak mode (editing a strip), which makes the active action read-only, so ${input.action} cannot play. Leave tweak mode first (in game_blender_code: obj.animation_data.use_tweak_mode = False); nothing was changed.`,
+        `${(fitted.objects ?? []).join(", ")} ${(fitted.objects ?? []).length === 1 ? "is" : "are"} in NLA tweak mode (editing a strip), which makes the active action read-only, so ${input.action} cannot play. Leave tweak mode first (in game_blender op code: obj.animation_data.use_tweak_mode = False); nothing was changed.`,
       );
     if (fitted.error === "missing")
       return yield* fail(

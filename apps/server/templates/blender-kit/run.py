@@ -96,10 +96,10 @@ def refusals_of(measured, info, params, creatures=()):
                 continue
             missing = [j for j in joints if j not in bones]
             if missing:
-                out.append({"code": "off-rig", "text": f"{name} lacks {len(missing)} joints of STYLE.json's rig ({', '.join(missing[:4])}), so library clips would not fit it. For those, build it with game_blender_character. If it carries its own clips, mark it on its own rig: armature['kurambit_rig'] = '<rig name>'."})
+                out.append({"code": "off-rig", "text": f"{name} lacks {len(missing)} joints of STYLE.json's rig ({', '.join(missing[:4])}), so library clips would not fit it. For those, build it with game_blender op character. If it carries its own clips, mark it on its own rig: armature['kurambit_rig'] = '<rig name>'."})
     dev = measured["restDeviation"]
     if dev is not None and dev > MAX_REST_DEVIATION:
-        out.append({"code": "rest-frames", "text": f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°): library clips would play twisted. Build the body with game_blender_character, which conforms it."})
+        out.append({"code": "rest-frames", "text": f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°): library clips would play twisted. Build the body with game_blender op character, which conforms it."})
     budget = params["budgets"][kind]
     if measured["triangles"] > budget:
         out.append({"code": "triangles", "text": f"{measured['triangles']} triangles, over STYLE.json's budget.{kind} of {budget}: use fewer segments, decimate a dense part, or raise the budget."})
@@ -109,7 +109,7 @@ def refusals_of(measured, info, params, creatures=()):
         out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
     # A creature with no clips ships posed as it came; one with clips needs one to stand in.
     if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]) and (measured["clips"] or not creatures):
-        out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender_character's clips, or key one."})
+        out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender op character's clips, or key one."})
     clips = measured["clips"]
     if kind == "character" and clips and len(info["frozen"]) == len(clips):
         out.append({"code": "frozen-clips", "text": "no clip moves a bone in the exported model, so the character would slide around in one pose. If the armature was left in rest position (Armature > Pose Position: Rest), the pass already exports it posed; otherwise check that each action keys this armature's bones."})
@@ -174,7 +174,7 @@ def run_pass(params):
         s = _stamp(a, "kurambit_generation")
         if isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("path"), str):
             creature_sources[a.name] = {"id": s["id"][:64], "path": s["path"][:500]}
-        # game_blender_character marks the clips it brings from the library with their pack.
+        # game_blender op character marks the clips it brings from the library with their pack.
         clips = [(c.get("kurambit_clip", c.name)[:120], "kurambit_from" in c) for c in exported_actions(a)]
         own_clips[a.name] = {"own": [n for n, lib in clips if not lib][:64], "library": [n for n, lib in clips if lib][:64]}
 

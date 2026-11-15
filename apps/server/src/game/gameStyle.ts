@@ -237,7 +237,7 @@ export const standardClipPacks = (style: GameStyle | null): ReadonlyArray<string
 const INTERFACE_FAMILY = "kenney-interface";
 
 /**
- * STYLE.json for a chosen family, as game_assets_add writes it before adding `adding`:
+ * STYLE.json for a chosen family, as game_assets op add writes it before adding `adding`:
  * the family's visual packs (those on another rig left out), its rig (the added pack's,
  * else the one its packs share), its pixel mode, tile and palette, and the interface packs.
  * What else a lock already there holds (anchor, a key-art palette, audio, imports, budgets)
@@ -263,7 +263,7 @@ export const styleFromLock = (
       (candidate) => candidate.id !== INTERFACE_FAMILY && hasLook(candidate.id),
     ).map((candidate) => candidate.id);
     return {
-      refusal: `lock.family "${lock.family}" is not a look to lock; the families are ${looks.join(", ")} (game_assets_search with no words describes each).`,
+      refusal: `lock.family "${lock.family}" is not a look to lock; the families are ${looks.join(", ")} (game_assets op search with no words describes each).`,
     };
   }
   const rigs = [
@@ -340,7 +340,7 @@ export const ownRigRefusal = (
   if (clips.library.length > 0)
     return `${name} is marked on its own rig (kurambit_rig) but carries library clips (${clips.library.slice(0, 6).join(", ")}), which fit only ${GAME_STYLE_FILE}'s rig. A model on its own rig plays only clips keyed on it: remove those, or leave the mark off and keep the character on the rig.`;
   if (clips.own.length === 0)
-    return `${name} is marked on its own rig (kurambit_rig) but carries no clips, so it could only play library clips, which fit only ${GAME_STYLE_FILE}'s rig. Key its clips on it as named actions (an idle first: Idle, Walk, Attack, or its own moves), or build the character with game_blender_character.`;
+    return `${name} is marked on its own rig (kurambit_rig) but carries no clips, so it could only play library clips, which fit only ${GAME_STYLE_FILE}'s rig. Key its clips on it as named actions (an idle first: Idle, Walk, Attack, or its own moves), or build the character with game_blender op character.`;
   return null;
 };
 
@@ -390,7 +390,7 @@ const makesInBlender = (choice: GameModelChoice) =>
 const ROUTE_USE: Record<GameCharacterRoute, string> = {
   code: "build it in three.js code (shell/model.js)",
   blender: "make it in Blender",
-  generated: "use a generated character (game_generate)",
+  generated: "use a generated character (game_assets op generate)",
 };
 
 /**

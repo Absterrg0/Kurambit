@@ -175,7 +175,7 @@ const kindsIn = (engine: GameEngineId, pack: LibraryPack): ReadonlyArray<GameLib
 };
 
 /**
- * A model format the engine does not load but game_blender_assets_import (source library)
+ * A model format the engine does not load but game_assets op blender_import (source library)
  * brings in and the export ships as a GLB: how an FBX-only pack reaches a three.js game.
  */
 const throughBlender = (engine: GameEngineId, format: string) =>
@@ -183,7 +183,7 @@ const throughBlender = (engine: GameEngineId, format: string) =>
 const reachable = (engine: GameEngineId, format: string) =>
   loadableIn(engine, format) || throughBlender(engine, format);
 const BLENDER_NOTE =
-  "loads through game_blender_assets_import (source library, this entry and path), then a review and export to GLB";
+  "loads through game_assets op blender_import (source library, this entry and path), then a review and export to GLB";
 
 const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1)} MB`;
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".");
@@ -457,7 +457,7 @@ const make = Effect.gen(function* () {
           "Library",
           id,
           "invalid-input",
-          `${pack.id} (${pack.title}) is in the library's index but waits to be mirrored: its source host (Google Drive) throttles downloads for everyone, so it is not offered yet. Use another entry; game_assets_search lists only what can be fetched.`,
+          `${pack.id} (${pack.title}) is in the library's index but waits to be mirrored: its source host (Google Drive) throttles downloads for everyone, so it is not offered yet. Use another entry; game_assets op search lists only what can be fetched.`,
         );
       if (pack !== undefined) return pack;
       const model = polyPizzaModelId(id);
@@ -1082,7 +1082,7 @@ const make = Effect.gen(function* () {
         return {
           text: [
             ...(lockLine === "" ? [] : [lockLine]),
-            `The library this ${engine} game loads, by style family${style === null ? "" : " (* in STYLE.json)"}. Every pack is CC0 unless a search says otherwise; game_assets_add credits whatever asks for credit.`,
+            `The library this ${engine} game loads, by style family${style === null ? "" : " (* in STYLE.json)"}. Every pack is CC0 unless a search says otherwise; game_assets op add credits whatever asks for credit.`,
             ...families,
             ...(hidden > 0
               ? [`${hidden} more packs hold no format this ${engine} game loads.`]
@@ -1164,7 +1164,7 @@ const make = Effect.gen(function* () {
               ? ""
               : "No pictures: these entries have none before they are fetched; pass pack to look inside one."))
           : `Contact sheet ${sheet.relative} shows ${pictured} of them, the source's own pictures, numbered like the list. Look at it before adding.`,
-        "Pass pack to look inside an entry (fetched once into a shared, size-capped cache), or add its files with game_assets_add. A licence that asks for credit is credited in ASSETS.md and the game's credits by the add. Keep one family's look per game.",
+        "Pass pack to look inside an entry (fetched once into a shared, size-capped cache), or add its files with game_assets op add. A licence that asks for credit is credited in ASSETS.md and the game's credits by the add. Keep one family's look per game.",
       ]
         .filter((line) => line !== "")
         .join("\n");
@@ -1227,7 +1227,7 @@ const make = Effect.gen(function* () {
               `Folders with files this ${engine} game loads:`,
               ...folderLines,
               ...(folders.size > 30 ? [`… and ${folders.size - 30} more folders.`] : []),
-              "Search this pack with a query or kind to see files, or add a whole folder with game_assets_add.",
+              "Search this pack with a query or kind to see files, or add a whole folder with game_assets op add.",
             ].join("\n"),
             ...(sheet === undefined ? {} : { sheet: sheet.relative, screenshot: sheet.screenshot }),
           };
@@ -1346,7 +1346,7 @@ const make = Effect.gen(function* () {
             : pictured === 0
               ? `These files have no picture of their own; contact sheet ${sheet.relative} shows the pack's own preview (${packPicture}). Look at it before adding.`
               : `Contact sheet ${sheet.relative} shows ${pictured} of them, ${numbering}${pictured < shown.length ? "; the rest have no picture of their own" : ""}${packPicture === undefined ? "" : `, then, unnumbered, the pack's own preview (${packPicture})`}. Look at it before adding.`,
-          "Add files or a whole folder with game_assets_add, by the exact paths above.",
+          "Add files or a whole folder with game_assets op add, by the exact paths above.",
         ].join("\n"),
         ...(sheet === undefined ? {} : { sheet: sheet.relative, screenshot: sheet.screenshot }),
       };
@@ -1890,7 +1890,7 @@ const make = Effect.gen(function* () {
           "Library file",
           `${id}/${path}`,
           "invalid-path",
-          "A pack file is named by its pack-relative path, as game_assets_search lists it.",
+          "A pack file is named by its pack-relative path, as game_assets op search lists it.",
         );
       const pack = yield* packOf(id);
       const index = yield* ensure(pack);
@@ -1899,7 +1899,7 @@ const make = Effect.gen(function* () {
           "Library file",
           `${id}/${path}`,
           "invalid-input",
-          `${pack.id} has no file ${path}; game_assets_search with pack "${pack.id}" lists its files.`,
+          `${pack.id} has no file ${path}; game_assets op search with pack "${pack.id}" lists its files.`,
         );
       const files = NodePath.join(packDir(pack), "files");
       const absolute = NodePath.join(files, ...segments);
@@ -1955,7 +1955,7 @@ const make = Effect.gen(function* () {
           "Library",
           pack.id,
           "invalid-input",
-          `${pack.id} ships no picture of its look. Use a pack that ships one, or a game image of the look, such as a game_blender_look render of one of its models.`,
+          `${pack.id} ships no picture of its look. Use a pack that ships one, or a game image of the look, such as a game_blender op look render of one of its models.`,
         );
       return { path, file: yield* packFile(pack.id, path) };
     });

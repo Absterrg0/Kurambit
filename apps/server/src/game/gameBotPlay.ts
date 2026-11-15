@@ -614,7 +614,7 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
           (videoFacts.longestStallMs >= 2000
             ? `; the game drew no new frame for ${(videoFacts.longestStallMs / 1000).toFixed(1)} s at its longest.`
             : "."));
-    // The trace carries what game_bot_view shows, so a view after a restart reads it from disk.
+    // The trace carries what game_play op bot_view shows, so a view after a restart reads it from disk.
     const kept = {
       ...trace,
       ...(refusedStates.length > 0 ? { refusedStates } : {}),
@@ -664,7 +664,7 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
  * A run that never got to play: its bot never ran (its module did not load,
  * or its child died before its first line), which says nothing about the game
  * and is not a bot run on the record; or the game never booted, which is
- * measured. Its trace still says which, for game_bot_view.
+ * measured. Its trace still says which, for game_play op bot_view.
  */
 export const runWithoutPlay = async (
   args: Pick<BotRunArgs, "root" | "runId" | "botFile" | "mode" | "tracePath" | "videoPath">,

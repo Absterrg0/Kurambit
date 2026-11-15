@@ -268,7 +268,7 @@ func _place(placed: Dictionary, path: String, transform: Transform3D) -> void:
 func _multimesh(root: Node3D, path: String, transforms: Array) -> float:
 	var packed := load(path) as PackedScene
 	if packed == null:
-		push_error("LevelMap.build_3d: %s is not a scene (a .glb or .tscn); run game_import after copying it" % path)
+		push_error("LevelMap.build_3d: %s is not a scene (a .glb or .tscn); run game_assets op import after copying it" % path)
 		return 0.0
 	var piece := packed.instantiate()
 	var top := 0.0

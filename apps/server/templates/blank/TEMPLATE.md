@@ -78,7 +78,7 @@ instanced GLB's clips by state: `anim.play("idle" | "walk" | "run" | "jump" |
 "fall" | "attack" | "hit" | "die", {"speed": s})` every frame crossfades,
 returns from one-shots and falls back (run to walk to idle) when a clip is
 missing. `SpriteStrips.apply(sprite, {...}, view)` (`shell/sprite_strips.gd`)
-loads `game_blender_render_sprites` strips into an AnimatedSprite2D.
+loads `game_blender` op `sprites` strips into an AnimatedSprite2D.
 `FollowCamera2D` (Camera2D smoothing, drag margins and limits plus look-ahead)
 and `FollowCamera3D` (a SpringArm3D that pulls in at walls, with orbit) follow
 the player. The comment block at the top of each file shows each call.
@@ -109,7 +109,7 @@ file shows each call.
 - Put runtime assets under `assets/`, including imported GLB files under
   `assets/models/`. Keep editable `.blend` sources outside `godot/`.
 - `export_presets.cfg` provides Web, Windows and Linux exports through
-  `game_export`. Keep Web single-threaded so it works without special
+  `game_builds` op `export`. Keep Web single-threaded so it works without special
   response headers.
 
 Read BRIEF.md and the relevant files in `studio-skills/`. When PLAN.md exists,
@@ -133,7 +133,7 @@ and `scenes/game.tscn`. A clean check says the project boots; it cannot
 establish that the game is good to play. Godot's shutdown-only resource-use
 chatter is noise, not a gameplay defect.
 
-Use `game_explore_start`, `game_explore_act` and `game_explore_close` to play.
+Use `game_play` ops `start`, `act` and `close` to play.
 The game opens on the title: click `Title.Play` or press Enter. Inspect the
 frames, try real inputs, and report what you reached and what remains
 unverified. Fix the cause of the biggest play flaw. Games are verified by

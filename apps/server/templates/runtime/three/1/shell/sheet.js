@@ -1,4 +1,4 @@
-// The model sheet the harness asks for (game_model_sheet): one thing the game named, drawn alone
+// The model sheet the harness asks for (game_play op model_sheet): one thing the game named, drawn alone
 // from the front, the side, the back and above at three quarters, beside a 1.8 m figure on a
 // one-metre grid, with what it costs to draw. The harness may name fewer views (a side profile
 // and a reference's view), which then draw larger. It is a picture laid over the page; the run under

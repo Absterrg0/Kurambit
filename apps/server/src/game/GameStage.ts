@@ -53,7 +53,7 @@ export class GameStage extends Context.Service<
       owner: string,
     ) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
-     * `game_preview`: a playable build of the current sources. A Web build
+     * `game_play` op `preview`: a playable build of the current sources. A Web build
      * older than the sources is rebuilt (the same export the Stage's Rebuild runs); a live-staged game serves its folder instead;
      * an engine whose games play as a built player gets that player prepared.
      */
@@ -104,14 +104,14 @@ const make = Effect.gen(function* () {
   /** What a game whose engine makes no Web build answers Play with. */
   const noWebPlay = (root: string, displayName: string): GameActionResult => ({
     success: false,
-    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from Export… in the Stage's More menu (game_export for an agent), or explore and bot-play the game, which play its built player.`,
+    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from Export… in the Stage's More menu (game_builds op export for an agent), or explore and bot-play the game, which play its built player.`,
     path: root,
     url: null,
     process: null,
   });
   // A live-staged game is its folder, served as its dev server: nothing is
   // built or written, so there is no operation and no write admission.
-  // `message` is read by whoever asked: the person's Stage shows Play's, an agent reads game_preview's.
+  // `message` is read by whoever asked: the person's Stage shows Play's, an agent reads game_play op preview's.
   const playLive = (root: string, profile: GameEngineProfile, message: (url: string) => string) =>
     preview
       .live(root, profile.projectDirectory, (path) =>
@@ -234,7 +234,7 @@ const make = Effect.gen(function* () {
       const prepared = yield* players.prepare(root);
       return {
         success: true,
-        message: `${profile.displayName} games play as a player of the current sources: ${prepared.player} is ready (${prepared.origin}). game_explore_start and game_bot_run play it.`,
+        message: `${profile.displayName} games play as a player of the current sources: ${prepared.player} is ready (${prepared.origin}). game_play op start and game_play op bot play it.`,
         path: prepared.player,
         url: null,
         process: null,

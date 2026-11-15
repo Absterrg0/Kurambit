@@ -51,7 +51,7 @@ export const UNITY_PROFILE: GameEngineProfile = {
     ],
     agents: `Build BRIEF.md's game in Unity 6 (C#, Input System). unity/ is the project inside a demo shell (TEMPLATE.md): gameplay goes in unity/Assets/Scenes/Game.unity, built by unity/Assets/Editor/BuildGame.cs, game code in unity/Assets/Scripts; unity/Assets/Kurambit stays as shipped.
 
-Use the game_* tools to check, play, export and package the game, and the game_unity_* tools to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
+Use the game_* tools to check, play, export and package the game, and the game_unity tool to edit scenes in the live editor; never run Unity yourself. Keep builds/ and unity/Library, Temp, Logs, UserSettings generated.
 `,
   },
   resourcePath: (projectRelative) => projectRelative,
@@ -65,15 +65,6 @@ Use the game_* tools to check, play, export and package the game, and the game_u
   stripLoad: null,
   xvfbRenderer: null,
   sidecarLoad: null,
-  tools: {
-    import: "Unity games refresh assets and recompile scripts in the game's live Unity editor.",
-    check:
-      "Unity games recompile, then play the first enabled build scene and the gameplay scene game.json declares in the live editor for 120 frames each and read its console errors; a scene that never lets play mode advance is an error (the game froze), one that runs below speed is a warning with its frame rate.",
-    export:
-      "Unity games export Linux or Windows players built in the live editor: builds/linux/ or builds/windows/ is the whole player folder (game.x86_64 or game.exe with game_Data/ and the runtime library beside it); ship the folder. Web is refused.",
-    explore:
-      "Unity games play a player of the current sources, built once per source identity, in a window the user never sees.",
-  },
   // Unity imports only what sits under Assets/, and its template's folders are capitalised.
   layout: {
     assets: "Assets",

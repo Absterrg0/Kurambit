@@ -16,7 +16,7 @@
 // its GLBs at pin time: kaykit-1 (41 joints, Adventurers and Skeletons alike), kenney-mini
 // (7 joints, Mini Characters and Mini Dungeon) and standard-humanoid (Quaternius' 65-joint
 // UE-named rig, shared by both animation libraries and the base characters; the base
-// characters' rest frames differ by up to 23 degrees, so game_blender_character conforms
+// characters' rest frames differ by up to 23 degrees, so game_blender op character conforms
 // every body to it). kenney-blocky is a shared node hierarchy without a skin;
 // kenney-character, quaternius-knight and quaternius-ultimate ship as FBX and are named
 // from the author's description.
@@ -200,7 +200,7 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
     id: "quaternius-universal",
     title: "Quaternius universal animation",
-    look: "humanoid bodies and two animation libraries on one standard skeleton; game_blender_character conforms any body to it",
+    look: "humanoid bodies and two animation libraries on one standard skeleton; game_blender op character conforms any body to it",
   },
   {
     id: "kenney-pixel",
@@ -819,7 +819,7 @@ export const CURATED_PACKS: ReadonlyArray<LibraryPack> = [
     style: "realistic humanoid base body",
     tags: "3d character humanoid base body male female hair hairstyles eyebrows rigged standard skeleton",
     description:
-      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF for Godot and the web, FBX for Unity); game_blender_character conforms them.",
+      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF for Godot and the web, FBX for Unity); game_blender op character conforms them.",
     family: "quaternius-universal",
     rig: STANDARD_RIG,
     root: "Universal Base Characters[Standard]",

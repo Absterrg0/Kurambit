@@ -1,14 +1,52 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Reads game_check's pictures to attach them as images.
+// @effect-diagnostics nodeBuiltinImport:off -- Reads the check's and the model sheet's pictures to attach them as images.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as Sink from "effect/Sink";
-import * as Stream from "effect/Stream";
-import { Tool, type Toolkit } from "effect/ai";
-import { GameOperationError, THREE_VIEWPORT, type ThreadId } from "@kurambit/contracts";
+import {
+  GameActionResult,
+  GameAnimateResult,
+  GameAssetsAddResult,
+  GameAssetsSearchResult,
+  GameBlenderAssetsImportResult,
+  GameBlenderAssetsSearchResult,
+  GameBlenderCarveResult,
+  GameBlenderCharacterResult,
+  GameBlenderCodeResult,
+  GameBlenderExportResult,
+  GameBlenderLookResult,
+  GameBlenderLookScreenshot,
+  GameBlenderPaintResult,
+  GameBlenderRenderSpritesResult,
+  GameBlenderSceneResult,
+  GameBotRunResult,
+  GameBotViewResult,
+  GameBuildComparison,
+  GameBuildFacts,
+  GameBuildRestoreResult,
+  GameBuildsResult,
+  GameCheckResult,
+  GameExploreActResult,
+  GameExploreCloseResult,
+  GameExploreStartResult,
+  GameGenerateResult,
+  GameKeepGoingStatus,
+  GameModelSheetResult,
+  GameOperationError,
+  GameReplayResult,
+  GameSavedListResult,
+  GameStatus,
+  GameUnityRecompileResult,
+  GameUnityScreenshotResult,
+  GameUnityTextResult,
+  GameUnityToolsResult,
+  GameWebPackage,
+  GameWindowsPackage,
+  gameModelChoice,
+  THREE_VIEWPORT,
+  type ThreadId,
+} from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
@@ -28,23 +66,21 @@ import * as GameUnity from "../../../game/GameUnity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
-  GameToolkit,
+  GameAssetsToolkit,
+  GameBlenderToolkit,
   GameCheckToolkit,
-  GameModelSheetToolkit,
-  GameAnimateToolkit,
-  GameAssetsSearchToolkit,
-  GameBlenderLookToolkit,
-  GameBlenderRenderSpritesToolkit,
-  GameUnityScreenshotToolkit,
-  GameMoreTool,
-  GameMoreToolkit,
+  GamePlayToolkit,
+  GameToolkit,
+  GameUnityToolkit,
 } from "./tools.ts";
-import { GAME_TOOL_PLACEMENTS, refusal } from "./placement.ts";
+import { GAME_TOOL_OPS, opRefusal, type GameToolName } from "./placement.ts";
+import type { GameEngineCapability } from "../../../game/engineProfile.ts";
 import { besideReference, gameReference } from "../../../game/gameReference.ts";
+
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
-/** One tool call: the calling thread's work on the game service that owns it, as an agent's. */
+/** One op: the calling thread's work on the game service that owns it, as an agent's. */
 const withGame = <I, S, A, E>(
   service: Context.Key<I, S>,
   work: (owner: S, threadId: ThreadId) => Effect.Effect<A, E>,
@@ -55,268 +91,79 @@ const withGame = <I, S, A, E>(
       Effect.provideService(GameCaller, { kind: "agent" }),
     );
   });
-/** One tool call on the calling chat's keep going, its refusals as operation errors. */
-const withKeepGoing = <A>(
-  work: (
-    runs: GameRunControl.GameRunControl["Service"],
-    threadId: ThreadId,
-  ) => Effect.Effect<A, GameRunControl.GameRunError>,
-) =>
-  Effect.gen(function* () {
-    const scope = yield* caller;
-    return yield* work(yield* GameRunControl.GameRunControl, scope.thread.threadId).pipe(
-      Effect.mapError((cause) =>
-        GameRunControl.GameRunError.toOperationError(`keep-going-${cause.operation}`, cause),
-      ),
-    );
-  });
+/** One op's answer, encoded by its own schema: the tool's success passes it on as it is. */
+const as =
+  <S extends Schema.Top>(schema: S) =>
+  <E, R>(effect: Effect.Effect<S["Type"], E, R>) =>
+    effect.pipe(
+      Effect.flatMap((value) => Schema.encodeUnknownEffect(schema)(value).pipe(Effect.orDie)),
+    ) as Effect.Effect<unknown, E, R | S["EncodingServices"]>;
 // Within the shortest tool-call timeout a provider gives an MCP server (Codex's is 60s).
 const TOOL_FACTS_WAIT = "30 seconds";
 
-const handlers = {
-  game_models_route: McpToolAccess.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      // The route is the person's choice: a turn keep going started is no one asking.
-      if (
-        yield* withGame(GameRunControl.GameRunControl, (runs, threadId) =>
-          runs.stepInFlight(threadId),
-        )
-      )
-        return yield* new GameOperationError({
-          operation: "set-characters",
-          path: "game.json",
-          reason: "invalid-input",
-          detail:
-            "This turn is a keep-going step, not the person's request: how models are made is theirs to change. Say in your reply what the step needed.",
-        });
-      return yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
-        projects.setCharacterRoute(threadId, input),
-      );
-    }),
-  ),
-  game_status: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
-      statuses.status(threadId, { checkSources: input.checkSources }),
-    ),
-  ),
-  game_blender_code: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.code(threadId, input)),
-  ),
-  game_blender_scene: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.scene(threadId, input)),
-  ),
-  game_blender_assets_search: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.assetsSearch(threadId, input)),
-  ),
-  game_assets_add: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
-      library.add(threadId, input),
-    ),
-  ),
-  game_blender_assets_import: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.assetsImport(threadId, input)),
-  ),
-  game_blender_export: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.exportGlb(threadId, input)),
-  ),
-  game_blender_character: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.character(threadId, input)),
-  ),
-  game_blender_paint: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.paint(threadId, input)),
-  ),
-  game_blender_carve: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.carve(threadId, input)),
-  ),
-  game_generate: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameArt.GameArt, (art, threadId) => art.generate(threadId, input)),
-  ),
-  game_image_edit: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameArt.GameArt, (art, threadId) => art.imageEdit(threadId, input)),
-  ),
-  game_generate_wait: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameArt.GameArt, (art, threadId) => art.wait(threadId, input)),
-  ),
-  game_unity_tools: McpToolAccess.readsAsCaller(() =>
-    withGame(GameUnity.GameUnity, (unity, threadId) => unity.listTools(threadId)),
-  ),
-  game_unity_edit: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameUnity.GameUnity, (unity, threadId) => unity.edit(threadId, input)),
-  ),
-  game_unity_eval: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameUnity.GameUnity, (unity, threadId) => unity.evaluate(threadId, input)),
-  ),
-  game_unity_recompile: McpToolAccess.actsAsCaller(() =>
-    withGame(GameEngine.GameEngine, (engines, threadId) => engines.recompile(threadId)),
-  ),
-  game_unity_play: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameUnity.GameUnity, (unity, threadId) => unity.play(threadId, input)),
-  ),
-  game_unity_console: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameUnity.GameUnity, (unity, threadId) => unity.console(threadId, input)),
-  ),
-  game_import: McpToolAccess.actsAsCaller(() =>
-    withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)),
-  ),
-  game_export: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameExport.GameExport, (exporter, threadId) =>
-      exporter.export(threadId, input.target),
-    ),
-  ),
-  game_package: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameExport.GameExport, (exporter, threadId) =>
-      Effect.gen(function* () {
-        if (input.target === "web") return yield* exporter.packageWeb(threadId);
-        return yield* exporter.packageWindows(threadId);
-      }),
-    ),
-  ),
-  game_saved: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
-      Effect.gen(function* () {
-        if (input.save !== undefined)
-          yield* saved.save(threadId, input.save.source, input.save.label);
-        if (input.delete !== undefined) yield* saved.delete(threadId, input.delete);
-        return yield* saved.list(threadId);
-      }),
-    ),
-  ),
-  game_preview: McpToolAccess.actsAsCaller(() =>
-    withGame(GameStage.GameStage, (stage, threadId) => stage.preview(threadId)),
-  ),
-  game_stop: McpToolAccess.actsAsCaller(() =>
-    withGame(GameStage.GameStage, (stage, threadId) => stage.stop(threadId)),
-  ),
-  game_explore_start: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameExplore.GameExplore, (explore, threadId) => explore.start(threadId, input)),
-  ),
-  game_explore_act: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameExplore.GameExplore, (explore, threadId) => explore.act(threadId, input)),
-  ),
-  game_explore_close: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameExplore.GameExplore, (explore, threadId) => explore.close(threadId, input)),
-  ),
-  game_bot_run: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBot.GameBot, (bots, threadId) => bots.run(threadId, input)),
-  ),
-  game_bot_view: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, input)),
-  ),
-  game_builds: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-      Effect.gen(function* () {
-        if (input.compare === undefined)
-          return yield* builds.list(threadId, { before: input.before, limit: input.limit });
-        return yield* builds.compare(
-          threadId,
-          { _tag: "build", build: input.compare[0] },
-          { _tag: "build", build: input.compare[1] },
-        );
-      }),
-    ),
-  ),
-  game_facts: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-      Effect.gen(function* () {
-        const build = input.build ?? (yield* builds.list(threadId, { limit: 1 })).builds[0]?.id;
-        if (build === undefined)
-          return yield* new GameOperationError({
-            operation: "Build facts",
-            path: threadId,
-            reason: "invalid-input",
-            detail: "This game has no builds yet: a turn that changes the game makes one.",
-          });
-        return yield* builds.measure(
-          threadId,
-          { _tag: "build", build },
-          {
-            waitFor: TOOL_FACTS_WAIT,
-            queue: "background",
-            ...(input.skilled === true ? { skilled: true } : {}),
-          },
-        );
-      }),
-    ),
-  ),
-  game_build_restore: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-      builds.restore(threadId, { _tag: "build", build: input.build }, input.commandId),
-    ),
-  ),
-  game_tune: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-      builds.keepValues(threadId, {
-        things: input.things,
-        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
-      }),
-    ),
-  ),
-  game_replay: McpToolAccess.actsAsCaller(() =>
-    withGame(GamePlays.GamePlays, (plays, threadId) => plays.replay(threadId, "folder")),
-  ),
-  game_keep_going: McpToolAccess.actsAsCaller((input) =>
-    withKeepGoing((runs, threadId) =>
-      Effect.gen(function* () {
-        if (input.steer !== undefined)
-          yield* runs.steer(threadId, {
-            threadId,
-            text: input.steer,
-            ...(input.commandId === undefined ? {} : { commandId: `${input.commandId}:steer` }),
-          });
-        if (input.mode === undefined) return yield* runs.status(threadId);
-        return yield* runs.set(threadId, {
-          threadId,
-          mode: input.mode,
-          ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
-          ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
-        });
-      }),
-    ),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
-export const layer = McpToolAccess.toLayer(GameToolkit, handlers);
+const invalid = (operation: string, detail: string) =>
+  new GameOperationError({ operation, path: "", reason: "invalid-input", detail });
+
 /**
- * Registered separately over the HTTP transport so the look image becomes
- * real image content; see McpHttpServer.registerGameBlenderLook.
+ * Runs the one op a call names, after its game and machine allowed it. A call that names none
+ * runs `fallback` when the tool has one.
  */
-const blenderLookHandlers = {
-  game_blender_look: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.look(threadId, input)),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameBlenderLookToolkit.tools>;
-export const layerBlenderLook = McpToolAccess.toLayer(GameBlenderLookToolkit, blenderLookHandlers);
+const dispatch = <
+  Input extends object,
+  Ops extends {
+    readonly [Op in keyof Input]-?: (
+      value: NonNullable<Input[Op]>,
+    ) => Effect.Effect<unknown, unknown, unknown>;
+  },
+>(
+  tool: GameToolName,
+  input: Input,
+  ops: Ops,
+  fallback?: keyof Input & string,
+): Effect.Effect<
+  unknown,
+  GameOperationError | Effect.Error<ReturnType<Ops[keyof Ops]>>,
+  McpInvocationContext.McpInvocationContext | Effect.Services<ReturnType<Ops[keyof Ops]>>
+> =>
+  Effect.gen(function* () {
+    const given = (Object.keys(input) as Array<keyof Input & string>).filter(
+      (key) => input[key] !== undefined,
+    );
+    const op = given.length === 0 ? fallback : given.length === 1 ? given[0] : undefined;
+    const all: Record<string, ReadonlyArray<GameEngineCapability>> = GAME_TOOL_OPS[tool];
+    if (op === undefined)
+      return yield* invalid(
+        tool,
+        `Pass exactly one op as the only key: ${Object.keys(all).join(", ")}${given.length > 1 ? ` (this call named ${given.join(", ")})` : ""}.`,
+      );
+    const why = opRefusal(all[op] ?? [], yield* McpInvocationContext.McpInvocationContext);
+    if (why !== null) return yield* invalid(`${tool} ${op}`, `${tool} ${op}: ${why}.`);
+    // Looked up by name, an op takes its own input: the key it was found under. The signature
+    // above carries every op's errors and services, which the lookup erases.
+    const run = ops[op] as unknown as (value: unknown) => Effect.Effect<unknown>;
+    return yield* run(input[op] ?? {});
+  }) as never;
 
-/** Registered like the Blender look, so the move's pictures become real image content. */
-const animateHandlers = {
-  game_animate: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) => blender.animate(threadId, input)),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameAnimateToolkit.tools>;
-export const layerAnimate = McpToolAccess.toLayer(GameAnimateToolkit, animateHandlers);
-
-/** Registered like the Blender look, so the contact sheet becomes real image content. */
-const blenderRenderSpritesHandlers = {
-  game_blender_render_sprites: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameBlender.GameBlender, (blender, threadId) =>
-      blender.renderSprites(threadId, input),
-    ),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameBlenderRenderSpritesToolkit.tools>;
-export const layerBlenderRenderSprites = McpToolAccess.toLayer(
-  GameBlenderRenderSpritesToolkit,
-  blenderRenderSpritesHandlers,
-);
-
-/** Registered like the Blender look, so the capture becomes real image content. */
-const unityScreenshotHandlers = {
-  game_unity_screenshot: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameUnity.GameUnity, (unity, threadId) => unity.screenshot(threadId, input)),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameUnityScreenshotToolkit.tools>;
-export const layerUnityScreenshot = McpToolAccess.toLayer(
-  GameUnityScreenshotToolkit,
-  unityScreenshotHandlers,
-);
+/**
+ * How this game's models are made is the person's choice. A keep-going step's turn is not the
+ * person asking, so while one runs, art and Blender ops refuse a game.json whose choice moved
+ * since the step started (GameProjectService.stepModelChoice).
+ */
+const personsModelChoice = Effect.gen(function* () {
+  const threadId = (yield* caller).thread.threadId;
+  if (!(yield* (yield* GameRunControl.GameRunControl).stepInFlight(threadId))) return;
+  const projects = yield* GameProjectService.GameProjectService;
+  const started = yield* projects.stepModelChoice(threadId);
+  if (started === undefined) return;
+  const now = gameModelChoice(yield* projects.read(yield* projects.resolve(threadId)));
+  if (now.route === started.route && now.library === started.library) return;
+  return yield* new GameOperationError({
+    operation: "model-choice",
+    path: "game.json",
+    reason: "invalid-input",
+    detail: `This turn is a keep-going step, and game.json's model choice changed since it started (characters ${started.route} → ${now.route}, library ${started.library} → ${now.library}). How models are made is the person's choice: put game.json's characters back to "${started.route}" and library to ${started.library}, and say in your reply what the step needed.`,
+  });
+});
 
 /**
  * How the agent judges its frame against the reference, carried by every check of a game that has
@@ -332,178 +179,379 @@ const FRAME_REVIEW =
 const BRIEF_REVIEW =
   "Before you end the turn, critique this frame as a player would, biggest gap first: does it read at a glance (the player big enough and seen from a side that reads, nothing washed out or too dark), do its light and atmosphere fit the mood the brief describes (the time of day, the weather, the place's own lights), and do its title and HUD look made for this game? Fix the biggest gap and look again.";
 
+/** A check's answer, with its pictures attached as images (the views' PNGs, title then play). */
+const GameCheckAnswer = Schema.Struct({
+  ...GameCheckResult.fields,
+  screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+  /** How to judge the frame (beside the reference, when the game has one) before ending. */
+  review: Schema.optionalKey(Schema.String),
+});
+
+const png = (bytes: Buffer) => ({
+  mimeType: "image/png" as const,
+  data: bytes.toString("base64"),
+  ...THREE_VIEWPORT,
+});
+
 /**
- * game_check, registered like the Blender look so its views (the title and play as the check
- * left them) become real image content: the agent sees its game before it ends the turn. When
- * the game has a reference picture, play's frame comes stacked above it at the same size, every
- * check: matching a picture is a loop of looks, and each look needs both.
+ * A check, with its views as images: the agent sees its game before it ends the turn. When the
+ * game has a reference picture, play's frame comes stacked above it at the same size, every check:
+ * matching a picture is a loop of looks, and each look needs both.
  */
-const checkHandlers = {
-  game_check: McpToolAccess.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
-        engines.check(threadId, undefined, { final: input.final === true }),
-      );
-      const views = result.views ?? [];
-      if (views.length === 0) return result;
-      const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
-        projects.resolve(threadId),
-      );
-      const reference = yield* gameReference(root);
-      const screenshots = yield* Effect.promise(() =>
-        Promise.all(
-          views.map((view) =>
-            NodeFSP.readFile(NodePath.join(root, view.path)).then(
-              (bytes) =>
-                (view.entry === "gameplay" && reference !== null
-                  ? besideReference(bytes, reference)
-                  : null) ?? {
-                  mimeType: "image/png" as const,
-                  data: bytes.toString("base64"),
-                  ...THREE_VIEWPORT,
-                },
-              () => null,
-            ),
+const check = (final: boolean) =>
+  Effect.gen(function* () {
+    const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
+      engines.check(threadId, undefined, { final }),
+    );
+    const views = result.views ?? [];
+    if (views.length === 0) return result;
+    const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+      projects.resolve(threadId),
+    );
+    const reference = yield* gameReference(root);
+    const screenshots = yield* Effect.promise(() =>
+      Promise.all(
+        views.map((view) =>
+          NodeFSP.readFile(NodePath.join(root, view.path)).then(
+            (bytes) =>
+              (view.entry === "gameplay" && reference !== null
+                ? besideReference(bytes, reference)
+                : null) ?? png(bytes),
+            () => null,
           ),
         ),
-      );
-      const shown = screenshots.filter((shot) => shot !== null);
-      return {
-        ...result,
-        ...(shown.length === 0 ? {} : { screenshots: shown }),
-        ...(shown.length === 0 ? {} : { review: reference === null ? BRIEF_REVIEW : FRAME_REVIEW }),
-      };
-    }),
+      ),
+    );
+    const shown = screenshots.filter((shot) => shot !== null);
+    return {
+      ...result,
+      ...(shown.length === 0 ? {} : { screenshots: shown }),
+      ...(shown.length === 0 ? {} : { review: reference === null ? BRIEF_REVIEW : FRAME_REVIEW }),
+    };
+  }).pipe(as(GameCheckAnswer));
+
+const checkHandlers = {
+  game_check: McpToolAccess.actsAsCaller((input) =>
+    dispatch(
+      "game_check",
+      input,
+      {
+        look: () => check(false),
+        // The critique is read back from this call's input by keep going (GameRunStepRunner).
+        final: () => check(true),
+        facts: (facts) =>
+          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+            Effect.gen(function* () {
+              const build =
+                facts.build ?? (yield* builds.list(threadId, { limit: 1 })).builds[0]?.id;
+              if (build === undefined)
+                return yield* invalid(
+                  "Build facts",
+                  "This game has no builds yet: a turn that changes the game makes one.",
+                );
+              return yield* builds.measure(
+                threadId,
+                { _tag: "build", build },
+                {
+                  waitFor: TOOL_FACTS_WAIT,
+                  queue: "background",
+                  ...(facts.skilled === true ? { skilled: true } : {}),
+                },
+              );
+            }),
+          ).pipe(as(GameBuildFacts)),
+        status: (status) =>
+          withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
+            statuses.status(threadId, { checkSources: status.checkSources }),
+          ).pipe(as(GameStatus)),
+      },
+      "look",
+    ),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
 export const layerCheck = McpToolAccess.toLayer(GameCheckToolkit, checkHandlers);
 
-/** Registered like the Blender look, so each model sheet becomes real image content. */
-const modelSheetHandlers = {
-  game_model_sheet: McpToolAccess.readsAsCaller((input) =>
-    Effect.gen(function* () {
-      const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
-        engines.modelSheet(threadId, input),
-      );
-      const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
-        projects.resolve(threadId),
-      );
-      const screenshots = yield* Effect.promise(() =>
-        Promise.all(
-          result.sheets.map((sheet) =>
-            NodeFSP.readFile(NodePath.join(root, sheet.image)).then(
-              (bytes) => ({
-                mimeType: "image/png" as const,
-                data: bytes.toString("base64"),
-                ...THREE_VIEWPORT,
-              }),
-              () => null,
-            ),
-          ),
-        ),
-      );
-      const reference = yield* gameReference(root, input.reference);
-      const shown = [
-        ...screenshots.filter((shot) => shot !== null),
-        ...(reference === null ? [] : [reference.image]),
-      ];
-      return {
-        ...result,
-        ...(reference === null ? {} : { reference: reference.path }),
-        ...(shown.length === 0 ? {} : { screenshots: shown }),
-      };
-    }),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameModelSheetToolkit.tools>;
-export const layerModelSheet = McpToolAccess.toLayer(GameModelSheetToolkit, modelSheetHandlers);
-
-/** Registered like the Blender look, so the contact sheet becomes real image content. */
-const assetsSearchHandlers = {
-  game_assets_search: McpToolAccess.readsAsCaller((input) =>
-    withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
-      library.search(threadId, input),
-    ),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameAssetsSearchToolkit.tools>;
-export const layerAssetsSearch = McpToolAccess.toLayer(
-  GameAssetsSearchToolkit,
-  assetsSearchHandlers,
-);
-
-const refuse = (message: string, failure?: unknown) =>
-  Effect.fail(failure === undefined ? { message } : { message, failure });
-
-/** One built toolkit, by tool name: what game_more needs to describe or run any of its tools. */
-const runner = <Tools extends Record<string, Tool.Any>>(kit: Toolkit.WithHandler<Tools>) => ({
-  tools: kit.tools as Record<string, Tool.Any>,
-  run: (name: string, input: unknown) =>
-    kit.handle(name as keyof Tools, input as never).pipe(
-      Effect.flatMap((results) => Stream.run(results, Sink.last())),
-      Effect.flatMap(Effect.fromOption),
-      Effect.catch((error) => refuse(error instanceof Error ? error.message : `${name} failed.`)),
-    ),
-});
-
-/**
- * game_more: an asked-for tool, described, or run by its own toolkit's handler
- * with its own access check, so it behaves exactly as a listed call would. It is
- * registered as an image tool, so a look's or a move's pictures arrive as images.
- */
-export const layerMore = McpToolAccess.toLayer(
-  GameMoreToolkit,
+/** Named models drawn from every side, with the reference picture after them, as images. */
+const modelSheet = (input: Parameters<GameEngine.GameEngine["Service"]["modelSheet"]>[1]) =>
   Effect.gen(function* () {
-    const kits = [
-      runner(yield* GameToolkit),
-      runner(yield* GameCheckToolkit),
-      runner(yield* GameBlenderLookToolkit),
-      runner(yield* GameAnimateToolkit),
-      runner(yield* GameBlenderRenderSpritesToolkit),
+    const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
+      engines.modelSheet(threadId, input),
+    );
+    const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+      projects.resolve(threadId),
+    );
+    const screenshots = yield* Effect.promise(() =>
+      Promise.all(
+        result.sheets.map((sheet) =>
+          NodeFSP.readFile(NodePath.join(root, sheet.image)).then(png, () => null),
+        ),
+      ),
+    );
+    const reference = yield* gameReference(root, input.reference);
+    const shown = [
+      ...screenshots.filter((shot) => shot !== null),
+      ...(reference === null ? [] : [reference.image]),
     ];
     return {
-      game_more: McpToolAccess.readsAsCaller((input: Tool.Parameters<typeof GameMoreTool>) =>
-        Effect.gen(function* () {
-          const name = input.tool;
-          const scope = yield* McpInvocationContext.McpInvocationContext;
-          const kit = kits.find((candidate) => name in candidate.tools);
-          const why = refusal(GAME_TOOL_PLACEMENTS[name], scope);
-          if (why !== null || kit === undefined)
-            return yield* refuse(
-              `${name} is not available in this chat: ${why ?? "game_more cannot run it"}.`,
-            );
-          const tool = kit.tools[name]!;
-          if (input.input === undefined)
-            return {
-              tool: name,
-              description: tool.description,
-              parameters: Tool.getJsonSchema(tool),
-            };
-          // Every game tool is strict (a misplaced key is refused, never dropped); the toolkit's
-          // own decode ignores excess keys, so the same rule is applied here first.
-          // Game tool parameters decode without services; Tool.Any only erases that.
-          const parameters = tool.parametersSchema as Schema.Decoder<unknown>;
-          yield* Schema.decodeUnknownEffect(parameters)(input.input, {
-            onExcessProperty: "error",
-            errors: "all",
-          }).pipe(Effect.catch((error) => refuse(`${name}: ${String(error)}`)));
-          const outcome = yield* kit.run(name, input.input);
-          if (!outcome.isFailure) return outcome.encodedResult;
-          const encoded = outcome.encodedResult as { readonly message?: unknown } | null;
-          return yield* refuse(
-            typeof encoded?.message === "string" ? encoded.message : `${name} failed.`,
-            outcome.encodedResult,
-          );
-        }),
-      ),
+      ...result,
+      ...(reference === null ? {} : { reference: reference.path }),
+      ...(shown.length === 0 ? {} : { screenshots: shown }),
     };
   }).pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        McpToolAccess.HandlersLayer.layer(layer),
-        McpToolAccess.HandlersLayer.layer(layerBlenderLook),
-        McpToolAccess.HandlersLayer.layer(layerAnimate),
-        McpToolAccess.HandlersLayer.layer(layerBlenderRenderSprites),
-        McpToolAccess.HandlersLayer.layer(layerCheck),
+    as(
+      Schema.Struct({
+        ...GameModelSheetResult.fields,
+        screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+      }),
+    ),
+  );
+
+const playHandlers = {
+  game_play: McpToolAccess.actsAsCaller((input) =>
+    dispatch("game_play", input, {
+      preview: () =>
+        withGame(GameStage.GameStage, (stage, threadId) => stage.preview(threadId)).pipe(
+          as(GameActionResult),
+        ),
+      start: (start) =>
+        withGame(GameExplore.GameExplore, (explore, threadId) =>
+          explore.start(threadId, start),
+        ).pipe(as(GameExploreStartResult)),
+      act: (act) =>
+        withGame(GameExplore.GameExplore, (explore, threadId) => explore.act(threadId, act)).pipe(
+          as(GameExploreActResult),
+        ),
+      close: (close) =>
+        withGame(GameExplore.GameExplore, (explore, threadId) =>
+          explore.close(threadId, close),
+        ).pipe(as(GameExploreCloseResult)),
+      bot: (bot) =>
+        withGame(GameBot.GameBot, (bots, threadId) => bots.run(threadId, bot)).pipe(
+          as(GameBotRunResult),
+        ),
+      bot_view: (view) =>
+        withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, view)).pipe(
+          as(GameBotViewResult),
+        ),
+      replay: () =>
+        withGame(GamePlays.GamePlays, (plays, threadId) => plays.replay(threadId, "folder")).pipe(
+          as(GameReplayResult),
+        ),
+      model_sheet: modelSheet,
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GamePlayToolkit.tools>;
+export const layerPlay = McpToolAccess.toLayer(GamePlayToolkit, playHandlers);
+
+const assetsHandlers = {
+  game_assets: McpToolAccess.actsAsCaller((input) =>
+    personsModelChoice.pipe(
+      Effect.andThen(
+        dispatch("game_assets", input, {
+          search: (search) =>
+            withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
+              library.search(threadId, search),
+            ).pipe(as(GameAssetsSearchResult)),
+          add: (add) =>
+            withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
+              library.add(threadId, add),
+            ).pipe(as(GameAssetsAddResult)),
+          generate: (generate) =>
+            withGame(GameArt.GameArt, (art, threadId) => art.generate(threadId, generate)).pipe(
+              as(GameGenerateResult),
+            ),
+          wait: (wait) =>
+            withGame(GameArt.GameArt, (art, threadId) => art.wait(threadId, wait)).pipe(
+              as(GameGenerateResult),
+            ),
+          image_edit: (edit) =>
+            withGame(GameArt.GameArt, (art, threadId) => art.imageEdit(threadId, edit)).pipe(
+              as(GameGenerateResult),
+            ),
+          import: () =>
+            withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)).pipe(
+              as(GameActionResult),
+            ),
+          blender_search: (search) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.assetsSearch(threadId, search),
+            ).pipe(as(GameBlenderAssetsSearchResult)),
+          blender_import: (asset) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.assetsImport(threadId, asset),
+            ).pipe(as(GameBlenderAssetsImportResult)),
+        }),
       ),
     ),
   ),
-);
+} satisfies McpToolAccess.Handlers<typeof GameAssetsToolkit.tools>;
+export const layerAssets = McpToolAccess.toLayer(GameAssetsToolkit, assetsHandlers);
+
+const blenderHandlers = {
+  game_blender: McpToolAccess.actsAsCaller((input) =>
+    personsModelChoice.pipe(
+      Effect.andThen(
+        dispatch("game_blender", input, {
+          code: (code) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.code(threadId, code),
+            ).pipe(as(GameBlenderCodeResult)),
+          look: (look) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.look(threadId, look),
+            ).pipe(as(GameBlenderLookResult)),
+          scene: (scene) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.scene(threadId, scene),
+            ).pipe(as(GameBlenderSceneResult)),
+          export: (exported) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.exportGlb(threadId, exported),
+            ).pipe(as(GameBlenderExportResult)),
+          character: (character) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.character(threadId, character),
+            ).pipe(as(GameBlenderCharacterResult)),
+          paint: (paint) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.paint(threadId, paint),
+            ).pipe(as(GameBlenderPaintResult)),
+          carve: (carve) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.carve(threadId, carve),
+            ).pipe(as(GameBlenderCarveResult)),
+          sprites: (sprites) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.renderSprites(threadId, sprites),
+            ).pipe(as(GameBlenderRenderSpritesResult)),
+          animate: (move) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.animate(threadId, move),
+            ).pipe(as(GameAnimateResult)),
+        }),
+      ),
+    ),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameBlenderToolkit.tools>;
+export const layerBlender = McpToolAccess.toLayer(GameBlenderToolkit, blenderHandlers);
+
+const unityHandlers = {
+  game_unity: McpToolAccess.actsAsCaller((input) =>
+    dispatch("game_unity", input, {
+      tools: () =>
+        withGame(GameUnity.GameUnity, (unity, threadId) => unity.listTools(threadId)).pipe(
+          as(GameUnityToolsResult),
+        ),
+      edit: (edit) =>
+        withGame(GameUnity.GameUnity, (unity, threadId) => unity.edit(threadId, edit)).pipe(
+          as(GameUnityTextResult),
+        ),
+      eval: (code) =>
+        withGame(GameUnity.GameUnity, (unity, threadId) => unity.evaluate(threadId, code)).pipe(
+          as(GameUnityTextResult),
+        ),
+      recompile: () =>
+        withGame(GameEngine.GameEngine, (engines, threadId) => engines.recompile(threadId)).pipe(
+          as(GameUnityRecompileResult),
+        ),
+      play: (play) =>
+        withGame(GameUnity.GameUnity, (unity, threadId) => unity.play(threadId, play)).pipe(
+          as(GameUnityTextResult),
+        ),
+      console: (console) =>
+        withGame(GameUnity.GameUnity, (unity, threadId) => unity.console(threadId, console)).pipe(
+          as(GameUnityTextResult),
+        ),
+      screenshot: (screenshot) =>
+        withGame(GameUnity.GameUnity, (unity, threadId) =>
+          unity.screenshot(threadId, screenshot),
+        ).pipe(as(GameUnityScreenshotResult)),
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameUnityToolkit.tools>;
+export const layerUnity = McpToolAccess.toLayer(GameUnityToolkit, unityHandlers);
+
+const handlers = {
+  game_builds: McpToolAccess.actsAsCaller((input) =>
+    dispatch(
+      "game_builds",
+      input,
+      {
+        list: (list) =>
+          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+            builds.list(threadId, { before: list.before, limit: list.limit }),
+          ).pipe(as(GameBuildsResult)),
+        compare: (pair) =>
+          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+            builds.compare(
+              threadId,
+              { _tag: "build", build: pair.from },
+              { _tag: "build", build: pair.to },
+            ),
+          ).pipe(as(GameBuildComparison)),
+        restore: (restore) =>
+          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+            builds.restore(threadId, { _tag: "build", build: restore.build }, restore.commandId),
+          ).pipe(as(GameBuildRestoreResult)),
+        saved: (saved) =>
+          withGame(GameSavedMediaService.GameSavedMediaService, (media, threadId) =>
+            Effect.gen(function* () {
+              if (saved.save !== undefined)
+                yield* media.save(threadId, saved.save.source, saved.save.label);
+              if (saved.delete !== undefined) yield* media.delete(threadId, saved.delete);
+              return yield* media.list(threadId);
+            }),
+          ).pipe(as(GameSavedListResult)),
+        export: (release) =>
+          withGame(GameExport.GameExport, (exporter, threadId) =>
+            exporter.export(threadId, release.target),
+          ).pipe(as(GameActionResult)),
+        package: (pack) =>
+          withGame(GameExport.GameExport, (exporter, threadId) =>
+            pack.target === "web"
+              ? exporter.packageWeb(threadId).pipe(as(GameWebPackage))
+              : exporter.packageWindows(threadId).pipe(as(GameWindowsPackage)),
+          ),
+        stop: () =>
+          withGame(GameStage.GameStage, (stage, threadId) => stage.stop(threadId)).pipe(
+            as(GameActionResult),
+          ),
+      },
+      "list",
+    ),
+  ),
+  // Keep going: the same service the composer control and the banner reach.
+  game_keep_going: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const why = opRefusal(
+        GAME_TOOL_OPS.game_keep_going.set,
+        yield* McpInvocationContext.McpInvocationContext,
+      );
+      if (why !== null) return yield* invalid("game_keep_going", `game_keep_going: ${why}.`);
+      const scope = yield* caller;
+      const threadId = scope.thread.threadId;
+      const runs = yield* GameRunControl.GameRunControl;
+      return yield* Effect.gen(function* () {
+        if (input.steer !== undefined)
+          yield* runs.steer(threadId, {
+            threadId,
+            text: input.steer,
+            ...(input.commandId === undefined ? {} : { commandId: `${input.commandId}:steer` }),
+          });
+        if (input.mode === undefined) return yield* runs.status(threadId);
+        return yield* runs.set(threadId, {
+          threadId,
+          mode: input.mode,
+          ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
+          ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+        });
+      }).pipe(
+        Effect.mapError((cause) =>
+          GameRunControl.GameRunError.toOperationError(`keep-going-${cause.operation}`, cause),
+        ),
+        as(GameKeepGoingStatus),
+      );
+    }),
+  ),
+} satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
+export const layer = McpToolAccess.toLayer(GameToolkit, handlers);

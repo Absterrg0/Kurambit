@@ -1353,7 +1353,7 @@ def animate(params):
     t0 = time.time()
     arm = bpy.data.objects.get(params["armature"])
     if arm is None or arm.type != "ARMATURE":
-        raise Refused("invalid-input", f"no armature {params['armature']!r} in the live scene; game_blender_character makes one")
+        raise Refused("invalid-input", f"no armature {params['armature']!r} in the live scene; game_blender op character makes one")
     clip = params["clip"]
     spec = params["spec"]
     existing = helpers.clip_of(arm, clip)
@@ -1372,7 +1372,7 @@ def animate(params):
         try:
             body = Body(arm)
         except ValueError as cause:
-            raise Refused("invalid-input", f"{arm.name} is {cause}: game_animate compiles moves for characters game_blender_character made") from None
+            raise Refused("invalid-input", f"{arm.name} is {cause}: game_blender op animate compiles moves for characters game_blender op character made") from None
         frames, poses, report = compile_move(body, spec, fps)
         name = helpers.action_name(arm.name, clip)
         if existing is not None:

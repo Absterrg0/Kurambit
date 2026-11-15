@@ -21,7 +21,7 @@ export const GAME_BOT_BOUNDS = {
   maxFindings: 40,
   /** Frames extracted from the run video for the result. */
   maxFrames: 8,
-  /** Recent bot runs remembered per game for game_bot_view. */
+  /** Recent bot runs remembered per game for game_play op bot_view. */
   maxRuns: 20,
 } as const;
 

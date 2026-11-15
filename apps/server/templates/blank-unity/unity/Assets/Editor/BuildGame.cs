@@ -10,7 +10,7 @@ using UnityEngine.SceneManagement;
 // The game's scene builder: what Assets/Scenes/Game.unity holds (camera,
 // lights, level, player, props, their components and references) is made
 // here, in code that stays in the project, so it survives a revert and runs
-// again after any change. Run it with game_unity_eval:
+// again after any change. Run it with game_unity op eval:
 //
 //   return BuildGame.Run();
 //
@@ -89,7 +89,7 @@ public static class BuildGame
     public static T Load<T>(string path) where T : UnityEngine.Object
     {
         var asset = AssetDatabase.LoadAssetAtPath<T>(path);
-        if (asset == null) Debug.LogError($"BuildGame: nothing at {path} (a typo, or a file game_import has not imported yet).");
+        if (asset == null) Debug.LogError($"BuildGame: nothing at {path} (a typo, or a file game_assets op import has not imported yet).");
         return asset;
     }
 

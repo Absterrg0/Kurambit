@@ -130,7 +130,7 @@ export const PassResult = Schema.Struct({
   ),
   /**
    * Each marked armature's clips by name: its own (made here or brought with its body) and those
-   * game_blender_character brought from the clip library. A mark no generation delivered stands
+   * game_blender op character brought from the clip library. A mark no generation delivered stands
    * only on its own clips (ownRigRefusal).
    */
   ownClips: Schema.optionalKey(
@@ -301,7 +301,7 @@ const partText = (part: GameAssetPart) => {
 
 /** The ASSETS.md line of one export: where every part came from, from the stamps. */
 export const ledgerLine = (file: string, candidate: Candidate) =>
-  `- \`${file}\` — made in Blender by game_blender_export, with its sidecar \`${NodePath.posix.basename(sidecarPathOf(file))}\`: ${[...new Set(candidate.parts.map(partText))].join(", ")}. Depicts: ${candidate.subject}.`;
+  `- \`${file}\` — made in Blender by game_blender op export, with its sidecar \`${NodePath.posix.basename(sidecarPathOf(file))}\`: ${[...new Set(candidate.parts.map(partText))].join(", ")}. Depicts: ${candidate.subject}.`;
 
 const LOCOMOTION = /walk|run|jog|sprint/i;
 /** Clips whose first and last poses should agree. */

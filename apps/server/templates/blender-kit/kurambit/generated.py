@@ -1,4 +1,4 @@
-"""generated(): a model game_generate delivered, brought into the live scene and stamped for the
+"""generated(): a model game_assets op generate delivered, brought into the live scene and stamped for the
 ledger like any import, so the review, the export and the sidecar credit its provider.
 
 params (the server resolves the path and reads the generation's record):
@@ -16,7 +16,7 @@ params (the server resolves the path and reads the generation's record):
 A creature keeps its skeleton and its clips: it is never conformed, and its armature carries
 kurambit_rig so the pass and the lock know it is on its own rig. A model made in parts keeps each
 part as its own object, named after the part, so the game can pivot it. A humanoid is not imported
-here: game_blender_character conforms it to the standard skeleton."""
+here: game_blender op character conforms it to the standard skeleton."""
 import json
 import re
 
@@ -56,7 +56,7 @@ def _rest_idle(arm, owner, stamp, frames=30):
 def generated(params):
     name, lane, stamp = params["name"], params["lane"], params["stamp"]
     if name in bpy.data.collections or name in bpy.data.objects:
-        raise Refused("invalid-input", f"{name} already exists in the live scene: remove it first (game_blender_code), or import under another name")
+        raise Refused("invalid-input", f"{name} already exists in the live scene: remove it first (game_blender op code), or import under another name")
     skeleton.object_mode()
     new, actions = skeleton.import_model(params["path"])
     arms = [o for o in new if o.type == "ARMATURE"]

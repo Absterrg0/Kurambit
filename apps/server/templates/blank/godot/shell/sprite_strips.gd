@@ -1,4 +1,4 @@
-## Strips from game_blender_render_sprites on an AnimatedSprite2D. Each render
+## Strips from game_blender op sprites on an AnimatedSprite2D. Each render
 ## writes `<output>.sprite.json` beside its frames (frame size, fps, loop and
 ## the anchor per view); this turns them into one SpriteFrames, each strip at
 ## its own speed, and offsets the sprite so the node origin is the feet (or the
@@ -12,7 +12,7 @@
 ##       }, "right")                        # the view rendered; flip_h faces left
 ##   # every frame: sprite.play("walk" if moving else "idle")
 ##
-## Run game_import after a render so the frames load.
+## Run game_assets op import after a render so the frames load.
 class_name SpriteStrips
 extends RefCounted
 
@@ -40,7 +40,7 @@ static func apply(sprite: AnimatedSprite2D, strips: Dictionary, view := "") -> S
 		for file in strip.get("frames", []):
 			var texture := load(path.get_base_dir().path_join(str(file))) as Texture2D
 			if texture == null:
-				push_warning("SpriteStrips: no frame %s (run game_import after rendering)" % file)
+				push_warning("SpriteStrips: no frame %s (run game_assets op import after rendering)" % file)
 				continue
 			frames.add_frame(animation, texture)
 		# Centred frames: move the drawing so the anchor lands on the node origin.

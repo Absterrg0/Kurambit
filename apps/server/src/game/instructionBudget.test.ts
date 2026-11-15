@@ -15,14 +15,12 @@ import {
 } from "@kurambit/contracts";
 import { McpInvocationContext } from "../mcp/McpInvocationContext.ts";
 import {
-  GameAnimateTool,
-  GameAssetsSearchTool,
-  GameBlenderLookTool,
-  GameBlenderRenderSpritesTool,
-  GameModelSheetTool,
-  GameMoreTool,
+  GameAssetsTool,
+  GameBlenderTool,
+  GameCheckTool,
+  GamePlayTool,
   GameToolkit,
-  GameUnityScreenshotTool,
+  GameUnityTool,
 } from "../mcp/toolkits/game/tools.ts";
 import { firstTurnMessage, gameTurnRules, scaffoldFiles } from "./scaffold.ts";
 
@@ -46,15 +44,11 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
   generated: 17_000,
 };
 /**
- * Bytes of tool descriptions a three.js chat is handed every turn, by route. Code and generated
- * keep the Blender tools behind game_more (10,918 on 2026-11-08); the Blender route lists them
- * (21,513 on 2026-11-15), with about 5% over.
+ * Bytes of tool descriptions a three.js chat is handed every turn, whatever its model route: the
+ * six game tools, each listed from the first turn (4,355 on 2026-11-16, from 12,428 over twelve
+ * tools before they took ops), with about 10% over (the target was 6,000).
  */
-const LISTED_TOOLS_BUDGET: Readonly<Record<GameCharacterRoute, number>> = {
-  code: 12_000,
-  generated: 12_000,
-  blender: 22_500,
-};
+const LISTED_TOOLS_BUDGET = 4_800;
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");
@@ -109,17 +103,15 @@ const firstTurnBytes = (choice: (typeof CHOICES)[keyof typeof CHOICES]) => {
 
 const GAME_TOOLS = [
   ...Object.values(GameToolkit.tools),
-  GameBlenderLookTool,
-  GameAnimateTool,
-  GameBlenderRenderSpritesTool,
-  GameAssetsSearchTool,
-  GameModelSheetTool,
-  GameUnityScreenshotTool,
-  GameMoreTool,
+  GameCheckTool,
+  GamePlayTool,
+  GameAssetsTool,
+  GameBlenderTool,
+  GameUnityTool,
 ];
 
-/** Each tool the MCP server would list for a three.js chat on this route, by its own EnabledWhen. */
-const listedTools = (route: GameCharacterRoute) =>
+/** Each tool the MCP server would list for a three.js chat, by its own EnabledWhen. */
+const listedTools = () =>
   Effect.sync(() =>
     GAME_TOOLS.filter(
       (tool) =>
@@ -135,7 +127,6 @@ const listedTools = (route: GameCharacterRoute) =>
     Effect.provideService(McpInvocationContext, {
       environmentId: EnvironmentId.make("budget"),
       gameEngine: "three",
-      gameModels: { route, library: false },
       blenderMissing: null,
       capabilities: new Set<never>(),
       issuedAt: 0,
@@ -173,23 +164,27 @@ it("keeps a three.js game's first-turn reading within its budget", () => {
   }
 });
 
-it.effect("keeps the tool descriptions a three.js chat lists within its route's budget", () =>
+it.effect("keeps the tool descriptions a three.js chat lists within their budget", () =>
   Effect.gen(function* () {
-    for (const [route, budget] of Object.entries(LISTED_TOOLS_BUDGET) as Array<
-      [GameCharacterRoute, number]
-    >) {
-      const tools = yield* listedTools(route);
-      const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
-      const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
-      expect(
-        total,
-        over(
-          `The ${route} route's ${tools.length} listed tools' descriptions`,
-          parts,
-          budget,
-          "Cut what a skill or another tool already says, or keep the tool for the moment it is asked for (placement.ts `asked`), rather than raising the budget.",
-        ),
-      ).toBeLessThanOrEqual(budget);
-    }
+    const tools = yield* listedTools();
+    const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
+    const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
+    expect(tools.map((tool) => tool.name).toSorted()).toEqual([
+      "game_assets",
+      "game_blender",
+      "game_builds",
+      "game_check",
+      "game_keep_going",
+      "game_play",
+    ]);
+    expect(
+      total,
+      over(
+        `The ${tools.length} listed tools' descriptions`,
+        parts,
+        LISTED_TOOLS_BUDGET,
+        "Say what each op gives in a sentence, and leave how to use it to a skill, rather than raising the budget.",
+      ),
+    ).toBeLessThanOrEqual(LISTED_TOOLS_BUDGET);
   }),
 );

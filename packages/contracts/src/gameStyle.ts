@@ -30,14 +30,14 @@ export const GameStyleView = Schema.Literals(["side", "top-down", "isometric", "
 export type GameStyleView = typeof GameStyleView.Type;
 
 /**
- * STYLE.json: the look a game records. game_assets_add writes it from the
+ * STYLE.json: the look a game records. game_assets op add writes it from the
  * style family the agent chooses (GameStyleLock), the person may edit it, and
  * the art tools read it on every call to fill their defaults; none refuses an
  * asset for falling outside it.
  */
 export const GameStyle = Schema.Struct({
   version: Schema.Literal(1),
-  /** A style family from the library (game_assets_search lists them). */
+  /** A style family from the library (game_assets op search lists them). */
   family: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
   /** pixel: sprites are quantised to the palette at the tile's pixel scale; smooth: drawn at size. */
   mode: Schema.Literals(["pixel", "smooth"]),
@@ -139,9 +139,9 @@ export const GameStyle = Schema.Struct({
 );
 export type GameStyle = typeof GameStyle.Type;
 
-/** A choice of look: game_assets_add derives STYLE.json's family fields from it. */
+/** A choice of look: game_assets op add derives STYLE.json's family fields from it. */
 export const GameStyleLock = Schema.Struct({
-  /** A style family from the library (game_assets_search lists them). */
+  /** A style family from the library (game_assets op search lists them). */
   family: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   view: GameStyleView,
 });

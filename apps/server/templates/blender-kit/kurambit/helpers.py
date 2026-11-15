@@ -450,7 +450,7 @@ def add_chain(arm, name, parent, points):
 
 
 def place_chain(armature, chain, points=None, *, start=None, direction=None, length=None):
-    """Moves a spring chain's bones (made by game_blender_character's chains), for example ears onto
+    """Moves a spring chain's bones (made by game_blender op character's chains), for example ears onto
     a hood you modelled: points are world positions root to tip (one more than the bones), or give
     start (and optionally direction and length; both default to the chain's own). Do it before
     skinning parts to the chain: a skinned part keeps its shape, not its place on the bones."""

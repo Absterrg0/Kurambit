@@ -193,7 +193,7 @@ const CALL_TIMEOUT_MS: Record<string, number> = {
   get_scene_info: 2 * 60_000,
   search_assets: 2 * 60_000,
 };
-const EXPORT_TOOL = "game_blender_export";
+const EXPORT_TOOL = "game_blender op export";
 
 /**
  * Python that prints `STUDIO_ARMATURES {name: [bones]}` for the armatures that
@@ -377,7 +377,7 @@ const decodeAnimated = Schema.decodeUnknownEffect(
     summary: Schema.Array(Schema.String),
   }),
 );
-/** Where each game_animate pass keeps its spec, bundle and pictures: <dir>/<clip>/<n>. */
+/** Where each game_blender op animate pass keeps its spec, bundle and pictures: <dir>/<clip>/<n>. */
 const ANIMATE_DIR = "builds/logs/animate";
 /** Words that say nothing about a move when a bar is picked by name. */
 const BAR_FILLER = new Set([
@@ -427,7 +427,7 @@ const routeRefusalOf = (candidate: Candidate, route: GameModelChoice) =>
           : null;
 
 const STILL_WORKING =
-  "Blender may still be finishing this call. Inspect the scene with game_blender_scene or game_blender_look before retrying, so the work is not done twice.";
+  "Blender may still be finishing this call. Inspect the scene with game_blender op scene or game_blender op look before retrying, so the work is not done twice.";
 
 interface Session extends LiveHealth {
   readonly root: string;
@@ -659,7 +659,7 @@ export class GameBlender extends Context.Service<
     ) => Effect.Effect<GameBlenderCharacterResult, GameOperationError>;
     /**
      * Live Blender scene: a move spec compiled onto a character as a clip, measured beside a
-     * library clip and pictured (game_animate).
+     * library clip and pictured (game_blender op animate).
      */
     readonly animate: (
       threadId: ThreadId,
@@ -697,7 +697,7 @@ export class GameBlender extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderRenderSpritesInput,
     ) => Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError>;
-    /** Stop one game's live session by root; game_stop calls this. */
+    /** Stop one game's live session by root; game_builds op stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
   }
 >()("kurambit/game/GameBlender") {}
@@ -1103,7 +1103,7 @@ const make = Effect.gen(function* () {
         uvx: uv.uvx,
       };
       // Written as each pid appears, so a crash mid-start still leaves the
-      // next ensure or game_stop something to reap.
+      // next ensure or game_builds op stop something to reap.
       const remember = (launches: Partial<SessionRecord>) =>
         Effect.suspend(() => {
           record = { ...record, ...launches };
@@ -1687,16 +1687,16 @@ const make = Effect.gen(function* () {
         }
         const row = yield* art.delivered(root, source.id, source.path);
         if (row === null || row.generation.lane !== "creature")
-          return `${name} names a creature generation (kurambit_generation), but no finished creature generation of this game delivered it. Bring the creature game_generate made in with game_blender_assets_import (source generated), or take the generation stamp off a model you rigged and animated yourself.`;
+          return `${name} names a creature generation (kurambit_generation), but no finished creature generation of this game delivered it. Bring the creature that game_assets op generate made in with game_assets op blender_import (source generated), or take the generation stamp off a model you rigged and animated yourself.`;
       }
       return null;
     });
 
   /**
-   * A model game_generate delivered, into the live scene: stamped with its generation record (the
+   * A model game_assets op generate delivered, into the live scene: stamped with its generation record (the
    * provider, its licence, ai and the cost), so the review and the export credit it like any import.
    * A prop comes in as it is; a creature keeps its own rig and clips. A humanoid is conformed by
-   * game_blender_character instead, and images and sound never need Blender.
+   * game_blender op character instead, and images and sound never need Blender.
    */
   const importGenerated = (root: string, path: string | undefined) =>
     Effect.gen(function* () {
@@ -1704,7 +1704,7 @@ const make = Effect.gen(function* () {
         Effect.fail(opError("blender-assets-import", path ?? root, "invalid-input", detail));
       if (path === undefined)
         return yield* refuse(
-          `source generated takes path: the game-relative model game_generate delivered under ${GENERATED_DIR}/ (game_generate_wait lists its files).`,
+          `source generated takes path: the game-relative model game_assets op generate delivered under ${GENERATED_DIR}/ (game_assets op wait lists its files).`,
         );
       const realRoot = yield* realRootOf(root);
       const { file, source } = yield* generatedSource(
@@ -1715,11 +1715,11 @@ const make = Effect.gen(function* () {
       );
       if (source.lane === "character")
         return yield* refuse(
-          `${path} is a generated humanoid: game_blender_character with body {game: "${path}"} conforms it to the standard skeleton, so the clip library plays on it.`,
+          `${path} is a generated humanoid: game_blender op character with body {game: "${path}"} conforms it to the standard skeleton, so the clip library plays on it.`,
         );
       if (source.lane !== "model" && source.lane !== "creature")
         return yield* refuse(
-          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is (game_import first where the engine has an import step).`,
+          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is (game_assets op import first where the engine has an import step).`,
         );
       if (source.lane === "creature") {
         const refused = lockCharacterRouteRefusal(
@@ -1747,7 +1747,7 @@ const make = Effect.gen(function* () {
                 `${made.armature} keeps its own rig, ${source.rig}${made.clips.length === 0 ? ", with no clips" : `, and its clips: ${made.clips.join(", ")}`}. The lock's rig governs humanoids only.`,
               ]),
           ...made.notes,
-          `Saved .blend source: ${blend}. Generators model at their own scale and facing: check the size, stand it on the ground facing -Y, then game_blender_look mode review and game_blender_export.`,
+          `Saved .blend source: ${blend}. Generators model at their own scale and facing: check the size, stand it on the ground facing -Y, then game_blender op look with mode review and game_blender op export.`,
         ].join("\n"),
         blend,
       };
@@ -1879,7 +1879,7 @@ const make = Effect.gen(function* () {
         ...(routeRefusal === null ? [] : [`- [route] ${routeRefusal}`]),
       ];
       const text = [
-        `Review of ${candidate.objects.join(", ")} (key ${key.slice(0, 12)}), exactly what game_blender_export would write. Image: ${imageRel}.`,
+        `Review of ${candidate.objects.join(", ")} (key ${key.slice(0, 12)}), exactly what game_blender op export would write. Image: ${imageRel}.`,
         ...(concept.section === null
           ? []
           : [`Concept (${candidate.concept}):\n${concept.section}`]),
@@ -1890,7 +1890,7 @@ const make = Effect.gen(function* () {
               `The image has errors:\n${rendered.problems.map((problem) => `- ${problem}`).join("\n")}`,
             ]),
         refusing.length === 0
-          ? "Would refuse: nothing; game_blender_export would write it."
+          ? "Would refuse: nothing; game_blender op export would write it."
           : `Would refuse:\n${refusing.join("\n")}`,
       ].join("\n\n");
       return {
@@ -2062,7 +2062,7 @@ const make = Effect.gen(function* () {
           `${painted.head ? `Textures: ${size} px for the body and ${Math.max(Math.floor(size / 2), 256)} px for the head (its own atlas)` : `Textures: ${size} px`}${input.size !== undefined && input.size > budget ? ` (${GAME_STYLE_FILE}'s budget.texture is ${budget})` : ""}: albedo, a detail normal map and ORM, under ${TEXTURES_DIR}/${name}/.`,
           ...painted.notes,
           ...paletteNote(style),
-          `Saved .blend source: ${blend}. Look at it (game_blender_look mode review, which also shows the ¾ view the sheet never drew), then game_blender_export.`,
+          `Saved .blend source: ${blend}. Look at it (game_blender op look with mode review, which also shows the ¾ view the sheet never drew), then game_blender op export.`,
         ].join("\n"),
         alignment,
         blend,
@@ -2132,7 +2132,7 @@ const make = Effect.gen(function* () {
           `Textures: ${size} px albedo, a normal map baked from the sculpt and ORM, under ${TEXTURES_DIR}/${input.name}/.`,
           ...carved.notes,
           ...paletteNote(style),
-          `Saved .blend source: ${blend}. Look at it from a ¾ view (game_blender_look mode review) before game_blender_export: three views leave its corners to guesswork.`,
+          `Saved .blend source: ${blend}. Look at it from a ¾ view (game_blender op look with mode review) before game_blender op export: three views leave its corners to guesswork.`,
         ].join("\n"),
         object: adopted.objects[0] ?? input.name,
         blend,
@@ -2357,7 +2357,7 @@ const make = Effect.gen(function* () {
                     ]
                   : []),
                 `Pass ${pass}: spec.json, bundle.json (every number) and the pictures, in order: contact sheet (front, side, 3/4; beats marked), onion strip, footprint (top down) and curves. Saved .blend source: ${blend}.`,
-                `Read the pictures and the numbers, change the spec, and animate ${input.clip} again; stop when neither improves. The clip is ${made.action} in the scene and ships with the character: game_blender_look mode review, then game_blender_export.`,
+                `Read the pictures and the numbers, change the spec, and animate ${input.clip} again; stop when neither improves. The clip is ${made.action} in the scene and ships with the character: game_blender op look with mode review, then game_blender op export.`,
               ].join("\n"),
               action: made.action,
               pass,
@@ -2420,7 +2420,7 @@ const make = Effect.gen(function* () {
               if (generated.source.lane !== "character")
                 return yield* fail(
                   "invalid-input",
-                  `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_blender_assets_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
+                  `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_assets op blender_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
                 );
               const refused = lockCharacterRouteRefusal(
                 "generated-body",
@@ -2509,7 +2509,7 @@ const make = Effect.gen(function* () {
                       `Chains (no clip keys them; the game springs them): ${chains.map(([name, bones]) => `${name} ${bones.join(", ")}`).join("; ")}.`,
                     ]),
                 ...made.notes,
-                `Saved .blend source: ${blend}. Model the rest with game_blender_code (import kurambit for the helpers), parented to its bones; then game_blender_look mode review, then game_blender_export.`,
+                `Saved .blend source: ${blend}. Model the rest with game_blender op code (import kurambit for the helpers), parented to its bones; then game_blender op look with mode review, then game_blender op export.`,
               ].join("\n"),
               armature: made.armature,
               meshes: made.meshes,
@@ -2559,7 +2559,7 @@ const make = Effect.gen(function* () {
                 "blender-assets-import",
                 root,
                 "invalid-input",
-                `source ${input.source} takes id: the asset id game_blender_assets_search listed.`,
+                `source ${input.source} takes id: the asset id game_assets op blender_search listed.`,
               );
             const source = input.source;
             // A library file is fetched and checked against its pin before the live scene changes.
@@ -2580,7 +2580,7 @@ const make = Effect.gen(function* () {
                         "blender-assets-import",
                         root,
                         "invalid-input",
-                        "source library takes path: a .glb, .gltf or .fbx file of the entry, as game_assets_search with pack lists it.",
+                        "source library takes path: a .glb, .gltf or .fbx file of the entry, as game_assets op search with pack lists it.",
                       );
                     return { pack, file: yield* library.packFile(pack.id, input.path) };
                   })
@@ -2698,7 +2698,7 @@ const make = Effect.gen(function* () {
                 ? ""
                 : `\n${yield* library.credit(root, libraryFile.pack, "Blender assets import")}`;
             return {
-              text: `${text}${credited}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence})${ownRig.length === 0 ? "" : `; ${ownRig.join(", ")} came with clips of ${ownRig.length === 1 ? "its" : "their"} own (${ownRig.map((name) => (importedClips[name] ?? []).slice(0, 6).join(", ")).join("; ")}), so ${ownRig.length === 1 ? "it enters" : "they enter"} on ${ownRig.length === 1 ? "its" : "their"} own rig (kurambit_rig) and plays only those clips`}; review and export it like anything you build (game_blender_look mode review, then game_blender_export).`}`,
+              text: `${text}${credited}\nSaved .blend source: ${blend}\n${count === 0 ? "The import added no model to the scene (an HDRI or a texture)." : `The import stays in the live scene, marked with its source and licence (${licence})${ownRig.length === 0 ? "" : `; ${ownRig.join(", ")} came with clips of ${ownRig.length === 1 ? "its" : "their"} own (${ownRig.map((name) => (importedClips[name] ?? []).slice(0, 6).join(", ")).join("; ")}), so ${ownRig.length === 1 ? "it enters" : "they enter"} on ${ownRig.length === 1 ? "its" : "their"} own rig (kurambit_rig) and plays only those clips`}; review and export it like anything you build (game_blender op look with mode review, then game_blender op export).`}`,
               blend,
             };
           }),
@@ -2732,7 +2732,7 @@ const make = Effect.gen(function* () {
                 "blender-export",
                 root,
                 "invalid-input",
-                `No review of these objects as they are now (${digest.objects.join(", ")}): call game_blender_look with mode review first. A change to them, or to ${GAME_STYLE_FILE}, since a review needs a new one, and a review covers exactly the objects it named.`,
+                `No review of these objects as they are now (${digest.objects.join(", ")}): call game_blender op look with mode review first. A change to them, or to ${GAME_STYLE_FILE}, since a review needs a new one, and a review covers exactly the objects it named.`,
               );
             if (candidate.refusals.length > 0)
               return yield* opError(

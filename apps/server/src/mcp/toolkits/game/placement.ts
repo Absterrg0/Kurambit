@@ -1,9 +1,9 @@
-// Which game tools a thread's agent is offered. Each tool says what it needs
-// of its game's engine and whether it waits to be asked for; the thread's game,
-// engine, model route and Blender come from the MCP invocation
-// (McpHttpServer's auth middleware). A tool the listing hides is also refused
-// when called by name, by Effect's MCP core.
-import { ACTIVE_GAME_ENGINES } from "@kurambit/contracts";
+// Which game tools a thread's agent is offered, and which of their ops its game can run. A tool is
+// listed from a game thread's first turn whenever its game's engine runs any of its ops, so the
+// listing never changes under an agent that keeps the schemas it loaded first; an op the game or
+// machine cannot run is refused when called, with why. The thread's game, engine and Blender come
+// from the MCP invocation (McpHttpServer's auth middleware). A tool the listing hides is also
+// refused when called by name, by Effect's MCP core.
 import {
   engineCapabilities,
   engineProfile,
@@ -11,145 +11,141 @@ import {
 } from "../../../game/engineProfile.ts";
 import { currentInvocation, type McpInvocationScope } from "../../McpInvocationContext.ts";
 
-export interface GameToolPlacement {
-  /** What the tool needs of the game's engine; empty for a tool any game's agent may use. */
-  readonly needs: ReadonlyArray<GameEngineCapability>;
-  /**
-   * Listed only when asked for: the tool stays reachable through game_more,
-   * whose description names it with this line, said as when to use it.
-   */
-  readonly asked?: string;
-}
+/** Each op, by tool, with what it needs of the game's engine (empty: any game). */
+export const GAME_TOOL_OPS = {
+  game_check: { look: ["play"], final: ["play"], facts: ["play"], status: [] },
+  game_play: {
+    preview: ["play"],
+    start: ["play"],
+    act: ["play"],
+    close: ["play"],
+    bot: ["play"],
+    bot_view: ["play"],
+    replay: ["tune"],
+    model_sheet: ["tune"],
+  },
+  game_assets: {
+    search: ["play"],
+    add: ["play"],
+    generate: ["play"],
+    wait: ["play"],
+    image_edit: ["play"],
+    import: ["import"],
+    blender_search: ["blender"],
+    blender_import: ["blender"],
+  },
+  game_blender: {
+    code: ["blender"],
+    look: ["blender"],
+    scene: ["blender"],
+    export: ["blender"],
+    character: ["blender"],
+    paint: ["blender"],
+    carve: ["blender"],
+    sprites: ["blender"],
+    animate: ["blender"],
+  },
+  game_builds: {
+    list: [],
+    compare: [],
+    restore: [],
+    saved: [],
+    export: ["play"],
+    package: ["play"],
+    stop: ["play"],
+  },
+  game_keep_going: { set: ["turnLoop"] },
+  game_unity: {
+    tools: ["unity"],
+    edit: ["unity"],
+    eval: ["unity"],
+    recompile: ["unity"],
+    play: ["unity"],
+    console: ["unity"],
+    screenshot: ["unity"],
+  },
+} as const satisfies Record<`game_${string}`, Record<string, ReadonlyArray<GameEngineCapability>>>;
+export type GameToolName = keyof typeof GAME_TOOL_OPS;
 
-const chat = (needs: ReadonlyArray<GameEngineCapability>, asked?: string): GameToolPlacement =>
-  asked === undefined ? { needs } : { needs, asked };
-
-export const GAME_TOOL_PLACEMENTS = {
-  game_status: chat([]),
-  game_check: chat(["play"]),
-  game_import: chat(["import"]),
-  game_export: chat(["play"]),
-  game_builds: chat([]),
-  game_facts: chat(["play"]),
-  game_build_restore: chat([], "when the person asks to undo a change or go back to a build"),
-  game_tune: chat(["tune"], "when the person asks to keep the values they tried on the Stage"),
-  game_replay: chat(
-    ["tune"],
-    "when the person asks whether their run on the Stage still plays the same",
-  ),
-  game_preview: chat(["play"], "when the person asks for a playable URL or player of the sources"),
-  game_stop: chat(["play"], "when the person asks to stop the game's processes"),
-  game_package: chat(["play"], "when the person asks for a downloadable Web or Windows ZIP"),
-  game_saved: chat(
-    [],
-    "when the person asks to keep a video or image Kurambit made, what is saved, or to delete one",
-  ),
-  game_keep_going: chat(
-    ["turnLoop"],
-    "when the person asks to turn Keep going on or off, what it is doing, or to give its next step their words",
-  ),
-  game_explore_start: chat(
-    ["play"],
-    "when the person asks you to play it, or a fact names something the code cannot show",
-  ),
-  game_explore_act: chat(["play"], "in a session game_explore_start opened"),
-  game_explore_close: chat(["play"], "to end that session"),
-  game_bot_run: chat(
-    ["play"],
-    "when the person asks for a bot to play the game or to prove it can be won",
-  ),
-  game_bot_view: chat(["play"], "to look at a finished bot run"),
-  game_generate: chat(["play"]),
-  game_generate_wait: chat(["play"]),
-  // Listed: agents asked to change an image must find it by name (see game_generate).
-  game_image_edit: chat(["play"]),
-  game_models_route: chat(
-    [],
-    "when the person asks to change how models are made (code, Blender, generated) or to turn the library on or off",
-  ),
-  game_model_sheet: chat(["tune"]),
-  game_assets_search: chat(["play"]),
-  game_assets_add: chat(["play"]),
-  game_blender_code: chat(["blender"]),
-  game_blender_look: chat(["blender"]),
-  game_blender_scene: chat(["blender"]),
-  game_blender_export: chat(["blender"]),
-  game_blender_character: chat(["blender"]),
-  game_blender_paint: chat(["blender"], "to paint a model from its turnaround sheet"),
-  game_blender_carve: chat(["blender"], "for an organic hard prop carved from a three-view sheet"),
-  game_blender_assets_search: chat(
-    ["blender"],
-    "for a Sketchfab model the library lacks, or to bring an asset straight into the live Blender scene",
-  ),
-  game_blender_assets_import: chat(["blender"]),
-  game_blender_render_sprites: chat(["blender"]),
-  game_animate: chat(["blender"]),
-  game_unity_tools: chat(["unity"]),
-  game_unity_edit: chat(["unity"]),
-  game_unity_eval: chat(["unity"]),
-  game_unity_recompile: chat(["unity"]),
-  game_unity_play: chat(["unity"]),
-  game_unity_console: chat(["unity"]),
-  game_unity_screenshot: chat(["unity"]),
-  game_more: chat([]),
-} satisfies Record<`game_${string}`, GameToolPlacement>;
-export type GameToolName = keyof typeof GAME_TOOL_PLACEMENTS;
-
-/** Why the calling thread's game or machine refuses the tool, or null when it may use it. */
-export const refusal = (
-  placement: GameToolPlacement,
+/** Why the calling thread's game or machine refuses the op, or null when it may run it. */
+export const opRefusal = (
+  needs: ReadonlyArray<GameEngineCapability>,
   scope: McpInvocationScope | undefined,
 ): string | null => {
   const engine = scope?.gameEngine;
   if (scope === undefined || engine == null) return "it works in no game";
   const capabilities = engineCapabilities(engine);
-  if (!placement.needs.every((need) => capabilities.has(need)))
+  if (!needs.every((need) => capabilities.has(need)))
     return `this ${engineProfile(engine).displayName} game's engine does not support it`;
-  if (placement.needs.includes("blender") && scope.blenderMissing != null)
+  if (needs.includes("blender") && scope.blenderMissing != null)
     return `it runs in Blender, which Kurambit cannot use on this machine. ${scope.blenderMissing}`;
   return null;
 };
 
-/** Whether the calling thread's game and machine allow the tool at all. */
-const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
-  refusal(placement, scope) === null;
-
-/**
- * The Blender tools are listed directly only on the Blender route (once Blender is found), whose
- * chats make their models there; on code and generated they wait behind game_more, so those
- * chats keep a small listing and reach Blender only when it is asked for.
- */
-const BLENDER_ASKED =
-  "when the person asks for a model, sprite render or animation made in Blender, to make what the library lacks when it is on, to put a generated humanoid on the standard skeleton, or for a library file that loads only through Blender (FBX)";
-
-/** The line game_more names it with, or undefined when it is listed. */
-const askedIn = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
-  placement.asked ??
-  (placement.needs.includes("blender") && (scope?.gameModels?.route ?? "code") !== "blender"
-    ? BLENDER_ASKED
-    : undefined);
-
-/** Whether it is in the listing: it fits, and is not waiting to be asked for. */
+/** Whether the calling thread's game runs any of the tool's ops; a missing Blender still lists it. */
 const listed = (name: GameToolName, scope: McpInvocationScope | undefined) => {
-  const placement: GameToolPlacement = GAME_TOOL_PLACEMENTS[name];
-  return fits(placement, scope) && askedIn(placement, scope) === undefined;
+  const engine = scope?.gameEngine;
+  if (engine == null) return false;
+  const capabilities = engineCapabilities(engine);
+  return Object.values<ReadonlyArray<GameEngineCapability>>(GAME_TOOL_OPS[name]).some((needs) =>
+    needs.every((need) => capabilities.has(need)),
+  );
 };
 
-/** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread now. */
+/** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread. */
 export const listedFor = (name: GameToolName) => () => listed(name, currentInvocation());
 
 /**
- * The tools game_more can reach on some active engine, with when to use each: those always
- * asked for, and the Blender tools off the Blender route.
+ * The game tools older games and chats still name, with the tool and op that does their work now.
+ * Each stays callable, never listed, only to answer with where its work went.
  */
-export const ASKABLE_TOOLS: ReadonlyArray<readonly [GameToolName, string]> = (
-  Object.entries(GAME_TOOL_PLACEMENTS) as Array<[GameToolName, GameToolPlacement]>
-).flatMap(([name, placement]) => {
-  const asked = askedIn(placement, undefined);
-  return asked !== undefined &&
-    ACTIVE_GAME_ENGINES.some((engine) =>
-      placement.needs.every((need) => engineCapabilities(engine).has(need)),
-    )
-    ? [[name, asked] as const]
-    : [];
-});
+export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
+  game_status: "game_check op status",
+  game_facts: "game_check op facts",
+  game_preview: "game_play op preview",
+  game_explore_start: "game_play op start",
+  game_explore_act: "game_play op act",
+  game_explore_close: "game_play op close",
+  game_bot_run: "game_play op bot",
+  game_bot_view: "game_play op bot_view",
+  game_replay: "game_play op replay",
+  game_model_sheet: "game_play op model_sheet",
+  game_assets_search: "game_assets op search",
+  game_assets_add: "game_assets op add",
+  game_generate: "game_assets op generate",
+  game_generate_wait: "game_assets op wait",
+  game_image_edit: "game_assets op image_edit",
+  game_import: "game_assets op import",
+  game_blender_assets_search: "game_assets op blender_search",
+  game_blender_assets_import: "game_assets op blender_import",
+  game_blender_code: "game_blender op code",
+  game_blender_look: "game_blender op look",
+  game_blender_scene: "game_blender op scene",
+  game_blender_export: "game_blender op export",
+  game_blender_character: "game_blender op character",
+  game_blender_paint: "game_blender op paint",
+  game_blender_carve: "game_blender op carve",
+  game_blender_render_sprites: "game_blender op sprites",
+  game_animate: "game_blender op animate",
+  game_build_restore: "game_builds op restore",
+  game_saved: "game_builds op saved",
+  game_export: "game_builds op export",
+  game_package: "game_builds op package",
+  game_stop: "game_builds op stop",
+  game_unity_tools: "game_unity op tools",
+  game_unity_edit: "game_unity op edit",
+  game_unity_eval: "game_unity op eval",
+  game_unity_recompile: "game_unity op recompile",
+  game_unity_play: "game_unity op play",
+  game_unity_console: "game_unity op console",
+  game_unity_screenshot: "game_unity op screenshot",
+  game_tune:
+    "an edit of the game's tune file (web/tune.json for three.js): write the values the person asked to keep there; the turn's build keeps them",
+  game_models_route:
+    "an edit of game.json's `characters` (code, blender or generated) and `library` (true or false), only when the person asks you to in chat",
+  game_more: "the game tool it reached, now listed itself",
+};
+
+/** What a call to a retired tool answers. */
+export const retiredToolMessage = (name: string) =>
+  `${name} is gone from Kurambit's game tools: its work is now ${RETIRED_GAME_TOOLS[name]}.`;

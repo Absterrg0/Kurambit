@@ -1,4 +1,4 @@
-"""fit(): library clips fitted to the body they play on (game_blender_character's fit).
+"""fit(): library clips fitted to the body they play on (game_blender op character's fit).
 
 Adapted from blender-kiln's plugin/tools/retarget.py (MIT, Copyright (c) 2026 Nicolas Dolphens),
 whose arm clearance adapts scripts/arm_clearance.py of image-to-3dlab (AssetFurnace) v0.4.4,

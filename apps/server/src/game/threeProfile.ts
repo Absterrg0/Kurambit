@@ -39,14 +39,6 @@ Use the game_* tools to check, play, export and package the game; never launch y
   xvfbRenderer: null,
   sidecarLoad: (key, sidecar) =>
     `three.js games load the sidecar: ASSETS = { ${key}: "${sidecar}" }.`,
-  tools: {
-    import: "three.js games have no import step: the static folder is the game.",
-    check:
-      "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure. The game's runtime measures the scene report (a shell from before scene reports says so).",
-    export:
-      "three.js games export Web only (a static copy of web/, with the Kurambit runtime it loads), as a release: Play keeps serving the folder live. Windows and Linux are refused.",
-    explore: "three.js games load the static folder in headless Chromium and play in real time.",
-  },
   layout: {
     assets: "assets",
     ui: "ui",

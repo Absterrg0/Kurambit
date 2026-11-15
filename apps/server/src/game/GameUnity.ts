@@ -135,7 +135,7 @@ const UNITY_MCP_TOOLS = [
   "console_get",
   "console_clear",
 ] as const;
-/** Of those, what `game_unity_edit` may call: the editing surface, by name prefix. */
+/** Of those, what `game_unity` op `edit` may call: the editing surface, by name prefix. */
 const UNITY_EDIT_TOOL =
   /^(scene_|gameobject_|component_|prefab_|material_|asset_find$|asset_create_folder$|script_attach$|settings_|lighting_|editor_save_all$|editor_status$|capture_scene_view$)/;
 
@@ -559,7 +559,7 @@ export class GameUnity extends Context.Service<
       args: Record<string, unknown>,
       timeoutMs?: number,
     ) => Effect.Effect<McpContent, GameOperationError>;
-    /** The editing tools `game_unity_edit` may call, with their input schemas. */
+    /** The editing tools `game_unity` op `edit` may call, with their input schemas. */
     readonly tools: (root: string) => Effect.Effect<
       ReadonlyArray<{
         readonly name: string;
@@ -570,7 +570,7 @@ export class GameUnity extends Context.Service<
     >;
     /** The live editor's log tail, for honest failure detail. */
     readonly logTail: (root: string) => Effect.Effect<string>;
-    /** Close this game's live editor (by recorded pid only); game_stop calls this. */
+    /** Close this game's live editor (by recorded pid only); game_builds op stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
     /**
      * Marks this game's live editor unusable (the game froze it, play mode
@@ -578,11 +578,11 @@ export class GameUnity extends Context.Service<
      * call opens a fresh one.
      */
     readonly wedged: (root: string, why: string) => Effect.Effect<void>;
-    /** `game_unity_tools`: the editing tools `game_unity_edit` may call. Refuses a game that is not Unity's. */
+    /** `game_unity` op `tools`: the editing tools `game_unity` op `edit` may call. Refuses a game that is not Unity's. */
     readonly listTools: (
       threadId: ThreadId,
     ) => Effect.Effect<GameUnityToolsResult, GameOperationError>;
-    /** `game_unity_edit`: one editing tool and the scene save, in one hold; fails when the save does not land. */
+    /** `game_unity` op `edit`: one editing tool and the scene save, in one hold; fails when the save does not land. */
     readonly edit: (
       threadId: ThreadId,
       input: GameUnityEditInput,
@@ -824,8 +824,8 @@ const make = Effect.gen(function* () {
               root,
               "busy",
               sameGame
-                ? "The live Unity editor is busy with another copy of this game (a git worktree of it); only one Unity editor runs at a time. Retry when that copy's Unity work finishes, or stop it with game_stop in that copy's chat."
-                : `The live Unity editor is busy with the game "${yield* gameName(otherRoot)}" (${otherRoot}); only one Unity editor runs at a time. Retry when that game's Unity work finishes, or stop it with game_stop there.`,
+                ? "The live Unity editor is busy with another copy of this game (a git worktree of it); only one Unity editor runs at a time. Retry when that copy's Unity work finishes, or stop it with game_builds op stop in that copy's chat."
+                : `The live Unity editor is busy with the game "${yield* gameName(otherRoot)}" (${otherRoot}); only one Unity editor runs at a time. Retry when that game's Unity work finishes, or stop it with game_builds op stop there.`,
             );
           }
         for (const otherRoot of Array.from(sessions.keys())) yield* drop(otherRoot);
@@ -885,7 +885,7 @@ const make = Effect.gen(function* () {
           cli: unity.cli,
         };
         // Written as each pid appears, so a crash mid-start still leaves the
-        // next open or game_stop something to reap.
+        // next open or game_builds op stop something to reap.
         const remember = (launches: Partial<SessionRecord>) =>
           Effect.suspend(() => {
             record = { ...record, ...launches };
@@ -1282,7 +1282,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  // The game_unity_* tools are the Unity editor's own front, so only a Unity game has them.
+  // The game_unity tool is the Unity editor's own front, so only a Unity game has it.
   const unityGame = (root: string, operation: string) =>
     projects
       .read(root)
@@ -1295,7 +1295,7 @@ const make = Effect.gen(function* () {
                   operation,
                   root,
                   "invalid-input",
-                  "The game_unity_* tools work on Unity games; this game runs another engine.",
+                  "The game_unity tool works on Unity games; this game runs another engine.",
                 ),
               ),
         ),
@@ -1309,7 +1309,7 @@ const make = Effect.gen(function* () {
           "Unity edit",
           input.tool,
           "invalid-input",
-          "That tool is not an editing tool here. List the editing tools with game_unity_tools; use game_unity_eval, game_unity_play, game_unity_screenshot or game_unity_console for the rest.",
+          "That tool is not an editing tool here. List the editing tools with game_unity op tools; use its ops eval, play, screenshot or console for the rest.",
         );
       // Edits live in the open scene until saved, so the edit and its save hold one editor.
       return yield* withSession(root, (session) =>

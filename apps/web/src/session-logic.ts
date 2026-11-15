@@ -611,7 +611,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
   const nodeById = new Map((input.nodes ?? []).map((node) => [node.id, node] as const));
   const planById = new Map((input.plans ?? []).map((plan) => [plan.id, plan] as const));
   // Once the chat's generation cards are read, they stand for the agent's
-  // game_generate and game_generate_wait calls; a refused or failed call keeps
+  // generation calls (game_assets ops generate, wait, image_edit); a refused or failed call keeps
   // its own row, since no card exists for it.
   const generationCardsShown = (input.anchoredCards ?? []).some(
     (card) => card.kind === "game-generation",
@@ -733,7 +733,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
     if (
       generationCardsShown &&
       item.type === "dynamic_tool" &&
-      isGameGenerationTool(item.toolName) &&
+      isGameGenerationTool(item.toolName, item.input) &&
       item.status !== "failed" &&
       item.status !== "cancelled" &&
       item.status !== "interrupted" &&

@@ -1,4 +1,4 @@
-// Blender-side half of game_blender_render_sprites. The service runs this in the live scene
+// Blender-side half of game_blender op sprites. The service runs this in the live scene
 // once to fit the camera ("fit") and then in batches to render ("render"), because the pinned
 // MCP server bounds each Blender command at 180 s.
 //

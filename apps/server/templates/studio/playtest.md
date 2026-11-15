@@ -10,8 +10,8 @@ something the code cannot show. Without one, play your change before you
 call it done.
 
 1. The code says what should happen, play shows what does, and play wins.
-   Start with game_explore_start, play with game_explore_act, study each
-   returned frame, and release the session with game_explore_close.
+   Start with game_play op start, play with op act, study each
+   returned frame, and release the session with op close.
 2. Passes: smoke (boots, menu, start, quit), feature (each system actually
    triggers), regression (what worked before still works), visual
    (frames against the key art).
@@ -22,7 +22,7 @@ call it done.
    seconds of input, so one short step per call runs out of calls in the
    opening. Learn a control with one short hold, then send two or three
    held steps per call, keeping each call within its input-seconds limit
-   (game_explore_act's description and your prompt give the numbers; a
+   (the start's and each act's result give the numbers; a
    call past them is rejected). Study the frame after each batch so a
    missed input or overshoot is visible. Every lane's starter shell has
    Settings > Controls listing every action with its keys; read it there

@@ -9,8 +9,8 @@ these checks decide whether it works. Report each numbered result with the macOS
 ## What to run
 
 Use a dev build on the Mac (`vp run dev:desktop`), with Godot 4.7 and ffmpeg installed and
-ffmpeg on PATH. Make a small Godot game, or open one, and have an agent run `game_explore_start`,
-a few `game_explore_act` calls, then `game_bot_run` with a 30-second budget. Keep working in
+ffmpeg on PATH. Make a small Godot game, or open one, and have an agent run `game_play` op `start`,
+a few `game_play` op `act` calls, then `game_play` op `bot` with a 30-second budget. Keep working in
 another app, such as a text editor, while it runs.
 
 ## Checks
@@ -27,12 +27,12 @@ another app, such as a text editor, while it runs.
    stopped drawing.
 5. **Covered and switched.** Repeat check 4 with Kurambit full screen, and again while you switch
    to another Space during the run.
-6. **Quitting is clean.** After `game_explore_close`, after the bot run, and after you quit
+6. **Quitting is clean.** After `game_play` op `close`, after the bot run, and after you quit
    Kurambit mid-run with Cmd+Q, Activity Monitor shows no Godot process.
 7. **Saves stay isolated.** Nothing new appears under
    `~/Library/Application Support/Godot/app_userdata/` for the game you tested. Kept saves land
    under the game's `.studio/saves/godot/`.
-8. **Blender stays hidden.** The first `game_blender_*` call opens no visible Blender window and
+8. **Blender stays hidden.** The first `game_blender` call opens no visible Blender window and
    takes no focus.
 9. **Memory is read right.** No session or bot run is refused as `low-memory` while Activity
    Monitor shows several GB of memory available (its Memory tab, with little memory pressure).
