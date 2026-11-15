@@ -5,12 +5,20 @@
 //   GameState.win("You escaped!", { Time: "1:42", Coins: 12 });
 //   GameState.lose("Out of fuel", { Distance: "340 m" });
 //
-// Either call freezes play after a short slow-motion beat and opens the end
-// screen with the message and the stats (shown in the order given), plus Retry
-// and Main menu.
+// On the demo shell's screens, either call freezes play after a short slow-motion beat and opens
+// the end screen with the message and the stats (shown in the order given), plus Retry and Main
+// menu. A game that draws its own screens shows its own ending: its update keeps running with
+// state "ended", and it moves the run on itself:
+//
+//   GameState.title();   // in start(): open this run on the game's own title (state "title");
+//                        // ignored under ?play, on a retry and in every harness play
+//   GameState.play();    // a fresh run in play: from the title, and as Retry
+//   GameState.menu();    // a fresh run on the title
+//   GameState.pause();   // play holds (state "paused") until GameState.resume()
 
 export const GameState = {
-  /** "title", "playing", "paused" or "ended". The shell sets it; games read it. */
+  /** "title", "playing", "paused" or "ended". The shell sets it; games read it (and the page's
+   * <body data-state> carries it). */
   state: "title",
   /** "won" or "lost" once the run ended, "" while it runs. */
   result: "",
@@ -42,6 +50,16 @@ method("lose", (text = "Game over", stats = {}) => {
   if (canLose) end(false, text, stats);
 });
 method("isPlaying", () => GameState.state === "playing");
+let shell = null;
+/** The shell's side of title(), play(), menu(), pause() and resume(). */
+export function onShellCalls(calls) {
+  shell = calls;
+}
+method("title", () => shell?.title());
+method("play", () => shell?.play());
+method("menu", () => shell?.menu());
+method("pause", () => shell?.pause());
+method("resume", () => shell?.resume());
 
 function end(won, text, stats) {
   if (GameState.state !== "playing") return;

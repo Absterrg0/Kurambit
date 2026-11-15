@@ -1,7 +1,10 @@
 // The look every frame goes through: the light, the sky, the fog and the post chain,
 // set for the game's own mood. A preset ("day", "golden" for golden hour, "night",
 // "interior", "flat" for stylised) is only a starting point for each part, which
-// main.js sets as the game needs; with no LOOK the game gets a neutral "day":
+// main.js sets as the game needs. A game drawing its own screens with no LOOK gets
+// "plain": the renderer draws the scene as the game built it (its background, lights,
+// fog and ctx.renderer's tone mapping), adding nothing; on the demo shell's screens no
+// LOOK is a neutral "day":
 //
 //   export const LOOK = {
 //     preset: "<one of them>", // optional
@@ -120,6 +123,20 @@ const PRESETS = {
     bloom: { strength: 0.4, threshold: 1 },
     grade: { saturation: 1.04, contrast: 1.05, warmth: 0.04, vignette: 0.45 },
   },
+  // Nothing of the look's own: no sky, light, fog, grade or ground, and the renderer's tone
+  // mapping left as the game sets it. The sky and sun values only light the model sheet.
+  plain: {
+    toneMapping: "none",
+    exposure: 1,
+    ambient: 1,
+    environment: false,
+    sky: { top: 0x3f7fd6, horizon: 0xc2d8ee, ground: 0x3a3936 },
+    sun: { direction: { x: -0.45, y: 0.8, z: 0.4 }, color: 0xffffff, intensity: 2.6 },
+    fog: false,
+    ao: false,
+    bloom: false,
+    grade: false,
+  },
   flat: {
     toneMapping: "neutral",
     exposure: 1,
@@ -191,7 +208,8 @@ export function resolveLook(options = {}) {
     bloom: part("bloom"),
     grade: part("grade"),
     shadows: options.shadows !== false,
-    ground: options.ground !== false,
+    ground: options.ground !== false && name !== "plain",
+    plain: name === "plain",
     resolution: options.resolution ?? "adaptive",
     quality: options.quality ?? "auto",
     // A 2D game's exact colours: an orthographic camera with nothing about the look named.
@@ -879,7 +897,7 @@ export async function createLook(canvas, options = {}) {
 
   /** The scene's sky, light and fog, once per scene, after the game has built it. */
   const dress = (scene, camera) => {
-    if (prepared.has(scene)) return;
+    if (look.plain || prepared.has(scene)) return;
     prepared.add(scene);
     // A 2D game's exact colours keep no sky probe; its backdrop is the preset's horizon, not
     // the renderer's black.
@@ -980,6 +998,10 @@ export async function createLook(canvas, options = {}) {
     }
   };
   const draw = (scene, camera, dt) => {
+    if (look.plain && chain === null) {
+      renderer.render(scene, camera);
+      return;
+    }
     dress(scene, camera);
     if (!exact(camera)) bandSky(scene, camera);
     if (chain === null || exact(camera)) {
@@ -1076,9 +1098,10 @@ export async function createLook(canvas, options = {}) {
     lightForPicture(scene, environment = null) {
       const tone = renderer.toneMapping;
       const baked = shared.lookBakedOn.value;
-      renderer.toneMapping = TONE[look.toneMapping];
+      if (!look.plain) renderer.toneMapping = TONE[look.toneMapping];
       shared.lookBakedOn.value = 0;
-      scene.environment = environment ?? (look.environment === false ? null : sky.light);
+      scene.environment =
+        environment ?? (look.environment === false && !look.plain ? null : sky.light);
       scene.environmentIntensity = look.ambient;
       return () => {
         renderer.toneMapping = tone;

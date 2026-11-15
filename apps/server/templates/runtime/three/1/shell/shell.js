@@ -61,6 +61,7 @@ import {
   loadProgress,
   newRun,
   onRunEnded,
+  onShellCalls,
   resetProgress,
   cannotLose,
   setCanLose,
@@ -94,7 +95,6 @@ const CLICK_SOUND = typeof game.CLICK_SOUND === "string" ? game.CLICK_SOUND : ""
 const CREDITS_FILE = "./credits.txt";
 const SETTINGS_KEY = `settings:${location.pathname}`;
 const KEEP = Array.isArray(game.KEEP_ACROSS_RUNS) ? game.KEEP_ACROSS_RUNS : [];
-const controls = createControls(game.ACTIONS);
 /** Real seconds and time scale of the slow-motion beat before the end screen. */
 const END_BEAT_S = 0.6;
 const END_BEAT_SCALE = 0.3;
@@ -103,23 +103,41 @@ const END_GUARD_S = 0.4;
 
 const byId = (id) => document.getElementById(id);
 const canvas = byId("game");
-const hud = byId("hud");
+const shellScreenIds = ["loading", "title", "pause", "settings", "end", "credits", "controls"];
+/**
+ * Whether the page carries the demo shell's screens (index.html's section.screen elements): a game
+ * made on them keeps them. A page without them is a game that draws its own title, menus, HUD and
+ * endings (the bridge contract in TEMPLATE.md): the shell then draws nothing a player sees and
+ * touches none of the page's elements, whatever their ids.
+ */
+const shellScreens = shellScreenIds.every((id) => byId(id)?.matches("section.screen") === true);
+const controls = createControls(game.ACTIONS, { defaultsYield: !shellScreens });
+const hud = shellScreens ? byId("hud") : null;
 // ctx.ui's own layer: a game writing raw text into ctx.hud cannot wipe it.
-const hudKit = byId("hud-kit");
-const ui = byId("ui");
-const backdrop = byId("backdrop");
-const screens = {
-  loading: byId("loading"),
-  title: byId("title"),
-  pause: byId("pause"),
-  settings: byId("settings"),
-  end: byId("end"),
-  credits: byId("credits"),
-  controls: byId("controls"),
-};
+const hudKit = shellScreens ? byId("hud-kit") : null;
+// What the harness reads as the text on screen, and the QA play's HUD fit: the whole page
+// when the game draws its own.
+const ui = shellScreens ? byId("ui") : document.body;
+const backdrop = shellScreens ? byId("backdrop") : null;
+const screens = Object.fromEntries(
+  shellScreenIds.map((id) => [id, shellScreens ? byId(id) : null]),
+);
+/**
+ * Whether play's input and the run's own listeners reach the game now. On the shell's screens only
+ * in play; a game with its own screens also reads them on its title and its ending, where its own
+ * update decides what they do.
+ */
+const live = () =>
+  GameState.state === "playing" ||
+  (!shellScreens && (GameState.state === "title" || GameState.state === "ended"));
 
-// The look makes the renderer: MSAA only where no post chain runs over it.
-const look = await createLook(canvas, game.LOOK);
+// The look makes the renderer: MSAA only where no post chain runs over it. A game with its own
+// screens and no LOOK gets the plain renderer: its scene's own background, lights and fog, as
+// three.js draws them.
+const look = await createLook(
+  canvas,
+  game.LOOK ?? (shellScreens ? undefined : { preset: "plain" }),
+);
 const { renderer } = look;
 
 let run = null;
@@ -135,7 +153,7 @@ let titleWorld = null;
 // from the style, not fetched: a probe for art the game never made is a 404 the check reports.
 const ownTitleArt =
   getComputedStyle(document.documentElement).getPropertyValue("--title-art").trim() !== "";
-{
+if (shellScreens) {
   // While the world is the backdrop: the menu over it through a soft shade, and no HUD (it is play's).
   const style = document.createElement("style");
   style.textContent = `body[data-title-world] #backdrop{background:radial-gradient(ellipse 60% 55% at 50% 45%,rgb(0 0 0/.2),rgb(0 0 0/.62))!important}
@@ -151,6 +169,8 @@ let held = false;
 // Play holds while the Stage's tab is hidden or the Stage has frozen it.
 let hidden = false;
 let frozen = false;
+/** A game with its own screens holds while its tab is hidden (the shell's screens pause instead). */
+let tabHidden = false;
 /** The harness's model sheet is over the page (shell/sheet.js): play holds under it. */
 let sheetShown = false;
 let redraw = true;
@@ -204,7 +224,7 @@ function newContext(seed = freshSeed()) {
     player: null,
     input: input.api,
     /** HUD widgets by name (shell/hud.js); call them every frame from update(). */
-    ui: createHud(hudKit, input.api),
+    ui: shellScreens ? createHud(hudKit, input.api) : null,
     keys: {
       down: (code) => down.has(code),
       pressed: (code) => pressed.has(code),
@@ -219,7 +239,7 @@ function newContext(seed = freshSeed()) {
     },
     listen(target, type, fn, options) {
       const wrapped = (event) => {
-        if (GameState.state === "playing") fn(event);
+        if (live()) fn(event);
       };
       target.addEventListener(type, wrapped, options);
       listeners.push(() => target.removeEventListener(type, wrapped, options));
@@ -239,6 +259,14 @@ function newContext(seed = freshSeed()) {
     random: seeded(seed),
   };
   ctx.look = look.forRun(ctx);
+  if (!shellScreens)
+    Object.defineProperty(ctx, "ui", {
+      get() {
+        throw new Error(
+          "ctx.ui is the demo shell's HUD, and this page has none of its screens: draw the HUD in the page yourself.",
+        );
+      },
+    });
   return {
     ctx,
     input,
@@ -316,11 +344,16 @@ function clearRun() {
     dispose(ended.ctx.scene);
   }
   Juice.stage = null;
-  hud.replaceChildren();
-  hudKit.replaceChildren();
+  hud?.replaceChildren();
+  hudKit?.replaceChildren();
 }
 
-function startRun() {
+/**
+ * A fresh run in play. `title`: the run may open on the game's own title instead
+ * (GameState.title() in its start), as a page a player opens does and the game's own
+ * GameState.menu(); never a retry, `?play`, a replay or a harness play.
+ */
+function startRun({ title = false } = {}) {
   closeTitleWorld();
   clearRun();
   GameState.state = "playing";
@@ -328,6 +361,7 @@ function startRun() {
   const replaying = nextReplay;
   nextReplay = null;
   run = newContext(replaying?.seed ?? freshSeed());
+  run.mayTitle = title && replaying === null && !shellScreens;
   run.dt = replaying?.dt ?? rate.step();
   if (replaying === null) {
     run.recorder = createRecorder(run.seed, run.dt);
@@ -341,15 +375,44 @@ function startRun() {
   // the menus keep working and the check sees the error itself.
   try {
     newRun(KEEP);
+    run.starting = true;
     seededWork(run, () => game.start?.(run.ctx));
   } catch (error) {
     reportError(error);
     run.reported = true;
+  } finally {
+    if (run !== null) run.starting = false;
   }
   // The run's own programs compile before its first frame, so play never opens on a stall.
   const started = run;
   started.compiling = true;
   look.compile(started.ctx.scene, started.ctx.camera).then(() => (started.compiling = false));
+}
+
+/**
+ * The game's own title (GameState.title() in start): the run stays on it, stepping, until the
+ * game calls GameState.play(), which starts a fresh run in play. A title run is not a play the
+ * Stage keeps, so it records nothing.
+ */
+function holdOnTitle() {
+  if (run === null || !run.starting || !run.mayTitle || GameState.state !== "playing") return;
+  GameState.state = "title";
+  run.recorder = null;
+}
+
+/** The game's own GameState.play() and GameState.menu(): after the frame, never inside a step. */
+let asked = null;
+function ask(next) {
+  if (asked === null)
+    queueMicrotask(() => {
+      const now = asked;
+      asked = null;
+      if (now === "menu") {
+        if (shellScreens) showTitle();
+        else startRun({ title: true });
+      } else startRun();
+    });
+  asked = next;
 }
 
 function pause() {
@@ -485,11 +548,21 @@ function disposeTitleWorld(world) {
   hudKit.replaceChildren();
 }
 
+onShellCalls({
+  title: holdOnTitle,
+  play: () => ask("play"),
+  menu: () => ask("menu"),
+  pause,
+  resume,
+});
+
 onRunEnded((won, text, stats) => {
   if (run === null) return;
   releaseKeys();
   ending = { won, text, stats };
-  endBeat = END_BEAT_S;
+  // The shell's slow beat before its end screen; a game with its own screens plays its own ending
+  // (its update keeps running) and shows its own end.
+  endBeat = shellScreens ? END_BEAT_S : 0;
   const outcome = {
     won,
     text: String(text ?? "").slice(0, 200),
@@ -499,6 +572,8 @@ onRunEnded((won, text, stats) => {
   else {
     const play = run.recorder?.finish(outcome);
     if (play != null) bridge.play(play);
+    // Play goes on past a game's own ending, and the kept play ends here.
+    if (!shellScreens) run.recorder = null;
   }
 });
 
@@ -545,6 +620,7 @@ function showEnd() {
 }
 
 function show(screen) {
+  if (!shellScreens) return;
   openScreen = screen;
   if (screen !== screens.controls) listening = null;
   for (const each of Object.values(screens)) each.hidden = each !== screen;
@@ -618,6 +694,7 @@ function loadSettings() {
   for (const name of VOLUME_NAMES)
     if (typeof values[name] === "number") setVolume(name, values[name]);
   controls.load(values.controls);
+  if (!shellScreens) return;
   for (const slider of screens.settings.querySelectorAll("input[data-volume]")) {
     slider.value = String(Math.round(getVolume(slider.dataset.volume) * 100));
     showVolume(slider);
@@ -758,6 +835,7 @@ function confirmResetProgress() {
 }
 
 ui.addEventListener("click", (event) => {
+  if (!shellScreens) return;
   const control = event.target.closest("[data-action]");
   if (control === null || control.disabled || !openScreen?.contains(control)) return;
   if (CLICK_SOUND === "") playTick();
@@ -767,6 +845,7 @@ ui.addEventListener("click", (event) => {
 });
 
 ui.addEventListener("input", (event) => {
+  if (!shellScreens) return;
   const slider = event.target;
   if (!(slider instanceof HTMLInputElement) || slider.dataset.volume === undefined) return;
   setVolume(slider.dataset.volume, Number(slider.value) / 100);
@@ -777,7 +856,7 @@ ui.addEventListener("input", (event) => {
 // The pointer and the keys move one selection, so a menu never shows two.
 // Only a real move counts: a screen opening under a still mouse keeps its focus.
 window.addEventListener("pointermove", (event) => {
-  if (event.movementX === 0 && event.movementY === 0) return;
+  if (!shellScreens || (event.movementX === 0 && event.movementY === 0)) return;
   document.documentElement.dataset.input = "pointer";
   const control = event.target.closest?.("button, input");
   if (
@@ -790,8 +869,18 @@ window.addEventListener("pointermove", (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  document.documentElement.dataset.input = "keys";
   const code = event.code;
+  if (!shellScreens) {
+    if (!live() || run === null) return;
+    for (const name of keyNames(event)) {
+      if (!event.repeat) run.pressed.add(name);
+      run.down.add(name);
+    }
+    // Play's keys never scroll the page; a game listening for them itself still hears them.
+    if (code.startsWith("Arrow") || code === "Space") event.preventDefault();
+    return;
+  }
+  document.documentElement.dataset.input = "keys";
   if (listening !== null) {
     event.preventDefault();
     if (event.repeat) return;
@@ -838,7 +927,7 @@ window.addEventListener("blur", releaseKeys);
 // lock) during play, so the click that closes a menu never fires a shot.
 const gameplayPointer = (event) =>
   run !== null &&
-  GameState.state === "playing" &&
+  live() &&
   openScreen === null &&
   !held &&
   (event.target === canvas || document.pointerLockElement != null);
@@ -873,14 +962,20 @@ window.addEventListener("pointercancel", (event) => run?.buttons.delete(event.bu
 // Exported web builds pause when their tab is hidden. The studio stage hides
 // with CSS, which leaves the page visible, so its own hold is unaffected.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") pause();
+  if (shellScreens) {
+    if (document.visibilityState === "hidden") pause();
+    return;
+  }
+  // A game with its own screens decides what pause looks like: a hidden tab only holds play.
+  tabHidden = document.visibilityState === "hidden";
+  applyHold();
 });
 
 document.addEventListener("fullscreenchange", syncFullscreen);
 document.addEventListener("pointerlockchange", () => {
   // Esc releases a pointer lock before the page sees the key, so losing the
-  // lock mid-run is the pause press.
-  if (document.pointerLockElement === null && hadPointerLock) pause();
+  // lock mid-run is the pause press. A game with its own screens hears the change itself.
+  if (document.pointerLockElement === null && hadPointerLock && shellScreens) pause();
   hadPointerLock = document.pointerLockElement !== null;
 });
 
@@ -899,6 +994,10 @@ function pollGamepad(now) {
   const isDown = (i) => pad.buttons[i]?.pressed === true;
   const pressedNow = (i) => isDown(i) && padWas[i] !== true;
   if (pad.buttons.some((_, i) => pressedNow(i))) unlockAudio();
+  if (!shellScreens) {
+    pad.buttons.forEach((button, i) => (padWas[i] = button.pressed));
+    return;
+  }
   if (pressedNow(9)) back(true);
   else if (listening !== null) {
     if (pressedNow(1)) back(false);
@@ -944,7 +1043,7 @@ function step() {
       animateShell.update(dt);
       waterShell.update(dt, stepping.ctx);
       cameraShell.update(dt);
-      stepping.ctx.ui.update(dt);
+      if (shellScreens) stepping.ctx.ui.update(dt);
     } catch (error) {
       // One report a run: the loop keeps going so the menus keep working.
       if (!stepping.reported) reportError(error);
@@ -1028,7 +1127,7 @@ function fit(camera, aspect) {
 }
 
 function applyHold() {
-  held = hidden || frozen || sheetShown;
+  held = hidden || frozen || sheetShown || tabHidden;
   releaseKeys();
   return holdAudio(held);
 }
@@ -1107,24 +1206,26 @@ const bridge = createStageBridge({
   // The Stage's Controls: the same table, rebinds and saved settings as the Controls screen.
   controls: {
     list: () =>
-      [...controls.actions.values()].map((action) => ({
-        name: action.name,
-        label: action.label,
-        codes: [...action.keys],
-        ...controls.parts(action),
-        fixed: action.fixed,
-        changed: action.keys.join() !== action.defaults.join(),
-      })),
+      [...controls.actions.values()]
+        .filter((action) => shellScreens || controls.ownedByGame(action.name))
+        .map((action) => ({
+          name: action.name,
+          label: action.label,
+          codes: [...action.keys],
+          ...controls.parts(action),
+          fixed: action.fixed,
+          changed: action.keys.join() !== action.defaults.join(),
+        })),
     rebind(name, code) {
       const note = controls.rebind(name, code);
       saveSettings();
-      if (openScreen === screens.controls) renderControls();
+      if (shellScreens && openScreen === screens.controls) renderControls();
       return note;
     },
     reset() {
       controls.reset();
       saveSettings();
-      if (openScreen === screens.controls) renderControls();
+      if (shellScreens && openScreen === screens.controls) renderControls();
     },
   },
   drawClean() {
@@ -1186,6 +1287,12 @@ const studio = installStudio({
   perf: () => look.stats(),
   player: () => run?.ctx.player ?? null,
   setState: (target, values) => game.setState?.(target, values, run?.ctx ?? null),
+  // How the harness starts play on a page opened as a player opens it, whatever its title is.
+  play() {
+    if (GameState.state === "playing" && run !== null) return true;
+    startRun();
+    return true;
+  },
   hold(on) {
     hidden = on;
     return applyHold();
@@ -1208,7 +1315,8 @@ const studio = installStudio({
     restart: startRun,
     canLose: setCanLose,
     eachThing: (fn) => bridge.eachThing(fn),
-    hudRoots: () => [hud, hudKit],
+    hudRoots: () => (shellScreens ? [hud, hudKit] : [document.body]),
+    listed: (action) => shellScreens || controls.ownedByGame(action.name),
     errors: studioErrors,
   }),
 });
@@ -1219,9 +1327,10 @@ await loadTuning();
 // Before the loop starts, so studio.ready (the harness's boot signal) waits for the assets,
 // the game's own prepare and the shader warm-up too.
 const assetCount = Object.keys(game.ASSETS ?? {}).length;
+document.body.dataset.state = "loading";
 if (assetCount > 0 || game.prepare !== undefined) {
   show(screens.loading);
-  const fill = byId("loading-fill");
+  const fill = shellScreens ? byId("loading-fill") : { style: {} };
   // The assets fill the bar, or its first half when the game prepares after them.
   const share = game.prepare === undefined ? 1 : assetCount > 0 ? 0.5 : 0;
   const bar = (k) => (fill.style.width = `${Math.round(Math.min(Math.max(k, 0), 1) * 100)}%`);
@@ -1271,8 +1380,10 @@ if (game.title !== undefined) {
 // `?play` boots straight into play, skipping the title (handy while building).
 // The Stage reloads a live game with #kurambit-play once the person has
 // played it, so a save lands them back in play, as pressing Play would.
-if (new URLSearchParams(location.search).has("play") || location.hash.includes("kurambit-play"))
-  startRun();
+const straightToPlay =
+  new URLSearchParams(location.search).has("play") || location.hash.includes("kurambit-play");
+if (!shellScreens) startRun({ title: !straightToPlay });
+else if (straightToPlay) startRun();
 else showTitle();
 
 let last = performance.now();
@@ -1289,8 +1400,7 @@ renderer.setAnimationLoop((now) => {
   if (!held && !document.hidden) rate.frame(elapsedMs);
   pollGamepad(now);
   // Only unpaused, unheld time moves the run, the end beat included.
-  const moving =
-    run !== null && !run.compiling && !held && (GameState.state === "playing" || endBeat > 0);
+  const moving = run !== null && !run.compiling && !held && (live() || endBeat > 0);
   let dt = 0;
   if (moving && run.player !== null) {
     // A replay: as many steps as fit in part of a frame, never waiting on real time.
@@ -1361,5 +1471,8 @@ renderer.setAnimationLoop((now) => {
   }
   bridge.tick(dt);
   measuredMs = sceneReport.tick(dt, drawing);
+  // The run's state on the page, so a game's own CSS can show its screens by it.
+  if (document.body.dataset.state !== GameState.state)
+    document.body.dataset.state = GameState.state;
   studio.ready = true;
 });

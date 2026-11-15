@@ -66,9 +66,19 @@ const angle = (a, b) => {
 /**
  * `current()` is the run (or null), `restart()` starts a fresh one as Retry does,
  * `canLose(on)` lets a loss end the run, `eachThing(fn)` walks the Stage's things and
- * `hudRoots()` are the HUD's elements.
+ * `hudRoots()` are the HUD's elements, and `listed(action)` whether an action is the game's
+ * own (a default a game with its own screens never reads is not).
  */
-export function createQa({ controls, current, restart, canLose, eachThing, hudRoots, errors }) {
+export function createQa({
+  controls,
+  current,
+  restart,
+  canLose,
+  eachThing,
+  hudRoots,
+  errors,
+  listed = () => true,
+}) {
   // Juice effects asked for, counted by wrapping its methods once the QA play first runs.
   let juice = 0;
   let counting = false;
@@ -186,7 +196,7 @@ export function createQa({ controls, current, restart, canLose, eachThing, hudRo
     let run = null;
     let onRun = 0;
     for (const action of controls.actions.values()) {
-      if (action.fixed) continue;
+      if (action.fixed || !listed(action)) continue;
       if (run === null || onRun >= ACTIONS_PER_RUN || current() !== run) {
         restart();
         run = await playing();

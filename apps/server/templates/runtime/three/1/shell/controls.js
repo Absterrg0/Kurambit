@@ -136,12 +136,27 @@ const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x ===
  * that order. Keyboard bindings change at runtime (rebinding); `defaults`
  * keeps each action's declared keys for "Reset to defaults".
  */
-export function createControls(gameActions) {
+export function createControls(gameActions, { defaultsYield = false } = {}) {
   const declared = { ...DEFAULT_ACTIONS };
   for (const [name, spec] of Object.entries(gameActions ?? {})) {
     if (name === "pause") continue;
     if (spec === null) delete declared[name];
     else if (typeof spec === "object") declared[name] = spec;
+  }
+  // A game drawing its own screens names only its own actions: a key it binds is taken from the
+  // defaults it does not name (pause aside), rather than bound twice.
+  if (defaultsYield) {
+    const taken = new Set(
+      Object.entries(gameActions ?? {}).flatMap(([name, spec]) =>
+        name === "pause" || spec === null || typeof spec !== "object" ? [] : strings(spec.keys),
+      ),
+    );
+    for (const name of Object.keys(DEFAULT_ACTIONS))
+      if (name !== "pause" && !(name in (gameActions ?? {})) && declared[name] !== undefined)
+        declared[name] = {
+          ...declared[name],
+          keys: strings(declared[name].keys).filter((key) => !taken.has(key)),
+        };
   }
   // One key on two actions fires both: name it, so the check sees it.
   const owners = new Map();
@@ -170,9 +185,16 @@ export function createControls(gameActions) {
   }
 
   const owner = (code) => [...actions.values()].find((each) => each.keys.includes(code));
+  // The actions main.js names, and those the game has read in any run: a default neither names
+  // nor reads is not one of the game's controls.
+  const named = new Set(Object.keys(gameActions ?? {}));
+  const used = new Set();
 
   return {
     actions,
+    used,
+    /** Whether an action is one of the game's: named in ACTIONS, or read through ctx.input. */
+    ownedByGame: (name) => named.has(name) || used.has(name),
     has: (name) => actions.has(name),
     keysOf: (name) => actions.get(name)?.keys ?? [],
     label(name) {
@@ -283,6 +305,7 @@ export function createInput(controls) {
         `Unknown action "${name}": declare it in main.js's ACTIONS (shell/controls.js).`,
       );
     reads.add(name);
+    controls.used.add(name);
     return now.get(name) ?? 0;
   };
   const api = {

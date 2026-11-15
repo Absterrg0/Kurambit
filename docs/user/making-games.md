@@ -427,16 +427,16 @@ you can open in that engine's own editor.
 Each game is a self-contained git repository you can move, back up, or open on another machine:
 
 - `game.json` and `BRIEF.md` describe the game.
-- `web/` is the game: a static three.js project with `index.html`, `main.js`, `style.css` and
-  `assets/`. three.js and the demo shell come from Kurambit's runtime, the version `game.json`
-  names under `runtime`: Kurambit brings fixes to them without changing the game, and every Web
-  export carries its own copy, so a release plays from any web server. Games made before the
-  runtime keep their own copy in `web/shell/` and `web/vendor/`. A new game starts inside a demo shell: a title
-  screen, pause (Esc or P), settings for volume and fullscreen, a Controls screen where players
-  rebind keys (gamepads work too), a win or lose screen with Retry, and credits. Best scores and
-  unlocks are saved between launches, and Settings can reset them. The game's icon
-  (`web/assets/ui/icon.png`, cut from the key art) shows on the browser tab. The gameplay lives in
-  `web/main.js`, and the credits screen shows `web/credits.txt`.
+- `web/` is the game: a static three.js project with `index.html`, `main.js` and `assets/`.
+  three.js and Kurambit's bridge come from Kurambit's runtime, the version `game.json` names under
+  `runtime`: Kurambit brings fixes to them without changing the game, and every Web export carries
+  its own copy, so a release plays from any web server. Games made before the runtime keep their
+  own copy in `web/shell/` and `web/vendor/`. A new game starts as an empty page: the agent makes
+  everything a player sees, its title, menus, HUD, light and look, for your brief, while the
+  bridge gives the Stage, Tune, Controls, the checks and replays what they need. Games made on the
+  older demo shell keep its title, pause, settings and end screens. The game's icon
+  (`web/assets/ui/icon.png`) shows on the browser tab, and `web/credits.txt` lists the credits
+  its assets' licences ask for.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the game's bots, their reports and kept play saves.

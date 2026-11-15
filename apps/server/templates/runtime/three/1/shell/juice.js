@@ -157,6 +157,7 @@ export const Juice = {
     if (layer === null) {
       layer = document.createElement("div");
       layer.id = "flash";
+      layer.style.cssText = "position:fixed;inset:0;pointer-events:none;opacity:0";
       document.body.append(layer);
     }
     layer.style.background = color;

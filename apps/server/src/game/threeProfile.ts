@@ -22,7 +22,7 @@ export const THREE_PROFILE: GameEngineProfile = {
     version: THREE_PINNED_VERSION,
     directories: ["web/assets", "builds/web"],
     ignores: [],
-    agents: `Build BRIEF.md's game with three.js. web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. three.js and the demo shell are Kurambit's runtime (game.json \`runtime\`), which Kurambit serves and copies into every export: no install step. Import them as the recipes do (\`./vendor/three.module.js\`, \`./shell/juice.js\`); the import map in web/index.html points those at the runtime. Never copy or edit the runtime: a variant is a module of the game's own beside main.js. Its kits' comment blocks are readable in studio-skills/runtime/shell/.
+    agents: `Build BRIEF.md's game with three.js. web/ is the static project: web/index.html, web/main.js, web/assets for every visual and sound. three.js and the bridge that runs the game (TEMPLATE.md) are Kurambit's runtime (game.json \`runtime\`), which Kurambit serves and copies into every export: no install step. Import them as \`./vendor/three.module.js\` and \`./shell/run-state.js\`; the import map in web/index.html points those at the runtime. Never copy or edit the runtime: a variant is a module of the game's own beside main.js. Its kits' comment blocks are readable in studio-skills/runtime/shell/.
 
 Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
 `,
@@ -42,7 +42,7 @@ Use the game_* tools to check, play, export and package the game; never launch y
   tools: {
     import: "three.js games have no import step: the static folder is the game.",
     check:
-      "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure. The game's shell measures the scene report (a shell from before scene reports says so).",
+      "three.js games load the static page and then the gameplay entry in headless Chromium and report console and page errors; a page that crashes is the game's error, a browser that is lost is a tool failure. The game's runtime measures the scene report (a shell from before scene reports says so).",
     export:
       "three.js games export Web only (a static copy of web/, with the Kurambit runtime it loads), as a release: Play keeps serving the folder live. Windows and Linux are refused.",
     explore: "three.js games load the static folder in headless Chromium and play in real time.",

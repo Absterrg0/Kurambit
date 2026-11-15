@@ -548,7 +548,8 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
     await launch.stop();
     await bounded(childExited, 3000);
     if (!childGone) botProcess.signal("SIGTERM");
-    const usedSetState = setStates.length > 0;
+    // Starting play past a game's own title ("play") moves the run, never its state: still pure play.
+    const usedSetState = setStates.some((entry) => entry.target !== "play");
     const frames = await extractRunFrames(args.host, args.ffmpeg, args.videoPath, args.runDir);
     // The engine's own frame counter, measured by the video, is the one source
     // of a frozen screen.

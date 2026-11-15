@@ -165,6 +165,7 @@ export function installStudio({
   qa,
   replay,
   sheet,
+  play,
 }) {
   let ready = false;
   const studio = {
@@ -235,6 +236,8 @@ export function installStudio({
     setState(target, values) {
       // "game_state" writes run values directly, as every engine's runner does;
       // any other target is the game's own state jump (exported from main.js).
+      // "play" starts a fresh run in play, past whatever title the game has.
+      if (target === "play") return typeof play === "function" && play() === true;
       if (target === "game_state") {
         for (const [key, value] of Object.entries(values ?? {}))
           if (["number", "boolean", "string"].includes(typeof value) && key.length <= 64)

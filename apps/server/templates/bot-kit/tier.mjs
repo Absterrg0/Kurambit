@@ -1,5 +1,6 @@
 // Bot kit: the harness's bot tiers (idle.mjs, masher.mjs) share this. A tier
-// starts a run from the title with Enter, plays it for a fixed span of game
+// starts a run from the title with Enter (the demo shell's Play), then through
+// the bridge's "play" for a game whose own title Enter does not leave, plays it for a fixed span of game
 // time, and reports how the run ended in the shell's own words
 // (GameState.state "ended", GameState.result "won" or "lost"). The harness
 // reads the ending from the game's state, not from this file; the times and
@@ -23,6 +24,7 @@ export function makeTier(tier, drive) {
   let playingAt = null;
   let endedAt = null;
   let lastEnter = -1e9;
+  let enters = 0;
   let last = null;
   const hold = (api, keys) => {
     const want = new Set(keys);
@@ -38,10 +40,13 @@ export function makeTier(tier, drive) {
     if (state === "ended" && endedAt === null && playingAt !== null) endedAt = t;
     if (playingAt === null) {
       hold(api, []);
-      // The shells focus Play first, so Enter starts a run.
+      // The demo shell focuses Play first, so Enter starts a run; a game's own title may want
+      // a click, so the second try starts play through the bridge.
       if (state === "title" && t - lastEnter >= 1) {
         lastEnter = t;
-        api.press("Enter");
+        enters += 1;
+        if (enters > 1) api.setState("play", {});
+        else api.press("Enter");
       }
     } else if (endedAt === null && state === "playing") {
       hold(api, drive(api, { t, since: t - playingAt, pos }));

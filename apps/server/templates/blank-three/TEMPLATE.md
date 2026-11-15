@@ -1,131 +1,58 @@
-# {{GAME_NAME}} — Blank (browser) starter template
+# {{GAME_NAME}}: the bridge contract
 
-This game started from the **Blank (browser)** template: one static three.js
-project under `web/`. It has no real gameplay yet, but it ships the shell a
-demo needs, so build the game, not the menus.
+`web/` is a static three.js page, and everything a player sees in it is this game's own: the
+title, menus, HUD, endings, light, sky and post. Design them for the brief. Kurambit's runtime
+runs `web/main.js` for the Stage, Tune, Controls, the checks and replays, and draws nothing. This
+is all it needs from the game:
 
-This file is reference: read a section when you use it. The first turn's
-steps are in the game's first message.
+1. **A run.** `main.js` exports `start(ctx)`, which builds a run into `ctx.scene` with
+   `ctx.camera`, and `update(dt, ctx)`, which moves it each fixed step. Every run starts fresh on
+   a new scene, so build in `start`, never at the module's top level; `stop(ctx)` undoes anything
+   `start` did outside `ctx` (the page's own elements are yours to keep). Set `ctx.player`.
+2. **An end.** `GameState.win(text)` and `GameState.lose(text)`, from `./shell/run-state.js`.
+   Plain values the game puts on `GameState` (a score, health) are what the harness reads, and
+   each run starts from their first values again.
+3. **The run's moves, through `GameState`.** `GameState.title()` in `start` opens the run on the
+   game's own title (`GameState.state` is `"title"`; update keeps running); `GameState.play()`
+   starts a fresh run in play (from the title, and as Retry), `menu()` a fresh run on the title,
+   `pause()` and `resume()` hold play. The harness's plays open in play: there `title()` does
+   nothing. `<body data-state>` carries the state, for the page's CSS.
+4. **Controls through `ctx.input`.** `ctx.input.down("jump")`, `pressed`, `vector()` (the move
+   actions) read named actions; `export const ACTIONS = { dash: { keys: ["ShiftLeft"], pad:
+["rb"] } }` adds one. The Stage's Controls rebinds them, the QA play presses each one the game
+   reads, and replays record them. `ctx.mouse` and `ctx.keys` are the raw input; timers and
+   listeners through `ctx.after` and `ctx.listen`, chance through `ctx.random()`, so a replay
+   plays the same.
+5. **Tunable values.** `ctx.tune(id, defaults, ranges)` returns a live object for the Stage's Tune
+   (read it every frame); `ctx.thing(object, { name, kind })` names what a person would select.
+   `web/tune.json` holds the person's tuned values and wins over your defaults.
 
-## The runtime and its kits
+`index.html?play` boots straight into play while building, and the Stage reloads a game being
+played with `#kurambit-play`. Everything else is a choice: draw the frame yourself with `export
+function render(ctx, dt)` (your own post chain), or not. List models and textures in `export const
+ASSETS = { knight: "assets/models/knight.glb" }` to load them before the first run
+(`ctx.assets.model(name)`; a Blender export by its `.asset.json` sidecar).
 
-The shell, its kits and three.js are Kurambit's runtime, not files of this
-game: `web/index.html` loads them from `_kurambit/runtime/three/1/` (the
-major `game.json` pins as `runtime`), and its import map points the game's
-`./shell/...`, `./vendor/...`, `three` and `three/addons/...` imports there.
-Kurambit serves the runtime, copies it into every export with its licences,
-and brings fixes to it without a change here. Never copy or edit it: a
-variant is a module of the game's own beside `main.js`.
+## Helpers you may import
 
-Each kit's comment block shows every call; read it in
-`studio-skills/runtime/shell/<file>` when you use the kit:
-
-| kit               | what it does                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `shell.js`        | the screens and the loop; every export `main.js` may make, and what `ctx` carries     |
-| `run-state.js`    | `GameState`, `win(text, stats)` and `lose(text, stats)`                               |
-| `assets.js`       | `ASSETS`, loaded behind the loading bar; `ctx.assets.model(name)`, `texture(name)`    |
-| `controls.js`     | named actions through `ctx.input`; `ACTIONS` adds, rebinds or drops one               |
-| `hud.js`          | `ctx.ui`: counter, bar, timer, objective, toast, hint                                 |
-| `juice.js`        | `Juice`: shake, hit pause, pop, squash, flash, bursts, sparks, dust, trails, sfx      |
-| `animate.js`      | `animate(model)`: clips by state, combat timing, springs, look-at, feet on the ground |
-| `locomotion.js`   | idle, walk, run and air from the speed the body moved                                 |
-| `camera.js`       | `followCamera2D`, `followCamera3D` (shoulder, orbit, walls, focus on a foe)           |
-| `level.js`        | `buildLevel` from a text map: spawns, bounds, walls, `move`, a ground to the horizon  |
-| `look.js`         | `LOOK` presets, a physical sky with clouds, `quality`, the sun, baked shadows         |
-| `model.js`        | models in code: PBR palette, canvas textures, shapes, rails, merge, scatter, `rig`    |
-| `water.js`        | `ocean`: a sea or lake that mirrors the sky, with whitecaps and wakes                 |
-| `audio.js`        | `playMusic`, `playAmbience`, `playSfx` on the volume sliders                          |
-| `stage-bridge.js` | `ctx.thing` and `ctx.tune` for the Stage                                              |
-
-## The shell's contract
-
-- `web/main.js` exports `start(ctx)` and `update(dt, ctx)`. The shell calls
-  `start` on Play and on Retry with a fresh `ctx` (a new scene and camera):
-  build the run there, never at the module's top level, and split it into
-  more modules under `web/` as it grows. A world kept across runs comes out
-  of `ctx.scene` in `stop(ctx)`, or the shell disposes it with the run.
-- Name every model and texture in `ASSETS`; never load files inside `start`
-  or `update`. A model `game_blender_export` made is named by its sidecar
-  (`cat: "assets/blender/space_cat.asset.json"`), never its GLB, so `animate`
-  gets its measurements; that GLB ships compressed, so never re-compress it.
-- Retry resets every plain-data `GameState` value to a copy of its starting
-  value; a function, class instance or three.js object is left as it is, so
-  build those in `start`. `export const KEEP_ACROSS_RUNS = ["best"]` keeps
-  values across runs and visits; Settings shows "Reset progress".
-- `index.html?play` boots straight into play while building; the Stage
-  reloads a game being played with `#kurambit-play`, so a save lands the
-  person back in play.
-- The screens' look lives in `web/style.css` (theme tokens at the top) and
-  their markup in `web/index.html`: restyle both to the game's key art, and
-  keep the element ids and `data-action` attributes. The title backdrop is
-  `--title-art: linear-gradient(rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.55)), url("assets/ui/title_bg.png")`
-  in `style.css`; replace the tab icon `web/assets/ui/icon.png` with a
-  256x256 cut of the key art's main subject.
-- `web/credits.txt` is what the credits screen shows. ASSETS.md stays the
-  full record of every file's source and licence; every asset whose licence
-  asks for attribution also gets a line in `credits.txt`.
-
-## Things and live values (the Stage)
-
-The Stage freezes the game, outlines things, tunes their values live and
-shows a thing's path over the last 10 s, at no cost until it asks.
-
-```js
-// in start(ctx): name what a person would select
-ctx.thing(cat, { name: "Cat", kind: "character" });
-ctx.thing(null, { name: "Music", kind: "sound" }); // no body
-// every number a person would tune, read every frame, never copied
-const cat = ctx.tune(
-  "Cat",
-  { jump: 8, speed: 5, look: 0 },
-  { jump: [2, 20, 0.5, "m"], speed: [1, 12, 0.5, "m/s"], look: ["Tabby", "Ginger", "Ghost"] },
-);
-const rules = ctx.tune("Difficulty", { spawnEvery: 2.5, hard: false }, { spawnEvery: [0.5, 6] });
-// in update: cat.jump, rules.spawnEvery
-```
-
-- Every `ctx.assets.model` copy is a thing already, named after its `ASSETS`
-  key; `ctx.thing` on it renames it. Kinds: `character`, `creature`, `prop`,
-  `level`, `effect`, `ui`, `rule`, `sound`, `other`.
-- `ctx.tune(id, defaults, ranges)` returns one live object per id, lasting
-  across retries, each number clamped to `[min, max, step, unit]`. A pick of
-  several (a theme, a weapon) takes their names (`["Dusk", "Snow"]`) and
-  reads as the index. An id no `ctx.thing` names is a rule of its own.
-- While the Stage's "Can't lose" is on, `ctx.cannotLose` is true: the player
-  takes no damage (`if (!ctx.cannotLose) hp -= hit`).
-- `web/tune.json` (keep it, even as `{}`) holds the person's tuned values and
-  wins over your defaults: to change a tuned value, change it there.
-
-## The studio bridge (keep it)
-
-`window.__studio` (`shell/studio.js`) is how the harness plays this game:
-`ready`, `getState()` (`{gameState, player, hudText}`), `errors[]`, `perf()`
-and `setState(target, values)`, which reaches named late content when
-`main.js` exports its own `setState(target, values, ctx)` (`ctx` is `null`
-with no run; return `false` then). Extend `GameState`, not the bridge.
+`./shell/` holds kits, each with its calls in its comment block (`studio-skills/runtime/shell/`):
+`look.js` (an `export const LOOK` with sky, fog, AO, bloom and grade presets), `model.js`
+(models in code), `animate.js` and `locomotion.js` (clips), `camera.js`, `level.js`, `water.js`,
+`juice.js`, `audio.js`. None is needed.
 
 ## Conventions
 
-- ES modules only, no build step: the file the browser loads is the file
-  you edit. Keep imports relative.
-- The game plays from `web/index.html` over HTTP on a fresh checkout. Every
-  visual and sound is a file under `web/assets/`; nothing loads from the
-  network, nothing outside `web/` is opened, nothing phones home.
+- ES modules, no build step; keep imports relative. Every file loads from `web/`: nothing from
+  the network.
+- `web/credits.txt` lists what each asset's licence asks to be credited; show it in the game if
+  it has menus. ASSETS.md is the full record of every file's source and licence.
 
 ## Check and play
 
-`game_check` is a quick look: it opens `index.html?play` headless, plays a
-moment of random keys and returns a frame of play (beside the game's
-reference picture, when it has one), console and page errors with file and
-line, and the frame rate. With `final: true` it also boots the title page,
-and its scene report plays 6 s of random keys and lists what a person would
-see is wrong, each with a frame that outlines it, then the QA play presses
-every control. It knows the player from `ctx.player` and the characters
-from `ctx.thing` kinds (`character`, `creature`; `ASSETS` models with clips
-are characters already). A clean check says the page boots and reads; it
-cannot say the game is good to play.
-
-When a chat turn ends, Kurambit plays and measures the build: its facts
-include the scene report over a minute of random input and the performance
-the shell measured (`window.__studio.perf()`).
+`game_check` is a quick look: it opens `index.html?play` headless, plays a moment of random keys
+and returns a frame of play (beside the game's reference picture, when it has one), errors with
+file and line, and the frame rate. With `final: true` it also opens the page as a player does
+(your title), plays the scene report (what a person would see is wrong, with a frame outlining
+each) and the QA play (every control, a retry, and whether the page's text fits the view).
+`game_model_sheet` draws one named thing alone from four sides. When a chat turn ends, Kurambit
+plays and measures the build.
