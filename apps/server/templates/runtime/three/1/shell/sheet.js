@@ -68,6 +68,7 @@ export function createSheet({ renderer, find, names, hold }) {
     canvas.width = width;
     canvas.height = height;
     let measured;
+    let cell = 1;
     const culled = [];
     try {
       // Alone and upright at the origin, as built: its own scale stays.
@@ -100,12 +101,10 @@ export function createSheet({ renderer, find, names, hold }) {
       figure.position.set(box.min.x - 0.7, 0, box.max.z + 0.5);
       scene.add(figure);
       const span = Math.max(size.x, size.z, 1) + 2.5;
-      const grid = new THREE.GridHelper(
-        Math.ceil(span) * 2,
-        Math.ceil(span) * 2,
-        0x3a3f46,
-        0x737981,
-      );
+      // Metre lines blur into a smear under a ship; past 20 m they are 5 m apart.
+      cell = span > 20 ? 5 : 1;
+      const across = Math.ceil(span / cell) * 2 * cell;
+      const grid = new THREE.GridHelper(across, across / cell, 0x3a3f46, 0x737981);
       grid.position.y = 0.002;
       scene.add(grid);
       const all = drawnBox(object).union(new THREE.Box3().setFromObject(figure));
@@ -182,7 +181,7 @@ export function createSheet({ renderer, find, names, hold }) {
     );
     const [x, y, z] = measured.size;
     label(
-      `${record.name}: ${x} × ${y} × ${z} m (wide × tall × long) · ${measured.triangles.toLocaleString("en-US")} triangles · ${measured.drawCalls} draw calls · grey figure ${PERSON_M} m · grid 1 m`,
+      `${record.name}: ${x} × ${y} × ${z} m (wide × tall × long) · ${measured.triangles.toLocaleString("en-US")} triangles · ${measured.drawCalls} draw calls · grey figure ${PERSON_M} m · grid ${cell} m`,
       "left:50%;bottom:1.2%;transform:translateX(-50%);white-space:nowrap",
     );
     document.body.append(overlay);
