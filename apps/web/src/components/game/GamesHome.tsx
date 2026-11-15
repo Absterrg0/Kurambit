@@ -8,6 +8,8 @@ import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime
 import {
   ACTIVE_GAME_ENGINES,
   GAME_ENGINES,
+  GAME_STYLE_DEFAULT_CHARACTERS,
+  GAME_STYLE_DEFAULT_LIBRARY,
   type EnvironmentId,
   type GameCharacterRoute,
   type GameEngineId,
@@ -52,7 +54,8 @@ import { KurambitMark } from "../brand/KurambitBrand";
 import { useStageStill } from "./gameStageBridge";
 import {
   CHARACTER_ROUTES,
-  characterRouteLabel,
+  LibraryChoice,
+  modelChoiceLabel,
   useCharacterRouteBlockers,
   useGeneratedRouteNote,
 } from "./GameCharacterRoute";
@@ -151,7 +154,8 @@ function BriefBox({
   const refreshLibrary = useGameLibraryRefresh(environmentId);
   const { toolchain, ready: engineReady } = useEngineReadiness(environmentId);
   const [brief, setBrief] = useState("");
-  const [characters, setCharacters] = useState<GameCharacterRoute>("library");
+  const [characters, setCharacters] = useState<GameCharacterRoute>(GAME_STYLE_DEFAULT_CHARACTERS);
+  const [library, setLibrary] = useState(GAME_STYLE_DEFAULT_LIBRARY);
   const [chosenEngine, setEngine] = useState<GameEngineId | null>(null);
   const engine = chooseEngine(chosenEngine, engineReady);
   const [busy, setBusy] = useState(false);
@@ -200,6 +204,7 @@ function BriefBox({
         brief: trimmedBrief,
         engine,
         characters,
+        library,
         modelSelection: choice.model,
       },
     });
@@ -331,6 +336,8 @@ function BriefBox({
             environmentId={environmentId}
             characters={characters}
             onCharacters={setCharacters}
+            library={library}
+            onLibrary={setLibrary}
             disabled={busy}
           />
           <span className="flex-1" />
@@ -423,11 +430,15 @@ function BriefOptions({
   environmentId,
   characters,
   onCharacters,
+  library,
+  onLibrary,
   disabled,
 }: {
   environmentId: EnvironmentId;
   characters: GameCharacterRoute;
   onCharacters: (route: GameCharacterRoute) => void;
+  library: boolean;
+  onLibrary: (library: boolean) => void;
   disabled: boolean;
 }) {
   const navigate = useNavigate();
@@ -441,17 +452,17 @@ function BriefOptions({
             size="sm"
             variant="ghost-muted"
             disabled={disabled}
-            aria-label={`First build options: characters from ${characterRouteLabel(characters)}`}
+            aria-label={`First build options: models from ${modelChoiceLabel(characters, library)}`}
           />
         }
       >
         <SlidersHorizontalIcon aria-hidden />
         {/* The one choice it holds, named with its value, so the icon is never a riddle. */}
-        Characters: {characterRouteLabel(characters)}
+        Models: {modelChoiceLabel(characters, library)}
       </MenuTrigger>
       <MenuPopup align="start" className="w-72">
         <MenuGroup>
-          <MenuGroupLabel>Make characters with</MenuGroupLabel>
+          <MenuGroupLabel>Make models with</MenuGroupLabel>
           <MenuRadioGroup
             value={characters}
             onValueChange={(value: GameCharacterRoute) => onCharacters(value)}
@@ -470,6 +481,8 @@ function BriefOptions({
               );
             })}
           </MenuRadioGroup>
+          <MenuSeparator />
+          <LibraryChoice checked={library} onChange={onLibrary} />
         </MenuGroup>
         {blocker("generated") !== null ? (
           <>

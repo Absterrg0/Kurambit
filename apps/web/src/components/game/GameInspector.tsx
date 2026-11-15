@@ -75,8 +75,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameBuildStill, PictureSourceBadge } from "./GameBuildStill";
 import {
-  characterRouteLabel,
   GameCharacterRoutePicker,
+  modelChoiceLabel,
   useCharacterRoute,
 } from "./GameCharacterRoute";
 import { useGameName } from "./GameName";
@@ -696,7 +696,7 @@ function checksSummary(facts: GameBuildFacts, stepLine: boolean): string {
 }
 
 function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
-  const characters = useCharacterRoute(threadRef).route;
+  const { route: characters, library } = useCharacterRoute(threadRef);
   const view = gameChecksView(facts);
   const measured = view.checks.filter((check) => check.reading._tag === "measured");
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
@@ -718,7 +718,7 @@ function Checks({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameB
           assetLibraryNote(facts.assets.value),
           characters === null
             ? null
-            : `This game makes characters with ${characterRouteLabel(characters)}; change it in the Scene tab.`,
+            : `This game makes models with ${modelChoiceLabel(characters, library)}; change it in the Scene tab.`,
         ]
           .filter((line) => line !== null)
           .join(" ") || null
@@ -1790,7 +1790,7 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         </div>
         <div className="flex min-h-9 items-center gap-2.5 ps-3 pe-1.5">
           <Text variant="meta" tone="default" render={<span className="flex-1" />}>
-            Characters
+            Models
           </Text>
           <GameCharacterRoutePicker threadRef={threadRef} />
         </div>

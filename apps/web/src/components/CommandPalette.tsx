@@ -1783,14 +1783,24 @@ function OpenCommandPaletteDialog(props: {
       actionItems.push({
         kind: "submenu",
         value: "action:game-character-route",
-        title: "Make characters with…",
-        searchTerms: ["characters", "make", "library", "blender", "generated", "route", "game"],
+        title: "Make models with…",
+        searchTerms: [
+          "models",
+          "characters",
+          "make",
+          "code",
+          "library",
+          "blender",
+          "generated",
+          "route",
+          "game",
+        ],
         icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
         addonIcon: <PersonStandingIcon className={ADDON_ICON_CLASS} />,
         groups: [
           {
             value: "character-routes",
-            label: "Make characters with",
+            label: "Make models with",
             items: CHARACTER_ROUTES.map((option) => ({
               kind: "action",
               value: `game-character-route:${option.route}`,
@@ -1799,7 +1809,7 @@ function OpenCommandPaletteDialog(props: {
               disabled:
                 characterRouteBlocker(option.route) !== null &&
                 characterRoute.shown !== option.route,
-              searchTerms: [option.label, "characters", "route"],
+              searchTerms: [option.label, "models", "route"],
               icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
               titleTrailingContent:
                 characterRoute.shown === option.route ? (
@@ -1807,6 +1817,24 @@ function OpenCommandPaletteDialog(props: {
                 ) : undefined,
               run: () => characterRoute.choose(option.route),
             })),
+          },
+          {
+            value: "character-library",
+            label: "Library",
+            items: [
+              {
+                kind: "action",
+                value: "game-character-library",
+                title:
+                  characterRoute.shownLibrary === true
+                    ? "Turn library models off"
+                    : "Turn library models on",
+                description: "Free asset library models first; the route makes what it lacks",
+                searchTerms: ["library", "assets", "models"],
+                icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
+                run: () => characterRoute.setLibrary(characterRoute.shownLibrary !== true),
+              },
+            ],
           },
         ],
       });

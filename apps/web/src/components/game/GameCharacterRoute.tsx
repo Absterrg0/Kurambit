@@ -17,30 +17,32 @@ import { ChevronDownIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Menu,
+  MenuCheckboxItem,
   MenuGroup,
   MenuGroupLabel,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
 import { Text } from "../ui/text";
 
-/** The ways a game's characters are made, in the order the person picks from. */
+/** The ways a game's models are made, in the order the person picks from. */
 export const CHARACTER_ROUTES: ReadonlyArray<{
   readonly route: GameCharacterRoute;
   readonly label: string;
   readonly description: string;
 }> = [
   {
-    route: "library",
-    label: "Library",
-    description: "The asset library first; the agent builds in Blender what it lacks",
+    route: "code",
+    label: "Code",
+    description: "The agent builds each model in three.js code, in the game itself",
   },
   {
     route: "blender",
     label: "Blender",
-    description: "The agent builds each character in Blender",
+    description: "The agent builds each model in Blender",
   },
   {
     route: "generated",
@@ -79,7 +81,7 @@ export const characterRouteLabel = (route: GameCharacterRoute) =>
 const NO_PERMISSION = Atom.make(false);
 
 /**
- * The game's "Make characters with" setting, as every surface reads and sets
+ * The game's "Make models with" setting, as every surface reads and sets
  * it: the server holds it in game.json, and only the person changes it.
  */
 export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
@@ -90,14 +92,21 @@ export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
       ? NO_PERMISSION
       : gameEnvironment.setCharacterRoute.permissionAtom(threadRef.environmentId),
   );
-  const [pending, setPending] = useState<GameCharacterRoute | null>(null);
+  const [pending, setPending] = useState<{
+    readonly route?: GameCharacterRoute;
+    readonly library?: boolean;
+  } | null>(null);
   const route = status.data?.characters ?? null;
-  const choose = async (next: GameCharacterRoute) => {
-    if (threadRef === null || pending !== null || next === route) return;
+  const library = status.data?.library ?? null;
+  const send = async (next: {
+    readonly route?: GameCharacterRoute;
+    readonly library?: boolean;
+  }) => {
+    if (threadRef === null || pending !== null) return;
     setPending(next);
     await set({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, route: next },
+      input: { threadId: threadRef.threadId, ...next },
     });
     setPending(null);
     status.refresh();
@@ -105,16 +114,51 @@ export function useCharacterRoute(threadRef: ScopedThreadRef | null) {
   return {
     /** null until the game's status is read. */
     route,
+    library,
     /** The choice on its way to the server, shown as chosen meanwhile. */
-    shown: pending ?? route,
+    shown: pending?.route ?? route,
+    shownLibrary: pending?.library ?? library,
     canSet: permitted && route !== null,
-    choose,
+    choose: async (next: GameCharacterRoute) => {
+      if (next !== route) await send({ route: next });
+    },
+    setLibrary: async (next: boolean) => {
+      if (next !== library) await send({ library: next });
+    },
   };
+}
+
+/** The library's own switch: models from the free asset library beside the route's. */
+export function LibraryChoice({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (library: boolean) => void;
+}) {
+  return (
+    <MenuCheckboxItem
+      variant="switch"
+      checked={checked}
+      disabled={disabled}
+      onCheckedChange={(next) => onChange(next)}
+      closeOnClick={false}
+    >
+      <span className="flex flex-col">
+        <Text variant="label">Library models</Text>
+        <Text variant="meta" tone="muted">
+          Free asset library models first; the route makes what it lacks
+        </Text>
+      </span>
+    </MenuCheckboxItem>
+  );
 }
 
 /** The three choices as menu radio items, with the generated route's note. */
 function CharacterRouteChoices({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const { shown, choose } = useCharacterRoute(threadRef);
+  const { shown, shownLibrary, choose, setLibrary } = useCharacterRoute(threadRef);
   const blocker = useCharacterRouteBlockers(threadRef.environmentId);
   const generatedNote = useGeneratedRouteNote(threadRef.environmentId);
   return (
@@ -147,26 +191,32 @@ function CharacterRouteChoices({ threadRef }: { threadRef: ScopedThreadRef }) {
           {generatedNote}
         </Text>
       ) : null}
+      <MenuSeparator />
+      <LibraryChoice checked={shownLibrary === true} onChange={(next) => void setLibrary(next)} />
     </>
   );
 }
 
-/** The Scene tab's Characters row: the current route, and a menu to change it. */
+/** How a choice reads in one line: "Code", "Code + library". */
+export const modelChoiceLabel = (route: GameCharacterRoute, library: boolean | null) =>
+  `${characterRouteLabel(route)}${library === true ? " + library" : ""}`;
+
+/** The Scene tab's Models row: the current route, and a menu to change it. */
 export function GameCharacterRoutePicker({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const { shown, canSet } = useCharacterRoute(threadRef);
+  const { shown, shownLibrary, canSet } = useCharacterRoute(threadRef);
   return (
     <Menu>
       <MenuTrigger
         render={
-          <Button size="xs" variant="ghost" disabled={!canSet} aria-label="Make characters with" />
+          <Button size="xs" variant="ghost" disabled={!canSet} aria-label="Make models with" />
         }
       >
-        {shown === null ? "…" : characterRouteLabel(shown)}
+        {shown === null ? "…" : modelChoiceLabel(shown, shownLibrary)}
         <ChevronDownIcon aria-hidden="true" />
       </MenuTrigger>
       <MenuPopup align="end" className="w-72">
         <MenuGroup>
-          <MenuGroupLabel>Make characters with</MenuGroupLabel>
+          <MenuGroupLabel>Make models with</MenuGroupLabel>
           <CharacterRouteChoices threadRef={threadRef} />
         </MenuGroup>
       </MenuPopup>
