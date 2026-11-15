@@ -30,10 +30,10 @@ export const GameStyleView = Schema.Literals(["side", "top-down", "isometric", "
 export type GameStyleView = typeof GameStyleView.Type;
 
 /**
- * STYLE.json: the look a game is held to. game_assets_add writes it from the
+ * STYLE.json: the look a game records. game_assets_add writes it from the
  * style family the agent chooses (GameStyleLock), the person may edit it, and
- * the art tools read it on every call: they fill their defaults from it and
- * refuse what drifts from it.
+ * the art tools read it on every call to fill their defaults; none refuses an
+ * asset for falling outside it.
  */
 export const GameStyle = Schema.Struct({
   version: Schema.Literal(1),

@@ -89,33 +89,24 @@ check that matters.
   skeleton names its rig, read from its GLBs' skin joints when it is pinned (`LIBRARY_RIG_JOINTS`;
   the FBX-only rigs are named from their authors' descriptions): a game whose characters share one
   rig can play any clip on any character. A pack whose animated models each have a skeleton of
-  their own (animals, creatures, vehicles) names no rig: each model comes with its own clips, and
-  the lock's rig never refuses it. Made characters share the `standard-humanoid` skeleton, so
+  their own (animals, creatures, vehicles) names no rig: each model comes with its own clips.
+  Made characters share the `standard-humanoid` skeleton, so
   every standard clip plays on every made or library body on it.
-- `STYLE.json` at the game root is the style lock (`packages/contracts/src/gameStyle.ts`), read
-  by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an edit
-  takes effect at once. `game_assets_add`'s `lock` writes it from a style family
-  (`styleFromLock`), keeping what else the lock holds, so agents never hand-write its shape. A lock
-  admits every pack of its family (one look by definition); `packs` lists the family's curated
-  packs and what comes from beyond it, and a source id there (`polyhaven`) admits all its assets.
-  The tools refuse what drifts rather than warn: a library add outside its family and packs
-  (checked before the pack is fetched) or of a possible character on another rig (any model
-  whose clips cannot be read counts), a sprite render in another palette or mode, a Blender
-  import from a source it does not list, and an import or export carrying an armature whose
-  bones are not the lock's rig. A lock without `rig` says no character shares library clips;
-  one without `audio.packs` leaves sound unlocked. The rig exists only so library clips fit every
-  character, so an armature marked on its own rig (`kurambit_rig`) is outside it: the mark stands
-  when a creature generation of this game delivered the armature, or, with no generation named,
-  when it carries clips of its own and none from the library (`ownRigRefusal`). Any scene code
-  can set the mark, so the review and the export check that claim, and the route treats a
-  marked armature with no generation as made in Blender. Each
-  refusal names the one edit that changes direction on purpose. A lock that is a link, not JSON
-  or names unknown library ids fails every art tool with the field, so a broken lock is never
-  silently lifted. It is a game file, so checkpoints carry it and a run's restore brings it back
-  with the art (`restoredPaths`). `rig` names the skeleton made characters are conformed to; a
-  pack the lock lists may still bring characters on its own rig with its own clips. How a game's
+- `STYLE.json` at the game root records the game's look (`packages/contracts/src/gameStyle.ts`),
+  read by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an
+  edit takes effect at once. `game_assets_add`'s optional `lock` writes it from a style family
+  (`styleFromLock`), so agents never hand-write its shape. Tools fill defaults from it (sprite
+  palette and views, export budgets, loudness targets, the clip packs a character gets) and search
+  ranks its packs first, but nothing is refused for falling outside it: refusals that kept a game
+  inside a family the harness picked decided the look for the agent, which is its and the
+  person's. The rig exists only so library clips fit every character, so an armature marked on its
+  own rig (`kurambit_rig`) plays its own: the mark stands when a creature generation of this game
+  delivered the armature, or, with no generation named, when it carries clips of its own and none
+  from the library (`ownRigRefusal`). A STYLE.json that is a link, not JSON or names unknown
+  library ids fails every art tool with the field. It is a game file, so checkpoints carry it and
+  a run's restore brings it back with the art (`restoredPaths`). How a game's
   models are made (code, Blender or generated) and whether the free library's models may come in
-  are the person's choice, kept in `game.json` (`characters`, `library`) rather than the lock, so
+  are the person's choice, kept in `game.json` (`characters`, `library`) rather than STYLE.json, so
   they can be set before the first turn writes one; the tools enforce them, and the agent changes
   them only when the person asks (`game_models_route`, refused in keep-going steps). The code route
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and

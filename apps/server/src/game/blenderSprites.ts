@@ -296,9 +296,8 @@ export const renderSprites = (
       try: () => NodeFSP.realpath(root),
       catch: io(root),
     });
-    // Before anything renders, so a drift from the lock costs no Blender time.
+    // What the input leaves out comes from STYLE.json, said in its notes.
     const locked = lockSpriteInput(requested, yield* readGameStyle(realRoot));
-    if ("refusal" in locked) return yield* fail(requested.output, "invalid-input", locked.refusal);
     const input = locked.input;
     const lane = manifestProject(manifest);
     const profile = engineProfile(manifest.engine.name);

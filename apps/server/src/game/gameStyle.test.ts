@@ -6,14 +6,10 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import type { GameStyle } from "@kurambit/contracts";
-import { LIBRARY_CATALOG, LIBRARY_RIG_JOINTS, STANDARD_RIG } from "./assetLibraryCatalog.ts";
+import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
 import {
-  lockArmatureRefusal,
-  lockImportRefusal,
-  lockPackRefusal,
-  lockRigRefusal,
+  inLook,
   lockSpriteInput,
-  mayBeCharacter,
   ownRigRefusal,
   readGameStyle,
   characterRoute,
@@ -87,49 +83,12 @@ it.effect("reads no lock as none, and refuses a link, a folder or a lock that is
   }),
 );
 
-it("refuses packs outside the lock and characters on another rig, never props", () => {
-  expect(lockPackRefusal(pack("kenney-pixel-platformer"), kaykit)).toMatch(
-    /add "kenney-pixel-platformer" to STYLE.json's packs/,
-  );
-  expect(lockPackRefusal(pack("kaykit-adventurers"), kaykit)).toBeNull();
-  expect(lockPackRefusal(pack("kenney-pixel-platformer"), null)).toBeNull();
-  // Sound is locked only once the lock lists audio.packs.
-  expect(lockPackRefusal(pack("rubberduck-100-sfx"), kaykit)).toBeNull();
-  const withSound = { ...kaykit, audio: { packs: ["kenney-rpg-audio"] } };
-  expect(lockPackRefusal(pack("rubberduck-100-sfx"), withSound)).toMatch(/audio.packs/);
-  // A pixel lock's palette pack is part of the look without being listed.
+it("marks the packs of the recorded look, and never keeps one out", () => {
+  expect(inLook(pack("kaykit-adventurers"), kaykit)).toBe(true);
+  expect(inLook(pack("kenney-pixel-platformer"), kaykit)).toBe(false);
+  expect(inLook(pack("kenney-pixel-platformer"), null)).toBe(false);
   const pixel = { ...kaykit, mode: "pixel" as const, tile: 16, palette: "kenney-tiny-dungeon" };
-  expect(lockPackRefusal(pack("kenney-tiny-dungeon"), pixel)).toBeNull();
-  // A listed pack brings its characters on its own rig; an unlisted one on another rig does not.
-  expect(lockRigRefusal(pack("kenney-mini-characters"), kaykit)).toBeNull();
-  expect(lockRigRefusal(pack("quaternius-universal-base-characters"), kaykit)).toMatch(
-    /kaykit-adventurers/,
-  );
-  expect(lockRigRefusal(pack("kaykit-dungeon-remastered"), kaykit)).toBeNull();
-  // A model whose clips cannot be read is a possible character; only a model known to have none is a prop.
-  const model = { path: "a", bytes: 1, media: "model" as const };
-  expect(mayBeCharacter({ ...model, format: "fbx" })).toBe(true);
-  expect(mayBeCharacter({ ...model, format: "glb", clipsUnread: true })).toBe(true);
-  expect(mayBeCharacter({ ...model, format: "glb", clipCount: 3 })).toBe(true);
-  expect(mayBeCharacter({ ...model, format: "glb" })).toBe(false);
-  expect(mayBeCharacter({ ...model, format: "obj" })).toBe(false);
-});
-
-it("refuses imports the lock does not list, and armatures off its rig", () => {
-  expect(lockImportRefusal("polyhaven", kaykit)).toMatch(/imports/);
-  expect(lockImportRefusal("polyhaven", { ...kaykit, imports: ["polyhaven"] })).toBeNull();
-  expect(lockImportRefusal("sketchfab", null)).toBeNull();
-  const kaykitBones = [...LIBRARY_RIG_JOINTS["kaykit-1"]!, "extra_prop_bone"];
-  expect(lockArmatureRefusal({ Rig: kaykitBones }, kaykit)).toBeNull();
-  expect(lockArmatureRefusal({ Hero: ["root", "spine", "arm"] }, kaykit)).toMatch(
-    /not on STYLE.json's rig kaykit-1/,
-  );
-  const { rig: _, ...noRig } = kaykit;
-  expect(lockArmatureRefusal({ Hero: ["root"] }, noRig)).toMatch(/names no rig/);
-  expect(lockArmatureRefusal({}, noRig)).toBeNull();
-  // Both refusals name the way onto an own rig, so a made creature is never told "props only".
-  expect(lockArmatureRefusal({ Owl: ["body"] }, noRig)).toMatch(/kurambit_rig/);
-  expect(lockArmatureRefusal({ Owl: ["body"] }, kaykit)).toMatch(/kurambit_rig/);
+  expect(inLook(pack("kenney-tiny-dungeon"), pixel)).toBe(true);
 });
 
 it("lets a rig marked as its own in only on clips of its own", () => {
@@ -143,7 +102,7 @@ it("lets a rig marked as its own in only on clips of its own", () => {
   );
 });
 
-it("fills sprite renders from a pixel lock and refuses a palette it does not hold", () => {
+it("fills what a sprite render leaves out from a pixel lock, and what it names wins", () => {
   const pixel: GameStyle = {
     version: 1,
     mode: "pixel",
@@ -163,11 +122,10 @@ it("fills sprite renders from a pixel lock and refuses a palette it does not hol
     },
   });
   expect(
-    lockSpriteInput({ output: "x", pixelArt: { palette: "kenney-1-bit-platformer" } }, pixel),
-  ).toMatchObject({ refusal: expect.stringMatching(/palette to kenney-tiny-dungeon/) });
-  expect(lockSpriteInput({ output: "x", pixelArt: {} }, kaykit)).toMatchObject({
-    refusal: expect.stringMatching(/smooth/),
-  });
+    lockSpriteInput({ output: "x", pixelArt: { palette: "kenney-1-bit-platformer" } }, pixel).input
+      .pixelArt?.palette,
+  ).toBe("kenney-1-bit-platformer");
+  expect(lockSpriteInput({ output: "x", pixelArt: {} }, kaykit).input.pixelArt).toEqual({});
 });
 
 it.effect("reads an old rig id through its alias and refuses a retired one with the edit", () =>
@@ -185,10 +143,6 @@ it.effect("reads an old rig id through its alias and refuses a retired one with 
       );
     yield* write(standard);
     expect(yield* readGameStyle(root)).toEqual(standard);
-    const bones = [...LIBRARY_RIG_JOINTS[STANDARD_RIG]!, "tail_01"];
-    expect(lockArmatureRefusal({ cat: bones }, standard)).toBeNull();
-    expect(lockArmatureRefusal({ cat: ["root"] }, standard)).toMatch(/rig standard-humanoid/);
-    expect(lockRigRefusal(pack("quaternius-universal-base-characters"), standard)).toBeNull();
 
     yield* write({ ...standard, rig: "quaternius-ual1" });
     expect(failure(yield* Effect.exit(readGameStyle(root)))).toMatch(

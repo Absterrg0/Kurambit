@@ -32,10 +32,8 @@ import {
 import * as ServerSettings from "../serverSettings.ts";
 import { parseEbur128 } from "./audioLoudness.ts";
 import {
-  lockPackRefusal,
-  lockRigRefusal,
+  inLook,
   loudnessTargets,
-  mayBeCharacter,
   readGameStyle,
   styleFromLock,
   isClipPack,
@@ -1017,29 +1015,24 @@ const make = Effect.gen(function* () {
     root: string,
     engine: GameEngineId,
     input: GameAssetsSearchInput,
-    style: Parameters<typeof lockPackRefusal>[1],
+    style: Parameters<typeof inLook>[1],
   ) =>
     Effect.gen(function* () {
       const words = queryWords(input.query);
       const cached = yield* cachedIds;
       const kind = input.kind;
       const fetched = (pack: LibraryPack) => (cached.has(packKey(pack)) ? ", fetched" : "");
-      const locked = (pack: LibraryPack) =>
-        style === null
-          ? ""
-          : lockPackRefusal(pack, style) === null
-            ? ", in STYLE.json"
-            : ", outside STYLE.json";
+      const locked = (pack: LibraryPack) => (inLook(pack, style) ? ", in STYLE.json" : "");
       const rig = (pack: LibraryPack) =>
         `${pack.rig === undefined ? "" : `; rig ${pack.rig}`}${(pack.animated ?? 0) > 0 ? `; ${pack.animated} with clips of their own` : ""}`;
       const licence = (pack: LibraryPack) =>
         `${LIBRARY_LICENCES[pack.licence].name}${pack.credit === undefined ? "" : ` (credit: ${pack.credit})`}`;
       const lockLine =
         style === null
-          ? "No STYLE.json yet: choose one family's look and pass it as lock (family and view) with your first game_assets_add, which writes STYLE.json; then take the game's art from that family."
-          : `STYLE.json locks this game to ${style.family === undefined ? "" : `the ${style.family} family (all its packs), `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}.`;
+          ? ""
+          : `STYLE.json records this game's look: ${style.family === undefined ? "" : `the ${style.family} family, `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}. Its packs come first; any pack may be added.`;
       // Browsing: each family's look, its packs on one line, and its sources' counts, so a look
-      // can be chosen from the whole library and locked in STYLE.json.
+      // can be chosen from the whole library.
       if (
         words.length === 0 &&
         kind === undefined &&
@@ -1079,7 +1072,7 @@ const make = Effect.gen(function* () {
                   `packs: ${packs
                     .map(
                       (pack) =>
-                        `${pack.id}${pack.rig === undefined ? "" : ` (rig ${pack.rig})`}${(pack.animated ?? 0) > 0 && pack.rig === undefined ? " (animated)" : ""}${style !== null && lockPackRefusal(pack, style) === null ? "*" : ""}`,
+                        `${pack.id}${pack.rig === undefined ? "" : ` (rig ${pack.rig})`}${(pack.animated ?? 0) > 0 && pack.rig === undefined ? " (animated)" : ""}${inLook(pack, style) ? "*" : ""}`,
                     )
                     .join(", ")}`,
                 ]),
@@ -1088,8 +1081,8 @@ const make = Effect.gen(function* () {
         });
         return {
           text: [
-            lockLine,
-            `The library this ${engine} game loads, by style family (* fits STYLE.json). Every pack is CC0 unless a search says otherwise; game_assets_add credits whatever asks for credit.`,
+            ...(lockLine === "" ? [] : [lockLine]),
+            `The library this ${engine} game loads, by style family${style === null ? "" : " (* in STYLE.json)"}. Every pack is CC0 unless a search says otherwise; game_assets_add credits whatever asks for credit.`,
             ...families,
             ...(hidden > 0
               ? [`${hidden} more packs hold no format this ${engine} game loads.`]
@@ -1116,8 +1109,8 @@ const make = Effect.gen(function* () {
             hidden += 1;
             return [];
           }
-          // The game's own look first, so the lock is what a search shows.
-          const own = style !== null && lockPackRefusal(pack, style) === null ? 1 : 0;
+          // The game's recorded look first.
+          const own = inLook(pack, style) ? 1 : 0;
           return [{ pack, ...offered, score, own, order }];
         })
         .toSorted((a, b) => b.own - a.own || b.score - a.score || a.order - b.order);
@@ -1158,7 +1151,7 @@ const make = Effect.gen(function* () {
             );
       const total = OFFERED_PACKS.length + LIBRARY_ASSETS.length;
       const text = [
-        lockLine,
+        ...(lockLine === "" ? [] : [lockLine]),
         shown.length === 0
           ? "Nothing in the library matches. Try fewer or broader words, or another kind."
           : `${ranked.length} of ${total} library entries${live.entries.length > 0 ? ` and Poly Pizza's live results` : ""} match${ranked.length > shown.length ? `; the best ${shown.length}` : ""}:`,
@@ -1545,9 +1538,6 @@ const make = Effect.gen(function* () {
       const locked = input.lock === undefined ? null : styleFromLock(input.lock, pack, lockBefore);
       if (locked !== null && "refusal" in locked)
         return yield* fail("Library add", GAME_STYLE_FILE, "invalid-input", locked.refusal);
-      const style = locked?.style ?? lockBefore;
-      const outside = lockPackRefusal(pack, style);
-      if (outside !== null) return yield* fail("Library add", pack.id, "invalid-input", outside);
       if (locked !== null)
         yield* writeAtomic(
           NodePath.join(gameRoot, GAME_STYLE_FILE),
@@ -1674,11 +1664,6 @@ const make = Effect.gen(function* () {
           "invalid-input",
           `${visual.path}: ${LIBRARY_OFF_REFUSAL}`,
         );
-      // Props from a pack on another rig are fine; its characters, or any model whose clips
-      // could not be read, are not.
-      const offRig = lockRigRefusal(pack, style);
-      if (offRig !== null && [...chosen.values()].some(mayBeCharacter))
-        return yield* fail("Library add", pack.id, "invalid-input", offRig);
       const total = [...chosen.values()].reduce((sum, file) => sum + file.bytes, 0);
       if (chosen.size > MAX_ADD_FILES || total > MAX_ADD_BYTES)
         return yield* fail(
@@ -1884,7 +1869,7 @@ const make = Effect.gen(function* () {
           root,
           [...chosen.values()].filter((file) => file.media === "audio"),
           filesDir,
-          style,
+          locked?.style ?? lockBefore,
         )),
         afterAddingArt(profile),
       ].join("\n");

@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- STYLE.json is a file in the game folder, read and decoded like ASSETS.md.
-// The style lock's one reader: STYLE.json at the game root, decoded and checked
-// against the library, for the art tools that fill defaults from it and refuse
-// what drifts from it.
+// STYLE.json's one reader: the game's look as recorded at the game root, decoded and
+// checked against the library, for the art tools that fill defaults from it. It never
+// refuses an asset for its look: the look is the agent's and the person's to choose.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -22,7 +22,7 @@ import {
   type GameStyleLock,
   gameModelChoice,
 } from "@kurambit/contracts";
-import { awaitsMirror, type LibraryFile, type LibraryPack } from "./assetLibraryFiles.ts";
+import { awaitsMirror, type LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
 import { LIBRARY_SOURCES } from "./assetLibrarySources.ts";
 import {
@@ -30,7 +30,6 @@ import {
   LIBRARY_CATALOG,
   LIBRARY_FAMILIES,
   LIBRARY_RIG_ALIASES,
-  LIBRARY_RIG_JOINTS,
   RETIRED_RIGS,
   STANDARD_RIG,
 } from "./assetLibraryCatalog.ts";
@@ -159,32 +158,20 @@ const SPRITE_VIEWS: Record<GameStyle["view"], GameBlenderRenderSpritesInput["vie
   };
 
 /**
- * A sprite render as the lock holds it: missing pixel-art settings, size and
- * views come from the lock (each said in `notes`), and a palette or mode the
- * lock does not allow is refused with how to change the lock instead.
+ * A sprite render with what it leaves out filled from STYLE.json: pixel-art settings, size and
+ * views (each said in `notes`). What the input names always wins.
  */
 export const lockSpriteInput = (
   input: GameBlenderRenderSpritesInput,
   style: GameStyle | null,
-):
-  | { readonly input: GameBlenderRenderSpritesInput; readonly notes: ReadonlyArray<string> }
-  | { readonly refusal: string } => {
+): { readonly input: GameBlenderRenderSpritesInput; readonly notes: ReadonlyArray<string> } => {
   if (style === null) return { input, notes: [] };
   const notes: string[] = [];
   let locked = input;
-  if (style.mode === "smooth") {
-    if (input.pixelArt !== undefined)
-      return {
-        refusal: `${GAME_STYLE_FILE} locks this game to smooth art, so its sprites are not quantised: leave out pixelArt, or change ${GAME_STYLE_FILE}'s mode to pixel (with tile and palette) to make the whole game pixel art.`,
-      };
-  } else {
-    // The lock's filter refuses a hex list in pixel mode, so only a pack id or a path reaches sprites.
-    const palette = typeof style.palette === "string" ? style.palette : undefined;
-    const asked = input.pixelArt?.palette;
-    if (asked !== undefined && asked !== palette)
-      return {
-        refusal: `${GAME_STYLE_FILE} locks this game's palette to ${palette}; leave out pixelArt.palette (the lock fills it) or pass that one. To change every sprite's palette, change ${GAME_STYLE_FILE}'s palette first and render the strips again.`,
-      };
+  if (style.mode === "pixel") {
+    // STYLE.json's filter refuses a hex list in pixel mode, so only a pack id or a path reaches sprites.
+    const palette =
+      input.pixelArt?.palette ?? (typeof style.palette === "string" ? style.palette : undefined);
     const outline = input.pixelArt?.outline ?? style.outline;
     locked = {
       ...locked,
@@ -221,51 +208,29 @@ const soundOnly = (pack: LibraryPack) =>
   pack.kinds.every((kind) => kind === "sfx" || kind === "music");
 
 /**
- * Why the lock refuses a pack before anything is fetched, or null. The lock's family is one
- * look, so every pack of it may come in; beyond it, the packs it lists, and every asset of a
- * source it lists (polyhaven). A pixel lock's palette pack is part of the look; sound is
- * locked only once the lock lists audio.packs, as characters are only once it names a rig.
+ * Whether a pack is part of the look STYLE.json records: its family's packs, the packs and
+ * sources it lists, its palette pack, its sound packs. Search marks and ranks these first; it
+ * never keeps a pack out.
  */
-export const lockPackRefusal = (pack: LibraryPack, style: GameStyle | null): string | null => {
-  if (style === null) return null;
-  if (style.packs.includes(pack.id) || style.palette === pack.id) return null;
-  if (!soundOnly(pack) && style.family !== undefined && pack.family === style.family) return null;
-  if (pack.group !== undefined && style.packs.includes(pack.group)) return null;
-  if (soundOnly(pack) && style.audio?.packs === undefined) return null;
-  const audio = style.audio?.packs ?? [];
-  if (audio.includes(pack.id)) return null;
-  const list = soundOnly(pack) ? "audio.packs" : "packs";
-  const holds = soundOnly(pack) ? audio : style.packs;
-  const allow = pack.group ?? pack.id;
-  return `${GAME_STYLE_FILE} locks this game's ${soundOnly(pack) ? "sound" : "look"} to ${soundOnly(pack) || style.family === undefined ? "" : `the ${style.family} family and `}${holds.length === 0 ? "no sound packs yet" : holds.join(", ")}; ${pack.id} (${pack.family}: ${pack.style}) is outside it. If it fits the game, add "${allow}" to ${GAME_STYLE_FILE}'s ${list}${pack.group === undefined ? "" : ` (every ${pack.group} asset then fits)`} and add again; to change the game's ${soundOnly(pack) ? "sound" : "look"}, change ${GAME_STYLE_FILE} first.`;
+export const inLook = (pack: LibraryPack, style: GameStyle | null): boolean => {
+  if (style === null) return false;
+  if (style.packs.includes(pack.id) || style.palette === pack.id) return true;
+  if (!soundOnly(pack) && style.family !== undefined && pack.family === style.family) return true;
+  if (pack.group !== undefined && style.packs.includes(pack.group)) return true;
+  return (style.audio?.packs ?? []).includes(pack.id);
 };
 
 /**
- * Whether a model may be an animated character: it has clips, or its clips
- * could not be read (an FBX, .blend or .dae, or a glTF too large to read).
- * Only a model known to have no clips is a prop.
+ * The library animation packs on the standard skeleton a character's clips come from:
+ * STYLE.json's when it lists some, else every one the library offers.
  */
-export const mayBeCharacter = (file: LibraryFile) =>
-  file.media === "model" &&
-  ((file.clipCount ?? 0) > 0 ||
-    file.clipsUnread === true ||
-    file.format === "fbx" ||
-    file.format === "blend" ||
-    file.format === "dae");
-
-/**
- * Why the lock refuses a pack's characters on another rig, or null. The rig names the
- * skeleton made characters are conformed to; a pack the lock lists brings its characters
- * on its own rig with its own clips (KayKit foes beside a standard-skeleton hero).
- */
-export const lockRigRefusal = (pack: LibraryPack, style: GameStyle | null): string | null => {
-  if (style?.rig === undefined || pack.rig === undefined || style.packs.includes(pack.id))
-    return null;
-  const rig = resolveRig(style.rig);
-  if (pack.rig === rig) return null;
-  const same = OFFERED.filter((other) => other.rig === rig).map((other) => other.id);
-  const from = same.length > 1 ? `${same.slice(0, -1).join(", ")} or ${same.at(-1)}` : same[0];
-  return `${pack.id}'s characters are on the ${pack.rig} rig and ${GAME_STYLE_FILE}'s rig is ${style.rig}, so their clips would not fit the game's other characters. Take characters from ${from}; from this pack add only props known to have no clips (glTF without animations: an FBX's clips cannot be read, so it counts as a character); or, if its characters belong in the game on their own rig, add "${pack.id}" to ${GAME_STYLE_FILE}'s packs.`;
+export const standardClipPacks = (style: GameStyle | null): ReadonlyArray<string> => {
+  const isClips = (id: string) => {
+    const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
+    return pack?.rig === STANDARD_RIG && pack.kinds.includes("animation");
+  };
+  const listed = (style?.packs ?? []).filter(isClips);
+  return listed.length > 0 ? listed : OFFERED.map((pack) => pack.id).filter(isClips);
 };
 
 /** UI, icons, fonts and particles that sit with every look: every derived lock lists them. */
@@ -361,46 +326,6 @@ export const loudnessTargets = (style: GameStyle | null) => ({
   sfxPeakDbtp: style?.audio?.sfxPeakDbtp ?? GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   fromLock: style?.audio?.musicLufs !== undefined || style?.audio?.sfxPeakDbtp !== undefined,
 });
-
-/** Why the lock refuses an import from an outside source, or null. */
-export const lockImportRefusal = (
-  source: "polyhaven" | "sketchfab" | "polypizza",
-  style: GameStyle | null,
-): string | null =>
-  style === null || (style.imports ?? []).includes(source)
-    ? null
-    : `${GAME_STYLE_FILE} locks this game's look to its library packs (${style.packs.join(", ")}) and allows no imports from ${source}. If ${source} models fit that look, add "${source}" to ${GAME_STYLE_FILE}'s imports and import again; otherwise take the piece from the lock's packs or build it in Blender in their style.`;
-
-/** How an armature says it is on its own rig; the name becomes its sidecar's skeleton. */
-const OWN_RIG_MARK = `armature["kurambit_rig"] = "<rig name>"`;
-
-/**
- * Why the lock refuses armatures about to enter the game (name to bone names),
- * or null: a lock with a rig takes only armatures holding every bone of that
- * rig (when its bones are known); a lock without one takes no armature. An
- * armature on its own rig (kurambit_rig) is never passed here: ownRigRefusal
- * and the generation it came from decide it.
- */
-export const lockArmatureRefusal = (
-  armatures: Readonly<Record<string, ReadonlyArray<string>>>,
-  style: GameStyle | null,
-): string | null => {
-  const names = Object.keys(armatures);
-  if (style === null || names.length === 0) return null;
-  const ownRig = `A model you rig and animate yourself (a creature, a vehicle, a humanoid that never plays library clips) enters on its own rig: key its own clips on its armature and mark it, ${OWN_RIG_MARK}.`;
-  if (style.rig === undefined)
-    return `${names.join(", ")} ${names.length === 1 ? "is an armature" : "are armatures"}, and ${GAME_STYLE_FILE} names no rig, so no character shares library clips. ${ownRig} To bring characters on a shared rig, set ${GAME_STYLE_FILE}'s rig to the rig they share first.`;
-  const rig = resolveRig(style.rig);
-  const joints = LIBRARY_RIG_JOINTS[rig];
-  if (joints === undefined) return null;
-  const off = names.filter((name) => {
-    const bones = new Set(armatures[name]);
-    return joints.some((joint) => !bones.has(joint));
-  });
-  if (off.length === 0) return null;
-  const packs = OFFERED.filter((pack) => pack.rig === rig).map((pack) => pack.id);
-  return `${off.join(", ")} ${off.length === 1 ? "is not" : "are not"} on ${GAME_STYLE_FILE}'s rig ${rig}, so library clips would not fit ${off.length === 1 ? "it" : "them"}. ${rig === STANDARD_RIG ? `A character that plays them is built with game_blender_character, which puts it on the rig, or taken from ${packs.join(", ")}` : `Characters that play them come from ${packs.join(", ")}`}. ${ownRig} Or change ${GAME_STYLE_FILE}'s rig to move every character.`;
-};
 
 /**
  * Why an armature may not enter on its own rig, or null. The lock's rig exists so library clips

@@ -59,8 +59,8 @@ export const GameAssetsAddInput = Schema.Struct({
   /** Pack-relative files or folders, as game_assets_search lists them. */
   paths: Schema.Array(packPath).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   /**
-   * Lock the game's look to a style family before these files come in: writes STYLE.json
-   * (packs, rig, mode and palette from the family), keeping what else a lock there holds.
+   * Record the game's look as a style family before these files come in: writes STYLE.json
+   * (packs, rig, mode and palette from the family), keeping what else one there holds.
    */
   lock: Schema.optionalKey(GameStyleLock),
 });

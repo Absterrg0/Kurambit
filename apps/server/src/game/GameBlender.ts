@@ -106,13 +106,11 @@ import {
   isClipPack,
   LIBRARY_OFF_REFUSAL,
   modelChoice,
-  lockArmatureRefusal,
   lockCharacterRouteRefusal,
   ownRigRefusal,
-  lockImportRefusal,
-  lockPackRefusal,
   readGameStyle,
   resolveRig,
+  standardClipPacks,
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
@@ -1366,13 +1364,6 @@ const make = Effect.gen(function* () {
   const assetDirOf = (manifest: GameManifest) =>
     gamePaths(manifest.engine.name, manifestProject(manifest)).blender;
 
-  /** The game's style lock, read fresh on every call. */
-  const styleOf = (root: string) =>
-    Effect.tryPromise({
-      try: () => NodeFSP.realpath(root),
-      catch: (cause) => opError("blender-live", root, "io", undefined, cause),
-    }).pipe(Effect.flatMap(readGameStyle));
-
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
     Effect.gen(function* () {
       const absolute = NodePath.join(root, BLEND_REL);
@@ -1617,8 +1608,9 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Each named clip found in the lock's animation packs on the standard skeleton, in the
-   * lock's order (the standard armature's pack first); "pack:Clip" picks the pack.
+   * Each named clip found in `packs` (standardClipPacks: STYLE.json's on the standard skeleton,
+   * else the library's), the standard armature's pack first; "pack:Clip" picks any library
+   * animation pack on the standard skeleton.
    */
   const resolveClips = (root: string, names: ReadonlyArray<string>, packs: ReadonlyArray<string>) =>
     Effect.gen(function* () {
@@ -1627,13 +1619,15 @@ const make = Effect.gen(function* () {
       const ordered = [...packs].toSorted(
         (a, b) => Number(b === STANDARD_ARMATURE.pack) - Number(a === STANDARD_ARMATURE.pack),
       );
-      const withClips = ordered.filter((id) =>
-        LIBRARY_CATALOG.find((pack) => pack.id === id)?.kinds.includes("animation"),
-      );
-      if (names.length > 0 && withClips.length === 0)
-        return yield* refuse(
-          `${GAME_STYLE_FILE}'s packs list no animation pack on ${STANDARD_RIG}, so no clip can be added. Add "${STANDARD_ARMATURE.pack}" to its packs.`,
-        );
+      const isClips = (id: string) => {
+        const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
+        return pack?.rig === STANDARD_RIG && pack.kinds.includes("animation");
+      };
+      const picked = names.flatMap((wanted) => {
+        const colon = wanted.indexOf(":");
+        return colon > 0 && isClips(wanted.slice(0, colon)) ? [wanted.slice(0, colon)] : [];
+      });
+      const withClips = [...new Set([...ordered.filter(isClips), ...picked])];
       const libraries = new Map<string, ReadonlyArray<PackClips>>();
       for (const id of withClips) libraries.set(id, yield* library.packClips(id));
       const found: Array<{ pack: string; name: string; path: string; licence: string }> = [];
@@ -1644,7 +1638,7 @@ const make = Effect.gen(function* () {
         const clip = colon > 0 ? wanted.slice(colon + 1) : wanted;
         if (named !== null && !withClips.includes(named))
           return yield* refuse(
-            `${wanted}: ${named} is not an animation pack ${GAME_STYLE_FILE}'s packs list on ${STANDARD_RIG} (${withClips.join(", ") || "none"}). Add it to packs first if it fits the game.`,
+            `${wanted}: ${named} is not a library animation pack on ${STANDARD_RIG} (${withClips.join(", ")}).`,
           );
         const hit = (named === null ? withClips : [named]).flatMap((id) =>
           (libraries.get(id) ?? [])
@@ -1805,15 +1799,9 @@ const make = Effect.gen(function* () {
                 ].join("\n"),
               }),
             );
-            const carried = { ...live, ...pass.armatures };
-            const offRig = lockArmatureRefusal(carried, style);
-            const armatures = Object.keys(carried);
+            const armatures = Object.keys({ ...live, ...pass.armatures });
             const record: PassRecord = {
               ...pass,
-              refusals:
-                offRig === null || pass.refusals.some((refusal) => refusal.code === "off-rig")
-                  ? pass.refusals
-                  : [...pass.refusals, { code: "off-rig" as const, text: offRig.slice(0, 400) }],
               key,
               kit,
               digest: digest.perObject,
@@ -2282,11 +2270,7 @@ const make = Effect.gen(function* () {
             const fail = (reason: GameOperationError["reason"], detail: string) =>
               Effect.fail(opError("blender-animate", root, reason, detail));
             const realRoot = yield* realRootOf(root);
-            const style = yield* readGameStyle(realRoot);
-            const packs = (style?.packs ?? []).filter((id) => {
-              const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
-              return pack?.rig === STANDARD_RIG && pack.kinds.includes("animation");
-            });
+            const packs = standardClipPacks(yield* readGameStyle(realRoot));
             // The bar: the named library clip, or the one sharing the most words with the move's name.
             let barName = input.bar ?? null;
             if (barName === null && packs.length > 0) {
@@ -2392,15 +2376,7 @@ const make = Effect.gen(function* () {
             const fail = (reason: GameOperationError["reason"], detail: string) =>
               Effect.fail(opError("blender-character", root, reason, detail));
             const realRoot = yield* realRootOf(root);
-            const style = yield* readGameStyle(realRoot);
-            if (style?.rig === undefined || resolveRig(style.rig) !== STANDARD_RIG)
-              return yield* fail(
-                "invalid-input",
-                `game_blender_character puts characters on the standard skeleton, and ${GAME_STYLE_FILE}${style === null ? " does not exist yet" : style.rig === undefined ? " names no rig" : `'s rig is ${style.rig}`}. Set it first: game_assets_add pack quaternius-universal-animation-library, path Unreal-Godot/UAL1_Standard.glb (its clips; allowed with the library off), with lock { family: "quaternius-universal", view } when the game has no ${GAME_STYLE_FILE} yet, or add "${STANDARD_RIG}" as ${GAME_STYLE_FILE}'s rig and that pack to its packs.`,
-              );
-            const standardPacks = style.packs.filter(
-              (id) => LIBRARY_CATALOG.find((pack) => pack.id === id)?.rig === STANDARD_RIG,
-            );
+            const standardPacks = standardClipPacks(yield* readGameStyle(realRoot));
             let body: Record<string, unknown>;
             if ("library" in input.body) {
               const { pack: id, file } = input.body.library;
@@ -2410,8 +2386,6 @@ const make = Effect.gen(function* () {
                   "invalid-input",
                   `${id} is not on ${STANDARD_RIG}; library bodies come from ${STANDARD_BODY_PACKS.join(" or ")}.`,
                 );
-              const refused = lockPackRefusal(pack, style);
-              if (refused !== null) return yield* fail("invalid-input", refused);
               body = {
                 library: yield* library.packFile(id, file),
                 pack: id,
@@ -2562,7 +2536,6 @@ const make = Effect.gen(function* () {
         holding(
           root,
           Effect.gen(function* () {
-            const refused = lockImportRefusal(input.source, yield* styleOf(root));
             const text = yield* callText(root, "search_assets", {
               source: input.source,
               ...(input.query === undefined ? {} : { query: input.query }),
@@ -2570,12 +2543,7 @@ const make = Effect.gen(function* () {
               ...(input.category === undefined ? {} : { category: input.category }),
               limit: input.limit ?? 10,
             });
-            return {
-              text:
-                refused === null
-                  ? text
-                  : `${text}\n\nAn import from ${input.source} would be refused: ${refused}`,
-            };
+            return { text };
           }),
         ),
       ),
@@ -2594,10 +2562,7 @@ const make = Effect.gen(function* () {
                 `source ${input.source} takes id: the asset id game_blender_assets_search listed.`,
               );
             const source = input.source;
-            // Refused before the live scene changes.
-            const style = yield* styleOf(root);
-            // A library file comes in under the library's lock (its family and packs), and is
-            // fetched and checked against its pin first; an outside source under imports.
+            // A library file is fetched and checked against its pin before the live scene changes.
             const libraryFile =
               source === "library"
                 ? yield* Effect.gen(function* () {
@@ -2610,14 +2575,6 @@ const make = Effect.gen(function* () {
                         "invalid-input",
                         `${id}: ${LIBRARY_OFF_REFUSAL}`,
                       );
-                    const refused = lockPackRefusal(pack, style);
-                    if (refused !== null)
-                      return yield* opError(
-                        "blender-assets-import",
-                        root,
-                        "invalid-input",
-                        refused,
-                      );
                     if (input.path === undefined || !/\.(glb|gltf|fbx)$/i.test(input.path))
                       return yield* opError(
                         "blender-assets-import",
@@ -2628,9 +2585,6 @@ const make = Effect.gen(function* () {
                     return { pack, file: yield* library.packFile(pack.id, input.path) };
                   })
                 : undefined;
-            const outside = source === "library" ? null : lockImportRefusal(source, style);
-            if (outside !== null)
-              return yield* opError("blender-assets-import", root, "invalid-input", outside);
             // The import adds to the live scene; only what it added is exported,
             // never the rest of the scene under the asset's name.
             const before = yield* callText(root, "execute_blender_code", {
@@ -2677,7 +2631,7 @@ const make = Effect.gen(function* () {
               );
             // An armature the import brings with clips of its own (an animated Poly Pizza
             // animal) enters on its own rig under the one own-rig rule (ownRigRefusal): it is
-            // marked, so the lock's rig no longer governs it and the review checks it again.
+            // marked, so STYLE.json's rig no longer governs it and the review checks it again.
             const clipsOf = /STUDIO_IMPORT_CLIPS (\{.*\})/.exec(
               yield* callText(root, "execute_blender_code", {
                 code: [
@@ -2703,30 +2657,6 @@ const make = Effect.gen(function* () {
                 (importedClips[name]?.length ?? 0) > 0 &&
                 ownRigRefusal(name, { own: importedClips[name] ?? [], library: [] }) === null,
             );
-            const offRig = lockArmatureRefusal(
-              Object.fromEntries(
-                Object.entries(armatures).filter(([name]) => !ownRig.includes(name)),
-              ),
-              style,
-            );
-            if (offRig !== null) {
-              yield* callText(root, "execute_blender_code", {
-                code: [
-                  "import bpy",
-                  `before = set(${known})`,
-                  `before_actions = set(${knownActions})`,
-                  "for o in [o for o in bpy.data.objects if o.name not in before]: bpy.data.objects.remove(o, do_unlink=True)",
-                  // Its clips go too, or they ride along with any armature whose bones they key.
-                  "for a in [a for a in bpy.data.actions if a.name not in before_actions]: bpy.data.actions.remove(a)",
-                ].join("\n"),
-              });
-              return yield* opError(
-                "blender-assets-import",
-                root,
-                "invalid-input",
-                `${offRig} The import was taken out of the live scene again.`,
-              );
-            }
             // The import stays in the live scene, stamped with its source and licence: the
             // export composes the ledger from the stamps, after a review like anything built here.
             // Its clips are stamped too, so a rigged import's animations are credited to it, not

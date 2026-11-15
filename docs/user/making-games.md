@@ -92,13 +92,12 @@ one. The **Chats** arrow on the game's sidebar row lists its **Other chats** and
 
 ## Style
 
-A game's look is locked in `STYLE.json` at the game's root: which family of the built-in CC0 art
-library it uses (KayKit, Kenney low-poly, Kenney pixel art and others), the packs its art and sound
-come from, pixel art or smooth, the view, the skeleton its characters share, and loudness targets for
-music and effects. It is written when the agent chooses the look, and its art tools hold the game to
-it: art from other packs, characters on another skeleton and sprites in another palette are refused
-until the file changes. To change the game's direction, edit `STYLE.json` or ask your agent to,
-then have the art redone. Delete it to lift the lock.
+A game's look can be recorded in `STYLE.json` at the game's root: which family of the built-in CC0
+art library it uses (KayKit, Kenney low-poly, Kenney pixel art and others), the packs its art and
+sound come from, pixel art or smooth, the view, the skeleton its characters share, and loudness
+targets for music and effects. The art tools fill their defaults from it, and searches show its
+packs first; nothing is refused for falling outside it. Edit it, or ask your agent to, to change
+those defaults.
 
 ## Models
 
