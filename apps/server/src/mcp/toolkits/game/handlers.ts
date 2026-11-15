@@ -324,6 +324,13 @@ export const layerUnityScreenshot = McpToolAccess.toLayer(
 );
 
 /**
+ * How the agent judges its frame against the reference, carried by every check of a game that has
+ * one, so it arrives at each look, including the last: a clean check is not a matching picture.
+ */
+const FRAME_REVIEW =
+  "Before you change anything, and before you end the turn, write a numbered critique of the game's frame (top) against the reference (bottom), biggest difference first: 1. camera and composition (where the horizon sits, the subject's size, angle and place in frame), 2. silhouette and proportions, 3. colour and light (sky, ground or sea, the subject's own colours), 4. surface and detail, 5. anything else the picture shows that the game lacks (its effects, its interface). Fix the first item and look again, as many times as it takes. A clean check, final or not, says the game runs, not that it matches: the turn ends when this critique finds nothing major.";
+
+/**
  * game_check, registered like the Blender look so its views (the title and play as the check
  * left them) become real image content: the agent sees its game before it ends the turn. When
  * the game has a reference picture, play's frame comes stacked above it at the same size, every
@@ -359,7 +366,11 @@ const checkHandlers = {
         ),
       );
       const shown = screenshots.filter((shot) => shot !== null);
-      return shown.length === 0 ? result : { ...result, screenshots: shown };
+      return {
+        ...result,
+        ...(shown.length === 0 ? {} : { screenshots: shown }),
+        ...(reference === null ? {} : { review: FRAME_REVIEW }),
+      };
     }),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameCheckToolkit.tools>;
