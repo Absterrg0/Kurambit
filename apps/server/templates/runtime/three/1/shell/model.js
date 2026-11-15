@@ -21,7 +21,8 @@
 //   boat.add(M.part(M.rail([[-3, 1.2, 1], [2, 1.2, 1], [3, 1.2, 0]], { height: 1 }), paint.trim));
 //     // a railing along a deck's edge: posts and bars in one geometry
 //   const hull = M.loft([[-3, 0.3, 0.2], [0, 1.1, 0.6], [3, 0.6, 0.15]], { width: 1 });
-//     // a hull or body from cross-sections along x: [x, half-width, depth]
+//     // a hull or body from cross-sections along x: [x, half-width, height, bottom y]; { keel: 1 }
+//     // draws its underside to a V
 //   const merged = M.merge(boat); // one mesh per material: build in parts, draw in few
 //   M.stats(merged);              // { triangles, drawCalls, size: [x, y, z] in metres }
 //   const forest = M.scatter(M.merge(tree), 400, (i, rand) => ({
@@ -206,9 +207,10 @@ export function tube(points, radius, { closed = false, segments = 0, sides = 8 }
 /**
  * A body lofted through cross-sections along x: each [x, halfWidth, height] (optionally a 4th,
  * the section's bottom y, default 0), each an ellipse-ish rounded section of `sides` points
- * (`flat` 0..1 squares it off), capped at both ends. Hulls, fuselages, bodies, fish.
+ * (`flat` 0..1 squares it off, `keel` 0..1 draws its lower half to a V), capped at both ends.
+ * Hulls, fuselages, bodies, fish.
  */
-export function loft(sections, { sides = 12, flat = 0.4 } = {}) {
+export function loft(sections, { sides = 12, flat = 0.4, keel = 0 } = {}) {
   const ring = [];
   for (let i = 0; i < sides; i += 1) {
     const a = (i / sides) * Math.PI * 2;
@@ -225,7 +227,8 @@ export function loft(sections, { sides = 12, flat = 0.4 } = {}) {
   const span = sections.at(-1)[0] - first || 1;
   for (const [x, half, height, bottom = 0] of sections)
     for (const [k, [c, s]] of ring.entries()) {
-      positions.push(x, bottom + (height / 2) * (1 + s), half * c);
+      // keel narrows the lower half toward its centre line: 1 is a V bottom, as a hull has.
+      positions.push(x, bottom + (height / 2) * (1 + s), half * c * (1 - keel * Math.max(0, -s)));
       // u along the length, v round the section: a canvas texture wraps the body.
       uvs.push((x - first) / span, k / sides);
     }

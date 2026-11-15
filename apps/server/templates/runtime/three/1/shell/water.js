@@ -11,11 +11,13 @@
 //   // bigger is longer), foam (crests, 0..1, 0.35), glitter (the sun on it, 1), clear (how much
 //   // of its own colour shows under the reflection, 0..1, 0.6: a tropical shallow high, a dark
 //   // lake low), at (y)
+//   boat.position.y = sea.height(boat.position.x, boat.position.z); // ride the swell
 //   sea.mesh;                                       // the Mesh, in ctx.scene
 //
 // What it costs follows LOOK.quality: high mirrors the world at 512 px, low at 256. The mirror
 // draws the scene a second time each frame; a game that needs every millisecond keeps
-// `quality: "low"`. Water is a surface: set boats on it at y 0 and bob them in update().
+// `quality: "low"`. The swell is the same in the picture and in height(), and fades into a
+// flat sea far off; waves 0 is a millpond.
 import * as THREE from "../vendor/three.module.js";
 import { Water } from "three/addons/objects/Water.js";
 
@@ -24,6 +26,66 @@ const WAKE_LIFE_S = 9;
 const WAKE_EVERY_M = 1.5;
 
 let normals = null;
+
+// The swell: a few long crossing waves, the same in the shader and in height(), so what floats
+// on the water rides what is drawn. [direction x, direction z, wavelength m, height m]; each
+// travels at deep water's speed for its length.
+const SWELL = [
+  [1, 0.25, 31, 0.22],
+  [0.6, 0.8, 17, 0.14],
+  [-0.4, 0.9, 9.5, 0.08],
+  [0.9, -0.45, 5.5, 0.05],
+];
+const swellGlsl = (scale) => {
+  const terms = SWELL.map(([dx, dz, length, height]) => {
+    const n = Math.hypot(dx, dz);
+    const k = (Math.PI * 2) / (length * scale.length);
+    const w = Math.sqrt(9.8 * k);
+    return `${(height * scale.height).toFixed(4)} * sin( dot( vec2( ${(dx / n).toFixed(4)}, ${(dz / n).toFixed(4)} ), p ) * ${k.toFixed(5)} + swellTime * ${w.toFixed(5)} )`;
+  });
+  return `float lookSwell( vec2 p ) { return ${terms.join(" + ")}; }`;
+};
+
+/** A disc of rings, close near its centre and far apart at its rim: it follows the camera. */
+function seaDisc(radius) {
+  const around = 96;
+  const rings = [0];
+  for (let r = 0.75; r < radius; r *= 1.075) rings.push(r);
+  rings.push(radius);
+  const positions = [];
+  const index = [];
+  positions.push(0, 0, 0);
+  for (let i = 1; i < rings.length; i += 1)
+    for (let j = 0; j < around; j += 1) {
+      const a = (j / around) * Math.PI * 2;
+      positions.push(Math.cos(a) * rings[i], Math.sin(a) * rings[i], 0);
+    }
+  const at = (ring, j) => (ring === 0 ? 0 : 1 + (ring - 1) * around + (j % around));
+  for (let i = 0; i < rings.length - 1; i += 1)
+    for (let j = 0; j < around; j += 1) {
+      if (i === 0) index.push(0, at(1, j), at(1, j + 1));
+      else
+        index.push(
+          at(i, j),
+          at(i + 1, j),
+          at(i, j + 1),
+          at(i, j + 1),
+          at(i + 1, j),
+          at(i + 1, j + 1),
+        );
+    }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute(
+    "normal",
+    new THREE.Float32BufferAttribute(
+      positions.map((_, i) => (i % 3 === 2 ? 1 : 0)),
+      3,
+    ),
+  );
+  geometry.setIndex(index);
+  return geometry;
+}
 
 /**
  * A tileable water normal map, made once: crossing swells of whole-tile wavelengths (so it
@@ -77,6 +139,8 @@ function waterNormals() {
 // Foam: on the crests, where the normal map tilts most, and along each wake's trail of points,
 // in two bands at the trail's spreading edge and churned water down its middle.
 const FOAM_PARS = /* glsl */ `
+uniform float swellTime;
+SWELL_FUNCTION
 uniform vec4 wakePoints[${MAX_WAKE_POINTS}];
 uniform float wakeLinks[${MAX_WAKE_POINTS}];
 uniform float crestFoam;
@@ -108,6 +172,24 @@ float wakeFoam( vec2 p ) {
   float churn = smoothstep( spread * 0.8, 0.0, best ) * exp( - age / 1.5 );
   return max( edge, churn ) * fade;
 }`;
+// The swell's slope tilts the surface the normal map ripples; its crests carry more foam.
+const SWELL_NORMAL = /* glsl */ `
+  vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );
+  {
+    float e = 0.25;
+    float hx = lookSwell( worldPosition.xz + vec2( e, 0.0 ) ) - lookSwell( worldPosition.xz - vec2( e, 0.0 ) );
+    float hz = lookSwell( worldPosition.xz + vec2( 0.0, e ) ) - lookSwell( worldPosition.xz - vec2( 0.0, e ) );
+    surfaceNormal = normalize( surfaceNormal + vec3( - hx, 0.0, - hz ) / ( 2.0 * e ) * 1.4 );
+  }`;
+const SWELL_VERTEX = /* glsl */ `
+  vec4 lookWorld = modelMatrix * vec4( position, 1.0 );
+  // Fades out far away, where the disc's rings are too coarse to draw a wave.
+  lookWorld.y += lookSwell( lookWorld.xz ) * ( 1.0 - smoothstep( 120.0, 260.0, distance( lookWorld.xz, cameraPosition.xz ) ) );
+  mirrorCoord = lookWorld;
+  worldPosition = lookWorld;
+  mirrorCoord = textureMatrix * mirrorCoord;
+  vec4 mvPosition = viewMatrix * lookWorld;
+  gl_Position = projectionMatrix * mvPosition;`;
 const FOAM_MIX = /* glsl */ `
   // The water's own colour under the mirror: a shallow tropical sea reads by it, a mirror never.
   albedo = mix( albedo, waterColor * ( 0.45 + diffuseLight * 0.5 ) * getShadowMask() + specularLight * 0.5, body * ( 0.4 + 0.6 * ( 1.0 - reflectance ) ) );
@@ -141,7 +223,7 @@ export function ocean(
   const look = ctx.look.settings;
   const low = look.quality === "low";
   const sun = look.sun.direction;
-  const water = new Water(new THREE.PlaneGeometry(size, size), {
+  const water = new Water(seaDisc(size / 2), {
     textureWidth: low ? 256 : 512,
     textureHeight: low ? 256 : 512,
     waterNormals: waterNormals(),
@@ -161,9 +243,19 @@ export function ocean(
   material.uniforms.crestFoam = { value: foam };
   material.uniforms.glitter = { value: glitter };
   material.uniforms.body = { value: clear };
+  const scale = { length: Math.max(wave, 0.05), height: waves };
+  const swell = swellGlsl(scale);
+  material.uniforms.swellTime = { value: 0 };
   material.fragmentShader = material.fragmentShader
-    .replace("void main() {", `${FOAM_PARS}\nvoid main() {`)
+    .replace("void main() {", `${FOAM_PARS.replace("SWELL_FUNCTION", swell)}\nvoid main() {`)
+    .replace("vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );", SWELL_NORMAL)
     .replace("vec3 outgoingLight = albedo;", FOAM_MIX);
+  material.vertexShader = material.vertexShader
+    .replace("void main() {", `uniform float swellTime;\n${swell}\nvoid main() {`)
+    .replace(
+      /mirrorCoord = modelMatrix \* vec4\( position, 1\.0 \);[\s\S]*?gl_Position = projectionMatrix \* mvPosition;/,
+      SWELL_VERTEX,
+    );
   water.rotation.x = -Math.PI / 2;
   water.position.y = at;
   water.receiveShadow = true;
@@ -182,6 +274,12 @@ export function ocean(
     last = now;
     clock += dt;
     material.uniforms.time.value = clock * 0.6 * waves;
+    material.uniforms.swellTime.value = clock;
+    // The disc follows the camera; the waves stay where they are in the world.
+    camera.getWorldPosition(eye);
+    water.position.x = eye.x;
+    water.position.z = eye.z;
+    water.updateMatrixWorld();
     let n = 0;
     for (const w of wakes) {
       w.object.getWorldPosition(stern);
@@ -205,8 +303,23 @@ export function ocean(
   };
   const stern = new THREE.Vector3();
   const ahead = new THREE.Vector3();
+  const eye = new THREE.Vector3();
+  const swellAt = (x, z) => {
+    let h = 0;
+    for (const [dx, dz, length, height] of SWELL) {
+      const n = Math.hypot(dx, dz);
+      const k = (Math.PI * 2) / (length * scale.length);
+      h +=
+        height *
+        scale.height *
+        Math.sin(((dx / n) * x + (dz / n) * z) * k + clock * Math.sqrt(9.8 * k));
+    }
+    return h;
+  };
   return {
     mesh: water,
+    /** The water's height at a point now (m above `at`): float a boat on it, tilt it by two. */
+    height: (x, z) => at + swellAt(x, z),
     /** Foam behind `object` as it moves: `width` metres at the stern, `stern` metres behind its centre. */
     wake(object, { width = 2, stern: behind = 0 } = {}) {
       wakes.push({ object, width, stern: behind, trail: [] });
