@@ -732,8 +732,8 @@ const make = Effect.gen(function* () {
         );
         yield* writeFileStringAtomically({
           filePath: file,
-          // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
           // The code route is no key (see scaffold.ts): older installs still open the game.
+          // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
           contents: `${JSON.stringify(
             route === "code"
               ? { ...Struct.omit(raw, ["characters"]), library }

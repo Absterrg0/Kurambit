@@ -39,7 +39,7 @@ const readPng = async (root: string, relative: string): Promise<GameReference | 
   const bytes = await NodeFSP.readFile(file).catch(() => null);
   if (bytes === null || bytes.length > MAX_REFERENCE_BYTES || bytes.length < 24) return null;
   if (bytes.subarray(0, 8).toString("hex") !== PNG_SIGNATURE) return null;
-  let shown = bytes;
+  let shown: Buffer = bytes;
   let width = bytes.readUInt32BE(16);
   let height = bytes.readUInt32BE(20);
   // Shrunk to the size a model sees anyway, so a full-resolution screenshot never makes the
