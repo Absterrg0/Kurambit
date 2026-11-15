@@ -7,9 +7,11 @@ person sees: if the bare agent's frame is better, cut harness before adding any.
 
     scripts/bench/bare/run.sh <out dir> "<brief>" [reference.png] [minutes=30] [port] [model] [effort]
 
-Run the Kurambit lane on the same brief, picture, model and cap, then put the two side by side:
+Run the Kurambit lane on the same brief, picture, model and cap: its first turn, then Keep going on
+Autopilot until the cap, as a person who pressed Keep going would, with its frame taken at the cap
+(`<out>/<stamp>/lane/<id>.png`). Then put the two side by side:
 
-    vp run bench --brief "<brief>" --reference <png> --minutes 30 --steps 0 \
+    vp run bench --brief "<brief>" --reference <png> --minutes 30 \
       --model claudeAgent/claude-opus-5-5 --effort high --home <spare home> --out <dir>
     scripts/bench/sheet.sh <out.png> <bare run dir> <kurambit game root> <turn seconds> [reference.png]
 

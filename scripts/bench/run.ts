@@ -9,9 +9,11 @@
  *   vp run bench --brief "<text>" [--reference <png>] [--minutes N] [--steps 0] …
  *   vp run bench --remeasure <stamp> [--home <dir>] [--out <dir>]
  *
- * `--brief` runs one brief of your own instead of briefs.json, `--reference` attaches a picture
- * to it as Home does, and `--minutes` caps the first turn's wall time: with the bare lane
- * (scripts/bench/bare/) on the same brief, picture, model and cap, the two lanes compare.
+ * `--brief` runs one brief of your own instead of briefs.json as the Kurambit lane beside the
+ * bare lane (scripts/bench/bare/): `--reference` attaches a picture to it as Home does, and the
+ * game gets the first turn and then Keep going on Autopilot until `--minutes` (30) from the
+ * moment the brief was sent, as a person who pressed Keep going would; at that cap its folder's
+ * frame is taken the way the bare lane's is (`lane/<id>.png`), and anything still running stops.
  *
  * Phase 1 scores each brief's first turn. Phase 2 then runs keep going on the
  * game for `--steps` steps (default 3; 0 skips it) and records what each step
@@ -62,6 +64,7 @@ import {
   type BenchStep,
 } from "./report.ts";
 import { CRITERIA, SCORE_VERSION, scoreGame } from "./score.ts";
+import { serveGameDirectory } from "../../apps/server/src/game/gameWebServer.ts";
 
 const checkout = NodePath.resolve(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
@@ -83,8 +86,10 @@ const { values: args } = NodeUtil.parseArgs({
     effort: { type: "string" },
   },
 });
-/** The first turn's wall-time cap. */
-const TURN_MINUTES = args.minutes === undefined ? 60 : Number(args.minutes);
+/** One brief of your own: the Kurambit lane, capped, beside the bare lane. */
+const LANE = args.brief !== undefined;
+/** The first turn's wall-time cap; in the lane, the whole lane's. */
+const TURN_MINUTES = args.minutes === undefined ? (LANE ? 30 : 60) : Number(args.minutes);
 if (!Number.isFinite(TURN_MINUTES) || TURN_MINUTES <= 0)
   throw new Error(`--minutes takes a number of minutes, not ${args.minutes}.`);
 
@@ -510,6 +515,135 @@ async function keepGoing(
 }
 
 /**
+ * The lane after its first turn: Keep going on Autopilot until the cap, counted from the moment
+ * the brief was sent, then the folder's frame as it stands at the cap (a step may be mid-edit,
+ * as the bare agent may be when its cap stops it), then everything stopped.
+ */
+async function toCap(
+  server: BenchmarkServer,
+  cookie: string,
+  game: { readonly threadId: ThreadId; readonly root: string },
+  sentAt: Date,
+  id: string,
+  turnEnded: boolean,
+): Promise<void> {
+  const capAt = sentAt.getTime() + TURN_MINUTES * 60_000;
+  const keepGoing = (mode: "autopilot" | "off", budgetMinutes?: number) =>
+    call(server, cookie, (client) =>
+      client[WS_METHODS.gameKeepGoing]({
+        threadId: game.threadId,
+        commandId: `bench:${NodeCrypto.randomUUID()}`,
+        mode,
+        ...(budgetMinutes === undefined ? {} : { budgetMinutes }),
+      }),
+    );
+  const left = Math.floor((capAt - Date.now()) / 60_000);
+  let now = null as Awaited<ReturnType<typeof keepGoing>> | null;
+  if (turnEnded && left >= 1) {
+    log(`${id}: keep going on Autopilot for the ${left} min left`);
+    now = await keepGoing("autopilot", left);
+    let seen = 0;
+    while (now.mode !== "off" && Date.now() < capAt) {
+      await sleep(5);
+      now = await call(server, cookie, (client) =>
+        client[WS_METHODS.gameKeepGoingStatus]({ threadId: game.threadId }),
+      );
+      const settled = now.steps.filter((step) => step.verdict !== null);
+      for (const step of settled.slice(seen))
+        log(`${id}: step ${step.n} ${step.verdict}: ${step.reason ?? step.text}`);
+      seen = settled.length;
+    }
+    if (now.mode === "off") log(`${id}: keep going stopped itself: ${now.ending ?? "no reason"}`);
+  }
+  const shot = NodePath.join(runDir, "lane", `${id}.png`);
+  await frameOf(game.root, shot)
+    .then(() =>
+      log(`${id}: frame at ${Math.round((Date.now() - sentAt.getTime()) / 1000)} s: ${shot}`),
+    )
+    .catch((cause: unknown) => log(`${id}: no frame at the cap: ${String(cause).slice(0, 300)}`));
+  if (now !== null && now.mode !== "off") await keepGoing("off");
+  const projection = await call(server, cookie, (client) =>
+    client[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId: game.threadId }),
+  );
+  for (const running of projection.runs.filter((each) => !TERMINAL_RUN.has(each.status)))
+    await call(server, cookie, (client) =>
+      client[ORCHESTRATION_V2_WS_METHODS.dispatchCommand]({
+        type: "run.interrupt",
+        commandId: CommandId.make(`bench:${NodeCrypto.randomUUID()}`),
+        threadId: game.threadId,
+        runId: running.id,
+        reason: `the lane's ${TURN_MINUTES}-minute cap`,
+      }),
+    ).catch(() => undefined);
+  await NodeFSP.writeFile(
+    NodePath.join(runDir, "lane", `${id}.json`),
+    `${JSON.stringify(
+      {
+        capMinutes: TURN_MINUTES,
+        frameAtSeconds: Math.round((Date.now() - sentAt.getTime()) / 1000),
+        keepGoing:
+          now === null
+            ? null
+            : {
+                ending: now.mode === "off" ? now.ending : "stopped at the cap",
+                steps: now.steps.map((step) => ({
+                  n: step.n,
+                  text: step.text,
+                  verdict: step.verdict,
+                  reason: step.reason,
+                  minutes: step.minutes,
+                })),
+              },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+/** The little of playwright-core's API the frame uses; scripts/ has no dependency on it. */
+interface HeadlessChromium {
+  readonly launch: (options: object) => Promise<{
+    readonly newPage: (options: object) => Promise<{
+      readonly goto: (url: string, options: object) => Promise<unknown>;
+      readonly waitForTimeout: (ms: number) => Promise<void>;
+      readonly screenshot: (options: { readonly path: string }) => Promise<unknown>;
+    }>;
+    readonly close: () => Promise<void>;
+  }>;
+}
+
+/**
+ * The game as a player opens it into play, shot like the bare lane's page (shot.mjs): served
+ * with its runtime, headless Chromium on the GPU, 1600x900, 8 s after load.
+ */
+async function frameOf(root: string, out: string): Promise<void> {
+  await NodeFSP.mkdir(NodePath.dirname(out), { recursive: true });
+  const served = await serveGameDirectory(root, "web", {
+    runtimes: NodePath.join(checkout, "apps/server/templates/runtime"),
+  });
+  const { chromium } = (await import(
+    NodePath.join(checkout, "apps/server/node_modules/playwright-core/index.mjs")
+  )) as { readonly chromium: HeadlessChromium };
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--headless=new", "--use-angle=gl-egl", "--ignore-gpu-blocklist", "--mute-audio"],
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key !== "DISPLAY" && key !== "WAYLAND_DISPLAY"),
+    ),
+  });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+    await page.goto(new URL("index.html?play", served.url).href, { waitUntil: "load" });
+    await page.waitForTimeout(8000);
+    await page.screenshot({ path: out });
+  } finally {
+    await browser.close();
+    await served.close();
+  }
+}
+
+/**
  * What a game's keep-going steps did: each step's facts against the build it
  * started from, the way keep going judged it, and the last build against the
  * first, each read once its facts settled.
@@ -678,6 +812,7 @@ async function runBrief(
   log(
     `${brief.id}: turn ${turnEnded ? run.status : `still ${run?.status ?? "missing"} after ${WAIT.turnMinutes} min`}`,
   );
+  if (LANE) await toCap(server, cookie, game, sentAt, brief.id, turnEnded);
 
   const check = await lastCheck(server, cookie, game.threadId, projection);
 
@@ -727,7 +862,7 @@ async function runBrief(
   });
   // Keep going needs a game that boots: a build that does not is phase 1's finding, not phase 2's.
   const phase2 =
-    STEPS === 0
+    STEPS === 0 || LANE
       ? null
       : build === undefined || score.verdicts.boots.result !== "pass"
         ? { skipped: `no booting first build (${score.verdicts.boots.detail})` }
