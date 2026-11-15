@@ -67,8 +67,10 @@ model is a prop on every route.
   model that is the brief's subject (a robot, a particular animal, a named
   machine), make that one the route's way rather than standing something
   else in for it: a knight is not a robot. The same goes for a prop the brief
-  names. With the library off, its models, textures and sprites are refused;
-  its clips and sounds still come in.
+  names. With the library off, its models, textures and sprites are refused
+  (in Blender's imports too); its clips and sounds still come in, and
+  `game_blender_character` may still start from a library body: a base
+  mesh reshaped in Blender, not a library model in the game.
 - `blender`: made characters: on the standard skeleton with the library's
   clips (Made characters), or on their own rig with their own clips (Made
   from scratch).

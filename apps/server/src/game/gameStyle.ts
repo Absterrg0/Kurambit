@@ -435,6 +435,14 @@ export const styleHash = (style: GameStyle | null): string =>
     ? "none"
     : NodeCrypto.createHash("sha256").update(stableStringify(style)).digest("hex");
 
+/** Why a library model, texture or sprite is refused while the person has the library off. */
+export const LIBRARY_OFF_REFUSAL =
+  "the person turned the library off for this game, so its models, textures and sprites are not used: build what you need in code (shell/model.js) or on the game's route. Clips (quaternius-universal-animation-library, for a character in code) and sounds still come in. Say so in your reply if the request needs library models: the person turns the library on in the game's \"Make models with\" setting.";
+
+/** Whether a pack is the standard skeleton's clips: those come in with the library off. */
+export const isClipPack = (pack: Pick<LibraryPack, "rig" | "kinds">) =>
+  pack.rig === STANDARD_RIG && pack.kinds.includes("animation");
+
 /** How the person chose to make this game's models, and whether the library is on (gameModelChoice). */
 export const modelChoice = (
   manifest: Pick<GameManifest, "characters" | "library">,

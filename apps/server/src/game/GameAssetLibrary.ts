@@ -20,7 +20,7 @@ import {
   manifestProject,
   type ThreadId,
 } from "@kurambit/contracts";
-import { LIBRARY_CATALOG, LIBRARY_FAMILIES, STANDARD_RIG } from "./assetLibraryCatalog.ts";
+import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
 import {
   INDEXED_ON,
   LIBRARY_ASSETS,
@@ -38,6 +38,8 @@ import {
   mayBeCharacter,
   readGameStyle,
   styleFromLock,
+  isClipPack,
+  LIBRARY_OFF_REFUSAL,
   modelChoice,
 } from "./gameStyle.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
@@ -1518,8 +1520,8 @@ const make = Effect.gen(function* () {
           : `${creditsRel} already credits it.`;
     });
 
-  const LIBRARY_OFF =
-    "the person turned the library off for this game, so its models, textures and sprites are not used: build what you need in code (shell/model.js) or on the game's route. Clips (quaternius-universal-animation-library, for a character in code) and sounds still come in. Say so in your reply if the request needs library models: the person turns the library on in the game's \"Make models with\" setting.";
+  /** What a library-off game may still take from a pack: its sounds and fonts. */
+  const SOUND_OR_TYPE: ReadonlySet<string> = new Set(["sfx", "music", "font"]);
   const add = (root: string, input: GameAssetsAddInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
@@ -1531,6 +1533,14 @@ const make = Effect.gen(function* () {
       const library = modelChoice(manifest).library;
       // The lock is the look's rig, view and budgets, not library models: it goes through with
       // the library off, and the per-file check below keeps the library's models out.
+      // A pack that could bring nothing but models and pictures is refused before it downloads.
+      if (!library && !isClipPack(pack) && !pack.kinds.some((kind) => SOUND_OR_TYPE.has(kind)))
+        return yield* fail(
+          "Library add",
+          pack.id,
+          "invalid-input",
+          `${pack.id}: ${LIBRARY_OFF_REFUSAL}`,
+        );
       const lockBefore = yield* readGameStyle(gameRoot);
       const locked = input.lock === undefined ? null : styleFromLock(input.lock, pack, lockBefore);
       if (locked !== null && "refusal" in locked)
@@ -1653,7 +1663,7 @@ const make = Effect.gen(function* () {
         }
       // With the library off, its clips and sounds still come in: the standard skeleton's clip
       // files carry a mannequin only to hold them, which shell/model.js rig takes off.
-      const clipPack = pack.rig === STANDARD_RIG && pack.kinds.includes("animation");
+      const clipPack = isClipPack(pack);
       const visual = library
         ? undefined
         : picked.find((file) => file.media === "image" || (file.media === "model" && !clipPack));
@@ -1662,7 +1672,7 @@ const make = Effect.gen(function* () {
           "Library add",
           pack.id,
           "invalid-input",
-          `${visual.path}: ${LIBRARY_OFF}`,
+          `${visual.path}: ${LIBRARY_OFF_REFUSAL}`,
         );
       // Props from a pack on another rig are fine; its characters, or any model whose clips
       // could not be read, are not.

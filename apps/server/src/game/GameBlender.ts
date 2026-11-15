@@ -103,6 +103,8 @@ import { LIBRARY_LICENCES } from "./assetLibraryFiles.ts";
 import {
   characterRoute,
   type GameModelChoice,
+  isClipPack,
+  LIBRARY_OFF_REFUSAL,
   modelChoice,
   lockArmatureRefusal,
   lockCharacterRouteRefusal,
@@ -2600,6 +2602,14 @@ const make = Effect.gen(function* () {
               source === "library"
                 ? yield* Effect.gen(function* () {
                     const pack = yield* library.entry(id);
+                    // The person's library switch holds here too: Blender is no way round it.
+                    if (!modelChoice(yield* projects.read(root)).library && !isClipPack(pack))
+                      return yield* opError(
+                        "blender-assets-import",
+                        root,
+                        "invalid-input",
+                        `${id}: ${LIBRARY_OFF_REFUSAL}`,
+                      );
                     const refused = lockPackRefusal(pack, style);
                     if (refused !== null)
                       return yield* opError(

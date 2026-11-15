@@ -120,7 +120,8 @@ also ask your agent in chat to switch; it never switches on its own.
   then the choice says what to set up.
 - **Library models** on: the free CC0 asset library's models come first, and the route makes what
   it has no model of. Off, its models, textures and sprites stay out of the game; its animations and
-  sounds are always available. Games made before this setting existed keep the library on.
+  sounds are always available, and a Blender character may still start from one of its base
+  bodies, which the agent reshapes. Games made before this setting existed keep the library on.
 
 Blender building needs Blender installed (Settings › Game tools).
 
