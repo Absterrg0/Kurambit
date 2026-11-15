@@ -35,8 +35,12 @@ const FIRST_TURN_BUDGET: Readonly<Record<"library" | "generated", number>> = {
   library: 26_000,
   generated: 32_000,
 };
-/** Bytes of tool descriptions a library-route three.js chat is handed every turn (10,918 then). */
-const LISTED_TOOLS_BUDGET = 12_000;
+/**
+ * Bytes of tool descriptions a library-route three.js chat is handed every turn: 19,988 on
+ * 2026-11-15, once the Blender tools were listed wherever Blender is found (asked for through
+ * game_more, they cost a round trip each and reached the agent without their schemas).
+ */
+const LISTED_TOOLS_BUDGET = 21_000;
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");

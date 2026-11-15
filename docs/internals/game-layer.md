@@ -178,15 +178,19 @@ check that matters.
   The game tools an agent is listed follow from the same data: each declares in
   [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
   engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether a
-  chat lists it only when asked; the MCP auth middleware puts the thread's engine, its character
-  route and whether this machine has Blender in the invocation, and `McpSchema.EnabledWhen` decides,
-  which Effect's MCP core also applies to calls. A provider reads the list once per session, so
-  nothing waits for a request to appear: what a chat uses only when the person asks stays reachable
-  through `game_more`, which runs it through its own handler. The Blender tools are listed only
-  where the person's route makes characters through Blender (`blender`, or `generated`, whose
-  humanoids are conformed there); on the library route they are asked for, so most chats never pay
-  for their descriptions. `game_more` is an image tool, so an asked-for look or move still arrives
-  as pictures.
+  chat lists it only when asked; the MCP auth middleware puts the thread's engine, whether this
+  machine has Blender and whether the thread is a play-bot setup session in the invocation, and
+  `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A provider reads
+  the list once per session, so nothing waits for a request to appear: what a chat uses only when
+  the person asks stays reachable through `game_more`, which runs it through its own handler. The
+  Blender tools are listed whenever Blender is found, on every route: a first turn makes in Blender
+  the subject the library lacks, and a tool reached through `game_more` reaches the agent without
+  its schema. `game_more` is an image tool, so an asked-for look or move still arrives as pictures.
+- A game thread's provider session gets Kurambit's MCP server and the provider's built-in tools,
+  never the person's own MCP servers or account connectors (`kurambitToolsOnly` on the turn input):
+  they cost context on every call and could reach the person's mail or files. Claude enforces it
+  with its strict MCP config; Codex, Cursor, Grok, OpenCode and Antigravity have no per-session way
+  to drop the person's servers yet, so there it is not enforced.
 - Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
   checked by the driver, compared with the sources before and after (an unidentifiable tree is
   refused before the engine runs), then published by `publishStaged`, which moves the incumbent

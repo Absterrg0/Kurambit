@@ -44,8 +44,14 @@ const SESSIONS = [0, 1] as const;
 const TASK =
   "Write a play bot for this game, so Kurambit can measure whether a skilled player wins. Read `BRIEF.md` and only as much of the game's code as you need for its controls and how a run is won. Write `.studio/bot/play.mjs` with the bot kit (read `.studio/bot/kit/KIT-GUIDE.md`): a `policy` bot whose goal is to win one run of the core loop. It steers by what the game reports while it plays (its state values, the player's position, the HUD): never copy positions, layouts, speeds or timings from the game's code into the bot, since a later step that moves one would break the bot, and keep going would undo that step. Run it with `game_bot_run` and fix it until one run ends: stop as soon as a run is won, or plays out in full if the game cannot be won. Don't polish a bot that has finished a run, and don't run it again to confirm. Change only files under `.studio/bot/`, outside `kit/`.";
 
-const commandIdOf = (runId: string, n: number) =>
-  CommandId.make(`server:game-run-bot-setup:${runId}:${n}`);
+const COMMAND_PREFIX = "server:game-run-bot-setup:";
+const commandIdOf = (runId: string, n: number) => CommandId.make(`${COMMAND_PREFIX}${runId}:${n}`);
+
+const THREAD_PREFIX = IdAllocator.derive.delegatedTaskThread({
+  commandId: CommandId.make(COMMAND_PREFIX),
+});
+/** Whether a thread is a setup session: its id is derived from its command's, part by part. */
+export const isBotSetupThread = (threadId: string) => threadId.startsWith(THREAD_PREFIX);
 
 /** The child thread of the run's `n`th setup session, as the orchestrator derives it. */
 const threadOf = (runId: string, n: number) =>

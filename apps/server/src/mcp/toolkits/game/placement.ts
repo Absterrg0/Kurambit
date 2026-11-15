@@ -1,9 +1,9 @@
 // Which game tools a thread's agent is offered. Each tool says what it needs
 // of its game's engine and whether it waits to be asked for; the thread's game,
-// engine, character route and Blender come from the MCP invocation
+// engine, Blender and whether it is a bot setup session come from the MCP invocation
 // (McpHttpServer's auth middleware). A tool the listing hides is also refused
 // when called by name, by Effect's MCP core.
-import { ACTIVE_GAME_ENGINES, type GameCharacterRoute } from "@kurambit/contracts";
+import { ACTIVE_GAME_ENGINES } from "@kurambit/contracts";
 import {
   engineCapabilities,
   engineProfile,
@@ -112,41 +112,34 @@ export const refusal = (
 const fits = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
   refusal(placement, scope) === null;
 
+/** Listed in keep going's play-bot setup session, whose task is to run the bot it writes. */
+const LISTED_FOR_BOT_SETUP: ReadonlySet<GameToolName> = new Set(["game_bot_run"]);
+
 /**
- * Routes whose characters go through Blender: built there, or generated and conformed to the
- * standard skeleton there. On the library route a chat asks for the Blender tools first.
+ * Whether it is in the listing: it fits, and is not waiting to be asked for. The Blender tools
+ * are listed on every route once Blender is found: a first turn makes the subject the library
+ * lacks there, and a tool reached through game_more loses its schema.
  */
-const BLENDER_ROUTES: ReadonlySet<GameCharacterRoute> = new Set(["blender", "generated"]);
-const BLENDER_ASKED =
-  "to make the player, threat or prop the brief names when the library has no model of it, when the person asks for a model, sprite render or animation made in Blender, or for a library file that loads only through Blender (FBX)";
-
-/** The line game_more names it with, or undefined when it is listed. */
-const askedIn = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
-  placement.asked ??
-  (placement.needs.includes("blender") && !BLENDER_ROUTES.has(scope?.gameCharacters ?? "library")
-    ? BLENDER_ASKED
-    : undefined);
-
-/** Whether it is in the listing: it fits, and is not waiting to be asked for. */
-const listed = (placement: GameToolPlacement, scope: McpInvocationScope | undefined) =>
-  fits(placement, scope) && askedIn(placement, scope) === undefined;
+const listed = (name: GameToolName, scope: McpInvocationScope | undefined) => {
+  const placement: GameToolPlacement = GAME_TOOL_PLACEMENTS[name];
+  return (
+    fits(placement, scope) &&
+    (placement.asked === undefined ||
+      (scope?.gameBotSetup === true && LISTED_FOR_BOT_SETUP.has(name)))
+  );
+};
 
 /** The `McpSchema.EnabledWhen` of a game tool: listed for the calling thread now. */
-export const listedFor = (name: GameToolName) => () =>
-  listed(GAME_TOOL_PLACEMENTS[name], currentInvocation());
+export const listedFor = (name: GameToolName) => () => listed(name, currentInvocation());
 
-/**
- * The tools game_more can reach on some active engine, with when to use each: those always
- * asked for, and the Blender tools on a route that makes no characters there.
- */
+/** The tools game_more can reach on some active engine, with when to use each. */
 export const ASKABLE_TOOLS: ReadonlyArray<readonly [GameToolName, string]> = (
   Object.entries(GAME_TOOL_PLACEMENTS) as Array<[GameToolName, GameToolPlacement]>
-).flatMap(([name, placement]) => {
-  const asked = askedIn(placement, undefined);
-  return asked !== undefined &&
-    ACTIVE_GAME_ENGINES.some((engine) =>
-      placement.needs.every((need) => engineCapabilities(engine).has(need)),
-    )
-    ? [[name, asked] as const]
-    : [];
-});
+).flatMap(([name, placement]) =>
+  placement.asked !== undefined &&
+  ACTIVE_GAME_ENGINES.some((engine) =>
+    placement.needs.every((need) => engineCapabilities(engine).has(need)),
+  )
+    ? [[name, placement.asked] as const]
+    : [],
+);
