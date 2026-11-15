@@ -3,7 +3,7 @@
 // one-metre grid, with what it costs to draw. It is a picture laid over the page; the run under
 // it is held, never changed: the thing goes back where it was, as it was, before this returns.
 import * as THREE from "../vendor/three.module.js";
-import { stats } from "./model.js";
+import { drawnBox, stats } from "./model.js";
 
 const PERSON_M = 1.8;
 const BACKDROP = 0x8c929a;
@@ -68,27 +68,36 @@ export function createSheet({ renderer, find, names, hold }) {
     canvas.width = width;
     canvas.height = height;
     let measured;
+    const culled = [];
     try {
       // Alone and upright at the origin, as built: its own scale stays.
       object.position.set(0, 0, 0);
       object.quaternion.identity();
       object.visible = true;
       scene.add(object);
-      // A skinned mesh keeps the box of its first pose; measure the pose it holds now.
-      object.updateWorldMatrix(true, true);
+      // A skinned mesh keeps the box of its first pose; measure the pose it holds now. Its
+      // sphere is as stale, so nothing is culled by it while the sheet draws.
+      // updateMatrixWorld, not updateWorldMatrix: only it refreshes a skinned mesh's bind inverse.
+      object.updateMatrixWorld(true);
       object.traverse((node) => {
         if (node.isSkinnedMesh) {
           node.skeleton.update();
           node.computeBoundingBox();
+          node.computeBoundingSphere();
+        }
+        if (node.frustumCulled) {
+          culled.push(node);
+          node.frustumCulled = false;
         }
       });
       measured = stats(object);
-      const box = new THREE.Box3().setFromObject(object);
+      const box = drawnBox(object);
       object.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
-      box.setFromObject(object);
+      box.copy(drawnBox(object));
       const size = box.getSize(new THREE.Vector3());
       const figure = person();
-      figure.position.set(box.min.x - 0.6, 0, box.min.z - 0.6);
+      // Beside it, toward the front: never behind it from one side or in front of it from another.
+      figure.position.set(box.min.x - 0.7, 0, box.max.z + 0.5);
       scene.add(figure);
       const span = Math.max(size.x, size.z, 1) + 2.5;
       const grid = new THREE.GridHelper(
@@ -99,9 +108,7 @@ export function createSheet({ renderer, find, names, hold }) {
       );
       grid.position.y = 0.002;
       scene.add(grid);
-      const all = new THREE.Box3()
-        .setFromObject(object)
-        .union(new THREE.Box3().setFromObject(figure));
+      const all = drawnBox(object).union(new THREE.Box3().setFromObject(figure));
       const centre = all.getCenter(new THREE.Vector3());
       const radius = all.getSize(new THREE.Vector3()).length() / 2;
       const w = Math.floor(width / 2);
@@ -146,6 +153,7 @@ export function createSheet({ renderer, find, names, hold }) {
       renderer.setViewport(viewport);
       measured.size = [size.x, size.y, size.z].map((n) => Math.round(n * 100) / 100);
     } finally {
+      for (const node of culled) node.frustumCulled = true;
       scene.remove(object);
       object.position.copy(saved.position);
       object.quaternion.copy(saved.quaternion);

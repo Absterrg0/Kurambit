@@ -460,6 +460,41 @@ export function seeded(seed = 1) {
   };
 }
 
+/**
+ * The box of what draws under `root`: hidden helpers (a hit box, a trigger, a turned-off
+ * light's mesh) count in three's Box3.setFromObject, and would size a model by its helpers.
+ */
+export function drawnBox(root) {
+  const box = new THREE.Box3();
+  const part = new THREE.Box3();
+  // updateMatrixWorld walks down through each SkinnedMesh's own override, which keeps its bind
+  // inverse in step with where it stands; updateWorldMatrix does not.
+  root.updateWorldMatrix(true, false);
+  root.updateMatrixWorld(true);
+  // One object's own geometry, without its children (three's expandByObject walks them all).
+  const own = (object) => {
+    if (!(object.isMesh || object.isLine || object.isPoints) || object.geometry === undefined)
+      return;
+    if (object.isSkinnedMesh || object.isInstancedMesh) {
+      if (object.boundingBox === null) object.computeBoundingBox();
+      part.copy(object.boundingBox);
+    } else {
+      if (object.geometry.boundingBox === null) object.geometry.computeBoundingBox();
+      part.copy(object.geometry.boundingBox);
+    }
+    box.union(part.applyMatrix4(object.matrixWorld));
+  };
+  const visit = (object) => {
+    if (!object.visible) return;
+    own(object);
+    for (const child of object.children) visit(child);
+  };
+  // The root draws even when the game has hidden it for now: the sheet shows it.
+  own(root);
+  for (const child of root.children) visit(child);
+  return box;
+}
+
 /** What `root` costs to draw: triangles, draw calls, and its size in metres [x, y, z]. */
 export function stats(root) {
   let triangles = 0;
@@ -473,7 +508,7 @@ export function stats(root) {
     triangles += per * copies;
     drawCalls += Array.isArray(object.material) ? Math.max(1, g.groups.length) : 1;
   });
-  const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
+  const size = drawnBox(root).getSize(new THREE.Vector3());
   return {
     triangles: Math.round(triangles),
     drawCalls,
