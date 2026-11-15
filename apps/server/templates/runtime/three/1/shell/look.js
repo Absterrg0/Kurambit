@@ -174,6 +174,9 @@ export function resolveLook(options = {}) {
     throw new Error('LOOK.quality must be "auto", "high" or "low".');
   if (look.resolution !== "adaptive" && !(look.resolution > 0))
     throw new Error('LOOK.resolution must be "adaptive" or a scale such as 0.75.');
+  // A game that asks for low quality drops the chain's dearest pass, decided here, before the
+  // renderer chooses its anti-aliasing from whether a chain runs.
+  if (look.quality === "low") look.ao = false;
   // The chain runs only for what needs whole-frame passes; tone mapping and the grade
   // also work inside the materials.
   look.post = look.ao !== false || look.bloom !== false;
@@ -609,6 +612,8 @@ async function skyProbes(renderer, look, sunDir, quality) {
     // is too soft for a cloud's edge.
     target = new THREE.WebGLCubeRenderTarget(quality === "low" ? 512 : 1024, {
       type: THREE.HalfFloatType,
+      // Every sky material draws with no depth test: a depth buffer here would only hold memory.
+      depthBuffer: false,
       generateMipmaps: true,
       minFilter: THREE.LinearMipmapLinearFilter,
     });
@@ -680,14 +685,13 @@ export async function createLook(canvas, options = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMappingExposure = look.exposure;
   const gpu = isSoftware(renderer);
-  // Auto spends where a GPU draws, and saves where the browser draws in software. Low also
-  // drops the ambient occlusion pass (the chain's dearest) and halves the sun's shadow map.
+  // Auto spends where a GPU draws, and saves where the browser draws in software (on the clouds
+  // and the water). A named low also drops ambient occlusion (resolveLook) and halves the sun's
+  // shadow map.
   look.quality = look.quality === "auto" ? (gpu.software ? "low" : "high") : look.quality;
-  if (look.quality === "low" && look.ao !== false) {
-    look.ao = false;
-    look.post = look.bloom !== false;
-  }
-  const shadowSize = look.quality === "low" ? 512 : 1024;
+  // Only a game that names low gets the smaller shadow map: auto (low in software) leaves the
+  // shadows of games made before it as they were.
+  const shadowSize = options.quality === "low" ? 512 : 1024;
   const post = look.post && !gpu.software;
   if (!post && look.grade !== false) {
     gradeInMaterials = true;
