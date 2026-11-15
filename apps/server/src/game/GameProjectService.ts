@@ -14,7 +14,10 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
+  type ChatAttachment,
+  ChatAttachmentId,
   CommandId,
+  type MessageId,
   ProjectId,
   ThreadId,
   GameManifest,
@@ -56,6 +59,13 @@ import * as GamePreview from "./GamePreview.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GameTemplates from "./GameTemplates.ts";
+import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
+import * as ServerConfig from "../config.ts";
+import {
+  attachmentRelativePath,
+  chatAttachmentStableKey,
+  createDeterministicAttachmentId,
+} from "../attachmentStore.ts";
 
 /**
  * The folder a new game gets: its name in lower-case ASCII words. Accents fold
@@ -174,6 +184,35 @@ const decodeManifestObject = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
 
+/** A new game's first message: the ids it is sent under, when they were minted here, and its attachments. */
+interface FirstMessage {
+  readonly threadId?: ThreadId;
+  readonly messageId?: MessageId;
+  readonly attachments: ReadonlyArray<ChatAttachment>;
+}
+const NO_IDS: FirstMessage = { attachments: [] };
+
+/** Where a new game keeps the picture the person attached on Home; gameReference.ts reads it. */
+const GAME_REFERENCE_FILE = "art/reference.png";
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** The attached picture's bytes, refused with why when they are not a PNG. */
+const referencePng = (reference: NonNullable<GameCreateInput["reference"]>) =>
+  Effect.gen(function* () {
+    const bytes = Buffer.from(
+      reference.dataUrl.slice(reference.dataUrl.indexOf(",") + 1),
+      "base64",
+    );
+    if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE))
+      return yield* new GameOperationError({
+        operation: "create-game",
+        path: GAME_REFERENCE_FILE,
+        reason: "invalid-input",
+        detail: "The attached picture is not a PNG.",
+      });
+    return { name: reference.name, bytes };
+  });
+
 const make = Effect.gen(function* () {
   const preview = yield* GamePreview.GamePreview;
   const projects = yield* ProjectService.ProjectService;
@@ -187,6 +226,8 @@ const make = Effect.gen(function* () {
   const createLocks = yield* KeyedLock.make<string>();
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const ids = yield* IdAllocator.IdAllocatorV2;
+  const config = yield* ServerConfig.ServerConfig;
   /**
    * The game's name from its brief, written by the text-generation model T3 titles threads with:
    * the title a player sees. A slow or failing model leaves the fallback, so a new game never waits
@@ -278,10 +319,67 @@ const make = Effect.gen(function* () {
           cause,
         }),
     });
+  /**
+   * The ids and attachments of a new game's first message. The person's picture rides on it as a
+   * chat attachment, stored where the composer's are, under ids minted for that thread and
+   * message; when it cannot be stored the message goes without it, as the game already holds it.
+   */
+  const firstMessage = (
+    projectId: ProjectId,
+    reference: { readonly name: string; readonly bytes: Buffer } | undefined,
+  ) =>
+    Effect.gen(function* () {
+      if (reference === undefined) return NO_IDS;
+      const threadId = yield* ids.allocate.thread({ projectId });
+      const messageId = yield* ids.allocate.message({ threadId, ordinal: 1 });
+      const rawId = createDeterministicAttachmentId(
+        threadId,
+        chatAttachmentStableKey(messageId, 0, reference.bytes),
+      );
+      if (rawId === null) return { threadId, messageId, attachments: [] } as FirstMessage;
+      const attachment = {
+        type: "image" as const,
+        id: ChatAttachmentId.make(rawId),
+        name: reference.name,
+        mimeType: "image/png",
+        sizeBytes: reference.bytes.byteLength,
+      };
+      const stored = yield* Effect.tryPromise(async () => {
+        const file = NodePath.join(config.attachmentsDir, attachmentRelativePath(attachment)!);
+        await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+        await NodeFSP.writeFile(file, reference.bytes);
+      }).pipe(
+        Effect.as(true),
+        Effect.catch((cause) =>
+          Effect.as(
+            Effect.logWarning("The first message goes without its picture.", { cause }),
+            false,
+          ),
+        ),
+      );
+      return {
+        threadId,
+        messageId,
+        attachments: stored ? [attachment] : [],
+      } as FirstMessage;
+    }).pipe(
+      Effect.catchTags({
+        IdAllocatorV2AllocationError: (cause) =>
+          Effect.as(
+            Effect.logWarning("The first message goes without its picture.", { cause }),
+            NO_IDS,
+          ),
+      }),
+    );
   const register = Effect.fnUntraced(function* (
     root: string,
     input: Pick<GameCreateInput, "modelSelection" | "runtimeMode">,
-    options: { readonly resume?: boolean; readonly firstTurn?: boolean } = {},
+    options: {
+      readonly resume?: boolean;
+      readonly firstTurn?: boolean;
+      /** The person's picture, already saved as art/reference.png; the first message carries it. */
+      readonly reference?: { readonly name: string; readonly bytes: Buffer };
+    } = {},
   ) {
     const lexicalRoot = NodePath.resolve(root);
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
@@ -343,19 +441,28 @@ const make = Effect.gen(function* () {
       if (latest !== undefined)
         return { projectId: project.id, threadId: latest.id, root: canonicalRoot };
     }
+    const first =
+      options.firstTurn === true ? yield* firstMessage(project.id, options.reference) : null;
     const result = yield* launches
       .launch({
         commandId: CommandId.make(NodeCrypto.randomUUID()),
         projectId: project.id,
+        ...(first?.threadId === undefined ? {} : { threadId: first.threadId }),
         title: manifest.name,
         modelSelection: input.modelSelection,
         runtimeMode: input.runtimeMode ?? "full-access",
         interactionMode: "default",
         workspaceStrategy: { type: "root" },
         // A new game's chat opens with its brief, sent atomically with the thread.
-        ...(options.firstTurn === true
-          ? { initialMessage: { text: firstTurnMessage(manifest), attachments: [] } }
-          : {}),
+        ...(first === null
+          ? {}
+          : {
+              initialMessage: {
+                ...(first.messageId === undefined ? {} : { messageId: first.messageId }),
+                text: firstTurnMessage(manifest, { reference: options.reference !== undefined }),
+                attachments: first.attachments,
+              },
+            }),
         createdBy: "user",
         creationSource: "web",
       })
@@ -428,6 +535,8 @@ const make = Effect.gen(function* () {
   );
   const createAt = (input: GameCreateInput, name: string, requestedRoot: string) =>
     Effect.gen(function* () {
+      const reference =
+        input.reference === undefined ? undefined : yield* referencePng(input.reference);
       // Start through the requested path, then settle on the real root before
       // writing any server-owned record. A symlinked parent must not mint keys
       // that the rest of the app cannot match.
@@ -470,6 +579,11 @@ const make = Effect.gen(function* () {
               await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
               await NodeFSP.writeFile(file, contents, { flag: "wx" });
             }
+            // In the first commit, so no turn's build counts it as its change.
+            if (reference !== undefined)
+              await NodeFSP.writeFile(NodePath.join(root, GAME_REFERENCE_FILE), reference.bytes, {
+                flag: "wx",
+              });
           },
           catch: (cause) =>
             (cause as NodeJS.ErrnoException | undefined)?.code === "EEXIST" && !created
@@ -520,7 +634,10 @@ const make = Effect.gen(function* () {
         // A game removed from Kurambit leaves its serve and watch on the folder's path; this game
         // is new there, so it starts with none of them.
         yield* preview.forget(root);
-        return yield* register(root, input, { firstTurn: true });
+        return yield* register(root, input, {
+          firstTurn: true,
+          ...(reference === undefined ? {} : { reference }),
+        });
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder behind.
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),
@@ -819,4 +936,4 @@ const make = Effect.gen(function* () {
     }),
   });
 });
-export const layer = Layer.effect(GameProjectService, make);
+export const layer = Layer.effect(GameProjectService, make).pipe(Layer.provide(IdAllocator.layer));

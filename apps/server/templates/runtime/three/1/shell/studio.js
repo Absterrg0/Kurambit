@@ -213,7 +213,7 @@ export function installStudio({
       ? {}
       : {
           sheet: {
-            draw: (name) => sheet.draw(name),
+            draw: (name, views) => sheet.draw(name, views),
             close: () => sheet.close(),
           },
         }),

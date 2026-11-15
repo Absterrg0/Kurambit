@@ -461,7 +461,8 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   literal beside `why`; the client words the cause and the harness branches on it, and neither
   reads meaning out of `why`, which is the agents' text and free to change.
 - **Facts skip what is already known or not needed.** The boot check is not run again when this
-  server's own `game_check` booted the same bytes (engine folder and `game.json`) clean, and the
+  server's own final `game_check` (`final: true`, the one that also plays the scene report and the
+  QA play) booted the same bytes (engine folder and `game.json`) clean, and the
   tester's bot plays a chat turn's build only while keep going, which judges by it, is on; a
   person's measure and keep going's own measures always play it.
 - **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the

@@ -698,6 +698,8 @@ export const GameOperationEvent = Schema.Struct({
   ownerThreadId: Schema.optionalKey(ThreadId),
 });
 export type GameOperationEvent = typeof GameOperationEvent.Type;
+/** A reference picture's data URL at most: a 1568 px PNG, with room. */
+export const GAME_REFERENCE_MAX_DATA_URL_CHARS = 12_000_000;
 export const GameCreateInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   /** A model names the game from its brief, as the person would title it; `name` is the fallback. */
@@ -711,6 +713,19 @@ export const GameCreateInput = Schema.Struct({
   characters: Schema.optionalKey(GameCharacterRoute),
   /** Whether it may take models from the free library. Omitted: off. */
   library: Schema.optionalKey(Schema.Boolean),
+  /**
+   * A picture the person attached to aim for, as a PNG data URL (the client re-encodes any image
+   * it reads), saved as art/reference.png and attached to the first message.
+   */
+  reference: Schema.optionalKey(
+    Schema.Struct({
+      name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
+      dataUrl: Schema.String.check(
+        Schema.isMaxLength(GAME_REFERENCE_MAX_DATA_URL_CHARS),
+        Schema.isPattern(/^data:image\/png;base64,/),
+      ),
+    }),
+  ),
   modelSelection: ModelSelection,
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
@@ -772,6 +787,17 @@ export const GameModelSheetInput = Schema.Struct({
       Schema.isMinLength(1),
       Schema.isMaxLength(4),
     ),
+  ),
+  /**
+   * With a reference: where the reference's camera sees the model from, in degrees. `around`
+   * turns from the model's front (+z) toward its right side (90 is the right side's profile);
+   * `up` is above the horizon. Omitted: a low front three-quarter.
+   */
+  view: Schema.optionalKey(
+    Schema.Struct({
+      around: Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 360 })),
+      up: Schema.Finite.check(Schema.isBetween({ minimum: -89, maximum: 89 })),
+    }),
   ),
 });
 export type GameModelSheetInput = typeof GameModelSheetInput.Type;

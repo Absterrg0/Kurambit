@@ -34,11 +34,11 @@ const CHOICES = {
 } as const satisfies Record<string, { characters: GameCharacterRoute; library: boolean }>;
 /**
  * Bytes a new three.js game's first turn reads, by model choice: its first message (the first
- * turn's steps), the turn rules the harness sends, AGENTS.md, TEMPLATE.md, three.md and the
- * art-pipeline sections they name.
- * About 10% over what they were on 2026-11-08 (library 23,981; generated 29,096); the code
- * route's on 2026-11-15 (30,316) the same way, and generated's raised by the kit it now reads: the stand-ins are built from the modelling kit's comment block where
- * the library route read the library's listing.
+ * turn's steps), the turn rules the harness sends, AGENTS.md, three.md, the art-pipeline sections
+ * they name and the kit comment blocks the message sends it to. TEMPLATE.md is reference the first
+ * turn is no longer sent to (its "Shortest path" was a second copy of the steps).
+ * Set about 10% over what they were on 2026-11-08 and 2026-11-15; on 2026-11-15, after the cut of
+ * the first turn's game tax and its second copy, code reads 22,370 and generated 26,503.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
   code: 33_000,
@@ -94,7 +94,6 @@ const firstTurnBytes = (choice: (typeof CHOICES)[keyof typeof CHOICES]) => {
     "first message": bytes(message),
     "turn rules": bytes(gameTurnRules("three") ?? ""),
     "AGENTS.md": bytes(agents),
-    "TEMPLATE.md": bytes(template("blank-three/TEMPLATE.md")),
     "three.md": bytes(template("studio/three.md")),
     "art-pipeline.md (named sections)": namedSkillBytes(`${message}\n${agents}`, "art-pipeline.md"),
     // A kit the first message sends the agent to read, by its comment block.

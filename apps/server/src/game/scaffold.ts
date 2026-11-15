@@ -77,16 +77,19 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
  */
 const KEEP_GOING_SECTION = `## Keep going
 
-- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Do that one step, like any turn: one change, \`game_check\` clean, end with your \`Next:\` line.
+- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Do that one step and only it: the last \`game_check\` with \`final: true\` clean, then end with your \`Next:\` line.
 - Kurambit measures the step's build, and undoes the step itself when it makes a fact worse; the person can redo it. Do not put an undone change back unless they ask.
 - A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line. Kurambit sets that step aside.
 - The person's own messages always come first. Turn keep going on or off (\`game_keep_going\`) only when they ask.
 `;
 const PLAYTEST_LINE =
-  "- Do not play-test with `game_explore_*` or bots to see whether the game works: the harness measures every build. Explore only when the person asks or a fact says something you cannot see in the code. Read `game_facts` when the person reports a problem.";
-// The person numbers builds by what they can see; a small fix stays inside the build it fixes.
-const CHANGE_LINE =
-  "- **Say whether the turn is a new build or a fix.** Pass `change` to your last `game_check`: `new` when the person would call it a new version of the game, `fix` for a small correction to the build they already have (a bug, a typo, a value nudged), which Kurambit keeps as that same build. When you cannot tell which they want, ask them in one short question before you end the turn.";
+  "- Explore (`game_explore_*`) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. Read `game_facts` when the person reports a problem.";
+/** What a turn is: the person's whole request, done and looked at. */
+const SCOPE_LINES = `- **Do everything the person asked in this message,** and only that: your own ideas go in \`Next:\`. The turn ends when that work is done and you have looked at it, not when the check is clean. When the game has a reference picture, keep going until your critique of the game's frame beside it finds nothing major.
+- **A value they ask to change** that a \`ctx.tune\` already holds: set it with \`game_tune\`, say so, and that is the turn.
+- **A question:** answer it and change nothing; your previous \`Next:\` line stands, so repeat it.
+- **Look as often as you need; check in full once.** \`game_check\` is a quick look: a frame of play, its errors and frame rate. Your turn's last call is \`game_check\` with \`final: true\`, which also plays the scene report and the QA play: fix what they list, then end the turn.
+- Install nothing the person did not ask for; the game_* tools are your toolchain.`;
 const UNDO_LINE =
   "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.";
 
@@ -99,21 +102,20 @@ const EVERY_TURN_SECTIONS: Partial<Record<GameStageKind, string>> = {
   // The Stage serves the folder and reloads it on every save (GamePreview.live).
   live: `## Every turn
 
-- **One visible change per turn.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it on every save. A turn is the change the person asked for, one they can see when they play, \`game_check\` clean and nothing left in its scene report or \`qa.problems\`, then end the turn. When a request holds several changes, do the first and put the rest in \`Next:\`, but never put off what they asked for because it takes work: a model the game lacks is made in the turn that asks for it, the way its route says.
-- **Keep the game booting between saves.** Every save reloads the person's game. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save.
+${SCOPE_LINES}
+- **Keep the game booting between saves.** The person watches your work live: Kurambit serves the game folder on their Stage and reloads it on every save. Write a new module before the line that imports it, and keep \`main.js\` loadable at each save.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
-${CHANGE_LINE}
 - **Write your last message for the person making the game:** what changed in the game and what they can do now. Name no tools or files.
 - **End every reply with one line,** \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done. The person can take your \`Next:\` into their message with one key, so make it a request they could have typed: one change, in their words, not a plan.
 `,
   // The Stage plays a Web export the turn loop rebuilds when the turn ends.
   export: `## Every turn
 
-- A turn that changes the game becomes a build. When your turn ends, Kurambit plays it on the person's Stage and measures its facts: whether it boots, an idle, a random and a skilled bot, frozen frames, input response. Ending the turn is how the person sees your work, so keep turns short: one visible improvement, \`game_check\` clean with nothing left in its scene report, then end. Do not export to show it; the build is made for you.
+${SCOPE_LINES}
+- When your turn ends, Kurambit plays the build on the person's Stage and measures its facts. Do not export to show it; the build is made for you.
 ${PLAYTEST_LINE}
 ${UNDO_LINE}
-${CHANGE_LINE}
 - Write your last message for the person making the game: what changed in the game and what they can do now. Name no tools or files.
 - End every reply with one line: \`Next: <the one change that would most improve this game>\`, or \`Next: none\` when the brief is done.
 `,
@@ -129,16 +131,15 @@ const everyTurnSection = (engine: GameEngineId): string | undefined => {
  */
 const GENERATED_GOAL =
   "Goal: the person plays the brief's core loop on the Stage while its art is generated from the look they pick: the loop plays first on stand-ins, so the Stage shows the game within minutes, never primitives.";
-const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ (rendering, palette, shape language), each one this game can reach in its engine, drawn as an in-game screenshot, each grounded with a \`style\`: a library pack id that ships a picture of its look (a Kenney low-poly kit, Quaternius Monsters; KayKit ships none), or the person's own reference image, so the key art never promises a look the game cannot reach (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with the stand-ins. Then read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.`;
-const GENERATED_LAST_STEP = `4. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names), and fix what a player would call wrong at a glance in its pictures (the player small, seen only from behind or hard to make out, a view washed out or too dark), then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
+const GENERATED_FIRST_STEP = `1. Start the key art first: \`game_generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ (rendering, palette, shape language), each one this game can reach in its engine, drawn as an in-game screenshot, each grounded with a \`style\`: a library pack id that ships a picture of its look (a Kenney low-poly kit, Quaternius Monsters; KayKit ships none), or the person's own reference image, so the key art never promises a look the game cannot reach (\`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it. If it is refused (no key, or over the person's daily limit), say so in your reply and go on with the stand-ins. Then read \`BRIEF.md\` and the recipe for your view in \`studio-skills/three.md\`. Write no plan or design document, and do not open Blender. The comment block at the top of each kit is enough; do not read the shell's code.`;
+const GENERATED_LAST_STEP = `4. Look with \`game_check\` and fix what a player would call wrong at a glance in its frame (the player small, seen only from behind or hard to make out, a view washed out or too dark), then \`game_check\` with \`final: true\` clean, including each problem its scene report lists (open the frame it names), then \`game_generate_wait\` for the key art and end the turn: say what the person can do now, ask them to pick one of the key art's candidates in the chat, or say it is still rendering (the models are stand-ins until art made from it arrives), say what it cost, and add your \`Next:\` line.`;
 
 const READ_STEP = (also: string) =>
-  `1. Read \`BRIEF.md\`, the "Shortest path" in \`TEMPLATE.md\` and the recipe for your view in \`studio-skills/three.md\`${also}. Write no plan or design document and make no key art. The comment block at the top of each kit is enough; do not read the shell's code.`;
-const LOOP_STEP = `3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the brief's core loop: the player moves (the recipe), the one main verb, the threat, a win and a lose through \`GameState.win\` and \`lose\`, the HUD through \`ctx.ui\`, and \`Juice\` on every action. As the recipes do, name the player and each threat with \`ctx.thing\` and read their speeds, timers and counts from \`ctx.tune\`: that is how the person selects them and drags their values live.`;
-const CHECK_STEP = `5. Run \`game_check\` and fix until it is clean, including each problem its scene report lists (open the frame it names). Then look at its pictures as a player would and fix what they would call wrong at a glance: the player small, seen only from behind or hard to make out, a view washed out by haze or too dark to read. This build is the person's first look at their game. End the turn with what the person can do now, plus your \`Next:\` line.`;
-const LATER = "More waves and levels, menu art, music and polish are later turns.";
+  `1. Read \`BRIEF.md\` and the recipe for your view in \`studio-skills/three.md\`${also}. Write no plan or design document and make no key art. The comment block at the top of each kit is enough; do not read the shell's code.`;
+const LOOP_STEP = `3. Replace the starter's gameplay in \`web/main.js\` (its sphere and beacon are placeholders) with the game the brief asks for: the player moves (the recipe), does what the brief has them do, and wins and loses through \`GameState.win\` and \`lose\` when the brief has an end, with the HUD through \`ctx.ui\`. Build only what the brief asks; your ideas go in \`Next:\`.`;
+const CHECK_STEP = `5. Look at the game with \`game_check\` as often as you need, and fix what a player would call wrong at a glance: the player small, seen only from behind or hard to make out, a view washed out by haze or too dark to read. When the game has a reference picture, match it like for like: frame the play camera as the picture is framed (\`followCamera3D\` \`frame\` and \`lens\`), then write a numbered critique of the game's frame beside the picture, biggest difference first (composition, silhouette, proportions, colour and light, surface), fix the first, and look again, until the critique finds nothing major. Then run \`game_check\` with \`final: true\` and fix until it is clean, including each problem its scene report lists (open the frame it names). End the turn with what the person can do now, plus your \`Next:\` line.`;
 /** Models in code: what the kit offers and how the agent sees one, said once for every route that builds them. */
-const CODE_MODELS = `with \`shell/model.js\`: one \`palette\` for the game; silhouette first, from curves (the side profile, then the plan, then the sections: \`curve\`, \`loft\`, \`mirrored\`, \`wall\`), then the details a person names each by, each model in its own module under \`web/models/\`, \`merge\`d, its main dimensions \`tuned\`. A humanoid is built on the clips' skeleton (\`rig\`): \`game_assets_add\` pack \`quaternius-universal-animation-library\`, path \`Unreal-Godot/UAL1_Standard.glb\`, named in \`ASSETS\`. Look at each with \`game_model_sheet\` and fix what reads wrong`;
+const CODE_MODELS = `with \`shell/model.js\`: one \`palette\` for the game; silhouette first, from curves (the side profile, then the plan, then the sections: \`curve\`, \`loft\`, \`mirrored\`, \`wall\`), then the details a person names each by, each model in its own module under \`web/models/\`, \`merge\`d. A humanoid is built on the clips' skeleton (\`rig\`): \`game_assets_add\` pack \`quaternius-universal-animation-library\`, path \`Unreal-Godot/UAL1_Standard.glb\`, named in \`ASSETS\`. Look at each with \`game_model_sheet\` and fix what reads wrong`;
 
 /** The library first, then what it lacks made the route's way: the old default, and any game with the library on. */
 const libraryTurn = (lacking: string) => `## The first turn
@@ -150,8 +151,6 @@ ${READ_STEP("")}
 ${LOOP_STEP}
 4. Make what the library lacks: the brief's player or main threat that no pack has, ${lacking === "made in Blender" ? "in Blender (each Blender tool names its recipe)" : "in three.js code with `shell/model.js` (its comment block shows every call; look at it alone with `game_model_sheet`)"}, then swap it in for the model standing in. Only those two; every other missing prop waits for a later turn.
 ${CHECK_STEP}
-
-${LATER}
 `;
 
 /** The code route with the library off: every model in code, looked at alone before the game is built round it. */
@@ -160,12 +159,10 @@ const CODE_TURN = `## The first turn
 Goal: the person plays the brief's core loop on the Stage, and its player, main threat and world are models you build in three.js code, never bare primitives standing in for them.
 
 ${READ_STEP(", and the comment block of `studio-skills/runtime/shell/model.js`")}
-2. Build the player and the main threat ${CODE_MODELS} before step 3. A picture the person attached to aim for is saved first as \`art/reference.png\`: the sheet shows it beside yours.
+2. Build the player and the main threat ${CODE_MODELS} before step 3.
 ${LOOP_STEP}
 4. Build the world the brief names the same way: the ground and the one or two set pieces it names, repeats with \`scatter\`, open water with \`shell/water.js\`. Choose the look the brief calls for in \`LOOK\` (its comment block in \`shell/look.js\`: a preset, a physical sky with clouds outdoors, or a flat stylised one), no lights besides \`ctx.look.sun\`.
 ${CHECK_STEP}
-
-${LATER}
 `;
 
 /** Blender with the library off: quick code stand-ins carry the loop while the real models are made. */
@@ -178,8 +175,6 @@ ${READ_STEP("")}
 ${LOOP_STEP}
 4. Make the player and the main threat in Blender (its tools each name their recipe), then swap them in for the stand-ins. Only those two; every other prop waits for a later turn.
 ${CHECK_STEP}
-
-${LATER}
 `;
 
 /** The first turn for this game's engine and model choice; an engine without one gets the brief alone. */
@@ -204,18 +199,26 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
   ].join("\n");
 };
 
+/** Said when the person attached a picture to the new game (GameCreateInput `reference`). */
+const REFERENCE_LINE =
+  "The person attached a picture to aim for, attached here and saved as `art/reference.png`. When it holds more than the one view you will match (a phone screenshot, a page around it), save that view alone over it. The model sheet and the check show it beside yours, and the turn ends when the game's frame matches it.";
+
 /**
  * A new game's first message: the brief, then the first turn's steps. They travel with the brief,
  * not in the game's AGENTS.md, so they reach the one turn they are for and a change to them needs
  * no migration of games already made.
  */
-export const firstTurnMessage = (manifest: GameManifest): string => {
+export const firstTurnMessage = (
+  manifest: GameManifest,
+  options: { readonly reference?: boolean } = {},
+): string => {
   const steps = firstTurnSection(manifest);
   const art = manifest.artDirection.trim();
   return [
     manifest.brief.trim(),
     ...(art === "" ? [] : [`Art direction: ${art}`]),
     steps === undefined ? FIRST_TURN_LEADS.brief : FIRST_TURN_LEADS.steps,
+    ...(options.reference === true ? [REFERENCE_LINE] : []),
     ...(steps === undefined ? [] : [steps.trim()]),
   ].join("\n\n");
 };

@@ -162,13 +162,18 @@ const RUN_REPLAY = `(async (play) => {
     return null;
   }
 })`;
+/** One view of a model sheet, as shell/sheet.js draws it: a label and the direction it looks from. */
+export interface SheetView {
+  readonly label: string;
+  readonly dir: readonly [number, number, number];
+}
 /** One model sheet (shell/sheet.js): four draws, which in software on a big model take seconds. */
 const SHEET_MS = 20_000;
-const DRAW_SHEET = `((name) => {
+const DRAW_SHEET = `((name, views) => {
   const sheet = window.__studio?.sheet;
   if (sheet === null || typeof sheet !== "object" || typeof sheet.draw !== "function") return "no-sheet";
   try {
-    return JSON.parse(JSON.stringify(sheet.draw(name)));
+    return JSON.parse(JSON.stringify(sheet.draw(name, views ?? undefined)));
   } catch (error) {
     return { error: String(error).slice(0, 300) };
   }
@@ -396,7 +401,7 @@ export interface WebPlaySession extends PlaySession {
    * measures; with null, the things it could draw. Null when the page did not answer in time,
    * "no-sheet" when the shell has none. `still` then takes the picture.
    */
-  readonly sheet: (name: string | null) => Promise<unknown>;
+  readonly sheet: (name: string | null, views?: ReadonlyArray<SheetView>) => Promise<unknown>;
 }
 
 /**
@@ -882,9 +887,11 @@ export const openWebPlaySession = async (input: {
         );
         return answered === TIMED_OUT ? null : answered;
       },
-      sheet: async (name) => {
+      sheet: async (name, views) => {
         const answered = await bounded(
-          page.evaluate(`${DRAW_SHEET}(${JSON.stringify(name)})`).catch(() => null),
+          page
+            .evaluate(`${DRAW_SHEET}(${JSON.stringify(name)}, ${JSON.stringify(views ?? null)})`)
+            .catch(() => null),
           SHEET_MS,
         );
         return answered === TIMED_OUT ? null : answered;

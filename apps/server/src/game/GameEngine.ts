@@ -52,13 +52,37 @@ import { makeAtomicWriter } from "./gameFiles.ts";
 import { hashFile } from "./hashFile.ts";
 import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import type { WindowHost } from "./windowHost.ts";
+import { gameReference } from "./gameReference.ts";
+import type { SheetView } from "./webPlaySession.ts";
 
 /**
  * How an agent judges a model sheet, carried by the sheet's own result so it arrives exactly
  * when it is needed and costs the turn's instructions nothing.
  */
 const MODEL_REVIEW =
-  "Before you change the model, write a numbered critique of these sheets against the reference at the same angle (the side profile against a side view, the low front three-quarter against the picture; without a reference, against the brief), biggest difference first: 1. silhouette (the side profile, then the plan: a bow's rake, a roof line, how a shape tapers), 2. proportions (length to height to width, each part against the 1.8 m figure), 3. the main parts and how they meet (fronts that curve and step back, bands that follow the walls they sit on), 4. surface (materials, glass, rails, small details). Fix the first item, call game_model_sheet again, and repeat until the critique finds nothing major. Draw from curves, not boxes: the side profile first (curve), then the plan (mirrored, outline, inset), then the sections (loft, wall), so every part follows the same lines.";
+  "Before you change the model, write a numbered critique of these sheets against the brief, biggest difference first: 1. silhouette (the side profile, then the plan: a bow's rake, a roof line, how a shape tapers), 2. proportions (length to height to width, each part against the 1.8 m figure), 3. the main parts and how they meet (fronts that curve and step back, bands that follow the walls they sit on), 4. surface (materials, glass, rails, small details). Fix the first item, call game_model_sheet again, and repeat until the critique finds nothing major. Draw from curves, not boxes: the side profile first (curve), then the plan (mirrored, outline, inset), then the sections (loft, wall), so every part follows the same lines.";
+
+/** The same review against a reference picture, drawn from the side and from the picture's angle. */
+const REFERENCE_REVIEW = MODEL_REVIEW.replace(
+  "these sheets against the brief",
+  "these sheets against the reference at the same angle (the side profile against a side view, the reference's view against the picture; set `view` to the picture's angle first)",
+);
+
+/** Against a reference: the side profile, and the reference's angle (a low front three-quarter unless named). */
+const referenceViews = (view?: {
+  readonly around: number;
+  readonly up: number;
+}): ReadonlyArray<SheetView> => {
+  const around = ((view?.around ?? 50) * Math.PI) / 180;
+  const up = ((view?.up ?? 8) * Math.PI) / 180;
+  return [
+    { label: "side profile", dir: [1, 0.06, 0] },
+    {
+      label: "the reference's view",
+      dir: [Math.sin(around) * Math.cos(up), Math.sin(up), Math.cos(around) * Math.cos(up)],
+    },
+  ];
+};
 
 /**
  * The game engines this build runs. The manifest still names one, so a
@@ -186,10 +210,17 @@ export interface GameEngineBackend {
    * Boot check of the entries the engine boots: what the player opens first, then the
    * gameplay entry. With `scene`, an engine that has a scene report plays the gameplay entry
    * briefly with random input and returns it; with `qa`, one that has a QA play plays it.
+   * With `look`, an engine that can opens only the gameplay entry for a moment of play and
+   * returns its frame, errors and frame rate: the agent's quick look between edits.
    */
   readonly runCheck: (
     ctx: GameEngineContext,
-    input: { readonly gameplayScene: string; readonly scene: boolean; readonly qa: boolean },
+    input: {
+      readonly gameplayScene: string;
+      readonly scene: boolean;
+      readonly qa: boolean;
+      readonly look: boolean;
+    },
   ) => Effect.Effect<GameEngineCheckReport, GameOperationError>;
   /** Refuses an export the installed engine cannot make (missing export templates), before any import. */
   readonly exportReady: (
@@ -255,6 +286,8 @@ export interface GameEngineBackend {
           readonly gameplayScene: string;
           readonly things: ReadonlyArray<string> | null;
           readonly folder: string;
+          /** The views to draw, larger for being fewer; null for the shell's six. */
+          readonly views: ReadonlyArray<SheetView> | null;
         },
       ) => Effect.Effect<GameModelSheetResult | "no-sheet", GameOperationError>)
     | null;
@@ -334,13 +367,15 @@ export class GameEngine extends Context.Service<
      * whose work it is, the thread by default), holding the live editor itself.
      * Everything the game did is in the result (a failed import, an entry that
      * does not load, a freeze, compile errors); it fails only when the check
-     * could not be made: a tool or the machine. The agent's and the person's
-     * check also plays the gameplay entry briefly for the scene report (see
-     * GameEngineBackend.runCheck).
+     * could not be made: a tool or the machine. Without `final` it is a quick look (see
+     * GameEngineBackend.runCheck); a final check also boots every entry and plays the scene
+     * report and the QA play, once per state of the files: a final check of files a clean
+     * final check already played answers with that check.
      */
     readonly check: (
       threadId: ThreadId,
       owner?: string,
+      options?: { readonly final?: boolean },
     ) => Effect.Effect<GameCheckResult, GameOperationError>;
     /**
      * The boot check of a checkout no thread owns (a build's copy), as its own
@@ -440,6 +475,7 @@ const make = Effect.gen(function* () {
     startedAt: number,
     scene: boolean,
     qa: boolean,
+    look: boolean,
   ) =>
     Effect.gen(function* () {
       const { profile } = backend;
@@ -454,6 +490,7 @@ const make = Effect.gen(function* () {
         gameplayScene: manifest.gameplayScene ?? "",
         scene,
         qa,
+        look,
       });
       const { run, reported } = executed;
       const errors = mergeCheckIssues(reported?.errors ?? [], [
@@ -521,7 +558,7 @@ const make = Effect.gen(function* () {
 
   const check = Effect.fn("GameEngine.check")(function* (
     root: string,
-    options?: { readonly scene?: boolean; readonly qa?: boolean },
+    options?: { readonly scene?: boolean; readonly qa?: boolean; readonly look?: boolean },
   ) {
     const startedAt = yield* Clock.currentTimeMillis;
     // A failure the game's own files cause (an unreadable game.json, an editor
@@ -553,6 +590,7 @@ const make = Effect.gen(function* () {
         startedAt,
         options?.scene === true,
         options?.qa === true,
+        options?.look === true,
       );
       // With a live editor, import and check share one hold, as export does:
       // another game cannot take the editor between them.
@@ -605,13 +643,21 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.orElseSucceed(() => null));
   // Set before the check's operation ends, so the status its end rereads has it.
   const cleanCheckTimes = new Map<string, string>();
-  /** The thread's check, remembered when it is clean and its files held still throughout. */
-  const checkRemembered = (root: string) =>
+  /**
+   * The thread's check: a quick look, or a final check remembered when it is clean and its files
+   * held still throughout. A look leaves out the scene report and the QA play, so only a final
+   * check stands for a build's boot check (cleanCheckOf).
+   */
+  const checkRemembered = (final: boolean) => (root: string) =>
     Effect.gen(function* () {
       const before = yield* checkedIdentity(root);
-      const result = yield* check(root, { scene: true, qa: true });
+      if (final && before !== null) {
+        const played = yield* Cache.getOption(cleanChecks, before);
+        if (Option.isSome(played)) return played.value;
+      }
+      const result = yield* check(root, final ? { scene: true, qa: true } : { look: true });
       if (result.ok) cleanCheckTimes.set(root, DateTime.formatIso(yield* DateTime.now));
-      if (result.ok && before !== null && before === (yield* checkedIdentity(root)))
+      if (final && result.ok && before !== null && before === (yield* checkedIdentity(root)))
         yield* Cache.set(cleanChecks, before, result);
       return result;
     });
@@ -625,10 +671,15 @@ const make = Effect.gen(function* () {
     context,
     importProject,
     import: (threadId) => projects.exclusive(threadId, "Import", importProject),
-    check: (threadId, owner) =>
+    check: (threadId, owner, options) =>
       Effect.gen(function* () {
         const label = yield* checkLabel(yield* projects.resolve(threadId));
-        return yield* projects.exclusive(threadId, label, checkRemembered, { owner });
+        return yield* projects.exclusive(
+          threadId,
+          label,
+          checkRemembered(options?.final === true),
+          { owner },
+        );
       }),
     cleanCheckAt: (root) => Effect.sync(() => cleanCheckTimes.get(root) ?? null),
     checkIn: (root, owner) =>
@@ -677,16 +728,22 @@ const make = Effect.gen(function* () {
             return yield* refused(
               `${backend.profile.displayName} games have no model sheet; three.js games do.`,
             );
+          // Against a reference only the views it is compared from, larger: the side profile and
+          // the reference's own angle.
+          const reference = yield* gameReference(root, input.reference);
           const sheets = yield* backend.modelSheet(ctx, {
             gameplayScene: manifest.gameplayScene ?? "",
             things: input.things ?? null,
             folder: NodePath.join(root, "builds/logs", `model-sheet-${NodeCrypto.randomUUID()}`),
+            views: reference === null ? null : referenceViews(input.view),
           });
           if (sheets === "no-sheet")
             return yield* refused(
               "This game's copy of the shell predates model sheets (an older game that carries its own shell).",
             );
-          return sheets.sheets.length === 0 ? sheets : { ...sheets, review: MODEL_REVIEW };
+          return sheets.sheets.length === 0
+            ? sheets
+            : { ...sheets, review: reference === null ? MODEL_REVIEW : REFERENCE_REVIEW };
         }),
       ),
     cleanCheckOf: (root) =>

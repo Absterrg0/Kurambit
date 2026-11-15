@@ -4,26 +4,8 @@ This game started from the **Blank (browser)** template: one static three.js
 project under `web/`. It has no real gameplay yet, but it ships the shell a
 demo needs, so build the game, not the menus.
 
-## Shortest path
-
-The first playable build, in this order ("The first turn" in the game's first message):
-
-1. The models, the way the first message says for this game: in code with
-   `shell/model.js`, each looked at alone with `game_model_sheet`; or from the
-   library: `game_assets_search` lists it by style family, `game_assets_add`
-   the player and one or two threats, the first call with `lock` (the family
-   and view), which writes `STYLE.json`, named in `ASSETS` by the path the add
-   reports. The shell loads `ASSETS` and compiles what draws behind the loading
-   screen, so play never starts on a freeze; keep the default look (or name
-   one preset; no lights besides `ctx.look.sun`).
-2. The game: paste the recipe for your view from `studio-skills/three.md`
-   (third person, top-down, side view) over `web/main.js`, put your models
-   where it uses the library's, and grow it into the brief's core loop.
-3. A win and a lose through `GameState`, the HUD through `ctx.ui`, `Juice` on
-   every action, then `game_check` clean, with each problem its scene report
-   lists fixed. Ending the turn plays the build.
-
-The rest of this file is reference: read a section when you use it.
+This file is reference: read a section when you use it. The first turn's
+steps are in the game's first message.
 
 ## The runtime and its kits
 
@@ -133,10 +115,13 @@ with no run; return `false` then). Extend `GameState`, not the bridge.
 
 ## Check and play
 
-`game_check` boots the page and `index.html?play` headless and reports
-console and page errors with file and line. Its scene report then plays 6 s
-of random keys and lists what a person would see is wrong, each with a frame
-that outlines it. It knows the player from `ctx.player` and the characters
+`game_check` is a quick look: it opens `index.html?play` headless, plays a
+moment of random keys and returns a frame of play (beside the game's
+reference picture, when it has one), console and page errors with file and
+line, and the frame rate. With `final: true` it also boots the title page,
+and its scene report plays 6 s of random keys and lists what a person would
+see is wrong, each with a frame that outlines it, then the QA play presses
+every control. It knows the player from `ctx.player` and the characters
 from `ctx.thing` kinds (`character`, `creature`; `ASSETS` models with clips
 are characters already). A clean check says the page boots and reads; it
 cannot say the game is good to play.

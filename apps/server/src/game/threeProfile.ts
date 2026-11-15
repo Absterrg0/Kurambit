@@ -22,7 +22,7 @@ export const THREE_PROFILE: GameEngineProfile = {
     version: THREE_PINNED_VERSION,
     directories: ["web/assets", "builds/web"],
     ignores: [],
-    agents: `Build BRIEF.md's game with three.js. web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. three.js and the demo shell are Kurambit's runtime (game.json \`runtime\`), which Kurambit serves and copies into every export: no install step. Import them as the recipes do (\`./vendor/three.module.js\`, \`./shell/juice.js\`); the import map in web/index.html points those at the runtime. Never copy or edit the runtime: a variant is a module of the game's own beside main.js. Its kits' comment blocks are readable in studio-skills/runtime/shell/. A new game's first turn follows "The first turn" below.
+    agents: `Build BRIEF.md's game with three.js. web/ is the static project: web/index.html, web/main.js, web/style.css, web/assets for every visual and sound. three.js and the demo shell are Kurambit's runtime (game.json \`runtime\`), which Kurambit serves and copies into every export: no install step. Import them as the recipes do (\`./vendor/three.module.js\`, \`./shell/juice.js\`); the import map in web/index.html points those at the runtime. Never copy or edit the runtime: a variant is a module of the game's own beside main.js. Its kits' comment blocks are readable in studio-skills/runtime/shell/.
 
 Use the game_* tools to check, play, export and package the game; never launch your own browser. Keep builds/ generated.
 `,

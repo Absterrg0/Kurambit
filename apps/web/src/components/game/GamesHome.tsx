@@ -9,15 +9,22 @@ import {
   ACTIVE_GAME_ENGINES,
   GAME_ENGINES,
   GAME_STYLE_DEFAULT_CHARACTERS,
+  GAME_REFERENCE_MAX_DATA_URL_CHARS,
   GAME_STYLE_DEFAULT_LIBRARY,
   type EnvironmentId,
   type GameCharacterRoute,
   type GameEngineId,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowUpIcon, FolderOpenIcon, SlidersHorizontalIcon } from "lucide-react";
+import {
+  ArrowUpIcon,
+  FolderOpenIcon,
+  ImagePlusIcon,
+  SlidersHorizontalIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ClipboardEvent, KeyboardEvent, ReactNode } from "react";
 
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -138,6 +145,26 @@ export function GamesHome() {
   );
 }
 
+/** The long side a reference is kept at: the size a model is shown pictures at. */
+const REFERENCE_MAX_EDGE = 1568;
+
+/**
+ * Any image the browser can decode, as the PNG the game keeps (art/reference.png), no larger than
+ * a model is shown. Null when it does not decode or is still too large.
+ */
+const referencePng = async (file: File): Promise<{ name: string; dataUrl: string } | null> => {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (bitmap === null) return null;
+  const scale = Math.min(1, REFERENCE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const dataUrl = canvas.toDataURL("image/png");
+  return dataUrl.length <= GAME_REFERENCE_MAX_DATA_URL_CHARS ? { name: file.name, dataUrl } : null;
+};
+
 /** The new-game form: the brief, the model, Start. Everything else has a sensible default. */
 function BriefBox({
   environmentId,
@@ -160,7 +187,24 @@ function BriefBox({
   const engine = chooseEngine(chosenEngine, engineReady);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A picture to aim for, which the game keeps as its reference.
+  const [picture, setPicture] = useState<{ name: string; dataUrl: string } | null>(null);
+  const pictureInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const takePicture = async (file: File) => {
+    const png = await referencePng(file);
+    if (png === null) setError(`${file.name} could not be read as a picture.`);
+    else {
+      setError(null);
+      setPicture(png);
+    }
+  };
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = [...event.clipboardData.files].find((each) => each.type.startsWith("image/"));
+    if (file === undefined) return;
+    event.preventDefault();
+    void takePicture(file);
+  };
 
   // A request from New game anywhere: take its brief while rendering, focus once mounted.
   const request = useGameEntryStore((state) => state.boxRequest);
@@ -205,6 +249,7 @@ function BriefBox({
         engine,
         characters,
         library,
+        ...(picture === null ? {} : { reference: picture }),
         modelSelection: choice.model,
       },
     });
@@ -275,12 +320,63 @@ function BriefBox({
           value={brief}
           onChange={(event) => setBrief(event.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           rows={2}
           disabled={busy}
           placeholder="Describe the game you want to play…"
           className="min-h-20 w-full resize-none bg-transparent px-4 pt-3.5 text-base/6 text-foreground outline-none placeholder:text-placeholder"
         />
+        {picture === null ? null : (
+          <div className="px-4 pt-1">
+            <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80">
+              <img
+                src={picture.dataUrl}
+                alt={picture.name}
+                className="h-full w-full object-cover"
+              />
+              <span className="absolute top-1 right-1 flex">
+                <Button
+                  variant="media-close"
+                  size="icon-xs"
+                  disabled={busy}
+                  onClick={() => setPicture(null)}
+                  aria-label={`Remove ${picture.name}`}
+                >
+                  <XIcon />
+                </Button>
+              </span>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-1 px-2.5 pt-1 pb-2.5">
+          <input
+            ref={pictureInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file !== undefined) void takePicture(file);
+            }}
+          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={busy}
+                  onClick={() => pictureInputRef.current?.click()}
+                  aria-label="Attach a picture to aim for"
+                />
+              }
+            >
+              <ImagePlusIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="top">Attach a picture to aim for</TooltipPopup>
+          </Tooltip>
           {/* One active engine is no choice, so no picker shows. */}
           {ACTIVE_GAME_ENGINES.length > 1 ? (
             <ToggleGroup

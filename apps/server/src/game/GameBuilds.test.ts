@@ -211,32 +211,6 @@ describe("GameBuilds base", () => {
   );
 });
 
-describe("GameBuilds numbers", () => {
-  it.effect("keeps a small fix on its build's number and numbers the next build on", () =>
-    Effect.gen(function* () {
-      const game = yield* world;
-      yield* Effect.gen(function* () {
-        const builds = yield* GameBuilds.GameBuilds;
-        // A fix declared on the first build is a build: there is nothing before it to fix.
-        yield* builds.declareChange(THREAD, "fix");
-        yield* builds.recordTurn(THREAD, yield* game.addTurn(1, 0));
-        yield* builds.declareChange(THREAD, "fix");
-        yield* builds.recordTurn(THREAD, yield* game.addTurn(2, 10));
-        // Nothing declared: a build of its own.
-        yield* builds.recordTurn(THREAD, yield* game.addTurn(3, 20));
-        const listed = yield* builds.list(THREAD, {});
-        const named = (n: number) => {
-          const build = listed.builds.find((b) => b.id === oid(n));
-          return [build?.number, build?.fix];
-        };
-        assert.deepStrictEqual(named(2), [1, undefined]);
-        assert.deepStrictEqual(named(3), [1, 1]);
-        assert.deepStrictEqual(named(4), [2, undefined]);
-      }).pipe(Effect.provide(game.layer));
-    }).pipe(Effect.provide(Layer.merge(NodeServices.layer, SqlitePersistence.layerMemory))),
-  );
-});
-
 describe("the folder's current build", () => {
   const at = (minute: number) => `2026-11-08T10:${String(minute).padStart(2, "0")}:00.000Z`;
   // Turn rows newest first, one a minute: `builds` are the minutes whose turn changed game files.

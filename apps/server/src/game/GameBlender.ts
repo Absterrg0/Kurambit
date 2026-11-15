@@ -1892,9 +1892,9 @@ const make = Effect.gen(function* () {
       ];
       const text = [
         `Review of ${candidate.objects.join(", ")} (key ${key.slice(0, 12)}), exactly what game_blender_export would write. Image: ${imageRel}.`,
-        concept.section === null
-          ? `No concept: art/CONCEPT.md has no section headed "${candidate.subject}"${concept.png === null ? ` and there is no art/concepts/${candidate.subject}.png` : ""}.`
-          : `Concept (${candidate.concept}):\n${concept.section}`,
+        ...(concept.section === null
+          ? []
+          : [`Concept (${candidate.concept}):\n${concept.section}`]),
         measurementText(candidate, styleBudgets(style), bytes),
         ...(rendered.problems === undefined || rendered.problems.length === 0
           ? []

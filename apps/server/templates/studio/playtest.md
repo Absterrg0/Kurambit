@@ -13,7 +13,7 @@ call it done.
    Start with game_explore_start, play with game_explore_act, study each
    returned frame, and release the session with game_explore_close.
 2. Passes: smoke (boots, menu, start, quit), feature (each system actually
-   triggers), regression (the DO NOT REGRESS list still holds), visual
+   triggers), regression (what worked before still works), visual
    (frames against the key art).
 3. Godot and Unity games play as native builds that pause between acts;
    three.js games play in a browser in real time. Use

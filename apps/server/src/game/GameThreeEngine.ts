@@ -36,6 +36,7 @@ import {
   WebPageCrashed,
   WebPageNotReady,
   type WebPageEvent,
+  type SheetView,
   type WebPlaySession,
 } from "./webPlaySession.ts";
 import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
@@ -67,6 +68,8 @@ const flatShareOf = (path: string) =>
   );
 
 const BOOT_TIMEOUT_MS = 60_000;
+/** A quick look's play: long enough for a frame rate (two seconds of frames) and a moved frame. */
+const LOOK_PLAY_MS = 2_500;
 /** Play before the sheet is drawn: start() has built the run and the clips have begun. */
 const SHEET_SETTLE_MS = 1_500;
 /** With no names: this many things, characters and creatures first. */
@@ -90,7 +93,11 @@ const fileSafe = (name: string) => name.replace(/[^A-Za-z0-9_-]+/g, "_").slice(0
 /** Each named thing's sheet from the open page; with no names, the first few it has. */
 const drawSheets = async (
   session: WebPlaySession,
-  input: { readonly things: ReadonlyArray<string> | null; readonly folder: string },
+  input: {
+    readonly things: ReadonlyArray<string> | null;
+    readonly folder: string;
+    readonly views: ReadonlyArray<SheetView> | null;
+  },
   root: string,
 ): Promise<GameModelSheetResult | "no-sheet"> => {
   const listed = await session.sheet(null);
@@ -119,7 +126,7 @@ const drawSheets = async (
   const sheets: Array<GameModelSheet> = [];
   const missing: Array<string> = [];
   for (const [index, name] of wanted.entries()) {
-    const drawn = decodeSheet(await session.sheet(name));
+    const drawn = decodeSheet(await session.sheet(name, input.views ?? undefined));
     if (Option.isNone(drawn)) {
       missing.push(name);
       continue;
@@ -308,9 +315,13 @@ export const makeThreeBackend = (
       // The page as the player opens it, then the gameplay entry the template
       // names (the starter's shell boots straight into play with "?play"), so a
       // failure in gameplay start cannot hide behind the title screen.
-      const entries: Array<readonly [GameCheckView["entry"], string]> = [["boot", server.url]];
+      // A quick look opens the gameplay entry alone, which boots the same page.
+      const entries: Array<readonly [GameCheckView["entry"], string]> =
+        input.look && input.gameplayScene !== "" ? [] : [["boot", server.url]];
       if (input.gameplayScene !== "")
         entries.push(["gameplay", new URL(input.gameplayScene, server.url).href]);
+      // The entry whose page booting is the game booting.
+      const bootEntry = entries[0]![0];
       // The gameplay entry's play, measured by the shell's scene report: what it left, and how long it took.
       let scenePlay: { readonly page: PageScene; readonly ms: number } | null = null;
       // What each entry looked like as the check left it: the agent judges its game from these.
@@ -360,8 +371,10 @@ export const makeThreeBackend = (
                   // A short random-input play the scene report watches; without one (or with a
                   // shell that has none, where nothing would watch it), one extra beat. Either
                   // way late module errors still land in the listeners above.
+                  const looking = input.look && entry === "gameplay";
                   if (measure && session.scene() !== "no-shell")
                     await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
+                  else if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
                   else await new Promise((resolve) => setTimeout(resolve, 2000));
                   const view = NodePath.join(temporary, `view-${entry}.png`);
                   if (await session.still(view)) {
@@ -369,12 +382,10 @@ export const makeThreeBackend = (
                     if (entry === "gameplay") flatView = await flatShareOf(view);
                   }
                   await session.close();
-                  if (measure) {
-                    scenePlay = { page: session.scene(), ms: Date.now() - started };
-                    playPerf = session.perf();
-                  }
+                  if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
+                  if (measure || looking) playPerf = session.perf();
                   reached.push(entry);
-                } else if (entry !== "boot" && !crashed)
+                } else if (entry !== bootEntry && !crashed)
                   issues.push({
                     file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,
                     message: `The gameplay entry ${input.gameplayScene} never reported ready (window.__studio.ready stayed false).`,
@@ -432,7 +443,7 @@ export const makeThreeBackend = (
         )
         .pipe(Effect.ensuring(Effect.promise(() => server.close().catch(() => undefined))));
       const { timedOut } = played;
-      const booted = reached.includes("boot");
+      const booted = reached.includes(bootEntry);
       if (!booted)
         issues.unshift({
           file: `${ctx.projectName}/index.html`,
@@ -485,7 +496,7 @@ export const makeThreeBackend = (
         run,
         ...(scene === undefined ? {} : { scene }),
         views,
-        ...(input.scene && reached.includes("gameplay")
+        ...((input.scene || input.look) && reached.includes("gameplay")
           ? { performance: checkPerformance(playPerf, browser) }
           : {}),
         ...(qa === undefined ? {} : { qa }),

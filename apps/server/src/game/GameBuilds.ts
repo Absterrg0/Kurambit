@@ -79,17 +79,11 @@ const NO_RUN = "game-builds";
  */
 const BASES = `${gameRunRefsFolder(NO_RUN)}bases/`;
 /**
- * A turn the harness folded into the build before it, as a fix of that build
- * (`fixes/<build>`, pointing at the build itself): it keeps that build's number.
- * Written as the turn lands, from what the agent declared through game_check.
+ * A turn folded into the build before it, as a fix of that build (`fixes/<build>`, pointing at
+ * the build itself): it keeps that build's number. Earlier servers wrote these from what the agent
+ * declared; they are still read, and no longer written.
  */
 const FIXES = `${gameRunRefsFolder(NO_RUN)}fixes/`;
-/**
- * A fix stays a fix only while it is small; a bigger change is a build of its own
- * whatever the agent said, so a number always means a change a person can see.
- */
-const FIX_MAX_LINES = 80;
-const FIX_MAX_FILES = 4;
 /**
  * A person's edit kept as a build outside a turn (the Stage's Keep as a
  * build): `edits/<request>-values` is the build, `edits/<request>-from` the
@@ -233,12 +227,6 @@ export class GameBuilds extends Context.Service<
      * a restart for the newest turn.
      */
     readonly recordTurn: (threadId: ThreadId, checkpointRef: string) => Effect.Effect<void>;
-    /**
-     * What the agent says the running turn's change is (game_check's `change`): a new build,
-     * or a fix folded into the build before it. Kept until the turn lands; the harness then
-     * folds it only when the change is small and is a person's turn on an earlier build.
-     */
-    readonly declareChange: (threadId: ThreadId, change: "new" | "fix") => Effect.Effect<void>;
     /**
      * A measure no thread waits for: a keep-going step's build as it lands,
      * or a chat turn's build, which with `supersede` replaces the game's earlier turn
@@ -410,7 +398,6 @@ export const turnPending = (
     run.startedAt !== null &&
     run.checkpointId === null);
 
-const isPersonBuild = (entry: Entry) => entry.source._tag === "turn" && entry.source.step === null;
 /**
  * A build in the game's one numbered sequence, the way a person counts what they see land: a
  * chat's turn, a keep-going step and values kept from the Stage. A restore's parked folder is
@@ -1002,20 +989,10 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => "unknown" as const),
     );
 
-  // What the agent said each chat's running turn changes, until that turn lands. A restart
-  // between the two forgets it, and the turn is then a build of its own.
-  const declared = new Map<ThreadId, "new" | "fix">();
-  const declareChange: GameBuilds["Service"]["declareChange"] = (threadId, change) =>
-    Effect.sync(() => {
-      declared.set(threadId, change);
-    });
-
   const recordTurn: GameBuilds["Service"]["recordTurn"] = (threadId, checkpointRef) =>
     Effect.gen(function* () {
-      const said = declared.get(threadId);
-      declared.delete(threadId);
       const g = yield* gameOf(threadId);
-      const { entries, refs, recorded, fixes } = yield* allEntries(g, 50, undefined);
+      const { entries, refs, recorded } = yield* allEntries(g, 50, undefined);
       const id = refs.get(checkpointRef);
       if (id === undefined) return;
       const entry = entries.find((each) => each.id === id && each.source._tag === "turn");
@@ -1025,21 +1002,6 @@ const make = Effect.gen(function* () {
           cwd: g.root,
           checkpointRef: CheckpointRef.make(`${BASES}${id}`),
           oid: entry.base,
-        });
-      const lines = entry.files.reduce((sum, file) => sum + file.additions + file.deletions, 0);
-      const small =
-        entry.fileCount !== null &&
-        entry.fileCount <= FIX_MAX_FILES &&
-        entry.fileCount <= entry.files.length &&
-        lines <= FIX_MAX_LINES;
-      const earlier = entries.some(
-        (each) => each.id !== id && isPersonBuild(each) && each.at < entry.at,
-      );
-      if (said === "fix" && small && earlier && isPersonBuild(entry) && !fixes.has(id))
-        yield* checkpoints.updateCheckpointRef({
-          cwd: g.root,
-          checkpointRef: CheckpointRef.make(`${FIXES}${id}`),
-          oid: id,
         });
     }).pipe(
       Effect.catchCause((cause) =>
@@ -2048,7 +2010,6 @@ const make = Effect.gen(function* () {
     measure,
     measureIn,
     recordTurn,
-    declareChange,
     play,
     inCopy,
     restore,

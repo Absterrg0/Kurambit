@@ -57,7 +57,10 @@ You also need a signed-in agent. Codex and Claude are enabled by default; enable
 
 ## Making a game
 
-Describe the game in the box on the home screen, including the look you want. **New game** in the
+Describe the game in the box on the home screen, including the look you want. To aim for a
+picture (a screenshot, concept art, a photo), attach it with the picture button or paste it into
+the box: the game keeps it as `art/reference.png`, and the agent works until its game looks like
+it. **New game** in the
 sidebar, `mod+N` and the command palette all bring you back to that box. Under it are the agent and
 model (your last game's, else Claude) and one options button for how characters are made. New games
 are saved in `~/Games`. Kurambit names the game from your brief; rename it any time from the game's
@@ -107,11 +110,11 @@ also ask your agent in chat to switch; it never switches on its own.
 
 - **Code**: the agent builds every model in three.js code inside the game: hulls, buildings,
   vehicles, props, terrain, and characters on the same skeleton the animation library's clips play
-  on. They cost nothing to install, download tiny, and their main dimensions show up on the Stage
-  as values you can drag, so "make the hull longer" is a slider. The agent looks at each model alone
-  (from four sides, beside a 1.8 m figure, with its size and cost) before building the game round
-  it. Give it a picture to aim for and it compares its work against it: the key art you picked, or
-  any picture you attach, which it saves as `art/reference.png`.
+  on. They cost nothing to install and download tiny. The agent looks at each model alone (from
+  six sides, beside a 1.8 m figure, with its size and cost) before building the game round it.
+  Give it a picture to aim for and it compares its work against it, the model from the picture's
+  angle and the game's frame beside the picture at the same size: the key art you picked, or any
+  picture you attach, which it saves as `art/reference.png`.
 - **Blender**: it builds each model in Blender: a character is a body on the shared skeleton, then
   the head, clothes, tail or ears it models itself, with the library's animations already fitted.
 - **Generated**: an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy
@@ -320,10 +323,7 @@ keeps running; use **Stop game** to close it.
 ## Builds and undo
 
 Every agent turn that changes the game is a build, in any of the game's chats, keep-going steps
-included. A small fix to the build you already have (a bug, a typo, a value nudged) stays in that
-build as its fix, named like "Build 3 · fix 1", instead of becoming a new one; when your agent
-cannot tell which you want, it asks you. A build is the game folder as its turn
-left it. A three.js game's stage shows the folder live, so while your agent works it can be ahead of
+included. A build is the game folder as its turn left it. A three.js game's stage shows the folder live, so while your agent works it can be ahead of
 the latest build.
 
 The build beside the play controls opens the builds list: one picture per build, oldest to newest,

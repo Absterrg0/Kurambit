@@ -1,6 +1,7 @@
 // The model sheet the harness asks for (game_model_sheet): one thing the game named, drawn alone
 // from the front, the side, the back and above at three quarters, beside a 1.8 m figure on a
-// one-metre grid, with what it costs to draw. It is a picture laid over the page; the run under
+// one-metre grid, with what it costs to draw. The harness may name fewer views (a side profile
+// and a reference's view), which then draw larger. It is a picture laid over the page; the run under
 // it is held, never changed: the thing goes back where it was, as it was, before this returns.
 import * as THREE from "../vendor/three.module.js";
 import { drawnBox, stats } from "./model.js";
@@ -18,8 +19,9 @@ const VIEWS = [
   { label: "plan, from above", dir: [0, 1, 0], up: [-1, 0, 0] },
   { label: "three quarters, back, above", dir: [1, 0.8, -1] },
 ];
-const COLUMNS = 3;
-const ROWS = 2;
+/** Columns and rows for this many views: six in a 3 x 2 grid, two side by side, one alone. */
+const layout = (count) =>
+  count <= 1 ? [1, 1] : count === 2 ? [2, 1] : count <= 4 ? [2, 2] : [3, Math.ceil(count / 3)];
 
 const person = () => {
   const grey = new THREE.MeshStandardMaterial({ color: 0x5b6068, roughness: 1 });
@@ -46,8 +48,14 @@ export function createSheet({ renderer, find, names, hold, light }) {
     hold(false);
   };
 
-  const draw = (name) => {
+  /** `views` as VIEWS holds them ({ label, dir, up? }); omitted or empty, all of VIEWS. */
+  const draw = (name, views) => {
     close();
+    const shown =
+      Array.isArray(views) && views.length > 0 && views.length <= VIEWS.length
+        ? views.filter((view) => Array.isArray(view?.dir) && view.dir.length === 3)
+        : VIEWS;
+    const [columns, rows] = layout(shown.length);
     const record = name == null ? null : find(String(name));
     if (record?.object?.isObject3D !== true)
       return {
@@ -120,8 +128,8 @@ export function createSheet({ renderer, find, names, hold, light }) {
       const all = drawnBox(object).union(new THREE.Box3().setFromObject(figure));
       const centre = all.getCenter(new THREE.Vector3());
       const radius = all.getSize(new THREE.Vector3()).length() / 2;
-      const w = Math.floor(width / COLUMNS);
-      const h = Math.floor(height / ROWS);
+      const w = Math.floor(width / columns);
+      const h = Math.floor(height / rows);
       const aspect = w / h;
       const ratio = width / css0.x;
       const camera = new THREE.OrthographicCamera();
@@ -138,7 +146,7 @@ export function createSheet({ renderer, find, names, hold, light }) {
             k & 4 ? all.max.z : all.min.z,
           ),
         );
-      VIEWS.forEach(({ dir, up = [0, 1, 0] }, i) => {
+      shown.forEach(({ dir, up = [0, 1, 0] }, i) => {
         camera.position
           .copy(centre)
           .addScaledVector(new THREE.Vector3(...dir).normalize(), radius * 3 + 2);
@@ -173,8 +181,8 @@ export function createSheet({ renderer, find, names, hold, light }) {
           height - h,
           w,
           h,
-          (i % COLUMNS) * w,
-          Math.floor(i / COLUMNS) * h,
+          (i % columns) * w,
+          Math.floor(i / columns) * h,
           w,
           h,
         );
@@ -208,10 +216,10 @@ export function createSheet({ renderer, find, names, hold, light }) {
       tag.style.cssText = `position:absolute;padding:3px 7px;background:rgb(255 255 255 / 0.85);border-radius:4px;${css}`;
       overlay.append(tag);
     };
-    VIEWS.forEach(({ label: text }, i) =>
+    shown.forEach(({ label: text }, i) =>
       label(
         text,
-        `left:${((i % COLUMNS) * 100) / COLUMNS + 0.6}%;top:${(Math.floor(i / COLUMNS) * 100) / ROWS + 1.2}%`,
+        `left:${((i % columns) * 100) / columns + 0.6}%;top:${(Math.floor(i / columns) * 100) / rows + 1.2}%`,
       ),
     );
     const [x, y, z] = measured.size;

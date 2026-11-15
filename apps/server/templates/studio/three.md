@@ -4,13 +4,8 @@ The browser lane: one static project under `web/` on Kurambit's runtime, the
 shell and three.js (TEMPLATE.md). The Stage reloads the game on every save, so
 add a model to `ASSETS` only once its file is in place.
 
-## The first turn
+## Before the recipes
 
-- Real models from the first build, made the way the game's route says (the
-  first message): in code (`shell/model.js`), or library models (sprites in
-  2D) named in `ASSETS`, or made in Blender. A bare Box, Sphere or Cylinder
-  never stands in for a character, an enemy or a prop the brief names;
-  effects (`Juice.burst`, a glow) are fine.
 - Packs differ in scale (a Kenney blocky character stands several times a
   mini one): when you mix packs, size each model with `root.scale.setScalar(n)`.
 - In a 3D view the look draws the sky, its light and the fog: do not set

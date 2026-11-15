@@ -40,7 +40,7 @@ import {
   GameMoreToolkit,
 } from "./tools.ts";
 import { GAME_TOOL_PLACEMENTS, refusal } from "./placement.ts";
-import { gameReference } from "../../../game/gameReference.ts";
+import { besideReference, gameReference } from "../../../game/gameReference.ts";
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
 );
@@ -323,58 +323,42 @@ export const layerUnityScreenshot = McpToolAccess.toLayer(
   unityScreenshotHandlers,
 );
 
-/** The build each chat's check last showed the reference with. */
-const referenceShownAt = new Map<ThreadId, string>();
-
 /**
  * game_check, registered like the Blender look so its views (the title and play as the check
- * left them) become real image content: the agent sees its game before it ends the turn.
+ * left them) become real image content: the agent sees its game before it ends the turn. When
+ * the game has a reference picture, play's frame comes stacked above it at the same size, every
+ * check: matching a picture is a loop of looks, and each look needs both.
  */
 const checkHandlers = {
   game_check: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      if (input.change !== undefined) {
-        const change = input.change;
-        yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-          builds.declareChange(threadId, change),
-        );
-      }
       const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
-        engines.check(threadId),
+        engines.check(threadId, undefined, { final: input.final === true }),
       );
       const views = result.views ?? [];
       if (views.length === 0) return result;
       const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
         projects.resolve(threadId),
       );
+      const reference = yield* gameReference(root);
       const screenshots = yield* Effect.promise(() =>
         Promise.all(
           views.map((view) =>
             NodeFSP.readFile(NodePath.join(root, view.path)).then(
-              (bytes) => ({
-                mimeType: "image/png" as const,
-                data: bytes.toString("base64"),
-                ...THREE_VIEWPORT,
-              }),
+              (bytes) =>
+                (view.entry === "gameplay" && reference !== null
+                  ? besideReference(bytes, reference)
+                  : null) ?? {
+                  mimeType: "image/png" as const,
+                  data: bytes.toString("base64"),
+                  ...THREE_VIEWPORT,
+                },
               () => null,
             ),
           ),
         ),
       );
-      // The target beside the views, when the game has one, once per build (a turn's first
-      // check): the agent compares rather than judging alone, and later checks don't pay for it.
-      const build = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-        builds.current(threadId),
-      ).pipe(Effect.orElseSucceed(() => null));
-      const threadId = (yield* caller).thread.threadId;
-      const buildKey = build?.build ?? "none";
-      const reference =
-        referenceShownAt.get(threadId) === buildKey ? null : yield* gameReference(root);
-      if (reference !== null) referenceShownAt.set(threadId, buildKey);
-      const shown = [
-        ...screenshots.filter((shot) => shot !== null),
-        ...(reference === null ? [] : [reference.image]),
-      ];
+      const shown = screenshots.filter((shot) => shot !== null);
       return shown.length === 0 ? result : { ...result, screenshots: shown };
     }),
   ),

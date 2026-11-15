@@ -6,14 +6,10 @@ modeller; you have no local Blender, Godot or image tools.
 `<assets>` is your lane's asset folder: `web/assets/`, `godot/assets/`, or
 `unity/Assets/Art/` for Unity (capital A: Unity imports nothing else).
 
-1. Key art first: one image the finished game must live up to.
-2. Every in-game visual is a file: characters, objects, tiles, backgrounds, UI
-   pieces, effects, animation frames. No code-drawn shapes, flat color
-   rectangles or default UI skin on the played path. Dynamic text stays code.
-3. One palette, one silhouette language, one ground line. Movement, hurt, win
+1. One palette, one silhouette language, one ground line. Movement, hurt, win
    and lose read at a glance. Put the set in one contact-sheet PNG, look at
    it, and redo the weak ones.
-4. Every file's source and licence is in ASSETS.md (the art tools write
+2. Every file's source and licence is in ASSETS.md (the art tools write
    their own lines); unknown-source files do not ship. Never scrape websites.
 
 ## Lock the look: STYLE.json
