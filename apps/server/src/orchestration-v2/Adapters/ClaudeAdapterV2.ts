@@ -1119,10 +1119,16 @@ export function makeClaudeQueryOptions(input: {
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
   // `strictMcpConfig` already drops the person's MCP config and claude.ai connectors (CLI
-  // 2.1.322); the setting keeps the connectors out should a CLI start fetching them anyway.
+  // 2.1.322); the setting keeps the connectors out should a CLI start fetching them anyway. The
+  // sync settings hide the account's claude.ai skills and plugins for this invocation only.
   const effectiveQuerySettings =
     input.kurambitToolsOnly === true && typeof compactedQuerySettings !== "string"
-      ? ({ ...compactedQuerySettings, disableClaudeAiConnectors: true } as ClaudeSdkSettings)
+      ? ({
+          ...compactedQuerySettings,
+          disableClaudeAiConnectors: true,
+          syncClaudeAiSkills: false,
+          syncClaudeAiPlugins: false,
+        } as ClaudeSdkSettings)
       : compactedQuerySettings;
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
