@@ -75,9 +75,24 @@ const TOOL_FACTS_WAIT = "30 seconds";
 
 const handlers = {
   game_models_route: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameProjectService.GameProjectService, (projects, threadId) =>
-      projects.setCharacterRoute(threadId, input),
-    ),
+    Effect.gen(function* () {
+      // The route is the person's choice: a turn keep going started is no one asking.
+      if (
+        yield* withGame(GameRunControl.GameRunControl, (runs, threadId) =>
+          runs.stepInFlight(threadId),
+        )
+      )
+        return yield* new GameOperationError({
+          operation: "set-characters",
+          path: "game.json",
+          reason: "invalid-input",
+          detail:
+            "This turn is a keep-going step, not the person's request: how models are made is theirs to change. Say in your reply what the step needed.",
+        });
+      return yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+        projects.setCharacterRoute(threadId, input),
+      );
+    }),
   ),
   game_status: McpToolAccess.readsAsCaller((input) =>
     withGame(GameStatusService.GameStatusService, (statuses, threadId) =>

@@ -116,7 +116,7 @@ const perEngine = (line: (tools: GameEngineProfile["tools"]) => string) =>
     .join(" ");
 const GameStatusTool = Tool.make("game_status", {
   description:
-    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes, playable preview URL and `characters`: how the person chose to make this game's characters (library, blender or generated; only they change it), and `artLanes`: per art lane, the provider game_generate would use now, or null when the person has set none up for it. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
+    "Inspect this thread's Kurambit project: the manifest, the engine tool's readiness (`engineTool`, with repair instructions), the release targets its engine exports, its builds, managed processes, playable preview URL and `characters` and `library`: how the person chose to make this game's models (code, blender or generated) and whether the free library's models are on (only they change these), and `artLanes`: per art lane, the provider game_generate would use now, or null when the person has set none up for it. Read-only. `sourcesDifferFromPlay` is `unknown` unless `checkSources` is true, which walks and hashes every source file.",
   parameters: Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) }),
   success: GameStatus,
   failure,
@@ -750,7 +750,7 @@ const KeepGoingSteerTool = Tool.make("game_keep_going_steer", {
 
 const ModelsRouteTool = Tool.make("game_models_route", {
   description:
-    "Change how this game's models are made, only because the person asked you to in chat: route code (three.js code with shell/model.js), blender, or generated (the person's art providers); library true or false turns the free asset library's models on or off (clips and sounds are always allowed). Omitted parts stay. Returns the choice now in game.json.",
+    "Change how this game's models are made, only because the person asked you to in chat (refused in a keep-going step): route code (three.js code with shell/model.js), blender, or generated (the person's art providers); library true or false turns the free asset library's models on or off (clips and sounds are always allowed). Omitted parts stay. Returns the choice now in game.json.",
   parameters: Schema.Struct({
     route: Schema.optionalKey(GameCharacterRoute),
     library: Schema.optionalKey(Schema.Boolean),
@@ -758,7 +758,7 @@ const ModelsRouteTool = Tool.make("game_models_route", {
   success: GameSetCharacterRouteResult,
   failure,
   failureMode: "return",
-  dependencies: on(GameProjectService.GameProjectService),
+  dependencies: [...on(GameProjectService.GameProjectService), GameRunControl.GameRunControl],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)

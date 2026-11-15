@@ -1519,7 +1519,7 @@ const make = Effect.gen(function* () {
     });
 
   const LIBRARY_OFF =
-    "the person turned the library off for this game, so its models, textures and sprites are not used: build what you need in code (shell/model.js) or on the game's route. Clips (quaternius-universal-animation-library, for a character in code) and sounds still come in. If the person wants library models, they turn the library on in the game's \"Make models with\" setting, or ask you to (game_models_route).";
+    "the person turned the library off for this game, so its models, textures and sprites are not used: build what you need in code (shell/model.js) or on the game's route. Clips (quaternius-universal-animation-library, for a character in code) and sounds still come in. Say so in your reply if the request needs library models: the person turns the library on in the game's \"Make models with\" setting.";
   const add = (root: string, input: GameAssetsAddInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);

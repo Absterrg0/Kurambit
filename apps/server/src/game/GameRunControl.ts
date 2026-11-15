@@ -101,6 +101,11 @@ type Service = {
   ) => Fails<GameKeepGoingSteerResult>;
   /** The keep-going step each turn of this chat was, by its T3 run. */
   readonly steps: (threadId: ThreadId) => Effect.Effect<ReadonlyMap<RunId, GameRunStepMark>>;
+  /**
+   * Whether the chat's agent is working a keep-going step now (a step turn, bot setup), not a
+   * turn the person started: such a turn may not make the person's choices. Unreadable: true.
+   */
+  readonly stepInFlight: (threadId: ThreadId) => Effect.Effect<boolean>;
 };
 
 export class GameRunControl extends Context.Service<GameRunControl, Service>()(
@@ -525,12 +530,23 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const stepInFlight = (threadId: ThreadId) =>
+    projections.getGameRunRecords(threadId, { steps: "in-flight" }).pipe(
+      Effect.map((records) =>
+        records.gameRuns.some(
+          (run) => run.status !== "ended" && run.threadId === threadId && run.inFlight !== null,
+        ),
+      ),
+      // When it cannot be read, the choice waits for the person.
+      Effect.orElseSucceed(() => true),
+    );
   return GameRunControl.of({
     set,
     status,
     decide,
     steer,
     steps,
+    stepInFlight,
   });
 });
 

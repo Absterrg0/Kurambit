@@ -478,5 +478,5 @@ export const lockCharacterRouteRefusal = (
       : what === "generated-body"
         ? "A generated character or creature (an AI provider made its body)"
         : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and the person chose to make this game's models with ${choice.route}${choice.library ? " and the library" : ""}. Instead ${ROUTE_USE[choice.route]}${choice.library ? " or use a library model" : ""}. If the request needs another kind of model, say so in your reply: the person changes how models are made in the game's "Make models with" setting, or asks you to (game_models_route).`;
+  return `${thing}, and the person chose to make this game's models with ${choice.route}${choice.library ? " and the library" : ""}. Instead ${ROUTE_USE[choice.route]}${choice.library ? " or use a library model" : ""}. If the request needs another kind of model, say so in your reply: the person changes how models are made in the game's "Make models with" setting.`;
 };

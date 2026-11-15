@@ -405,7 +405,8 @@ const STANDARD_BODY_PACKS = LIBRARY_CATALOG.filter(
 ).map((pack) => pack.id);
 const MPFB_MISSING = `An mpfb body needs MPFB2, which is not installed. Only the person installs it, in Settings → Game tools (the MPFB2 row); say so in your reply if the request needs it. Meanwhile use a library body: {library: {pack: "quaternius-universal-base-characters", file: "Base Characters/Godot - UE/Superhero_Female_FullBody.gltf"}} (or Superhero_Male_FullBody.gltf), or the Universal Animation Library's mannequin.`;
 /**
- * The person's route refuses a made character on library: an MPFB2 body, or a mesh no library
+ * The person's choice refuses a Blender-made character on code with the library off (and on
+ * generated): an MPFB2 body, or a mesh no library
  * or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
  */
 const routeRefusalOf = (candidate: Candidate, route: GameModelChoice) =>
