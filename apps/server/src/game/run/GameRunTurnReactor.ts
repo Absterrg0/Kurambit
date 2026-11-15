@@ -384,7 +384,8 @@ const make = Effect.gen(function* () {
         elapsedMs: Math.max(0, to - from),
         personSteered: yield* steeredBy(threadId, chain),
         reason,
-        did: yield* didOf(threadId, chain),
+        // A turn cut off mid-work ends on a progress line, not on what it did.
+        did: outcome === "completed" ? yield* didOf(threadId, chain) : "",
       });
     });
 
