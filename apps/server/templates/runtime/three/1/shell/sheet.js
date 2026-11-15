@@ -7,12 +7,19 @@ import { drawnBox, stats } from "./model.js";
 
 const PERSON_M = 1.8;
 const BACKDROP = 0x8c929a;
+// Models face +z: from its right side the front points left, as a profile is usually drawn.
+// The low front three-quarter is how a camera at play height sees a vehicle; the plan from above
+// is what curve-led modelling draws second.
 const VIEWS = [
-  { label: "front", dir: [0, 0.12, 1] },
-  { label: "right side", dir: [1, 0.12, 0] },
-  { label: "back", dir: [0, 0.12, -1] },
-  { label: "three quarters, above", dir: [1, 0.8, 1] },
+  { label: "side profile", dir: [1, 0.06, 0] },
+  { label: "three quarters, front, low", dir: [1, 0.14, 0.75] },
+  { label: "front", dir: [0, 0.1, 1] },
+  { label: "back", dir: [0, 0.1, -1] },
+  { label: "plan, from above", dir: [0, 1, 0], up: [-1, 0, 0] },
+  { label: "three quarters, back, above", dir: [1, 0.8, -1] },
 ];
+const COLUMNS = 3;
+const ROWS = 2;
 
 const person = () => {
   const grey = new THREE.MeshStandardMaterial({ color: 0x5b6068, roughness: 1 });
@@ -63,6 +70,7 @@ export function createSheet({ renderer, find, names, hold }) {
     sun.position.set(3, 6, 4);
     scene.add(sun);
     const width = renderer.domElement.width;
+    const css0 = renderer.getSize(new THREE.Vector2());
     const height = renderer.domElement.height;
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -110,40 +118,62 @@ export function createSheet({ renderer, find, names, hold }) {
       const all = drawnBox(object).union(new THREE.Box3().setFromObject(figure));
       const centre = all.getCenter(new THREE.Vector3());
       const radius = all.getSize(new THREE.Vector3()).length() / 2;
-      const w = Math.floor(width / 2);
-      const h = Math.floor(height / 2);
+      const w = Math.floor(width / COLUMNS);
+      const h = Math.floor(height / ROWS);
       const aspect = w / h;
+      const ratio = width / css0.x;
       const camera = new THREE.OrthographicCamera();
       const context = canvas.getContext("2d");
       const autoClear = renderer.autoClear;
       const viewport = renderer.getViewport(new THREE.Vector4());
       const css = renderer.getSize(new THREE.Vector2());
       renderer.autoClear = true;
-      VIEWS.forEach(({ dir }, i) => {
-        const extent = radius * 1.08;
-        camera.left = -extent * aspect;
-        camera.right = extent * aspect;
-        camera.top = extent;
-        camera.bottom = -extent;
-        camera.near = 0.01;
-        camera.far = radius * 8 + 10;
+      const corners = [];
+      for (let k = 0; k < 8; k += 1)
+        corners.push(
+          new THREE.Vector3(
+            k & 1 ? all.max.x : all.min.x,
+            k & 2 ? all.max.y : all.min.y,
+            k & 4 ? all.max.z : all.min.z,
+          ),
+        );
+      VIEWS.forEach(({ dir, up = [0, 1, 0] }, i) => {
         camera.position
           .copy(centre)
           .addScaledVector(new THREE.Vector3(...dir).normalize(), radius * 3 + 2);
+        camera.up.set(...up);
         camera.lookAt(centre);
+        camera.updateMatrixWorld();
+        // Each view framed to what it shows: the box's corners in this camera's own axes.
+        const view = new THREE.Box3();
+        for (const corner of corners)
+          view.expandByPoint(corner.clone().applyMatrix4(camera.matrixWorldInverse));
+        const halfW =
+          Math.max((view.max.x - view.min.x) / 2, ((view.max.y - view.min.y) / 2) * aspect) * 1.1;
+        const midX = (view.max.x + view.min.x) / 2;
+        const midY = (view.max.y + view.min.y) / 2;
+        camera.left = midX - halfW;
+        camera.right = midX + halfW;
+        camera.top = midY + halfW / aspect;
+        camera.bottom = midY - halfW / aspect;
+        camera.near = 0.01;
+        camera.far = radius * 8 + 10;
         camera.updateProjectionMatrix();
-        renderer.setViewport(0, 0, css.x, css.y);
-        renderer.setScissorTest(false);
+        // Drawn into a cell-sized corner of the canvas (its bottom left), then copied out.
+        renderer.setViewport(0, 0, w / ratio, h / ratio);
+        renderer.setScissor(0, 0, w / ratio, h / ratio);
+        renderer.setScissorTest(true);
         renderer.render(scene, camera);
+        renderer.setScissorTest(false);
         // Copied in the same task as the draw, so the drawing buffer still holds it.
         context.drawImage(
           renderer.domElement,
           0,
-          0,
-          width,
-          height,
-          (i % 2) * w,
-          Math.floor(i / 2) * h,
+          height - h,
+          w,
+          h,
+          (i % COLUMNS) * w,
+          Math.floor(i / COLUMNS) * h,
           w,
           h,
         );
@@ -177,7 +207,10 @@ export function createSheet({ renderer, find, names, hold }) {
       overlay.append(tag);
     };
     VIEWS.forEach(({ label: text }, i) =>
-      label(text, `left:${(i % 2) * 50 + 0.8}%;top:${Math.floor(i / 2) * 50 + 1.2}%`),
+      label(
+        text,
+        `left:${((i % COLUMNS) * 100) / COLUMNS + 0.6}%;top:${(Math.floor(i / COLUMNS) * 100) / ROWS + 1.2}%`,
+      ),
     );
     const [x, y, z] = measured.size;
     label(

@@ -795,6 +795,8 @@ export const GameModelSheetResult = Schema.Struct({
   things: Schema.Array(Schema.Struct({ name: Schema.String, kind: Schema.String })),
   /** The reference picture attached after the sheets, game-relative; absent when the game has none. */
   reference: Schema.optionalKey(Schema.String),
+  /** How to judge the sheets before changing the model. */
+  review: Schema.optionalKey(Schema.String),
 });
 export type GameModelSheetResult = typeof GameModelSheetResult.Type;
 export const GameAction = Schema.Literals([

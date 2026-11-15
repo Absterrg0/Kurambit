@@ -54,6 +54,13 @@ import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourc
 import type { WindowHost } from "./windowHost.ts";
 
 /**
+ * How an agent judges a model sheet, carried by the sheet's own result so it arrives exactly
+ * when it is needed and costs the turn's instructions nothing.
+ */
+const MODEL_REVIEW =
+  "Before you change the model, write a numbered critique of these sheets against the reference at the same angle (the side profile against a side view, the low front three-quarter against the picture; without a reference, against the brief), biggest difference first: 1. silhouette (the side profile, then the plan: a bow's rake, a roof line, how a shape tapers), 2. proportions (length to height to width, each part against the 1.8 m figure), 3. the main parts and how they meet (fronts that curve and step back, bands that follow the walls they sit on), 4. surface (materials, glass, rails, small details). Fix the first item, call game_model_sheet again, and repeat until the critique finds nothing major. Draw from curves, not boxes: the side profile first (curve), then the plan (mirrored, outline, inset), then the sections (loft, wall), so every part follows the same lines.";
+
+/**
  * The game engines this build runs. The manifest still names one, so a
  * project that declares anything else fails here — before any engine
  * lookup or process launch — instead of being silently routed elsewhere.
@@ -679,7 +686,7 @@ const make = Effect.gen(function* () {
             return yield* refused(
               "This game's copy of the shell predates model sheets (an older game that carries its own shell).",
             );
-          return sheets;
+          return sheets.sheets.length === 0 ? sheets : { ...sheets, review: MODEL_REVIEW };
         }),
       ),
     cleanCheckOf: (root) =>
