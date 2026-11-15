@@ -308,6 +308,9 @@ export const layerUnityScreenshot = McpToolAccess.toLayer(
   unityScreenshotHandlers,
 );
 
+/** The build each chat's check last showed the reference with. */
+const referenceShownAt = new Map<ThreadId, string>();
+
 /**
  * game_check, registered like the Blender look so its views (the title and play as the check
  * left them) become real image content: the agent sees its game before it ends the turn.
@@ -343,8 +346,16 @@ const checkHandlers = {
           ),
         ),
       );
-      // The target beside the views, when the game has one: the agent compares, not judges alone.
-      const reference = yield* gameReference(root);
+      // The target beside the views, when the game has one, once per build (a turn's first
+      // check): the agent compares rather than judging alone, and later checks don't pay for it.
+      const build = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+        builds.current(threadId),
+      ).pipe(Effect.orElseSucceed(() => null));
+      const threadId = (yield* caller).thread.threadId;
+      const buildKey = build?.build ?? "none";
+      const reference =
+        referenceShownAt.get(threadId) === buildKey ? null : yield* gameReference(root);
+      if (reference !== null) referenceShownAt.set(threadId, buildKey);
       const shown = [
         ...screenshots.filter((shot) => shot !== null),
         ...(reference === null ? [] : [reference.image]),

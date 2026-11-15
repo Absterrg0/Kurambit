@@ -5,12 +5,18 @@
 // art/reference.png, which the agent saves when the person attaches one.
 import * as NodeFSP from "node:fs/promises";
 import * as Effect from "effect/Effect";
+import { PNG } from "pngjs";
 import { insideGame } from "./gamePath.ts";
+import { downscale } from "./spriteRender.ts";
 import { readGameStyle } from "./gameStyle.ts";
 
 const PNG_SIGNATURE = "89504e470d0a1a0a";
-/** A reference is shown, never processed: one this large is not worth a turn's context. */
-const MAX_REFERENCE_BYTES = 6 * 1024 * 1024;
+/** Read at most this large; anything larger is no reference a person meant to attach. */
+const MAX_REFERENCE_BYTES = 40 * 1024 * 1024;
+/** The long side a model is shown at (Anthropic's limit before it resizes images itself). */
+const MAX_SIDE = 1568;
+/** Under every provider's per-image limit (Anthropic's is 5 MB), base64 and all. */
+const MAX_SHOWN_BYTES = 3_500_000;
 
 export interface GameReference {
   /** Game-relative. */
@@ -33,14 +39,34 @@ const readPng = async (root: string, relative: string): Promise<GameReference | 
   const bytes = await NodeFSP.readFile(file).catch(() => null);
   if (bytes === null || bytes.length > MAX_REFERENCE_BYTES || bytes.length < 24) return null;
   if (bytes.subarray(0, 8).toString("hex") !== PNG_SIGNATURE) return null;
+  let shown = bytes;
+  let width = bytes.readUInt32BE(16);
+  let height = bytes.readUInt32BE(20);
+  // Shrunk to the size a model sees anyway, so a full-resolution screenshot never makes the
+  // provider refuse the turn's request.
+  if (Math.max(width, height) > MAX_SIDE) {
+    let image: PNG;
+    try {
+      image = PNG.sync.read(bytes);
+    } catch {
+      return null;
+    }
+    const k = Math.ceil(Math.max(width, height) / MAX_SIDE);
+    const small = downscale(
+      { width: image.width, height: image.height, data: image.data },
+      k,
+      "area",
+    );
+    const out = new PNG({ width: small.width, height: small.height });
+    out.data = Buffer.from(small.data);
+    shown = PNG.sync.write(out);
+    width = small.width;
+    height = small.height;
+  }
+  if (Math.ceil(shown.length / 3) * 4 > MAX_SHOWN_BYTES) return null;
   return {
     path: relative,
-    image: {
-      mimeType: "image/png",
-      data: bytes.toString("base64"),
-      width: bytes.readUInt32BE(16),
-      height: bytes.readUInt32BE(20),
-    },
+    image: { mimeType: "image/png", data: shown.toString("base64"), width, height },
   };
 };
 
