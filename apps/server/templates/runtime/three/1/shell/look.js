@@ -73,12 +73,13 @@ const PRESETS = {
     toneMapping: "neutral",
     exposure: 1,
     ambient: 1,
-    sky: { top: 0x5b8fd8, horizon: 0xd0e0ee, ground: 0x3a3936 },
+    // A clear day reads deep and crisp: a saturated sky, a thin bluish haze, a little contrast.
+    sky: { top: 0x3f7fd6, horizon: 0xc2d8ee, ground: 0x3a3936 },
     sun: { direction: { x: -0.45, y: 0.8, z: 0.4 }, color: 0xfff2de, intensity: 2.6 },
-    fog: { density: 0.004, height: 0.06 },
+    fog: { density: 0.0022, height: 0.06 },
     ao: false,
     bloom: false,
-    grade: { saturation: 1.06, contrast: 1.04, warmth: 0.01, vignette: 0.25 },
+    grade: { saturation: 1.1, contrast: 1.07, warmth: 0.01, vignette: 0.2 },
   },
   golden: {
     toneMapping: "aces",
@@ -503,8 +504,9 @@ void main() {
     if ( c <= 0.0 ) continue;
     // Light: how much cloud lies between here and the sun.
     float toward = 0.0;
-    for ( int j = 1; j <= 3; j ++ ) toward += cloud( p + sunDir * 0.12 * float( j ), 2 );
-    float sunlight = exp( - toward * 1.1 ) * ( 1.0 - exp( - c * 2.0 ) * 0.4 );
+    // Read from the cloud's broad shape only (one octave), so its shade is smooth, never grainy.
+    for ( int j = 1; j <= 3; j ++ ) toward += cloud( p + sunDir * 0.18 * float( j ), 1 );
+    float sunlight = exp( - toward * 0.7 ) * ( 1.0 - exp( - c * 2.0 ) * 0.3 );
     float h = clamp( ( p.y - 1.0 ) / 1.4, 0.0, 1.0 );
     vec3 here = mix( shade, shade * 1.25, h ) + lit * mix( vec3( 1.0 ), sunColor, 0.5 ) * sunlight;
     float a = 1.0 - exp( - c * dt * 14.0 );
@@ -553,9 +555,10 @@ async function skyProbes(renderer, look, sunDir, quality) {
     sky.scale.setScalar(150);
     const tune = look.sky.physical === true ? {} : look.sky.physical;
     const u = sky.material.uniforms;
-    u.turbidity.value = tune.turbidity ?? 2;
-    u.rayleigh.value = tune.rayleigh ?? 1.2;
-    u.mieCoefficient.value = tune.mie ?? 0.005;
+    // A clear day: deep blue overhead, a thin haze at the horizon.
+    u.turbidity.value = tune.turbidity ?? 2.2;
+    u.rayleigh.value = tune.rayleigh ?? 2.6;
+    u.mieCoefficient.value = tune.mie ?? 0.003;
     u.mieDirectionalG.value = 0.8;
     u.sunPosition.value.copy(sunDir);
     // Below the horizon the gradient's hazy ground stays (the Sky alone goes black there), and
@@ -585,7 +588,7 @@ async function skyProbes(renderer, look, sunDir, quality) {
         uniforms: {
           sunDir: { value: sunDir.clone() },
           sunColor: { value: new THREE.Color(look.sun.color) },
-          shade: { value: new THREE.Color(c.shade ?? 0x8f9aab) },
+          shade: { value: new THREE.Color(c.shade ?? 0xa4b0c2) },
           lit: { value: new THREE.Color(c.lit ?? 0xffffff).multiplyScalar(1.25) },
           cover: { value: c.cover ?? 0.4 },
           scale: { value: c.scale ?? 1 },

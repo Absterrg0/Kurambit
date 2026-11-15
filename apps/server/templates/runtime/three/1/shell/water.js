@@ -3,14 +3,16 @@
 // Water (three/addons/objects/Water.js) with foam and wakes added, lit by the look's sun.
 //
 //   import { ocean } from "./shell/water.js";
-//   const sea = ocean(ctx, { colour: "#1f8f9a" });  // a sea to the horizon at y 0
+//   const sea = ocean(ctx, { colour: "#1fa3a8", deep: "#0a3f6e" }); // a sea to the horizon at
+//     // y 0: colour looking down into it, deep toward the horizon
 //   sea.wake(boat, { width: 3 });                   // foam behind it as it moves; stern:
 //                                                   // how far behind its centre it starts (m)
 //   const lake = ocean(ctx, { size: 200, colour: "#2a4a3a", waves: 0.4, foam: 0 });
 //   // options: size (m across), colour, waves (how rough, 1), wave (the swell's length, 1:
 //   // bigger is longer), foam (crests, 0..1, 0.35), glitter (the sun on it, 1), clear (how much
 //   // of its own colour shows under the reflection, 0..1, 0.6: a tropical shallow high, a dark
-//   // lake low), at (y)
+//   // lake low), mirror (how much it reflects looking straight down, 0.04; 0.3 a glassy pond),
+//   // at (y)
 //   boat.position.y = sea.height(boat.position.x, boat.position.z); // ride the swell
 //   sea.mesh;                                       // the Mesh, in ctx.scene
 //
@@ -146,6 +148,7 @@ uniform float wakeLinks[${MAX_WAKE_POINTS}];
 uniform float crestFoam;
 uniform float glitter;
 uniform float body;
+uniform vec3 deepColour;
 float foamHash( vec2 p ) { return fract( sin( dot( p, vec2( 41.3, 289.1 ) ) ) * 43758.5453 ); }
 float foamNoise( vec2 p ) {
   vec2 i = floor( p ), f = fract( p );
@@ -193,13 +196,24 @@ const SWELL_VERTEX = /* glsl */ `
   vec4 mvPosition = viewMatrix * lookWorld;
   gl_Position = projectionMatrix * mvPosition;`;
 const FOAM_MIX = /* glsl */ `
-  // The water's own colour under the mirror: a shallow tropical sea reads by it, a mirror never.
-  albedo = mix( albedo, waterColor * ( 0.45 + diffuseLight * 0.5 ) * getShadowMask() + specularLight * 0.5, body * ( 0.4 + 0.6 * ( 1.0 - reflectance ) ) );
+  // The water's own colour under the mirror: turquoise looking down into it, deep blue toward the
+  // horizon where the eye runs through more water, as a tropical sea reads; a mirror never.
+  float looking = clamp( eyeDirection.y, 0.0, 1.0 );
+  float away = smoothstep( 40.0, 700.0, distance );
+  vec3 waterBody = mix( deepColour, waterColor, smoothstep( 0.05, 0.6, looking ) * ( 1.0 - away * 0.7 ) );
+  albedo = mix( albedo, waterBody * ( 0.5 + diffuseLight * 0.45 ) * getShadowMask() + specularLight * 0.5, body * ( 0.45 + 0.55 * ( 1.0 - reflectance ) ) );
+  // Sun glitter: a finer ripple than the swell catches the sun in pinpoints.
+  vec3 fine = normalize( texture2D( normalSampler, worldPosition.xz * size * 0.031 + vec2( time * 0.11, - time * 0.07 ) ).xzy * 2.0 - 1.0 + surfaceNormal );
+  float glint = pow( max( dot( reflect( - sunDirection, fine ), eyeDirection ), 0.0 ), 900.0 );
+  albedo += sunColor * glint * 6.0 * glitter * getShadowMask();
   // Whitecaps where the surface tilts most, scattered by a slow field so they come and go in
   // patches; the wake is laced by the same small waves.
   float lookFoam = crestFoam * smoothstep( 0.3, 0.55, length( surfaceNormal.xz ) )
     * smoothstep( 0.45, 0.8, foamNoise( worldPosition.xz * 0.05 + time * 0.02 ) );
+  // Lace: foam breaks into a fine net at a smaller scale, as real foam tears.
+  lookFoam *= 0.45 + 0.55 * smoothstep( 0.2, 0.75, foamNoise( worldPosition.xz * 2.3 ) * 0.6 + foamNoise( worldPosition.xz * 7.1 ) * 0.4 );
   float lookWake = wakeFoam( worldPosition.xz );
+  lookWake *= 0.6 + 0.4 * smoothstep( 0.15, 0.7, foamNoise( worldPosition.xz * 3.7 ) );
   lookWake *= 0.55 + 0.45 * smoothstep( 0.05, 0.25, length( surfaceNormal.xz ) );
   lookFoam = max( lookFoam, lookWake );
   // Foam is the brightest thing on the water: white, lit, a little blue in its shade.
@@ -213,12 +227,14 @@ export function ocean(
   ctx,
   {
     size = 4000,
-    colour = "#1f8f9a",
+    colour = "#1fa3a8",
+    deep = "#0a3f6e",
     waves = 1,
     wave = 1,
     foam = 0.35,
     glitter = 1,
     clear = 0.6,
+    mirror = 0.04,
     at = 0,
   } = {},
 ) {
@@ -245,11 +261,24 @@ export function ocean(
   material.uniforms.crestFoam = { value: foam };
   material.uniforms.glitter = { value: glitter };
   material.uniforms.body = { value: clear };
+  material.uniforms.deepColour = { value: new THREE.Color(deep) };
   const scale = { length: Math.max(wave, 0.05), height: waves };
   const swell = swellGlsl(scale);
   material.uniforms.swellTime = { value: 0 };
+  // Water reflects about 2% looking straight down; three's example uses 30%, which turns any sea
+  // into a mirror of the sky. `mirror` sets it.
+  material.uniforms.rf0 = { value: mirror };
   material.fragmentShader = material.fragmentShader
-    .replace("void main() {", `${FOAM_PARS.replace("SWELL_FUNCTION", swell)}\nvoid main() {`)
+    .replace("float rf0 = 0.3;", "")
+    // A rough sea's facets tilt every way, so even at a low angle part of it shows its own colour.
+    .replace(
+      "float reflectance = rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 );",
+      "float reflectance = ( rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 ) ) * ( 1.0 - 0.35 * clamp( length( surfaceNormal.xz ) * 3.0 + 0.6, 0.0, 1.0 ) );",
+    )
+    .replace(
+      "void main() {",
+      `uniform float rf0;\n${FOAM_PARS.replace("SWELL_FUNCTION", swell)}\nvoid main() {`,
+    )
     .replace("vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );", SWELL_NORMAL)
     .replace("vec3 outgoingLight = albedo;", FOAM_MIX);
   material.vertexShader = material.vertexShader
@@ -270,7 +299,7 @@ export function ocean(
   const wakes = [];
   let clock = 0;
   let last = performance.now();
-  const mirror = water.onBeforeRender;
+  const reflect = water.onBeforeRender;
   water.onBeforeRender = (renderer, scene, camera, ...rest) => {
     const now = performance.now();
     // Real time between drawn frames: a paused game draws none, so its sea holds still.
@@ -314,7 +343,7 @@ export function ocean(
       }
     }
     for (let i = n; i < MAX_WAKE_POINTS; i += 1) links[i] = 0;
-    mirror(renderer, scene, camera, ...rest);
+    reflect(renderer, scene, camera, ...rest);
   };
   const stern = new THREE.Vector3();
   const ahead = new THREE.Vector3();
