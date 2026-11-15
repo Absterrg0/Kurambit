@@ -1,6 +1,8 @@
-// The demo shell around the game: title, pause, settings, end and credits
-// screens, the render loop and the studio bridge. The game plugs in at its
-// main.js (the import map's "#main") and never builds these screens itself:
+// The bridge that runs a game's main.js (the import map's "#main"): the render loop, the run's
+// fixed steps, its input and the studio bridge for the Stage, Tune, Controls, the checks and
+// replays. A page without the old demo shell's screens (TEMPLATE.md's contract) gets nothing a
+// player sees from here; a page that carries them (index.html's section.screen elements) also
+// gets their title, pause, settings, end and credits screens and the default look. main.js:
 //
 //   export function start(ctx) {}   // build the run into ctx.scene; set ctx.camera, ctx.player
 //   export function update(dt, ctx) {} // every frame while playing (and the slow end beat)
@@ -46,10 +48,11 @@
 // the next one. The shell refits ctx.camera, perspective or orthographic, on
 // resize.
 //
-// A run ends with GameState.win(text, stats) or GameState.lose(text, stats).
-// The shell owns the loop: gameplay stops while paused or ended, the menus keep
-// working, and Retry builds the run fresh. Pause is Esc or P (gamepad Start).
-// Restyle the screens in index.html and style.css.
+// A run ends with GameState.win(text, stats) or GameState.lose(text, stats). On the demo
+// shell's screens gameplay stops while paused or ended, Retry builds the run fresh, and Esc or P
+// pauses; a game with its own screens moves the run with GameState.title/play/menu/pause/resume
+// (shell/run-state.js), and its update keeps running past its end. ctx.hud and ctx.ui (the HUD
+// kit) exist only on the demo shell's screens.
 import * as THREE from "../vendor/three.module.js";
 import { errors as studioErrors, installStudio } from "./studio.js";
 import { createQa } from "./qa.js";
@@ -1317,6 +1320,7 @@ const studio = installStudio({
     eachThing: (fn) => bridge.eachThing(fn),
     hudRoots: () => (shellScreens ? [hud, hudKit] : [document.body]),
     listed: (action) => shellScreens || controls.ownedByGame(action.name),
+    openTitle: shellScreens ? null : () => startRun({ title: true }),
     errors: studioErrors,
   }),
 });

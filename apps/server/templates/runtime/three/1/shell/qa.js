@@ -66,8 +66,9 @@ const angle = (a, b) => {
 /**
  * `current()` is the run (or null), `restart()` starts a fresh one as Retry does,
  * `canLose(on)` lets a loss end the run, `eachThing(fn)` walks the Stage's things and
- * `hudRoots()` are the HUD's elements, and `listed(action)` whether an action is the game's
- * own (a default a game with its own screens never reads is not).
+ * `hudRoots()` are the HUD's elements, `listed(action)` whether an action is the game's own (a
+ * default a game with its own screens never reads is not), and `openTitle()`, for a game with its
+ * own title, starts a run that may open on it.
  */
 export function createQa({
   controls,
@@ -78,6 +79,7 @@ export function createQa({
   hudRoots,
   errors,
   listed = () => true,
+  openTitle = null,
 }) {
   // Juice effects asked for, counted by wrapping its methods once the QA play first runs.
   let juice = 0;
@@ -189,10 +191,23 @@ export function createQa({
     return [];
   };
 
+  // A game drawing its own title may read a key there only (the one that leaves it): pressed in
+  // play it answers nothing, which is no dead control. A title run's reads name those keys.
+  const titleKeys = async () => {
+    if (openTitle === null) return new Set();
+    openTitle();
+    const started = performance.now();
+    while (current()?.compiling === true && performance.now() - started < START_MS) await wait(50);
+    await span(SETTLE_MS, HOLD_FRAMES);
+    const run = current();
+    return run !== null && GameState.state === "title" ? new Set(run.input.reads) : new Set();
+  };
+
   // Errors thrown while a control was pressed, each named by the control.
   const thrown = [];
   const everyControl = async () => {
     const out = [];
+    const onTitle = await titleKeys();
     let run = null;
     let onRun = 0;
     for (const action of controls.actions.values()) {
@@ -209,6 +224,7 @@ export function createQa({
       const found = await probe(run, action.name);
       for (const error of errors.slice(errorsFrom))
         if (thrown.length < 10) thrown.push(`${action.label}: ${error.message}`.slice(0, 240));
+      if (found.length === 0 && onTitle.has(action.name)) continue;
       out.push({
         name: action.name,
         label: action.label,
