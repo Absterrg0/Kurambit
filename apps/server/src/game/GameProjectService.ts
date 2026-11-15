@@ -6,6 +6,7 @@ import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Struct from "effect/Struct";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -732,7 +733,14 @@ const make = Effect.gen(function* () {
         yield* writeFileStringAtomically({
           filePath: file,
           // @effect-diagnostics-next-line preferSchemaOverJson:off -- game.json keeps the indented form people read and diff.
-          contents: `${JSON.stringify({ ...raw, characters: route, library }, null, 2)}\n`,
+          // The code route is no key (see scaffold.ts): older installs still open the game.
+          contents: `${JSON.stringify(
+            route === "code"
+              ? { ...Struct.omit(raw, ["characters"]), library }
+              : { ...raw, characters: route, library },
+            null,
+            2,
+          )}\n`,
           followLink: false,
         }).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),

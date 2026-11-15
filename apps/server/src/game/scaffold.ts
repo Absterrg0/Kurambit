@@ -61,8 +61,12 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
     // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
     godotProject: engineProfile(engine).projectDirectory,
     assets: [],
-    // Both written, always: a game.json with no library key is one made before it was opt-in.
-    characters: input.characters ?? GAME_STYLE_DEFAULT_CHARACTERS,
+    // The code route is written as no route at all, which reads as code here and which an older
+    // installed Kurambit (it knows library, blender and generated) still opens. The library key is
+    // always written: without it a game reads as one made before the library was opt-in.
+    ...((input.characters ?? GAME_STYLE_DEFAULT_CHARACTERS) === "code"
+      ? {}
+      : { characters: input.characters }),
     library: input.library ?? GAME_STYLE_DEFAULT_LIBRARY,
   };
 }
