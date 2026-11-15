@@ -258,7 +258,9 @@ export function ocean(
     );
   water.rotation.x = -Math.PI / 2;
   water.position.y = at;
-  water.receiveShadow = true;
+  // Water shows the sky more than it shows shade: a long low-sun shadow on it reads as a dark
+  // slab, and the sun's shadow box edge as a seam on the sea.
+  water.receiveShadow = false;
   water.name = "Water";
   ctx.scene.add(water);
 
