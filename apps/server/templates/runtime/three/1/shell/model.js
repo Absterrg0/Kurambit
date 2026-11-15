@@ -354,9 +354,18 @@ function planOf(pts) {
   };
   // Each point moves along the bisector of its two edges, lengthened so both edges move the
   // full distance (a mitre), but never more than three times it at a needle-sharp point.
+  // A cut plan holds runs of points clamped onto one spot: each point's edges run to its nearest
+  // distinct neighbours, or a zero-length edge would throw it out by the mitre's limit.
+  const distinct = (i, step) => {
+    for (let k = 1; k < count; k += 1) {
+      const q = pts[(i + step * k + count * k) % count];
+      if (Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]) > 1e-6) return q;
+    }
+    return pts[i];
+  };
   const normals = pts.map((p, i) => {
-    const e0 = edgeNormal(pts[(i - 1 + count) % count], p);
-    const e1 = edgeNormal(p, pts[(i + 1) % count]);
+    const e0 = edgeNormal(distinct(i, -1), p);
+    const e1 = edgeNormal(p, distinct(i, 1));
     let nx = e0[0] + e1[0],
       nz = e0[1] + e1[1];
     const l = Math.hypot(nx, nz) || 1;
