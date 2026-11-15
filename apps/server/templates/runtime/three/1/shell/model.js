@@ -20,9 +20,21 @@
 //   boat.add(M.part(M.tube([[0, 1, 0], [1, 2, 0], [2, 1.5, 1]], 0.04), paint.trim)); // ropes, pipes
 //   boat.add(M.part(M.rail([[-3, 1.2, 1], [2, 1.2, 1], [3, 1.2, 0]], { height: 1 }), paint.trim));
 //     // a railing along a deck's edge: posts and bars in one geometry
-//   const hull = M.loft([[-3, 0.3, 0.2], [0, 1.1, 0.6], [3, 0.6, 0.15]], { width: 1 });
-//     // a hull or body from cross-sections along x: [x, half-width, height, bottom y]; { keel: 1 }
-//     // draws its underside to a V
+//
+// Curve-led: draw the silhouette once as curves (side profile, then plan), and build every part
+// from them, so the lines stay fair and the parts agree:
+//   const sheer = M.curve([[-20, 3.4], [8, 3.9], [21, 5.6]]); // a smooth y over x: sheer(12)
+//   const keel = M.curve([[-20, 1], [-15, 0], [12, 0.6], [21, 5.5]]); // meets the sheer: a raked stem
+//   const half = M.curve([[-20, 3.6], [4, 4.1], [18, 1.8], [21, 0]]);
+//   const hull = M.loft({ from: -20, to: 21, half, top: sheer, bottom: keel }, { flat: 0.9, keel: 0.7 });
+//     // a body along x from three curves (or sections [[x, half, height, bottom]...]); keel: V underside
+//   const deck = M.mirrored([[-19, 3.4], [6, 3.8], [15, 2.4], [20, 0.3]]); // a plan from one side
+//   const house = deck.inset(0.8).cut(-15, 8);         // a closed plan [x, z]: M.outline(points)
+//   const top = house.inset(0.2).cut(-15, 6.5);        // the same plan, smaller: the front steps back
+//   M.wall(house, 4, top, 6.6);                        // the sides between two plans: curve and taper
+//   M.wall(M.blend(house, top, 0.3), 4.8, M.blend(house, top, 0.75), 6); // a band that follows them
+//   house.inset(-0.5).slab(6.6, 6.85, { bevel: 0.05 }); // an overhanging roof; plan.band(y0, y1) a strip
+//   M.rail(house.inset(-0.35).edge(6.85));             // a rail tracing that roof's edge
 //   const merged = M.merge(boat); // one mesh per material: build in parts, draw in few
 //   M.stats(merged);              // { triangles, drawCalls, size: [x, y, z] in metres }
 //   const forest = M.scatter(M.merge(tree), 400, (i, rand) => ({
@@ -204,13 +216,264 @@ export function tube(points, radius, { closed = false, segments = 0, sides = 8 }
   return new THREE.TubeGeometry(curve, segments || points.length * 8, radius, sides, closed);
 }
 
+// ── Curves: draw a line once, build from it ───────────────────────────
+// A silhouette is a few curves: a side profile (sheer, keel, roof line) and a plan. Each is drawn
+// once from a handful of points and then reused for every part that follows it, so lines stay
+// fair and the parts agree.
+
+/**
+ * A smooth curve through [x, y] points, read as y at any x (monotone cubic: no overshoot between
+ * points, flat beyond the ends). `sheer(12)` is the curve's height at x 12.
+ */
+export function curve(points) {
+  const p = [...points].sort((a, b) => a[0] - b[0]);
+  const n = p.length;
+  if (n === 1) return () => p[0][1];
+  const d = [];
+  const m = new Array(n).fill(0);
+  for (let i = 0; i < n - 1; i += 1)
+    d.push((p[i + 1][1] - p[i][1]) / (p[i + 1][0] - p[i][0] || 1e-9));
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i += 1) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  // Fritsch-Carlson: tangents limited so the curve never swings past its points.
+  for (let i = 0; i < n - 1; i += 1) {
+    if (d[i] === 0) {
+      m[i] = m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i],
+      b = m[i + 1] / d[i];
+    const h = Math.hypot(a, b);
+    if (h > 3) {
+      m[i] = (3 * a * d[i]) / h;
+      m[i + 1] = (3 * b * d[i]) / h;
+    }
+  }
+  return (x) => {
+    if (x <= p[0][0]) return p[0][1];
+    if (x >= p[n - 1][0]) return p[n - 1][1];
+    let i = 0;
+    while (x > p[i + 1][0]) i += 1;
+    const span = p[i + 1][0] - p[i][0];
+    const t = (x - p[i][0]) / span;
+    const t2 = t * t,
+      t3 = t2 * t;
+    return (
+      (2 * t3 - 3 * t2 + 1) * p[i][1] +
+      (t3 - 2 * t2 + t) * span * m[i] +
+      (-2 * t3 + 3 * t2) * p[i + 1][1] +
+      (t3 - t2) * span * m[i + 1]
+    );
+  };
+}
+
+const PLAN_POINTS = 96;
+
+/** Points round a closed loop, resampled to `count` evenly spaced along its length. */
+const resample = (loop, count) => {
+  const lengths = [0];
+  for (let i = 1; i <= loop.length; i += 1) {
+    const a = loop[i - 1],
+      b = loop[i % loop.length];
+    lengths.push(lengths[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+  }
+  const total = lengths.at(-1);
+  const out = [];
+  let j = 0;
+  for (let k = 0; k < count; k += 1) {
+    const at = (k / count) * total;
+    while (lengths[j + 1] < at) j += 1;
+    const a = loop[j],
+      b = loop[(j + 1) % loop.length];
+    const t = (at - lengths[j]) / (lengths[j + 1] - lengths[j] || 1);
+    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+  }
+  return out;
+};
+
+/**
+ * A closed plan in the ground plane: [x, z] points round it (smoothed through them unless
+ * `sharp`), resampled evenly. Every plan built from it (inset, blend) keeps the same number of
+ * points, so any two can be joined by a wall.
+ *   plan.inset(0.8)          the outline 0.8 m inside (negative: outside)
+ *   plan.cut(x0, x1)          only the part between x0 and x1 (a deck that stops short)
+ *   plan.slab(y0, y1, { bevel })   a flat solid on it: a deck, a roof, a floor
+ *   plan.band(y0, y1, { out })     a strip round its edge: window bands, a rubbing strake, a sign
+ *   plan.edge(y)              its edge at height y as [x, y, z] points: rail(plan.edge(y)) traces it
+ */
+export function outline(points, { sharp = false, count = PLAN_POINTS } = {}) {
+  let loop = points;
+  if (!sharp) {
+    const curve = new THREE.CatmullRomCurve3(
+      points.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+      true,
+      "centripetal",
+    );
+    loop = curve
+      .getPoints(count * 2)
+      .slice(0, -1)
+      .map((v) => [v.x, v.z]);
+  }
+  return planOf(resample(loop, count));
+}
+
+/**
+ * A plan symmetric about the x axis from one side's [x, half-width] points, stern to bow (or back
+ * to front): hulls, fuselages, decks, cars seen from above. A half-width of 0 is a point (a bow).
+ */
+export function mirrored(side, { count = PLAN_POINTS } = {}) {
+  // Each side is the curve through its points (no bulge past them), sampled closer toward the
+  // ends where the line turns fastest; the back is closed straight across, like a transom.
+  const half = curve(side);
+  const xs = side.map(([x]) => x);
+  const from = Math.min(...xs),
+    to = Math.max(...xs);
+  const steps = Math.max(8, Math.floor(count / 2));
+  const right = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const x = from + ((to - from) * (1 - Math.cos((i / steps) * Math.PI))) / 2;
+    right.push([x, Math.max(half(x), 0)]);
+  }
+  const left = right
+    .slice()
+    .reverse()
+    .filter(([, w]) => w > 1e-4)
+    .map(([x, w]) => [x, -w]);
+  return outline([...right, ...left], { sharp: true, count });
+}
+
+function planOf(pts) {
+  const count = pts.length;
+  // Outward normals of a counter-clockwise or clockwise loop alike: the sign of its area says.
+  let area = 0;
+  for (let i = 0; i < count; i += 1) {
+    const a = pts[i],
+      b = pts[(i + 1) % count];
+    area += a[0] * b[1] - b[0] * a[1];
+  }
+  const turn = area > 0 ? 1 : -1;
+  const edgeNormal = (a, b) => {
+    const tx = b[0] - a[0],
+      tz = b[1] - a[1];
+    const l = Math.hypot(tx, tz) || 1;
+    return [(turn * tz) / l, (-turn * tx) / l];
+  };
+  // Each point moves along the bisector of its two edges, lengthened so both edges move the
+  // full distance (a mitre), but never more than three times it at a needle-sharp point.
+  const normals = pts.map((p, i) => {
+    const e0 = edgeNormal(pts[(i - 1 + count) % count], p);
+    const e1 = edgeNormal(p, pts[(i + 1) % count]);
+    let nx = e0[0] + e1[0],
+      nz = e0[1] + e1[1];
+    const l = Math.hypot(nx, nz) || 1;
+    nx /= l;
+    nz /= l;
+    const scale = 1 / Math.max(nx * e0[0] + nz * e0[1], 1 / 3);
+    return [nx * scale, nz * scale];
+  });
+  const plan = {
+    points: pts,
+    inset: (d) => planOf(pts.map((p, i) => [p[0] - normals[i][0] * d, p[1] - normals[i][1] * d])),
+    shift: (dx, dz = 0) => planOf(pts.map(([x, z]) => [x + dx, z + dz])),
+    scale: (sx, sz = sx) => planOf(pts.map(([x, z]) => [x * sx, z * sz])),
+    cut(x0, x1) {
+      // Clamped onto the cut's ends, so the point count and order stay.
+      return planOf(pts.map(([x, z]) => [Math.min(Math.max(x, x0), x1), z]));
+    },
+    edge: (y) => [...pts, pts[0]].map(([x, z]) => [x, y, z]),
+    slab(y0, y1, { bevel = 0 } = {}) {
+      const shape = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+      const depth = Math.max(y1 - y0 - bevel * 2, 0.001);
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth,
+        bevelEnabled: bevel > 0,
+        bevelThickness: bevel,
+        bevelSize: bevel,
+        bevelSegments: bevel > 0 ? 2 : 0,
+        curveSegments: 1,
+      });
+      geometry.rotateX(-Math.PI / 2);
+      geometry.translate(0, y0 + bevel, 0);
+      return geometry;
+    },
+    band(y0, y1, { out = 0.02 } = {}) {
+      const edge = plan.inset(-out);
+      return wall(edge, y0, edge, y1);
+    },
+  };
+  return plan;
+}
+
+/** The plan `t` of the way from `a` to `b` (0 is a, 1 is b): a wall's outline at a height. */
+export function blend(a, b, t) {
+  return planOf(
+    a.points.map(([x, z], i) => [x + (b.points[i][0] - x) * t, z + (b.points[i][1] - z) * t]),
+  );
+}
+
+/**
+ * The side of a solid from plan `lower` at y0 to plan `upper` at y1: a deckhouse whose front
+ * curves and tapers, a tower that leans, a hull's flare. Cap it with each plan's slab.
+ */
+export function wall(lower, y0, upper, y1) {
+  const a = lower.points,
+    b = upper.points;
+  const count = a.length;
+  const positions = [];
+  const uvs = [];
+  let run = 0;
+  for (let i = 0; i <= count; i += 1) {
+    const p = a[i % count],
+      q = b[i % count];
+    if (i > 0) run += Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]);
+    positions.push(p[0], y0, p[1], q[0], y1, q[1]);
+    uvs.push(run, 0, run, 1);
+  }
+  const index = [];
+  for (let i = 0; i < count; i += 1) {
+    const k = i * 2;
+    index.push(k, k + 2, k + 1, k + 1, k + 2, k + 3);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  // u runs in metres round the wall, so a texture repeats at its own scale: window bays.
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  // Faces outward whichever way the loop runs: its signed area says which way that is.
+  let area = 0;
+  for (let i = 0; i < count; i += 1) {
+    const p = a[i],
+      q = a[(i + 1) % count];
+    area += p[0] * q[1] - q[0] * p[1];
+  }
+  if (area > 0)
+    for (let i = 0; i < index.length; i += 3)
+      [index[i + 1], index[i + 2]] = [index[i + 2], index[i + 1]];
+  geometry.setIndex(index);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 /**
  * A body lofted through cross-sections along x: each [x, halfWidth, height] (optionally a 4th,
  * the section's bottom y, default 0), each an ellipse-ish rounded section of `sides` points
  * (`flat` 0..1 squares it off, `keel` 0..1 draws its lower half to a V), capped at both ends.
  * Hulls, fuselages, bodies, fish.
  */
-export function loft(sections, { sides = 12, flat = 0.4, keel = 0 } = {}) {
+export function loft(sections, { sides = 12, flat = 0.4, keel = 0, steps = 40 } = {}) {
+  // The curve form: { from, to, half(x), top(x), bottom(x) } (functions, curve() for one).
+  if (!Array.isArray(sections)) {
+    const { from, to, half, top, bottom = () => 0 } = sections;
+    const list = [];
+    for (let i = 0; i <= steps; i += 1) {
+      // Closer together toward the ends, where a bow or a nose turns fastest.
+      const t = (1 - Math.cos((i / steps) * Math.PI)) / 2;
+      const x = from + (to - from) * t;
+      const b = bottom(x);
+      list.push([x, Math.max(half(x), 0.001), Math.max(top(x) - b, 0.001), b]);
+    }
+    sections = list;
+  }
   const ring = [];
   for (let i = 0; i < sides; i += 1) {
     const a = (i / sides) * Math.PI * 2;
