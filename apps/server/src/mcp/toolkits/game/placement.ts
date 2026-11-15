@@ -39,19 +39,14 @@ export const GAME_TOOL_PLACEMENTS = {
   ),
   game_preview: chat(["play"], "when the person asks for a playable URL or player of the sources"),
   game_stop: chat(["play"], "when the person asks to stop the game's processes"),
-  game_package_web: chat(["packageWeb"], "when the person asks for a downloadable Web ZIP"),
-  game_package_windows: chat(
-    ["packageWindows"],
-    "when the person asks for a downloadable Windows ZIP",
+  game_package: chat(["play"], "when the person asks for a downloadable Web or Windows ZIP"),
+  game_saved: chat(
+    [],
+    "when the person asks to keep a video or image Kurambit made, what is saved, or to delete one",
   ),
-  game_media_save: chat([], "when the person asks to keep a video or image Kurambit made"),
-  game_saved_list: chat([], "when the person asks what is saved"),
-  game_saved_delete: chat([], "when the person asks to delete a saved file"),
-  game_keep_going: chat(["turnLoop"], "when the person asks to turn Keep going on or off"),
-  game_keep_going_status: chat(["turnLoop"], "when the person asks what Keep going is doing"),
-  game_keep_going_steer: chat(
+  game_keep_going: chat(
     ["turnLoop"],
-    "when the person asks to give Keep going's next step their words",
+    "when the person asks to turn Keep going on or off, what it is doing, or to give its next step their words",
   ),
   game_explore_start: chat(
     ["play"],
@@ -64,7 +59,6 @@ export const GAME_TOOL_PLACEMENTS = {
     "when the person asks for a bot to play the game or to prove it can be won",
   ),
   game_bot_view: chat(["play"], "to look at a finished bot run"),
-  game_bot_report: chat(["play"], "to rebuild the player report across bot runs"),
   game_generate: chat(["play"]),
   game_generate_wait: chat(["play"]),
   // Listed: agents asked to change an image must find it by name (see game_generate).

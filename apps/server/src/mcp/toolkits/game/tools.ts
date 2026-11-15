@@ -68,16 +68,13 @@ import {
   GameKeepValuesResult,
   GameReplayResult,
   GameKeepGoingSteerInput,
-  GameKeepGoingSteerResult,
   GameBotRunInput,
   GameBotRunResult,
-  GameBotReportResult,
   GameBotViewInput,
   GameBotViewResult,
   GameMediaSaveFields,
   GameSavedDeleteFields,
   GameSavedListResult,
-  GameSavedMedia,
   GameWebPackage,
   GameWindowsPackage,
   OrchestratorMcpFailure,
@@ -423,7 +420,7 @@ const GameCheckToolResult = Schema.Struct({
   review: Schema.optionalKey(Schema.String),
 });
 export const GameCheckTool = Tool.make("game_check", {
-  description: `Look at this thread's game: a quick look by default, a full check with \`final: true\`. ${perEngine((t) => t.check)} A look opens the gameplay entry, plays a moment of random input and reports what the game did as errors and warnings with file:line, \`performance\` (the game must hold 60 fps on this machine's GPU; a warning names what to cut), and \`views\`, attached as images: play's frame, and when the game has a reference picture (STYLE.json's anchor or art/reference.png), play's frame above it at the same size, so you match its camera and composition like for like. Look as the player will: anything black, missing, broken, clashing, cluttered or unlike the brief or the reference is a bug to fix; say what you saw. Once the work is done, before you end the turn, run it with \`final: true\`: it also boots the entry the player opens and plays \`scene\`, the scene report (a line, with a frame that outlines it, for each thing a person would see is wrong: the player hidden, off screen or too small, an empty view, a character buried or inside a solid, bodies inside each other, something fallen out of the world, the camera inside a wall, sliding in idle), and \`qa\`, the QA play (every control in ACTIONS, Retry, the HUD at 16:9 and 4:3). Fix what \`scene\` and \`qa.problems\` list before you end the turn; files a clean final check already played answer with that check. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory).`,
+  description: `Look at this thread's game: a quick look by default, a full check with \`final: true\`. ${perEngine((t) => t.check)} A look opens the gameplay entry, plays a moment of random input and reports what the game did as errors and warnings with file:line, \`performance\` (the game must hold 60 fps on this machine's GPU; a warning names what to cut), and \`views\`, attached as images: play's frame, and when the game has a reference picture (STYLE.json's anchor or art/reference.png), play's frame above it at the same size, so you match its camera and composition like for like. Look at the frame as the player will and say what you saw. Once the work is done, before you end the turn, run it with \`final: true\`: it also boots the entry the player opens and plays \`scene\`, the scene report (a line with a frame for what may look wrong: the player hidden, off screen or too small, an empty view, bodies buried or inside each other, something fallen out of the world, the camera inside a wall, sliding in idle; fix what is not meant to be), and \`qa\`, the QA play (every control in ACTIONS, Retry, the HUD at 16:9 and 4:3), whose \`qa.problems\` are bugs to fix before you end the turn. Files a clean final check already played answer with that check. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory).`,
   parameters: Schema.Struct({
     final: Schema.optionalKey(Schema.Boolean),
     critique: Schema.optionalKey(
@@ -451,7 +448,7 @@ const GameModelSheetToolResult = Schema.Struct({
 });
 export const GameModelSheetTool = Tool.make("game_model_sheet", {
   description:
-    "Look at a model alone: each named thing (a ctx.thing name or an ASSETS key; up to 4, or omit for the first few characters, creatures and props) drawn by the running game in six views (side profile, low front three-quarter, front, back, plan from above, three-quarter from above), beside a grey 1.8 m figure on a metre grid (5 m past 20 m), in the pose it holds a moment into play, with its size in metres, triangles and draw calls. The sheets are attached as images. With a reference picture (`reference`, else STYLE.json's anchor, else art/reference.png: save a picture the person attaches there), each sheet draws the side profile and the picture's angle (`view`), larger, and the picture follows: say what still differs and fix that. Use it on every model you build or change before you build the game around it, and fix what reads wrong: proportions, scale against the figure, a side you never looked at, faces missing, parts floating or sunk, too many draw calls (merge it).",
+    "Look at a model alone: each named thing (a ctx.thing name or an ASSETS key; up to 4, or omit for the first few characters, creatures and props) drawn by the running game in six views (side profile, low front three-quarter, front, back, plan from above, three-quarter from above), beside a grey 1.8 m figure on a metre grid (5 m past 20 m), in the pose it holds a moment into play, with its size in metres, triangles and draw calls. The sheets are attached as images. With a reference picture (`reference`, else STYLE.json's anchor, else art/reference.png: save a picture the person attaches there), each sheet draws the side profile and the picture's angle (`view`), larger, and the picture follows: say what still differs and fix that. Use it to see a model you built or changed from every side before the game depends on it.",
   parameters: GameModelSheetInput,
   success: GameModelSheetToolResult,
   failure,
@@ -473,59 +470,26 @@ const ExportTool = Tool.make("game_export", {
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_export"));
-const PackageWindowsTool = Tool.make("game_package_windows", {
+const PackageTool = Tool.make("game_package", {
   description:
-    "Package the Windows release this game already exported as a downloadable ZIP, for an engine whose Windows release Kurambit packages (a game whose Windows release is a whole folder is refused: ship the folder). It never exports: if builds/windows/game.exe is missing, is not a checked x86_64 executable with the game's pack, or changes while packaging, it returns the exact reason and leaves existing release files and any earlier package untouched. The ZIP contains game.exe and, only for a non-embedded preset, game.pck, at the archive root so extraction is runnable. Returns the absolute archive path, byte count, SHA-256, per-file hashes and notes; the creator downloads it from Export… in the Stage's More menu. Packaging does not prove Windows booted.",
-  // No `parameters`: an explicit empty Schema.Struct({}) serializes to a root
-  // anyOf, which no MCP client accepts, and the whole server fails to register.
-  success: GameWindowsPackage,
+    "Package a release this game already has as a downloadable ZIP, for the target the person asks for. web: the exact Web build Play serves now, every served file at its relative path with index.html at the root, for an ordinary static host (serve it over HTTP: WebAssembly does not load from file://). windows: the exported builds/windows/game.exe (and game.pck for a non-embedded preset) at the root; a Windows release that is a whole folder is refused: ship the folder. It never exports or rebuilds: anything missing, changed or unchecked returns the exact reason and leaves earlier packages untouched. Returns the archive path, bytes, SHA-256 and per-file hashes; the person downloads it from Export… in the Stage's More menu.",
+  parameters: Schema.Struct({ target: Schema.Literals(["web", "windows"]) }),
+  success: Schema.Union([GameWebPackage, GameWindowsPackage]),
   failure,
   failureMode: "return",
   dependencies: on(GameExport.GameExport),
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_package_windows"));
-const PackageWebTool = Tool.make("game_package_web", {
+  .annotate(McpSchema.EnabledWhen, listedFor("game_package"));
+const SavedTool = Tool.make("game_saved", {
   description:
-    "Package the exact immutable Web build Play currently serves as a downloadable ZIP for an ordinary static game host. It never exports, never rebuilds and never packages a draft: if no build is selected, or the selected build is missing or its bytes changed, it returns the exact reason and leaves the selection, sources and any earlier package untouched. The ZIP contains every served build file at its relative path with index.html at the archive root. The archive is bound to the selected build id and its own SHA-256. Upload and serve the extracted files over HTTP; opening index.html through file:// is not a supported play path because WebAssembly needs HTTP. Returns the absolute archive path, byte count, SHA-256, per-file hashes, entry and notes; the creator downloads it from Export… in the Stage's More menu. An engine with no Web build is refused.",
-  // No `parameters` here either; see game_package_windows.
-  success: GameWebPackage,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameExport.GameExport),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_package_web"));
-const MediaSaveTool = Tool.make("game_media_save", {
-  description:
-    "Keep a video or image Kurambit generated when the creator wants it: a bot run's run.mp4 or frames, an explore session's screenshots, a sprite render. The storage cleanup deletes game logs after a while; this copies the file into the game's saved/ folder (ignored by git) under a readable dated name, and the original keeps working until the cleanup removes it. source is the game-relative or absolute path a game tool returned, inside builds/logs; label gives the words after the date (\"level 2 bot run\"). Nothing in saved/ is overwritten: a taken name gets a number.",
-  parameters: Schema.Struct(GameMediaSaveFields),
-  success: GameSavedMedia,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameSavedMediaService.GameSavedMediaService),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_media_save"));
-const SavedListTool = Tool.make("game_saved_list", {
-  description:
-    "The videos and images saved in this game's saved/ folder with game_media_save or the Save button, newest first, with absolute paths.",
+    "The videos and images kept in this game's saved/ folder (ignored by git), newest first with absolute paths. save keeps one Kurambit generated, when the person wants it: source is the game-relative or absolute path a game tool returned inside builds/logs (a bot run's run.mp4 or frames, explore screenshots, a sprite render), which the storage cleanup would delete after a while; label gives the words after the date (\"level 2 bot run\"); a taken name gets a number. delete removes one file directly in saved/ by the name the list gives, only when the person asks. Returns the list after.",
+  parameters: Schema.Struct({
+    save: Schema.optionalKey(Schema.Struct(GameMediaSaveFields)),
+    delete: Schema.optionalKey(GameSavedDeleteFields.name),
+  }),
   success: GameSavedListResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameSavedMediaService.GameSavedMediaService),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_saved_list"));
-const SavedDeleteTool = Tool.make("game_saved_delete", {
-  description:
-    "Delete one saved video or image from this game's saved/ folder when the creator asks, by the name game_saved_list gives. Only files directly in saved/ can be deleted.",
-  parameters: Schema.Struct(GameSavedDeleteFields),
-  success: Schema.Struct({}),
   failure,
   failureMode: "return",
   dependencies: on(GameSavedMediaService.GameSavedMediaService),
@@ -533,7 +497,7 @@ const SavedDeleteTool = Tool.make("game_saved_delete", {
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_saved_delete"));
+  .annotate(McpSchema.EnabledWhen, listedFor("game_saved"));
 const PreviewTool = Tool.make("game_preview", {
   description:
     "A playable build of this thread's current sources. For a three.js game the folder is served live: it returns the loopback URL of web/ itself, which reloads on the person's Stage as you save, with no export (game_export Web makes a release without changing what Play shows). For an engine with a Web build (Godot): when the selected build is missing, damaged or exported from other sources than the folder holds now, it exports Web again (the same export the Stage's Rebuild runs), then serves it from a managed loopback static server and returns the playable URL; a build of the current sources is served without another export. This is the actual game, not a screenshot. For an engine whose games play as a built player (Unity), it prepares that player of the current sources and returns its path; game_explore_start and game_bot_run play it. game_stop closes the server.",
@@ -607,17 +571,6 @@ const BotRunTool = Tool.make("game_bot_run", {
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_bot_run"));
-const BotReportTool = Tool.make("game_bot_report", {
-  description:
-    "Rebuild the facts-only player report across this game's recorded bot runs and save it to .studio/player-report.md: run endings, what was picked and how often, offered-but-never-picked and rarely-picked options, first-action times, death/stall position clusters, sampled areas, detector findings and explicit state writes. Code states facts and interprets nothing.",
-  success: GameBotReportResult,
-  failure,
-  failureMode: "return",
-  dependencies: on(GameBot.GameBot),
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_bot_report"));
 const BotViewTool = Tool.make("game_bot_view", {
   description:
     "Take a quick look at a finished bot run: goal status, measured tick rate and game/wall ratio, decisions, findings and server-owned paths to the trace, video and frames. Pass the runId from game_bot_run.",
@@ -715,50 +668,27 @@ const ReplayTool = Tool.make("game_replay", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_replay"));
 
 /** Keep going: the same service the composer control and the banner reach. */
-const keepGoingDependencies = [
-  GameRunControl.GameRunControl,
-  McpInvocationContext.McpInvocationContext,
-  ThreadManagementService.ThreadManagementService,
-];
 const KeepGoingTool = Tool.make("game_keep_going", {
   description:
-    "Turn Keep going on or off for this chat, only when the person asks. off stops it; a step's turn in flight ends and still becomes a build. guided proposes each next step in the composer and starts it after a minute unless the person changes it; autopilot takes each next step itself. Both undo a step that makes a measured fact worse (the person can redo it). Choosing a mode while it is paused resumes it, keeping the steps it set aside and the notes waiting for it. budgetMinutes (null for no limit; a new run's is 60) applies when it starts or resumes. Keep going runs only on games Kurambit plays after every turn (three.js); elsewhere, or while it is on in another chat of the game, it is refused with why. Returns what game_keep_going_status returns.",
+    "Keep going on this game, only when the person asks about it. With nothing else it returns what Keep going is doing: off, guided or autopilot, its phase, its last 10 steps with each verdict and reason, the notes and set-aside steps waiting, when its budget ends and why it last stopped. mode turns it off (a step's turn in flight ends and still becomes a build), guided (proposes each step, starting it after a minute unless the person changes it) or autopilot (takes each step itself); choosing a mode while it is paused resumes it; budgetMinutes (null for no limit; a new run's is 60) applies when it starts or resumes. steer gives its next step the person's words, one request per call, when they ask for that from another chat or after the step in flight. It runs only on games Kurambit plays after every turn (three.js); elsewhere, or while it is on in another chat of the game, it is refused with why. A message that starts \"Keep going · step N\" is a step: do that one change as it asks.",
   parameters: Schema.Struct({
-    mode: GameKeepGoingInput.fields.mode,
+    mode: Schema.optionalKey(GameKeepGoingInput.fields.mode),
     budgetMinutes: GameKeepGoingInput.fields.budgetMinutes,
+    steer: Schema.optionalKey(GameKeepGoingSteerInput.fields.text),
     commandId,
   }),
   success: GameKeepGoingStatus,
   failure,
   failureMode: "return",
-  dependencies: keepGoingDependencies,
+  dependencies: [
+    GameRunControl.GameRunControl,
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService.ThreadManagementService,
+  ],
 })
   .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_keep_going"));
-const KeepGoingStatusTool = Tool.make("game_keep_going_status", {
-  description:
-    "Keep going on this game: off, guided or autopilot; what it is doing now (waiting for a turn to end, reading the build's facts, a proposal and when it starts, a step's turn, measuring, undoing); its last 10 steps with each verdict, reason and fact changes; the person's notes waiting for the next step; the steps it set aside and why; when its budget ends; and why it last stopped and whether choosing a mode resumes it. A message in this chat that starts \"Keep going · step N\" is a step: do that one change as it asks, like any turn. The person's own messages always come first. Read-only.",
-  success: GameKeepGoingStatus,
-  failure,
-  failureMode: "return",
-  dependencies: keepGoingDependencies,
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_keep_going_status"));
-const KeepGoingSteerTool = Tool.make("game_keep_going_steer", {
-  description:
-    "Give Keep going the person's words for its next step, when they ask for that from another chat of the game, or want it taken up after the step in flight: the next step carries them as they said them, before anything keep going would choose. One request per call, in their words. Returns how many notes are waiting. In the chat keep going runs in, the person's own message goes first anyway.",
-  parameters: Schema.Struct({ text: GameKeepGoingSteerInput.fields.text, commandId }),
-  success: GameKeepGoingSteerResult,
-  failure,
-  failureMode: "return",
-  dependencies: keepGoingDependencies,
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_keep_going_steer"));
 
 const ModelsRouteTool = Tool.make("game_models_route", {
   description:
@@ -799,11 +729,8 @@ export const GameToolkit = Toolkit.make(
   UnityConsoleTool,
   ImportTool,
   ExportTool,
-  PackageWindowsTool,
-  PackageWebTool,
-  MediaSaveTool,
-  SavedListTool,
-  SavedDeleteTool,
+  PackageTool,
+  SavedTool,
   PreviewTool,
   StopTool,
   ExploreStartTool,
@@ -811,15 +738,12 @@ export const GameToolkit = Toolkit.make(
   ExploreCloseTool,
   BotRunTool,
   BotViewTool,
-  BotReportTool,
   BuildsTool,
   FactsTool,
   BuildRestoreTool,
   TuneTool,
   ReplayTool,
   KeepGoingTool,
-  KeepGoingStatusTool,
-  KeepGoingSteerTool,
 );
 
 /**

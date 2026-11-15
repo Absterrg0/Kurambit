@@ -22,7 +22,6 @@ import {
   isGameEngineActive,
   type GameBotMode,
   type GameBotPerf,
-  type GameBotReportResult,
   type GameBotRunInput,
   type GameBotRunResult,
   type GameBotViewInput,
@@ -135,8 +134,6 @@ export class GameBot extends Context.Service<
       threadId: ThreadId,
       input: GameBotViewInput,
     ) => Effect.Effect<GameBotViewResult, GameOperationError>;
-    /** Rebuild the facts-only player report across recorded runs. */
-    readonly report: (threadId: ThreadId) => Effect.Effect<GameBotReportResult, GameOperationError>;
     /**
      * The latest play-mode bot any thread ran on this game folder, from the
      * server's records (never the folder's own results file); null when none ran.
@@ -194,30 +191,6 @@ const readTrace = async (root: string, runId: string): Promise<RunTrace | null> 
   } catch {
     return null;
   }
-};
-
-/** The newest run traces under builds/logs (at most 20), found by stat before any is read. */
-const listRunTraces = async (
-  root: string,
-): Promise<Array<{ runId: string; trace: RunTrace; mtime: number }>> => {
-  const logs = NodePath.join(root, "builds/logs");
-  const entries = await NodeFSP.readdir(logs).catch(() => [] as string[]);
-  const stamped: Array<{ runId: string; mtime: number }> = [];
-  for (const entry of entries) {
-    if (!entry.startsWith("game-bot-")) continue;
-    const runId = entry.slice("game-bot-".length);
-    const stat = await NodeFSP.stat(traceFile(root, runId)).catch(() => null);
-    if (stat?.isFile() === true) stamped.push({ runId, mtime: stat.mtimeMs });
-  }
-  stamped.sort((a, b) => b.mtime - a.mtime);
-  const out: Array<{ runId: string; trace: RunTrace; mtime: number }> = [];
-  for (const { runId, mtime } of stamped) {
-    if (out.length >= 20) break;
-    const trace = await readTrace(root, runId);
-    // One bad trace never breaks the report; a bot that never ran is no run.
-    if (trace !== null && trace.played !== false) out.push({ runId, trace, mtime });
-  }
-  return out;
 };
 
 const fmtT = (t: number): string => `${t.toFixed(1)}s`;
@@ -1100,26 +1073,6 @@ const make = Effect.gen(function* () {
       } satisfies GameBotViewResult;
     });
 
-  const report = (root: string) =>
-    Effect.gen(function* () {
-      const traces = yield* Effect.promise(() => listRunTraces(root));
-      if (traces.length === 0)
-        return yield* opError(
-          "Bot report",
-          root,
-          "invalid-input",
-          "No bot run traces recorded for this game yet.",
-        );
-      const written = yield* writeReport(root, { picked: traces, unreadable: 0 });
-      if (written === null)
-        return yield* opError("Bot report", root, "io", "The player report could not be written.");
-      return {
-        path: written.rel,
-        runs: written.runs,
-        message: `Player report across ${written.runs.length} run(s): ${written.rel}.`,
-      } satisfies GameBotReportResult;
-    });
-
   const latestPlayBot: GameBot["Service"]["latestPlayBot"] = (root) =>
     Effect.promise(async () => {
       if (latestPlays.has(root)) return latestPlays.get(root) ?? null;
@@ -1139,7 +1092,6 @@ const make = Effect.gen(function* () {
       Effect.flatMap(projects.resolve(threadId), (root) => view(root, input)),
     stop: (root) => stopWhere((each) => each === root),
     stopOwned: (threadId) => stopWhere((_root, owner) => owner === threadId),
-    report: (threadId) => Effect.flatMap(projects.resolve(threadId), report),
   });
 });
 

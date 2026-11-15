@@ -156,18 +156,3 @@ export const GameBotViewResult = Schema.Struct({
   message: Schema.String,
 });
 export type GameBotViewResult = typeof GameBotViewResult.Type;
-
-/**
- * Facts-only player report across a game's bot runs, written by code (no
- * interpretation): where runs ended, what was picked and how often, which
- * offered options were never or rarely picked, first-action times, position
- * clusters, and detector findings. Saved as `.studio/player-report.md`.
- */
-export const GameBotReportResult = Schema.Struct({
-  /** Game-relative report path (`.studio/player-report.md`). */
-  path: Schema.String,
-  /** Run ids the report covers, oldest first. */
-  runs: Schema.Array(Schema.String),
-  message: Schema.String,
-});
-export type GameBotReportResult = typeof GameBotReportResult.Type;

@@ -163,25 +163,22 @@ const handlers = {
       exporter.export(threadId, input.target),
     ),
   ),
-  game_package_windows: McpToolAccess.actsAsCaller(() =>
-    withGame(GameExport.GameExport, (exporter, threadId) => exporter.packageWindows(threadId)),
-  ),
-  game_package_web: McpToolAccess.actsAsCaller(() =>
-    withGame(GameExport.GameExport, (exporter, threadId) => exporter.packageWeb(threadId)),
-  ),
-  game_media_save: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
-      saved.save(threadId, input.source, input.label),
+  game_package: McpToolAccess.actsAsCaller((input) =>
+    withGame(GameExport.GameExport, (exporter, threadId) =>
+      Effect.gen(function* () {
+        if (input.target === "web") return yield* exporter.packageWeb(threadId);
+        return yield* exporter.packageWindows(threadId);
+      }),
     ),
   ),
-  game_saved_list: McpToolAccess.readsAsCaller(() =>
+  game_saved: McpToolAccess.actsAsCaller((input) =>
     withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
-      saved.list(threadId),
-    ),
-  ),
-  game_saved_delete: McpToolAccess.actsAsCaller((input) =>
-    withGame(GameSavedMediaService.GameSavedMediaService, (saved, threadId) =>
-      saved.delete(threadId, input.name).pipe(Effect.as({})),
+      Effect.gen(function* () {
+        if (input.save !== undefined)
+          yield* saved.save(threadId, input.save.source, input.save.label);
+        if (input.delete !== undefined) yield* saved.delete(threadId, input.delete);
+        return yield* saved.list(threadId);
+      }),
     ),
   ),
   game_preview: McpToolAccess.actsAsCaller(() =>
@@ -204,9 +201,6 @@ const handlers = {
   ),
   game_bot_view: McpToolAccess.readsAsCaller((input) =>
     withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, input)),
-  ),
-  game_bot_report: McpToolAccess.actsAsCaller(() =>
-    withGame(GameBot.GameBot, (bots, threadId) => bots.report(threadId)),
   ),
   game_builds: McpToolAccess.readsAsCaller((input) =>
     withGame(GameBuilds.GameBuilds, (builds, threadId) =>
@@ -262,23 +256,20 @@ const handlers = {
   ),
   game_keep_going: McpToolAccess.actsAsCaller((input) =>
     withKeepGoing((runs, threadId) =>
-      runs.set(threadId, {
-        threadId,
-        mode: input.mode,
-        ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
-        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
-      }),
-    ),
-  ),
-  game_keep_going_status: McpToolAccess.readsAsCaller(() =>
-    withKeepGoing((runs, threadId) => runs.status(threadId)),
-  ),
-  game_keep_going_steer: McpToolAccess.actsAsCaller((input) =>
-    withKeepGoing((runs, threadId) =>
-      runs.steer(threadId, {
-        threadId,
-        text: input.text,
-        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+      Effect.gen(function* () {
+        if (input.steer !== undefined)
+          yield* runs.steer(threadId, {
+            threadId,
+            text: input.steer,
+            ...(input.commandId === undefined ? {} : { commandId: `${input.commandId}:steer` }),
+          });
+        if (input.mode === undefined) return yield* runs.status(threadId);
+        return yield* runs.set(threadId, {
+          threadId,
+          mode: input.mode,
+          ...(input.budgetMinutes === undefined ? {} : { budgetMinutes: input.budgetMinutes }),
+          ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+        });
       }),
     ),
   ),

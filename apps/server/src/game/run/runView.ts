@@ -1,5 +1,5 @@
 // PURE. How keep going reads to people and tools: the status the control,
-// the banner and game_keep_going_status share, the game card's line, and the
+// the banner and game_keep_going share, the game card's line, and the
 // one plain sentence for each way it stops.
 import {
   type GameKeepGoingBotSetup,
