@@ -273,6 +273,8 @@ export const GameRunStepResult = Schema.Union([
     /** The person steered this turn (steer_active into it). */
     personSteered: Schema.Boolean,
     reason: Schema.String,
+    /** What the step did, from its reply's first sentence; absent on records written before it. */
+    did: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
     kind: Schema.Literal("judge"),

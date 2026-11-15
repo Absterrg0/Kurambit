@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- A step's briefing reads the game's BRIEF.md from disk.
 // The work behind keep going's step effects, as GameRunJobs runs it: each job
 // reads its step from the run's records, does the step's I/O and reports
 // with game-run.step.complete under the step's attempt. A job that finds its
@@ -6,24 +7,28 @@
 //
 // - look: waits for the game to be idle (GameRunTurnReactor wakes it when a
 //   turn ends), then reads the folder's build and whether the folder still
-//   holds it, its facts (the ones the look before measured, when the build is
-//   the same), the chat's last `Next:` line and whether a play bot exists.
-//   A booting game with none gets one first, written once per run in a
-//   session of its own (botSetup.ts); the look waits for it.
-// - turn: posts the step's message in the chat as an ordinary queued turn;
-//   GameRunTurnReactor follows that turn to its build.
+//   holds it, the facts measured on it so far (never waited for: a step starts
+//   at once, and its judge measures the build it starts from), the chat's
+//   newest `Next:` line and whether a play bot exists. Once a step of the run
+//   has landed, a booting game with no play bot gets one, written once per run
+//   in a session of its own (botSetup.ts); its minutes are not the budget's.
+// - turn: posts the step's message in the chat as an ordinary queued turn in a
+//   fresh provider session (`freshContext`), the message carrying a compact
+//   briefing; GameRunTurnReactor follows that turn to its build.
 // - judge: measures the step's build and its base, never superseded, and
 //   waits for both.
 // - undo: once the game is idle, restores the base only while the folder
 //   still holds the step's build.
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import {
   CommandId,
   type GameBuildFacts,
   type GameBuildId,
+  type GameRunRound,
   type GameRunStepResult,
   type ThreadId,
   gameRunStepCommandId,
-  gameRunStepId,
 } from "@kurambit/contracts";
 import { readNextLine } from "@kurambit/shared/gameNextLine";
 import * as Cause from "effect/Cause";
@@ -55,8 +60,10 @@ import { makeBotSetup } from "./botSetup.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
 
-/** How long a judge or a look waits for a build's facts before the step ends unmeasured. */
+/** How long a judge waits for a build's facts before the step ends unmeasured. */
 const FACTS_WAIT = "10 minutes";
+/** How many of the chat's latest replies the look reads for the newest `Next:` line. */
+const NEXT_LOOKBACK = 20;
 
 /** A thread whose turn is running, queued or being captured keeps the game busy. */
 const BUSY: ReadonlySet<string> = new Set([
@@ -140,38 +147,47 @@ const make = Effect.gen(function* () {
             ),
           );
 
-  /** The `Next:` line of the chat's latest reply, when that reply is the latest turn's. */
-  const nextLine = (threadId: ThreadId) =>
+  /** The facts measured on a build so far, never waited for; null when none can be read. */
+  const factsSoFar = (threadId: ThreadId, build: GameBuildId | null) =>
+    build === null
+      ? Effect.succeed<GameBuildFacts | null>(null)
+      : builds.facts(threadId, { _tag: "build", build }).pipe(
+          Effect.map((facts): GameBuildFacts | null => facts),
+          Effect.orElseSucceed(() => null),
+        );
+
+  /** The chat's settled replies, newest first, a page at a time. */
+  const repliesOf = (threadId: ThreadId) =>
     Effect.gen(function* () {
       const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
-      const latest = runs.reduce<(typeof runs)[number] | undefined>(
-        (newest, run) => (newest === undefined || run.ordinal > newest.ordinal ? run : newest),
-        undefined,
-      );
-      if (latest === undefined) return null;
+      const newest = runs
+        .filter((run) => run.status !== "queued" && run.status !== "running")
+        .toSorted((a, b) => b.ordinal - a.ordinal)
+        .slice(0, NEXT_LOOKBACK);
+      if (newest.length === 0) return [];
       const { messages } = yield* threads.getThreadRecords(threadId, ["messages"], {
         messageRoles: ["assistant"],
-        messageRunIds: [latest.id],
+        messageRunIds: newest.map((run) => run.id),
       });
-      const reply = messages.at(-1);
-      return reply === undefined ? null : readNextLine(reply.text);
+      // A run's last assistant message is its reply.
+      return newest.flatMap((run) => {
+        const reply = messages.findLast((message) => message.runId === run.id);
+        return reply === undefined ? [] : [reply.text];
+      });
     });
 
-  /** The facts an earlier look of the run measured; null when they cannot be read. */
-  const lookedAt = (located: GameRunTurnReactor.Located, seq: number) =>
-    projections
-      .getGameRunRecords(located.run.threadId, { steps: [gameRunStepId(located.run.id, seq)] })
-      .pipe(
-        Effect.map((records) => {
-          const result = records.gameRunSteps[0]?.result;
-          return result?.kind === "look" && "facts" in result
-            ? (result.facts as GameBuildFacts | null)
-            : null;
-        }),
-        Effect.orElseSucceed(() => null),
-      );
+  /**
+   * The newest `Next:` line in the chat: a reply without one (a question
+   * answered, a step that ended without it) never wipes the plan. Null when no
+   * recent reply has one.
+   */
+  const nextLine = (threadId: ThreadId) =>
+    Effect.map(
+      repliesOf(threadId),
+      (replies) => replies.map(readNextLine).find((line) => line !== null) ?? null,
+    );
 
-  const look = (located: GameRunTurnReactor.Located) =>
+  const look = (located: GameRunTurnReactor.Located, rounds: ReadonlyArray<GameRunRound>) =>
     Effect.gen(function* () {
       const step = located.record.step;
       if (step.kind !== "look") return;
@@ -186,15 +202,14 @@ const make = Effect.gen(function* () {
       const finished = yield* botSetup.finish(located, root, setup);
       if (finished === "wait") return;
       const { build, edited } = yield* builds.current(threadId);
-      const facts = edited
-        ? null
-        : ((step.known !== undefined && step.known.build === build
-            ? yield* lookedAt(located, step.known.look)
-            : null) ?? (yield* factsOf(threadId, build)));
+      const facts = edited ? null : yield* factsSoFar(threadId, build);
       const bot = yield* botSetup.played(root, 0);
-      // Once per run, a booting game with no play bot gets one: the skilled
-      // tier is the one fact that says a real player can win.
+      const stepped = rounds.some((r) => r.runId === located.run.id && r.round.step !== undefined);
+      // Once per run, after its first step landed (so it never delays the
+      // first), a booting game with no play bot gets one: the skilled tier is
+      // shown beside the facts, never a reason to undo.
       if (
+        stepped &&
         located.run.botSetup === undefined &&
         finished === null &&
         !edited &&
@@ -274,7 +289,14 @@ const make = Effect.gen(function* () {
           );
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         yield* turnAdmission.admit(yield* projections.getThread(threadId));
-        const message = stepMessage(rounds, gameLastStep, step.proposal);
+        const root = yield* projects.resolve(threadId);
+        const message = stepMessage(rounds, gameLastStep, step.proposal, {
+          brief: yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, "BRIEF.md"), "utf8").catch(() => null),
+          ),
+          lastReply: (yield* repliesOf(threadId))[0] ?? null,
+          facts: yield* factsSoFar(threadId, step.base),
+        });
         yield* GameRunTurnReactor.refusedOnly(
           engine.dispatch({
             type: "message.dispatch",
@@ -288,6 +310,9 @@ const make = Effect.gen(function* () {
               summary: message.summary,
             },
             attachments: [],
+            // A step re-reading the whole chat cost millions of tokens; its own
+            // session starts from the briefing, and the person's chat keeps theirs.
+            freshContext: true,
             dispatchMode: { type: "queue_after_active" },
             createdBy: "agent",
             creationSource: "server",
@@ -365,7 +390,7 @@ const make = Effect.gen(function* () {
       const work = () => {
         switch (located.record.step.kind) {
           case "look":
-            return look(located);
+            return look(located, located.rounds);
           case "turn":
             return turn(located, located.rounds, located.gameLastStep);
           case "judge":

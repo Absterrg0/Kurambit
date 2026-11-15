@@ -250,7 +250,7 @@ describe("a keep-going run", () => {
           base: BASE,
           gain: false,
           tokens: 50_000,
-          reason: expect.stringContaining("Boots"),
+          reason: expect.stringMatching(/^it stopped booting: /),
         }),
       }),
     ]);
@@ -535,19 +535,14 @@ describe("a keep-going run", () => {
     expect(store.step().step.kind).toBe("look");
   });
 
-  it("pauses when steps keep never landing, whatever made them, and never measures a build twice for it", () => {
+  it("pauses when steps keep never landing, whatever made them", () => {
     const store = new Store();
     store.start("guided");
     // A proposal a turn superseded, a turn the folder moved under, and one
     // that started on another build: each looks again, and the third pauses.
     store.complete(look());
     store.complete({ kind: "decided", answer: "superseded", by: "server" });
-    // The look again takes the facts its cycle measured, for the build it read.
-    expect(store.step().step).toEqual({
-      kind: "look",
-      id: 3,
-      known: { build: BASE, look: 1 },
-    });
+    expect(store.step().step).toEqual({ kind: "look", id: 3 });
     store.complete(look());
     store.ok({
       type: "game-run.decide",
@@ -556,7 +551,7 @@ describe("a keep-going run", () => {
       answer: "start",
     });
     store.complete(turn({ outcome: "superseded", startBuild: null, build: null }));
-    expect(store.step().step).toMatchObject({ kind: "look", known: { build: BASE } });
+    expect(store.step().step).toMatchObject({ kind: "look" });
     expect(store.run.supersededStreak).toBe(2);
     store.complete(look());
     store.ok({

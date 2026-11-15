@@ -48,6 +48,7 @@ import {
   latestRootProviderFailure,
 } from "@kurambit/shared/orchestrationV2ThreadError";
 import type { UsageLimitSourceSnapshots } from "@kurambit/contracts";
+import { readNextLine } from "@kurambit/shared/gameNextLine";
 import { isUsageLimitsCommand } from "@kurambit/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { useUsageLimitsPanel } from "./chat/useUsageLimitsPanel";
@@ -3123,12 +3124,12 @@ export default function ChatView(props: ChatViewProps) {
   const askAgentToFixStable = useStableCallback(askAgentToFix);
   const gameNextReply = (() => {
     if (!isGameThread || !latestRunSettled || activeLatestRun === null) return null;
+    // The newest `Next:` in the chat: a reply without one (a question answered) keeps the plan.
     const reply = serverProjection?.messages.findLast(
-      (message) => message.role === "assistant" && !message.streaming,
+      (message) =>
+        message.role === "assistant" && !message.streaming && readNextLine(message.text) !== null,
     );
-    return reply === undefined || reply.runId !== activeLatestRun.runId
-      ? null
-      : { key: `${routeThreadKey}:${reply.id}`, text: reply.text };
+    return reply === undefined ? null : { key: `${routeThreadKey}:${reply.id}`, text: reply.text };
   })();
   const keepGoingBanner = useKeepGoingBanner(
     isGameThread && isServerThread ? activeThreadRef : null,

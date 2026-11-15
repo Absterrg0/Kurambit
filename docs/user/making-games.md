@@ -223,34 +223,39 @@ Pick a budget in the same menu (1 hour unless you change it); while keep going r
 when it ends. Choose **Off**, or press `mod+Alt+X`, to stop it: a step that is running stops and
 still becomes a build.
 
-When the game boots but has no play bot yet, keep going first has one written, once, in a session
-of its own that shows as a card in the chat: the bot is what measures whether a skilled player can
-win, so it is no step and changes nothing you see. If it cannot write one in about ten minutes,
-keep going goes on without the skilled fact and its status says why. On a computer that draws the
-game in software too slowly for its plays to finish, no bot is written, since nothing could measure
-it there; the status says so.
+The first step starts at once, from your agent's latest `Next:` line. After a step has landed, a
+game that boots but has no play bot yet gets one written, once, in a session of its own that shows
+as a card in the chat: Kurambit's play bot shows whether a player can win, so it is no step,
+changes nothing you see, and its minutes are not taken from your budget. If it cannot write one in
+about ten minutes, keep going goes on without it and its status says why. On a computer that draws
+the game in software too slowly for its plays to finish, no bot is written; the status says so.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
 and why: notes you left for it first, then a crash or freeze, then a step that was undone, then a
-failing fact, then the agent's own `Next:` line. The step's build is played and
-measured like any turn. Its builds sit under one **Keep going** bracket in the builds list, and its
-line in the chat says what happened to each:
+failing fact, then the agent's newest `Next:` line. A step runs in a fresh session of your agent,
+so it costs what the step is worth rather than re-reading the whole chat; its message carries what
+the agent needs (your brief, the chat's last reply, the current facts and the steps so far). Your
+own messages keep your agent's session, and it is told what the steps did. The step's build is
+played and measured like any turn. Its builds sit under one **Keep going** bracket in the builds
+list, and its line in the chat says what the step did and what happened to it:
 
-- **kept**: no fact Kurambit watches got worse;
-- **undone**: a fact got worse (the game stopped booting, a bot now crashes, it froze, it answers
-  later, or it can now be won without skill), so Kurambit put back the build the step started from.
-  The chat says what got worse. **Redo** in the chat or the build's tab puts the step back if you
-  want it anyway, and keep going goes on from there. A step undone twice is not tried again in this
-  run;
-- **not undone**: it made a fact worse but was left in place, with why: a later turn had already
+- **kept**: the game still boots, plays without errors or freezing, and can still be won or lost.
+  Every other fact (controls, the HUD, whether the play bot wins) is shown and, when it is bad,
+  proposed as a later step, but never a reason to undo;
+- **undone**: the step broke the game, so Kurambit put back the build the step started from. The
+  chat says why ("undone: it stopped booting: …"), and the next step is told too. **Redo** in the
+  chat or the build's tab puts the step back if you want it anyway, and keep going goes on from
+  there. A step undone twice is not tried again in this run;
+- **not undone**: it broke the game but was left in place, with why: a later turn had already
   changed the game, or the undo itself failed and the builds list says what failed;
 - **not measured**: the facts could not be compared, so the step is kept.
 
 Your messages always go first: a message you send is an ordinary turn, never judged or undone, and
 keep going waits for it to end. Stopping a step's turn with the chat's Stop pauses keep going.
 
-Keep going stops by itself when two steps in a row are undone or change nothing, when its budget is
-up, or when your agent says `Next: none`. The banner above the composer says why in one line, and
+Keep going stops by itself when your agent says `Next: none`, when two steps in a row are undone or
+change nothing, or when its budget is up. It does not judge whether a change made the game better:
+that is yours to say. The banner above the composer says why in one line, and
 **Resume** (or choosing a mode again) carries on with the same run. After the agent says the game is
 done, ask it for more and turn keep going on again. The command palette has **Keep going: Guided**,
 **Keep going: Autopilot**, **Stop Keep going**, and the proposal's **Start the proposed step now** and

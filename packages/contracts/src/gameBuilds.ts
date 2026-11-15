@@ -28,10 +28,10 @@ export const GAME_FACTS_BOUNDS = {
 
 /**
  * Why a build's skilled fact was not measured while its game has a play bot: the
- * tester's bot plays only for keep going's judgment and a person's measure.
+ * play bot Kurambit wrote plays only for keep going's judgment and a person's measure.
  */
 export const GAME_FACTS_SKILLED_DEFERRED =
-  "the tester's bot plays a build when keep going judges it or when you measure it; this build was not asked for yet";
+  "Kurambit's play bot plays a build when keep going judges it or when you measure it; this build was not asked for yet";
 
 /** Push names on the game's operation stream: the list changed, or a build's facts did. */
 export const GAME_BUILDS_EVENT = "builds";
@@ -239,7 +239,7 @@ export type GameBuild = typeof GameBuild.Type;
  * - slow: the game itself ran below real time on an idle machine (a step can make it faster).
  * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
  * - no-play-bot: the game has no play bot to measure skilled play with.
- * - deferred: the tester's bot plays only for keep going's judgment or a person's measure.
+ * - deferred: Kurambit's play bot plays only for keep going's judgment or a person's measure.
  */
 export const GameFactNotMeasuredCause = Schema.Literals([
   "software",
@@ -547,7 +547,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   hud: "HUD",
   idle: "No input",
   masher: "Random input",
-  skilled: "Tester's bot",
+  skilled: "Kurambit's play bot",
   "winnable-without-skill": "Winnable without skill",
   freeze: "Still stretches",
   motion: "Motion",
@@ -589,7 +589,8 @@ const at = (tier: BotTier) => (tier.at === null ? "" : ` at ${seconds(tier.at)}`
 // What each tier's ending says about the game: an idle or random player that
 // wins means no challenge, one that loses means there is pressure.
 const tierText = (id: "idle" | "masher" | "skilled", tier: BotTier) => {
-  const who = id === "idle" ? "With no input" : id === "masher" ? "Random input" : "The bot";
+  const who =
+    id === "idle" ? "With no input" : id === "masher" ? "Random input" : "Kurambit's play bot";
   switch (tier.ending) {
     case "won":
       return `${who} wins${at(tier)}`;
@@ -657,7 +658,7 @@ const BROKE_ENDINGS: ReadonlySet<string> = new Set(["crashed", "unresponsive", "
 const PLAYS = [
   ["masher", "with random input"],
   ["idle", "with no input"],
-  ["skilled", "by the play bot"],
+  ["skilled", "by Kurambit's play bot"],
 ] as const;
 /** The first play that broke (crashed, stopped answering, did not start), with who played it. */
 const brokenPlay = (facts: GameBuildFacts) => {
@@ -1106,7 +1107,7 @@ const CHECK_LABELS: Readonly<
   retry: "Retry starts clean",
   hud: "HUD fits the screen",
   performance: "Holds its frame rate",
-  skilled: "Can be won by the play bot",
+  skilled: "Can be won by Kurambit's play bot",
 };
 
 /**
@@ -1120,7 +1121,7 @@ const atTime = (tier: BotTier) => (tier.at === null ? null : `at ${seconds(tier.
 
 /** A bot tier's ending as a check: who played and what it came to. */
 const tierCheck = (
-  who: "with no input" | "with random input" | "by the play bot",
+  who: "with no input" | "with random input" | "by Kurambit's play bot",
   tier: BotTier,
 ): { sentence: string; value: string | null } => {
   switch (tier.ending) {
@@ -1129,13 +1130,13 @@ const tierCheck = (
         ? { sentence: "Wins itself with no input", value: atTime(tier) }
         : who === "with random input"
           ? { sentence: "Random input wins it", value: atTime(tier) }
-          : { sentence: "Can be won by the play bot", value: atTime(tier) };
+          : { sentence: "Can be won by Kurambit's play bot", value: atTime(tier) };
     case "lost":
       return who === "with no input"
         ? { sentence: "Can be lost with no input", value: atTime(tier) }
         : who === "with random input"
           ? { sentence: "Random input loses", value: atTime(tier) }
-          : { sentence: "The play bot loses", value: atTime(tier) };
+          : { sentence: "Kurambit's play bot loses", value: atTime(tier) };
     case "no-ending":
       return {
         sentence:
@@ -1143,7 +1144,7 @@ const tierCheck = (
             ? "Not lost with no input"
             : who === "with random input"
               ? "Random input finds no ending"
-              : "The play bot finds no ending",
+              : "Kurambit's play bot finds no ending",
         value: `in ${seconds(tier.played)}`,
       };
     case "crashed":
@@ -1183,13 +1184,13 @@ const checkWords = (
       const tier = facts.skilled.value;
       // Only a win proves the game can be won; anything short of one leaves it unproven.
       if (tier.ending === "won" || BROKE_ENDINGS.has(tier.ending))
-        return tierCheck("by the play bot", tier);
+        return tierCheck("by Kurambit's play bot", tier);
       return {
         sentence: "Not yet proven winnable",
         value:
           tier.ending === "lost"
-            ? `the play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`
-            : `the play bot found no ending in ${seconds(tier.played)}`,
+            ? `Kurambit's play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`
+            : `Kurambit's play bot found no ending in ${seconds(tier.played)}`,
       };
     }
     case "errors": {

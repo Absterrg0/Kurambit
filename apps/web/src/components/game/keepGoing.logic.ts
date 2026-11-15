@@ -29,7 +29,7 @@ export const KEEP_GOING_MODES: ReadonlyArray<{
   {
     mode: "autopilot",
     label: "Autopilot",
-    description: "Takes each next step itself, and undoes one that makes a fact worse.",
+    description: "Takes each next step itself, and undoes one that breaks the game.",
   },
 ];
 
@@ -144,7 +144,7 @@ export const keepGoingControlView = (
         ? mode.description
         : status !== null && status.ending !== null
           ? status.message
-          : "Your agent picks the next change, builds it and measures it, and stops when changes stop helping."),
+          : "Your agent takes its own next step, and Kurambit plays each build and undoes one that breaks the game. It stops when your agent says nothing is left, after two steps in a row that kept nothing, or at the budget."),
   };
 };
 
@@ -247,7 +247,7 @@ export const keepGoingBannerView = (
   const reason = status.steps.find((entry) => entry.n === n)?.reason ?? "";
   const title =
     status.botSetup?.state === "running"
-      ? "Keep going · writing a play bot in a session of its own"
+      ? "Keep going · Kurambit is writing its play bot, outside your budget"
       : status.phase === "waiting"
         ? `Keep going · waits for this turn to end${status.endsAt === null ? "" : ` · until ${clock(status.endsAt)}`}`
         : status.phase === "turn"

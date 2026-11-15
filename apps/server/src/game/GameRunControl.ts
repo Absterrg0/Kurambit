@@ -507,7 +507,7 @@ const make = Effect.gen(function* () {
                 n: read.n,
                 verdict: null,
                 reason: undoing
-                  ? `undoing it: ${read.undoing ?? "it made a fact worse"}`
+                  ? `undoing it: ${read.undoing ?? "it broke the game"}`
                   : "measuring before keeping it",
                 move,
               }

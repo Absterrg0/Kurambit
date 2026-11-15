@@ -77,8 +77,8 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
  */
 const KEEP_GOING_SECTION = `## Keep going
 
-- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Do that one step and only it: the last \`game_check\` with \`final: true\` clean, then end with your \`Next:\` line.
-- Kurambit measures the step's build, and undoes the step itself when it makes a fact worse; the person can redo it. Do not put an undone change back unless they ask.
+- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Each step runs in a session of its own, so the message carries what you need: the brief, the chat's last reply, the facts and the steps before it. Do that one step, like any turn: the last \`game_check\` with \`final: true\` clean, then end with your \`Next:\` line, or \`Next: none\` when nothing worth doing for the brief is left.
+- Kurambit measures the step's build, and undoes the step itself only when it breaks the game (it stops booting, errors or freezes in play, or can no longer be won or lost); the person can redo it. Do not put an undone change back unless they ask.
 - A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line. Kurambit sets that step aside.
 - The person's own messages always come first. Turn keep going on or off (\`game_keep_going\`) only when they ask.
 `;

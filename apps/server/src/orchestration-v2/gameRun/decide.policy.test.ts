@@ -155,55 +155,75 @@ const judged = (s: RunState, base: GameBuildFacts, build: GameBuildFacts, c = cy
   Loop.applyJudge(s, c, { kind: "judge", base, build: { ...build, build: BUILD } }, NOW);
 
 describe("worse", () => {
-  it("counts a crossing into bad, never a fact already bad that gets worse", () => {
-    const crashed = facts({ masher: tier("crashed", 12) });
-    expect(Loop.regressions(facts(), crashed, false).map((r) => [r.delta.id, r.kind])).toEqual([
-      ["errors", "health"],
+  const broke = (base: GameBuildFacts, build: GameBuildFacts) =>
+    Loop.regressions(base, build).map((r) => [r.delta.id, r.why]);
+  const noEnding = (patch: Partial<GameBuildFacts> = {}) =>
+    facts({ idle: tier("no-ending", null), masher: tier("no-ending", null), ...patch });
+
+  it("undoes only on health, in words a person reads", () => {
+    expect(broke(facts(), facts({ masher: tier("crashed", 12) }))).toEqual([
+      ["errors", "it crashed: crashed at 12 s when played with random input"],
+    ]);
+    expect(broke(facts(), facts({ idle: tier("unresponsive", 8) }))).toEqual([
+      ["errors", "it froze: stopped answering at 8.0 s when played with no input"],
     ]);
     expect(
-      Loop.regressions(deadControls(0), deadControls(1), false).map((r) => r.delta.id),
-    ).toEqual(["controls"]);
-    // Already bad on the base: the next fact step's business, not an undo.
-    expect(Loop.regressions(deadControls(1), deadControls(2), false)).toEqual([]);
+      broke(
+        facts(),
+        facts({
+          boots: { status: "measured", value: { ok: false, detail: "main.js: x is not defined" } },
+        }),
+      ),
+    ).toEqual([["boots", "it stopped booting: main.js: x is not defined"]]);
+    // Already bad on the base: the next blocker, not an undo.
+    expect(
+      broke(facts({ masher: tier("crashed", 3) }), facts({ masher: tier("crashed", 2) })),
+    ).toEqual([]);
+  });
+
+  it("never undoes on one run of the play bot or a check: shown, proposed, never guarded", () => {
+    expect(broke(facts(), facts(skilledWith("lost")))).toEqual([]);
+    expect(broke(deadControls(0), deadControls(1))).toEqual([]);
+    expect(broke(facts(), facts({ masher: tier("won", 9) }))).toEqual([]);
+  });
+
+  it("undoes a step after which no play reaches an ending", () => {
+    expect(broke(facts(), noEnding(skilledWith("no-ending")))).toEqual([
+      [
+        "skilled",
+        "it can no longer be won or lost: Kurambit's play bot: no ending in 60 s (before: Kurambit's play bot wins at 40 s)",
+      ],
+    ]);
+    // One play still ends: the game still ends.
+    expect(broke(facts(), noEnding())).toEqual([]);
+    // Nothing ended before either: nothing was lost.
+    expect(broke(noEnding(skilledWith("no-ending")), noEnding(skilledWith("no-ending")))).toEqual(
+      [],
+    );
   });
 
   it("never counts what cannot be compared: a renderer, a harness or a bot that changed", () => {
     const crashed = facts({
       boots: { status: "measured", value: { ok: false, detail: "throws" } },
     });
-    expect(Loop.regressions(facts(), { ...crashed, renderer: "SwiftShader" }, false)).toEqual([]);
-    expect(Loop.regressions(facts(), { ...crashed, harness: "h2" }, false)).toEqual([]);
-    expect(Loop.regressions(facts(), facts(skilledWith("lost", "y")), false)).toEqual([]);
-    expect(Loop.regressions(facts(), { ...crashed, boots: { status: "pending" } }, false)).toEqual(
-      [],
-    );
+    expect(Loop.regressions(facts(), { ...crashed, renderer: "SwiftShader" })).toEqual([]);
+    expect(Loop.regressions(facts(), { ...crashed, harness: "h2" })).toEqual([]);
+    expect(Loop.regressions(facts(), facts(skilledWith("lost", "y")))).toEqual([]);
+    expect(Loop.regressions(facts(), { ...crashed, boots: { status: "pending" } })).toEqual([]);
   });
 
-  it("splits health from design, and a step the person asked for keeps its design", () => {
-    // Random input winning is the creator's design, never a regression.
-    expect(Loop.regressions(facts(), facts({ masher: tier("won", 9) }), false)).toEqual([]);
-    // Skilled stopping winning is design; skilled crashing is health and always counts.
-    expect(
-      Loop.regressions(facts(), facts(skilledWith("lost")), false).map((r) => [r.delta.id, r.kind]),
-    ).toEqual([["skilled", "design"]]);
-    expect(Loop.regressions(facts(), facts(skilledWith("lost")), true)).toEqual([]);
-    expect(
-      Loop.regressions(facts(), facts(skilledWith("crashed")), true).map((r) => r.kind),
-    ).toEqual(["health", "health"]);
-  });
-
-  it("undoes a regression, keeps a steer step's design change, and keeps the unmeasured", () => {
-    const easier = facts(skilledWith("lost"));
-    expect(judged(state(), facts(), easier).plan).toEqual({
+  it("undoes a broken step, keeps one the play bot lost, and keeps the unmeasured", () => {
+    const broken = facts({ masher: tier("crashed", 12) });
+    expect(judged(state(), facts(), broken).plan).toEqual({
       kind: "undo",
       target: BASE,
       expect: BUILD,
     });
+    // The person's own step is undone too when it breaks the game: it can be redone.
     const asked = cycle(turnStep({ proposal: proposal({ why: "steer", key: "steer:1" }) }));
-    expect(judged(state(), facts(), easier, asked).record?.step.verdict).toBe("kept");
-    const steered = cycle(turnStep(), turnResult({ personSteered: true }));
-    expect(judged(state(), facts(), easier, steered).record?.step.verdict).toBe("kept");
-    const unmeasured = judged(state(), facts(), { ...easier, harness: "h2" });
+    expect(judged(state(), facts(), broken, asked).plan?.kind).toBe("undo");
+    expect(judged(state(), facts(), facts(skilledWith("lost"))).record?.step.verdict).toBe("kept");
+    const unmeasured = judged(state(), facts(), { ...broken, harness: "h2" });
     expect(unmeasured.plan).toEqual({ kind: "look" });
     expect(unmeasured.record).toMatchObject({
       failure: "harness",
@@ -213,27 +233,15 @@ describe("worse", () => {
 });
 
 describe("gain", () => {
-  const input = (patch: Partial<Parameters<typeof Loop.gain>[0]> = {}) => ({
-    verdict: "kept" as const,
-    files: 0,
-    turn: { proposal: proposal(), startedBy: "autopilot" as const },
-    deltas: [],
-    build: facts(),
-    ...patch,
+  it("is a kept step that changed the game, and nothing else: taste is never inferred", () => {
+    expect(Loop.gain({ verdict: "kept", files: 3 })).toBe(true);
+    expect(Loop.gain({ verdict: "not-measured", files: 3 })).toBe(true);
+    expect(Loop.gain({ verdict: "kept", files: 0 })).toBe(false);
+    expect(Loop.gain({ verdict: "undone", files: 3 })).toBe(false);
+    expect(Loop.gain({ verdict: "kept-moved-on", files: 3 })).toBe(false);
   });
 
-  it("is a kept step that changed the game; flat facts do not take it away", () => {
-    expect(Loop.gain(input({ files: 3 }))).toBe(true);
-    expect(Loop.gain(input())).toBe(false);
-    expect(Loop.gain(input({ files: 3, verdict: "undone" }))).toBe(false);
-    expect(Loop.gain(input({ files: 3, verdict: "kept-moved-on" }))).toBe(false);
-  });
-
-  it("also counts a closed target: the person's own step", () => {
-    expect(Loop.gain(input({ turn: { proposal: proposal(), startedBy: "creator" } }))).toBe(true);
-  });
-
-  it("pauses the run after two steps in a row that gained nothing", () => {
+  it("pauses the run after two steps in a row that kept nothing", () => {
     const quiet = cycle(turnStep(), turnResult({ files: 0 }));
     const first = Loop.applyTurn(state(), quiet.turn, quiet.result, {
       now: NOW,
@@ -480,9 +488,11 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
   });
 
   it("words a failed undo as failed, and only a moved folder as moved on", () => {
-    const easier = deadControls(1);
-    const judged = { ...cycle(), judge: { kind: "judge" as const, base: facts(), build: easier } };
-    expect(Loop.undoReason(judged)).toContain("Controls");
+    const broken = facts({ masher: tier("crashed", 12) });
+    const judged = { ...cycle(), judge: { kind: "judge" as const, base: facts(), build: broken } };
+    expect(Loop.undoReason(judged)).toBe(
+      "it crashed: crashed at 12 s when played with random input",
+    );
     const failed = Loop.applyUndo(
       state(),
       judged,
@@ -491,7 +501,9 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
     );
     // Not undone either way; the reason, not the verdict, says the restore failed.
     expect(failed.record?.step).toMatchObject({ verdict: "kept-moved-on", gain: false });
-    expect(failed.record?.step.reason).toMatch(/^the copy could not be made \(Controls/);
+    expect(failed.record?.step.reason).toBe(
+      "the copy could not be made (it crashed: crashed at 12 s when played with random input)",
+    );
     const moved = Loop.applyUndo(
       state(),
       judged,
@@ -500,5 +512,19 @@ describe("a step acts only on the build it was planned on (TW1)", () => {
     );
     expect(moved.record?.step.verdict).toBe("kept-moved-on");
     expect(moved.record?.step.reason).toMatch(/^the game changed after it/);
+  });
+});
+
+describe("a step's record", () => {
+  it("names what the step did from its reply, without markdown or its Next line", () => {
+    expect(
+      Loop.replyHeadline(
+        "## Added the Junk King boss. It slams the ground.\n\nNext: add a boss intro",
+      ),
+    ).toBe("Added the Junk King boss.");
+    expect(Loop.replyHeadline("**Done** — the tank now dashes on Shift\nNext: none")).toBe(
+      "Done — the tank now dashes on Shift",
+    );
+    expect(Loop.replyHeadline("Next: add sound")).toBe("");
   });
 });

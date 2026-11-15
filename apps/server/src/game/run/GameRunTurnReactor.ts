@@ -33,6 +33,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
+import { replyHeadline } from "../../orchestration-v2/gameRun/decide.ts";
 import * as GameRunJobs from "../../orchestration-v2/gameRun/GameRunJobs.ts";
 import {
   type StepTurn,
@@ -302,6 +303,16 @@ const make = Effect.gen(function* () {
       },
     );
 
+  /** What the step did, from the last reply of its turn; empty without one. */
+  const didOf = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
+    Effect.map(
+      threads.getThreadRecords(threadId, ["messages"], {
+        messageRoles: ["assistant"],
+        messageRunIds: chain.map((run) => run.id),
+      }),
+      (records) => replyHeadline(records.messages.at(-1)?.text ?? ""),
+    );
+
   const land = (
     located: Located,
     turn: GameRunTurnStep,
@@ -373,6 +384,7 @@ const make = Effect.gen(function* () {
         elapsedMs: Math.max(0, to - from),
         personSteered: yield* steeredBy(threadId, chain),
         reason,
+        did: yield* didOf(threadId, chain),
       });
     });
 

@@ -16,7 +16,6 @@ import {
   type GameRun,
   type GameRunEnding,
   type GameRunId,
-  type GameRunLookStep,
   type GameRunProfile,
   type GameRunProposal,
   type GameRunRefusalReason,
@@ -56,7 +55,7 @@ export interface RunState {
   readonly budgetEndsAt: number | null;
   readonly steer: ReadonlyArray<string>;
   readonly setAside: ReadonlyArray<SetAside>;
-  /** Steps in a row that gained nothing. */
+  /** Steps in a row that kept nothing (undone, or no game file changed). */
   readonly stallStreak: number;
   /** Steps in a row that never landed: superseded, or started on another build. */
   readonly superseded: number;
@@ -158,13 +157,12 @@ const MISS_LIMIT = 2;
 const TEXT_MAX = 8000;
 
 /**
- * The facts keep going acts on and guards: what a player would hit (the lead checks), the
- * play bot's win, and how soon the controls answer. Who wins with no input or random input
- * is the creator's design, and motion and detail are heuristics: shown, never proposed and
- * never guarded. Of the scene report, only what the scene's own geometry decides is watched
- * (a body sunk in the ground, a player the camera cannot see); clipping, falling, the camera
- * in a wall and sliding depend on where random input led and how fast this machine ran it,
- * so they are shown and never guarded.
+ * The facts keep going shows on a step's record and proposes when bad: what a player would hit
+ * (the lead checks), the play bot's win, and how soon the controls answer. Who wins with no input
+ * or random input is the creator's design, and motion and detail are heuristics: shown, never
+ * proposed. Of the scene report, only what the scene's own geometry decides is watched (a body
+ * sunk in the ground, a player the camera cannot see); clipping, falling, the camera in a wall and
+ * sliding depend on where random input led and how fast this machine ran it.
  */
 const WATCHED: ReadonlySet<GameFactId> = new Set([
   "boots",
@@ -178,7 +176,6 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
   "player-view",
   "empty",
 ]);
-const BROKE: ReadonlySet<string> = new Set(["crashed", "unresponsive", "did-not-boot"]);
 
 // ── The step's text: four templates, the facts' own wording and the agent's own line.
 const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
@@ -192,7 +189,7 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
 };
 const STEER_INTRO = "The person asked for this, in their words:";
 const STEP_TAIL =
-  "This is a keep-going step: make this one change, keep `game_check` clean, and end with your `Next:` line.";
+  "This is a keep-going step: make this one change, keep `game_check` clean, and end with your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
 const NEXT_FALLBACK = "Make the one change that most improves the game for BRIEF.md.";
 
 const clip = (text: string, max: number) =>
@@ -254,14 +251,65 @@ export const proposalSummary = (
 };
 
 /**
+ * What a step's fresh session is told about the game, since it starts without
+ * the chat's history: the brief, the chat's last reply, the facts Kurambit
+ * measured on the build the step starts from, and the steps before it with
+ * their verdicts (an undo's reason included, so a retry is not blind).
+ */
+export interface StepBriefing {
+  readonly brief: string | null;
+  readonly lastReply: string | null;
+  readonly facts: GameBuildFacts | null;
+}
+
+const BRIEF_MAX = 2500;
+const REPLY_MAX = 2000;
+const PAST_STEPS = 5;
+
+const briefingText = (rounds: ReadonlyArray<GameRunRound>, briefing: StepBriefing): string => {
+  const facts =
+    briefing.facts === null
+      ? []
+      : gameFactsView(briefing.facts).flatMap((view) =>
+          view.reading._tag === "measured" ? [`- ${view.label}: ${view.reading.text}`] : [],
+        );
+  const past = rounds
+    .map((r) => r.round)
+    .filter(isStepRecord)
+    .toSorted((a, b) => a.round - b.round)
+    .slice(-PAST_STEPS)
+    .map(
+      (r) =>
+        `- Step ${r.round} (${r.move}): ${r.step.verdict}${r.step.reason === "" ? "" : ` — ${r.step.reason}`}`,
+    );
+  const section = (title: string, body: string | null) =>
+    body === null || body.trim() === "" ? [] : [`${title}\n${body.trim()}`];
+  return [
+    "This step runs in a session of its own, without the chat's history. What you need about the game is below; read its files only as far as this change needs.",
+    ...section("BRIEF.md:", briefing.brief === null ? null : clip(briefing.brief, BRIEF_MAX)),
+    ...section(
+      "The chat's last reply:",
+      briefing.lastReply === null ? null : clip(briefing.lastReply, REPLY_MAX),
+    ),
+    ...section(
+      "Kurambit's facts on the build this step starts from:",
+      facts.length === 0 ? null : facts.join("\n"),
+    ),
+    ...section("Keep going's steps so far:", past.length === 0 ? null : past.join("\n")),
+  ].join("\n\n");
+};
+
+/**
  * The message a step posts into its chat, and its notification summary. The
  * provider tells the agent a stopped turn was stopped by the person; when it
- * was Kurambit's time cap, the next step says so.
+ * was Kurambit's time cap, the next step says so. With a briefing, the step
+ * runs in a fresh session and the message carries what it needs to know.
  */
 export const stepMessage = (
   rounds: ReadonlyArray<GameRunRound>,
   gameLastStep: number,
   proposal: Pick<GameRunProposal, "why" | "text" | "target">,
+  briefing?: StepBriefing,
 ): { readonly text: string; readonly summary: string } => {
   const n = stepNumber(rounds, gameLastStep);
   const capped = rounds.find((r) => isStepRecord(r.round) && r.round.round === n - 1)?.round.step
@@ -270,10 +318,28 @@ export const stepMessage = (
     capped === undefined
       ? ""
       : `Kurambit's ${capped}-minute time cap stopped your last keep-going step's turn; the person did not stop it.\n\n`;
+  const about = briefing === undefined ? "" : `\n\n---\n\n${briefingText(rounds, briefing)}`;
   return {
-    text: `Keep going · step ${n} (${WHY_LABEL[proposal.why]})\n\n${cap}${proposal.text}\n\n${STEP_TAIL}`,
+    text: `Keep going · step ${n} (${WHY_LABEL[proposal.why]})\n\n${cap}${proposal.text}\n\n${STEP_TAIL}${about}`,
     summary: `Keep going · step ${n}: ${proposalSummary(proposal)}`,
   };
+};
+
+const MARKDOWN_LEAD = /^(?:#{1,6}\s+|[-*+>]\s+|\d+[.)]\s+)+/;
+
+/**
+ * What a step did, from its reply: the reply's first sentence, without its
+ * markdown, so a record names the change the agent made rather than the
+ * proposal's generic text. Empty when the reply holds no prose.
+ */
+export const replyHeadline = (reply: string, max = 140): string => {
+  const line =
+    reply
+      .split("\n")
+      .map((each) => each.trim().replace(MARKDOWN_LEAD, "").replace(/[*_`]/g, "").trim())
+      .find((each) => each.length > 0 && !/^next\s*:/i.test(each)) ?? "";
+  const sentence = /^(.+?[.!?])(?:\s|$)/.exec(line)?.[1] ?? line;
+  return clip(sentence, max);
 };
 
 /** FNV-1a: a short stable key for a text, never a secret. */
@@ -308,52 +374,84 @@ const blockers = (views: Views): ReadonlyArray<GameFactId> =>
 // A step's reasons are read in the chat, where no A and B are on screen.
 const STEP_SIDES = { a: "the build before the step", b: "the step's build" } as const;
 
-/** A watched fact that crossed into bad between two builds, and whether it is health or design. */
+/** A health fact the step broke, and why in the words its undo reads. */
 interface Regression {
   readonly delta: GameFactDelta;
-  readonly kind: "health" | "design";
+  readonly why: string;
 }
 
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+const ENDING_TIERS: ReadonlySet<GameFactId> = new Set(["idle", "masher", "skilled"]);
+const ended = (facts: GameBuildFacts, id: GameFactId) =>
+  id === "idle" || id === "masher" || id === "skilled"
+    ? tierEnding(facts, id) === "won" || tierEnding(facts, id) === "lost"
+    : false;
+
 /**
- * What got worse from `base` to `build`. Only a comparable delta of a
- * watched fact counts, and only when its reading crosses into `bad` (or
- * skilled stops winning); a fact already bad that gets worse is the next
- * blocker, not a regression. Design regressions do not count on a step the
- * person asked for or steered: difficulty is their call.
+ * Every play that can be compared reached an ending (won or lost) on the base
+ * at least once, and none does on the step's build: the game no longer ends.
+ * A play that broke is the errors fact's, so it is counted once.
+ */
+const endingLost = (
+  base: GameBuildFacts,
+  build: GameBuildFacts,
+  deltas: ReadonlyArray<GameFactDelta>,
+): Regression | null => {
+  const plays = deltas.filter((d) => ENDING_TIERS.has(d.id) && d.change !== "not-comparable");
+  const was = plays.find((d) => ended(base, d.id));
+  if (was === undefined) return null;
+  if (!plays.every((d) => tierEnding(build, d.id as "idle" | "masher" | "skilled") === "no-ending"))
+    return null;
+  return {
+    delta: was,
+    why: `it can no longer be won or lost: ${was.b ?? "no ending"} (before: ${was.a ?? "?"})`,
+  };
+};
+
+/**
+ * What the step broke from `base` to `build`: it stopped booting, it errors or
+ * freezes in play, or it can no longer be won or lost at all. Only these undo a
+ * step. Every other fact is shown on the record and, when bad, proposed as the
+ * next step; one noisy run of a check (QA, the scene report, the play bot the
+ * harness wrote) is no evidence to throw away a person's or an agent's work.
+ * Only a comparable delta counts, and only a crossing into bad: a fact already
+ * bad that gets worse is the next blocker, not an undo.
  */
 export const regressions = (
   base: GameBuildFacts,
   build: GameBuildFacts,
-  exemptDesign: boolean,
 ): ReadonlyArray<Regression> => {
   const before = viewsOf(base);
   const after = viewsOf(build);
-  return diffBuildFacts(base, build, STEP_SIDES).flatMap((delta): ReadonlyArray<Regression> => {
-    if (!WATCHED.has(delta.id) || delta.change === "not-comparable") return [];
-    const a = toneOf(before, delta.id);
-    const b = toneOf(after, delta.id);
-    if (a === null || b === null) return [];
-    const crossed =
-      (a !== "bad" && b === "bad") || (delta.id === "skilled" && a === "good" && b !== "good");
-    if (!crossed) return [];
-    const kind =
-      delta.id === "skilled"
-        ? BROKE.has(tierEnding(build, delta.id) ?? "")
-          ? "health"
-          : "design"
-        : // An empty view can be the look the person asked for.
-          delta.id === "empty"
-          ? "design"
-          : "health";
-    return kind === "design" && exemptDesign ? [] : [{ delta, kind }];
+  const deltas = diffBuildFacts(base, build, STEP_SIDES);
+  const crossed = deltas.flatMap((delta): ReadonlyArray<Regression> => {
+    if ((delta.id !== "boots" && delta.id !== "errors") || delta.change === "not-comparable")
+      return [];
+    if (toneOf(before, delta.id) === "bad" || toneOf(after, delta.id) !== "bad") return [];
+    const now = delta.b ?? "";
+    if (delta.id === "boots")
+      return [{ delta, why: `it stopped booting: ${now.replace(/^Does not boot: /, "")}` }];
+    return [
+      {
+        delta,
+        why: now.startsWith("Stopped answering")
+          ? `it froze: ${lowerFirst(now)}`
+          : now.startsWith("Crashed")
+            ? `it crashed: ${lowerFirst(now)}`
+            : now.startsWith("Did not start")
+              ? `it stopped booting: ${lowerFirst(now)}`
+              : `it errors in play: ${now}`,
+      },
+    ];
   });
+  const lost = endingLost(base, build, deltas);
+  return lost === null ? crossed : [...crossed, lost];
 };
 
 const watchedDeltas = (base: GameBuildFacts, build: GameBuildFacts) =>
   diffBuildFacts(base, build, STEP_SIDES).filter((d) => WATCHED.has(d.id));
 const comparable = (deltas: ReadonlyArray<GameFactDelta>) =>
   deltas.filter((d) => d.change !== "not-comparable");
-const deltaText = (d: GameFactDelta) => `${d.label}: ${d.a ?? "?"} → ${d.b ?? "?"}`;
 
 /** Up to three chips for the record: what got worse first, then what got better. */
 const chips = (
@@ -606,7 +704,18 @@ export const applyLook = (state: RunState, look: LookResult, now: number): Next 
   const setup = look.botSetup;
   if (setup === undefined) return proposeFrom(state, look, now);
   // The run keeps the setup this look finished, so no later look sets up again.
-  const next = proposeFrom({ ...state, botSetup: setup }, look, now);
+  // The setup is Kurambit's own instrument: its minutes never come out of the
+  // person's budget.
+  const spent = Math.round((setup.minutes ?? 0) * MIN);
+  const next = proposeFrom(
+    {
+      ...state,
+      botSetup: setup,
+      budgetEndsAt: state.budgetEndsAt === null ? null : state.budgetEndsAt + spent,
+    },
+    look,
+    now,
+  );
   const line =
     setup.state === "written"
       ? "the play bot is written"
@@ -665,7 +774,10 @@ const recordOf = (
   },
 ): StepRecord => ({
   round: state.n,
-  move: headline(cycle.turn.proposal),
+  move:
+    cycle.result.did === undefined || cycle.result.did === ""
+      ? headline(cycle.turn.proposal)
+      : cycle.result.did,
   branch: "",
   verdicts: [],
   kept: fields.verdict !== "undone",
@@ -696,28 +808,17 @@ const targetStillBad = (turn: GameRunTurnStep, build: GameBuildFacts | null) =>
   toneOf(viewsOf(build), turn.proposal.target) === "bad";
 
 /**
- * A step gains when it was kept, made no watched fact worse, and changed
- * what a restore covers. A watched fact that got better, or the step's own
- * target closing, count too: the person's own step, a kept retry, a blocker
- * or fact no longer bad.
+ * A step gains when it kept a change to the game: kept (or kept unmeasured)
+ * with game files changed. That is all the harness can honestly say: whether
+ * a kept boss or a new sound helps the game is taste, the person's call, and
+ * a fact that stays flat is no evidence either way. So the run stops on what
+ * it measures: the agent's own `Next: none`, two steps in a row that kept
+ * nothing (undone, or no game file changed), or the budget.
  */
 export const gain = (input: {
   readonly verdict: GameStepVerdict;
   readonly files: number;
-  readonly turn: Pick<GameRunTurnStep, "proposal" | "startedBy">;
-  readonly deltas: ReadonlyArray<GameFactDelta>;
-  readonly build: GameBuildFacts | null;
-}): boolean => {
-  if (input.verdict !== "kept" && input.verdict !== "not-measured") return false;
-  if (input.files > 0) return true;
-  if (comparable(input.deltas).some((d) => d.tone === "better")) return true;
-  const { proposal, startedBy } = input.turn;
-  if (proposal.why === "steer" || startedBy === "creator") return true;
-  if (proposal.why === "regression") return input.verdict === "kept";
-  if (proposal.target === null || input.build === null) return false;
-  const tone = toneOf(viewsOf(input.build), proposal.target);
-  return tone !== null && tone !== "bad";
-};
+}): boolean => (input.verdict === "kept" || input.verdict === "not-measured") && input.files > 0;
 
 /** How many of this run's steps with `key` missed: undone, or kept with their target still bad. */
 const misses = (records: ReadonlyArray<StepRecord>, key: string) =>
@@ -752,7 +853,7 @@ const settle = (state: RunState, record: StepRecord, log: string): Next => {
       record,
     );
   if (next.stallStreak >= STALL_LIMIT)
-    return end(next, "stalled", "", `${log}; two steps in a row gained nothing`, record);
+    return end(next, "stalled", "", `${log}; two steps in a row kept nothing`, record);
   return go(next, LOOK, log, record);
 };
 
@@ -845,19 +946,15 @@ export const applyTurn = (
 const worseOf = (cycle: Cycle & { readonly judge: JudgeResult }) =>
   cycle.judge.base === null || cycle.judge.build === null
     ? []
-    : regressions(
-        cycle.judge.base,
-        cycle.judge.build,
-        cycle.turn.proposal.why === "steer" || cycle.result.personSteered,
-      );
+    : regressions(cycle.judge.base, cycle.judge.build);
 
-/** What an undo is for: the facts the step made worse, as one line. */
+/** What an undo is for, as a person reads it: "it stopped booting: <error>". */
 export const undoReason = (cycle: Cycle & { readonly judge: JudgeResult }): string =>
   worseOf(cycle)
-    .map((r) => deltaText(r.delta))
+    .map((r) => r.why)
     .join("; ");
 
-/** Keep, or undo the step whose build made a watched fact worse. */
+/** Keep, or undo the step whose build broke the game's health. */
 export const applyJudge = (
   state: RunState,
   cycle: Cycle,
@@ -872,13 +969,7 @@ export const applyJudge = (
       recordOf(state, cycle, now, {
         verdict: "not-measured",
         reason: why,
-        gain: gain({
-          verdict: "not-measured",
-          files: result.files,
-          turn,
-          deltas: [],
-          build: judge.build,
-        }),
+        gain: gain({ verdict: "not-measured", files: result.files }),
         failure: "harness",
       }),
       `step ${n} kept, not measured: ${why}`,
@@ -895,7 +986,7 @@ export const applyJudge = (
     return go(
       state,
       { kind: "undo", target: base, expect: result.build },
-      `step ${n} made a fact worse (${worse.map((r) => deltaText(r.delta)).join("; ")}): undoing it`,
+      `step ${n} broke the game (${worse.map((r) => r.why).join("; ")}): undoing it`,
     );
   const missed = targetStillBad(turn, judge.build);
   return settle(
@@ -903,7 +994,7 @@ export const applyJudge = (
     recordOf(state, cycle, now, {
       verdict: "kept",
       reason: "no fact got worse",
-      gain: gain({ verdict: "kept", files: result.files, turn, deltas, build: judge.build }),
+      gain: gain({ verdict: "kept", files: result.files }),
       delta: chips(deltas, []),
       ...(missed ? { failure: "game" as const } : {}),
     }),
@@ -1112,23 +1203,10 @@ const currentStep = (work: Work, run: GameRun, stepId: GameRunStepId, attempt?: 
 const cycleStep = (work: Work, record: GameRunStep, back: number) =>
   work.records.steps.find((s) => s.runId === record.runId && s.seq === record.seq - back) ?? null;
 
-/** The newest look of the cycle with measured facts: what a look again can take. */
-const knownOf = (work: Work, record: GameRunStep | null): GameRunLookStep["known"] => {
-  if (record === null) return undefined;
-  for (const step of [record, cycleStep(work, record, 1), cycleStep(work, record, 2)]) {
-    const look = resultOf(step?.result, "look");
-    if (step != null && look !== null)
-      return look.current === null || look.facts === null || look.edited
-        ? undefined
-        : { build: look.current, look: step.seq };
-  }
-  return undefined;
-};
-
-const planned = (seq: number, plan: Plan, known: GameRunLookStep["known"]): GameRunStep["step"] => {
+const planned = (seq: number, plan: Plan): GameRunStep["step"] => {
   switch (plan.kind) {
     case "look":
-      return { kind: "look", id: seq, ...(known === undefined ? {} : { known }) };
+      return { kind: "look", id: seq };
     case "propose":
       return { kind: "propose", id: seq, proposal: plan.proposal, deadline: plan.deadline };
     case "turn":
@@ -1175,8 +1253,6 @@ const keptOnPause = (record: GameRunStep | null) =>
 /**
  * The policy's answer becomes the run's records: the step record it finished,
  * the step's round when one landed, the next step and its effect, and the run.
- * A look after a step that never landed takes the facts its cycle's look
- * measured, so a supersede never measures the same build twice.
  */
 const land = (
   work: Work,
@@ -1187,8 +1263,6 @@ const land = (
 ): GameRunDecision => {
   const ended = next.state.ending !== null;
   const seq = next.plan === null ? run.seq : run.seq + 1;
-  const known =
-    next.plan?.kind === "look" && next.record === null ? knownOf(work, finished) : undefined;
   const step: GameRunStep | null =
     next.plan === null
       ? null
@@ -1199,7 +1273,7 @@ const land = (
           seq,
           attempt: 1,
           kind: next.plan.kind,
-          step: planned(seq, next.plan, known),
+          step: planned(seq, next.plan),
           status: "planned",
           result: null,
           logs: next.log === "" ? [] : [next.log],

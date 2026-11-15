@@ -483,18 +483,24 @@ timer (a cap set again, a recovery wake) records itself on its step. A game has 
 `GameRunControl` reads and dispatches under the project's lock, so two chats turning it on at once
 cannot both find none.
 
-- **A step is an ordinary chat turn.** The cycle is look, then (Guided) a proposal, then the turn,
-  a judge, maybe an undo, then the step's record, then look again. The turn is a message the run
-  posts into the chat; its id names the step and attempt
+- **A step is an ordinary chat turn, in a fresh provider session.** The cycle is look, then
+  (Guided) a proposal, then the turn, a judge, maybe an undo, then the step's record, then look
+  again. The turn is a message the run posts into the chat with `freshContext`, so a step does not
+  re-read the whole chat (one step read 7.8 M tokens that way); the message carries a compact
+  briefing instead (BRIEF.md, the chat's last reply, the facts, the steps so far). `freshContext` is
+  T3's own fresh native session on the thread's provider thread, the one a failed resume falls back
+  to (`ProviderTurnStartService`), and the thread's next run without it resumes the native session
+  its own runs used and gets the fresh runs as missed runs, so the person's chat keeps its session.
+  Its id names the step and attempt
   ([ids.ts](../../apps/server/src/orchestration-v2/gameRun/ids.ts)), which is how the reactor, the
   strip and the timeline know a turn is a step. Everything phases 1 and 2 give a turn (its build,
   facts, strip, Redo, timeline mark) a step gets for free; the run adds only the choice of message,
   keep or undo, and when to stop.
 - **The proposal costs no tokens.** The policy writes the step from the facts' own wording and the
-  agent's own `Next:` line (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
+  chat's newest `Next:` line, so a reply without one never wipes the plan (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
   the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
   blocker, a retry of an undone step, a failing fact, the agent's next line. Only
-  watched facts are proposed or guarded: what a player would hit (the lead checks: errors,
+  watched facts are proposed: what a player would hit (the lead checks: errors,
   controls, Retry, HUD), the play bot's win and input response. Who wins with no input or random
   input is the creator's design, and motion and detail are heuristics; none costs a step. Of the scene report only buried bodies, the player in
   view and the empty view are watched, because the scene's geometry decides them (the empty view
@@ -503,7 +509,9 @@ cannot both find none.
   clipping, falling, the camera in a
   wall and sliding follow where random input led and how fast the machine ran it, and an undo
   must never hang on a path.
-- **The look reads the folder's build.** The current build is the newest turn build that changed
+- **The look never waits.** It reads the facts measured on the folder's build so far, so step 1
+  starts at once from the newest `Next:`; the judge measures the base the step started from
+  anyway. **The look reads the folder's build.** The current build is the newest turn build that changed
   game files, or a later kept edit, restore target or bot setup point; turns that changed only notes are no builds,
   so it is found by walking the turns page by page however far back (`GameBuilds.currentBuild`),
   never in a fixed window. A folder whose game files are no build's (edited outside a turn) pauses
@@ -515,21 +523,25 @@ cannot both find none.
   and a turn that started on any other build (a Redo, a restore, a person's turn landing during the
   look) is never judged or undone, so the run looks again. A step the person redid is never
   retried. A person's turn is never judged or undone.
-- **Worse is a crossing, not a change.** A step regresses a watched fact only on a comparable delta
-  whose reading crosses into `bad` (or skilled stops winning). GPU liveness varies between builds
-  of one tree, so "any change" would undo good work; a fact already bad that gets worse is the
-  next blocker, not an undo. Not-comparable (another harness, renderer or bot) never undoes.
-  Health regressions always undo; design ones (winning without skill, skilled losing) do not on a
-  step the person asked for or steered: difficulty is their call.
+- **Only health undoes.** A step is undone when it stops booting, errors or freezes in play, or can
+  no longer be won or lost at all (every comparable play reached an ending on the base, none does
+  now). Every other fact is shown on the record and proposed when bad, never guarded: one noisy run
+  of QA, the scene report or the play bot the harness itself wrote is not evidence to throw away
+  work, and guarding them biased steps away from bosses, harder waves and new verbs. Health is a
+  crossing into bad on a comparable delta, never a change: a fact already bad that gets worse is
+  the next blocker; not-comparable (another harness, renderer or bot) never undoes. The reason is
+  written for a person ("it stopped booting: …") and reaches the next step's briefing.
 - **The undo cannot hurt the person's work.** It is `GameBuilds.restore(base, { expect: build })`:
   inside the game lock the folder moves only while it still holds the step's build unedited, else
   it is refused `moved-on` and the record reads "the game changed after it". A step the person
   undid first counts as undone.
-- **Gain and stopping.** A step gains when it was kept, changed what a restore covers and made no
-  watched fact worse; a closed target counts too (the person's own step, a kept retry). Two steps in a row without gain pause the run
+- **Gain and stopping.** A step gains when it kept a change: kept (or kept unmeasured) with game
+  files changed. Nothing more is claimed: whether a kept boss helps the game is the person's taste.
+  The record's line is the step's reply's first sentence, so it names what the step did. Two steps
+  in a row without gain pause the run
   `stalled`; three steps in a row that never landed (a superseded proposal or turn, a turn that
   started on another build) pause it `stalled` with why, so no mix of supersedes and looks runs
-  without bound, and a look after one takes the facts its cycle's look measured for the same build; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
+  without bound; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
   otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
   The budget is checked before each turn against a typical step (8 min), and it is what bounds an
   Autopilot that keeps adding content. Every ending but `done` resumes.
@@ -538,15 +550,16 @@ cannot both find none.
   step that changed nothing (it is never sent again as it was), or Skip set the key aside for the
   run.
 - **The play bot is setup, never a step.** A step must change what a person sees or fix a measured
-  fault; the bot is the harness's instrument, and a step's turn re-reads the whole chat. So a look
-  that finds a booting game with no play bot has it written once per run in a session of its own
-  ([botSetup.ts](../../apps/server/src/game/run/botSetup.ts)): a `game-round.task.request` child
-  of the chat's last finished turn (`completionWake: "never"`, so it never wakes the chat, and its
-  checkpoint is no build). The look waits on the game being busy, caps each session, sends at most
-  one fix-up session, and reports the outcome, which the run keeps (`GameRun.botSetup`); a failed
-  setup leaves the skilled fact unmeasured and the run goes on. It decides only once the idle and
-  random-input tiers have played: they play the skilled tier's span, so when they ran out of time
-  because the harness draws in software (`tooSlowInSoftware`), the setup is kept as skipped
+  fault; the bot is the harness's instrument. So once a step of the run has landed (never before
+  step 1), a look that finds a booting game with no play bot has it written once per run in a
+  session of its own ([botSetup.ts](../../apps/server/src/game/run/botSetup.ts)): a
+  `game-round.task.request` child of the chat's last finished turn (`completionWake: "never"`, so
+  it never wakes the chat, and its checkpoint is no build). The look waits on the game being busy,
+  caps each session, sends at most one fix-up session, and reports the outcome, which the run keeps
+  (`GameRun.botSetup`); its minutes extend the budget's end, so the person's budget buys steps only.
+  A failed setup leaves the skilled fact unmeasured and the run goes on. It decides only once the
+  idle and random-input tiers have played: they play the skilled tier's span, so when they ran out
+  of time because the harness draws in software (`tooSlowInSoftware`), the setup is kept as skipped
   instead. The kept setup point is the chat's next-turn base
   (`CheckpointService.nextTurnBaseRefForThread`), so the next turn's chat diff, like the rail,
   does not list the bot as its change.
@@ -591,7 +604,7 @@ batches renders because the pinned server gives each Blender command 180 s. The 
 A model left alone grades its own work, stops when it feels done, and says it tested things. The
 harness makes the facts true regardless of what the model says: every turn's build is played and
 measured by the harness's own bots (boots, the idle, masher and skilled tiers, liveness, response),
-and keep going undoes a step that made a watched fact worse and stops when steps stop landing
+and keep going undoes a step that broke the game's health and stops when steps stop landing
 changes. Taste stays with the person; the harness never judges it for them. Craft advice lives in the skill pack under `apps/server/templates/studio/` and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product.
 A game gets only its own engine's skill file (`three.md`, `godot-game.md`, `unity.md`), and the pack is
