@@ -324,7 +324,7 @@ const runFile = (command: string, argv: ReadonlyArray<string>) =>
   );
 
 /** The run video of a measured play, when its evidence is still on disk. */
-function videoOf(root: string, tier: GameBuildFacts["idle"]): string | null {
+function videoOf(root: string, tier: GameBuildFacts["masher"]): string | null {
   if (tier.status !== "measured" || tier.value.evidence === null) return null;
   const video = NodePath.join(root, tier.value.evidence, "run.mp4");
   return NodeFS.existsSync(video) ? video : null;
@@ -372,10 +372,10 @@ async function frames(video: string, shares: ReadonlyArray<number>, name: string
 
 /**
  * Three pictures of play from the facts' own plays: the random-input run first
- * (it moves), then no input, then the tester's bot. Early, middle and late.
+ * (it moves), then the play bot's. Early, middle and late.
  */
 async function screenshots(root: string, facts: GameBuildFacts, id: string) {
-  for (const tier of [facts.masher, facts.idle, facts.skilled]) {
+  for (const tier of [facts.masher, facts.skilled]) {
     const video = videoOf(root, tier);
     if (video === null || tier.status !== "measured") continue;
     const shots = await frames(video, [0.2, 0.55, 0.92], id);

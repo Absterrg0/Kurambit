@@ -105,7 +105,7 @@ const pass = (detail: string): Verdict => ({ result: "pass", detail });
 const fail = (detail: string): Verdict => ({ result: "fail", detail });
 const notMeasured = (detail: string): Verdict => ({ result: "not-measured", detail });
 
-type Tier = GameBuildFacts["idle"];
+type Tier = GameBuildFacts["masher"];
 
 const bootsVerdict = (facts: GameBuildFacts): Verdict =>
   facts.boots.status === "measured"
@@ -116,7 +116,6 @@ const bootsVerdict = (facts: GameBuildFacts): Verdict =>
 
 const endingVerdict = (facts: GameBuildFacts): Verdict => {
   const tiers: ReadonlyArray<readonly [string, Tier]> = [
-    ["no input", facts.idle],
     ["random input", facts.masher],
     ["tester's bot", facts.skilled],
   ];
