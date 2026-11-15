@@ -114,9 +114,13 @@ check that matters.
   silently lifted. It is a game file, so checkpoints carry it and a run's restore brings it back
   with the art (`restoredPaths`). `rig` names the skeleton made characters are conformed to; a
   pack the lock lists may still bring characters on its own rig with its own clips. How a game's
-  characters are made (library, Blender or Tripo) is the person's choice, kept in `game.json`
-  `characters` rather than the lock, so it can be set before the first turn writes one; the
-  export enforces it and the agent never changes it on its own.
+  models are made (code, Blender or generated) and whether the free library's models may come in
+  are the person's choice, kept in `game.json` (`characters`, `library`) rather than the lock, so
+  they can be set before the first turn writes one; the tools enforce them, and the agent changes
+  them only when the person asks (`game_models_route`, refused in keep-going steps). The code route
+  is written as no `characters` key, so an older install, which knows only `library`, `blender` and
+  `generated`, still opens the game; a game.json with no `library` key predates the switch and
+  keeps its library on (`gameModelChoice`).
 - Made characters are conformed, not retargeted: `game_blender_character` fits the standard
   armature to the body once, keeping the standard rest frames, so library clips play unchanged
   and a body off those frames is refused at export rather than playing broken. An asset ships
@@ -178,14 +182,16 @@ check that matters.
   The game tools an agent is listed follow from the same data: each declares in
   [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) what it needs of the
   engine (`engineCapabilities`, derived from the profile, empty for a parked engine) and whether a
-  chat lists it only when asked; the MCP auth middleware puts the thread's engine, whether this
-  machine has Blender and whether the thread is a play-bot setup session in the invocation, and
+  chat lists it only when asked; the MCP auth middleware puts the thread's engine, its model route,
+  whether this machine has Blender and whether the thread is a play-bot setup session in the
+  invocation, and
   `McpSchema.EnabledWhen` decides, which Effect's MCP core also applies to calls. A provider reads
   the list once per session, so nothing waits for a request to appear: what a chat uses only when
   the person asks stays reachable through `game_more`, which runs it through its own handler. The
-  Blender tools are listed whenever Blender is found, on every route: a first turn makes in Blender
-  the subject the library lacks, and a tool reached through `game_more` reaches the agent without
-  its schema. `game_more` is an image tool, so an asked-for look or move still arrives as pictures.
+  Blender tools are listed directly only on the Blender route, once Blender is found: its chats make
+  their models there, and a tool reached through `game_more` reaches the agent without its schema.
+  On code and generated they wait behind `game_more`, so those chats keep a small listing (the
+  listing budgets in `instructionBudget.test.ts` are per route). `game_more` is an image tool, so an asked-for look or move still arrives as pictures.
 - A game thread's provider session gets Kurambit's MCP server and the provider's built-in tools,
   never the person's own MCP servers, account connectors or synced account skills
   (`kurambitToolsOnly` on the turn input): they cost context on every call and could reach the
