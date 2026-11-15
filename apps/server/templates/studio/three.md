@@ -81,6 +81,9 @@ export function update(dt, ctx) {
 }
 ```
 
+A vehicle reads by its profile: the same camera with
+`{ angle: 0.7, lens: 24, frame: 0.33 }` settles to its side with a long lens.
+
 Top-down (the starter's roam, with `kenney-mini-dungeon`; low walls keep the
 characters in sight).
 

@@ -38,6 +38,11 @@
 //                                // raycasting a big terrain mesh as a blocker
 //   });
 //   cam.focus = foe.root;        // turns to keep this foe in frame; null lets go
+// For a vehicle, as a camera crew shoots one (any of these alone):
+//   followCamera3D(ctx, boat, { angle: 0.7, lens: 24, frame: 0.33, pitch: 0.1 });
+//   // angle: where it settles, in radians from straight behind (+ toward its right side), so
+//   // its profile shows; lens: the field of view in degrees (narrow is a long lens); frame: the
+//   // share of the view's width it fills, which sets the distance for that lens
 import * as THREE from "../vendor/three.module.js";
 
 const live = new Set();
@@ -139,8 +144,23 @@ export function followCamera3D(ctx, target, options = {}) {
     maxPitch = 1.1,
     radius = 0.3,
     ground = null,
+    angle = 0,
+    lens = null,
+    frame = null,
   } = options;
   const camera = ctx.camera;
+  if (lens !== null && camera.isPerspectiveCamera) {
+    camera.fov = lens;
+    camera.updateProjectionMatrix();
+  }
+  // Framed by its longest side across the view's width, at this lens.
+  const span = frame === null ? null : longestSide(target);
+  const framed = () => {
+    if (span === null || !camera.isPerspectiveCamera) return distance;
+    const across =
+      2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect);
+    return span / frame / (2 * Math.tan(across / 2));
+  };
   const ray = new THREE.Raycaster();
   const pivot = target.position.clone();
   const ahead = new THREE.Vector3();
@@ -154,7 +174,7 @@ export function followCamera3D(ctx, target, options = {}) {
   const to = new THREE.Vector3();
   const foeAt = new THREE.Vector3();
   let pitch = startPitch;
-  let length = distance;
+  let length = framed();
   let side = shoulder;
   let idle = 0;
   /** The first blocker hit from `from` toward `point`, as a distance; Infinity when clear. */
@@ -170,7 +190,7 @@ export function followCamera3D(ctx, target, options = {}) {
     camera,
     target,
     /** The view's heading around y; 0 looks down -z. Move the player relative to it. */
-    yaw: target.rotation.y + Math.PI,
+    yaw: target.rotation.y + Math.PI + angle,
     blockers,
     /** An Object3D or point to keep in frame (a foe), or null. */
     focus: null,
@@ -206,7 +226,7 @@ export function followCamera3D(ctx, target, options = {}) {
       } else if (idle > 1 && moved.lengthSq() > 0.5) {
         // Untouched for a moment and moving: swing behind the target's facing
         // (+z, as glTF models face, turned by rotation.y).
-        const behind = target.rotation.y + Math.PI;
+        const behind = target.rotation.y + Math.PI + angle;
         const turn = Math.atan2(Math.sin(behind - rig.yaw), Math.cos(behind - rig.yaw));
         rig.yaw += turn * ease(1.5, dt);
       }
@@ -238,7 +258,8 @@ export function followCamera3D(ctx, target, options = {}) {
       // Pulled in at once when blocked, eased back out when clear. The near
       // plane's corners are tested too: a thin post beside the line of sight
       // would otherwise fill the view.
-      let room = distance;
+      const reachOut = framed();
+      let room = reachOut;
       if (rig.blockers.length > 0) {
         up.crossVectors(right, back).normalize();
         const halfH = camera.isPerspectiveCamera
@@ -254,7 +275,7 @@ export function followCamera3D(ctx, target, options = {}) {
         ]) {
           goal
             .copy(look)
-            .addScaledVector(back, distance + radius)
+            .addScaledVector(back, reachOut + radius)
             .addScaledVector(right, u * halfW)
             .addScaledVector(up, v * halfH);
           const from = to
@@ -281,6 +302,14 @@ export function followCamera3D(ctx, target, options = {}) {
   live.add(rig);
   rig.update(1e-3);
   return rig;
+}
+
+/** The target's longest side in world units, from its bounds; 2 when it has none yet. */
+function longestSide(target) {
+  target.updateWorldMatrix(true, true);
+  const size = new THREE.Box3().setFromObject(target).getSize(new THREE.Vector3());
+  const most = Math.max(size.x, size.y, size.z);
+  return Number.isFinite(most) && most > 0.05 ? most : 2;
 }
 
 /** How tall the target stands, in world units, from its bounds; 2 when it has none yet. */
