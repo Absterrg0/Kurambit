@@ -427,9 +427,12 @@ export const GameCheckTool = Tool.make("game_check", {
   parameters: Schema.Struct({
     final: Schema.optionalKey(Schema.Boolean),
     critique: Schema.optionalKey(
-      Schema.String.check(Schema.isMaxLength(400)).annotate({
+      Schema.Struct({
+        major: Schema.Boolean,
+        biggest: Schema.String.check(Schema.isMaxLength(400)),
+      }).annotate({
         description:
-          "On a final check, when the person asked the game to match its reference picture: the biggest difference your critique still finds major, in one line, or none. Keep going takes its next step from it.",
+          "On a final check, when the person asked the game to match its reference picture: the biggest difference your critique of the frame against it finds, in one line, and whether it is still major. While it is, Keep going takes its next step from it.",
       }),
     ),
   }),

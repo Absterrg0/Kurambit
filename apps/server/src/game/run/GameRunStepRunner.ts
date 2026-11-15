@@ -36,7 +36,9 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 
 import { stepMessage } from "../../orchestration-v2/gameRun/decide.ts";
@@ -64,6 +66,13 @@ import { retrying } from "./retrying.ts";
 const FACTS_WAIT = "10 minutes";
 /** How many of the chat's latest replies the look reads for the newest `Next:` line. */
 const NEXT_LOOKBACK = 20;
+/** A final game_check's declaration about the reference, as the tool's input carries it. */
+const decodeCritique = Schema.decodeUnknownOption(
+  Schema.Struct({
+    final: Schema.optionalKey(Schema.Boolean),
+    critique: Schema.Struct({ major: Schema.Boolean, biggest: Schema.String }),
+  }),
+);
 
 /** A thread whose turn is running, queued or being captured keeps the game busy. */
 const BUSY: ReadonlySet<string> = new Set([
@@ -189,7 +198,8 @@ const make = Effect.gen(function* () {
 
   /**
    * What the chat's newest final game_check declared about the reference (its `critique` input):
-   * the biggest major difference left, "none", or null when no recent final check declared one.
+   * the biggest difference left while it is major, "none" once it is not, or null when no recent
+   * final check declared one.
    * Read from the call as the agent made it, so the step follows a typed declaration, never prose.
    */
   const referenceCritique = (threadId: ThreadId) =>
@@ -210,14 +220,14 @@ const make = Effect.gen(function* () {
           .flatMap((item) => {
             if (item.type !== "dynamic_tool" || !(item.toolName ?? "").endsWith("game_check"))
               return [];
-            const input = item.input as { readonly final?: unknown; readonly critique?: unknown };
-            return input?.final === true && typeof input.critique === "string"
-              ? [input.critique.trim()]
+            const declaration = decodeCritique(item.input);
+            return Option.isSome(declaration) && declaration.value.final === true
+              ? [declaration.value.critique]
               : [];
           })
           .at(-1);
-        if (declared === undefined || declared.length === 0) continue;
-        return /^none\.?$/i.test(declared) ? ("none" as const) : { text: declared.slice(0, 400) };
+        if (declared === undefined) continue;
+        return declared.major ? { text: declared.biggest.slice(0, 400) } : ("none" as const);
       }
       return null;
     });
