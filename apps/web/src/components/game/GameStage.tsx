@@ -1646,7 +1646,8 @@ function ThreadGameStage({
             }
           >
             <Text variant="meta" tone="default" truncate>
-              {playTarget?.label ?? folderName ?? "No builds yet"}
+              {/* The folder may hold no build while builds exist (the only one undone). */}
+              {playTarget?.label ?? folderName ?? (hasBuild ? "Builds" : "No builds yet")}
             </Text>
             <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
           </PopoverTrigger>
