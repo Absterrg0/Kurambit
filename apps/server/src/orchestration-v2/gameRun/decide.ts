@@ -1602,7 +1602,12 @@ const stepStart = (work: Work, command: Command<"game-run.step.start">) =>
   Result.flatMap(live(work, command.runId), (run) =>
     Result.flatMap(currentStep(work, run, command.stepId, command.attempt), (record) => {
       if (record.status === "running") return Result.succeed(NOTHING);
-      const started: GameRunStep = { ...record, status: "running", startedAt: work.iso };
+      const started: GameRunStep = {
+        ...record,
+        status: "running",
+        startedAt: work.iso,
+        ...(command.models === undefined ? {} : { models: command.models }),
+      };
       if (record.step.kind !== "turn") return only([stepEvent(work, started)]);
       const turn = record.step;
       return only(

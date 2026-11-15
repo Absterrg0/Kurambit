@@ -366,7 +366,7 @@ def character(params):
         has = {name_map.get(b.name, b.name) for b in body_arm.data.bones}
         missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
         if missing:
-            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_assets op blender_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
+            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_blender op asset_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
         own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
         # Its clips move the pelvis in the body's own units.
         unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z

@@ -36,7 +36,6 @@ import {
   type GameSummary,
   manifestProject,
 } from "@kurambit/contracts";
-import type { GameModelChoice } from "./gameStyle.ts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as GameOperations from "./GameOperations.ts";
@@ -164,23 +163,13 @@ export class GameProjectService extends Context.Service<
     ) => Effect.Effect<A, E | GameOperationError>;
     /**
      * The person's choice of how this game's models are made and whether the library is on,
-     * written into game.json; an omitted part stays as it is. Only the person makes it: the
-     * client's control, or the agent when they asked in chat.
+     * written into game.json; an omitted part stays as it is. The client's control reaches it
+     * through GameRunControl.setModelChoice; keep going reaches it to put a step's change back.
      */
     readonly setCharacterRoute: (
       threadId: ThreadId,
       choice: { readonly route?: GameCharacterRoute; readonly library?: boolean },
     ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
-    /**
-     * The model choice game.json held when a keep-going step's turn started on the thread, which
-     * the agent's art ops in that step hold it to. Kept in memory: after a restart a step's turn
-     * that was already sent has none, and nothing is refused for it.
-     */
-    readonly noteStepModelChoice: (
-      threadId: ThreadId,
-      choice: GameModelChoice,
-    ) => Effect.Effect<void>;
-    readonly stepModelChoice: (threadId: ThreadId) => Effect.Effect<GameModelChoice | undefined>;
     /** Between turns: the game's studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The manifest and the resolution the game plays at. */
@@ -704,12 +693,8 @@ const make = Effect.gen(function* () {
     return root;
   });
 
-  const stepChoices = new Map<ThreadId, GameModelChoice>();
   return GameProjectService.of({
     create,
-    noteStepModelChoice: (threadId, choice) =>
-      Effect.sync(() => void stepChoices.set(threadId, choice)),
-    stepModelChoice: (threadId) => Effect.sync(() => stepChoices.get(threadId)),
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
         [

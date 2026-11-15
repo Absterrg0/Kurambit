@@ -13,6 +13,7 @@
 import {
   CommandId,
   type GameOperationError,
+  type GameRunStepId,
   type GameRunStepResult,
   type GameRunTurnStep,
   type MessageId,
@@ -21,6 +22,7 @@ import {
   type ProjectId,
   type RunId,
   type ThreadId,
+  gameModelChoice,
   gameRunStepCommandId,
 } from "@kurambit/contracts";
 import { latestRootProviderFailure } from "@kurambit/shared/orchestrationV2ThreadError";
@@ -253,36 +255,79 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /** game.json's model choice now; null when it cannot be read, so nothing is held to it. */
+  const modelChoiceNow = (threadId: ThreadId) =>
+    projects.resolve(threadId).pipe(
+      Effect.flatMap(projects.read),
+      Effect.map(gameModelChoice),
+      Effect.orElseSucceed(() => null),
+    );
+
   /**
-   * The step starts with its turn. A start the run refuses (it ended, the step
-   * moved on) leaves a turn no step owns: it is stopped, so nothing edits the
-   * game for a run that is over.
+   * How models are made is the person's choice, so a step's turn never keeps a change to it:
+   * once the turn is over, game.json's characters and library go back to what the step recorded
+   * as its turn started. Read from the step's record, so it holds across a restart.
    */
-  const startStep = (located: Located, run: OrchestrationV2Run) =>
-    engine
-      .dispatch({
+  const putBackModelChoice = (threadId: ThreadId, stepId: GameRunStepId) =>
+    Effect.gen(function* () {
+      const { gameRunSteps } = yield* projections.getGameRunRecords(threadId, {
+        steps: [stepId],
+      });
+      const started = gameRunSteps.find((step) => step.id === stepId)?.models;
+      if (started === undefined) return;
+      const now = yield* modelChoiceNow(threadId);
+      if (now === null || (now.route === started.route && now.library === started.library)) return;
+      yield* projects.setCharacterRoute(threadId, started);
+      yield* Effect.logInfo("a keep-going step's change to the model choice was put back", {
+        threadId,
+        stepId,
+        from: now,
+        to: started,
+      });
+    }).pipe(
+      // Never what holds a step back from landing: the choice is logged as left changed.
+      Effect.catchCause((cause) =>
+        Effect.logWarning("a keep-going step's model choice could not be put back", {
+          threadId,
+          stepId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+
+  /**
+   * The step starts with its turn, recording game.json's model choice as it starts. A start the
+   * run refuses (it ended, the step moved on) leaves a turn no step owns: it is stopped, so
+   * nothing edits the game for a run that is over. A start sent only as the turn lands records
+   * none: the folder is already the turn's.
+   */
+  const startStep = (located: Located, run: OrchestrationV2Run, recordChoice: boolean) =>
+    Effect.gen(function* () {
+      const models = recordChoice ? yield* modelChoiceNow(located.run.threadId) : null;
+      return yield* engine.dispatch({
         type: "game-run.step.start",
         commandId: gameRunStepCommandId(located.record.id, located.record.attempt, "start"),
         threadId: located.run.threadId,
         runId: located.run.id,
         stepId: located.record.id,
         attempt: located.record.attempt,
-      })
-      .pipe(
-        Effect.asVoid,
-        Effect.catchTags({
-          OrchestratorGameRunRefusedError: () =>
-            isActive(run)
-              ? interrupt(
-                  located.run.threadId,
-                  run,
-                  "orphan",
-                  "Keep going moved on before this step's turn started.",
-                )
-              : Effect.void,
-          OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
-        }),
-      );
+        ...(models === null ? {} : { models }),
+      });
+    }).pipe(
+      Effect.asVoid,
+      Effect.catchTags({
+        OrchestratorGameRunRefusedError: () =>
+          isActive(run)
+            ? interrupt(
+                located.run.threadId,
+                run,
+                "orphan",
+                "Keep going moved on before this step's turn started.",
+              )
+            : Effect.void,
+        OrchestratorCommandPreviouslyRejectedError: () => Effect.void,
+      }),
+    );
 
   const tokensOf = (threadId: ThreadId, chain: ReadonlyArray<OrchestrationV2Run>) =>
     Effect.map(threads.getThreadRecords(threadId, ["attempts", "providerTurns"]), (records) =>
@@ -325,7 +370,8 @@ const make = Effect.gen(function* () {
       const attempt = located.record.attempt;
       // A turn that ran lands as started: the captured steer it carried is spent.
       if (located.record.status === "planned" && chain.some((run) => run.startedAt !== null))
-        yield* startStep(located, latest);
+        yield* startStep(located, latest, false);
+      yield* putBackModelChoice(threadId, stepId);
       let failed = "its turn failed";
       if (latest.status === "failed") {
         const { turnItems } = yield* threads.getThreadRecords(threadId, ["turnItems"], {
@@ -423,7 +469,7 @@ const make = Effect.gen(function* () {
         case "wait":
           return;
         case "start":
-          return yield* startStep(located, move.run);
+          return yield* startStep(located, move.run, true);
         case "cancel":
           yield* refusedOnly(
             engine.dispatch({
@@ -477,6 +523,8 @@ const make = Effect.gen(function* () {
           // it is stopped, so nothing edits the game for a run that is over.
           if (isActive(run) && run.status !== "waiting")
             yield* interrupt(threadId, run, "orphan", "Keep going stopped; this step's turn ends.");
+          // Once it is over, its change to the model choice goes too, as a landed turn's does.
+          if (!isActive(run)) yield* putBackModelChoice(threadId, turn.stepId);
         }),
       ).pipe(
         Effect.catchCause((cause) =>

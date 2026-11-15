@@ -6,8 +6,7 @@ import { GameModelMeasure, GameModelRefusal } from "./gameModel.ts";
 
 export const GameBlenderCodeInput = Schema.Struct({
   code: Schema.NonEmptyString.check(Schema.isMaxLength(20_000)).annotate({
-    description:
-      "bpy Python. Relative paths resolve from the game root, and ~ is the live Blender's own home, not yours; print every path you write. A Python error fails the call with its traceback.",
+    description: "bpy Python; relative paths are from the game root.",
   }),
 });
 export type GameBlenderCodeInput = typeof GameBlenderCodeInput.Type;

@@ -62,6 +62,7 @@ import { GameRunProfile } from "./gameRun.ts";
 import {
   GameRun,
   GameRunId,
+  GameRunModelChoice,
   GameRunRound,
   GameRunStep,
   GameRunStepId,
@@ -3092,6 +3093,8 @@ export const OrchestrationV2GameRunCommand = Schema.Union([
     roleThreadId: Schema.optional(ThreadId),
     /** The thread the role ran on before: a deleted or broken one is replaced by a fresh one. */
     replaces: Schema.optional(ThreadId),
+    /** A turn step's: game.json's model choice as its turn started (GameRunStep.models). */
+    models: Schema.optionalKey(GameRunModelChoice),
   }),
   Schema.Struct({
     type: Schema.Literal("game-run.step.complete"),

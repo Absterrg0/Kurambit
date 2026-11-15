@@ -1,6 +1,7 @@
 import {
   type AuthMcpClientAccess,
   type EnvironmentId,
+  type GameCharacterRoute,
   type GameEngineId,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
@@ -49,6 +50,11 @@ export interface McpInvocationScope {
    * retired game tool is callable only by it, so it answers with where its work went.
    */
   readonly calledTool?: string;
+  /** How the calling thread's game makes its models and whether its library is on; null outside a game. */
+  readonly gameModels?: {
+    readonly route: GameCharacterRoute;
+    readonly library: boolean;
+  } | null;
   /** Why this machine has no Blender the game's tools can run, or null when it has one (or the engine uses none). */
   readonly blenderMissing?: string | null;
   readonly capabilities: ReadonlySet<McpCapability>;

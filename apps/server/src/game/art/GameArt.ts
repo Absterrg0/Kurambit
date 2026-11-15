@@ -828,7 +828,7 @@ const make = Effect.gen(function* () {
       const joints = (doc.skins ?? []).reduce((sum, skin) => sum + (skin.joints ?? []).length, 0);
       if ((doc.skins ?? []).length > 0)
         return yield* refuse(
-          `is already rigged (${joints} joints): rigging it again would replace its skeleton. Keep its rig: game_assets op blender_import brings a library model in with its own rig and clips, and a rigged file already in the game is used as it is.`,
+          `is already rigged (${joints} joints): rigging it again would replace its skeleton. Keep its rig: game_blender op asset_import brings a library model in with its own rig and clips, and a rigged file already in the game is used as it is.`,
         );
       return absolute;
     });
@@ -1454,7 +1454,7 @@ const make = Effect.gen(function* () {
       return " Next: load it in the game from where it is (game_assets op import first where the engine has an import step).";
     return g.lane === "character"
       ? ` Next: game_blender op character with body {game: "${model}"}.`
-      : ` Next: game_assets op blender_import with source "generated" and path "${model}".`;
+      : ` Next: game_blender op asset_import with source "generated" and path "${model}".`;
   };
   const refusedText = (g: GameGeneration) =>
     (g.refused ?? []).length === 0

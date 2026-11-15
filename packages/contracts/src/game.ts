@@ -546,14 +546,12 @@ const GamePointerPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number }
 export const GamePlaytestStep = Schema.Union([
   Schema.Struct({
     press: Schema.String.annotate({
-      description:
-        'Physical browser key to press, such as "Enter", "Space", "ArrowLeft", "w" or "F1" — not a Godot InputMap action name.',
+      description: 'A browser key name ("Enter", "w", "ArrowLeft").',
     }),
   }),
   Schema.Struct({
     hold: Schema.String.annotate({
-      description:
-        'Physical browser key to hold, such as "Space" or "ArrowRight" — not a Godot InputMap action name.',
+      description: "A browser key name.",
     }),
     holdMs: Schema.Number,
   }),
@@ -563,36 +561,32 @@ export const GamePlaytestStep = Schema.Union([
   }),
   Schema.Struct({
     key: Schema.String.annotate({
-      description:
-        'Physical browser key to hold while playing, such as "ArrowUp", "w", "Space" or "F1" — not a Godot InputMap action name.',
+      description: "A browser key name.",
     }),
-    holdMs: Schema.Number.annotate({ description: "Hold the key for this long." }),
+    holdMs: Schema.Number,
   }),
   Schema.Struct({
     keys: Schema.Array(Schema.String).annotate({
-      description:
-        'Physical browser keys to hold at the same time, such as ["Shift", "w"] for a running jump or ["w", "Space"] — not Godot InputMap action names.',
+      description: "Browser key names, held together.",
     }),
-    holdMs: Schema.Number.annotate({ description: "Hold every key for this long." }),
+    holdMs: Schema.Number,
   }),
-  Schema.Struct({ waitMs: Schema.Number.annotate({ description: "Wait before the next step." }) }),
+  Schema.Struct({ waitMs: Schema.Number }),
   Schema.Struct({
     x: Schema.optionalKey(Schema.Number),
     y: Schema.optionalKey(Schema.Number),
     click: Schema.Literals(["left", "middle", "right"]).annotate({
-      description:
-        "Click this mouse button at the centre of the game canvas. Web games need a click before they can capture the pointer, and menu buttons need a click to press them.",
+      description: "A mouse button, clicked at x, y or the canvas centre.",
     }),
   }),
   Schema.Struct({
     mouseMove: Schema.Struct({ dx: Schema.Number, dy: Schema.Number }).annotate({
-      description:
-        "Move the pointer by dx/dy pixels from its current position, for mouse-look and camera controls.",
+      description: "A pointer move, in pixels.",
     }),
   }),
   Schema.Struct({
     screenshot: Schema.String.check(Schema.isMaxLength(80)).annotate({
-      description: "Capture a frame mid-sequence and label it, for evidence between steps.",
+      description: "A label for a frame taken here.",
     }),
   }),
 ]);

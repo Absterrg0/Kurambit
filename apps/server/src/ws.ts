@@ -1857,7 +1857,7 @@ const layerWsRpc = (
         [WS_METHODS.gameToolchainInstall]: ({ tool }) => gameToolchain.install(tool),
         [WS_METHODS.gameToolchainRemove]: ({ tool }) => gameToolchain.remove(tool),
         [WS_METHODS.gameSetCharacterRoute]: ({ threadId, ...choice }) =>
-          gameProjects.setCharacterRoute(threadId, choice),
+          gameRun.setModelChoice(threadId, choice),
         [WS_METHODS.gameGenerations]: ({ threadId }) => gameArt.list(threadId),
         [WS_METHODS.gameChooseGeneration]: ({ threadId, id, candidate }) =>
           gameArt.choose(threadId, id, candidate),

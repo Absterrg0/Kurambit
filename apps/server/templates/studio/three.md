@@ -44,5 +44,6 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
    GPU 9 ms at 0.8× of 1280×720"): a low 1% or a small scale is a reason to
    bake the level's shadow, trim triangles or drop a pass. "Not measured"
    because the harness drew in software is Kurambit's machine, not your game.
-8. When you play with `game_play` ops `start`, `act` and `close`, send real keys (`"Enter"`, `"w"`, `"ArrowLeft"`); the
-   page opens as a player opens it, on your title when the game has one.
+8. When you play with `game_play` ops `start`, `act` and `close`, send real keys (`"Enter"`, `"w"`, `"ArrowLeft"`), and a click
+   before the game can capture the pointer; the page opens as a player opens
+   it, on your title when the game has one.

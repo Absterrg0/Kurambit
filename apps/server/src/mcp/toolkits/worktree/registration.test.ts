@@ -64,7 +64,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(GameSavedMediaService.GameSavedMediaService)({}),
   Layer.mock(GameExplore.GameExplore)({}),
   Layer.mock(GameBot.GameBot)({}),
-  // Every thread here works in a three.js game on the library route, except one that is no
+  // Every thread here works in a three.js game made in code with the library off, except one that is no
   // game and one whose person chose to make characters in Blender.
   Layer.mock(GameProjectService.GameProjectService)({
     resolve: (threadId) =>
@@ -80,6 +80,7 @@ const layerStubServices = Layer.mergeAll(
     read: (root) =>
       Effect.succeed({
         engine: { name: "three", version: "0" },
+        library: false,
         ...(root === "/games/blender" ? { characters: "blender" } : {}),
       } as never),
   }),
@@ -220,23 +221,17 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("kurambit_worktree_status");
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
-      // A three.js chat lists the six game tools from its first turn, whatever its model route.
-      const six = [
-        "game_assets",
-        "game_blender",
-        "game_builds",
-        "game_check",
-        "game_keep_going",
-        "game_play",
-      ];
-      expect(toolNames.filter((name) => name.startsWith("game_")).toSorted()).toEqual(six);
+      // A three.js chat lists its game tools from its first turn; game_blender only where the
+      // person's model choice makes models in Blender.
+      const five = ["game_assets", "game_builds", "game_check", "game_keep_going", "game_play"];
+      expect(toolNames.filter((name) => name.startsWith("game_")).toSorted()).toEqual(five);
       const blender = yield* listTools(blenderThread);
       expect(
         blender
           .map((tool) => tool.name)
           .filter((name) => name.startsWith("game_"))
           .toSorted(),
-      ).toEqual(six);
+      ).toEqual([...five, "game_blender"].toSorted());
       const noGame = (yield* listTools(noGameThread)).map((tool) => tool.name);
       expect(noGame.filter((name) => name.startsWith("game_"))).toEqual([]);
 

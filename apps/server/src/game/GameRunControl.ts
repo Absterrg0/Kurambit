@@ -20,6 +20,9 @@ import {
   type GameStepVerdict,
   GameOperationError,
   GameRunErrorReason,
+  type GameCharacterRoute,
+  type GameRunModelChoice,
+  type GameSetCharacterRouteResult,
   type RunId,
   ThreadId,
 } from "@kurambit/contracts";
@@ -101,10 +104,21 @@ type Service = {
   /** The keep-going step each turn of this chat was, by its T3 run. */
   readonly steps: (threadId: ThreadId) => Effect.Effect<ReadonlyMap<RunId, GameRunStepMark>>;
   /**
-   * Whether the chat's agent is working a keep-going step now (a step turn, bot setup), not a
-   * turn the person started: such a turn may not make the person's choices. Unreadable: true.
+   * The model choice the game's keep-going step turn started under, while one is at work; null
+   * when none is. Read from the step's record (GameRunStep.models), so it holds across a restart.
    */
-  readonly stepInFlight: (threadId: ThreadId) => Effect.Effect<boolean>;
+  readonly stepModelChoice: (
+    threadId: ThreadId,
+  ) => Effect.Effect<GameRunModelChoice | null, GameOperationError>;
+  /**
+   * The person's choice of how the game's models are made (the Game panel). Refused while a
+   * keep-going step turn is at work: the step's end puts game.json's choice back to what it
+   * started under, which would undo the person's change.
+   */
+  readonly setModelChoice: (
+    threadId: ThreadId,
+    choice: { readonly route?: GameCharacterRoute; readonly library?: boolean },
+  ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
 };
 
 export class GameRunControl extends Context.Service<GameRunControl, Service>()(
@@ -529,23 +543,50 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  const stepInFlight = (threadId: ThreadId) =>
-    projections.getGameRunRecords(threadId, { steps: "in-flight" }).pipe(
-      Effect.map((records) =>
-        records.gameRuns.some(
-          (run) => run.status !== "ended" && run.threadId === threadId && run.inFlight !== null,
-        ),
+  const stepModelChoice: Service["stepModelChoice"] = (threadId) =>
+    Effect.gen(function* () {
+      const { projectRun } = yield* resolveGame(threadId);
+      if (projectRun === null || projectRun.status === "ended" || projectRun.inFlight === null)
+        return null;
+      const { gameRunSteps } = yield* projections.getGameRunRecords(projectRun.threadId, {
+        steps: "in-flight",
+      });
+      const step = gameRunSteps.find(
+        (each) => each.runId === projectRun.id && each.seq === projectRun.inFlight,
+      );
+      return step?.step.kind === "turn" && step.status === "running" ? (step.models ?? null) : null;
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GameOperationError({
+            operation: "model-choice",
+            path: threadId,
+            reason: "io",
+            detail: `Keep going's records could not be read: ${cause.message}`,
+          }),
       ),
-      // When it cannot be read, the choice waits for the person.
-      Effect.orElseSucceed(() => true),
     );
+
+  const setModelChoice: Service["setModelChoice"] = (threadId, choice) =>
+    Effect.gen(function* () {
+      if ((yield* stepModelChoice(threadId)) !== null)
+        return yield* new GameOperationError({
+          operation: "set-characters",
+          path: "game.json",
+          reason: "busy",
+          detail:
+            "Keep going is working a step on this game. How models are made changes once the step ends, or turn Keep going off first.",
+        });
+      return yield* projects.setCharacterRoute(threadId, choice);
+    });
   return GameRunControl.of({
     set,
     status,
     decide,
     steer,
     steps,
-    stepInFlight,
+    stepModelChoice,
+    setModelChoice,
   });
 });
 

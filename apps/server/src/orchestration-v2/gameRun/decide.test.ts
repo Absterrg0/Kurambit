@@ -195,6 +195,26 @@ describe("a keep-going run", () => {
     ).toBe("no-turn-loop");
   });
 
+  // The person's model choice a step's turn started under is put back from this record when the
+  // turn ends, so it must be on the step itself, not in a process's memory.
+  it("records the model choice a step's turn started under on the step", () => {
+    const store = new Store();
+    store.start("autopilot", 60);
+    store.complete(look());
+    const turnStep = store.step();
+    store.ok({
+      type: "game-run.step.start",
+      runId: store.run.id,
+      stepId: turnStep.id,
+      attempt: 1,
+      models: { route: "code", library: false },
+    });
+    expect(store.step()).toMatchObject({
+      status: "running",
+      models: { route: "code", library: false },
+    });
+  });
+
   it("goes look, turn, judge, undo, record, and proposes the retry next", () => {
     const store = new Store();
     store.start("autopilot", 60);

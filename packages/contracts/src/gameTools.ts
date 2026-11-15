@@ -39,8 +39,7 @@ const Nothing = Schema.Record(Schema.String, Schema.Never);
 
 const commandId = Schema.optionalKey(
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)).annotate({
-    description:
-      "Any id of yours for this request. Pass the same one when you retry a call that may have gone through, so it applies once.",
+    description: "Your id for this request: a retry with the same id applies once.",
   }),
 );
 
@@ -56,7 +55,7 @@ export const GameCheckToolInput = Schema.Struct({
           biggest: Schema.String.check(Schema.isMaxLength(400)),
         }).annotate({
           description:
-            "When the person asked the game to match its reference picture: the biggest difference your critique of the frame against it finds, in one line, and whether it is still major. While it is, Keep going takes its next step from it.",
+            "The biggest difference from the reference picture left, and whether it is major.",
         }),
       ),
     }),
@@ -90,8 +89,6 @@ export const GameAssetsToolInput = Schema.Struct({
   wait: op(GameGenerateWaitInput),
   image_edit: op(GameImageEditInput),
   import: op(Nothing),
-  blender_search: op(GameBlenderAssetsSearchInput),
-  blender_import: op(GameBlenderAssetsImportInput),
 });
 export type GameAssetsToolInput = typeof GameAssetsToolInput.Type;
 
@@ -105,6 +102,8 @@ export const GameBlenderToolInput = Schema.Struct({
   carve: op(GameBlenderCarveInput),
   sprites: op(GameBlenderRenderSpritesInput),
   animate: op(GameAnimateInput),
+  asset_search: op(GameBlenderAssetsSearchInput),
+  asset_import: op(GameBlenderAssetsImportInput),
 });
 export type GameBlenderToolInput = typeof GameBlenderToolInput.Type;
 

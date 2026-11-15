@@ -108,9 +108,12 @@ check that matters.
   models are made (code, Blender or generated) and whether the free library's models may come in
   are the person's choice, kept in `game.json` (`characters`, `library`) rather than STYLE.json, so
   they can be set before the first turn writes one; the tools enforce them, and the agent changes
-  them in `game.json` only when the person asks. A keep-going step is no one asking: while one
-  runs, its art and Blender ops refuse a `game.json` whose choice moved since the step started
-  (`GameProjectService.stepModelChoice`, kept in memory, so a restart mid-step forgets it). The code route
+  them in `game.json` only when the person asks. A keep-going step is no one asking: its
+  `game-run.step.start` records the choice its turn started under on the step
+  (`GameRunStep.models`), its art and Blender ops refuse a `game.json` whose choice has moved, and
+  when its turn is over `GameRunTurnReactor` puts the two fields back, read from the record so a
+  restart changes nothing. The Game panel's change is refused while a step turn works
+  (`GameRunControl.setModelChoice`), since the step's end would undo it. The code route
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and
   `generated`, still opens the game; a game.json with no `library` key predates the switch and
   keeps its library on (`gameModelChoice`).
@@ -177,9 +180,10 @@ check that matters.
   key rather than a tagged union because providers refuse a tool input that is not one object at
   the top. [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) says what each op
   needs of the engine (`engineCapabilities`, derived from the profile, empty for a parked engine).
-  A tool is listed from a game thread's first turn whenever its engine runs any of its ops: a
-  provider reads the list once per session and keeps the schemas it loaded first, so the listing
-  never changes with the model route, a missing Blender or what the person asked. An op the game
+  A tool is listed from a game thread's first turn whenever the game runs any of its ops: its
+  engine, and for `game_blender` the person's model choice (the routes that make models in
+  Blender: blender, generated and code with the library on), so a code chat never reads Blender's
+  schemas. A missing Blender never changes the listing. An op the game
   or machine cannot run is refused when called, with why. A retired tool name stays registered,
   never listed: the MCP auth middleware reads a `tools/call`'s name from the request body
   (`calledTool`), only that call can see the retired name, and it answers with the tool and op

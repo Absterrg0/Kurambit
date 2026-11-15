@@ -3,8 +3,10 @@ import {
   GameAssetsToolkit,
   GameBlenderTool,
   GameBlenderToolkit,
+  GameBuildsTool,
   GameCheckTool,
   GameCheckToolkit,
+  GameKeepGoingTool,
   GamePlayTool,
   GamePlayToolkit,
   GameToolkit,
@@ -29,7 +31,11 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { OrchestratorMcpFailure, PreviewAutomationError } from "@kurambit/contracts";
+import {
+  gameModelChoice,
+  OrchestratorMcpFailure,
+  PreviewAutomationError,
+} from "@kurambit/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -187,8 +193,8 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: !looksLikeProviderToken(token),
       });
     }
-    // Which game tools a thread sees follows its game's engine, the person's character route
-    // and whether this machine has Blender (toolkits/game/placement.ts).
+    // Which game tools a thread sees follows its game's engine and the person's model choice;
+    // whether this machine has Blender decides only what its ops refuse (toolkits/game/placement.ts).
     const manifest =
       invocation.thread === undefined
         ? null
@@ -217,6 +223,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
         gameEngine,
+        gameModels: manifest === null ? null : gameModelChoice(manifest),
         blenderMissing,
         ...(calledTool === undefined ? {} : { calledTool }),
       }),
@@ -678,6 +685,83 @@ const withoutImageTransport = (payload: unknown) => {
   return parameters;
 };
 
+const NON_FINITE = ["Infinity", "-Infinity", "NaN"];
+/** Guards the server enforces on every call, not what a field is; a breach is refused with the bound. */
+const GUARDS = new Set(["minLength", "maxLength"]);
+const SAFE_INTEGER = new Set([Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER]);
+
+const isNonFinite = (branch: unknown) =>
+  typeof branch === "object" &&
+  branch !== null &&
+  (branch as { type?: unknown }).type === "string" &&
+  JSON.stringify((branch as { enum?: unknown }).enum) === JSON.stringify(NON_FINITE);
+
+/**
+ * A tool's input schema as an agent reads it, every call, without what Effect's JSON Schema adds
+ * that says nothing to the agent: `additionalProperties: true` on each object (JSON Schema's
+ * default), every number's "Infinity", "-Infinity" and "NaN" strings (no input means them), an
+ * Int's safe-integer bounds, a union nested in a union, and strings' length guards. The tool's
+ * own decode still applies every one of them.
+ */
+const compactJsonSchema = <A>(schema: A): A => {
+  if (Array.isArray(schema)) return schema.map(compactJsonSchema) as A;
+  if (schema === null || typeof schema !== "object") return schema;
+  const { additionalProperties, anyOf, ...rest } = schema as Record<string, unknown>;
+  const branches = Array.isArray(anyOf) ? anyOf : undefined;
+  const number =
+    branches?.length === 2 && isNonFinite(branches[1]) ? (branches[0] as object) : undefined;
+  // A branch that is only a union of its own joins its parent's branches.
+  const flat = branches?.flatMap((branch) => {
+    const keys = typeof branch === "object" && branch !== null ? Object.keys(branch) : [];
+    return keys.length === 1 && keys[0] === "anyOf"
+      ? (branch as { anyOf: Array<unknown> }).anyOf
+      : [branch];
+  });
+  const kept = Object.entries({
+    ...(number ?? {}),
+    ...rest,
+    ...(flat === undefined || number !== undefined ? {} : { anyOf: flat }),
+    ...(additionalProperties === true || additionalProperties === undefined
+      ? {}
+      : { additionalProperties }),
+  }).filter(
+    ([key, value]) =>
+      !GUARDS.has(key) &&
+      !((key === "minimum" || key === "maximum") && SAFE_INTEGER.has(value as number)),
+  );
+  return Object.fromEntries(kept.map(([key, value]) => [key, compactJsonSchema(value)])) as A;
+};
+
+/**
+ * The input schema an image tool is published with: its own, compacted, and the `includeImage`
+ * switch unless it answers no pictures. Exported so the listing budget measures what agents read.
+ */
+export const publishedInputSchema = (
+  tool: Tool.Any,
+  options: { readonly defaultIncludeImage: boolean; readonly images?: boolean | undefined },
+) => {
+  const parametersSchema = compactJsonSchema(Tool.getJsonSchema(tool));
+  return {
+    ...parametersSchema,
+    properties: {
+      ...(parametersSchema.properties !== null && typeof parametersSchema.properties === "object"
+        ? parametersSchema.properties
+        : {}),
+      ...(options.images === false
+        ? {}
+        : {
+            includeImage: {
+              type: "boolean",
+              description: options.defaultIncludeImage
+                ? "false: answer without pictures."
+                : "Attach the saved frames inline. Defaults to false; read selected frame paths with file/image tools to avoid accumulating entire sequences in context.",
+            },
+          }),
+    },
+    ...(Tool.getStrictMode(tool) === true ? { additionalProperties: false } : {}),
+  };
+};
+
 /**
  * `McpServer.toolkit` serializes every result as JSON text, which is the wrong
  * shape for a screenshot: the model needs image content.
@@ -700,7 +784,11 @@ const registerImageTool = <T extends Tool.Any, E, R>(
   ) => Effect.Effect<ImageToolHandleResult, E, McpInvocationContext.McpInvocationContext>,
   operation: string,
   failureText: string | ((error: E) => string),
-  options?: { readonly defaultIncludeImage?: boolean },
+  options?: {
+    readonly defaultIncludeImage?: boolean;
+    /** False for a tool that answers no pictures: it is offered no `includeImage`. */
+    readonly images?: boolean;
+  },
 ) =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
@@ -710,22 +798,10 @@ const registerImageTool = <T extends Tool.Any, E, R>(
       onExcessProperty: strict ? "error" : "ignore",
       errors: "all",
     };
-    const parametersSchema = Tool.getJsonSchema(tool);
-    const inputSchema = {
-      ...parametersSchema,
-      properties: {
-        ...(parametersSchema.properties !== null && typeof parametersSchema.properties === "object"
-          ? parametersSchema.properties
-          : {}),
-        includeImage: {
-          type: "boolean",
-          description: defaultIncludeImage
-            ? "Attach image content. Defaults to true; false returns metadata only."
-            : "Attach the saved frames inline. Defaults to false; read selected frame paths with file/image tools to avoid accumulating entire sequences in context.",
-        },
-      },
-      ...(strict ? { additionalProperties: false } : {}),
-    };
+    const inputSchema = publishedInputSchema(tool, {
+      defaultIncludeImage,
+      images: options?.images,
+    });
     yield* server.addTool({
       tool: new McpSchema.Tool({
         name: tool.name,
@@ -830,10 +906,14 @@ const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 const registrationServices = <T extends Tool.Any>(_tool: T) =>
   Effect.context<Exclude<Tool.HandlerServices<T>, McpInvocationContext.McpInvocationContext>>();
 
-/** A game tool whose answers carry pictures, registered so they become image content. */
+/**
+ * A game tool, registered so its pictures become image content and its schema is published
+ * compacted (compactJsonSchema); `images` false for one that answers none.
+ */
 const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
   tool: Tools[keyof Tools],
   toolkit: Toolkit.Toolkit<Tools>,
+  images = true,
 ) =>
   Effect.gen(function* () {
     const services = yield* registrationServices(tool);
@@ -847,6 +927,7 @@ const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
       (effect) => effect.pipe(Effect.provideContext(services)),
       tool.name,
       (error) => (error instanceof Error ? error.message : `${tool.name} failed.`),
+      { images },
     );
   });
 
@@ -1009,7 +1090,14 @@ const layerGameToolkit = Layer.mergeAll(
     registerGameImageTool(GameUnityTool, GameUnityToolkit),
     GameHandlers.layerUnity,
   ),
-  toolkitRegistration(GameToolkit, GameHandlers.layer),
+  imageToolRegistration(
+    registerGameImageTool(GameBuildsTool, GameToolkit, false),
+    GameHandlers.layer,
+  ),
+  imageToolRegistration(
+    registerGameImageTool(GameKeepGoingTool, GameToolkit, false),
+    GameHandlers.layer,
+  ),
   Layer.effectDiscard(registerRetiredGameTools),
 );
 

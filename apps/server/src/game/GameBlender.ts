@@ -1687,7 +1687,7 @@ const make = Effect.gen(function* () {
         }
         const row = yield* art.delivered(root, source.id, source.path);
         if (row === null || row.generation.lane !== "creature")
-          return `${name} names a creature generation (kurambit_generation), but no finished creature generation of this game delivered it. Bring the creature that game_assets op generate made in with game_assets op blender_import (source generated), or take the generation stamp off a model you rigged and animated yourself.`;
+          return `${name} names a creature generation (kurambit_generation), but no finished creature generation of this game delivered it. Bring the creature that game_assets op generate made in with game_blender op asset_import (source generated), or take the generation stamp off a model you rigged and animated yourself.`;
       }
       return null;
     });
@@ -2420,7 +2420,7 @@ const make = Effect.gen(function* () {
               if (generated.source.lane !== "character")
                 return yield* fail(
                   "invalid-input",
-                  `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_assets op blender_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
+                  `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_blender op asset_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
                 );
               const refused = lockCharacterRouteRefusal(
                 "generated-body",
@@ -2559,7 +2559,7 @@ const make = Effect.gen(function* () {
                 "blender-assets-import",
                 root,
                 "invalid-input",
-                `source ${input.source} takes id: the asset id game_assets op blender_search listed.`,
+                `source ${input.source} takes id: the asset id game_blender op asset_search listed.`,
               );
             const source = input.source;
             // A library file is fetched and checked against its pin before the live scene changes.

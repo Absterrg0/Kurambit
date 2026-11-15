@@ -5,13 +5,11 @@ import { GameCheckIssue } from "./game.ts";
 
 export const GameUnityEditInput = Schema.Struct({
   tool: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)).annotate({
-    description:
-      "One editor tool from game_unity op tools, such as a gameobject or component tool. Builds, tests, packages and editor lifecycle are not reachable here.",
+    description: "An editing tool's name, as op tools lists it.",
   }),
   arguments: Schema.optionalKey(
     Schema.Record(Schema.String, Schema.Unknown).annotate({
-      description:
-        "The tool's arguments, exactly as game_unity op tools describes its input schema.",
+      description: "Its arguments, by its schema.",
     }),
   ),
 });
@@ -19,8 +17,7 @@ export type GameUnityEditInput = typeof GameUnityEditInput.Type;
 
 export const GameUnityEvalInput = Schema.Struct({
   code: Schema.NonEmptyString.check(Schema.isMaxLength(20_000)).annotate({
-    description:
-      "C# statements run on the editor's main thread; `return <value>;` sends a value back. UnityEngine and UnityEditor are available.",
+    description: "C# for the editor's main thread; `return <value>;` answers.",
   }),
 });
 export type GameUnityEvalInput = typeof GameUnityEvalInput.Type;

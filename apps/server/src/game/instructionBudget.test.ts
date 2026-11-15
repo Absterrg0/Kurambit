@@ -23,6 +23,7 @@ import {
   GameUnityTool,
 } from "../mcp/toolkits/game/tools.ts";
 import { firstTurnMessage, gameTurnRules, scaffoldFiles } from "./scaffold.ts";
+import { publishedInputSchema } from "../mcp/McpHttpServer.ts";
 
 /** The model choices whose first turns differ. */
 const CHOICES = {
@@ -44,11 +45,17 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
   generated: 17_000,
 };
 /**
- * Bytes of tool descriptions a three.js chat is handed every turn, whatever its model route: the
- * six game tools, each listed from the first turn (4,355 on 2026-11-16, from 12,428 over twelve
- * tools before they took ops), with about 10% over (the target was 6,000).
+ * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input
+ * schemas as published, by model choice. Code with the library off lists five tools (no Blender);
+ * the routes that make models in Blender list game_blender too. Targets set 2026-11-16 at 10,000
+ * and 18,000 (code read 18,398 over twelve tools before the tools took ops, Blender 34,611).
  */
-const LISTED_TOOLS_BUDGET = 4_800;
+const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", number>> = {
+  code: 10_000,
+  "code with the library": 18_000,
+  generated: 18_000,
+  blender: 18_000,
+};
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");
@@ -101,6 +108,9 @@ const firstTurnBytes = (choice: (typeof CHOICES)[keyof typeof CHOICES]) => {
   };
 };
 
+/** Registered without the `includeImage` switch: they answer no pictures (McpHttpServer). */
+const NO_IMAGES = new Set(Object.keys(GameToolkit.tools));
+
 const GAME_TOOLS = [
   ...Object.values(GameToolkit.tools),
   GameCheckTool,
@@ -110,8 +120,8 @@ const GAME_TOOLS = [
   GameUnityTool,
 ];
 
-/** Each tool the MCP server would list for a three.js chat, by its own EnabledWhen. */
-const listedTools = () =>
+/** Each tool the MCP server would list for a three.js chat with this model choice, by its own EnabledWhen. */
+const listedTools = (models: { readonly route: GameCharacterRoute; readonly library: boolean }) =>
   Effect.sync(() =>
     GAME_TOOLS.filter(
       (tool) =>
@@ -122,11 +132,24 @@ const listedTools = () =>
           protocolVersion: "2025-06-18",
           capabilities: {},
         }) ?? true,
-    ).map((tool) => ({ name: tool.name, bytes: bytes(tool.description ?? "") })),
+    ).map((tool) => ({
+      name: tool.name,
+      bytes:
+        bytes(tool.description ?? "") +
+        bytes(
+          JSON.stringify(
+            publishedInputSchema(tool, {
+              defaultIncludeImage: true,
+              images: !NO_IMAGES.has(tool.name),
+            }),
+          ),
+        ),
+    })),
   ).pipe(
     Effect.provideService(McpInvocationContext, {
       environmentId: EnvironmentId.make("budget"),
       gameEngine: "three",
+      gameModels: models,
       blenderMissing: null,
       capabilities: new Set<never>(),
       issuedAt: 0,
@@ -164,27 +187,28 @@ it("keeps a three.js game's first-turn reading within its budget", () => {
   }
 });
 
-it.effect("keeps the tool descriptions a three.js chat lists within their budget", () =>
+it.effect("keeps the game tools a three.js chat reads within its model choice's budget", () =>
   Effect.gen(function* () {
-    const tools = yield* listedTools();
-    const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
-    const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
-    expect(tools.map((tool) => tool.name).toSorted()).toEqual([
-      "game_assets",
-      "game_blender",
-      "game_builds",
-      "game_check",
-      "game_keep_going",
-      "game_play",
-    ]);
-    expect(
-      total,
-      over(
-        `The ${tools.length} listed tools' descriptions`,
-        parts,
-        LISTED_TOOLS_BUDGET,
-        "Say what each op gives in a sentence, and leave how to use it to a skill, rather than raising the budget.",
-      ),
-    ).toBeLessThanOrEqual(LISTED_TOOLS_BUDGET);
+    const choices = { ...CHOICES, blender: { characters: "blender", library: false } } as const;
+    for (const [choice, budget] of Object.entries(LISTED_TOOLS_BUDGET) as Array<
+      [keyof typeof choices, number]
+    >) {
+      const { characters, library } = choices[choice];
+      const tools = yield* listedTools({ route: characters, library });
+      const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
+      const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
+      expect(tools.some((tool) => tool.name === "game_blender")).toBe(
+        characters !== "code" || library,
+      );
+      expect(
+        total,
+        over(
+          `The ${choice} choice's ${tools.length} listed tools`,
+          parts,
+          budget,
+          "A field says what it is in a few words and an op what it gives in a sentence; how to use them belongs in the op's result or a skill. Cut there rather than raising the budget.",
+        ),
+      ).toBeLessThanOrEqual(budget);
+    }
   }),
 );

@@ -11,6 +11,7 @@ import {
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
 import { GameEngineId } from "./game.ts";
+import { GameCharacterRoute } from "./gameStyle.ts";
 import {
   GameBuildFacts,
   GameBuildId,
@@ -359,6 +360,13 @@ const GameRunStepStatus = Schema.Literals([
 ]);
 export type GameRunStepStatus = typeof GameRunStepStatus.Type;
 
+/** How the person chose to make a game's models: game.json's `characters` and `library`. */
+export const GameRunModelChoice = Schema.Struct({
+  route: GameCharacterRoute,
+  library: Schema.Boolean,
+});
+export type GameRunModelChoice = typeof GameRunModelChoice.Type;
+
 export const GameRunStep = Schema.Struct({
   id: GameRunStepId,
   runId: GameRunId,
@@ -398,6 +406,11 @@ export const GameRunStep = Schema.Struct({
   plannedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
+  /**
+   * A turn step's: the person's model choice game.json held when its turn started, which the
+   * step's ops are held to and which is put back when its turn ends.
+   */
+  models: Schema.optionalKey(GameRunModelChoice),
 });
 export type GameRunStep = typeof GameRunStep.Type;
 

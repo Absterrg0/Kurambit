@@ -2,7 +2,9 @@
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
 The live Blender behind `game_blender` is your renderer and your
-modeller; you have no local Blender, Godot or image tools.
+modeller; you have no local Blender, Godot or image tools. Its `code` op
+resolves relative paths from the game root, and `~` there is its own home,
+not yours; print every path you write.
 `<assets>` is your lane's asset folder: `web/assets/`, `godot/assets/`, or
 `unity/Assets/Art/` for Unity (capital A: Unity imports nothing else).
 
@@ -346,7 +348,7 @@ the generations cost.
    this":
    - a humanoid: `game_blender` op `character` with `body: {game: "<the .glb it
 delivered>"}` and the clips;
-   - a creature: `game_assets` op `blender_import` with `source: "generated"`.
+   - a creature: `game_blender` op `asset_import` with `source: "generated"`.
      One that came with clips but no idle gets `Idle_Loop` holding its rest
      pose, which you may key into a breath;
    - then stand it on the ground facing -Y, review and export it (Made
@@ -358,7 +360,7 @@ delivered>"}` and the clips;
 4. **Props.** A concept first when the look matters (lane `image`, the key
    art as reference, the prop alone on a plain background), then lane
    `model` with the picked concept as its only reference, then
-   `game_assets` op `blender_import` with `source: "generated"`, review and
+   `game_blender` op `asset_import` with `source: "generated"`, review and
    export. Moving parts (`options.parts`) get their origin at the hinge.
 5. **Images and sound.** Sprites, UI art, backgrounds and textures: lane
    `image` or `texture` with the key art as reference; effects and music
@@ -400,7 +402,7 @@ proportions, its bevel (never flat boxes) and colours by palette role
 third-person or top-down camera needs low partitions (about 1.8 m in a 4 m
 cell), not full-height walls. Realistic models and materials (Poly Haven
 and ambientCG in `game_assets` op `search`; Sketchfab in
-`game_assets` op `blender_search` with the person's key) belong only in a
+`game_blender` op `asset_search` with the person's key) belong only in a
 realistic lock; an HDR sky that only lights the scene suits any 3D look.
 A CC BY entry is credited by the add; keep its line in the credits file.
 

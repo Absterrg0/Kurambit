@@ -54,7 +54,6 @@ import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
-import { modelChoice } from "../gameStyle.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
@@ -303,14 +302,6 @@ const make = Effect.gen(function* () {
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         yield* turnAdmission.admit(yield* projections.getThread(threadId));
         const root = yield* projects.resolve(threadId);
-        // The person's model choice as the step starts: its art ops are held to it. A game.json
-        // that cannot be read holds them to nothing rather than stopping the step.
-        yield* projects.read(root).pipe(
-          Effect.flatMap((manifest) =>
-            projects.noteStepModelChoice(threadId, modelChoice(manifest)),
-          ),
-          Effect.ignore,
-        );
         const message = stepMessage(rounds, gameLastStep, step.proposal, {
           brief: yield* Effect.promise(() =>
             NodeFSP.readFile(NodePath.join(root, "BRIEF.md"), "utf8").catch(() => null),

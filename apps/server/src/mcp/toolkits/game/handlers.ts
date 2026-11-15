@@ -145,23 +145,22 @@ const dispatch = <
   }) as never;
 
 /**
- * How this game's models are made is the person's choice. A keep-going step's turn is not the
- * person asking, so while one runs, art and Blender ops refuse a game.json whose choice moved
- * since the step started (GameProjectService.stepModelChoice).
+ * How this game's models are made is the person's choice. While a keep-going step's turn is at
+ * work, art and Blender ops refuse a game.json whose choice moved since the step started (the
+ * step's record), and the step's end puts it back (GameRunTurnReactor).
  */
 const personsModelChoice = Effect.gen(function* () {
   const threadId = (yield* caller).thread.threadId;
-  if (!(yield* (yield* GameRunControl.GameRunControl).stepInFlight(threadId))) return;
+  const started = yield* (yield* GameRunControl.GameRunControl).stepModelChoice(threadId);
+  if (started === null) return;
   const projects = yield* GameProjectService.GameProjectService;
-  const started = yield* projects.stepModelChoice(threadId);
-  if (started === undefined) return;
   const now = gameModelChoice(yield* projects.read(yield* projects.resolve(threadId)));
   if (now.route === started.route && now.library === started.library) return;
   return yield* new GameOperationError({
     operation: "model-choice",
     path: "game.json",
     reason: "invalid-input",
-    detail: `This turn is a keep-going step, and game.json's model choice changed since it started (characters ${started.route} → ${now.route}, library ${started.library} → ${now.library}). How models are made is the person's choice: put game.json's characters back to "${started.route}" and library to ${started.library}, and say in your reply what the step needed.`,
+    detail: `Keep going is working a step on this game, and game.json's model choice changed since the step started (characters ${started.route} → ${now.route}, library ${started.library} → ${now.library}). How models are made is the person's choice and stays as it was while the step runs: put characters back to "${started.route}" and library to ${started.library} (the step's end puts them back anyway), and say in your reply what the work needed.`,
   });
 });
 
@@ -372,14 +371,6 @@ const assetsHandlers = {
             withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)).pipe(
               as(GameActionResult),
             ),
-          blender_search: (search) =>
-            withGame(GameBlender.GameBlender, (blender, threadId) =>
-              blender.assetsSearch(threadId, search),
-            ).pipe(as(GameBlenderAssetsSearchResult)),
-          blender_import: (asset) =>
-            withGame(GameBlender.GameBlender, (blender, threadId) =>
-              blender.assetsImport(threadId, asset),
-            ).pipe(as(GameBlenderAssetsImportResult)),
         }),
       ),
     ),
@@ -428,6 +419,14 @@ const blenderHandlers = {
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.animate(threadId, move),
             ).pipe(as(GameAnimateResult)),
+          asset_search: (search) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.assetsSearch(threadId, search),
+            ).pipe(as(GameBlenderAssetsSearchResult)),
+          asset_import: (asset) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.assetsImport(threadId, asset),
+            ).pipe(as(GameBlenderAssetsImportResult)),
         }),
       ),
     ),
@@ -499,9 +498,10 @@ const handlers = {
               if (saved.save !== undefined)
                 yield* media.save(threadId, saved.save.source, saved.save.label);
               if (saved.delete !== undefined) yield* media.delete(threadId, saved.delete);
-              return yield* media.list(threadId);
+              // An answer is an object: a tool's structured content cannot be a bare list.
+              return { saved: yield* media.list(threadId) };
             }),
-          ).pipe(as(GameSavedListResult)),
+          ).pipe(as(Schema.Struct({ saved: GameSavedListResult }))),
         export: (release) =>
           withGame(GameExport.GameExport, (exporter, threadId) =>
             exporter.export(threadId, release.target),

@@ -175,7 +175,7 @@ const kindsIn = (engine: GameEngineId, pack: LibraryPack): ReadonlyArray<GameLib
 };
 
 /**
- * A model format the engine does not load but game_assets op blender_import (source library)
+ * A model format the engine does not load but game_blender op asset_import (source library)
  * brings in and the export ships as a GLB: how an FBX-only pack reaches a three.js game.
  */
 const throughBlender = (engine: GameEngineId, format: string) =>
@@ -183,7 +183,7 @@ const throughBlender = (engine: GameEngineId, format: string) =>
 const reachable = (engine: GameEngineId, format: string) =>
   loadableIn(engine, format) || throughBlender(engine, format);
 const BLENDER_NOTE =
-  "loads through game_assets op blender_import (source library, this entry and path), then a review and export to GLB";
+  "loads through game_blender op asset_import (source library, this entry and path), then a review and export to GLB";
 
 const megabytes = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1)} MB`;
 const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".");
