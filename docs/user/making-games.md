@@ -231,8 +231,9 @@ about ten minutes, keep going goes on without it and its status says why. On a c
 the game in software too slowly for its plays to finish, no bot is written; the status says so.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
-and why: notes you left for it first, then a crash or freeze, then a step that was undone, then a
-failing fact, then the agent's newest `Next:` line. A step runs in a fresh session of your agent,
+and why: notes you left for it first, then a crash or freeze, then a step that was undone, then,
+when you asked for the game to match a picture, what your agent's last check found still differs
+most from it, then a failing fact, then the agent's newest `Next:` line. A step runs in a fresh session of your agent,
 so it costs what the step is worth rather than re-reading the whole chat; its message carries what
 the agent needs (your brief, the chat's last reply, the current facts and the steps so far). Your
 own messages keep your agent's session, and it is told what the steps did. The step's build is

@@ -58,6 +58,7 @@ const WHY_LABEL: Record<GameRunStepWhy, string> = {
   regression: "after an undo",
   bot: "a play bot",
   fact: "a check to look at",
+  reference: "your picture",
   next: "your agent's next step",
 };
 const stepWhyLabel = (why: GameRunStepWhy): string => WHY_LABEL[why];

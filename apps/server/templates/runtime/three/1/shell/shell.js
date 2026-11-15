@@ -10,7 +10,7 @@
 //                                    // with no run, then return false
 //   export const KEEP_ACROSS_RUNS = ["best"]; // GameState values a retry keeps
 //   export const ASSETS = { knight: "assets/models/knight.glb" }; // loaded before the title
-//   export const LOOK = { preset: "golden" }; // the light, sky, fog and post chain (shell/look.js)
+//   export const LOOK = { … };          // the light, sky, fog and post chain, for the game's mood (shell/look.js)
 //   export const CLICK_SOUND = "assets/sfx/click.ogg"; // optional: the menu button sound
 //                                    // (default: a short synthesized tick)
 //   export async function prepare({ renderer, assets, look, progress }) {} // optional: behind the

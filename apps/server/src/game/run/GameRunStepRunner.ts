@@ -187,6 +187,41 @@ const make = Effect.gen(function* () {
       (replies) => replies.map(readNextLine).find((line) => line !== null) ?? null,
     );
 
+  /**
+   * What the chat's newest final game_check declared about the reference (its `critique` input):
+   * the biggest major difference left, "none", or null when no recent final check declared one.
+   * Read from the call as the agent made it, so the step follows a typed declaration, never prose.
+   */
+  const referenceCritique = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const { runs } = yield* threads.getThreadRecords(threadId, ["runs"]);
+      const newest = runs
+        .filter((run) => run.status !== "queued" && run.status !== "running")
+        .toSorted((a, b) => b.ordinal - a.ordinal)
+        .slice(0, NEXT_LOOKBACK);
+      if (newest.length === 0) return null;
+      const { turnItems } = yield* threads.getThreadRecords(threadId, ["turnItems"], {
+        turnItemRunIds: newest.map((run) => run.id),
+        turnItemTypes: ["dynamic_tool"],
+      });
+      for (const run of newest) {
+        const declared = turnItems
+          .filter((item) => item.runId === run.id && item.type === "dynamic_tool")
+          .flatMap((item) => {
+            if (item.type !== "dynamic_tool" || !(item.toolName ?? "").endsWith("game_check"))
+              return [];
+            const input = item.input as { readonly final?: unknown; readonly critique?: unknown };
+            return input?.final === true && typeof input.critique === "string"
+              ? [input.critique.trim()]
+              : [];
+          })
+          .at(-1);
+        if (declared === undefined || declared.length === 0) continue;
+        return /^none\.?$/i.test(declared) ? ("none" as const) : { text: declared.slice(0, 400) };
+      }
+      return null;
+    });
+
   const look = (located: GameRunTurnReactor.Located, rounds: ReadonlyArray<GameRunRound>) =>
     Effect.gen(function* () {
       const step = located.record.step;
@@ -240,6 +275,7 @@ const make = Effect.gen(function* () {
           current: build,
           facts,
           next: yield* nextLine(threadId),
+          critique: yield* referenceCritique(threadId),
           bot,
           edited,
           botSetup: started,
@@ -250,6 +286,7 @@ const make = Effect.gen(function* () {
         current: build,
         facts,
         next: yield* nextLine(threadId),
+        critique: yield* referenceCritique(threadId),
         bot,
         edited,
         ...(finished === null ? {} : { botSetup: finished }),

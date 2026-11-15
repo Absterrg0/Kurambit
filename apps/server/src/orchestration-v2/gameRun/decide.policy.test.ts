@@ -334,6 +334,20 @@ describe("the proposal", () => {
     expect(Loop.applyLook(state(), look({ next: "none" }), NOW).state.ending).toBe("done");
   });
 
+  // Matching the person's picture is their stated goal: while the agent's final check still
+  // declares a major difference, it comes before a failing fact and the agent's own next line.
+  it("takes the next step from the reference critique until it declares none", () => {
+    const critique = { text: "The camera sits higher and closer than the picture's" };
+    const step = Loop.propose(state(), look({ facts: deadControls(1), critique }));
+    expect(step).toMatchObject({ why: "reference" });
+    expect(step?.text).toContain("The camera sits higher and closer than the picture's.");
+    expect(Loop.propose(state(), look({ facts: deadControls(1), critique: "none" }))?.why).toBe(
+      "fact",
+    );
+    const crashing = facts({ masher: tier("crashed", 12) });
+    expect(Loop.propose(state(), look({ facts: crashing, critique }))?.why).toBe("blocker");
+  });
+
   // The bot is the harness's instrument, written once as setup: never a step.
   it("never proposes a play bot, and the run keeps the setup a look reports", () => {
     expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("next");

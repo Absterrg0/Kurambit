@@ -52,6 +52,7 @@ export const GameRunStepWhy = Schema.Literals([
   "regression",
   "bot",
   "fact",
+  "reference",
   "next",
 ]);
 export type GameRunStepWhy = typeof GameRunStepWhy.Type;

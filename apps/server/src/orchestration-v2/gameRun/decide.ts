@@ -185,6 +185,7 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   // Only an earlier Kurambit's records: the bot is now setup, never a step.
   bot: "a bot for the skilled fact",
   fact: "a failing fact",
+  reference: "your picture",
   next: "your agent's next step",
 };
 const STEER_INTRO = "The person asked for this, in their words:";
@@ -245,6 +246,7 @@ export const proposalSummary = (
         ? headline(proposal, 100)
         : (FACT_GOAL[proposal.target] ?? `Fix a failing fact (${proposal.target})`);
     case "steer":
+    case "reference":
     case "next":
       return headline(proposal, 100);
   }
@@ -497,8 +499,29 @@ const steerProposal = (state: RunState): GameRunProposal | null => {
 };
 
 /**
+ * The person asked the game to match a picture and the chat's last final check still found a
+ * major difference from it: that difference is the next step, as their stated goal.
+ */
+const referenceProposal = (look: LookResult): GameRunProposal | null => {
+  const critique = look.critique;
+  if (critique === undefined || critique === null || critique === "none") return null;
+  const difference = critique.text.trim().replace(/[.\s]+$/, "");
+  if (difference.length === 0) return null;
+  return {
+    why: "reference",
+    text: clip(
+      `${difference}. This is what still differs most from the picture the person asked this game to match (its reference). Close it, looking at the game beside the picture with game_check until it is gone, and on your final check pass critique: the biggest major difference still left, or none.`,
+      TEXT_MAX,
+    ),
+    target: null,
+    key: `reference:${fnv(normalized(difference))}`,
+  };
+};
+
+/**
  * The order of evidence, the person's first: their notes, a blocker, a retry
- * of an undone step, a failing fact, then the agent's own next line. Every
+ * of an undone step, the picture they asked to match while it still differs,
+ * a failing fact, then the agent's own next line. Every
  * candidate whose key is set aside is passed over. Null: nothing left to
  * propose. The play bot is no candidate: a step must change what a person
  * sees or fix a measured fault, so the look writes it once as setup.
@@ -527,6 +550,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
         key: last.step.key,
       };
     },
+    () => referenceProposal(look),
     ...(facts === null || views === null
       ? []
       : (["controls", "retry", "hud", "first-response", "buried", "player-view", "empty"] as const)

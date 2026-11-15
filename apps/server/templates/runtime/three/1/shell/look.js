@@ -1,10 +1,10 @@
-// The look every frame goes through. A preset picks the light, the sky, the fog
-// and the post chain; main.js chooses one in one line and may override any part:
+// The look every frame goes through: the light, the sky, the fog and the post chain,
+// set for the game's own mood. A preset ("day", "golden" for golden hour, "night",
+// "interior", "flat" for stylised) is only a starting point for each part, which
+// main.js sets as the game needs; with no LOOK the game gets a neutral "day":
 //
-//   export const LOOK = { preset: "day" };   // "day" (the default), "golden" (golden hour),
-//                                            // "night", "interior", "flat" (stylised)
 //   export const LOOK = {
-//     preset: "golden",
+//     preset: "<one of them>", // optional
 //     exposure: 1.1,
 //     toneMapping: "aces",    // "neutral" keeps base colours, "agx" and "aces" are filmic, "none"
 //     environment: "sky",     // the light around the scene: "sky" (the preset's sky, or the scene's

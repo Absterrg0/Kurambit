@@ -240,6 +240,11 @@ export const GameRunStepResult = Schema.Union([
     facts: Schema.NullOr(GameBuildFacts),
     /** The chat's latest settled reply's line (packages/shared readNextLine). */
     next: NextLine,
+    /**
+     * What the chat's newest final game_check declared still differs most from the reference
+     * picture the person asked the game to match: its text, "none", or null when none declared.
+     */
+    critique: Schema.optionalKey(NextLine),
     /** A play bot exists (GameBot.latestPlayBot). */
     bot: Schema.Boolean,
     /** The folder's game files are not `current`'s: edited outside any build. */

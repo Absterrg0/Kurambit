@@ -419,12 +419,20 @@ const ImportTool = Tool.make("game_import", {
 const GameCheckToolResult = Schema.Struct({
   ...GameCheckResult.fields,
   screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
-  /** With a reference picture: how to judge the frame beside it before changing or ending. */
+  /** How to judge the frame (beside the reference, when the game has one) before ending. */
   review: Schema.optionalKey(Schema.String),
 });
 export const GameCheckTool = Tool.make("game_check", {
   description: `Look at this thread's game: a quick look by default, a full check with \`final: true\`. ${perEngine((t) => t.check)} A look opens the gameplay entry, plays a moment of random input and reports what the game did as errors and warnings with file:line, \`performance\` (the game must hold 60 fps on this machine's GPU; a warning names what to cut), and \`views\`, attached as images: play's frame, and when the game has a reference picture (STYLE.json's anchor or art/reference.png), play's frame above it at the same size, so you match its camera and composition like for like. Look as the player will: anything black, missing, broken, clashing, cluttered or unlike the brief or the reference is a bug to fix; say what you saw. Once the work is done, before you end the turn, run it with \`final: true\`: it also boots the entry the player opens and plays \`scene\`, the scene report (a line, with a frame that outlines it, for each thing a person would see is wrong: the player hidden, off screen or too small, an empty view, a character buried or inside a solid, bodies inside each other, something fallen out of the world, the camera inside a wall, sliding in idle), and \`qa\`, the QA play (every control in ACTIONS, Retry, the HUD at 16:9 and 4:3). Fix what \`scene\` and \`qa.problems\` list before you end the turn; files a clean final check already played answer with that check. The call fails only when the check could not be made (reason tool-failed, tool-missing, busy or low-memory).`,
-  parameters: Schema.Struct({ final: Schema.optionalKey(Schema.Boolean) }),
+  parameters: Schema.Struct({
+    final: Schema.optionalKey(Schema.Boolean),
+    critique: Schema.optionalKey(
+      Schema.String.check(Schema.isMaxLength(400)).annotate({
+        description:
+          "On a final check, when the person asked the game to match its reference picture: the biggest difference your critique still finds major, in one line, or none. Keep going takes its next step from it.",
+      }),
+    ),
+  }),
   success: GameCheckToolResult,
   failure,
   failureMode: "return",

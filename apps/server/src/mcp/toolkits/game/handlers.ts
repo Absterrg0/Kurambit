@@ -328,7 +328,14 @@ export const layerUnityScreenshot = McpToolAccess.toLayer(
  * one, so it arrives at each look, including the last: a clean check is not a matching picture.
  */
 const FRAME_REVIEW =
-  "Before you change anything, and before you end the turn, write a numbered critique of the game's frame (top) against the reference (bottom), biggest difference first. 1. The camera comes first, solved rather than judged by eye: measure landmarks in the reference in pixels (where the horizon crosses, the subject's ends, top and waterline or ground line, how much larger its near end draws than its far end) and solve its camera from them, in a few lines of code: height above the ground or water, lens (the vertical field of view; a long lens of 15 to 30 degrees draws near and far ends at nearly one size) and angle round the subject, and so its distance. Put that camera in the game as a picture camera the player can switch to (a key) and that play starts in, so each check's frame is taken through it (followCamera3D takes lens, angle, pitch and frame), and look until the subject's outline lies over the reference's. Then 2. silhouette and proportions, 3. colour and light (sky and clouds, ground or sea, the subject's own colours; where the runtime's look or water cannot reach the picture's, write the game's own module for it, a shader if need be, rather than settle), 4. surface and detail, 5. anything else the picture shows that the game lacks (its effects, its interface). Fix the first item and look again, as many times as it takes. A clean check, final or not, says the game runs, not that it matches: the turn ends when this critique finds nothing major.";
+  "Before you change anything, and before you end the turn, write a numbered critique of the game's frame (top) against the reference (bottom), biggest difference first. 1. The camera comes first, solved rather than judged by eye: measure landmarks in the reference in pixels (where the horizon crosses, the subject's ends, top and waterline or ground line, how much larger its near end draws than its far end) and solve its camera from them, in a few lines of code: height above the ground or water, lens (the vertical field of view; a long lens of 15 to 30 degrees draws near and far ends at nearly one size) and angle round the subject, and so its distance. Put that camera in the game as a picture camera the player can switch to (a key) and that play starts in, so each check's frame is taken through it (followCamera3D takes lens, angle, pitch and frame), and look until the subject's outline lies over the reference's. Then 2. silhouette and proportions, 3. colour, light and mood (sky and clouds, ground or sea, the subject's own colours, the time of day and the atmosphere; where the runtime's look or water cannot reach the picture's, write the game's own module for it, a shader if need be, rather than settle), 4. surface and detail, 5. anything else the picture shows that the game lacks (its effects, its interface). Fix the first item and look again, as many times as it takes. A clean check, final or not, says the game runs, not that it matches: the turn ends when this critique finds nothing major. When the person asked the game to match this picture, pass critique on your final check: the biggest difference still major, or none.";
+
+/**
+ * The same look for a game without a reference: the brief is the only target, so the light and
+ * atmosphere are judged against what it describes, never against a look the harness prefers.
+ */
+const BRIEF_REVIEW =
+  "Before you end the turn, critique this frame as a player would, biggest gap first: does it read at a glance (the player big enough and seen from a side that reads, nothing washed out or too dark), and do its light and atmosphere fit the mood the brief describes (the time of day, the weather, the place's own lights)? Fix the biggest gap and look again.";
 
 /**
  * game_check, registered like the Blender look so its views (the title and play as the check
@@ -369,7 +376,7 @@ const checkHandlers = {
       return {
         ...result,
         ...(shown.length === 0 ? {} : { screenshots: shown }),
-        ...(reference === null ? {} : { review: FRAME_REVIEW }),
+        ...(shown.length === 0 ? {} : { review: reference === null ? BRIEF_REVIEW : FRAME_REVIEW }),
       };
     }),
   ),
