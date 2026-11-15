@@ -45,8 +45,16 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
   "code with the library": 33_000,
   generated: 36_000,
 };
-/** Bytes of tool descriptions a code-route three.js chat is handed every turn (10,918 on 2026-11-08). */
-const LISTED_TOOLS_BUDGET = 12_000;
+/**
+ * Bytes of tool descriptions a three.js chat is handed every turn, by route. Code and generated
+ * keep the Blender tools behind game_more (10,918 on 2026-11-08); the Blender route lists them
+ * (21,513 on 2026-11-15), with about 5% over.
+ */
+const LISTED_TOOLS_BUDGET: Readonly<Record<GameCharacterRoute, number>> = {
+  code: 12_000,
+  generated: 12_000,
+  blender: 22_500,
+};
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");
@@ -162,19 +170,23 @@ it("keeps a three.js game's first-turn reading within its budget", () => {
   }
 });
 
-it.effect("keeps the tool descriptions a code-route three.js chat lists within its budget", () =>
+it.effect("keeps the tool descriptions a three.js chat lists within its route's budget", () =>
   Effect.gen(function* () {
-    const tools = yield* listedTools("code");
-    const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
-    const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
-    expect(
-      total,
-      over(
-        `The ${tools.length} listed tools' descriptions`,
-        parts,
-        LISTED_TOOLS_BUDGET,
-        "Cut what a skill or another tool already says, or keep the tool for the moment it is asked for (placement.ts `asked`), rather than raising the budget.",
-      ),
-    ).toBeLessThanOrEqual(LISTED_TOOLS_BUDGET);
+    for (const [route, budget] of Object.entries(LISTED_TOOLS_BUDGET) as Array<
+      [GameCharacterRoute, number]
+    >) {
+      const tools = yield* listedTools(route);
+      const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
+      const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);
+      expect(
+        total,
+        over(
+          `The ${route} route's ${tools.length} listed tools' descriptions`,
+          parts,
+          budget,
+          "Cut what a skill or another tool already says, or keep the tool for the moment it is asked for (placement.ts `asked`), rather than raising the budget.",
+        ),
+      ).toBeLessThanOrEqual(budget);
+    }
   }),
 );

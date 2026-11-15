@@ -128,7 +128,6 @@ export function createSheet({ renderer, find, names, hold, light }) {
       const context = canvas.getContext("2d");
       const autoClear = renderer.autoClear;
       const viewport = renderer.getViewport(new THREE.Vector4());
-      const css = renderer.getSize(new THREE.Vector2());
       renderer.autoClear = true;
       const corners = [];
       for (let k = 0; k < 8; k += 1)
