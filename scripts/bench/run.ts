@@ -5,8 +5,13 @@
  * through the same WebSocket RPC the client uses. One private server per run, on
  * a dev home (never an installed one); runs are kept by date so two compare.
  *
- *   vp run bench [--briefs N] [--only <id>[,<id>…]] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--steps N]
+ *   vp run bench [--briefs N] [--only <id>[,<id>…]] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--effort <level>] [--steps N]
+ *   vp run bench --brief "<text>" [--reference <png>] [--minutes N] [--steps 0] …
  *   vp run bench --remeasure <stamp> [--home <dir>] [--out <dir>]
+ *
+ * `--brief` runs one brief of your own instead of briefs.json, `--reference` attaches a picture
+ * to it as Home does, and `--minutes` caps the first turn's wall time: with the bare lane
+ * (scripts/bench/bare/) on the same brief, picture, model and cap, the two lanes compare.
  *
  * Phase 1 scores each brief's first turn. Phase 2 then runs keep going on the
  * game for `--steps` steps (default 3; 0 skips it) and records what each step
@@ -63,9 +68,29 @@ const checkout = NodePath.resolve(
   "../..",
 );
 
+const { values: args } = NodeUtil.parseArgs({
+  options: {
+    briefs: { type: "string" },
+    only: { type: "string" },
+    out: { type: "string" },
+    home: { type: "string" },
+    model: { type: "string" },
+    steps: { type: "string" },
+    remeasure: { type: "string" },
+    brief: { type: "string" },
+    reference: { type: "string" },
+    minutes: { type: "string" },
+    effort: { type: "string" },
+  },
+});
+/** The first turn's wall-time cap. */
+const TURN_MINUTES = args.minutes === undefined ? 60 : Number(args.minutes);
+if (!Number.isFinite(TURN_MINUTES) || TURN_MINUTES <= 0)
+  throw new Error(`--minutes takes a number of minutes, not ${args.minutes}.`);
+
 /** How long to wait on each stage before recording it as not done; generous, never a score. */
 const WAIT = {
-  turnMinutes: 60,
+  turnMinutes: TURN_MINUTES,
   factsMinutes: 25,
   /** A turn that changed files has its build listed within moments of ending. */
   buildSeconds: 90,
@@ -85,19 +110,10 @@ interface Brief {
   readonly genre: string;
   readonly name: string;
   readonly brief: string;
+  /** A PNG the person attaches on Home, as a data URL. */
+  readonly reference?: { readonly name: string; readonly dataUrl: string };
 }
 
-const { values: args } = NodeUtil.parseArgs({
-  options: {
-    briefs: { type: "string" },
-    only: { type: "string" },
-    out: { type: "string" },
-    home: { type: "string" },
-    model: { type: "string" },
-    steps: { type: "string" },
-    remeasure: { type: "string" },
-  },
-});
 const STEPS = args.steps === undefined ? 3 : Number(args.steps);
 if (!Number.isInteger(STEPS) || STEPS < 0 || STEPS > 10)
   throw new Error(`--steps takes 0 to 10 (keep going reports its last ten), not ${args.steps}.`);
@@ -110,9 +126,33 @@ const briefFile = JSON.parse(
   NodeFS.readFileSync(NodePath.join(checkout, "scripts/bench/briefs.json"), "utf8"),
 ) as { readonly version: number; readonly briefs: ReadonlyArray<Brief> };
 const only = args.only === undefined ? null : new Set(args.only.split(",").map((id) => id.trim()));
-const briefs = briefFile.briefs
-  .filter((brief) => only === null || only.has(brief.id))
-  .slice(0, args.briefs === undefined ? undefined : Number(args.briefs));
+const ownBrief = (text: string): Brief => {
+  const name = text.split(/\s+/).slice(0, 6).join(" ");
+  return {
+    id:
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "brief",
+    genre: "own brief",
+    name,
+    brief: text,
+    ...(args.reference === undefined
+      ? {}
+      : {
+          reference: {
+            name: NodePath.basename(args.reference),
+            dataUrl: `data:image/png;base64,${NodeFS.readFileSync(args.reference).toString("base64")}`,
+          },
+        }),
+  };
+};
+const briefs =
+  args.brief === undefined
+    ? briefFile.briefs
+        .filter((brief) => only === null || only.has(brief.id))
+        .slice(0, args.briefs === undefined ? undefined : Number(args.briefs))
+    : [ownBrief(args.brief)];
 if (briefs.length === 0) throw new Error(`No brief matches --only ${args.only}.`);
 
 const outRoot = NodePath.resolve(args.out ?? NodePath.join(home, "bench"));
@@ -595,6 +635,7 @@ async function runBrief(
       parentDirectory: gamesDir,
       brief: brief.brief,
       engine: "three",
+      ...(brief.reference === undefined ? {} : { reference: brief.reference }),
       modelSelection,
     }),
   );
@@ -771,6 +812,9 @@ async function main() {
         : {
             instanceId: ProviderInstanceId.make(provider),
             model: modelParts.join("/"),
+            ...(args.effort === undefined
+              ? {}
+              : { options: [{ id: "effort", value: args.effort }] }),
           };
     log(`model ${modelSelection.instanceId}/${modelSelection.model}`);
     for (const brief of briefs) {

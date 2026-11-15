@@ -1,0 +1,7 @@
+{BRIEF}
+
+{PICTURE}Build it in three.js as a web page in this folder; serve it and screenshot it headless, and iterate until it is right.
+
+To screenshot: `node shot.mjs <url> <out.png> [waitMs] [width] [height]` (headless Chromium with the GPU; it prints the page's console errors). Serve on port {PORT}.
+
+Machine rules: work only inside this folder; never kill a process you did not start yourself (no pkill or killall); stop the server you started before you finish.

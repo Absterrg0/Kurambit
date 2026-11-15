@@ -1,0 +1,7 @@
+{
+  "disableClaudeAiConnectors": true,
+  "syncClaudeAiSkills": false,
+  "syncClaudeAiPlugins": false,
+  "claudeMdExcludes": ["**/CLAUDE.md", "**/.claude/CLAUDE.md"],
+  "autoMemoryEnabled": false
+}
