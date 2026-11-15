@@ -8,18 +8,15 @@
 //     // coat), metal, chrome, glass, wood, rubber, cloth, stone, water; or { rough, metal, coat,
 //     // glow, smooth, opacity, map }. They mirror the look's sky. Every model drawing with
 //     // paint.hull is one world, and merges into one draw.
-//   const bands = M.canvasTexture(512, 64, (g, w, h) => { g.fillStyle = "#fff"; g.fillRect(0, 0, w, h);
-//     g.fillStyle = "#222"; g.fillRect(0, 20, w, 18); }); // windows, panel lines, names, decals
-//   const hullPaint = M.paintOf("#ffffff", { kind: "paint", map: bands });
+//   M.paintOf("#fff", { kind: "paint", map: M.canvasTexture(512, 64, (g, w, h) => {...}) });
+//     // a texture drawn with the 2D canvas API: windows, panel lines, names, decals
 //   const boat = new THREE.Group();
 //   boat.add(M.part(M.box(6, 1.2, 2.2, 0.25), paint.hull, { at: [0, 0.6, 0] })); // bevelled box
 //   boat.add(M.part(M.lathe([[0, 0], [0.3, 0.1], [0.2, 1.4]]), paint.trim, { at: [1, 1.2, 0] }));
 //     // a profile of [radius, y] spun round y: masts, bottles, domes, towers, trunks
-//   boat.add(M.part(M.extrude([[0, 0], [2, 0], [0, 3]], 0.05, { bevel: 0.02 }), paint.trim));
-//     // a flat shape of [x, y] given depth along z: sails, fins, blades, signs, walls with holes
-//   boat.add(M.part(M.tube([[0, 1, 0], [1, 2, 0], [2, 1.5, 1]], 0.04), paint.trim)); // ropes, pipes
-//   boat.add(M.part(M.rail([[-3, 1.2, 1], [2, 1.2, 1], [3, 1.2, 0]], { height: 1 }), paint.trim));
-//     // a railing along a deck's edge: posts and bars in one geometry
+//   M.extrude([[0, 0], [2, 0], [0, 3]], 0.05, { bevel: 0.02 }); // a flat [x, y] shape given depth
+//   M.tube([[0, 1, 0], [1, 2, 0], [2, 1.5, 1]], 0.04);       // ropes, pipes
+//   M.rail([[-3, 1.2, 1], [2, 1.2, 1]], { height: 1 });       // posts and bars in one geometry
 //
 // Curve-led: draw the silhouette once as curves (side profile, then plan), and build every part
 // from them, so the lines stay fair and the parts agree:
@@ -37,10 +34,8 @@
 //   M.rail(house.inset(-0.35).edge(6.85));             // a rail tracing that roof's edge
 //   const merged = M.merge(boat); // one mesh per material: build in parts, draw in few
 //   M.stats(merged);              // { triangles, drawCalls, size: [x, y, z] in metres }
-//   const forest = M.scatter(M.merge(tree), 400, (i, rand) => ({
-//     at: [rand() * 80 - 40, 0, rand() * 80 - 40], turn: rand() * 6.28, scale: 0.8 + rand() * 0.5,
-//   }), 7); // repeats as instances: 400 trees, one draw per material; the last number is the seed
-//   const rand = M.seeded(7); // 0..1, the same numbers for the same seed: variants
+//   M.scatter(M.merge(tree), 400, (i, rand) => ({ at: [x, 0, z], turn, scale }), 7);
+//     // repeats as instances, one draw per material, seeded; M.seeded(7) gives 0..1 numbers
 //
 // A model whose numbers the person tunes on the Stage, rebuilt whenever one changes (also while
 // the Stage has play frozen), and named so they can select it:
@@ -56,8 +51,7 @@
 //   const body = M.rig(ctx.assets.model("rig"));  // the clips' copy, its mannequin taken off
 //   body.joint("hand_r");                          // a joint's rest position (Vector3, body metres)
 //   body.limb("thigh_l", "calf_l", 0.09, paint.cloth, { end: 0.07 }); // a capsule along a bone
-//   body.part(new THREE.SphereGeometry(0.13), paint.skin, { at: [0, 1.62, 0.02] }); // the nearest
-//     // bone takes it, or name one: { bone: "Head" }; a mesh you built goes in as body.add(mesh)
+//   body.part(geometry, paint.skin, { at: [0, 1.62, 0.02] }); // nearest bone, or { bone: "Head" }
 //   body.part(swordGeometry, paint.metal, { at: [...], bone: "hand_r", rigid: true }); // never bends
 //   const hero = animate(body.done());             // skinned to the bones by distance, bending at
 //     // the joints, one draw per material; done({ skin: "rigid" }) hangs each part on its bone
