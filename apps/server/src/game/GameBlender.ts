@@ -2393,7 +2393,7 @@ const make = Effect.gen(function* () {
             if (style?.rig === undefined || resolveRig(style.rig) !== STANDARD_RIG)
               return yield* fail(
                 "invalid-input",
-                `game_blender_character puts characters on the standard skeleton, and ${GAME_STYLE_FILE}${style === null ? " does not exist yet" : style.rig === undefined ? " names no rig" : `'s rig is ${style.rig}`}. Set ${GAME_STYLE_FILE}'s rig to "${STANDARD_RIG}" (and list an animation pack on it, such as quaternius-universal-animation-library, in packs) first.`,
+                `game_blender_character puts characters on the standard skeleton, and ${GAME_STYLE_FILE}${style === null ? " does not exist yet" : style.rig === undefined ? " names no rig" : `'s rig is ${style.rig}`}. Set it first: game_assets_add pack quaternius-universal-animation-library, path Unreal-Godot/UAL1_Standard.glb (its clips; allowed with the library off), with lock { family: "quaternius-universal", view } when the game has no ${GAME_STYLE_FILE} yet, or add "${STANDARD_RIG}" as ${GAME_STYLE_FILE}'s rig and that pack to its packs.`,
               );
             const standardPacks = style.packs.filter(
               (id) => LIBRARY_CATALOG.find((pack) => pack.id === id)?.rig === STANDARD_RIG,

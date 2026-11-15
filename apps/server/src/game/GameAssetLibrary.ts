@@ -1529,8 +1529,8 @@ const make = Effect.gen(function* () {
       // pack costs no download and writes no lock.
       const gameRoot = yield* realRootOf(root, "Library add");
       const library = modelChoice(manifest).library;
-      if (!library && input.lock !== undefined)
-        return yield* fail("Library add", GAME_STYLE_FILE, "invalid-input", LIBRARY_OFF);
+      // The lock is the look's rig, view and budgets, not library models: it goes through with
+      // the library off, and the per-file check below keeps the library's models out.
       const lockBefore = yield* readGameStyle(gameRoot);
       const locked = input.lock === undefined ? null : styleFromLock(input.lock, pack, lockBefore);
       if (locked !== null && "refusal" in locked)
