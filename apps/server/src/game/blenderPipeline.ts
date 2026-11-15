@@ -305,9 +305,9 @@ export const ledgerLine = (file: string, candidate: Candidate) =>
 
 const LOCOMOTION = /walk|run|jog|sprint/i;
 /** Clips whose first and last poses should agree. */
-export const isLoopClip = (clip: GameModelClip) => /_loop$/i.test(clip.name);
+const isLoopClip = (clip: GameModelClip) => /_loop$/i.test(clip.name);
 /** Horizontal pelvis travel past which an in-place clip is said to drift, metres. */
-export const DRIFT_METRES = 0.1;
+const DRIFT_METRES = 0.1;
 
 const metres = (value: number) => `${value.toFixed(2)} m`;
 

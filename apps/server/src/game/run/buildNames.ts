@@ -14,7 +14,7 @@ export const BuildName = {
 } as const;
 
 /** The play bot: the measuring instrument the skilled fact plays with. */
-export const BOT_DIR = ".studio/bot";
+const BOT_DIR = ".studio/bot";
 
 /**
  * What a restore brings back, and so what a build is: the engine project and

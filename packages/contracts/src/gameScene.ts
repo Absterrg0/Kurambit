@@ -120,7 +120,7 @@ const metres = (m: number) => `${m < 10 ? m.toFixed(1) : Math.round(m)} m`;
 const secs = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 
 /** PURE. One finding as a plain line: the one wording game_check and the facts share. */
-export const sceneFindingText = (finding: GameSceneFinding): string => {
+const sceneFindingText = (finding: GameSceneFinding): string => {
   const thing = finding.thing ?? "Something";
   const other = finding.other ?? "a solid";
   switch (finding.kind) {
@@ -142,7 +142,7 @@ export const sceneFindingText = (finding: GameSceneFinding): string => {
 };
 
 /** PURE. The player's line when a person could not follow it; null when they could. */
-export const scenePlayerText = (player: GameScenePlayer): string | null => {
+const scenePlayerText = (player: GameScenePlayer): string | null => {
   if (player.kind !== "body") return null;
   if (player.notVisible)
     return player.hidden >= player.offscreen
@@ -156,7 +156,7 @@ export const scenePlayerText = (player: GameScenePlayer): string | null => {
 };
 
 /** PURE. The frame that shows the player's problem, if it has one. */
-export const scenePlayerFrame = (player: GameScenePlayer): string | null =>
+const scenePlayerFrame = (player: GameScenePlayer): string | null =>
   player.kind !== "body"
     ? null
     : player.notVisible
@@ -168,7 +168,7 @@ export const scenePlayerFrame = (player: GameScenePlayer): string | null =>
           : null;
 
 /** PURE. The empty frame's line when it is flagged; null when the view is filled. */
-export const sceneEmptyText = (empty: GameSceneEmpty): string | null =>
+const sceneEmptyText = (empty: GameSceneEmpty): string | null =>
   empty.flagged
     ? `${percent(empty.share)} of the view is empty: the camera looks down past everything drawn into the flat ${empty.colour} backdrop, for ${percent(empty.held)} of play`
     : null;
