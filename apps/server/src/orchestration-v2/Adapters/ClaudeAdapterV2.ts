@@ -1075,6 +1075,7 @@ export function makeClaudeQueryOptions(input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   readonly harnessInstructions?: string;
+  readonly kurambitToolsOnly?: boolean;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -1110,13 +1111,19 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const effectiveQuerySettings =
+  const compactedQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
+  // `strictMcpConfig` already drops the person's MCP config and claude.ai connectors (CLI
+  // 2.1.322); the setting keeps the connectors out should a CLI start fetching them anyway.
+  const effectiveQuerySettings =
+    input.kurambitToolsOnly === true && typeof compactedQuerySettings !== "string"
+      ? ({ ...compactedQuerySettings, disableClaudeAiConnectors: true } as ClaudeSdkSettings)
+      : compactedQuerySettings;
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -1162,6 +1169,8 @@ export function makeClaudeQueryOptions(input: {
       : {}),
     ...(input.environment === undefined ? {} : { env: input.environment }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
+    // Kurambit's own server arrives over the control channel (setMcpServers) and stays.
+    ...(input.kurambitToolsOnly === true ? { strictMcpConfig: true } : {}),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
@@ -8410,6 +8419,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(turnInput.harnessInstructions === undefined
               ? {}
               : { harnessInstructions: turnInput.harnessInstructions }),
+            ...(turnInput.kurambitToolsOnly === true ? { kurambitToolsOnly: true } : {}),
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
               ? {}

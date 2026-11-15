@@ -1405,7 +1405,10 @@ export const layer: Layer.Layer<
             modelSelection: input.modelSelection,
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),
-            ...(harnessInstructions === undefined ? {} : { harnessInstructions }),
+            // Turn rules exist exactly for a game's folder, whose agent gets only game tools.
+            ...(harnessInstructions === undefined
+              ? {}
+              : { harnessInstructions, kurambitToolsOnly: true }),
           };
           // Check after the context read: ingestion can settle the run while
           // it awaits. A failed ownership read fails the start below.

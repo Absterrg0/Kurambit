@@ -426,6 +426,12 @@ export interface ProviderAdapterV2TurnInput {
    * and sent wherever an adapter sends those; unlike `appContext`, never text an MCP server wrote.
    */
   readonly harnessInstructions?: string;
+  /**
+   * The session gets Kurambit's MCP server and the provider's built-in tools only: none of the
+   * person's own MCP servers or account connectors, which cost context on every call and could
+   * reach their mail or files. Set for a game's turns; an adapter that cannot enforce it ignores it.
+   */
+  readonly kurambitToolsOnly?: boolean;
 }
 
 export interface ProviderAdapterV2SteerInput {
