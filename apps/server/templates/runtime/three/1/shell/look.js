@@ -92,16 +92,18 @@ const PRESETS = {
     bloom: { strength: 0.5, threshold: 0.95 },
     grade: { saturation: 1.08, contrast: 1.06, warmth: 0.05, vignette: 0.5 },
   },
+  // Night must still read: a warm key so the player stands out from a blue world, a lower and
+  // less saturated blue around it, a light vignette. The old blue key tinted every model navy.
   night: {
     toneMapping: "aces",
-    exposure: 1.3,
-    ambient: 2.4,
-    sky: { top: 0x0a1430, horizon: 0x2c3e68, ground: 0x0b0d14, light: 0.8 },
-    sun: { direction: { x: -0.35, y: 0.75, z: 0.45 }, color: 0xa9bdff, intensity: 1.5 },
-    fog: { density: 0.012, height: 0.05 },
-    ao: { radius: 1.2, intensity: 2 },
-    bloom: { strength: 0.9, threshold: 0.75 },
-    grade: { saturation: 0.92, contrast: 1.08, warmth: -0.04, vignette: 0.6 },
+    exposure: 1.4,
+    ambient: 3.4,
+    sky: { top: 0x0d1838, horizon: 0x34497a, ground: 0x0b0d14, light: 0.15 },
+    sun: { direction: { x: -0.35, y: 0.75, z: 0.45 }, color: 0xffd9ae, intensity: 1.9 },
+    fog: { density: 0.009, height: 0.05 },
+    ao: { radius: 1.2, intensity: 1.5 },
+    bloom: { strength: 0.8, threshold: 0.8 },
+    grade: { saturation: 1, contrast: 1.06, warmth: 0.02, vignette: 0.3 },
   },
   interior: {
     toneMapping: "agx",
