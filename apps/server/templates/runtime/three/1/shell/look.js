@@ -878,6 +878,23 @@ export async function createLook(canvas, options = {}) {
   };
 
   const api = {
+    /**
+     * For a picture drawn outside the frame (the model sheet): the look's tone mapping, its light
+     * around the scene (the game's own environment when given), no baked level shadow. Returns
+     * the call that puts the renderer back.
+     */
+    lightForPicture(scene, environment = null) {
+      const tone = renderer.toneMapping;
+      const baked = shared.lookBakedOn.value;
+      renderer.toneMapping = TONE[look.toneMapping];
+      shared.lookBakedOn.value = 0;
+      scene.environment = environment ?? (look.environment === false ? null : sky.light);
+      scene.environmentIntensity = look.ambient;
+      return () => {
+        renderer.toneMapping = tone;
+        shared.lookBakedOn.value = baked;
+      };
+    },
     renderer,
     /** The resolved look: its preset's name and every part. */
     settings: look,

@@ -38,7 +38,7 @@ const person = () => {
  * `find(name)` is the named thing's record ({ id, name, kind, object }) or null; `names()` lists
  * the things there are. `hold(on)` freezes the run under the sheet.
  */
-export function createSheet({ renderer, find, names, hold }) {
+export function createSheet({ renderer, find, names, hold, light }) {
   let overlay = null;
   const close = () => {
     overlay?.remove();
@@ -65,7 +65,9 @@ export function createSheet({ renderer, find, names, hold }) {
     };
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(BACKDROP);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x50555c, 2.2));
+    // Lit as the game lights it (its environment and tone mapping, shell/look.js), so metal,
+    // glass and clear coat read as they do in play, plus one neutral key light from the front.
+    const restoreLight = light(scene);
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     sun.position.set(3, 6, 4);
     scene.add(sun);
@@ -182,6 +184,7 @@ export function createSheet({ renderer, find, names, hold }) {
       renderer.setViewport(viewport);
       measured.size = [size.x, size.y, size.z].map((n) => Math.round(n * 100) / 100);
     } finally {
+      restoreLight();
       for (const node of culled) node.frustumCulled = true;
       scene.remove(object);
       object.position.copy(saved.position);

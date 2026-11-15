@@ -1174,6 +1174,7 @@ const sheet = createSheet({
     sheetShown = on;
     applyHold();
   },
+  light: (scene) => look.lightForPicture(scene, run?.ctx.scene.environment ?? null),
 });
 
 const studio = installStudio({
