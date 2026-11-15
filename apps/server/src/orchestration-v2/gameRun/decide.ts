@@ -489,10 +489,11 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     ...(facts === null || views === null
       ? []
       : blockers(views).map((id) => () => factStep("blocker", id, views))),
-    // The random-input play of this build is still measuring, and the one before it broke.
+    // This build's errors have no reading yet, and the build before it broke in play.
     () =>
       earlier !== null &&
-      views?.get("errors")?.reading._tag === "pending" &&
+      views !== null &&
+      views.get("errors")?.reading._tag !== "measured" &&
       toneOf(earlier, "errors") === "bad"
         ? factStep("blocker", "errors", earlier, true)
         : null,

@@ -498,7 +498,7 @@ cannot both find none.
   build so far, so step 1 starts at once from the newest `Next:`. The judge waits only for the
   boot check and the QA play (`upTo: "boots"`), usually the step's own clean `game_check` on the
   same files; the random-input play goes on behind the next step. While the current build's play
-  is still measuring, the look also reads the build it was made from (`earlier`), so an error that
+  has no reading yet (queued, playing, or dropped for a newer build), the look also reads the build it was made from (`earlier`), so an error that
   play found there is the next blocker rather than an undo. **The look reads the folder's build.** The current build is the newest turn build that changed
   game files, or a later kept edit or restore target; turns that changed only notes are no builds,
   so it is found by walking the turns page by page however far back (`GameBuilds.currentBuild`),

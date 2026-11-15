@@ -242,13 +242,14 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const { build, edited } = yield* builds.current(threadId);
       const facts = edited ? null : yield* factsSoFar(threadId, build);
-      // The step build this one came from, while this one's random-input play still measures:
-      // an error that play found there is the next blocker.
+      // The step build this one came from, while this one's random-input play has no reading yet
+      // (queued, playing, or dropped for a newer build): an error that play found there is the
+      // next blocker.
       const made = rounds
         .map((r) => r.round)
         .findLast((record) => record.build !== undefined && record.build === build)?.step?.base;
       const earlier =
-        facts !== null && facts.masher.status === "pending" && made != null
+        facts !== null && facts.masher.status !== "measured" && made != null
           ? yield* factsSoFar(threadId, made)
           : null;
       yield* complete(located, {

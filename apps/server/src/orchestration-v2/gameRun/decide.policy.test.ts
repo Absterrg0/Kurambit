@@ -321,13 +321,18 @@ describe("the proposal", () => {
 
   // The judge waits only for the boot check, so the random-input play of a step's build may
   // land after the next look: an error it found is that look's blocker while the current
-  // build still measures, and never once the current build's own reading is in.
-  it("proposes an error the earlier build's random-input play found while the current one measures", () => {
+  // build has no reading of its own, and never once the current build's own reading is in.
+  it("proposes an error the earlier build's random-input play found while the current one has none", () => {
     const crashed = facts({ masher: tier("crashed", 12) });
     const measuring = facts({ masher: { status: "pending" } });
     const step = Loop.propose(state(), look({ facts: measuring, earlier: crashed }));
     expect(step).toMatchObject({ why: "blocker", target: "errors", key: "fact:errors" });
     expect(step?.text).toContain("the build before the last step");
+    // Queued behind another play, its reading is not measured yet: the same.
+    const queued = facts({
+      masher: { status: "not-measured", why: "not measured yet", retry: true },
+    });
+    expect(Loop.propose(state(), look({ facts: queued, earlier: crashed }))?.target).toBe("errors");
     expect(Loop.propose(state(), look({ facts: facts(), earlier: crashed }))?.why).toBe("next");
   });
 
