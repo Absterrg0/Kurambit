@@ -168,8 +168,10 @@ float wakeFoam( vec2 p ) {
   if ( best > 1e8 ) return 0.0;
   float spread = width * ( 0.5 + age * 0.55 );
   float fade = exp( - age / 3.0 );
-  float edge = smoothstep( spread * 0.3, 0.0, abs( best - spread ) ) * 0.9;
-  float churn = smoothstep( spread * 0.8, 0.0, best ) * exp( - age / 1.5 );
+  // Fresh water beside the hull rolls well out from it; older wake narrows to two lines.
+  float fresh = exp( - age / 0.8 );
+  float edge = smoothstep( spread * ( 0.3 + 0.5 * fresh ), 0.0, abs( best - spread ) ) * 0.9;
+  float churn = smoothstep( spread * ( 0.8 + 0.6 * fresh ), 0.0, best ) * exp( - age / 1.5 );
   return max( edge, churn ) * fade;
 }`;
 // The swell's slope tilts the surface the normal map ripples; its crests carry more foam.
@@ -291,11 +293,22 @@ export function ocean(
       if (head === undefined || Math.hypot(stern.x - head.x, stern.z - head.z) > WAKE_EVERY_M)
         w.trail.push({ x: stern.x, z: stern.z, born: clock });
       while (w.trail.length > 0 && clock - w.trail[0].born > WAKE_LIFE_S) w.trail.shift();
-      // The newest point follows the stern, so the wake starts right behind it.
-      const shown = [...w.trail, { x: stern.x, z: stern.z, born: clock }];
+      // How fast it moves now, eased: the wash along its sides and the bow wave grow with it.
+      const moved = w.last === null ? 0 : Math.hypot(stern.x - w.last.x, stern.z - w.last.z);
+      w.last = { x: stern.x, z: stern.z };
+      if (dt > 0) w.speed += (moved / dt - w.speed) * Math.min(1, dt * 3);
+      const way = Math.min(1, w.speed / 5);
+      // The newest point follows the stern, so the wake starts right behind it; one more runs
+      // along the hull to the bow, so the water washes white along its sides.
+      const bow = { x: stern.x + ahead.x * w.stern * 2, z: stern.z + ahead.z * w.stern * 2 };
+      const shown = [
+        ...w.trail.map((p) => ({ ...p, width: w.width })),
+        { x: stern.x, z: stern.z, born: clock, width: w.width * way },
+        ...(w.stern > 0 ? [{ ...bow, born: clock, width: w.width * 0.8 * way }] : []),
+      ];
       for (let i = Math.max(0, shown.length - (MAX_WAKE_POINTS - n)); i < shown.length; i += 1) {
         const p = shown[i];
-        points[n].set(p.x, p.z, clock - p.born, w.width);
+        points[n].set(p.x, p.z, clock - p.born, p.width);
         links[n] = i < shown.length - 1 ? 1 : 0;
         n += 1;
       }
@@ -322,9 +335,13 @@ export function ocean(
     mesh: water,
     /** The water's height at a point now (m above `at`): float a boat on it, tilt it by two. */
     height: (x, z) => at + swellAt(x, z),
-    /** Foam behind `object` as it moves: `width` metres at the stern, `stern` metres behind its centre. */
+    /**
+     * Foam behind `object` as it moves, and along its sides to its bow (taken as far ahead of its
+     * centre as the stern is behind): `width` metres across at the stern, `stern` metres behind
+     * its centre. The wash grows with its speed; at rest it leaves none.
+     */
     wake(object, { width = 2, stern: behind = 0 } = {}) {
-      wakes.push({ object, width, stern: behind, trail: [] });
+      wakes.push({ object, width, stern: behind, trail: [], last: null, speed: 0 });
     },
   };
 }

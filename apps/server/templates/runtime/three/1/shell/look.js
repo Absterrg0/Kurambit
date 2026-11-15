@@ -16,8 +16,9 @@
 //     // { turbidity: 2, rayleigh: 1.2, mie: 0.005 } to tune it), and clouds lays a cloud deck
 //     // over either: { cover: 0.4 (0..1), scale: 1 (bigger is smaller clouds), shade: 0x8f9aab }.
 //     // Both are drawn once into the backdrop and the light, so they cost nothing per frame.
-//     quality: "auto",        // "high", "low": how much the water, clouds and shadows spend;
-//                             // auto is high on a GPU, low drawn in software
+//     quality: "auto",        // "high", "low": how much the water, clouds, shadows and post
+//                             // spend (low: no ao, a smaller shadow map, coarser clouds and
+//                             // mirror); auto is high on a GPU, low drawn in software
 //     sun: { direction: { x: -0.6, y: 0.22, z: 0.75 }, color: 0xffc98a, intensity: 3.6 },
 //     fog: { density: 0.008, height: 0.05, color: 0xf2b27a }, // height fog: thick low, thin high;
 //                             // false: none
@@ -676,6 +677,14 @@ export async function createLook(canvas, options = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMappingExposure = look.exposure;
   const gpu = isSoftware(renderer);
+  // Auto spends where a GPU draws, and saves where the browser draws in software. Low also
+  // drops the ambient occlusion pass (the chain's dearest) and halves the sun's shadow map.
+  look.quality = look.quality === "auto" ? (gpu.software ? "low" : "high") : look.quality;
+  if (look.quality === "low" && look.ao !== false) {
+    look.ao = false;
+    look.post = look.bloom !== false;
+  }
+  const shadowSize = look.quality === "low" ? 512 : 1024;
   const post = look.post && !gpu.software;
   if (!post && look.grade !== false) {
     gradeInMaterials = true;
@@ -692,8 +701,6 @@ export async function createLook(canvas, options = {}) {
   shared.lookSunDir.value.copy(sunDir);
   if (look.fog !== false)
     shared.lookSunGlow.value.set(look.sun.color).multiplyScalar(look.sun.intensity * 0.25);
-  // Auto spends where a GPU draws, and saves where the browser draws in software.
-  look.quality = look.quality === "auto" ? (gpu.software ? "low" : "high") : look.quality;
   const sky = await skyProbes(renderer, look, sunDir, look.quality);
   const backgroundColor = look.background === null ? null : new THREE.Color(look.background);
 
@@ -957,7 +964,7 @@ export async function createLook(canvas, options = {}) {
           const light = new THREE.DirectionalLight(color, intensity);
           const toLight = new THREE.Vector3(direction.x, direction.y, direction.z).normalize();
           light.castShadow = look.shadows;
-          light.shadow.mapSize.set(1024, 1024);
+          light.shadow.mapSize.set(shadowSize, shadowSize);
           light.shadow.bias = -0.0005;
           light.shadow.normalBias = 0.02;
           const half = size / 2;
@@ -971,7 +978,7 @@ export async function createLook(canvas, options = {}) {
           });
           light.shadow.camera.updateProjectionMatrix();
           ctx.scene.add(light, light.target);
-          const rig = { light, follow, toLight, distance: size * 1.5, texel: size / 1024 };
+          const rig = { light, follow, toLight, distance: size * 1.5, texel: size / shadowSize };
           suns.add(rig);
           place(rig);
           return light;
