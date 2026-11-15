@@ -14,7 +14,7 @@
 //                             // its light is the same sky at `light` saturation
 //     // physical: true draws the sky by scattering from the sun instead (three's Sky:
 //     // { turbidity: 2, rayleigh: 1.2, mie: 0.005 } to tune it), and clouds lays a cloud deck
-//     // over either: { cover: 0.45 (0..1), scale: 1 (bigger is smaller clouds), shade: 0x8d96a6 }.
+//     // over either: { cover: 0.4 (0..1), scale: 1 (bigger is smaller clouds), shade: 0x8f9aab }.
 //     // Both are drawn once into the backdrop and the light, so they cost nothing per frame.
 //     quality: "auto",        // "high", "low": how much the water, clouds and shadows spend;
 //                             // auto is high on a GPU, low drawn in software
@@ -436,8 +436,9 @@ void main() {
   gl_FragColor = vec4( c, 1.0 );
 }`;
 
-// A cloud deck on a dome over the sky: fbm on the sky's plane, lit from the sun's side by how
-// much thinner the cloud is a step toward it, faded into the haze at the horizon.
+// A deck of cumulus over the sky, raymarched through a slab of 3D noise: flat grey bases, lit
+// rounded tops, thinning into haze at the horizon. It is drawn once into the backdrop's cube at
+// load, never per frame, so it can afford the march; low quality takes fewer steps.
 const CLOUD_FRAGMENT = /* glsl */ `
 uniform vec3 sunDir;
 uniform vec3 sunColor;
@@ -445,47 +446,73 @@ uniform vec3 shade;
 uniform vec3 lit;
 uniform float cover;
 uniform float scale;
+uniform float steps;
 varying vec3 vDir;
-float hash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
-float noise( vec2 p ) {
-  vec2 i = floor( p ), f = fract( p );
-  vec2 u = f * f * ( 3.0 - 2.0 * f );
-  return mix( mix( hash( i ), hash( i + vec2( 1, 0 ) ), u.x ), mix( hash( i + vec2( 0, 1 ) ), hash( i + vec2( 1, 1 ) ), u.x ), u.y );
+float hash( vec3 p ) {
+  p = fract( p * 0.3183099 + 0.1 );
+  p *= 17.0;
+  return fract( p.x * p.y * p.z * ( p.x + p.y + p.z ) );
 }
-float fbm( vec2 p ) {
+float noise( vec3 x ) {
+  vec3 i = floor( x ), f = fract( x );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( mix( hash( i ), hash( i + vec3( 1, 0, 0 ) ), f.x ),
+                   mix( hash( i + vec3( 0, 1, 0 ) ), hash( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+              mix( mix( hash( i + vec3( 0, 0, 1 ) ), hash( i + vec3( 1, 0, 1 ) ), f.x ),
+                   mix( hash( i + vec3( 0, 1, 1 ) ), hash( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
+}
+float fbm( vec3 p, int octaves ) {
   float v = 0.0, a = 0.5;
-  for ( int i = 0; i < 6; i ++ ) { v += a * noise( p ); p = p * 2.03 + vec2( 17.1, 9.2 ); a *= 0.5; }
+  for ( int i = 0; i < 5; i ++ ) {
+    if ( i >= octaves ) break;
+    v += a * noise( p );
+    p = p * 2.02 + vec3( 3.1, 1.7, 5.3 );
+    a *= 0.5;
+  }
   return v;
 }
-float density( vec2 p ) {
-  // Big rounded heaps: a low, warped field decides where a cloud is, the fine octaves only
-  // break its edge, so they read as cumulus rather than streaks.
-  vec2 q = p * 0.55;
-  float base = fbm( q + 0.3 * vec2( fbm( q * 0.7 + 3.1 ), fbm( q * 0.7 + 8.3 ) ) );
-  float edge = fbm( p * 3.1 ) - 0.5;
-  float n = base + edge * 0.12;
-  return smoothstep( 1.0 - cover * 0.95, 1.0 - cover * 0.95 + 0.09, n );
+// The slab runs from y 1 to 2.4 (the sky's own units); a cloud is a heap: flat at its base,
+// rounded toward its top, where the low octaves say a cloud stands.
+float cloud( vec3 p, int octaves ) {
+  float h = ( p.y - 1.0 ) / 1.4;
+  if ( h < 0.0 || h > 1.0 ) return 0.0;
+  vec2 q = p.xz * 0.32 * scale;
+  float where = fbm( vec3( q, 0.5 ), 3 );
+  float heap = smoothstep( 0.0, 0.07, h ) * ( 1.0 - smoothstep( 0.25, 1.0, h ) * ( 1.2 - where ) );
+  float detail = fbm( p * 2.6 * scale, octaves );
+  float d = where * 1.5 + detail * 0.42 - ( 1.42 - cover * 0.95 );
+  return clamp( d * heap * 14.0, 0.0, 1.0 );
 }
 void main() {
   vec3 d = normalize( vDir );
-  if ( d.y <= 0.0 ) discard;
-  vec2 p = d.xz / ( d.y + 0.12 ) * 1.6 * scale;
-  float c = density( p );
-  if ( c < 0.003 ) discard;
-  vec2 toward = normalize( sunDir.xz + 1e-4 ) * 0.18;
-  float ahead = density( p + toward );
-  float behind = density( p - toward );
-  // Out along p is down toward the horizon: where the cloud ends that way is its flat base.
-  vec2 down = normalize( p + 1e-4 ) * 0.3;
-  float base = 1.0 - density( p + down );
-  float top = 1.0 - density( p - down );
-  // Lit toward the sun and on its top, grey under its base.
-  float light = clamp( 0.75 + ( behind - ahead ) * 0.45 + top * 0.25 - base * 0.35, 0.0, 1.0 );
-  vec3 col = mix( shade, lit * mix( vec3( 1.0 ), sunColor, 0.45 ), light );
-  float s = max( dot( d, sunDir ), 0.0 );
-  col += sunColor * pow( s, 10.0 ) * 0.6 * ( 1.0 - c );
-  float fade = smoothstep( 0.0, 0.18, d.y );
-  gl_FragColor = vec4( col, c * fade );
+  if ( d.y <= 0.015 ) discard;
+  float t0 = 1.0 / d.y, t1 = 2.4 / d.y;
+  // Far decks thin into the horizon's haze; the march spans no more than a few cloud lengths.
+  float far = min( t1, t0 + 9.0 );
+  int n = int( steps );
+  float dt = ( far - t0 ) / steps;
+  float transmit = 1.0;
+  vec3 colour = vec3( 0.0 );
+  // Each ray starts at its own fraction of a step, so the steps blur instead of banding.
+  float jitter = hash( d * 913.7 );
+  for ( int i = 0; i < 64; i ++ ) {
+    if ( i >= n || transmit < 0.03 ) break;
+    vec3 p = d * ( t0 + ( float( i ) + jitter ) * dt );
+    float c = cloud( p, 4 );
+    if ( c <= 0.0 ) continue;
+    // Light: how much cloud lies between here and the sun.
+    float toward = 0.0;
+    for ( int j = 1; j <= 3; j ++ ) toward += cloud( p + sunDir * 0.12 * float( j ), 2 );
+    float sunlight = exp( - toward * 1.1 ) * ( 1.0 - exp( - c * 2.0 ) * 0.4 );
+    float h = clamp( ( p.y - 1.0 ) / 1.4, 0.0, 1.0 );
+    vec3 here = mix( shade, shade * 1.25, h ) + lit * mix( vec3( 1.0 ), sunColor, 0.5 ) * sunlight;
+    float a = 1.0 - exp( - c * dt * 14.0 );
+    colour += transmit * a * here;
+    transmit *= 1.0 - a;
+  }
+  float alpha = ( 1.0 - transmit ) * smoothstep( 0.015, 0.16, d.y );
+  if ( alpha < 0.003 ) discard;
+  gl_FragColor = vec4( colour / max( 1.0 - transmit, 1e-3 ), alpha );
 }`;
 
 // How far the backdrop below the horizon goes from the horizon's haze toward the sky's ground
@@ -557,10 +584,11 @@ async function skyProbes(renderer, look, sunDir, quality) {
         uniforms: {
           sunDir: { value: sunDir.clone() },
           sunColor: { value: new THREE.Color(look.sun.color) },
-          shade: { value: new THREE.Color(c.shade ?? 0xa3adbb) },
-          lit: { value: new THREE.Color(c.lit ?? 0xffffff).multiplyScalar(1.15) },
-          cover: { value: c.cover ?? 0.45 },
-          scale: { value: (c.scale ?? 1) * 1.5 },
+          shade: { value: new THREE.Color(c.shade ?? 0x8f9aab) },
+          lit: { value: new THREE.Color(c.lit ?? 0xffffff).multiplyScalar(1.25) },
+          cover: { value: c.cover ?? 0.4 },
+          scale: { value: c.scale ?? 1 },
+          steps: { value: quality === "low" ? 24 : 56 },
         },
         vertexShader: SKY_VERTEX,
         fragmentShader: CLOUD_FRAGMENT,
