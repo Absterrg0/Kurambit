@@ -450,7 +450,7 @@ export const GameModelSheetTool = Tool.make("game_model_sheet", {
   dependencies: [...on(GameEngine.GameEngine), GameProjectService.GameProjectService],
 })
   .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_model_sheet"));
 export const GameModelSheetToolkit = Toolkit.make(GameModelSheetTool);
 const ExportTool = Tool.make("game_export", {

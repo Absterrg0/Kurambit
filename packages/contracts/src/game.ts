@@ -797,6 +797,8 @@ export const GameModelSheetResult = Schema.Struct({
   reference: Schema.optionalKey(Schema.String),
   /** How to judge the sheets before changing the model. */
   review: Schema.optionalKey(Schema.String),
+  /** Why nothing could be drawn, when the game did not answer. */
+  note: Schema.optionalKey(Schema.String),
 });
 export type GameModelSheetResult = typeof GameModelSheetResult.Type;
 export const GameAction = Schema.Literals([

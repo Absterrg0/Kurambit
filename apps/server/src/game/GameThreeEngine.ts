@@ -95,6 +95,13 @@ const drawSheets = async (
 ): Promise<GameModelSheetResult | "no-sheet"> => {
   const listed = await session.sheet(null);
   if (listed === "no-sheet") return "no-sheet";
+  if (listed === null)
+    return {
+      sheets: [],
+      missing: [...(input.things ?? [])],
+      things: [],
+      note: "The game did not answer in time (still loading, or its main thread is stuck), so nothing was drawn. Run game_check, then call again.",
+    };
   const things = Option.match(decodeThings(listed), {
     onNone: () => [],
     onSome: (value) => value.things,
