@@ -230,7 +230,7 @@ export function curve(points) {
   const n = p.length;
   if (n === 1) return () => p[0][1];
   const d = [];
-  const m = new Array(n).fill(0);
+  const m = Array.from({ length: n }, () => 0);
   for (let i = 0; i < n - 1; i += 1)
     d.push((p[i + 1][1] - p[i][1]) / (p[i + 1][0] - p[i][0] || 1e-9));
   m[0] = d[0];
@@ -336,8 +336,7 @@ export function mirrored(side, { count = PLAN_POINTS } = {}) {
     right.push([x, Math.max(half(x), 0)]);
   }
   const left = right
-    .slice()
-    .reverse()
+    .toReversed()
     .filter(([, w]) => w > 1e-4)
     .map(([x, w]) => [x, -w]);
   return outline([...right, ...left], { sharp: true, count });
