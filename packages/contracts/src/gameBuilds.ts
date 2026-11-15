@@ -144,7 +144,7 @@ const MEASURED_FACT_IDS = [
   "unseen",
 ] as const;
 export type GameMeasuredFactId = (typeof MEASURED_FACT_IDS)[number];
-export const GAME_FACT_IDS: ReadonlyArray<GameMeasuredFactId> = MEASURED_FACT_IDS;
+const GAME_FACT_IDS: ReadonlyArray<GameMeasuredFactId> = MEASURED_FACT_IDS;
 /**
  * A fact's id. Keep going's stored step records name facts no longer measured (design opinions
  * the checks dropped), so their ids still decode; nothing reads or diffs them.
