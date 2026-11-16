@@ -166,6 +166,7 @@ import {
   toggleStageDevView,
   useStageCannotLose,
   useStageDevViews,
+  useStageBridge,
   useThreadStageBridge,
 } from "./game/gameStageBridge";
 import {
@@ -1661,9 +1662,23 @@ function OpenCommandPaletteDialog(props: {
         title: `Workbench: ${tab.title}`,
         searchTerms: ["workbench", "game", ...tab.searchTerms],
         icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+        ...(tab.tab === "art" ? { shortcutCommand: "game.art.toggle" as const } : {}),
         run: async () => showWorkbench(tab.tab),
       });
     }
+    // The thing pointed at on the Stage, as its file in Art; Art's list when it has none.
+    actionItems.push({
+      kind: "action",
+      value: "action:game-art-pointed",
+      title: "Show the pointed thing's art",
+      searchTerms: ["art", "asset", "model", "texture", "viewer", "selected", "pointed", "thing"],
+      icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const path = useStageBridge.getState().selected?.thing.asset?.path;
+        if (path === undefined) showWorkbench("art");
+        else useGameWorkspaceStore.getState().openArtAsset(path);
+      },
+    });
     actionItems.push({
       kind: "action",
       value: "action:game-history",

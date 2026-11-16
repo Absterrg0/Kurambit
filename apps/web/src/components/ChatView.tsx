@@ -4,6 +4,7 @@ import {
   diffCrowdsGame,
   fitSidePanels,
   toggleWorkbench,
+  toggleWorkbenchTab,
   useRowWidth,
 } from "./game/gameWorkbenchPanel";
 import { useStageSelectionChip } from "./game/gameComposerContext";
@@ -5352,6 +5353,10 @@ export default function ChatView(props: ChatViewProps) {
         // Only a game thread has a Workbench.
         if (!isGameThread || activeThreadRef === null) return false;
         toggleWorkbench();
+      },
+      "game.art.toggle": () => {
+        if (!isGameThread || activeThreadRef === null) return false;
+        toggleWorkbenchTab("art");
       },
       // The Stage acts on these, so the keys, the palette and the timeline
       // share one path. A focused game never sees them: its frame is

@@ -69,6 +69,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "rightPanel.new",
   "threadPanel.toggle",
   "game.workbench.toggle",
+  "game.art.toggle",
   "game.undoTurn",
   "game.redoTurn",
   "game.focus",

@@ -16,6 +16,13 @@ export const showWorkbench = (tab?: WorkbenchTab) => {
   store.setWorkbenchOpen(true);
 };
 
+/** Opens the Workbench on `tab`, or closes it when it already shows that section: one key per section. */
+export const toggleWorkbenchTab = (tab: WorkbenchTab) => {
+  const store = useGameWorkspaceStore.getState();
+  if (store.workbenchOpen && store.workbenchTab === tab) store.setWorkbenchOpen(false);
+  else showWorkbench(tab);
+};
+
 export const toggleWorkbench = () => {
   const store = useGameWorkspaceStore.getState();
   store.setWorkbenchOpen(!store.workbenchOpen);

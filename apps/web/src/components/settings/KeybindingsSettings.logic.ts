@@ -391,6 +391,7 @@ export function buildKeybindingCommandOptions(
 // One pattern: a short verb and its object, no articles; a toggle says Toggle.
 const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "game.workbench.toggle": "Show or hide the Workbench",
+  "game.art.toggle": "Show or hide the game's art",
   "game.focus": "Focus game, or leave it",
   "game.freeze": "Freeze or resume game",
   "game.stepFrame": "Step frozen game one frame",
