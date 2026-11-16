@@ -182,7 +182,7 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
 };
 const STEER_INTRO = "The person asked for this, in their words:";
 const STEP_TAIL =
-  "This is a keep-going step: make this one change, keep `game_check` clean, and end with your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
+  "This is a keep-going step: make this one change, end with a clean `game_check` op `final`, then your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
 const NEXT_FALLBACK = "Make the one change that most improves the game for BRIEF.md.";
 
 const clip = (text: string, max: number) =>
