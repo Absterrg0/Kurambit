@@ -2,7 +2,12 @@ import { useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { playOutcomeWords, type GamePlayOutcome, type ScopedThreadRef } from "@kurambit/contracts";
+import {
+  playOutcomeWords,
+  type GameBuildId,
+  type GamePlayOutcome,
+  type ScopedThreadRef,
+} from "@kurambit/contracts";
 import { MessageSquareIcon, PlayIcon, RotateCcwIcon, XIcon } from "lucide-react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -43,7 +48,8 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
   // Counts runs started: a keep that answers after the next run began shows nothing.
   const runSerial = useRef(0);
 
-  const receive = useStableCallback((message: StudioMessage) => {
+  /** `build`: the build whose copy the run played on, when not the folder. */
+  const receive = useStableCallback((message: StudioMessage, build?: GameBuildId) => {
     if (message.type === "studio-run-reset") {
       runSerial.current += 1;
       setEnded(null);
@@ -54,7 +60,11 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
     const { outcome } = message.play;
     void keepPlay({
       environmentId,
-      input: { threadId: threadRef.threadId, play: message.play },
+      input: {
+        threadId: threadRef.threadId,
+        play: message.play,
+        ...(build === undefined ? {} : { build }),
+      },
     }).then(async (result) => {
       if (result._tag !== "Success") return;
       const { kept } = result.value;

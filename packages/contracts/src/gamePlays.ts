@@ -123,10 +123,12 @@ export const GameReplayRun = Schema.Struct({
 });
 export type GameReplayRun = typeof GameReplayRun.Type;
 
-/** The Stage keeps a person's ended run on the game folder (a build's copy has no bridge). */
+/** The Stage keeps a person's ended run, on the game folder or on the build whose copy it played. */
 export const GameKeepPlayInput = Schema.Struct({
   threadId: ThreadId,
   play: GamePlay,
+  /** The build whose copy the run played on; absent: the folder, as its build stands. */
+  build: Schema.optionalKey(GameBuildId),
 });
 export type GameKeepPlayInput = typeof GameKeepPlayInput.Type;
 /** A kept run's id, which "Save as a test play" names it by. */

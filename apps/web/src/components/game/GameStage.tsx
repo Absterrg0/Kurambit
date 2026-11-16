@@ -827,6 +827,15 @@ function ThreadGameStage({
   useEffect(() => {
     if (liveOpenAsked) openLive();
   }, [liveOpenAsked, openLive]);
+  // A build's copy: its runs are kept on that build, as the folder's are on its own. Its bridge
+  // wakes on the Stage's first message, and only plays are taken from it.
+  const [copyFrame, setCopyFrame] = useState<HTMLIFrameElement | null>(null);
+  const onCopyStudioMessage = useStableCallback((studio: StudioMessage) => {
+    if (studio.type === "studio-ready")
+      copyFrame?.contentWindow?.postMessage({ type: "studio-things-request" }, "*");
+    if (asked !== null && (studio.type === "studio-play" || studio.type === "studio-run-reset"))
+      runs.receive(studio, asked.build);
+  });
   const onStudioMessage = useStableCallback((studio: StudioMessage) => {
     // A run, ended or left: kept, so the agent hears of it, a later build can play it again,
     // and the person can save it as a test play.
@@ -1557,6 +1566,8 @@ function ThreadGameStage({
                   gameName={gameName}
                   hidden={hidden || collapsed || compare !== null}
                   focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
+                  onFrame={setCopyFrame}
+                  onStudioMessage={onCopyStudioMessage}
                 />
               ) : (
                 <p className="flex size-full items-center justify-center p-6 text-center text-body text-washi/90">

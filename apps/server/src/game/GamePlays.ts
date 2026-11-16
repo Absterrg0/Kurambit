@@ -114,7 +114,7 @@ const make = Effect.gen(function* () {
   const keep: GamePlays["Service"]["keep"] = (threadId, input) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
-      const build = yield* folderBuild(threadId);
+      const build = input.build ?? (yield* folderBuild(threadId));
       const at = DateTime.formatIso(yield* DateTime.now);
       const kept = yield* Effect.tryPromise({
         try: () => keepPlay(root, { at, build, play: input.play }),

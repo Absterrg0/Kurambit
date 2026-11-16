@@ -1844,7 +1844,8 @@ const layerWsRpc = (
             ...(commandId === undefined ? {} : { commandId }),
             ...(fold === undefined ? {} : { fold }),
           }),
-        [WS_METHODS.gameKeepPlay]: ({ threadId, play }) => gamePlays.keep(threadId, { play }),
+        [WS_METHODS.gameKeepPlay]: ({ threadId, play, build }) =>
+          gamePlays.keep(threadId, { play, ...(build === undefined ? {} : { build }) }),
         [WS_METHODS.gameReplay]: ({ threadId, build }) => gamePlays.replay(threadId, build),
         [WS_METHODS.gameSavePlay]: ({ threadId, name, kept }) =>
           gamePlays.save(threadId, { name, ...(kept === undefined ? {} : { kept }) }),

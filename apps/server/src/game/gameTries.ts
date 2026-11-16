@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- A ref name holds a hash of a thread id.
 // A try ("try it N ways") is no record of its own, as a build is none: it is
 // read from the chat's try run, its version child threads and the refs the
 // game keeps. Version k's thread id is derived from the try's run, so a read
@@ -11,28 +12,46 @@ import {
   type RunId,
   ThreadId,
 } from "@kurambit/contracts";
+import { createHash } from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
 import type * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 
-/** The refs a game keeps for its tries: `versions/<chat>/<run>/base`, each part hex (ids are not ref-safe). */
+/**
+ * The refs a game keeps for its tries: `versions/<chat>/<ordinal>/base`, the chat's id in
+ * base64url and the try's run ordinal, since a run's id is derived from those two and a full id
+ * would pass a ref name's 255-byte limit.
+ */
 export const VERSIONS_FOLDER = `${gameRunRefsFolder("game-builds")}versions/`;
-const hex = (text: string) => Buffer.from(text, "utf8").toString("hex");
-const unhex = (text: string) => Buffer.from(text, "hex").toString("utf8");
 
-export const tryBaseRef = (threadId: ThreadId, runId: RunId | string) =>
-  checkpointRefForGameRun("game-builds", `versions/${hex(threadId)}/${hex(runId)}/base`);
+export const tryBaseRef = (threadId: ThreadId, ordinal: number) =>
+  checkpointRefForGameRun(
+    "game-builds",
+    `versions/${Buffer.from(threadId, "utf8").toString("base64url")}/${ordinal}/base`,
+  );
+
+/**
+ * A version whose turn ended with no checkpoint (a restart cancels it): its worktree as it was
+ * left, captured before the worktree goes, so no version's work is lost.
+ */
+export const versionLeftRef = (childThreadId: ThreadId) =>
+  checkpointRefForGameRun(
+    "game-builds",
+    `versions/left/${createHash("sha256").update(childThreadId).digest("hex").slice(0, 32)}`,
+  );
 
 /** The chat and run of every try the refs name, from their base refs. */
 export const triesInRefs = (refs: Iterable<string>) =>
   [...refs].flatMap((ref) => {
     if (!ref.startsWith(VERSIONS_FOLDER) || !ref.endsWith("/base")) return [];
-    const [thread, run] = ref.slice(VERSIONS_FOLDER.length).split("/");
-    return thread === undefined || run === undefined
-      ? []
-      : [{ threadId: ThreadId.make(unhex(thread)), runId: unhex(run) }];
+    const [thread, ordinal] = ref.slice(VERSIONS_FOLDER.length).split("/");
+    if (thread === undefined || ordinal === undefined || !/^\d+$/.test(ordinal)) return [];
+    const threadId = ThreadId.make(Buffer.from(thread, "base64url").toString("utf8"));
+    return [
+      { threadId, runId: IdAllocator.derive.run({ threadId, ordinal: Number(ordinal) }) as string },
+    ];
   });
 
 /** `game-version.start`'s id: one per try, so a repeat after a restart is a receipt. */
@@ -48,19 +67,18 @@ export const keptSignal = (n: number, commandId: string) => `kept-${n}-${command
 const KEPT_IN_ID = /:signal:kept-(\d+)-/;
 
 const MARKDOWN_LEAD = /^(?:#{1,6}\s+|[-*+>]\s+|\d+[.)]\s+)+/;
-/** A reply's first line of prose, without its markdown: the version's own line on its approach. */
+const APPROACH_LINE = /^(?:\*\*)?approach:?(?:\*\*)?:?\s*/i;
+/**
+ * The version's own line on its approach: the reply's "Approach:" line, which it is asked to
+ * start with, else its first line of prose, without markdown.
+ */
 export const approachOf = (reply: string | null) => {
-  const line =
-    (reply ?? "")
-      .split("\n")
-      .map((each) =>
-        each
-          .trim()
-          .replace(MARKDOWN_LEAD, "")
-          .replace(/^\*\*(.*)\*\*$/, "$1")
-          .replace(/^approach:\s*/i, ""),
-      )
-      .find((each) => each !== "") ?? "";
+  const lines = (reply ?? "")
+    .split("\n")
+    .map((each) => each.trim().replace(MARKDOWN_LEAD, ""))
+    .filter((each) => each !== "");
+  const named = lines.find((each) => APPROACH_LINE.test(each));
+  const line = (named ?? lines[0] ?? "").replace(APPROACH_LINE, "").replace(/^\*\*(.*)\*\*$/, "$1");
   return line.length > 140 ? `${line.slice(0, 139)}…` : line;
 };
 
@@ -136,7 +154,9 @@ export const readTry = (
           const checkpoint = child.value.checkpoints.find(
             (each) => each.id === childRun?.checkpointId && each.status === "ready",
           );
-          const build = checkpoint === undefined ? undefined : oids.get(checkpoint.ref);
+          const build =
+            (checkpoint === undefined ? undefined : oids.get(checkpoint.ref)) ??
+            oids.get(versionLeftRef(childThreadId));
           const reply = child.value.messages.findLast((each) => each.runId === childRun?.id);
           return [
             {
@@ -152,7 +172,7 @@ export const readTry = (
         }),
       { concurrency: 4 },
     );
-    const base = oids.get(tryBaseRef(threadId, runId)) ?? null;
+    const base = oids.get(tryBaseRef(threadId, run.ordinal)) ?? null;
     return {
       threadId,
       runId,
@@ -192,8 +212,9 @@ export const triesNote = (
       (each) => each.versions !== undefined && each.status === "completed",
     );
     if (tries.length === 0) return null;
+    // The agent's own last turn that finished: a failed start never showed it anything.
     const own = earlier
-      .filter((each) => each.versions === undefined && each.completedAt !== null)
+      .filter((each) => each.versions === undefined && each.status === "completed")
       .toSorted((a, b) => b.ordinal - a.ordinal)[0];
     const since =
       own?.completedAt === null || own === undefined ? null : DateTime.formatIso(own.completedAt);

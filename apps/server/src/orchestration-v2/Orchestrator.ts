@@ -6647,8 +6647,31 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Run ${command.runId} is not a try waiting to start its ${command.versions.length} versions.`,
         });
       const first = yield* nextTurnItemOrdinal(projection);
-      // The children first: each needs the run still active, and all of them
-      // land with the run's completion or none do.
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      const notice: OrchestrationV2TurnItem = {
+        id: idAllocator.derive.runSignalTurnItem({ runId: run.id, signal: "versions" }),
+        threadId: command.threadId,
+        runId: run.id,
+        nodeId: rootNode.id,
+        providerThreadId: run.providerThreadId,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: first,
+        status: "completed",
+        title: null,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+        type: "system_notice",
+        message: command.notice,
+      };
+      const at = { threadId: command.threadId, runId: run.id, nodeId: rootNode.id };
+      // The notice first, then the versions: the turn reads as the request, what Kurambit does
+      // with it, and the versions. The children need the run still active, so its completion
+      // comes last, and all of it lands in one transaction or none does.
+      yield* emitEvent({ type: "turn-item.updated", ...at, occurredAt: now, payload: notice });
       for (const [index, version] of command.versions.entries()) {
         yield* dispatchChildTaskRequest(
           {
@@ -6674,29 +6697,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           effects,
         );
       }
-      const now = yield* DateTime.now;
-      const emitEvent = emit(events, command);
-      const notice: OrchestrationV2TurnItem = {
-        id: idAllocator.derive.runSignalTurnItem({ runId: run.id, signal: "versions" }),
-        threadId: command.threadId,
-        runId: run.id,
-        nodeId: rootNode.id,
-        providerThreadId: run.providerThreadId,
-        providerTurnId: null,
-        nativeItemRef: null,
-        parentItemId: null,
-        ordinal: first,
-        status: "completed",
-        title: null,
-        startedAt: now,
-        completedAt: now,
-        updatedAt: now,
-        type: "system_notice",
-        message: command.notice,
-      };
       const settled = { status: "completed" as const, startedAt: now, completedAt: now };
-      const at = { threadId: command.threadId, runId: run.id, nodeId: rootNode.id };
-      yield* emitEvent({ type: "turn-item.updated", ...at, occurredAt: now, payload: notice });
       yield* emitEvent({
         type: "run-attempt.updated",
         ...at,
