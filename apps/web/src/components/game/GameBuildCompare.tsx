@@ -64,7 +64,7 @@ export function GameBuildCompare({
   gameName: string;
   /** The Stage is not shown: both sides pause. */
   hidden: boolean;
-  /** The Build tab is beside the compare, so its side can say "in the Build tab". */
+  /** The Workbench's Checks is beside the compare, so its side can say "in Checks". */
   inspectorOpen: boolean;
   /** Another build picked for a side. */
   onPair: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
@@ -351,7 +351,7 @@ function ComparePane({
           {[
             buildName(build),
             undone ? "undone" : null,
-            shown && inspectorOpen ? "in the Build tab" : null,
+            shown && inspectorOpen ? "in Checks" : null,
             formatBuildTime(build.at),
           ]
             .filter((part) => part !== null)

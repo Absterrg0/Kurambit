@@ -77,7 +77,7 @@ export const GameThing = Schema.Struct({
   /** "Cat", "Slime 3". */
   name: Schema.String,
   kind: GameThingKind,
-  /** Game-relative; the Look tab reads the sidecar and its generation. */
+  /** Game-relative; the Workbench's Art tab reads the sidecar and its generation. */
   asset: Schema.optionalKey(
     Schema.Struct({ path: Schema.String, sidecar: Schema.optionalKey(Schema.String) }),
   ),

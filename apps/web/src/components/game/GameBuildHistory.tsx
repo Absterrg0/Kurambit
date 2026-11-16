@@ -68,7 +68,7 @@ export interface GameBuildSlot {
 /**
  * The game's builds as a history, newest first, the way a developer reads commits: each its
  * name, how its checks moved, what was asked for and when, with the one on the Stage marked.
- * A row plays its build and shows it in the Build tab; Compare picks two rows.
+ * A row plays its build and shows it in Checks; Compare picks two rows.
  */
 export function GameBuildHistory({
   threadRef,
@@ -97,7 +97,7 @@ export function GameBuildHistory({
   /** Back to the folder's own game. */
   onLive: () => void;
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
-  /** Shows a build in the Build tab. */
+  /** Shows a build in Checks. */
   onInspect: (build: GameBuild) => void;
 }) {
   const still = useStageStill(scopedThreadKey(threadRef));

@@ -23,7 +23,7 @@ import { useTurnUndo } from "./useBuildActions";
 /**
  * A changing chat turn's build in the chat, on one line: its name, its checks, the files it
  * changed (their diff opens in the right panel) and Undo or Redo while it is the latest. The
- * name plays it on the Stage; its Build tab has everything else.
+ * name plays it on the Stage; the Workbench's Checks has everything else.
  */
 export function GameTurnBuild({
   threadRef,

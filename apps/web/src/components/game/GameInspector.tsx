@@ -736,7 +736,7 @@ function ChecksLoading() {
 }
 
 /**
- * The Build tab before its builds are read: a build's header and the named check rows, the
+ * The Checks tab before its builds are read: a build's header and the named check rows, the
  * shape it has once they are, from the first frame the Inspector is on screen.
  */
 function GameInspectorLoading() {
@@ -1433,7 +1433,7 @@ export function useSelectNotice(
   return null;
 }
 
-/** The Look tab: the game's style, how its characters are made, and the art made for it. */
+/** The Workbench's Art tab, for now (the Art tab's own browser comes next): the game's style, how its characters are made, and the art made for it. */
 export function GameLookPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">

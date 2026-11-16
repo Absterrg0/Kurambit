@@ -414,6 +414,7 @@ function ThreadGameStage({
     (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
   );
   const workbenchShown = useWorkbenchShown(threadRef);
+  const workbenchTab = useGameWorkspaceStore((state) => state.workbenchTab);
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
@@ -1516,7 +1517,7 @@ function ThreadGameStage({
               viewport={data.viewport}
               gameName={gameName}
               hidden={hidden}
-              inspectorOpen={workbenchShown}
+              inspectorOpen={workbenchShown && workbenchTab === "checks"}
               onPair={setCompare}
               onClose={() => setCompare(null)}
             />

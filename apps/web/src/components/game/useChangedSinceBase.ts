@@ -7,7 +7,7 @@ import { changedReadings, factsSettled, type CompareRow } from "./gameBuilds.log
 
 /**
  * What a build changed in the readings since the build it was made from: the change a turn
- * made, for the Build tab's line and the folded Inspector's label. Null until both builds are
+ * made, for the Checks tab's line and the folded Inspector's label. Null until both builds are
  * measured, so nothing being measured is ever said to differ.
  */
 export function useChangedSinceBase(

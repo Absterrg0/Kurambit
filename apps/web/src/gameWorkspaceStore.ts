@@ -52,7 +52,7 @@ export interface GameInspectedBuild {
 
 interface GameWorkspaceStoreState {
   inspectedBuild: GameInspectedBuild | null;
-  /** Shows a build in the Build tab; null follows the Stage again. */
+  /** Shows a build in the Workbench's Checks; null follows the Stage again. */
   inspectBuild: (inspected: GameInspectedBuild | null) => void;
   /** The latest Stage request; `n` makes a repeat of the same request news. Not persisted. */
   stageRequest: { readonly request: GameStageRequest; readonly n: number } | null;
