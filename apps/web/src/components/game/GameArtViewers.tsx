@@ -397,6 +397,8 @@ function ViewControl({
             variant="ghost"
             aria-label={label}
             {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
+            // The ghost button's own pressed look, as a toggle's.
+            {...(pressed === true ? { "data-pressed": "" } : {})}
             disabled={disabled}
             onClick={onClick}
           />
@@ -719,7 +721,7 @@ export function AudioViewer({
                 size="icon-sm"
                 variant="ghost"
                 disabled={url === null}
-                aria-label={playing ? "Pause" : "Play"}
+                aria-label={playing ? "Pause the sound" : "Play the sound"}
                 onClick={() => {
                   if (audio.current === null) return;
                   if (playing) audio.current.pause();

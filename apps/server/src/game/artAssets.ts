@@ -83,7 +83,8 @@ export const routeOfLine = (line: string): Exclude<GameArtAssetRoute, "unrecorde
 /** The licence or credit a line names: its "Licence: …" clause, else a known licence's name. */
 export const creditOfLine = (line: string): string | null => {
   const library = /\blibrary pack [^,]+,\s*(.+)$/i.exec(line);
-  if (library !== null) return library[1]!.trim().replace(/\.$/, "");
+  // The add writes "licence, credit: …"; words after a full stop are someone's description.
+  if (library !== null) return library[1]!.split(/\.\s/)[0]!.trim().replace(/\.$/, "");
   const said = /\blicen[cs]e:?\s+([^.;]+)/i.exec(line);
   if (said !== null) return said[1]!.trim();
   const known =

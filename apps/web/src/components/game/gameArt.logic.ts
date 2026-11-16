@@ -116,16 +116,21 @@ export const artRows = (
 };
 
 /** Whether the build's plays used a file, in a few words; null when its plays did not measure it. */
-export const useWords = (asset: GameArtAsset, use: GameAssetUse | null): string | null => {
-  if (use === null) return null;
+export const inPlayWords = (
+  asset: GameArtAsset,
+  use: GameAssetUse | null,
+  onStage: boolean,
+): string | null => {
+  // The use fact leaves library packs out; a model the game on the Stage holds is in use.
+  if (use === null) return onStage ? "On the Stage" : null;
   if (asset.kind === "audio") {
     if (use.played.includes(asset.path)) return "Played";
-    if (use.silent.includes(asset.path)) return "Loaded, never played";
+    if (use.silent.includes(asset.path)) return "Never played";
   }
-  if (use.used.includes(asset.path)) return "Used in play";
-  if (use.unused.includes(asset.path)) return "Not loaded in play";
+  if (use.used.includes(asset.path)) return "Used";
+  if (use.unused.includes(asset.path)) return "Not loaded";
   // Past the fact's caps, a file is counted but not named.
-  return null;
+  return onStage ? "On the Stage" : null;
 };
 
 export const bytesWords = (bytes: number) =>
@@ -138,16 +143,13 @@ export const bytesWords = (bytes: number) =>
 export const countWords = (count: number, one: string, many: string) =>
   `${count.toLocaleString("en-US")} ${count === 1 ? one : many}`;
 
-/** The row's second line: where it came from, its licence, its cost and whether play used it. */
-export const assetSummary = (asset: GameArtAsset, use: GameAssetUse | null) =>
+/** The row's second line: where it came from, its licence and its cost. */
+export const assetSummary = (asset: GameArtAsset) =>
   [
-    asset.route === "library" && asset.pack !== undefined
-      ? `Library · ${asset.pack}`
-      : ROUTE_WORDS[asset.route],
+    ROUTE_WORDS[asset.route],
     asset.credit ?? null,
     asset.triangles === undefined ? null : countWords(asset.triangles, "triangle", "triangles"),
     bytesWords(asset.bytes),
-    useWords(asset, use),
   ]
     .filter((part) => part !== null)
     .join(" · ");
@@ -161,9 +163,10 @@ export const thingOfAsset = (things: ReadonlyArray<GameThing>, asset: GameArtAss
         (asset.sidecar !== undefined && thing.asset.sidecar === asset.sidecar)),
   ) ?? null;
 
-/** Seconds as the clip scrubber says them: "0:01.2". */
+/** Seconds as the clip scrubber says them: "0.6 s", "12.4 s", "1:05.2". */
 export const clipTime = (seconds: number) => {
   const whole = Math.max(0, seconds);
+  if (whole < 60) return `${whole.toFixed(1)} s`;
   const minutes = Math.floor(whole / 60);
   return `${minutes}:${(whole - minutes * 60).toFixed(1).padStart(4, "0")}`;
 };

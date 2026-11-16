@@ -67,7 +67,7 @@ import {
   fileName,
   ROUTE_WORDS,
   thingOfAsset,
-  useWords,
+  inPlayWords,
   type GameArtCodeModel,
   type GameArtEntry,
   type GameArtRow,
@@ -332,8 +332,10 @@ function ArtRowButton({
 }) {
   const name = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
   const summary =
-    entry.kind === "file" ? assetSummary(entry.asset, use) : "Code · made while the game plays";
+    entry.kind === "file" ? assetSummary(entry.asset) : "Code · made while the game plays";
   const stageId = stageThingOf(entry, things);
+  // Whether the last measured play used it, at the row's end: the one reading a list scans for.
+  const used = entry.kind === "file" ? inPlayWords(entry.asset, use, stageId !== null) : null;
   return (
     <div className="px-2">
       <button
@@ -347,9 +349,16 @@ function ArtRowButton({
       >
         <ArtThumb threadRef={threadRef} root={root} entry={entry} drawn={drawn} />
         <span className="flex min-w-0 flex-1 flex-col">
-          <Text variant="body" tone="default" truncate>
-            {name}
-          </Text>
+          <span className="flex min-w-0 items-baseline gap-2">
+            <Text variant="body" tone="default" truncate render={<span className="flex-1" />}>
+              {name}
+            </Text>
+            {used === null ? null : (
+              <Text variant="caption" tone="muted" render={<span className="shrink-0" />}>
+                {used}
+              </Text>
+            )}
+          </span>
           <Text variant="caption" tone="muted" numeric truncate>
             {summary}
           </Text>
@@ -695,7 +704,7 @@ function CodeModelDetail({
   return (
     <Workbench.Body className="overflow-visible">
       <Workbench.Section title="Where it comes from">
-        <Workbench.Row name="Made by the game's code while it plays" reading="Code" />
+        <ArtFact name="Made by the game's code while it plays" reading="Code" />
         <Text variant="caption" tone="muted" render={<p className="px-4 pt-1" />}>
           It has no file to open here. Point at it on the frozen Stage to see it, or Tune its
           values.
@@ -713,6 +722,61 @@ function CodeModelDetail({
         </ActionRow>
       </Workbench.Section>
     </Workbench.Body>
+  );
+}
+
+/**
+ * One fact of an asset: its name and its reading at the right, as a Checks row reads, on the
+ * Art tab's own 16 px edges (no evidence column here).
+ */
+function ArtFact({
+  mark,
+  name,
+  reading,
+}: {
+  mark?: ReactNode;
+  name: ReactNode;
+  reading?: ReactNode;
+}) {
+  return (
+    <div className="flex min-h-7 min-w-0 items-start gap-2 px-4 py-1">
+      {mark === undefined ? null : (
+        <span className="flex h-5 w-3.5 shrink-0 items-center justify-center">{mark}</span>
+      )}
+      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
+        <Text variant="meta" tone="default" render={<span className="min-w-0 leading-5" />}>
+          {name}
+        </Text>
+        <span aria-hidden="true" className="flex-1" />
+        {reading === undefined ? null : (
+          <Text
+            variant="caption"
+            tone="muted"
+            numeric
+            render={<span className="min-w-0 leading-5" />}
+          >
+            {reading}
+          </Text>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** A game path that breaks only after its slashes, the folders quieter than the file. */
+function AssetPath({ path }: { path: string }) {
+  const parts = path.split("/");
+  const file = parts.pop() ?? path;
+  return (
+    <Text variant="caption" tone="muted" render={<p className="px-4 pb-1" />}>
+      {parts.map((part, index) => (
+        // oxlint-disable-next-line react/no-array-index-key -- a folder is its place in the path.
+        <span key={index}>
+          {part}/<wbr />
+        </span>
+      ))}
+      <span className="text-foreground">{file}</span>
+    </Text>
   );
 }
 
@@ -757,7 +821,7 @@ function FileDetail({
     tint: typeof tint === "number" ? tint : 0xffffff,
     scale: typeof scale === "number" ? scale : 1,
   };
-  const usedWords = useWords(asset, use);
+  const usedWords = inPlayWords(asset, use, stageThing !== null);
   return (
     <>
       {asset.kind === "model" ? (
@@ -785,8 +849,8 @@ function FileDetail({
       )}
       <Workbench.Body className="overflow-visible">
         <Workbench.Section title="File" detail={bytesWords(asset.bytes)}>
-          <Workbench.Row name={<span className="break-all">{asset.path}</span>} />
-          <Workbench.Row
+          <AssetPath path={asset.path} />
+          <ArtFact
             name="From"
             reading={
               asset.route === "library" && asset.pack !== undefined
@@ -794,10 +858,8 @@ function FileDetail({
                 : ROUTE_WORDS[asset.route]
             }
           />
-          {asset.credit === undefined ? null : (
-            <Workbench.Row name="Licence" reading={asset.credit} />
-          )}
-          <Workbench.Row name="In play" reading={usedWords ?? "Not measured for this build"} />
+          {asset.credit === undefined ? null : <ArtFact name="Licence" reading={asset.credit} />}
+          <ArtFact name="In play" reading={usedWords ?? "Not measured for this build"} />
           {asset.note === undefined ? null : (
             <Text variant="caption" tone="muted" render={<p className="px-4 pt-1" />}>
               {asset.note}
@@ -824,29 +886,27 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
   return (
     <>
       <Workbench.Section title="Model">
-        <Workbench.Row name="Triangles" reading={info.triangles.toLocaleString("en-US")} />
-        <Workbench.Row name="Draw calls" reading={info.drawCalls} />
-        <Workbench.Row name="Size" reading={`${info.size.join(" × ")} m (wide × tall × long)`} />
-        <Workbench.Row
+        <ArtFact name="Triangles" reading={info.triangles.toLocaleString("en-US")} />
+        <ArtFact name="Draw calls" reading={info.drawCalls} />
+        <ArtFact name="Size" reading={`${info.size.join(" × ")} m (wide × tall × long)`} />
+        <ArtFact
           name="Pivot"
           reading={`origin; bounds y ${info.bounds[0][1]} to ${info.bounds[1][1]} m`}
         />
-        <Workbench.Row
+        <ArtFact
           name="Skeleton"
           reading={info.bones === 0 ? "None" : countWords(info.bones, "bone", "bones")}
         />
-        <Workbench.Row
+        <ArtFact
           name="Clips"
           reading={
-            info.clips.length === 0
-              ? "None"
-              : info.clips.map((clip) => `${clip.name} ${clip.duration.toFixed(1)} s`).join(", ")
+            info.clips.length === 0 ? "None" : countWords(info.clips.length, "clip", "clips")
           }
         />
       </Workbench.Section>
       <Workbench.Section title="Materials" detail={info.materials.length}>
         {info.materials.map((material, index) => (
-          <Workbench.Row
+          <ArtFact
             // oxlint-disable-next-line react/no-array-index-key -- two materials may share a name.
             key={`${index}:${material.name}`}
             mark={
@@ -869,7 +929,7 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
           </Text>
         ) : (
           info.textures.map((texture, index) => (
-            <Workbench.Row
+            <ArtFact
               // oxlint-disable-next-line react/no-array-index-key -- two textures may share a name.
               key={`${index}:${texture.name}`}
               name={texture.name}
