@@ -170,6 +170,12 @@ export const DEFAULT_GAME_ENGINE: GameEngineId = GameEngineId.literals[0];
 /** What a game in an engine this version does not have says, and a refused create. */
 export const unavailableEngineMessage = (engine: GameEngineName): string =>
   `${engineDisplayName(engine)} games are not available in this version of Kurambit: their chat, builds and history still open, but nothing builds or plays them.`;
+/**
+ * What a three.js game made on the older demo shell says (its page carries that shell's screens):
+ * this version opens it, as it opens a game in an engine it does not have, and plays nothing.
+ */
+export const OLD_SHELL_MESSAGE =
+  "This game was made with an older Kurambit and is not supported in this version: its chat, builds and history still open, but nothing plays it.";
 /** The engine a game made from a template runs on; games from before templates were Godot games. */
 export const templateEngine = (template: GameTemplateId | null): GameEngineName =>
   template === "blank-three" ? "three" : template === "blank-unity" ? "unity" : "godot";
@@ -558,6 +564,11 @@ export const GameStatus = Schema.Struct({
   exportTargets: Schema.Array(GameExportTarget),
   /** The resolution the game boots at, in which the Stage frames it. */
   viewport: GameViewport,
+  /**
+   * Why this version plays nothing of a game in an engine it has (OLD_SHELL_MESSAGE); absent when
+   * it plays the game.
+   */
+  unsupported: Schema.optionalKey(Schema.String),
   /** A web build exists but game sources changed after it: play would be out of date. */
   webBuildStale: Schema.Boolean,
   /**

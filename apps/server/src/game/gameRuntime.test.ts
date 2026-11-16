@@ -4,7 +4,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { expect, it } from "@effect/vitest";
 
-import { runtimeRequestFile } from "./gameRuntime.ts";
+import type { GameManifest } from "@kurambit/contracts";
+import { carriesOldShell, runtimeRequestFile } from "./gameRuntime.ts";
 
 it("serves a file of a known engine's major, and nothing outside the runtime", async () => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-runtime-"));
@@ -33,6 +34,35 @@ it("serves a file of a known engine's major, and nothing outside the runtime", a
       "/shell/shell.js",
     ])
       expect(await runtimeRequestFile(runtimes, path), path).toBe(null);
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("calls a page old only when it carries every screen of the older demo shell", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-old-shell-"));
+  try {
+    NodeFS.mkdirSync(NodePath.join(root, "web"));
+    const manifest = { engine: { name: "three" }, project: "web" } as GameManifest;
+    const page = (screens: ReadonlyArray<string>) =>
+      NodeFS.writeFileSync(
+        NodePath.join(root, "web", "index.html"),
+        screens
+          .map((id) => `<section class="screen screen-card" id="${id}" hidden></section>`)
+          .join(""),
+      );
+    const all = ["loading", "title", "pause", "settings", "end", "credits", "controls"];
+    page(all);
+    expect(await carriesOldShell(root, manifest)).toBe(true);
+    // A game that drew its own title (and kept some of the old ids) is not old.
+    page(all.slice(1));
+    expect(await carriesOldShell(root, manifest)).toBe(false);
+    // The new template: no screens at all.
+    NodeFS.copyFileSync(
+      new URL("../../templates/blank-three/web/index.html", import.meta.url),
+      NodePath.join(root, "web", "index.html"),
+    );
+    expect(await carriesOldShell(root, manifest)).toBe(false);
   } finally {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }

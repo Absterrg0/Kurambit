@@ -11,7 +11,8 @@ import {
   type GameAction,
   type GameActionResult,
   type GameManifest,
-  type GameOperationError,
+  GameOperationError,
+  OLD_SHELL_MESSAGE,
   type ThreadId,
 } from "@kurambit/contracts";
 import { engineProfile, unavailableEngine, type GameEngineProfile } from "./engineProfile.ts";
@@ -24,6 +25,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameStatusService from "./GameStatusService.ts";
+import { carriesOldShell } from "./gameRuntime.ts";
 
 /**
  * What the Stage plays and stops: Play, Rebuild and the agent's preview of the
@@ -99,6 +101,17 @@ const make = Effect.gen(function* () {
             : projects.exclusive(threadId, "Build Web", exporter.publishWeb),
       ),
     );
+  const oldShell = (root: string, manifest: GameManifest) =>
+    Effect.promise(() => carriesOldShell(root, manifest));
+  const oldShellRefused = (root: string) =>
+    Effect.fail(
+      new GameOperationError({
+        operation: "play",
+        path: root,
+        reason: "engine-parked",
+        detail: OLD_SHELL_MESSAGE,
+      }),
+    );
   /** What a game whose engine makes no Web build answers Play with. */
   const noWebPlay = (root: string, displayName: string): GameActionResult => ({
     success: false,
@@ -126,9 +139,11 @@ const make = Effect.gen(function* () {
       );
   const play = Effect.fn("GameStage.play")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
-    const engine = (yield* projects.read(root)).engine.name;
+    const manifest = yield* projects.read(root);
+    const engine = manifest.engine.name;
     // A game in an engine this version does not have plays nothing, not even an export it made before.
     if (!isAvailableEngine(engine)) return yield* unavailableEngine(engine);
+    if (yield* oldShell(root, manifest)) return yield* oldShellRefused(root);
     const profile = engineProfile(engine);
     if (profile.stage === "live")
       return yield* playLive(
@@ -215,6 +230,7 @@ const make = Effect.gen(function* () {
     const manifest = yield* projects.read(root);
     if (!isAvailableEngine(manifest.engine.name))
       return yield* unavailableEngine(manifest.engine.name);
+    if (yield* oldShell(root, manifest)) return yield* oldShellRefused(root);
     const profile = engineProfile(manifest.engine.name);
     if (profile.stage === "live")
       return yield* playLive(

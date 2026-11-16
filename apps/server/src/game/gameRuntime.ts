@@ -10,7 +10,12 @@ import * as NodePath from "node:path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
-import { GameEngineId, manifestRuntime, type GameManifest } from "@kurambit/contracts";
+import {
+  GameEngineId,
+  manifestProject,
+  manifestRuntime,
+  type GameManifest,
+} from "@kurambit/contracts";
 import type { GameTemplates } from "./GameTemplates.ts";
 import { copyTree } from "./gameFiles.ts";
 import { readWebBuild } from "./webBuild.ts";
@@ -96,3 +101,26 @@ export const hasRuntime = (runtimes: string, engine: GameEngineId, major: number
     () => true,
     () => false,
   );
+
+/** The older demo shell's screens, each a `section.screen` in its page (the runtime's shell.js). */
+const OLD_SHELL_SCREENS = ["loading", "title", "pause", "settings", "end", "credits", "controls"];
+const screenSection = (id: string) =>
+  new RegExp(
+    `<section(?=[^>]*\\bid=["']${id}["'])(?=[^>]*\\bclass=["'][^"']*\\bscreen\\b)[^>]*>`,
+    "i",
+  );
+const OLD_SHELL_SECTIONS = OLD_SHELL_SCREENS.map(screenSection);
+
+/**
+ * Whether a three.js game's page carries every screen of the older demo shell, the same test the
+ * runtime makes before it refuses the page: such a game opens, and this version plays nothing of
+ * it. A page that cannot be read is not called old.
+ */
+export const carriesOldShell = async (root: string, manifest: GameManifest): Promise<boolean> => {
+  if (manifest.engine.name !== "three") return false;
+  const page = await NodeFSP.readFile(
+    NodePath.join(root, manifestProject(manifest), "index.html"),
+    "utf8",
+  ).catch(() => null);
+  return page !== null && OLD_SHELL_SECTIONS.every((section) => section.test(page));
+};

@@ -7,6 +7,7 @@ import {
   GameRunId,
   isAvailableEngine,
   unavailableEngineMessage,
+  OLD_SHELL_MESSAGE,
   type GameEngineId,
   type OrchestrationV2GameRunCommand,
   type GameRunStep,
@@ -54,6 +55,7 @@ import {
   undoReason,
 } from "../orchestration-v2/gameRun/decide.ts";
 import { ensureScaffold } from "./runSetup.ts";
+import { carriesOldShell } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 
 export class GameRunError extends Schema.TaggedError<GameRunError>()("GameRunError", {
@@ -272,6 +274,7 @@ const make = Effect.gen(function* () {
         const engine = manifest.engine.name;
         if (!isAvailableEngine(engine)) return unavailableEngineMessage(engine);
         if (!GAME_ENGINES[engine].turnLoop) return NO_TURN_LOOP_SENTENCE;
+        if (yield* Effect.promise(() => carriesOldShell(root, manifest))) return OLD_SHELL_MESSAGE;
       }
       if (run === null || run.status === "ended" || run.threadId === threadId) return null;
       const shell = yield* threads
@@ -396,6 +399,8 @@ const make = Effect.gen(function* () {
         return yield* runError("set", threadId, "no-turn-loop", unavailableEngineMessage(engineId));
       if (!GAME_ENGINES[engineId].turnLoop)
         return yield* runError("set", threadId, "no-turn-loop", NO_TURN_LOOP_SENTENCE);
+      if (yield* Effect.promise(() => carriesOldShell(root, manifest)))
+        return yield* runError("set", threadId, "no-turn-loop", OLD_SHELL_MESSAGE);
       // A paused run in this chat resumes, keeping its set-aside steps and notes.
       if (
         run !== null &&

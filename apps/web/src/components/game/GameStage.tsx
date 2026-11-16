@@ -615,7 +615,10 @@ function ThreadGameStage({
   }, [hidden]);
   const refresh = query.refresh;
   const data = query.data;
-  const liveStaged = data != null && gameEngineEntry(data.manifest.engine.name)?.stage === "live";
+  const liveStaged =
+    data != null &&
+    data.unsupported === undefined &&
+    gameEngineEntry(data.manifest.engine.name)?.stage === "live";
   const gameName = useGameName(
     threadRef.environmentId,
     quietShell?.projectId ?? null,
@@ -891,8 +894,9 @@ function ThreadGameStage({
       // Read but not answered yet: the Stage's own shape, so nothing moves when it lands.
       <GameStageLoading />
     ) : null;
-  // Null for a game in an engine this version does not have: it opens and plays nothing.
-  const engine = gameEngineEntry(data.manifest.engine.name);
+  // Null for a game in an engine this version does not have, or one it no longer plays (made on
+  // the older demo shell): it opens and plays nothing.
+  const engine = data.unsupported === undefined ? gameEngineEntry(data.manifest.engine.name) : null;
   const stageKind = engine?.stage ?? null;
   // The copy the stage was asked to play shows only while the server says it
   // plays, so a Stop from the palette, another client or an
@@ -916,7 +920,10 @@ function ThreadGameStage({
     data.operation !== null && turnEndedAt !== null && Date.parse(data.operation.at) >= turnEndedAt;
   const phase = deriveGameStagePhase({
     stage: stageKind,
-    parked: engine === null ? unavailableEngineMessage(data.manifest.engine.name) : null,
+    parked:
+      engine === null
+        ? (data.unsupported ?? unavailableEngineMessage(data.manifest.engine.name))
+        : null,
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
     // A failure becomes the stage's own only when this chat's work failed: a

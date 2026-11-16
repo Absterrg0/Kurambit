@@ -41,6 +41,7 @@ export function GameKeepGoingButton({ threadRef }: { threadRef: ScopedThreadRef 
   const canKeepGoing =
     status != null &&
     isAvailableEngine(status.manifest.engine.name) &&
+    status.unsupported === undefined &&
     current !== null &&
     !working;
   return canKeepGoing ? (

@@ -780,9 +780,12 @@ function OpenCommandPaletteDialog(props: {
   const isGameThread = useIsGameThread(activeThreadRef);
   // The same status read the stage mounts: Play exists only for an engine that
   // makes a Web build, and Rebuild only where the Stage plays an export.
-  // A game in an engine this version does not have builds and plays nothing, so it gets no play commands.
+  // A game this version does not play (another engine, or the older demo shell) builds and plays nothing, so it gets no play commands.
   const gameStatus = useIsGameThreadStatus(activeThreadRef).data;
-  const gameEngine = gameStatus == null ? null : gameEngineEntry(gameStatus.manifest.engine.name);
+  const gameEngine =
+    gameStatus == null || gameStatus.unsupported !== undefined
+      ? null
+      : gameEngineEntry(gameStatus.manifest.engine.name);
   const gameWebBuild = gameEngine !== null && gameStatus?.exportTargets.includes("Web") === true;
   const gameStageKind = gameEngine?.stage ?? null;
   // Running is the live serve, or an export's preview, as the Stage reads them: the palette
