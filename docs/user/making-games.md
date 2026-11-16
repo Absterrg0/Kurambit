@@ -291,7 +291,18 @@ which also opens each section directly). Drag its edge to resize it. Its section
   session is one build Undo takes back; **Keep as a build** ends the session, so your next change
   starts another. **Put all back** returns every value to the game's own. If a game shows nothing to
   tune, **Ask your agent to expose them** asks for it.
-- **Art**: the game's look, how its characters are made, and the art made for it.
+- **Art** (`mod+Alt+R`): the game's look (its style, how its models are made and whether the free
+  library may come in, and the art generated for it), then every asset the game has: models,
+  textures and sprites, sounds, fonts, and the models its code builds while it plays. Each shows
+  where it came from, its licence, its size and whether the last measured play used it. Open one to
+  look at it: a model turns in a 3D viewer beside a 1.8 m figure, with wireframe, normals, its
+  skeleton, bounds and its clips to play or scrub; an image shows at full size with its alpha and a
+  sprite sheet's frames; a sound shows its waveform. **Tint** and **Scale** change a model the game
+  loads through `ASSETS`, as a build Undo takes back. The asset's **Change it** asks the agent by the
+  way it was made: generate it again from its prompt, which you can edit first, swap a library
+  entry, or rework it in Blender. The chat bubble button adds the asset to your message with a
+  picture of the view. With the game paused, the asset you open is outlined where it is in the
+  game, and a picked thing's **Open in Art** goes the other way.
 - **Checks**: first what the build changed in words (the turn's headline, the values it tuned, and
   the saved plays and readings that moved since the build before), then its files as one line that
   opens to each file's lines; click a file to open it in the diff. Then its checks as one line, such
