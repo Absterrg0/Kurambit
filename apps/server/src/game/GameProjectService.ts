@@ -227,6 +227,8 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration.TextGeneration;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const config = yield* ServerConfig.ServerConfig;
+  // Names still being made for new games end with the server.
+  const namingScope = yield* Effect.scope;
   /**
    * The game's name from its brief, written by the text-generation model T3 titles threads with:
    * the title a player sees. A slow or failing model leaves the fallback, so a new game never waits
@@ -242,6 +244,7 @@ const make = Effect.gen(function* () {
       });
       return generated.name;
     }).pipe(
+      Effect.withSpan("GameProjectService.nameFromBrief"),
       Effect.timeout("15 seconds"),
       Effect.catchCause((cause) =>
         Effect.as(
@@ -249,6 +252,34 @@ const make = Effect.gen(function* () {
           fallback,
         ),
       ),
+    );
+  /**
+   * A new game's name from its brief, applied once the model answers. The game is made, and its
+   * first turn starts, under the drafted name, as T3 titles a thread after its first message: the
+   * model takes seconds, and the person waits for none of them. Only the project's title, the
+   * name the person sees, changes: the folder and game.json keep the drafted name, as they keep a
+   * game's first name after any rename. A name the person gave it in the meantime stands.
+   */
+  const nameLater = (projectId: ProjectId, brief: string, drafted: string) =>
+    nameFromBrief(brief, drafted).pipe(
+      Effect.flatMap((name) =>
+        name.trim() === "" || name === drafted
+          ? Effect.void
+          : projects.getById(projectId).pipe(
+              Effect.flatMap((project) =>
+                Option.isNone(project) || project.value.title !== drafted
+                  ? Effect.void
+                  : projects.update({
+                      commandId: CommandId.make(NodeCrypto.randomUUID()),
+                      projectId,
+                      title: name,
+                    }),
+              ),
+            ),
+      ),
+      Effect.ignoreCause({ log: true }),
+      Effect.forkIn(namingScope),
+      Effect.asVoid,
     );
   // A card says what a live run is doing. A paused or ended run reads nothing
   // here, so the row never masks "Needs attention"; the chat's banner says paused.
@@ -480,10 +511,8 @@ const make = Effect.gen(function* () {
   });
   const create: GameProjectService["Service"]["create"] = Effect.fn("GameProjectService.create")(
     function* (input) {
-      const name =
-        input.nameFromBrief === true
-          ? yield* nameFromBrief(input.brief, input.name.trim())
-          : input.name.trim();
+      // A brief's own name comes later (nameLater): the game is made at once under the drafted one.
+      const name = input.name.trim();
       if (name === "")
         return yield* new GameOperationError({
           operation: "create-game",
@@ -518,10 +547,12 @@ const make = Effect.gen(function* () {
       // One create per folder at a time in this server, so a second click
       // cannot take the first's half-made folder for a leftover.
       // The scaffold (game.json, the page's title) and the project take the name the game got.
-      return yield* createLocks.withLock(
+      const made = yield* createLocks.withLock(
         free.root,
         createAt({ ...input, name: free.name }, free.name, free.root),
       );
+      if (input.nameFromBrief === true) yield* nameLater(made.projectId, input.brief, free.name);
+      return made;
     },
   );
   const createAt = (input: GameCreateInput, name: string, requestedRoot: string) =>
@@ -591,7 +622,7 @@ const make = Effect.gen(function* () {
                   reason: "io",
                   cause,
                 }),
-        });
+        }).pipe(Effect.withSpan("GameProjectService.create.scaffold"));
         const templatesDirectory = yield* templates.directory;
         yield* copyTemplateIntoGame({
           templatesDirectory,
@@ -608,6 +639,7 @@ const make = Effect.gen(function* () {
         yield* ensureScaffold(templatesDirectory, root, createEngine(input), true).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
+          Effect.withSpan("GameProjectService.create.skills"),
         );
         // The first commit is Kurambit's own, through git's plumbing: the
         // user's signing config and hooks never apply to it. The marker sits
@@ -615,7 +647,10 @@ const make = Effect.gen(function* () {
         const git = yield* vcs.get("git").pipe(Effect.mapError(gitInitError(root)));
         yield* git
           .initRepository({ cwd: root, initialCommit: { message: "chore: create game project" } })
-          .pipe(Effect.mapError(gitInitError(root)));
+          .pipe(
+            Effect.mapError(gitInitError(root)),
+            Effect.withSpan("GameProjectService.create.gitInit"),
+          );
         yield* Effect.tryPromise({
           try: () => NodeFSP.rm(NodePath.join(root, CREATE_MARKER)),
           catch: (cause) =>
@@ -628,7 +663,7 @@ const make = Effect.gen(function* () {
         return yield* register(root, input, {
           firstTurn: true,
           ...(reference === undefined ? {} : { reference }),
-        });
+        }).pipe(Effect.withSpan("GameProjectService.create.register"));
       }).pipe(
         // A create that fails or is interrupted must not leave a half-made folder behind.
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),

@@ -238,8 +238,8 @@ function BriefBox({
     const result = await create({
       environmentId,
       input: {
-        // The model names it from the brief; this draft stands if it cannot. The person renames
-        // it whenever they like, and the folder takes it too.
+        // The game is made under this draft at once; the model's name from the brief replaces
+        // it when it answers. The person renames it whenever they like.
         name: draftGameName(trimmedBrief) || "Untitled Game",
         nameFromBrief: true,
         // Empty: the server's default games folder.
@@ -294,6 +294,30 @@ function BriefBox({
         }
       : null,
   ].filter((note) => note !== null);
+
+  // From the press of Enter the person sees what they sent and that it is being made, as the
+  // game's chat will show it, while the game is made and its chat opens.
+  if (busy)
+    return (
+      <section
+        aria-busy="true"
+        aria-label="Making your game"
+        className="flex w-full flex-col gap-3"
+      >
+        <div className="flex justify-end">
+          <p
+            data-starting-message=""
+            className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-message p-3 text-message-foreground"
+          >
+            {trimmedBrief}
+          </p>
+        </div>
+        <Text variant="body" tone="muted" render={<p className="flex items-center gap-2 px-1" />}>
+          <Spinner size="sm" aria-hidden="true" />
+          Making your game…
+        </Text>
+      </section>
+    );
 
   return (
     <section className="flex w-full flex-col gap-3">
