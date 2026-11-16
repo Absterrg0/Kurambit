@@ -360,13 +360,13 @@ export const StudioFrozen = Schema.Struct({
 });
 
 /**
- * A Stage key pressed while the game's frame has focus, which keeps every key
- * from the Stage: Tab (freeze, play on) always, Escape only while frozen (the
- * game's own pause otherwise). Sent only once the Stage has spoken to the game.
+ * Escape pressed while the game's frame has focus and the game is frozen: the frame keeps every
+ * key from the Stage, and Tab and an unfrozen Escape are the game's. Sent only once the Stage has
+ * spoken to the game.
  */
 export const StudioKey = Schema.Struct({
   type: Schema.Literal("studio-key"),
-  key: Schema.Literals(["Tab", "Escape"]),
+  key: Schema.Literal("Escape"),
 });
 
 /**

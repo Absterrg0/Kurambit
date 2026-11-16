@@ -402,9 +402,10 @@ still rewinds the conversation itself.
 
 **Keys.** `mod+Alt+Z` undoes the latest turn's change and `mod+Alt+Shift+Z` redoes it; `mod+Alt+[`
 and `mod+Alt+]` play the previous and next build (past the newest, back to the live
-game); `mod+Alt+G` puts the keyboard in the game. The command palette has each of these, plus
-**Compare builds…**, **Export…** and **Go back to a build…**. A game you clicked into owns the
-keyboard, and its keys never reach Kurambit: click outside the game before using these.
+game); `mod+Alt+G` puts the keyboard in the game, and pressed while you play, gives it back to the
+chat. The command palette has each of these, plus **Compare builds…**, **Export…** and **Go back to
+a build…**. A game you clicked into owns every key, Tab, Escape and the number keys included; only
+these `mod+Alt` keys reach Kurambit while you play.
 
 **Try several ways.** For a change where taste decides ("make the dash feel better"), the chip
 beside send (`mod+Alt+W`, or **Try the next message 3 ways** in the command palette) sends your next

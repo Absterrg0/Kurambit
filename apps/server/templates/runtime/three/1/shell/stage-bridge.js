@@ -1173,15 +1173,19 @@ export function createStageBridge({
     }
   });
 
-  // A focused game keeps every key from the Stage, so its two keys travel up: Tab
-  // always, Escape only while frozen (the game's own pause otherwise). Capture
-  // phase, so the shell's keys never see them. Only once the Stage has spoken.
-  // Kurambit's own chords (Ctrl or Cmd with Alt) travel up too: a game reading P for pause
-  // would take Ctrl+Alt+P for its own.
+  // A focused game keeps every key from the Stage: Tab, Escape and the number keys are the game's
+  // while it plays (a journal on Tab, a pause on Escape). Escape travels up only while frozen,
+  // when nothing is playing. Capture phase, so the shell's keys never see it. Only once the Stage
+  // has spoken. Kurambit's own chords (Ctrl or Cmd with Alt) travel up too: a game reading P for
+  // pause would take Ctrl+Alt+P for its own, and Focus game's chord hands the keyboard back.
   window.addEventListener(
     "keydown",
     (event) => {
-      if (!framed || !active || event.repeat) return;
+      if (!framed || !active) return;
+      // Tab is the game's, and the page's own Tab would move the keyboard out of the game.
+      if (event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey)
+        event.preventDefault();
+      if (event.repeat) return;
       if (event.altKey && (event.ctrlKey || event.metaKey)) {
         const { key, code, ctrlKey, metaKey, shiftKey } = event;
         event.preventDefault();
@@ -1190,11 +1194,10 @@ export function createStageBridge({
         return;
       }
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      const key = event.key === "Tab" ? "Tab" : event.key === "Escape" && frozen ? "Escape" : null;
-      if (key === null) return;
+      if (event.key !== "Escape" || !frozen) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      toStage({ type: "studio-key", key });
+      toStage({ type: "studio-key", key: "Escape" });
     },
     { capture: true },
   );

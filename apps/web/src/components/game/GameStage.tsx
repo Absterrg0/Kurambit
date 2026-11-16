@@ -1263,13 +1263,19 @@ function ThreadGameStage({
       tabIndex={-1}
       onKeyDown={(event) => {
         // Esc clears the selection when the Stage itself has focus; a focused game sends it up
-        // as studio-key. Tab is never kept here: it moves on, like everywhere else.
+        // as studio-key.
         if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey)
           return;
         if (event.key === "Escape" && useStageBridge.getState().selected !== null) {
           event.preventDefault();
           clearStageSelection();
+          return;
         }
+        // Any other key on the Stage itself is meant for the game: no app key reads it (a
+        // waiting question's number keys, Tab moving on), and the game takes the keyboard.
+        event.stopPropagation();
+        if (event.key === "Tab") event.preventDefault();
+        handleRequest({ kind: "focus" }, Date.now());
       }}
       className={cn(
         "relative min-w-0 flex-none flex-col bg-background outline-none",

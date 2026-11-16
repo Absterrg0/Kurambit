@@ -5330,7 +5330,11 @@ export default function ChatView(props: ChatViewProps) {
       // cross-origin, so its keys stay in the game.
       "game.undoTurn": () => requestGameStage({ kind: "undo" }),
       "game.redoTurn": () => requestGameStage({ kind: "redo" }),
-      "game.focus": () => requestGameStage({ kind: "focus" }),
+      // The same key takes the keyboard back while the game has it: Tab and Escape are the game's.
+      "game.focus": () => {
+        if (document.activeElement?.matches(GAME_FRAME_ON_STAGE) === true) focusComposerStable();
+        else requestGameStage({ kind: "focus" });
+      },
       "game.freeze": () => requestGameStage({ kind: "freeze" }),
       // A game on the Stage that answers none of these lets the key through.
       "game.stepFrame": () => activeThreadKey !== null && stepStageFrame(activeThreadKey),
