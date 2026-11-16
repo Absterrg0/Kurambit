@@ -19,7 +19,6 @@ const THUMBNAILS = new URLSearchParams(location.search).has("thumbnails");
 const THUMBNAIL_SIZE = 192;
 // Normals of more vertices than this read as fur, and cost a draw each: the toggle says so instead.
 const MAX_NORMALS = 60_000;
-const BACKDROP = 0x17181b;
 
 const canvas = document.getElementById("view");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -27,7 +26,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
 const scene = new THREE.Scene();
-scene.background = THUMBNAILS ? null : new THREE.Color(BACKDROP);
+// Drawn over the Art tab's own surface, so the viewer sits in the app's theme.
+scene.background = null;
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.9;

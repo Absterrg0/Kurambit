@@ -49,7 +49,7 @@ type SaveState =
  * turn runs, values wait (they still play) and save once it ends, on top of its build. A failed
  * save keeps its values for the next one.
  */
-function useTuneSaver(threadRef: ScopedThreadRef) {
+export function useTuneSaver(threadRef: ScopedThreadRef) {
   const turnRunning = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
   const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
   const canSave = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));

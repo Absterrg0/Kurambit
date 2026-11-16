@@ -79,6 +79,11 @@ interface GameWorkspaceStoreState {
   /** The Workbench section last shown, for every game. */
   workbenchTab: WorkbenchTab;
   setWorkbenchTab: (tab: WorkbenchTab) => void;
+  /** The asset Art shows (a game-relative path, or `thing:<id>` for a model made in code); null lists them all. Not persisted. */
+  artAsset: string | null;
+  setArtAsset: (asset: string | null) => void;
+  /** Opens the Workbench on Art at one asset: the Stage's way to its art. */
+  openArtAsset: (asset: string) => void;
 }
 
 const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
@@ -104,6 +109,9 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setWorkbenchOpen: (open) => set({ workbenchOpen: open }),
       workbenchTab: "tune",
       setWorkbenchTab: (tab) => set({ workbenchTab: tab }),
+      artAsset: null,
+      setArtAsset: (asset) => set({ artAsset: asset }),
+      openArtAsset: (asset) => set({ workbenchOpen: true, workbenchTab: "art", artAsset: asset }),
 
       tryWays: {},
       cycleTryWays: (threadKey) =>

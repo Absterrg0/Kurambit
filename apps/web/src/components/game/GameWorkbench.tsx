@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Text } from "../ui/text";
 import { GameDecisionsPanel } from "./GameDecisions";
-import { GameLookPanel } from "./GameInspector";
+import { GameArtPanel } from "./GameArt";
 import { GameTunePanel } from "./GameTune";
 import { GameWorkbenchChecks } from "./GameWorkbenchChecks";
 import { GameWorkbenchDebug } from "./GameWorkbenchDebug";
@@ -97,7 +97,7 @@ export function GameWorkbench({
         <GameTunePanel threadRef={threadRef} onAsk={onAsk} />
       </TabsPanel>
       <TabsPanel value="art" className="flex min-h-0 flex-1 flex-col">
-        <GameLookPanel threadRef={threadRef} />
+        <GameArtPanel threadRef={threadRef} onAsk={onAsk} />
       </TabsPanel>
       <TabsPanel value="checks" className="flex min-h-0 flex-1 flex-col">
         <GameWorkbenchChecks threadRef={threadRef} onOpenTurnDiff={onOpenTurnDiff} />

@@ -95,6 +95,26 @@ export const attachRunToComposer = async (
   );
 };
 
+/**
+ * "Ask the agent about this asset": the Art tab's asset as a chip in the composer, with the
+ * picture its viewer shows from the angle the person left it at. One chip per asset: asking again
+ * replaces it.
+ */
+export const attachAssetToComposer = async (
+  threadRef: ScopedThreadRef,
+  asset: { readonly key: string; readonly label: string; readonly context: string },
+  png: string | null,
+) => {
+  const id = `art-asset-${asset.key}`;
+  detach(threadRef, id);
+  await attach(
+    threadRef,
+    { id, pageTitle: "Art", label: asset.label, comment: asset.context },
+    png,
+    { focus: true },
+  );
+};
+
 const thingLabel = (selection: StageSelection) =>
   selection.thing.instance === undefined
     ? selection.thing.name
