@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { ThreadId } from "./baseSchemas.ts";
 
 const familyText = (cap: number) =>
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(cap));
@@ -89,3 +90,83 @@ export const GameAssetFamily = Schema.Struct({
   provenance: Schema.optionalKey(Schema.Literals(["required", "optional"])),
 });
 export type GameAssetFamily = typeof GameAssetFamily.Type;
+
+// ─── The Workbench's Art tab ──────────────────────────────────────────────────
+
+const AssetPathText = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500));
+const Sha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+
+export const GameArtAssetKind = Schema.Literals(["model", "texture", "audio", "font"]);
+export type GameArtAssetKind = typeof GameArtAssetKind.Type;
+
+/**
+ * Where a file came from, as the game's own records say: a sidecar's source, an ASSETS.md line,
+ * a library credit. `unrecorded` is a file nothing names; models made in code are not files and
+ * come from the running game's things instead.
+ */
+export const GameArtAssetRoute = Schema.Literals([
+  "code",
+  "blender",
+  "generated",
+  "library",
+  "unrecorded",
+]);
+export type GameArtAssetRoute = typeof GameArtAssetRoute.Type;
+
+/** A sprite sheet's grid, from the line ASSETS.md gives it. */
+export const GameArtSpriteSheet = Schema.Struct({
+  columns: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 256 })),
+  rows: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 256 })),
+});
+
+export const GameArtAsset = Schema.Struct({
+  /** Game-relative. */
+  path: AssetPathText,
+  /** Where the game's page fetches it, relative to the folder the game is served from. */
+  url: AssetPathText,
+  kind: GameArtAssetKind,
+  bytes: Schema.Number,
+  /** Its content, for a thumbnail cached by what it is rather than where. */
+  sha256: Sha256,
+  /** A model's triangles, from its glTF JSON (or its sidecar, which names the shipped bytes). */
+  triangles: Schema.optionalKey(Schema.Number),
+  route: GameArtAssetRoute,
+  /** The licence or credit the records give it, in their words. */
+  credit: Schema.optionalKey(Schema.String),
+  /** What ASSETS.md says of it, after its path. */
+  note: Schema.optionalKey(Schema.String),
+  /** A model's sidecar, game-relative: three.js loads the model through it. */
+  sidecar: Schema.optionalKey(AssetPathText),
+  /** The generations that delivered it, by id. */
+  generations: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The library pack it came from. */
+  pack: Schema.optionalKey(Schema.String),
+  sheet: Schema.optionalKey(GameArtSpriteSheet),
+  /** Its cached thumbnail, game-relative, once one was drawn for these bytes. */
+  thumbnail: Schema.optionalKey(AssetPathText),
+});
+export type GameArtAsset = typeof GameArtAsset.Type;
+
+export const GameArtAssetsInput = Schema.Struct({ threadId: ThreadId });
+export type GameArtAssetsInput = typeof GameArtAssetsInput.Type;
+export const GameArtAssetsResult = Schema.Struct({
+  assets: Schema.Array(GameArtAsset),
+  /** Files past the list's cap, counted only. */
+  more: Schema.Number,
+  /** The game's Blender source, game-relative, when it has one. */
+  blend: Schema.optionalKey(AssetPathText),
+});
+export type GameArtAssetsResult = typeof GameArtAssetsResult.Type;
+
+/** A model's thumbnail as the Art tab's viewer drew it once: a small PNG, cached by content. */
+export const GameArtThumbnailInput = Schema.Struct({
+  threadId: ThreadId,
+  sha256: Sha256,
+  png: Schema.String.check(
+    Schema.isPattern(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/),
+    Schema.isMaxLength(400_000),
+  ),
+});
+export type GameArtThumbnailInput = typeof GameArtThumbnailInput.Type;
+export const GameArtThumbnailResult = Schema.Struct({ thumbnail: AssetPathText });
+export type GameArtThumbnailResult = typeof GameArtThumbnailResult.Type;

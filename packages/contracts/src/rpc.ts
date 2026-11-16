@@ -14,6 +14,12 @@ import {
   GameGenerationsResult,
 } from "./gameArt.ts";
 import {
+  GameArtAssetsInput,
+  GameArtAssetsResult,
+  GameArtThumbnailInput,
+  GameArtThumbnailResult,
+} from "./gameAssets.ts";
+import {
   GameActionInput,
   GameActionResult,
   GameCreateInput,
@@ -384,6 +390,8 @@ export const WS_METHODS = {
   gameChooseGeneration: "game.chooseGeneration",
   gameCancelGeneration: "game.cancelGeneration",
   gameArtProviders: "game.artProviders",
+  gameArtAssets: "game.artAssets",
+  gameArtThumbnail: "game.artThumbnail",
   gameKeepGoing: "game.keepGoing",
   gameKeepGoingStatus: "game.keepGoingStatus",
   gameKeepGoingDecide: "game.keepGoingDecide",
@@ -1525,6 +1533,16 @@ const WsGameSetCharacterRouteRpc = Rpc.make(WS_METHODS.gameSetCharacterRoute, {
   error: gameError,
 });
 
+const WsGameArtAssetsRpc = Rpc.make(WS_METHODS.gameArtAssets, {
+  payload: GameArtAssetsInput,
+  success: GameArtAssetsResult,
+  error: gameError,
+});
+const WsGameArtThumbnailRpc = Rpc.make(WS_METHODS.gameArtThumbnail, {
+  payload: GameArtThumbnailInput,
+  success: GameArtThumbnailResult,
+  error: gameError,
+});
 const WsGameGenerationsRpc = Rpc.make(WS_METHODS.gameGenerations, {
   payload: GameGenerationsInput,
   success: GameGenerationsResult,
@@ -1694,6 +1712,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameToolchainInstallRpc,
   WsGameToolchainRemoveRpc,
   WsGameSetCharacterRouteRpc,
+  WsGameArtAssetsRpc,
+  WsGameArtThumbnailRpc,
   WsGameGenerationsRpc,
   WsGameChooseGenerationRpc,
   WsGameCancelGenerationRpc,

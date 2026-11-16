@@ -8,6 +8,7 @@ import * as GameExplore from "./game/GameExplore.ts";
 import * as GameExport from "./game/GameExport.ts";
 import * as GameMemoryGate from "./game/GameMemoryGate.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
+import * as GameArtAssets from "./game/GameArtAssets.ts";
 import * as GameStage from "./game/GameStage.ts";
 import * as GameStatusService from "./game/GameStatusService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
@@ -529,6 +530,7 @@ const layerGameRunWork = GameRunStepRunner.layer.pipe(
 const layerGameOperations = GameStage.layer.pipe(
   Layer.provideMerge(GameStatusService.layer),
   Layer.provideMerge(GameSavedMediaService.layer),
+  Layer.provideMerge(GameArtAssets.layer),
   // Shared with the builds' facts, so Stop game and the facts reach the same bot runs.
   Layer.provideMerge(GameBuildCopies.layer),
   Layer.provideMerge(GameBot.layer),
