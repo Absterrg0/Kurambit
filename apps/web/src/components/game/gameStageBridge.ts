@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { create } from "zustand";
 import {
+  type GamePlay,
   type GameStageCapability,
   type GameStageControl,
   type GameStageRect,
@@ -9,6 +10,8 @@ import {
   type GameStageTrace,
   type GameThing,
   type GameToStageMessage,
+  type StudioReplay,
+  type StudioReplayed,
 } from "@kurambit/contracts";
 
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -175,6 +178,8 @@ export function useStageBridgeFrame(
     useStageBridge.setState({ ...EMPTY, owner, post, hold });
     return () => {
       settleCapture(null);
+      settleRun(null);
+      settleReplay(null);
       if (useStageBridge.getState().owner === owner)
         useStageBridge.setState({ ...EMPTY, owner: null, post: null, hold: null });
     };
@@ -256,6 +261,12 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       return;
     case "studio-controls":
       useStageBridge.setState({ controls: message.controls, controlsNote: message.note ?? null });
+      return;
+    case "studio-run":
+      settleRun(message.play);
+      return;
+    case "studio-replayed":
+      if (replayWaiter?.id === message.id) settleReplay(message);
       return;
     case "studio-error":
     case "studio-visibility-ack":
@@ -500,4 +511,83 @@ export const captureStageFrame = (timeoutMs = 4000): Promise<string | null> => {
     captureWaiters.push(done);
     if (captureWaiters.length === 1) post({ type: "studio-capture" });
   });
+};
+
+// The one take of the run in flight: a second asker waits for the same answer.
+let runWaiters: Array<(play: GamePlay | null) => void> = [];
+const settleRun = (play: GamePlay | null) => {
+  const waiters = runWaiters;
+  runWaiters = [];
+  for (const resolve of waiters) resolve(play);
+};
+
+/**
+ * The run in play so far, or null with none (a title, an ending, a game that cannot say). With
+ * `leave`, the page is about to go away: the game stops recording the run, which is the
+ * Stage's to keep and to resume on the page that comes up.
+ */
+export const takeStageRun = (leave: boolean, timeoutMs = 400): Promise<GamePlay | null> => {
+  const { post, capabilities, status } = useStageBridge.getState();
+  if (post === null || status !== "ready" || !capabilities.includes("rewind"))
+    return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      runWaiters = runWaiters.filter((waiter) => waiter !== done);
+      resolve(null);
+    }, timeoutMs);
+    const done = (play: GamePlay | null) => {
+      window.clearTimeout(timeout);
+      resolve(play);
+    };
+    runWaiters.push(done);
+    if (runWaiters.length === 1) post({ type: "studio-run-take", leave });
+  });
+};
+
+let replayWaiter: {
+  readonly id: number;
+  readonly resolve: (result: StudioReplayed | null) => void;
+} | null = null;
+let replayCount = 0;
+const settleReplay = (result: StudioReplayed | null) => {
+  const waiter = replayWaiter;
+  replayWaiter = null;
+  waiter?.resolve(result);
+};
+/** The game gives up on getting back after 20 s of real time; past this the frame is gone. */
+const REPLAY_ANSWER_MS = 30_000;
+
+/**
+ * Replays a run to a moment on the Stage's game and hands it over there, frozen
+ * (packages/contracts StudioReplay). Null when the game cannot, when a newer replay was asked for
+ * first, or when its frame went away.
+ */
+export const replayStageRun = (
+  request: Omit<StudioReplay, "type" | "id">,
+): Promise<StudioReplayed | null> => {
+  const { post, capabilities, status } = useStageBridge.getState();
+  if (post === null || status !== "ready" || !capabilities.includes("rewind"))
+    return Promise.resolve(null);
+  settleReplay(null);
+  replayCount += 1;
+  const id = replayCount;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      if (replayWaiter?.id === id) settleReplay(null);
+    }, REPLAY_ANSWER_MS);
+    replayWaiter = {
+      id,
+      resolve: (result) => {
+        window.clearTimeout(timeout);
+        resolve(result);
+      },
+    };
+    post({ type: "studio-replay", id, ...request });
+  });
+};
+
+/** A fresh run in play instead of the one on the Stage: "Start fresh". */
+export const startStageFresh = () => {
+  const { post, capabilities } = useStageBridge.getState();
+  if (post !== null && capabilities.includes("rewind")) post({ type: "studio-new-run" });
 };

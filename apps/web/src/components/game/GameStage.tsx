@@ -64,6 +64,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { GameRunCard, useStageRuns } from "./GameRunCard";
 import { GameDecisionsDialog } from "./GameDecisions";
+import { useStageRewind } from "./GameRunTimeline";
 import { GameSavedPlaysDialog } from "./GameSavedPlays";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -408,6 +409,7 @@ function ThreadGameStage({
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const runs = useStageRuns(threadRef);
+  const rewind = useStageRewind(threadRef, runs.receive);
   const [playsOpen, setPlaysOpen] = useState(false);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
@@ -472,6 +474,8 @@ function ThreadGameStage({
   // The fold of what the play surface runs across reads; state, so the render
   // below can pin this serve without touching refs.
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
+  // A reload into play waiting while the page hands over its run, so the next one resumes it.
+  const [leavingFold, setLeavingFold] = useState<GameFrameFold | null>(null);
   // The build the mounted frame plays, for telling a new build from a live edit of the same one.
   const [frameBuild, setFrameBuild] = useState<string | null>(null);
   // The live game's first page error, for the frame that threw it.
@@ -823,11 +827,40 @@ function ThreadGameStage({
     // and the person can save it as a test play.
     if (studio.type === "studio-play" || studio.type === "studio-run-reset") {
       runs.receive(studio);
+      rewind.receive(studio);
       return;
     }
     const key = frameFold?.key ?? "";
     setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
   });
+  const takesRuns = useThreadStageBridge(
+    threadKey,
+    (state) => state.status === "ready" && state.capabilities.includes("rewind"),
+    false,
+  );
+  const applyFold = useStableCallback((next: GameFrameFold) => {
+    if (next.key !== frameFold?.key) {
+      setFrameBuild(folderBuild);
+      setHeldBuild(false);
+    }
+    setFrameFold(next);
+  });
+  /** The held game the person asked for: into play, so its run is taken first. */
+  const showFold = (next: GameFrameFold) => {
+    if (frameFold !== null && next.key !== frameFold.key && next.intoPlay && takesRuns)
+      setLeavingFold(next);
+    else applyFold(next);
+  };
+  const leavingKey = leavingFold?.key ?? null;
+  const applyLeaving = useStableCallback(() => {
+    if (leavingFold === null) return;
+    setLeavingFold(null);
+    applyFold(leavingFold);
+  });
+  const leaveStage = rewind.leave;
+  useEffect(() => {
+    if (leavingKey !== null) void leaveStage().then(applyLeaving);
+  }, [leavingKey, leaveStage, applyLeaving]);
 
   if (!data)
     return query.error !== null && isGameStatusFailure(query.failure) ? (
@@ -938,7 +971,7 @@ function ThreadGameStage({
     turnUndo.restoring ||
     heldBuild ||
     (frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild);
-  const frame = remountOrHold(
+  const computed = remountOrHold(
     frameFold,
     stageKind === "live"
       ? liveServe(data.previewUrl, liveRevision)
@@ -954,13 +987,24 @@ function ThreadGameStage({
       newBuild,
     },
   );
-  if (frame !== frameFold) {
-    setFrameFold(frame);
-    if (frame.key !== frameFold?.key) {
+  // A reload into play first takes the run in play from the page, which the page that comes up
+  // replays to where it was (useStageRewind); the old page stays until it answered.
+  const leaving =
+    frameFold !== null &&
+    computed.key !== frameFold.key &&
+    computed.intoPlay &&
+    takesRuns &&
+    !frameHidden;
+  if (leaving) {
+    if (leavingFold?.key !== computed.key) setLeavingFold(computed);
+  } else if (computed !== frameFold) {
+    setFrameFold(computed);
+    if (computed.key !== frameFold?.key) {
       setFrameBuild(folderBuild);
       setHeldBuild(false);
     }
   } else if (frameBuild === null && folderBuild !== null) setFrameBuild(folderBuild);
+  const frame = leaving && frameFold !== null ? frameFold : computed;
   const frameKey = frame.key;
   // A reload clears what the old page threw; a later error sets it again.
   const liveError = studioError !== null && studioError.key === frameKey ? studioError.text : null;
@@ -1616,13 +1660,19 @@ function ThreadGameStage({
             onAskAgent={(failure) => onAskAgent(buildFailurePrompt(failure))}
             onOpenTools={() => void navigate({ to: "/settings/game-tools" })}
             held={held}
-            onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
+            onTakeHeld={() => showFold(playHeldFrame(frame))}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
             bridge={{ threadKey, enabled: engine?.stageBridge === true, freezeKey }}
             overlay={<GameStageOverlay threadKey={threadKey} />}
           />
-          <GameRunCard threadRef={threadRef} runs={runs} onNote={setMessage} />
+          <GameRunCard
+            threadRef={threadRef}
+            runs={runs}
+            rewind={rewind}
+            onNote={setMessage}
+            onFocusGame={() => handleRequest({ kind: "focus" }, Date.now())}
+          />
         </div>
       </div>
       <div

@@ -3,16 +3,19 @@ import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { playOutcomeWords, type GamePlayOutcome, type ScopedThreadRef } from "@kurambit/contracts";
-import { MessageSquareIcon, XIcon } from "lucide-react";
+import { MessageSquareIcon, PlayIcon, RotateCcwIcon, XIcon } from "lucide-react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { captureStageFrame, requestStageRun, useThreadStageBridge } from "./gameStageBridge";
 import type { StudioMessage } from "./GamePlaySurface";
 import { tellAgentAboutRun } from "./gameRunTell";
+import { GameRunCompare, GameRunTimeline, type StageRewind } from "./GameRunTimeline";
+import { clockLabel } from "./gameStageRewind";
 
 /** The name a first win is saved under from the Stage. */
 const FIRST_WIN_NAME = "first win";
@@ -81,18 +84,25 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
 
 /**
  * Over the Stage's bottom edge: how the run just ended, with "Tell the agent about this run" and,
- * for a first win, "Keep this win as a test play". While paused mid-run, only the tell. Its own
- * dark backing, like the Stage's other cards, so it reads over whatever the game drew.
+ * for a first win, "Keep this win as a test play". While paused mid-run, only the tell. Above
+ * them, frozen or ended, the run's timeline to rewind it, and what the last replay found (back
+ * where the person was after a reload, a fork, Compare). Its own dark backing, like the Stage's
+ * other cards, so it reads over whatever the game drew.
  */
 export function GameRunCard({
   threadRef,
   runs,
+  rewind,
   onNote,
+  onFocusGame,
 }: {
   threadRef: ScopedThreadRef;
   runs: ReturnType<typeof useStageRuns>;
+  rewind: StageRewind;
   /** Says how a save went, in the Stage's status line. */
   onNote: (text: string) => void;
+  /** Gives the game the keyboard: playing on from a rewind is playing. */
+  onFocusGame: () => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
   const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
@@ -105,7 +115,9 @@ export function GameRunCard({
   const canSave = useAtomValue(gameEnvironment.savePlay.permissionAtom(threadRef.environmentId));
   const [saving, setSaving] = useState(false);
   const { ended } = runs;
-  if (ended === null && !(frozen && tellsRuns)) return null;
+  const { notice, busy, timeline } = rewind;
+  const shown = ended !== null || (frozen && tellsRuns);
+  if (!shown && busy === null && notice === null) return null;
 
   const tell = async () => {
     // A paused run is asked for first; the game answers with it (useStageRuns).
@@ -139,37 +151,89 @@ export function GameRunCard({
     onNote(`Saved "${result.value.name}" as a test play: every build replays it from now on.`);
   };
 
-  const words = ended === null ? null : playOutcomeWords(ended.outcome);
+  // What the last replay found, said in full above the buttons; else how the run ended, beside them.
+  const said = busy !== null ? `Getting back to ${clockLabel(busy)}…` : (notice?.text ?? null);
+  const words = said !== null || ended === null ? null : playOutcomeWords(ended.outcome);
+  const withTimeline = timeline !== null && (shown || busy !== null);
+  const playOn = () => {
+    rewind.playOn();
+    onFocusGame();
+  };
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-3">
+    // With its timeline the card stands above the Stage's frozen hint in the bottom corner.
+    <div
+      className={cn(
+        "pointer-events-none absolute inset-x-0 z-20 flex justify-center px-3",
+        withTimeline ? "bottom-11" : "bottom-3",
+      )}
+    >
       <div
-        className="pointer-events-auto flex max-w-full min-w-0 items-center gap-2 rounded-xl bg-stage-well py-1.5 ps-3 pe-1.5 text-stage-foreground shadow-lg"
+        className={cn(
+          "pointer-events-auto flex max-w-full min-w-0 flex-col gap-1 rounded-xl bg-stage-well py-1.5 ps-3 pe-1.5 text-stage-foreground shadow-lg",
+          withTimeline && "w-[40rem]",
+        )}
         data-game-run-card=""
       >
-        {words === null ? null : (
-          <Text variant="meta" tone="inherit" truncate>
-            {`${words.charAt(0).toUpperCase()}${words.slice(1)}`}
+        {withTimeline ? <GameRunTimeline rewind={rewind} /> : null}
+        {said === null ? null : (
+          <Text variant="meta" tone="inherit" render={<p className="line-clamp-2 pe-1.5" />}>
+            {said}
           </Text>
         )}
-        <Button size="sm" variant="overlay" onClick={() => void tell()}>
-          <MessageSquareIcon aria-hidden="true" />
-          Tell the agent about this run
-        </Button>
-        {ended?.firstWin === true && canSave ? (
-          <Button size="sm" variant="overlay" disabled={saving} onClick={() => void keepWin()}>
-            {saving ? "Checking it replays the same…" : "Keep this win as a test play"}
-          </Button>
-        ) : null}
-        {ended === null ? null : (
-          <Button
-            size="icon-micro"
-            variant="overlay"
-            aria-label="Dismiss the run"
-            onClick={runs.dismiss}
-          >
-            <XIcon aria-hidden="true" />
-          </Button>
-        )}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {words === null ? null : (
+            <Text variant="meta" tone="inherit" truncate render={<span className="flex-1" />}>
+              {`${words.charAt(0).toUpperCase()}${words.slice(1)}`}
+            </Text>
+          )}
+          {busy === null && frozen ? <GameRunCompare rewind={rewind} /> : null}
+          {busy === null && notice !== null && frozen ? (
+            <Button size="sm" variant="overlay" onClick={playOn}>
+              <PlayIcon aria-hidden="true" />
+              Play on
+            </Button>
+          ) : null}
+          {busy === null && notice !== null && (frozen || notice.ended) ? (
+            <>
+              <Button
+                size="sm"
+                variant="overlay"
+                onClick={() => {
+                  rewind.fresh();
+                  onFocusGame();
+                }}
+              >
+                <RotateCcwIcon aria-hidden="true" />
+                Start fresh
+              </Button>
+            </>
+          ) : null}
+          {/* A replay held at an ending it reached has no run in play to tell of. */}
+          {shown && busy === null && notice?.ended !== true ? (
+            <Button size="sm" variant="overlay" onClick={() => void tell()}>
+              <MessageSquareIcon aria-hidden="true" />
+              Tell the agent about this run
+            </Button>
+          ) : null}
+          {ended?.firstWin === true && canSave ? (
+            <Button size="sm" variant="overlay" disabled={saving} onClick={() => void keepWin()}>
+              {saving ? "Checking it replays the same…" : "Keep this win as a test play"}
+            </Button>
+          ) : null}
+          {ended === null && notice === null ? null : (
+            <Button
+              size="icon-micro"
+              variant="overlay"
+              aria-label="Dismiss the run"
+              onClick={() => {
+                runs.dismiss();
+                rewind.dismiss();
+              }}
+            >
+              <XIcon aria-hidden="true" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
