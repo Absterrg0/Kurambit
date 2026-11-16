@@ -100,12 +100,6 @@ export const GameStyle = Schema.Struct({
   rig: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
   /** The library packs the game's visuals come from; a pack-id palette is allowed without listing it. */
   packs: Schema.Array(GameLibraryPackId).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
-  /** Outside sources the live Blender may import from; none when omitted. */
-  imports: Schema.optionalKey(
-    Schema.Array(Schema.Literals(["polyhaven", "sketchfab", "polypizza"])).check(
-      Schema.isMaxLength(3),
-    ),
-  ),
   audio: Schema.optionalKey(
     Schema.Struct({
       /** The library packs the game's sounds and music come from; omitted, sound is not locked. */

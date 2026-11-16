@@ -60,8 +60,6 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
       : { runtime: { [engine]: templateEntry.runtime } }),
     engine: { name: engine, version: engineProfile(engine).scaffold.version },
     project: engineProfile(engine).projectDirectory,
-    // The same folder under its legacy key, for one release, so an older installed Kurambit still opens the game.
-    godotProject: engineProfile(engine).projectDirectory,
     assets: [],
     // The code route is written as no route at all, which reads as code here and which an older
     // installed Kurambit (it knows library, blender and generated) still opens. The library key is

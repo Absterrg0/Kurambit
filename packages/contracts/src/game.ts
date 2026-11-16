@@ -205,7 +205,7 @@ export const GameManifest = Schema.Struct({
   engine: Schema.Struct({ name: GameEngineName, version: Schema.String }),
   /** The engine project's folder in the game (web/; godot/ and unity/ in older games). */
   project: Schema.optionalKey(Schema.String),
-  /** The same folder under its legacy name: written beside `project` for one release so older installs open new games; read only through manifestProject. */
+  /** The same folder under its legacy name, which older games carry; read only through manifestProject. */
   godotProject: Schema.optionalKey(Schema.String),
   assets: Schema.Array(GameAsset),
   /**

@@ -240,7 +240,7 @@ const INTERFACE_FAMILY = "kenney-interface";
  * STYLE.json for a chosen family, as game_assets op add writes it before adding `adding`:
  * the family's visual packs (those on another rig left out), its rig (the added pack's,
  * else the one its packs share), its pixel mode, tile and palette, and the interface packs.
- * What else a lock already there holds (anchor, a key-art palette, audio, imports, budgets)
+ * What else a lock already there holds (anchor, a key-art palette, audio, budgets)
  * is kept, so choosing the look again never drops the person's own settings.
  */
 export const styleFromLock = (

@@ -143,6 +143,9 @@ it.effect("reads an old rig id through its alias and refuses a retired one with 
       );
     yield* write(standard);
     expect(yield* readGameStyle(root)).toEqual(standard);
+    // A lock written while it carried `imports`, which nothing reads, still reads.
+    yield* write({ ...standard, imports: ["polyhaven"] });
+    expect(yield* readGameStyle(root)).toEqual(standard);
 
     yield* write({ ...standard, rig: "quaternius-ual1" });
     expect(failure(yield* Effect.exit(readGameStyle(root)))).toMatch(
