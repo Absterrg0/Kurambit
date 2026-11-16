@@ -4,6 +4,7 @@ import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GamePlays from "./game/GamePlays.ts";
+import * as GameDecisions from "./game/GameDecisions.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameArt from "./game/art/GameArt.ts";
 import * as GameExport from "./game/GameExport.ts";
@@ -1195,6 +1196,7 @@ const layerWsRpc = (
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
       const gamePlays = yield* GamePlays.GamePlays;
+      const gameDecisions = yield* GameDecisions.GameDecisions;
       const gameToolchain = yield* GameToolchain.GameToolchain;
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1828,7 +1830,7 @@ const layerWsRpc = (
           }),
         [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
         [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
-          gameBuilds.restore(threadId, build, commandId),
+          gameBuilds.restore(threadId, build, commandId, { person: true }),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
         [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId, fold }) =>
@@ -1844,6 +1846,8 @@ const layerWsRpc = (
         [WS_METHODS.gameSavedPlays]: ({ threadId }) => gamePlays.saved(threadId),
         [WS_METHODS.gameDeletePlay]: ({ threadId, name }) =>
           gamePlays.remove(threadId, name).pipe(Effect.as({})),
+        [WS_METHODS.gameDecisions]: ({ threadId }) => gameDecisions.list(threadId),
+        [WS_METHODS.gameDecide]: ({ threadId, change }) => gameDecisions.decide(threadId, change),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined
@@ -2977,6 +2981,7 @@ export const layer = Layer.unwrap(
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const gameBuilds = yield* GameBuilds.GameBuilds;
     const gamePlays = yield* GamePlays.GamePlays;
+    const gameDecisions = yield* GameDecisions.GameDecisions;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3042,6 +3047,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provide(Layer.succeed(GameBuilds.GameBuilds, gameBuilds)),
               Layer.provide(Layer.succeed(GamePlays.GamePlays, gamePlays)),
+              Layer.provide(Layer.succeed(GameDecisions.GameDecisions, gameDecisions)),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.

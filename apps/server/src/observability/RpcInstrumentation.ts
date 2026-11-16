@@ -33,6 +33,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameSavePlay]: "game",
   [WS_METHODS.gameSavedPlays]: "game",
   [WS_METHODS.gameDeletePlay]: "game",
+  [WS_METHODS.gameDecisions]: "game",
+  [WS_METHODS.gameDecide]: "game",
   [WS_METHODS.gameStatus]: "game",
   [WS_METHODS.gameList]: "game",
   [WS_METHODS.gameCreate]: "game",

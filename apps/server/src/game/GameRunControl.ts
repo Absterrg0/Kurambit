@@ -44,6 +44,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import { recordDecision } from "./GameDecisions.ts";
 import { NO_TURN_LOOP_SENTENCE, keepGoingStatus } from "./run/runView.ts";
 import {
   RESUMABLE,
@@ -88,6 +89,8 @@ export interface GameRunStepMark {
   readonly reason: string;
   /** What the step set out to change, in one line; empty when unknown. */
   readonly move: string;
+  /** Its proposal's never-repeat key (decide.ts); empty when unknown. */
+  readonly key: string;
 }
 
 type Service = {
@@ -446,6 +449,8 @@ const make = Effect.gen(function* () {
     input: GameKeepGoingDecideInput,
   ) {
     const run = yield* turnsRun("decide", threadId);
+    const waiting =
+      input.answer === "skip" ? (yield* readRun("decide", threadId, run)).inFlight : null;
     yield* dispatch("decide", {
       type: "game-run.decide",
       commandId: yield* commandId("keep-going-decide", input.commandId, threadId, run.id),
@@ -455,6 +460,24 @@ const make = Effect.gen(function* () {
       answer: input.answer,
       chat: threadId,
     });
+    // The person turned the step down: every later session, and keep going after this run,
+    // hears it from the game's decisions.
+    const skipped =
+      waiting?.id === input.stepId && waiting.step.kind === "propose"
+        ? waiting.step.proposal
+        : null;
+    if (skipped !== null)
+      yield* Effect.flatMap(projects.resolve(threadId), (root) =>
+        recordDecision(root, {
+          kind: "skipped",
+          text: `Skipped keep going's step: ${headline(skipped)}`,
+          key: skipped.key,
+        }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("A skipped step could not be kept in the decisions.", { cause }),
+        ),
+      );
     return {
       message:
         input.answer === "start"
@@ -505,6 +528,7 @@ const make = Effect.gen(function* () {
             verdict: round.step.verdict,
             reason: round.step.reason,
             move: round.move,
+            key: round.step.key,
           });
       // A judge or undo still held: the run is at work on it, or was stopped or
       // paused with it, so its turn's build stays the step's (never a person's
@@ -521,6 +545,7 @@ const make = Effect.gen(function* () {
       ) {
         const undoing = read.inFlight?.step.kind === "undo";
         const move = read.turn === null ? "" : headline(read.turn.proposal);
+        const key = read.turn === null ? "" : read.turn.proposal.key;
         marks.set(
           read.turnRun,
           run.status !== "ended"
@@ -531,14 +556,16 @@ const make = Effect.gen(function* () {
                   ? `undoing it: ${read.undoing ?? "it broke the game"}`
                   : "measuring before keeping it",
                 move,
+                key,
               }
             : run.ending === "stopped"
-              ? { n: read.n, verdict: "stopped", reason: "", move }
+              ? { n: read.n, verdict: "stopped", reason: "", move, key }
               : {
                   n: read.n,
                   verdict: null,
                   reason: `keep going paused before ${undoing ? "undoing" : "judging"} it`,
                   move,
+                  key,
                 },
         );
       }

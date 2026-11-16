@@ -37,7 +37,11 @@ import * as Stream from "effect/Stream";
 
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
-import { personRunsForWorkspace, turnRulesForWorkspace } from "../game/gameTurnRules.ts";
+import {
+  personDecisionsForWorkspace,
+  personRunsForWorkspace,
+  turnRulesForWorkspace,
+} from "../game/gameTurnRules.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -544,6 +548,11 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly baselineFromOrdinal?: number;
   /** When the thread's previous turn ended: a game's turn rules name the person's runs since. */
   readonly lastTurnEndedAt?: DateTime.Utc;
+  /**
+   * When the native session this turn goes on in last started a turn; absent when it starts
+   * fresh. A game's turn is told the person's decisions since then, or all of them.
+   */
+  readonly sessionLastTurnAt?: DateTime.Utc;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1386,9 +1395,19 @@ export const layer: Layer.Layer<
           }));
           // A game's turn rules come from the harness each turn, never from a copy in the game.
           const harnessInstructions = yield* turnRulesForWorkspace(input.runtimePolicy.cwd);
-          // What the person played since the last turn goes beside their message; a slash
-          // command stays first in the prompt, and gets none.
-          const personRuns = input.message.text.trimStart().startsWith("/")
+          // What the person decided and played since the last turn goes beside their message; a
+          // slash command stays first in the prompt, and gets neither.
+          const slash = input.message.text.trimStart().startsWith("/");
+          const personDecisions = slash
+            ? null
+            : yield* personDecisionsForWorkspace(input.runtimePolicy.cwd, {
+                ...(input.sessionLastTurnAt === undefined
+                  ? {}
+                  : { since: DateTime.formatIso(input.sessionLastTurnAt) }),
+                // The person's own words may say why they undid the last build.
+                ...(input.message.createdBy === "user" ? { words: input.message.text } : {}),
+              });
+          const personRuns = slash
             ? null
             : yield* personRunsForWorkspace(
                 input.runtimePolicy.cwd,
@@ -1396,6 +1415,14 @@ export const layer: Layer.Layer<
                   ? undefined
                   : DateTime.formatIso(input.lastTurnEndedAt),
               );
+          const beside = [
+            ...(personDecisions === null
+              ? []
+              : [`<kurambit_game_decisions>\n${personDecisions}\n</kurambit_game_decisions>`]),
+            ...(personRuns === null
+              ? []
+              : [`<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>`]),
+          ];
           const turnInput = {
             appThread: input.appThread,
             threadId: input.run.threadId,
@@ -1414,12 +1441,9 @@ export const layer: Layer.Layer<
             rootNodeId: input.rootNode.id,
             providerThread: input.providerThread,
             message:
-              personRuns === null
+              beside.length === 0
                 ? input.message
-                : {
-                    ...input.message,
-                    text: `<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>\n\n${input.message.text}`,
-                  },
+                : { ...input.message, text: [...beside, input.message.text].join("\n\n") },
             modelSelection: input.modelSelection,
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),

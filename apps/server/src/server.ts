@@ -15,6 +15,7 @@ import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GamePlays from "./game/GamePlays.ts";
+import * as GameDecisions from "./game/GameDecisions.ts";
 import * as GameBuildsReactor from "./game/GameBuildsReactor.ts";
 import * as GameFacts from "./game/GameFacts.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
@@ -542,6 +543,7 @@ const layerGameOperations = GameStage.layer.pipe(
 );
 const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GamePlays.layer),
+  Layer.provideMerge(GameDecisions.layer),
   Layer.provideMerge(GameBuilds.layer),
   Layer.provideMerge(GameFacts.layer),
   Layer.provideMerge(GameRunControl.layer),

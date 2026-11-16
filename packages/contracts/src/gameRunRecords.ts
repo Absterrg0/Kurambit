@@ -257,6 +257,11 @@ export const GameRunStepResult = Schema.Union([
     edited: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
     /** The play bot setup this look finished (written or failed); the run keeps it. */
     botSetup: Schema.optionalKey(GameKeepGoingBotSetup),
+    /**
+     * Never-repeat keys of what the person undid, went back from or skipped, read from the
+     * game's decisions (`.studio/decisions.md`), so a run after theirs never proposes it again.
+     */
+    decided: Schema.optionalKey(Schema.Array(Schema.String)),
   }),
   Schema.Struct({
     kind: Schema.Literal("decided"),

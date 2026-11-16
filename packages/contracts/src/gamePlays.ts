@@ -143,6 +143,34 @@ export const GameSavedPlaysResult = Schema.Array(GameSavedPlaySummary);
 export const GameDeletePlayInput = Schema.Struct({ threadId: ThreadId, name: Schema.String });
 export type GameDeletePlayInput = typeof GameDeletePlayInput.Type;
 
+/**
+ * One line of the game's `.studio/decisions.md`: what the person decided (an undo, values kept,
+ * a step skipped, a note), dated. `line` is its place in the file, which an edit names.
+ */
+export const GameDecision = Schema.Struct({
+  line: NonNegativeInt,
+  /** YYYY-MM-DD; empty on a line written by hand without one. */
+  date: Schema.String,
+  text: Schema.String,
+});
+export type GameDecision = typeof GameDecision.Type;
+export const GameDecisionsResult = Schema.Array(GameDecision);
+
+const DecisionText = Schema.String.check(Schema.isMaxLength(2000));
+/**
+ * The person's change to the decisions: a note to remember, or one line edited or deleted.
+ * `was` is the line's text as they read it; a line that reads otherwise now is refused.
+ */
+export const GameDecideInput = Schema.Struct({
+  threadId: ThreadId,
+  change: Schema.Union([
+    Schema.TaggedStruct("note", { text: DecisionText }),
+    Schema.TaggedStruct("edit", { line: NonNegativeInt, was: DecisionText, text: DecisionText }),
+    Schema.TaggedStruct("remove", { line: NonNegativeInt, was: DecisionText }),
+  ]),
+});
+export type GameDecideInput = typeof GameDecideInput.Type;
+
 /** The person's latest kept play, replayed on one build. */
 export const GameReplayInput = Schema.Struct({
   threadId: ThreadId,

@@ -49,6 +49,8 @@ import {
 } from "./gameBuilds.ts";
 import { GameKeepValuesInput, GameKeepValuesResult } from "./gameStageBridge.ts";
 import {
+  GameDecideInput,
+  GameDecisionsResult,
   GameDeletePlayInput,
   GameKeepPlayInput,
   GameKeepPlayResult,
@@ -395,6 +397,8 @@ export const WS_METHODS = {
   gameSavePlay: "game.savePlay",
   gameSavedPlays: "game.savedPlays",
   gameDeletePlay: "game.deletePlay",
+  gameDecisions: "game.decisions",
+  gameDecide: "game.decide",
   subscribeGameEvents: "subscribeGameEvents",
 
   shellOpenInEditor: "shell.openInEditor",
@@ -1617,6 +1621,16 @@ const WsGameDeletePlayRpc = Rpc.make(WS_METHODS.gameDeletePlay, {
   success: Schema.Struct({}),
   error: gameError,
 });
+const WsGameDecisionsRpc = Rpc.make(WS_METHODS.gameDecisions, {
+  payload: GameThreadInput,
+  success: GameDecisionsResult,
+  error: gameError,
+});
+const WsGameDecideRpc = Rpc.make(WS_METHODS.gameDecide, {
+  payload: GameDecideInput,
+  success: GameDecisionsResult,
+  error: gameError,
+});
 const WsGameReplayRpc = Rpc.make(WS_METHODS.gameReplay, {
   payload: GameReplayInput,
   success: GameReplayResult,
@@ -1672,6 +1686,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameSavePlayRpc,
   WsGameSavedPlaysRpc,
   WsGameDeletePlayRpc,
+  WsGameDecisionsRpc,
+  WsGameDecideRpc,
   WsSubscribeGameEventsRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

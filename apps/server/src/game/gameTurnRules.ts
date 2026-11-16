@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { GameManifest, isAvailableEngine, keptRunTag, playOutcomeWords } from "@kurambit/contracts";
 
+import { decisionsForTurn } from "./GameDecisions.ts";
 import { keptSince, savedPlays, type KeptPlay } from "./playFiles.ts";
 import { gameTurnRules } from "./scaffold.ts";
 
@@ -103,4 +104,25 @@ export const personRunsForWorkspace = (cwd: string | null, lastTurnEndedAt?: str
     if (cwd === null || (yield* gameEngine(cwd)) === null) return null;
     const runs = yield* read(() => keptSince(cwd, lastTurnEndedAt, RUNS_READ), []);
     return runsSection(runs, lastTurnEndedAt !== undefined);
+  });
+
+/**
+ * The person's decisions on the game in `cwd` (`.studio/decisions.md`) as a block for the turn's
+ * message: all of them for a session that starts fresh, those since `since` (when the session
+ * last started a turn) for one that goes on; null when there are none or it is no game. The
+ * person's own message (`words`) first gives a waiting undo its reason.
+ */
+export const personDecisionsForWorkspace = (
+  cwd: string | null,
+  input: { readonly since?: string; readonly words?: string },
+) =>
+  Effect.gen(function* () {
+    if (cwd === null || (yield* gameEngine(cwd)) === null) return null;
+    return yield* decisionsForTurn(cwd, input).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("The game's decisions could not be read.", { cwd, cause }).pipe(
+          Effect.as(null),
+        ),
+      ),
+    );
   });

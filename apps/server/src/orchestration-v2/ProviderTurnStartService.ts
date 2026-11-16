@@ -93,6 +93,26 @@ const lastTurnEnded = (
     : { lastTurnEndedAt: rest.reduce<DateTime.Utc>((a, b) => DateTime.max(a, b), first) };
 };
 
+/**
+ * When the native session the run goes on in last started a turn of the thread: a game turn tells
+ * it only the decisions made since. Absent when the session starts fresh.
+ */
+const sessionLastTurn = (
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  run: OrchestrationV2Run,
+  sessionRunIds: ReadonlySet<RunId>,
+): { readonly sessionLastTurnAt?: DateTime.Utc } => {
+  const started = runs.flatMap((each) =>
+    each.ordinal < run.ordinal && sessionRunIds.has(each.id) && each.startedAt !== null
+      ? [each.startedAt]
+      : [],
+  );
+  const [first, ...rest] = started;
+  return first === undefined
+    ? {}
+    : { sessionLastTurnAt: rest.reduce<DateTime.Utc>((a, b) => DateTime.max(a, b), first) };
+};
+
 /** The run asked for a fresh context, or carries on one that did across a restart. */
 const inFreshSession = (
   runs: ReadonlyArray<OrchestrationV2Run>,
@@ -1344,6 +1364,16 @@ export const layer: Layer.Layer<
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);
+      const legacySession =
+        legacyInputRunIds.size > 0 &&
+        sameNativeThread &&
+        !acceptedAttempts.some((source) => source.nativeThreadId !== undefined);
+      const sessionHasTurns = nativeInputRunIds.size > 0 || legacySession;
+      // The runs whose input this native session holds: what it has already been told.
+      const sessionRunIds: ReadonlySet<RunId> = new Set([
+        ...nativeInputRunIds,
+        ...(legacySession ? legacyInputRunIds : []),
+      ]);
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
@@ -1369,11 +1399,8 @@ export const layer: Layer.Layer<
               .filter((turn) => turn.providerThreadId === providerThread.id)
               .map((turn) => turn.ordinal),
           ) + 1,
-        nativeThreadHasTurns:
-          nativeInputRunIds.size > 0 ||
-          (legacyInputRunIds.size > 0 &&
-            sameNativeThread &&
-            !acceptedAttempts.some((source) => source.nativeThreadId !== undefined)),
+        nativeThreadHasTurns: sessionHasTurns,
+        ...sessionLastTurn(projection.runs, run, sessionHasTurns ? sessionRunIds : new Set()),
         shouldStartProviderTurn: runControls.shouldStartProviderTurn,
         shouldFinalizeRun: runControls.shouldFinalizeRun,
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,

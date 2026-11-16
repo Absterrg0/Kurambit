@@ -54,6 +54,7 @@ import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
 import * as GameProjectService from "../GameProjectService.ts";
+import { decidedKeys } from "../GameDecisions.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
@@ -265,6 +266,13 @@ const make = Effect.gen(function* () {
         critique: yield* referenceCritique(threadId),
         bot: (yield* bots.latestPlayBot(root)) !== null,
         edited,
+        decided: yield* decidedKeys(root).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("The game's decisions could not be read.", { root, cause }).pipe(
+              Effect.as([]),
+            ),
+          ),
+        ),
       });
     });
 

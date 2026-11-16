@@ -42,7 +42,7 @@ import {
   unavailableEngineMessage,
   type ProjectId,
   RESTORE_BEFORE_LABEL,
-  type RunId,
+  RunId,
   ThreadId,
 } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -63,6 +63,8 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameStage from "./GameStage.ts";
+import { decisionsOfBuild, dropDecisions, recordDecision } from "./GameDecisions.ts";
+import { nextKey, replyHeadline } from "../orchestration-v2/gameRun/decide.ts";
 import { BuildName } from "./run/buildNames.ts";
 import { availableEngine, engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
@@ -271,7 +273,11 @@ export class GameBuilds extends Context.Service<
       threadId: ThreadId,
       build: GameBuildRef,
       commandId: string | undefined,
-      options?: { readonly expect?: GameBuildId },
+      options?: {
+        readonly expect?: GameBuildId;
+        /** The person asked (Undo, Redo, Go back): what it turned down goes in the game's decisions. */
+        readonly person?: boolean;
+      },
     ) => Effect.Effect<
       typeof GameBuildRestoreResult.Type & { readonly moved: RestoreMoved },
       GameOperationError
@@ -403,6 +409,57 @@ export const turnPending = (
 const isNumbered = (entry: Entry) =>
   entry.source._tag === "turn" ||
   (entry.source._tag === "saved" && entry.source.edit !== undefined);
+
+interface KeptChange {
+  readonly label: string;
+  readonly from: string;
+  readonly to: string;
+}
+const valueWords = (value: unknown) =>
+  typeof value === "number"
+    ? String(Math.round(value * 1000) / 1000)
+    : typeof value === "boolean"
+      ? String(value)
+      : "default";
+/** A thing's name in a line: the last part of its id, without an extension. */
+const thingWords = (id: string) =>
+  id
+    .split("/")
+    .at(-1)!
+    .replace(/\.[a-z0-9]+$/i, "") || id;
+
+/** Each kept value from where the session started (the base file's value, else its default). */
+const keptChanges = (
+  baseFile: unknown,
+  things: GameKeepValuesInput["things"],
+): ReadonlyArray<KeptChange> =>
+  things.flatMap((thing) =>
+    thing.values.map((value) => {
+      const kept =
+        baseFile !== null && typeof baseFile === "object"
+          ? (baseFile as Record<string, unknown>)[thing.id]
+          : undefined;
+      const was =
+        kept !== null && typeof kept === "object"
+          ? (kept as Record<string, unknown>)[value.key]
+          : undefined;
+      return {
+        label: `${thingWords(thing.id)} ${value.key}`,
+        from: valueWords(was ?? value.default),
+        to: valueWords(value.value),
+      };
+    }),
+  );
+
+/** The "label from → to" parts of a kept-values line, by label. */
+const keptSegments = (text: string) =>
+  text
+    .slice(text.indexOf(": ") + 2)
+    .split("; ")
+    .flatMap((part): ReadonlyArray<readonly [string, { from: string; to: string }]> => {
+      const match = /^(.+) (\S+) → (\S+)$/.exec(part);
+      return match === null ? [] : [[match[1]!, { from: match[2]!, to: match[3]! }]];
+    });
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -1290,7 +1347,28 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
+      // What the folder held, read before it moves: what the person's restore turns down.
+      // A retried request answers from its record and decides nothing again.
+      const repeat =
+        commandId !== undefined &&
+        (yield* noRunRestoreOf(g.root))?.requestId === restoreRequestId(g.root, commandId);
+      const held =
+        options.person === true && !repeat
+          ? yield* heldBefore(g).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("The builds a restore leaves could not be read.", { cause }).pipe(
+                  Effect.as(null),
+                ),
+              ),
+            )
+          : null;
       const result = yield* restoreWithoutRun(threadId, g, build, commandId, options.expect);
+      if (result.moved === "restored" && held !== null)
+        yield* decideRestore(g, held, build.build).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("A restore could not be kept in the game's decisions.", { cause }),
+          ),
+        );
       if (result.moved !== "moved-on") yield* playRestored(threadId, g);
       // Undo, Redo or Go back moved the folder a Guided proposal read: the person goes first.
       if (result.moved === "restored")
@@ -1302,6 +1380,108 @@ const make = Effect.gen(function* () {
           ),
         );
       return result;
+    });
+
+  /** The game's newest builds, their numbers and the folder's build: what a restore leaves. */
+  const heldBefore = (g: Game) =>
+    Effect.gen(function* () {
+      const listed = yield* allEntries(g, 50, undefined);
+      return {
+        entries: listed.entries,
+        numbers: yield* numbersOf(listed, listed.entries),
+        current: yield* currentOf(g, listed),
+      };
+    });
+
+  /**
+   * The person's Undo, Redo or Go back in the game's decisions. Restoring what an undo of theirs
+   * left takes that undo back; bringing back a step keep going undid keeps it; any other restore
+   * turns down the build the folder held, which their next message may say why.
+   */
+  const decideRestore = (
+    g: Game,
+    held: Effect.Success<ReturnType<typeof heldBefore>>,
+    target: GameBuildId,
+  ) =>
+    Effect.gen(function* () {
+      const nameOf = (id: string) => {
+        const number = held.numbers.get(id)?.number;
+        const entry = held.entries.find((each) => each.id === id);
+        if (number !== undefined) return `Build ${number}`;
+        if (entry?.source._tag === "saved")
+          return `"${entry.source.label}${entry.source.nth === undefined ? "" : ` ${entry.source.nth}`}"`;
+        return `build ${id.slice(0, 7)}`;
+      };
+      const takenBack = yield* dropDecisions(
+        g.root,
+        (each) => (each.kind === "undone" || each.kind === "went-back") && each.build === target,
+      );
+      if (takenBack > 0) return;
+      const brought = held.entries.find((each) => each.id === target);
+      if (brought?.source._tag === "turn" && brought.source.step?.verdict === "undone") {
+        const what = yield* whatBuildDid(g, brought);
+        return yield* recordDecision(g.root, {
+          kind: "redid",
+          text: `Brought back ${nameOf(target)} after keep going undid it: ${what.text}`,
+          build: target,
+          key: what.key,
+        });
+      }
+      const left =
+        held.current === null ? undefined : held.entries.find((each) => each.id === held.current);
+      if (left === undefined)
+        return yield* recordDecision(g.root, {
+          kind: "went-back",
+          text: `Went back to ${nameOf(target)} from a folder edited outside any build`,
+        });
+      const what = yield* whatBuildDid(g, left);
+      return yield* recordDecision(g.root, {
+        kind: left.base === target ? "undone" : "went-back",
+        text:
+          left.base === target
+            ? `Undid ${nameOf(left.id)}: ${what.text}`
+            : `Went back to ${nameOf(target)} from ${nameOf(left.id)}: ${what.text}`,
+        build: left.id,
+        key: what.key,
+        awaiting: true,
+      });
+    });
+
+  /**
+   * What a build did, in a line, and keep going's key for it: a turn's reply's first sentence
+   * (its request's when it has none), a step's own key or the key of the request as a `Next:`
+   * line; tuned values as the decisions kept them.
+   */
+  const whatBuildDid = (g: Game, entry: Entry) =>
+    Effect.gen(function* () {
+      if (entry.source._tag === "saved") {
+        const kept = (yield* decisionsOfBuild(g.root, entry.id).pipe(
+          Effect.orElseSucceed(() => []),
+        )).find((each) => each.kind === "kept-values");
+        return {
+          text: kept === undefined ? entry.summary : kept.text.replace(/^[^:]*:\s*/, "tuned "),
+          key: null,
+        };
+      }
+      const source = entry.source;
+      const { messages } = yield* projections
+        .getThreadRecords(source.threadId, ["messages"], {
+          messageRoles: ["user", "assistant"],
+          messageRunIds: [RunId.make(source.runId)],
+        })
+        .pipe(Effect.orElseSucceed(() => ({ messages: [] })));
+      const reply = replyHeadline(
+        messages.findLast((each) => each.role === "assistant")?.text ?? "",
+      );
+      const request = messages.find((each) => each.role === "user")?.text ?? source.request;
+      const step =
+        source.step === null
+          ? undefined
+          : (yield* stepsOf(new Set([source.threadId]))).get(RunId.make(source.runId));
+      return {
+        text: reply !== "" ? reply : source.step?.move || entry.summary,
+        key: step !== undefined && step.key !== "" ? step.key : nextKey(request),
+      };
     });
 
   const holdsIn = (g: Game, build: GameBuildId, owner: string) =>
@@ -1533,6 +1713,11 @@ const make = Effect.gen(function* () {
       return outcome;
     });
 
+  const restoreRequestId = (root: string, commandId: string | undefined) =>
+    commandId === undefined
+      ? NodeCrypto.randomUUID()
+      : NodeCrypto.createHash("sha256").update(`${root}\0${commandId}`).digest("hex").slice(0, 32);
+
   const restoreWithoutRun = (
     threadId: ThreadId,
     g: Game,
@@ -1541,13 +1726,7 @@ const make = Effect.gen(function* () {
     expect: GameBuildId | undefined,
   ) =>
     Effect.gen(function* () {
-      const requestId =
-        commandId === undefined
-          ? NodeCrypto.randomUUID()
-          : NodeCrypto.createHash("sha256")
-              .update(`${g.root}\0${commandId}`)
-              .digest("hex")
-              .slice(0, 32);
+      const requestId = restoreRequestId(g.root, commandId);
       const earlier = yield* noRunRestoreOf(g.root);
       // A repeat answers as the first try did.
       if (earlier?.requestId === requestId && earlier.outcome !== null) {
@@ -1708,7 +1887,7 @@ const make = Effect.gen(function* () {
           ),
         );
         return changed === false
-          ? { base: from.oid, refs: [from.checkpointRef, newest.checkpointRef] }
+          ? { base: from.oid, build: newest.oid, refs: [from.checkpointRef, newest.checkpointRef] }
           : null;
       });
       const said = (things: GameKeepValuesInput["things"]) =>
@@ -1794,6 +1973,14 @@ const make = Effect.gen(function* () {
           const putBack =
             baseText !== undefined &&
             sameTuneFile(merged.file, baseText === null ? Option.some({}) : decodeJson(baseText));
+          // Each value against the session's start: the base file's, else the game's default.
+          const baseFile =
+            baseText === undefined
+              ? existing
+              : baseText === null
+                ? null
+                : Option.getOrNull(decodeJson(baseText));
+          const changes = keptChanges(baseFile, input.things);
           const written =
             putBack && baseText === null
               ? null
@@ -1827,9 +2014,23 @@ const make = Effect.gen(function* () {
           // Every value put back: the session leaves no build, and the folder is its base again.
           if ((yield* changeOf(g.root, g.lane, base, build)).count === 0) {
             yield* drop([fromRef, keptRef]);
-            return { base, build: base, summary: merged.summary, unchanged: true };
+            return {
+              base,
+              build: base,
+              summary: merged.summary,
+              unchanged: true,
+              held: held?.build ?? null,
+              changes,
+            };
           }
-          return { base, build, summary: merged.summary, unchanged: false };
+          return {
+            base,
+            build,
+            summary: merged.summary,
+            unchanged: false,
+            held: held?.build ?? null,
+            changes,
+          };
         }),
         owner,
       );
@@ -1837,6 +2038,16 @@ const make = Effect.gen(function* () {
         if (!isGameBuildId(kept.base))
           return yield* failed("Keep values", g.root, "io", "the game's build is not a build");
         yield* nextTurnsFrom(g, threadId, kept.base);
+        // The session left no build, so it decided nothing.
+        if (kept.held !== null)
+          yield* dropDecisions(
+            g.root,
+            (each) => each.kind === "kept-values" && each.build === kept.held,
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Tuned values put back could not leave the decisions.", { cause }),
+            ),
+          );
         yield* operations.changed(g.root, GAME_BUILDS_EVENT, "Tuned values put back.");
         return {
           build: kept.base,
@@ -1846,10 +2057,54 @@ const make = Effect.gen(function* () {
       }
       const result = yield* answer(kept.build, kept.base, kept.summary);
       yield* nextTurnsFrom(g, threadId, kept.build);
+      yield* decideKept(g, kept.build, kept.held, kept.changes).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Kept values could not be kept in the game's decisions.", { cause }),
+        ),
+      );
       yield* operations.changed(g.root, GAME_BUILDS_EVENT, result.message);
       // Measured like a turn's build, so its facts sit beside the build before it.
       yield* measureIn(g.root, kept.build, { supersede: true });
       return result;
+    });
+
+  /**
+   * Values kept from the Stage in the game's decisions, as "player jump 9 → 12". A tuning
+   * session folds into one build, so its line folds too: the build it replaces gives way, each
+   * value keeping where the session started.
+   */
+  const decideKept = (
+    g: Game,
+    build: string,
+    replaces: string | null,
+    changes: ReadonlyArray<KeptChange>,
+  ) =>
+    Effect.gen(function* () {
+      const before =
+        replaces === null
+          ? []
+          : (yield* decisionsOfBuild(g.root, replaces)).filter(
+              (each) => each.kind === "kept-values",
+            );
+      const started = new Map(before.flatMap((each) => keptSegments(each.text)));
+      const told = new Map(started);
+      for (const change of changes)
+        told.set(change.label, {
+          from: started.get(change.label)?.from ?? change.from,
+          to: change.to,
+        });
+      const segments = [...told].flatMap(([label, { from, to }]) =>
+        from === to ? [] : [`${label} ${from} → ${to}`],
+      );
+      if (segments.length === 0) return;
+      const listed = yield* allEntries(g, 5, undefined);
+      const number = (yield* numbersOf(listed, listed.entries)).get(build)?.number;
+      yield* recordDecision(g.root, {
+        kind: "kept-values",
+        text: `Kept tuned values as ${number === undefined ? `build ${build.slice(0, 7)}` : `Build ${number}`}: ${segments.join("; ")}`,
+        build,
+        ...(replaces === null ? {} : { replaces }),
+      });
     });
 
   /** Finishes every no-run restore a restart cut short, by running its moves again. */

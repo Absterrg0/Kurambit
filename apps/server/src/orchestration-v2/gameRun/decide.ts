@@ -342,6 +342,12 @@ const fnv = (text: string) => {
 };
 const normalized = (text: string) => text.trim().replace(/\s+/g, " ").toLowerCase();
 
+/**
+ * The never-repeat key of a `Next:` line as a step: a person's turn asking for exactly that line
+ * (the Next banner sends it as written) shares it, so undoing that turn sets the line aside.
+ */
+export const nextKey = (line: string) => `next:${fnv(normalized(clip(line, TEXT_MAX)))}`;
+
 // ── Reading facts. ──────────────────────────────────────────────────────────
 type Views = ReadonlyMap<GameFactId, GameFactView>;
 const viewsOf = (facts: GameBuildFacts): Views =>
@@ -491,7 +497,8 @@ const referenceProposal = (look: LookResult): GameRunProposal | null => {
  * sees or fix a measured fault.
  */
 export const propose = (state: RunState, look: LookResult): GameRunProposal | null => {
-  const aside = new Set(state.setAside.map((entry) => entry.key));
+  // The run's own set-aside steps, and what the person turned down in any run or chat.
+  const aside = new Set([...state.setAside.map((entry) => entry.key), ...(look.decided ?? [])]);
   const facts = look.facts;
   const views = facts === null ? null : viewsOf(facts);
   const earlier = look.earlier === undefined ? null : viewsOf(look.earlier);
@@ -536,7 +543,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
       if (look.next === "none") return null;
       const text = look.next === null ? "" : look.next.text.trim();
       const line = text.length === 0 ? NEXT_FALLBACK : clip(text, TEXT_MAX);
-      return { why: "next", text: line, target: null, key: `next:${fnv(normalized(line))}` };
+      return { why: "next", text: line, target: null, key: nextKey(line) };
     },
   ];
   for (const candidate of candidates) {
