@@ -24,8 +24,9 @@ const inGame = <A, E>(work: (root: string) => Effect.Effect<A, E>) =>
 const fileText = (root: string) =>
   Effect.promise(() => NodeFSP.readFile(NodePath.join(root, DECISIONS_FILE), "utf8"));
 /** The test clock starts at 0; this server started now, so a session going on reads from now. */
-const goOn = (millis: number) => TestClock.setTime(Date.now() + millis);
-const isoAt = (millis: number) => DateTime.formatIso(DateTime.makeUnsafe(Date.now() + millis));
+const STARTED = DateTime.toEpochMillis(DateTime.nowUnsafe());
+const goOn = (millis: number) => TestClock.setTime(STARTED + millis);
+const isoAt = (millis: number) => DateTime.formatIso(DateTime.makeUnsafe(STARTED + millis));
 
 it.effect("keeps the newest 40, the person's own notes last to go", () =>
   inGame((root) =>
