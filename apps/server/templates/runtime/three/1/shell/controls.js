@@ -1,5 +1,5 @@
-// Named actions: the one table every control in the game reads, shown on the
-// Controls screen and rebindable there. The game reads ctx.input, never raw
+// Named actions: the one table every control in the game reads, shown in the
+// Stage's Controls and rebindable there. The game reads ctx.input, never raw
 // keys, so a player's rebinding reaches every check:
 //
 //   ctx.input.down("jump")      // held now
@@ -20,7 +20,7 @@
 // lb rb lt rt, back start, ls rs (stick clicks), up down left right (d-pad),
 // lstick_left/right/up/down and rstick_left/right/up/down. mouse lists buttons
 // (0 left, 2 right) and counts only presses on the game canvas. label is the
-// Controls screen's name for it (default: the name, "move_left" -> "Move left").
+// Controls' name for it (default: the name, "move_left" -> "Move left").
 
 /** Defaults every genre can read; each one has a reason in TEMPLATE.md. */
 export const DEFAULT_ACTIONS = {
@@ -31,7 +31,7 @@ export const DEFAULT_ACTIONS = {
   jump: { keys: ["Space"], pad: ["a"] },
   action: { keys: ["KeyJ", "Enter"], pad: ["x"], mouse: [0] },
   alt: { keys: ["KeyK", "ShiftLeft"], pad: ["b"] },
-  // The shell's own; it stays bound so a player can always reach the menu.
+  // The shell's own; it stays bound so a player can always reach the game's pause.
   pause: { keys: ["Escape", "KeyP"], pad: ["start"], fixed: true },
 };
 
@@ -136,28 +136,26 @@ const strings = (list) => (Array.isArray(list) ? list.filter((x) => typeof x ===
  * that order. Keyboard bindings change at runtime (rebinding); `defaults`
  * keeps each action's declared keys for "Reset to defaults".
  */
-export function createControls(gameActions, { defaultsYield = false } = {}) {
+export function createControls(gameActions) {
   const declared = { ...DEFAULT_ACTIONS };
   for (const [name, spec] of Object.entries(gameActions ?? {})) {
     if (name === "pause") continue;
     if (spec === null) delete declared[name];
     else if (typeof spec === "object") declared[name] = spec;
   }
-  // A game drawing its own screens names only its own actions: a key it binds is taken from the
-  // defaults it does not name (pause aside), rather than bound twice.
-  if (defaultsYield) {
-    const taken = new Set(
-      Object.entries(gameActions ?? {}).flatMap(([name, spec]) =>
-        name === "pause" || spec === null || typeof spec !== "object" ? [] : strings(spec.keys),
-      ),
-    );
-    for (const name of Object.keys(DEFAULT_ACTIONS))
-      if (name !== "pause" && !(name in (gameActions ?? {})) && declared[name] !== undefined)
-        declared[name] = {
-          ...declared[name],
-          keys: strings(declared[name].keys).filter((key) => !taken.has(key)),
-        };
-  }
+  // The game names only its own actions: a key it binds is taken from the defaults it does not
+  // name (pause aside), rather than bound twice.
+  const taken = new Set(
+    Object.entries(gameActions ?? {}).flatMap(([name, spec]) =>
+      name === "pause" || spec === null || typeof spec !== "object" ? [] : strings(spec.keys),
+    ),
+  );
+  for (const name of Object.keys(DEFAULT_ACTIONS))
+    if (name !== "pause" && !(name in (gameActions ?? {})) && declared[name] !== undefined)
+      declared[name] = {
+        ...declared[name],
+        keys: strings(declared[name].keys).filter((key) => !taken.has(key)),
+      };
   // One key on two actions fires both: name it, so the check sees it.
   const owners = new Map();
   for (const [name, spec] of Object.entries(declared))
@@ -196,7 +194,6 @@ export function createControls(gameActions, { defaultsYield = false } = {}) {
     /** Whether an action is one of the game's: named in ACTIONS, or read through ctx.input. */
     ownedByGame: (name) => named.has(name) || used.has(name),
     has: (name) => actions.has(name),
-    keysOf: (name) => actions.get(name)?.keys ?? [],
     label(name) {
       const action = actions.get(name);
       if (action === undefined) return "";
@@ -213,19 +210,10 @@ export function createControls(gameActions, { defaultsYield = false } = {}) {
         pad: action.pad.map(padName),
       };
     },
-    describe(action) {
-      return {
-        keyboard: [
-          ...action.keys.map(keyName),
-          ...action.mouse.map((b) => MOUSE_NAMES[b] ?? `Mouse ${b}`),
-        ].join(", "),
-        gamepad: action.pad.map(padName).join(", "),
-      };
-    },
     /**
      * Puts `code` as the action's first key. A key another action holds moves
      * over to it in exchange for this one's old key; a fixed action's key is
-     * refused. Returns the sentence the Controls screen shows.
+     * refused. Returns the sentence the Stage's Controls shows.
      */
     rebind(name, code) {
       const action = actions.get(name);

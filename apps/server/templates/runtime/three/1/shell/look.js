@@ -1,10 +1,9 @@
 // The look every frame goes through: the light, the sky, the fog and the post chain,
 // set for the game's own mood. A preset ("day", "golden" for golden hour, "night",
 // "interior", "flat" for stylised) is only a starting point for each part, which
-// main.js sets as the game needs. A game drawing its own screens with no LOOK gets
-// "plain": the renderer draws the scene as the game built it (its background, lights,
-// fog and ctx.renderer's tone mapping), adding nothing; on the demo shell's screens no
-// LOOK is a neutral "day":
+// main.js sets as the game needs. A game with no LOOK gets "plain": the renderer draws
+// the scene as the game built it (its background, lights, fog and ctx.renderer's tone
+// mapping), adding nothing; a LOOK that names no preset starts from a neutral "day":
 //
 //   export const LOOK = {
 //     preset: "<one of them>", // optional
@@ -1149,8 +1148,8 @@ export async function createLook(canvas, options = {}) {
     },
     /**
      * Compiles every program a run will use (the models lit as a run is, the
-     * shadow pass and the post chain) and draws them once, off screen behind
-     * the loading screen, so the first frame of play does not stall on them.
+     * shadow pass and the post chain) and draws them once, off screen before
+     * the first run, so the first frame of play does not stall on them.
      */
     async warm(models, extra = null) {
       const scene = extra?.scene ?? new THREE.Scene();

@@ -1,4 +1,4 @@
-// Sound through three Web Audio gain nodes, so the settings sliders reach
+// Sound through three Web Audio gain nodes, so the volume settings reach
 // every sound: master <- music, master <- sfx.
 //
 //   playMusic("./assets/music/theme.ogg");   // looped on the music gain; replaces the last track
@@ -197,32 +197,6 @@ export function stopAmbience({ fade = 1 } = {}) {
   fadeTo(bed.level, 0, fade);
   bed.source.stop(context.currentTime + fade + 0.05);
   bed = null;
-}
-
-/** A short synthesized tick for menu presses, so the shell sounds before any file exists. */
-export function playTick() {
-  if (context === null || held) return;
-  // A context left suspended (made from a gamepad press, or after a hold)
-  // resumes on this press, so the first menu tick still sounds.
-  if (context.state !== "running") {
-    context.resume().then(
-      () => context.state === "running" && tick(),
-      () => undefined,
-    );
-    return;
-  }
-  tick();
-}
-
-function tick() {
-  const tone = context.createOscillator();
-  const level = context.createGain();
-  tone.frequency.value = 880;
-  level.gain.setValueAtTime(0.12, context.currentTime);
-  level.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.05);
-  tone.connect(level).connect(gains.sfx);
-  tone.start();
-  tone.stop(context.currentTime + 0.06);
 }
 
 /** The studio's hidden-tab hold: suspends all sound, then puts back what it found. Returns muted. */

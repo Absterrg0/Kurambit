@@ -155,7 +155,6 @@ function position(player) {
  * `scene`, when the shell has one, is the scene report the harness reads.
  */
 export function installStudio({
-  ui,
   player,
   setState,
   hold,
@@ -224,8 +223,8 @@ export function installStudio({
           },
         }),
     getState() {
-      // innerText skips hidden screens, so this is the text on screen now.
-      const text = typeof ui?.innerText === "string" ? ui.innerText : "";
+      // innerText skips hidden elements, so this is the page's text on screen now.
+      const text = document.body.innerText;
       return {
         gameState: gameStateValues(),
         player: position(player()),

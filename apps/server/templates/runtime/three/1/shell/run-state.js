@@ -5,10 +5,8 @@
 //   GameState.win("You escaped!", { Time: "1:42", Coins: 12 });
 //   GameState.lose("Out of fuel", { Distance: "340 m" });
 //
-// On the demo shell's screens, either call freezes play after a short slow-motion beat and opens
-// the end screen with the message and the stats (shown in the order given), plus Retry and Main
-// menu. A game that draws its own screens shows its own ending: its update keeps running with
-// state "ended", and it moves the run on itself:
+// The game shows its own ending: its update keeps running with state "ended", and it moves the
+// run on itself:
 //
 //   GameState.title();   // in start(): open this run on the game's own title (state "title");
 //                        // ignored under ?play, on a retry and in every harness play
@@ -22,7 +20,7 @@ export const GameState = {
   state: "title",
   /** "won" or "lost" once the run ended, "" while it runs. */
   result: "",
-  /** The message the end screen shows. */
+  /** The ending's message. */
   result_text: "",
 };
 
@@ -156,7 +154,7 @@ export function newRun(keep = []) {
 }
 
 /**
- * The shell calls this once at launch, before the title, so a title screen can
+ * The shell calls this once at launch, before the first run, so the game's title can
  * already show the best score from the last visit. Only plain data saves.
  */
 export function loadProgress(keep = []) {
@@ -190,19 +188,6 @@ function jsonSafe(value) {
   if (typeof value !== "object") return false;
   const proto = Object.getPrototypeOf(value);
   return (proto === Object.prototype || proto === null) && Object.values(value).every(jsonSafe);
-}
-
-/** Whether the game keeps anything across runs (the Settings reset shows only then). */
-export const hasProgress = () => keptStart.size > 0;
-
-/** Puts every kept value back to its starting value and forgets the saved copy. */
-export function resetProgress() {
-  for (const [key, start] of keptStart) GameState[key] = structuredClone(start);
-  try {
-    localStorage.removeItem(PROGRESS_KEY);
-  } catch {
-    // Storage blocked: nothing was saved either.
-  }
 }
 
 function saveProgress() {

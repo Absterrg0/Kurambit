@@ -1,5 +1,4 @@
-// Models and textures the game names in main.js load once, behind the
-// loading screen, before the title shows:
+// Models and textures the game names in main.js load once, before the first run:
 //
 //   export const ASSETS = {
 //     knight: "assets/models/knight.glb",
@@ -78,14 +77,12 @@ export const assets = {
 };
 
 /**
- * Loads every entry of the game's ASSETS, reporting progress as (done, total).
+ * Loads every entry of the game's ASSETS.
  * A file that fails is reported as a page error (the check sees it) and the
  * rest still load, so one bad path names itself instead of blanking the game.
  */
-export async function preloadAssets(manifest, onProgress) {
+export async function preloadAssets(manifest) {
   const entries = Object.entries(manifest ?? {});
-  let done = 0;
-  onProgress(done, entries.length);
   // GLTFLoader only logs a texture a model references and cannot find (a .glb
   // copied without its Textures/ folder), and the model then renders white.
   const listed = new Set(entries.map(([, path]) => path));
@@ -132,7 +129,6 @@ export async function preloadAssets(manifest, onProgress) {
           new Error(`ASSETS.${name} (${path}) did not load: ${error?.message ?? "not found"}`),
         );
       }
-      onProgress(++done, entries.length);
     }),
   );
 }

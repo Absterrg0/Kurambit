@@ -6,11 +6,11 @@
 //     for a moment on a fresh run, and something answers it: the player moves or turns, a
 //     GameState value changes, a Juice effect or a sound fires, or something appears. An
 //     action the game never reads through ctx.input is dead for certain.
-//   - Retry starts clean: a run is ended and retried as the end screen's Retry does, and the
+//   - Retry starts clean: a run is ended and retried as GameState.play() retries it, and the
 //     new run is counted against the one before it: the scene's objects, the listeners on
 //     window and document, the intervals running, the animation frames asked for each
 //     second, and errors. Growth is state the game kept outside its run.
-//   - the HUD fits: the text of ctx.ui and the HUD stays inside the view and does not overlap.
+//   - the HUD fits: the page's text stays inside the view and does not overlap.
 //
 // A page a player opens never runs this: the harness calls window.__studio.qa on a page it
 // opened with its counters on (studio.js). Every wait is real time, so a slow machine only
@@ -64,23 +64,11 @@ const angle = (a, b) => {
 };
 
 /**
- * `current()` is the run (or null), `restart()` starts a fresh one as Retry does,
- * `canLose(on)` lets a loss end the run, `eachThing(fn)` walks the Stage's things and
- * `hudRoots()` are the HUD's elements, `listed(action)` whether an action is the game's own (a
- * default a game with its own screens never reads is not), and `openTitle()`, for a game with its
- * own title, starts a run that may open on it.
+ * `current()` is the run (or null), `restart()` starts a fresh one in play, `canLose(on)` lets
+ * a loss end the run, `eachThing(fn)` walks the Stage's things and `openTitle()` starts a run
+ * that may open on the game's own title.
  */
-export function createQa({
-  controls,
-  current,
-  restart,
-  canLose,
-  eachThing,
-  hudRoots,
-  errors,
-  listed = () => true,
-  openTitle = null,
-}) {
+export function createQa({ controls, current, restart, canLose, eachThing, errors, openTitle }) {
   // Juice effects asked for, counted by wrapping its methods once the QA play first runs.
   let juice = 0;
   let counting = false;
@@ -194,7 +182,6 @@ export function createQa({
   // A game drawing its own title may read a key there only (the one that leaves it): pressed in
   // play it answers nothing, which is no dead control. A title run's reads name those keys.
   const titleKeys = async () => {
-    if (openTitle === null) return new Set();
     openTitle();
     const started = performance.now();
     while (current()?.compiling === true && performance.now() - started < START_MS) await wait(50);
@@ -211,7 +198,8 @@ export function createQa({
     let run = null;
     let onRun = 0;
     for (const action of controls.actions.values()) {
-      if (action.fixed || !listed(action)) continue;
+      // A default the game neither names nor reads is not one of its controls.
+      if (action.fixed || !controls.ownedByGame(action.name)) continue;
       if (run === null || onRun >= ACTIONS_PER_RUN || current() !== run) {
         restart();
         run = await playing();
@@ -257,7 +245,7 @@ export function createQa({
     await wait(800);
     const before = await count(first);
     const errorsBefore = errors.length;
-    // Ended as a loss ends it, then retried as the end screen's Retry does.
+    // Ended as a loss ends it, then retried as GameState.play() retries it.
     canLose(true);
     GameState.lose("QA play");
     const ended = performance.now();
@@ -295,20 +283,19 @@ export function createQa({
      */
     hud() {
       const items = [];
-      for (const root of hudRoots())
-        for (const element of root.querySelectorAll("*")) {
-          const own = [...element.childNodes]
-            .filter((node) => node.nodeType === Node.TEXT_NODE)
-            .map((node) => node.textContent)
-            .join("")
-            .trim();
-          if (own === "") continue;
-          const style = getComputedStyle(element);
-          if (style.visibility === "hidden" || Number(style.opacity) === 0) continue;
-          const rect = element.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-          items.push({ element, text: own.slice(0, 60), rect });
-        }
+      for (const element of document.body.querySelectorAll("*")) {
+        const own = [...element.childNodes]
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .map((node) => node.textContent)
+          .join("")
+          .trim();
+        if (own === "") continue;
+        const style = getComputedStyle(element);
+        if (style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        items.push({ element, text: own.slice(0, 60), rect });
+      }
       const width = window.innerWidth;
       const height = window.innerHeight;
       const off = items
