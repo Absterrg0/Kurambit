@@ -505,27 +505,23 @@ function CheckRows({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: Ga
   );
   return (
     <div className="flex flex-col">
-      {/* The passing checks fold into one line; what is left to look at is listed under it. */}
-      <PassingLine
-        label={
-          rest.some(
-            (check) =>
-              check.id === "boots" &&
-              check.reading._tag === "measured" &&
-              check.reading.tone === "bad",
-          ) && !busy
-            ? "Does not start"
-            : busy
+      {/* The passing checks fold into one line; what is left to look at is listed under it.
+          While measuring, the line waits for a first pass rather than say "0". */}
+      {busy && passing.length === 0 ? null : (
+        <PassingLine
+          label={
+            busy
               ? `${passing.length} pass so far`
               : `${passing.length} of ${view.checks.length} pass`
-        }
-        failed={rest.some(
-          (check) => check.reading._tag === "measured" && check.reading.tone === "bad",
-        )}
-        count={passing.length}
-      >
-        {passing.map(row)}
-      </PassingLine>
+          }
+          failed={rest.some(
+            (check) => check.reading._tag === "measured" && check.reading.tone === "bad",
+          )}
+          count={passing.length}
+        >
+          {passing.map(row)}
+        </PassingLine>
+      )}
       {rest.map(row)}
       {pending > 0 ? (
         <Workbench.Row
