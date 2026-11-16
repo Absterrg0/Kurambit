@@ -573,7 +573,7 @@ function BuildThumb({
         >
           <ThumbEdge
             className={cn(
-              "group-hover/thumb:ring-foreground/30 group-focus-visible/thumb:ring-2 group-focus-visible/thumb:ring-ring",
+              "group-hover/thumb:ring-foreground/30 group-focus-visible/thumb:ring-2 group-focus-visible/thumb:ring-ring group-focus-visible/thumb:ring-inset",
               onStage && "ring-2 ring-live group-hover/thumb:ring-live",
               picked && "ring-2 ring-strong-foreground",
             )}
