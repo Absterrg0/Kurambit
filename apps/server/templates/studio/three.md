@@ -40,10 +40,11 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
    planted. Size it by the sidecar's height (`copy.userData.asset.height`, metres at scale 1): a
    box measured around a skinned copy before its bones move reads the bind data, not what
    draws, and scales it wildly.
-7. The facts' Performance row is the random-input play ("60 fps · 1% low 48 ·
-   GPU 9 ms at 0.8× of 1280×720"): a low 1% or a small scale is a reason to
-   bake the level's shadow, trim triangles or drop a pass. "Not measured"
-   because the harness drew in software is Kurambit's machine, not your game.
+7. The facts' Performance row is the random-input play ("41 fps · 1% low 22 ·
+   GPU 14 ms at 0.8× of 1280×720 · 1,900 draw calls · 2.1M triangles"): cut draw
+   calls past a few hundred (one InstancedMesh per repeated model, merge static
+   pieces) and triangles past about 1.5M. A frame rate "not measured" in software
+   is Kurambit's machine, not your game; the counts are still your game's.
 8. When you play with `game_play` ops `start`, `act` and `close`, send real keys (`"Enter"`, `"w"`, `"ArrowLeft"`), and a click
    before the game can capture the pointer; the page opens as a player opens
    it, on your title when the game has one.

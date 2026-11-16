@@ -26,6 +26,9 @@ export const PlayPerf = Schema.Struct({
   height: Finite,
   software: Schema.Boolean,
   renderer: Schema.String,
+  /** The median sampled frame's draw calls and triangles; absent from shells that predate them. */
+  drawCalls: Schema.optionalKey(Schema.NullOr(Finite)),
+  triangles: Schema.optionalKey(Schema.NullOr(Finite)),
 });
 export type PlayPerf = typeof PlayPerf.Type;
 const decodePlayPerf = Schema.decodeUnknownOption(Schema.fromJsonString(PlayPerf));
@@ -47,17 +50,45 @@ const LOW1_FRAMES = 1000;
 /** Below this a reading on a busy machine says nothing about the game. */
 const SMOOTH_FPS = 55;
 
+/** What a frame draws, as the record counted it: the same on any renderer. */
+const countsOf = (record: PlayPerf) => {
+  const whole = (value: number | null | undefined) =>
+    typeof value === "number" && value >= 0 ? Math.round(value) : null;
+  const drawCalls = whole(record.drawCalls);
+  const triangles = whole(record.triangles);
+  return {
+    ...(drawCalls === null ? {} : { drawCalls }),
+    ...(triangles === null ? {} : { triangles }),
+  };
+};
+
 /**
  * PURE. The random-input play's record as the performance fact. Software
- * rendering is the harness's fault on this machine, never the game's: the reason
- * says so, with what the GPU probe printed.
+ * rendering is the harness's fault on this machine, never the game's: its frame
+ * times are not read, and the reason says so with what the GPU probe printed;
+ * what a frame draws is the game's own, so a record that counted it keeps it.
  */
 export const performanceOf = (
   record: PlayPerf | "none" | null,
   browser: { readonly software: boolean; readonly renderer: string | null; readonly probe: string },
   machine: MachineLoad | null,
 ): GameBuildFacts["performance"] => {
-  if (browser.software || (record !== null && record !== "none" && record.software))
+  if (browser.software || (record !== null && record !== "none" && record.software)) {
+    const counts = record !== null && record !== "none" ? countsOf(record) : {};
+    if (record !== null && record !== "none" && Object.keys(counts).length > 0)
+      return {
+        status: "measured",
+        value: {
+          fps: null,
+          low1: null,
+          gpuMs: null,
+          scale: null,
+          width: Math.round(record.width),
+          height: Math.round(record.height),
+          frames: Math.round(record.frames),
+          ...counts,
+        },
+      };
     // Its 300-character cap would cut the probe's output, so the reason is set after.
     return {
       ...notMeasured("software", false, true, "software"),
@@ -66,6 +97,7 @@ export const performanceOf = (
         700,
       ),
     };
+  }
   if (record === "none")
     return notMeasured(
       "the game's shell does not report frame times (its copy of the shell predates performance measurement)",
@@ -87,6 +119,7 @@ export const performanceOf = (
     width: Math.round(record.width),
     height: Math.round(record.height),
     frames: Math.round(record.frames),
+    ...countsOf(record),
   };
   return (
     (record.fps < SMOOTH_FPS ? busyReading("frames ran slow", machine) : null) ?? {
@@ -121,16 +154,34 @@ export const checkPerformance = (
   browser: { readonly software: boolean },
 ): { readonly line: string; readonly warning: string | null } => {
   const record = Option.getOrNull(decodePlayPerf(JSON.stringify(raw ?? null)));
+  const draws = finite(record?.drawCalls);
+  const triangles = finite(record?.triangles);
+  const counted = [
+    draws === null ? null : `${count(draws)} draw calls`,
+    triangles === null ? null : `${count(triangles)} triangles`,
+  ].filter((part) => part !== null);
+  const overCounts = [
+    draws !== null && draws > CHECK_DRAW_CALLS
+      ? `${count(draws)} draw calls (budget ${CHECK_DRAW_CALLS}): draw repeated models as one InstancedMesh (buildLevel does) and merge static pieces`
+      : null,
+    triangles !== null && triangles > CHECK_TRIANGLES
+      ? `${count(triangles)} triangles (budget ${count(CHECK_TRIANGLES)}): fewer or lighter copies of the densest model, nothing far away drawn at full detail`
+      : null,
+  ].filter((cost) => cost !== null);
+  // Software says nothing of the frame rate, but a frame draws the same on any renderer.
   if (browser.software || record?.software === true)
     return {
-      line: "not measured: this machine's check drew in software, where frame rates say nothing",
-      warning: null,
+      line: [
+        "fps not measured: this machine's check drew in software, where frame rates say nothing",
+        ...counted,
+      ].join(" · "),
+      warning:
+        overCounts.length === 0
+          ? null
+          : `Heavier than a laptop GPU holds at 60 fps: ${overCounts.join("; ")}.`,
     };
   if (record === null || record.fps === null || record.frames < MIN_FRAMES / 2)
     return { line: "not measured: the play drew too few frames to read", warning: null };
-  const extra = raw as { readonly drawCalls?: unknown; readonly triangles?: unknown };
-  const draws = finite(extra.drawCalls);
-  const triangles = finite(extra.triangles);
   const gpu = record.gpuMs;
   const low1 = record.frames >= LOW1_FRAMES ? record.low1Fps : null;
   const line = [
@@ -139,8 +190,7 @@ export const checkPerformance = (
     gpu === null
       ? null
       : `GPU ${gpu.toFixed(1)} ms at ${record.scale ?? 1}× of ${Math.round(record.width)}×${Math.round(record.height)}`,
-    draws === null ? null : `${count(draws)} draw calls`,
-    triangles === null ? null : `${count(triangles)} triangles`,
+    ...counted,
   ]
     .filter((part) => part !== null)
     .join(" · ");
@@ -151,12 +201,7 @@ export const checkPerformance = (
     record.scale !== null && record.scale < 1
       ? `the look dropped to ${record.scale}× resolution to keep up`
       : null,
-    draws !== null && draws > CHECK_DRAW_CALLS
-      ? `${count(draws)} draw calls (budget ${CHECK_DRAW_CALLS}): draw repeated models as one InstancedMesh (buildLevel does) and merge static pieces`
-      : null,
-    triangles !== null && triangles > CHECK_TRIANGLES
-      ? `${count(triangles)} triangles (budget ${count(CHECK_TRIANGLES)}): fewer or lighter copies of the densest model, nothing far away drawn at full detail`
-      : null,
+    ...overCounts,
   ].filter((cost) => cost !== null);
   const slow = record.fps < SMOOTH_FPS || (low1 !== null && low1 < 40);
   if (costs.length === 0 && !slow) return { line, warning: null };

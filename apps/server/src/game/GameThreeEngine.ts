@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
+  GAME_SCREEN_SIZES,
   THREE_PINNED_VERSION,
   THREE_VIEWPORT,
   GameOperationError,
@@ -17,6 +18,9 @@ import {
   type GameCheckIssue,
   type GameCheckQa,
   type GameCheckScene,
+  type GameCheckScreens,
+  type GameScreenSize,
+  gameScreensFindings,
   type GameCheckView,
   type GameModelSheet,
   type GameModelSheetResult,
@@ -190,6 +194,115 @@ const qaOf = (played: { readonly raw: unknown; readonly ms: number } | null): Ga
   };
 };
 
+/**
+ * Play at each other screen size: long enough to start a run, draw at that size and throw what
+ * the size makes the game throw. It costs a boot per size, so it stays short.
+ */
+const SCREEN_PLAY_MS = 1_500;
+const decodeScreenRead = Schema.decodeUnknownOption(
+  Schema.Struct({
+    canvas: Schema.NullOr(Schema.Struct({ width: Schema.Finite, height: Schema.Finite })),
+    hud: Schema.NullOr(
+      Schema.Struct({
+        texts: Schema.optionalKey(Schema.Finite),
+        off: Schema.Array(Schema.String),
+      }),
+    ),
+  }),
+);
+
+/**
+ * The gameplay entry booted fresh at phone portrait and at widescreen, each played a moment
+ * and read as a player there sees it: whether it starts, what it throws that the check's own
+ * size did not (`known`), how much of the window its canvas covers and whether the HUD's DOM
+ * text stays on it, with a frame. A HUD drawn in the canvas is not in the DOM: not measured.
+ * Also the bytes its page loads to start. Our browser failing is ours: not measured.
+ */
+const playScreens = async (input: {
+  readonly browser: GameBrowser;
+  readonly url: string;
+  readonly root: string;
+  readonly folder: string;
+  readonly known: ReadonlySet<string>;
+  readonly signal: AbortSignal;
+}): Promise<GameCheckScreens> => {
+  const started = Date.now();
+  const sizes: Array<GameScreenSize> = [];
+  let bytes: number | null = null;
+  try {
+    for (const size of GAME_SCREEN_SIZES) {
+      input.signal.throwIfAborted();
+      const errors: Array<string> = [];
+      const heard = (text: string) => {
+        const line = text.slice(0, 200);
+        if (!input.known.has(line) && !errors.includes(line) && errors.length < 3)
+          errors.push(line);
+      };
+      const at = { name: size.name, width: size.width, height: size.height };
+      const session = await openWebPlaySession({
+        browser: input.browser,
+        url: input.url,
+        width: size.width,
+        height: size.height,
+        bootTimeoutMs: BOOT_TIMEOUT_MS,
+        signal: input.signal,
+        onPageEvent: (event) => {
+          if (event.kind === "pageerror") heard(event.text);
+          else if (event.kind === "script-failed")
+            heard(`script failed to load: ${event.url} (${event.status})`);
+          else if (event.level === "error" && !/favicon\.ico/i.test(event.text)) heard(event.text);
+        },
+        stopOnPageError: true,
+        countBytes: true,
+      }).catch((cause: unknown) => {
+        if (cause instanceof WebPageCrashed) {
+          heard(`the page crashed: ${cause.message}`);
+          return null;
+        }
+        if (cause instanceof WebPageNotReady) return null;
+        throw cause;
+      });
+      if (session === null) {
+        sizes.push({ ...at, booted: false, canvas: null, errors, hudOff: null, frame: null });
+        continue;
+      }
+      await playRandomly(session.input, SCREEN_PLAY_MS, input.signal);
+      const read = Option.getOrNull(decodeScreenRead(await session.screen()));
+      if (read === null) heard("the page stopped answering at this size");
+      const frame = NodePath.join(input.folder, `screen-${size.name}.png`);
+      const kept = await session.still(frame);
+      await session.close();
+      const loaded = session.loadedBytes();
+      if (loaded !== null) bytes = Math.max(bytes ?? 0, loaded);
+      const hud = read?.hud ?? null;
+      sizes.push({
+        ...at,
+        booted: true,
+        canvas:
+          read?.canvas == null
+            ? null
+            : { width: Math.round(read.canvas.width), height: Math.round(read.canvas.height) },
+        errors,
+        hudOff: hud === null || hud.texts === 0 ? null : hud.off.slice(0, 8),
+        frame: kept ? NodePath.relative(input.root, frame) : null,
+      });
+    }
+  } catch (cause) {
+    if (input.signal.aborted) throw cause;
+    return {
+      status: "not-measured",
+      why: `the browser failed while opening the game at other screen sizes: ${(cause instanceof Error ? cause.message : String(cause)).slice(0, 200)}`,
+    };
+  }
+  const report = { sizes, bytes };
+  return {
+    status: "measured",
+    problems: gameScreensFindings(report).map((found) => `${found.said}: ${found.fix}`),
+    report,
+    ms: Date.now() - started,
+  };
+};
+
 const response = (
   process: GameProcessResult,
   outputPath: string | null = null,
@@ -275,7 +388,14 @@ export const makeThreeBackend = (
           }),
       });
       const origin = new URL(server.url).origin;
+      // What the check's own plays threw: the other screen sizes report only what is new there.
+      const thrown = new Set<string>();
       const onPageEvent = (event: WebPageEvent): void => {
+        if (
+          event.kind !== "script-failed" &&
+          (event.kind === "pageerror" || event.level === "error")
+        )
+          thrown.add(event.text.slice(0, 200));
         if (event.kind === "script-failed") {
           log(`script failed to load: ${event.url} (${event.status})`);
           return;
@@ -320,6 +440,8 @@ export const makeThreeBackend = (
       let playPerf: unknown = null;
       // The QA play's report, from a page of its own after the measured play.
       let qaPlay: { readonly raw: unknown; readonly ms: number } | null = null;
+      // The other screen sizes, played after the QA play.
+      let screens: GameCheckScreens | undefined;
       // The agent waits on this play: it goes first in the play lane and is never interrupted.
       const played = yield* playLane
         .hold(
@@ -391,8 +513,10 @@ export const makeThreeBackend = (
                   signal,
                   // Errors after Retry are the report's own finding, not a second issue.
                   onPageEvent: (event) => {
-                    if (event.kind === "pageerror")
+                    if (event.kind === "pageerror") {
+                      thrown.add(event.text.slice(0, 200));
                       log(`QA play pageerror: ${event.text.slice(0, 300)}`);
+                    }
                   },
                   qa: true,
                 }).catch(() => null);
@@ -401,6 +525,14 @@ export const makeThreeBackend = (
                   await session.close();
                   qaPlay = { raw, ms: Date.now() - started };
                 }
+                screens = await playScreens({
+                  browser,
+                  url: new URL(input.gameplayScene, server.url).href,
+                  root: ctx.root,
+                  folder: temporary,
+                  known: thrown,
+                  signal,
+                });
               }
               return { timedOut };
             },
@@ -479,6 +611,7 @@ export const makeThreeBackend = (
           ? { performance: checkPerformance(playPerf, browser) }
           : {}),
         ...(qa === undefined ? {} : { qa }),
+        ...(screens === undefined ? {} : { screens }),
       };
     });
   return {

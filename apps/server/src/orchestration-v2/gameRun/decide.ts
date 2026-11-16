@@ -166,6 +166,7 @@ const WATCHED: ReadonlySet<GameFactId> = new Set([
   "controls",
   "retry",
   "hud",
+  "screens",
   "saved-plays",
 ]);
 
@@ -212,6 +213,7 @@ const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
   controls: "Make every declared control do something",
   retry: "Make Retry start a clean run",
   hud: "Keep the HUD on screen",
+  screens: "Make the game fit phone and widescreen",
   "saved-plays": "Make the saved plays end the way they did",
 };
 
@@ -525,8 +527,9 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     ...(facts === null || views === null
       ? []
       : // A saved play that ends otherwise is proposed, never undone: it may be the change
-        // the person asked for, and the step's agent says whether it was.
-        (["controls", "retry", "hud", "saved-plays"] as const)
+        // the person asked for, and the step's agent says whether it was. So are the other
+        // screen sizes: a game made for one shape of window may be meant that way.
+        (["controls", "retry", "hud", "screens", "saved-plays"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
     () => {

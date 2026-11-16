@@ -289,7 +289,10 @@ export function createQa({
         canLose(true);
       }
     },
-    /** The HUD's text off the view or over other HUD text, at the page's size now. */
+    /**
+     * The HUD's text off the view or over other HUD text, at the page's size now. `texts` is how
+     * many HUD texts it read: none means a HUD drawn in the canvas, which this cannot see.
+     */
     hud() {
       const items = [];
       for (const root of hudRoots())
@@ -326,7 +329,7 @@ export function createQa({
           const smaller = Math.min(a.rect.width * a.rect.height, b.rect.width * b.rect.height);
           if (w * h > smaller * 0.3) over.push([a.text, b.text]);
         }
-      return { width, height, off: off.slice(0, 8), over: over.slice(0, 8) };
+      return { width, height, texts: items.length, off: off.slice(0, 8), over: over.slice(0, 8) };
     },
   };
 }

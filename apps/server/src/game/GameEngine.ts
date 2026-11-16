@@ -23,6 +23,7 @@ import {
   type GameCheckView,
   type GameCheckScene,
   type GameCheckQa,
+  type GameCheckScreens,
   type GameProcessResult,
   type GamePlay,
   type GameReplayRun,
@@ -125,6 +126,8 @@ export interface GameEngineCheckReport {
   readonly performance?: { readonly line: string; readonly warning: string | null };
   /** The QA play's report and what to fix, or why it was not played (three.js). */
   readonly qa?: GameCheckQa;
+  /** With the QA play: the game at phone portrait and widescreen (three.js). */
+  readonly screens?: GameCheckScreens;
 }
 
 /** One release the engine wrote into a staging folder. */
@@ -173,9 +176,10 @@ export interface GameEngineBackend {
   /**
    * Boot check of the entries the engine boots: what the player opens first, then the
    * gameplay entry. With `scene`, an engine that has a scene report plays the gameplay entry
-   * briefly with random input and returns it; with `qa`, one that has a QA play plays it.
-   * With `look`, an engine that can opens only the gameplay entry for a moment of play and
-   * returns its frame, errors and frame rate: the agent's quick look between edits.
+   * briefly with random input and returns it; with `qa`, one that has a QA play plays it, then
+   * opens the gameplay entry at the other screen sizes. With `look`, an engine that can opens
+   * only the gameplay entry for a moment of play and returns its frame, errors and frame rate:
+   * the agent's quick look between edits.
    */
   readonly runCheck: (
     ctx: GameEngineContext,
@@ -450,6 +454,7 @@ const make = Effect.gen(function* () {
           : { views: executed.views }),
         ...(executed.performance === undefined ? {} : { performance: executed.performance.line }),
         ...(executed.qa === undefined ? {} : { qa: executed.qa }),
+        ...(executed.screens === undefined ? {} : { screens: executed.screens }),
         ...(scene
           ? {
               scene: executed.scene ?? {

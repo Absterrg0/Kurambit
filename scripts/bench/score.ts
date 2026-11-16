@@ -192,6 +192,7 @@ const performanceVerdict = (facts: GameBuildFacts): Verdict => {
       facts.performance.status === "pending" ? "still measuring" : facts.performance.why,
     );
   const perf = facts.performance.value;
+  if (perf.fps === null || perf.low1 === null) return notMeasured("drawn in software");
   const text = `${Math.round(perf.fps)} fps, 1% low ${Math.round(perf.low1)}, ${perf.width}×${perf.height}`;
   return perf.fps >= THRESHOLDS.minFps ? pass(text) : fail(text);
 };

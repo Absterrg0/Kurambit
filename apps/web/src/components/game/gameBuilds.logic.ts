@@ -4,6 +4,7 @@ import {
   gameFactName,
   gameFactsView,
   gameQaFindings,
+  gameScreensFindings,
   playOutcomeWords,
   type GameReplayResult,
   type GameBuild,
@@ -113,9 +114,14 @@ export const factLine = (view: GameFactView): FactLine => {
 
 /**
  * A failing QA check's detail, one line a finding, as a player would hit it: the controls that
- * do nothing, what Retry kept, the HUD text off the view, the errors pressing a control threw.
+ * do nothing, what Retry kept, the HUD text off the view, the errors pressing a control threw,
+ * and what broke at another screen size.
  */
 export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<string> => {
+  if (id === "screens")
+    return facts.screens.status === "measured"
+      ? gameScreensFindings(facts.screens.value).map((found) => found.said)
+      : [];
   if (facts.qa.status !== "measured") return [];
   const found = gameQaFindings(facts.qa.value);
   switch (id) {

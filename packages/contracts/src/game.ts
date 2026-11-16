@@ -8,7 +8,7 @@ import { GameRunErrorReason } from "./gameRunReasons.ts";
 import { GameCharacterRoute, GameStoredCharacterRoute } from "./gameStyle.ts";
 import { GameArtLanes } from "./gameArt.ts";
 import { GameSceneReport } from "./gameScene.ts";
-import { GameQaReport } from "./gameQa.ts";
+import { GameQaReport, GameScreens } from "./gameQa.ts";
 import { GameSavedPlaysReading } from "./gamePlays.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
@@ -924,6 +924,22 @@ export const GameCheckResult = Schema.Struct({
     ]),
   ),
   /**
+   * After the QA play (three.js): the game booted fresh at phone portrait and at widescreen and
+   * played a moment at each. `problems` say what broke at which size, each with its frame in
+   * `report`; not part of `ok`. `report.bytes` is what the page downloads to start.
+   */
+  screens: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({
+        status: Schema.Literal("measured"),
+        problems: Schema.Array(Schema.String),
+        report: GameScreens,
+        ms: Schema.Number,
+      }),
+      Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
+    ]),
+  ),
+  /**
    * A final check of a game with saved plays: each replayed on the folder as it is now, read
    * against how it ended when saved ("2 of 3 end the same; first boss win now loses at 30 s").
    * One that ends differently is a regression or the change you meant: say which.
@@ -941,3 +957,4 @@ export const GameCheckResult = Schema.Struct({
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
 export type GameCheckQa = NonNullable<GameCheckResult["qa"]>;
+export type GameCheckScreens = NonNullable<GameCheckResult["screens"]>;

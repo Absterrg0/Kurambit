@@ -40,6 +40,7 @@ import {
   GamePerformance,
   GameQaReport,
   GameSavedPlaysReading,
+  GameScreens,
   type GameBotRunResult,
   GameEngineName,
   engineDisplayName,
@@ -61,6 +62,7 @@ import {
   tierFact,
   tierWallSeconds,
   qaFact,
+  screensFact,
 } from "./buildFacts.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -185,6 +187,13 @@ const Stored = Schema.Struct({
       GameFactPending,
     ]),
   ),
+  screens: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GameScreens }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
   /** Each play's own use record, so a tier measured again replaces only its own. */
   plays: Schema.optionalKey(
     Schema.Struct({
@@ -211,10 +220,19 @@ const decodeCopyManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameMa
  * read it).
  */
 type Tier = "boots" | "replays" | "masher" | "skilled";
-type FactName = "boots" | "masher" | "skilled" | "use" | "performance" | "qa" | "savedPlays";
+type FactName =
+  | "boots"
+  | "masher"
+  | "skilled"
+  | "use"
+  | "performance"
+  | "qa"
+  | "screens"
+  | "savedPlays";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
-  // The boot check plays the QA play too (GameEngine.checkIn), so its report lands with it.
-  boots: ["boots", "qa"],
+  // The boot check plays the QA play and the other screen sizes too (GameEngine.checkIn), so
+  // their reports land with it.
+  boots: ["boots", "qa", "screens"],
   replays: ["savedPlays"],
   masher: ["masher", "performance", "use"],
   skilled: ["skilled", "use"],
@@ -236,12 +254,18 @@ const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => 
  * engine this version does not have played in that engine's own process, which measured none of
  * them: it says so, and never owes them.
  */
-const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "qa", "savedPlays"]);
-const browserOnly = (engine: GameEngineName, fact: "use" | "performance" | "qa") =>
+const BROWSER_ONLY: ReadonlySet<FactName> = new Set([
+  "use",
+  "performance",
+  "qa",
+  "screens",
+  "savedPlays",
+]);
+const browserOnly = (engine: GameEngineName, fact: "use" | "performance" | "qa" | "screens") =>
   isAvailableEngine(engine)
     ? null
     : notMeasured(
-        `${engineDisplayName(engine)} games played in their engine's own process, which never measured ${fact === "use" ? "asset use" : fact === "performance" ? "performance" : "a QA play"}`,
+        `${engineDisplayName(engine)} games played in their engine's own process, which never measured ${fact === "use" ? "asset use" : fact === "performance" ? "performance" : fact === "screens" ? "other screen sizes" : "a QA play"}`,
         false,
       );
 const useNotMeasured = (engine: GameEngineName) => browserOnly(engine, "use");
@@ -427,6 +451,7 @@ const make = Effect.gen(function* () {
       use: useNotMeasured(build.engine) ?? get("use"),
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
       qa: browserOnly(build.engine, "qa") ?? get("qa"),
+      screens: browserOnly(build.engine, "screens") ?? get("screens"),
       savedPlays:
         useNotMeasured(build.engine) !== null
           ? NONE_SAVED
@@ -507,10 +532,27 @@ const make = Effect.gen(function* () {
                 note: `${fact.value.note} (evidence removed by cleanup)`.trim(),
               },
             } as F);
+      const screens = facts.screens;
       return {
         ...facts,
         masher: await tier(facts.masher),
         skilled: await tier(facts.skilled),
+        screens:
+          screens.status !== "measured"
+            ? screens
+            : {
+                ...screens,
+                value: {
+                  ...screens.value,
+                  sizes: await Promise.all(
+                    screens.value.sizes.map(async (size) =>
+                      size.frame === null || (await exists(size.frame))
+                        ? size
+                        : { ...size, frame: null },
+                    ),
+                  ),
+                },
+              },
       };
     });
 
@@ -668,6 +710,40 @@ const make = Effect.gen(function* () {
       return major === null ? null : runtimeVersion(runtimesDirectory(templates), engine, major);
     });
 
+  /**
+   * The screen sizes' frames, kept in the game's logs beside the build's other evidence: a
+   * check of the copy left them in the copy, and a game_check that stands for it in the game.
+   */
+  const keepScreenFrames = (
+    root: string,
+    copy: string,
+    key: string,
+    fact: Fact<"screens">,
+  ): Effect.Effect<Fact<"screens">> =>
+    fact.status !== "measured"
+      ? Effect.succeed(fact)
+      : Effect.promise(async () => {
+          const folder = `builds/logs/game-screens-${key.split(":")[1]?.slice(0, 12) ?? "x"}`;
+          const logs = await ensureGameDir(root, folder).catch(() => null);
+          const sizes = await Promise.all(
+            fact.value.sizes.map(async (size) => {
+              if (size.frame === null || logs === null) return { ...size, frame: null };
+              const name = `${size.name}.png`;
+              for (const from of [copy, root])
+                try {
+                  const source = insideGame(from, size.frame);
+                  await NodeFSP.rm(NodePath.join(logs, name), { force: true });
+                  await NodeFSP.copyFile(source, NodePath.join(logs, name));
+                  return { ...size, frame: `${folder}/${name}` };
+                } catch {
+                  // Not in this checkout: the other one ran the check.
+                }
+              return { ...size, frame: null };
+            }),
+          );
+          return { ...fact, value: { ...fact.value, sizes } };
+        });
+
   const measureJob = (
     build: ResolvedBuild,
     tiers: ReadonlySet<Tier>,
@@ -734,9 +810,19 @@ const make = Effect.gen(function* () {
               ? {
                   boots: bootsFact(checked, "from game_check on the same files"),
                   qa: qaFact(checked),
+                  screens: yield* keepScreenFrames(root, copy, key, screensFact(checked)),
                 }
               : yield* step(engines.checkIn(copy, OWNER)).pipe(
-                  Effect.map((result) => ({ boots: bootsFact(result), qa: qaFact(result) })),
+                  Effect.flatMap((result) =>
+                    Effect.map(
+                      keepScreenFrames(root, copy, key, screensFact(result)),
+                      (screens) => ({
+                        boots: bootsFact(result),
+                        qa: qaFact(result),
+                        screens,
+                      }),
+                    ),
+                  ),
                   Effect.catchTags({
                     GameOperationError: (error) => {
                       const fault = faultOf(error);
@@ -749,6 +835,9 @@ const make = Effect.gen(function* () {
                           },
                         },
                         qa: fault ?? notMeasured("the boot check failed before the QA play", false),
+                        screens:
+                          fault ??
+                          notMeasured("the boot check failed before the other screen sizes", false),
                       });
                     },
                   }),
@@ -920,14 +1009,22 @@ const make = Effect.gen(function* () {
                     run.fact.cause,
                   )
                 : notMeasured("the random-input run was not measured", true);
-            // Performance is the page's own stats from the same play, on a browser engine.
+            // Performance is the page's own stats from the same play, on a browser engine. In
+            // software its frame times are not read, but what a frame draws still is, from any
+            // run that left its record.
             const performance =
               browserOnly(build.engine, "performance") !== null
                 ? {}
                 : {
                     performance:
                       Option.isSome(backend) && backend.value.software
-                        ? performanceOf(null, backend.value, run.machine)
+                        ? performanceOf(
+                            run.result === null || run.evidence === null
+                              ? null
+                              : yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
+                            backend.value,
+                            run.machine,
+                          )
                         : !measuredRun || run.evidence === null
                           ? notFromRun
                           : performanceOf(

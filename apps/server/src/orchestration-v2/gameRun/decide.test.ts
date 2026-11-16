@@ -45,6 +45,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   use: { status: "not-measured", why: "not played", retry: false },
   performance: { status: "not-measured", why: "not played", retry: false },
   qa: { status: "not-measured", why: "not played", retry: false },
+  screens: { status: "not-measured", why: "not played", retry: false },
   savedPlays: {
     status: "not-measured",
     why: "no saved play was replayed on this build",

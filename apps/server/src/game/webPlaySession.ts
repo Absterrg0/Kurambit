@@ -195,6 +195,30 @@ const READ_HUD = `(() => {
     return null;
   }
 })()`;
+/**
+ * The window as a player sees it at this size: the part of it the largest canvas covers, and the
+ * shell's HUD reading (shell/qa.js) where it has one.
+ */
+const READ_SCREEN = `(() => {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const boxes = [...document.querySelectorAll("canvas")]
+    .map((canvas) => canvas.getBoundingClientRect())
+    .filter((box) => box.width > 0 && box.height > 0)
+    .sort((a, b) => b.width * b.height - a.width * a.height);
+  const box = boxes[0];
+  const canvas = box === undefined ? null : {
+    width: Math.round(Math.max(0, Math.min(box.right, width) - Math.max(box.left, 0))),
+    height: Math.round(Math.max(0, Math.min(box.bottom, height) - Math.max(box.top, 0))),
+  };
+  let hud = null;
+  try {
+    const qa = window.__studio?.qa;
+    if (qa !== null && typeof qa === "object" && typeof qa.hud === "function")
+      hud = JSON.parse(JSON.stringify(qa.hud()));
+  } catch {}
+  return { width, height, canvas, hud };
+})()`;
 const FRAME_COUNTER = `(() => {
   let frames = 0;
   let seconds = 0;
@@ -388,6 +412,13 @@ export interface WebPlaySession extends PlaySession {
    */
   readonly perf: () => unknown;
   /**
+   * After `close`: the bytes the page loaded since it opened (every finished request's body and
+   * headers, as sent), on a session opened with `countBytes`; null otherwise.
+   */
+  readonly loadedBytes: () => number | null;
+  /** The window, the part of it the canvas covers and the HUD's reading (READ_SCREEN); null when the page did not answer. */
+  readonly screen: () => Promise<unknown>;
+  /**
    * After `close`: the scene report of a session opened with `sceneReport`, read just before
    * the page closed; "no-shell" when the game's shell has none, null when it could not be read
    * or was not asked for.
@@ -461,6 +492,8 @@ export const openWebPlaySession = async (input: {
   readonly sceneReport?: boolean | undefined;
   /** Turns the shell's QA counters on before any script runs, so `qa()` can play its QA play. */
   readonly qa?: boolean | undefined;
+  /** Counts the bytes the page loads from the start, for `loadedBytes()`. */
+  readonly countBytes?: boolean | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -525,6 +558,18 @@ export const openWebPlaySession = async (input: {
       await context.addInitScript(SOUND_TAP);
     }
     const page = await context.newPage();
+    // Sizes are read from the browser as each request finishes, so all are in before it closes.
+    const sizes: Array<Promise<number>> = [];
+    if (input.countBytes === true)
+      page.on("requestfinished", (request) => {
+        sizes.push(
+          request.sizes().then(
+            (size) => Math.max(0, size.responseBodySize) + Math.max(0, size.responseHeadersSize),
+            () => 0,
+          ),
+        );
+      });
+    let loaded: number | null = null;
     page.on("crash", () => settleEnded({ by: "game", detail: new WebPageCrashed().message }));
     const pending: GameConsoleMessage[] = [];
     let dropped = 0;
@@ -892,6 +937,14 @@ export const openWebPlaySession = async (input: {
       ended,
       keptStorage: () => kept,
       perf: () => perf,
+      loadedBytes: () => loaded,
+      screen: async () => {
+        const read = await bounded(
+          page.evaluate(READ_SCREEN).catch(() => null),
+          PLAY_BOUNDS.webCallMs,
+        );
+        return read === TIMED_OUT ? null : read;
+      },
       scene: () => scene,
       replay: async (play, options) => {
         const answered = await bounded(
@@ -1143,6 +1196,10 @@ export const openWebPlaySession = async (input: {
                   2,
                 )}\n`,
               };
+          }
+          if (input.countBytes === true) {
+            const all = await bounded(Promise.all(sizes), PLAY_BOUNDS.webCallMs);
+            if (all !== TIMED_OUT) loaded = all.reduce((sum, bytes) => sum + bytes, 0);
           }
         } finally {
           await closeBrowser();

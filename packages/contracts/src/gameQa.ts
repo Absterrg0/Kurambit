@@ -158,3 +158,133 @@ export const gameQaProblems = (findings: GameQaFindings): ReadonlyArray<string> 
   ...findings.retry.map((each) => `${each.said}: ${each.fix}`),
   ...findings.hud.map((each) => `${each.said}: ${each.fix}`),
 ];
+
+/**
+ * The window sizes the build's boot check also opens the game at, after the QA play: what a
+ * player on a phone held upright and one on an ultrawide monitor would get.
+ */
+export const GAME_SCREEN_SIZES = [
+  { name: "phone", width: 390, height: 844 },
+  { name: "widescreen", width: 2560, height: 1080 },
+] as const;
+
+/** The game booted fresh at one window size, played a moment and read as a player would see it. */
+export const GameScreenSize = Schema.Struct({
+  name: Schema.Literals(["phone", "widescreen"]),
+  width: Count,
+  height: Count,
+  /** The page reported ready at this size. */
+  booted: Schema.Boolean,
+  /** The part of the window the game's canvas covers; null: the page drew no canvas. */
+  canvas: Schema.NullOr(Schema.Struct({ width: Count, height: Count })),
+  /** Errors at this size that the check's own play at its usual size did not throw. */
+  errors: Schema.Array(Text(200)).check(Schema.isMaxLength(3)),
+  /**
+   * The HUD's DOM text that lies off the window. Null: not measured, because the page has no
+   * HUD text in its DOM (a HUD drawn inside the canvas) or its shell could not say.
+   */
+  hudOff: Schema.NullOr(Schema.Array(Text(60)).check(Schema.isMaxLength(8))),
+  /** Game-relative PNG of the game at this size; null when none was kept. */
+  frame: Schema.NullOr(Schema.String),
+});
+export type GameScreenSize = typeof GameScreenSize.Type;
+
+export const GameScreens = Schema.Struct({
+  sizes: Schema.Array(GameScreenSize).check(Schema.isMaxLength(2)),
+  /** Bytes the page loaded from its boot through the moment of play, the larger of the sizes. */
+  bytes: Schema.NullOr(Count),
+});
+export type GameScreens = typeof GameScreens.Type;
+
+const SIZE_WORDS = { phone: "phone", widescreen: "widescreen" } as const;
+
+/** PURE. "loads 14 MB": what a player downloads to start the game. */
+export const loadedWords = (bytes: number): string =>
+  bytes >= 10_000_000
+    ? `loads ${Math.round(bytes / 1_000_000)} MB`
+    : bytes >= 1_000_000
+      ? `loads ${(bytes / 1_000_000).toFixed(1)} MB`
+      : `loads ${Math.max(1, Math.round(bytes / 1000))} KB`;
+
+/**
+ * PURE. What broke at each size, in the order a player meets it: as the person reads it
+ * (`said`), in a few words (`short`), and what the agent does about it (`fix`).
+ */
+export const gameScreensFindings = (report: GameScreens) =>
+  report.sizes.flatMap((size) => {
+    const at = `At ${SIZE_WORDS[size.name]} size (${size.width}×${size.height})`;
+    const found: Array<{
+      readonly size: GameScreenSize["name"];
+      readonly said: string;
+      readonly short: string;
+      readonly fix: string;
+    }> = [];
+    if (!size.booted)
+      found.push({
+        size: size.name,
+        said: `${at} the game does not start${size.errors[0] === undefined ? "" : `: ${size.errors[0]}`}`,
+        short: "does not start",
+        fix: "it must boot at any window size; read innerWidth and innerHeight, never assume 16:9.",
+      });
+    else {
+      const first = size.errors[0];
+      if (first !== undefined)
+        found.push({
+          size: size.name,
+          said: `${at} the game throws: ${first}${size.errors.length > 1 ? ` (+${size.errors.length - 1} more)` : ""}`,
+          short: "throws",
+          fix: "fix the error; it happens only at this window size.",
+        });
+      if (
+        size.canvas !== null &&
+        (size.canvas.width < size.width - 2 || size.canvas.height < size.height - 2)
+      )
+        found.push({
+          size: size.name,
+          said: `${at} the canvas covers only ${size.canvas.width}×${size.canvas.height} of the window`,
+          short: "canvas does not fill",
+          fix: "let the canvas fill the window (the shell sizes it); never give it a fixed size or aspect.",
+        });
+      if (size.canvas === null)
+        found.push({
+          size: size.name,
+          said: `${at} the page draws no canvas`,
+          short: "no canvas",
+          fix: "the game's canvas must be on screen at every window size.",
+        });
+      if (size.hudOff !== null && size.hudOff.length > 0)
+        found.push({
+          size: size.name,
+          said: `${at} HUD text runs off the screen: ${listedNames(size.hudOff.map((t) => `"${t}"`))}`,
+          short: "HUD off screen",
+          fix: "anchor it to the view's edges and let it wrap or shrink, never a fixed position past the narrowest window.",
+        });
+    }
+    return found;
+  });
+
+/** PURE. The Screens fact's row: what fits, or the first thing that broke, and the download. */
+export const gameScreensWords = (
+  report: GameScreens,
+): { readonly text: string; readonly broken: number } => {
+  const found = gameScreensFindings(report);
+  const loads = report.bytes === null ? [] : [loadedWords(report.bytes)];
+  const first = found[0];
+  if (first !== undefined)
+    return {
+      text: [
+        `${first.said}${found.length > 1 ? ` (+${found.length - 1} more)` : ""}`,
+        ...loads,
+      ].join(" · "),
+      broken: found.length,
+    };
+  const hudUnread = report.sizes.length > 0 && report.sizes.every((size) => size.hudOff === null);
+  return {
+    text: [
+      `Fits ${report.sizes.map((size) => SIZE_WORDS[size.name]).join(" and ")}`,
+      ...(hudUnread ? ["HUD not measured (none in the page's DOM)"] : []),
+      ...loads,
+    ].join(" · "),
+    broken: 0,
+  };
+};

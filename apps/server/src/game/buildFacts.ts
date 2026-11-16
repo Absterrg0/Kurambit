@@ -234,6 +234,14 @@ export const qaFact = (result: GameCheckResult): Facts["qa"] =>
       ? { status: "measured", value: result.qa.report }
       : notMeasured(result.qa.why, false, false, result.qa.cause);
 
+/** The other screen sizes, from the same boot check as the QA play. */
+export const screensFact = (result: GameCheckResult): Facts["screens"] =>
+  result.screens === undefined
+    ? notMeasured("the boot check did not reach the gameplay entry", false)
+    : result.screens.status === "measured"
+      ? { status: "measured", value: result.screens.report }
+      : notMeasured(result.screens.why, false);
+
 const TONE_ORDER: Readonly<Record<GameFactTone, number>> = { bad: 0, good: 1, neutral: 2 };
 
 /** A list row's facts: its state, at most three worded chips (what is wrong first), and how many were not measured. */

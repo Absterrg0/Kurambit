@@ -2,7 +2,15 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
-import { GameQaReport, gameQaFindings, listedNames } from "./gameQa.ts";
+import {
+  GameQaReport,
+  GameScreens,
+  gameQaFindings,
+  gameScreensFindings,
+  gameScreensWords,
+  listedNames,
+  loadedWords,
+} from "./gameQa.ts";
 import { GameSavedPlaysReading, savedPlaysWords } from "./gamePlays.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
@@ -126,6 +134,7 @@ const MEASURED_FACT_IDS = [
   "retry",
   "hud",
   "performance",
+  "screens",
   "saved-plays",
   "skilled",
 ] as const;
@@ -336,13 +345,16 @@ export const GameSkilledTier = Schema.Struct({
 /**
  * How the random-input play ran, as the game's shell measured it while the harness
  * played (three.js): play's frame rate, its 1% low, the GPU's time per frame and the
- * render scale the look settled on, at the play's canvas size.
+ * render scale the look settled on, at the play's canvas size, and what a frame draws.
  */
 export const GamePerformance = Schema.Struct({
-  /** Frames per second from the median frame time. */
-  fps: Schema.Number,
-  /** Frames per second over the slowest 1% of frames. */
-  low1: Schema.Number,
+  /**
+   * Frames per second from the median frame time. Null when the play drew in software, where
+   * frame times say nothing about a game; what a frame draws is still the game's own.
+   */
+  fps: Schema.NullOr(Schema.Number),
+  /** Frames per second over the slowest 1% of frames; null with `fps`. */
+  low1: Schema.NullOr(Schema.Number),
   /** The GPU's median milliseconds per frame (timer queries); null where the browser has none. */
   gpuMs: Schema.NullOr(Schema.Number),
   /** The median render scale: the share of the canvas's pixels per side the frame was drawn at. */
@@ -350,6 +362,12 @@ export const GamePerformance = Schema.Struct({
   width: NonNegativeInt,
   height: NonNegativeInt,
   frames: NonNegativeInt,
+  /**
+   * The median frame's draw calls and triangles (renderer.info, sampled through play): why a
+   * frame costs what it does. Absent on readings from before they were kept.
+   */
+  drawCalls: Schema.optionalKey(NonNegativeInt),
+  triangles: Schema.optionalKey(NonNegativeInt),
 });
 export type GamePerformance = typeof GamePerformance.Type;
 
@@ -372,7 +390,7 @@ export const GameBuildFacts = Schema.Struct({
   masher: gameFact(GameBotTier),
   /** Kurambit's play bot, only when the person or their agent asks to prove it can be won. */
   skilled: gameFact(GameSkilledTier),
-  /** Measured during the random-input play: frame rate, 1% low, GPU time and render scale. */
+  /** Measured during the random-input play: frame rate, 1% low, GPU time, render scale, draw calls and triangles. */
   performance: gameFact(GamePerformance).pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -404,6 +422,19 @@ export const GameBuildFacts = Schema.Struct({
       Effect.succeed({
         status: "not-measured" as const,
         why: "measured before the QA play existed",
+        retry: false,
+      }),
+    ),
+  ),
+  /**
+   * From the build's boot check (three.js), after the QA play: the game at phone portrait and
+   * at widescreen, and what its page downloads to start.
+   */
+  screens: gameFact(GameScreens).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before other screen sizes were checked",
         retry: false,
       }),
     ),
@@ -485,6 +516,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   colour: "Colour",
   "first-response": "First response",
   performance: "Performance",
+  screens: "Screens",
   "saved-plays": "Saved plays",
   assets: "Assets",
   use: "Asset use",
@@ -722,13 +754,24 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
       return from(facts.performance, (perf) => {
         const ms = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
         const scale = perf.scale === null ? "" : ` at ${Number(perf.scale.toFixed(2))}×`;
+        const counts = drawCounts(perf);
+        if (perf.fps === null || perf.low1 === null)
+          return {
+            text: ["Frame rate not measured (drawn in software)", ...counts].join(" · "),
+            value: null,
+            tone: "neutral",
+            kind: "software",
+          };
         const text = [
-          `${Math.round(perf.fps)} fps`,
-          `1% low ${Math.round(perf.low1)}`,
-          ...(perf.gpuMs === null ? [] : [`GPU ${ms(perf.gpuMs)} ms`]),
-        ]
-          .join(" · ")
-          .concat(`${scale} of ${perf.width}×${perf.height}`);
+          [
+            `${Math.round(perf.fps)} fps`,
+            `1% low ${Math.round(perf.low1)}`,
+            ...(perf.gpuMs === null ? [] : [`GPU ${ms(perf.gpuMs)} ms`]),
+          ]
+            .join(" · ")
+            .concat(`${scale} of ${perf.width}×${perf.height}`),
+          ...counts,
+        ].join(" · ");
         // Whole frames: a tenth of a frame is the machine's noise, never better or worse.
         return {
           text,
@@ -737,7 +780,33 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
           kind: "performance",
         };
       });
+    case "screens":
+      return from(facts.screens, (report) => {
+        const words = gameScreensWords(report);
+        return {
+          text: words.text,
+          value: words.broken,
+          tone: words.broken === 0 ? "good" : "bad",
+          kind: words.broken === 0 ? "fits" : "breaks",
+        };
+      });
   }
+};
+
+/** "1,900 draw calls", "2.1M triangles": the counts a reading kept, for its row. */
+const drawCounts = (perf: GamePerformance): ReadonlyArray<string> => {
+  const big = (n: number) =>
+    n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(1)}M`
+      : n >= 10_000
+        ? `${Math.round(n / 1000)}k`
+        : n.toLocaleString("en-US");
+  return [
+    ...(perf.drawCalls === undefined
+      ? []
+      : [`${perf.drawCalls.toLocaleString("en-US")} draw call${perf.drawCalls === 1 ? "" : "s"}`]),
+    ...(perf.triangles === undefined ? [] : [`${big(perf.triangles)} triangles`]),
+  ];
 };
 
 const measured = (reading: Reading): Read => ({ _tag: "measured", reading });
@@ -748,6 +817,25 @@ const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView
     case "errors": {
       const broke = brokenPlay(facts);
       return broke === null ? [] : tierEvidence(broke.tier);
+    }
+    case "screens": {
+      if (facts.screens.status !== "measured") return [];
+      // The sizes that broke show first; with none broken, each size's frame.
+      const broke = new Set(gameScreensFindings(facts.screens.value).map((found) => found.size));
+      const sizes = facts.screens.value.sizes.filter(
+        (size) => broke.size === 0 || broke.has(size.name),
+      );
+      return sizes.flatMap((size) =>
+        size.frame === null
+          ? []
+          : [
+              {
+                kind: "frame" as const,
+                label: `At ${size.width}×${size.height}`,
+                path: size.frame,
+              },
+            ],
+      );
     }
     default:
       return [];
@@ -802,6 +890,7 @@ export const GAME_LEAD_FACTS = [
   "retry",
   "hud",
   "performance",
+  "screens",
   "saved-plays",
   "skilled",
 ] as const satisfies ReadonlyArray<GameMeasuredFactId>;
@@ -831,6 +920,7 @@ const CHECK_LABELS: Readonly<
   retry: "Retry starts clean",
   hud: "HUD fits the screen",
   performance: "Holds its frame rate",
+  screens: "Fits phone and widescreen",
   "saved-plays": "Saved plays end the same",
   skilled: "Can be won by Kurambit's play bot",
 };
@@ -974,12 +1064,34 @@ const checkWords = (
     case "performance": {
       if (facts.performance.status !== "measured") return null;
       const perf = facts.performance.value;
+      if (perf.fps === null || perf.low1 === null)
+        return {
+          sentence: "Frame rate not measured here",
+          value: drawCounts(perf).join(" · ") || null,
+        };
       const fps = `${Math.round(perf.fps)} fps`;
       return perf.fps >= 55 && perf.low1 >= 30
         ? { sentence: "Holds its frame rate", value: fps }
         : perf.fps < 30
           ? { sentence: "Runs slowly", value: fps }
           : { sentence: "Frame rate dips", value: `${fps} · 1% low ${Math.round(perf.low1)}` };
+    }
+    case "screens": {
+      if (facts.screens.status !== "measured") return null;
+      const report = facts.screens.value;
+      const found = gameScreensFindings(report);
+      const loads = report.bytes === null ? null : loadedWords(report.bytes);
+      if (found.length === 0) return { sentence: "Fits phone and widescreen", value: loads };
+      const sizes = new Set(found.map((each) => each.size));
+      return {
+        sentence:
+          sizes.size > 1
+            ? "Breaks on phone and widescreen"
+            : sizes.has("phone")
+              ? "Breaks at phone size"
+              : "Breaks on widescreen",
+        value: [...new Set(found.map((each) => each.short))].join(", "),
+      };
     }
     default:
       return null;
@@ -1027,6 +1139,7 @@ const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
   "controls",
   "retry",
   "hud",
+  "screens",
   "saved-plays",
 ]);
 const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance"]);
@@ -1041,6 +1154,8 @@ const rank = (id: GameFactId, kind: string): number | null => {
     case "retry":
     case "hud":
       return kind === "clean" ? 1 : 0;
+    case "screens":
+      return kind === "fits" ? 1 : 0;
     case "skilled":
       return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
     case "saved-plays":

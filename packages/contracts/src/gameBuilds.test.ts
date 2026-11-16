@@ -29,6 +29,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   use: { status: "not-measured", why: "not built", retry: false },
   performance: { status: "not-measured", why: "ffmpeg failed", retry: true },
   qa: { status: "pending" },
+  screens: { status: "not-measured", why: "not built", retry: false },
   savedPlays: {
     status: "not-measured",
     why: "no saved play was replayed on this build",
@@ -96,7 +97,48 @@ describe("gameFactsView", () => {
       "retry",
       "hud",
       "performance",
+      "screens",
       "skilled",
     ]);
+  });
+
+  it("reads a performance row from before draw counts as it read then", () => {
+    const value = { fps: 58.2, low1: 41, gpuMs: 9.04, scale: 0.8, width: 1280, height: 720 };
+    const old = decodeFacts({
+      ...encodeFacts(facts()),
+      performance: { status: "measured", value: { ...value, frames: 3400 } },
+    });
+    const text = (decoded: GameBuildFacts) => {
+      const row = gameFactsView(decoded).find((each) => each.id === "performance");
+      return row?.reading._tag === "measured" ? row.reading.text : null;
+    };
+    expect(text(old)).toBe("58 fps · 1% low 41 · GPU 9.0 ms at 0.8× of 1280×720");
+    const counted = facts({
+      performance: {
+        status: "measured",
+        value: { ...value, frames: 3400, drawCalls: 1900, triangles: 2_140_000 },
+      },
+    });
+    expect(text(counted)).toBe(
+      "58 fps · 1% low 41 · GPU 9.0 ms at 0.8× of 1280×720 · 1,900 draw calls · 2.1M triangles",
+    );
+    const software = facts({
+      performance: {
+        status: "measured",
+        value: {
+          ...value,
+          fps: null,
+          low1: null,
+          gpuMs: null,
+          scale: null,
+          frames: 300,
+          drawCalls: 41,
+          triangles: 52_000,
+        },
+      },
+    });
+    expect(text(software)).toBe(
+      "Frame rate not measured (drawn in software) · 41 draw calls · 52k triangles",
+    );
   });
 });
