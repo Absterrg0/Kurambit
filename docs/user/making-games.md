@@ -323,6 +323,20 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   the same on its own build is refused, with what differed: usually the game timing itself
   outside its update. Your agent saves its own winning runs the same way, and both of you can
   list and delete them.
+- **Back where you were (three.js).** When your agent changes the game while you play, **Reload**
+  brings the new game back to the moment you were at, frozen, replaying your run on the changed
+  code: press **Play on** to keep going, or **Start fresh**. It says where the change first made
+  play differ, or that the run now ends earlier ("With the change, this run now ends at 1:40").
+  A run on a title screen, an ended run, and runs over 10 minutes start fresh instead, and so does
+  one that takes over 20 seconds to get back to.
+- **Rewind and fork (three.js).** While the game is frozen, or after a run ends, a timeline under
+  the run card shows its seconds, its losses and its ending. Drag it to any second and let go: the
+  game replays your run to there, frozen. Change a value in **Tune** (or let your agent change the
+  code), then **Play on**: the run goes on from that second as a new run, which your agent hears
+  about and you can save as a test play. After a fork with tuned values, **As it was** and **With
+  the change** play the same three seconds of your input after it both ways. If the game does not
+  repeat itself exactly (it times or picks something outside its update), the timeline says it
+  couldn't get back exactly.
 - **Dev views (three.js).** The **⋯** menu's **Dev views** step a frozen game one frame at a
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose
