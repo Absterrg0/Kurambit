@@ -63,8 +63,9 @@ export function GameWorkbenchRun({ threadRef }: { threadRef: ScopedThreadRef }) 
   const marks = live.length > 0 ? live : (timeline?.play.marks ?? live);
   const consoleState = useStageConsole(threadKey);
   // Nothing played, logged or ended yet: one calm line of what will show, not four empty sections.
+  // A page with no game yet still marks its seconds, with no values in them.
   if (
-    marks.length === 0 &&
+    marks.every((mark) => Object.keys(mark.values).length === 0) &&
     consoleState.lines.length === 0 &&
     timeline === null &&
     session?.runs.ended == null
