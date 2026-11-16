@@ -741,8 +741,9 @@ function step() {
   const entry = marking ? mark(run.time, run.ctx.player, GameState) : null;
   run.recorder?.stepped(run.steps, entry);
   if (entry !== null && run.player !== null) run.player.marks.push(entry);
-  // A person's own play only: a replay racing to its moment is not the run they watch.
-  else if (entry !== null) bridge.mark(entry);
+  // A person's own play, while it is played: a replay racing to its moment, or an end screen
+  // standing still, is not the run they watch.
+  else if (entry !== null && GameState.state === "playing") bridge.mark(entry);
   clearFrameInput();
   return dt;
 }
