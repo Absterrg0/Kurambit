@@ -2,11 +2,8 @@ import {
   GAME_LEAD_FACTS,
   gameChecksView,
   gameFactName,
-  gameFactsView,
   gameQaFindings,
   gameScreensFindings,
-  playOutcomeWords,
-  type GameReplayResult,
   type GameBuild,
   type GameBuildFacts,
   type GameBuildFactsSummary,
@@ -151,40 +148,6 @@ export const silentControlsNote = (facts: GameBuildFacts): string | null => {
   return silent.length === 0
     ? null
     : `The QA play pressed ${silent.join(", ")} on a fresh run and saw no answer. A control that works only in some places looks the same, so try them yourself.`;
-};
-
-/**
- * A replay as two lines: how the kept run ended on the build it was played on, then how it
- * plays on this build and the first second it played differently.
- */
-export const replayLines = (
-  result: GameReplayResult,
-  list: GameBuildsResult,
-): readonly [string, string] => {
-  const kept = result.kept;
-  const played = list.builds.find((each) => kept.build !== null && each.id === kept.build);
-  const where =
-    kept.build === null
-      ? "the game as it was then"
-      : played === undefined
-        ? "an earlier build"
-        : buildName(played);
-  const now = result.now;
-  const sameEnd =
-    now !== null &&
-    now.won === kept.outcome.won &&
-    Math.round(now.seconds * 10) === Math.round(kept.outcome.seconds * 10);
-  const differs = result.differs;
-  const how =
-    differs !== null
-      ? `, playing differently from ${Math.round(differs.seconds)} s (${differs.what})`
-      : sameEnd
-        ? ", the same run throughout"
-        : ", playing differently only in its last second";
-  return [
-    `Your run on ${where}: ${playOutcomeWords(kept.outcome)}.`,
-    `On this build: ${playOutcomeWords(now)}${how}.`,
-  ];
 };
 
 export interface DeltaLine {
@@ -374,26 +337,6 @@ const moveAmount = (id: GameFactId, a: number, b: number): string | null => {
   return size < 0.05 ? null : `${sign}${seconds(size)}`;
 };
 
-/**
- * PURE. The readings that differ between two compared builds, lead checks first, without the
- * ones that vary from run to run by themselves: what a turn changed, as Compare counts it.
- */
-export const changedReadings = (compared: {
-  readonly deltas: ReadonlyArray<GameFactDelta>;
-  readonly factsA: GameBuildFacts;
-  readonly factsB: GameBuildFacts;
-}): ReadonlyArray<CompareRow> =>
-  compareRows(compared.deltas, gameFactsView(compared.factsA), gameFactsView(compared.factsB), {
-    a: allChecks(compared.factsA),
-    b: allChecks(compared.factsB),
-  }).rows.filter((row) => row.mark !== null && row.mark !== "=" && !VARIES_BY_ITSELF.has(row.id));
-
-/** Every check of a build, the lead ones and the rest, as the Inspector words them. */
-export const allChecks = (facts: GameBuildFacts) => {
-  const view = gameChecksView(facts);
-  return view.checks;
-};
-
 const LEAD_ORDER: ReadonlyArray<GameFactId> = GAME_LEAD_FACTS;
 const sideWhy = (view: GameFactView | undefined): string | null =>
   view === undefined || view.reading._tag === "measured"
@@ -401,6 +344,12 @@ const sideWhy = (view: GameFactView | undefined): string | null =>
     : view.reading._tag === "pending"
       ? "still being measured"
       : notMeasuredWhy(view.reading);
+
+/** Every check of a build, the lead ones and the rest, as the Inspector words them. */
+export const allChecks = (facts: GameBuildFacts) => {
+  const view = gameChecksView(facts);
+  return view.checks;
+};
 
 /**
  * PURE. Two builds' facts as the compare view draws them: the lead checks first, by the

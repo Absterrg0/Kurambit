@@ -327,9 +327,6 @@ export const clearStageSelection = () => {
   useStageBridge.setState({ selected: null });
 };
 
-export const selectStageThing = (id: string) =>
-  useStageBridge.getState().post?.({ type: "studio-select", id });
-
 /** Outlines a thing from the Things list while frozen; null clears. */
 export const hoverStageThing = (id: string | null) =>
   useStageBridge.getState().post?.({ type: "studio-hover-thing", id });

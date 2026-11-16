@@ -1,13 +1,6 @@
-import type { ReactNode } from "react";
 import { useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import {
-  BookmarkCheckIcon,
-  BookmarkIcon,
-  FolderOpenIcon,
-  ExternalLinkIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { BookmarkIcon, FolderOpenIcon, ExternalLinkIcon, Trash2Icon } from "lucide-react";
 import type { GameSavedMedia, ScopedThreadRef } from "@kurambit/contracts";
 
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
@@ -19,8 +12,6 @@ import { serverEnvironment } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import { MenuItem } from "../ui/menu";
-import { Text } from "../ui/text";
 
 /**
  * Open and Show in folder for a file in the game: the system's own apps
@@ -81,81 +72,6 @@ const SavedFileActions = ({
 }) => (
   <GameFileActions threadRef={threadRef} path={media.path} relativePath={`saved/${media.name}`} />
 );
-
-/** One file's save into the game's saved/: whether it is there yet, and the way to put it there. */
-function useSaveMedia(threadRef: ScopedThreadRef, source: string, label: string) {
-  const canSave = useAtomValue(gameEnvironment.saveMedia.permissionAtom(threadRef.environmentId));
-  const save = useAtomCommand(gameEnvironment.saveMedia, { reportFailure: false });
-  // One read of saved/ for every button of the game: a save is shown as saved
-  // once the folder holds it, after a remount, a delete or a save elsewhere too.
-  const list = useEnvironmentQuery(
-    gameEnvironment.savedList({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  );
-  const [saving, setSaving] = useState(false);
-  // This button's save until the list is read again after it.
-  const [justSaved, setJustSaved] = useState<{
-    readonly media: GameSavedMedia;
-    readonly listAt: number | null;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const saved =
-    list.data?.find((media) => media.source === source && media.label === label) ??
-    (justSaved !== null && justSaved.listAt === list.dataUpdatedAt ? justSaved.media : null);
-  const run = async () => {
-    if (saving) return;
-    setSaving(true);
-    const result = await save({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, source, label },
-    });
-    setSaving(false);
-    if (result._tag === "Failure") {
-      setError(String(squashAtomCommandFailure(result)));
-      return;
-    }
-    setError(null);
-    setJustSaved({ media: result.value, listAt: list.dataUpdatedAt });
-  };
-  return { canSave, saving, saved, error, run };
-}
-
-/** A menu's Save row for one file: "Save the video", then "Video saved" once it is kept. */
-export function SaveMediaMenuItem({
-  threadRef,
-  source,
-  label,
-  text,
-  icon,
-}: {
-  threadRef: ScopedThreadRef;
-  source: string;
-  label: string;
-  /** What the file is, in a word: "Video". */
-  text: string;
-  icon: ReactNode;
-}) {
-  const { canSave, saving, saved, error, run } = useSaveMedia(threadRef, source, label);
-  return (
-    <MenuItem
-      disabled={saved !== null || !canSave || saving}
-      closeOnClick={false}
-      onClick={() => void run()}
-    >
-      {saved !== null ? <BookmarkCheckIcon aria-hidden="true" /> : icon}
-      <span className="flex min-w-0 flex-col">
-        {saved !== null ? `${text} saved` : saving ? "Saving…" : `Save the ${text.toLowerCase()}`}
-        {error === null ? null : (
-          <Text variant="caption" tone="destructive">
-            {error}
-          </Text>
-        )}
-      </span>
-    </MenuItem>
-  );
-}
 
 const sizeLabel = (bytes: number) =>
   bytes >= 1024 ** 2
