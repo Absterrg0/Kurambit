@@ -92,12 +92,20 @@ function Row({
         variant="meta"
         tone={muted ? "muted" : "default"}
         truncate
-        render={<span className="flex-1" />}
+        render={<span className="shrink" />}
       >
         {name}
       </Text>
+      <span className="min-w-2 flex-1" />
+      {/* A long reading gives way before the name does. */}
       {reading === undefined || reading === null ? null : (
-        <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
+        <Text
+          variant="caption"
+          tone="muted"
+          numeric
+          truncate
+          render={<span className="shrink-[3] text-end" />}
+        >
           {reading}
         </Text>
       )}

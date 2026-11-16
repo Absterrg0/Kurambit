@@ -61,12 +61,15 @@ export function GameStagePlayControls({
   threadRef,
   playing,
   canReload,
+  scrubbing,
   onRestart,
   onFocus,
 }: {
   threadRef: ScopedThreadRef;
   playing: boolean;
   canReload: boolean;
+  /** The run's scrubber takes the bar: speed, a control of play, steps aside for it. */
+  scrubbing: boolean;
   onRestart: () => void;
   onFocus: () => void;
 }) {
@@ -121,7 +124,7 @@ export function GameStagePlayControls({
           </Control>
         ) : null}
       </StageToolbarGroup>
-      {ready && capabilities.includes("speed") ? (
+      {ready && capabilities.includes("speed") && !scrubbing ? (
         <ToggleGroup
           aria-label="Game speed"
           variant="segmented"

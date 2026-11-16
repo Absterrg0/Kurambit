@@ -1356,7 +1356,8 @@ function ThreadGameStage({
           {playTarget !== null ? (
             <Button size="xs" variant="outline" className="shrink-0" onClick={backToLive}>
               <HistoryIcon aria-hidden="true" />
-              Back to the current game
+              <span className="hidden @[36rem]/stage-header:inline">Back to the current game</span>
+              <span className="@[36rem]/stage-header:hidden">Back</span>
             </Button>
           ) : null}
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
@@ -1482,7 +1483,7 @@ function ThreadGameStage({
               }
             >
               <PanelRightIcon className="size-3.5" aria-hidden="true" />
-              Workbench
+              <span className="hidden @[36rem]/stage-header:inline">Workbench</span>
             </TooltipTrigger>
             <TooltipPopup side="bottom" className="max-w-xs">
               <span className="flex flex-col gap-1">
@@ -1685,6 +1686,7 @@ function ThreadGameStage({
               threadRef={threadRef}
               playing={phase.kind === "playing" && compare === null}
               canReload={data.previewUrl !== null}
+              scrubbing={scrubbing}
               onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
               onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
             />
@@ -1713,7 +1715,13 @@ function ThreadGameStage({
           />
         )}
       </div>
-      <div className="mx-auto w-full shrink-0" style={{ maxWidth: column ?? undefined }}>
+      {/* Not counted in the game's fit: opening the strip takes its room from the chat, so the
+          game never changes size under the person. */}
+      <div
+        data-stage-spacer=""
+        className="mx-auto w-full shrink-0"
+        style={{ maxWidth: column ?? undefined }}
+      >
         <GameBuildStrip
           threadRef={threadRef}
           gameName={gameName}

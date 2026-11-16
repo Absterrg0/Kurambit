@@ -1,4 +1,4 @@
-import type { ScopedThreadRef } from "@kurambit/contracts";
+import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
 import { isElectron } from "../../env";
@@ -33,10 +33,13 @@ const isTab = (value: unknown): value is WorkbenchTab =>
 export function GameWorkbench({
   threadRef,
   onAsk,
+  onOpenTurnDiff,
   ownsTitleBarEnd,
 }: {
   threadRef: ScopedThreadRef;
   onAsk: (text: string) => void;
+  /** Opens T3's diff view on a turn, at a file: the path a chat turn's files take. */
+  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   ownsTitleBarEnd: boolean;
 }) {
   const tab = useGameWorkspaceStore((state) => state.workbenchTab);
@@ -72,7 +75,7 @@ export function GameWorkbench({
         <GameLookPanel threadRef={threadRef} />
       </TabsPanel>
       <TabsPanel value="checks" className="flex min-h-0 flex-1 flex-col">
-        <GameWorkbenchChecks threadRef={threadRef} />
+        <GameWorkbenchChecks threadRef={threadRef} onOpenTurnDiff={onOpenTurnDiff} />
       </TabsPanel>
       <TabsPanel value="debug" className="flex min-h-0 flex-1 flex-col">
         <GameWorkbenchDebug threadRef={threadRef} />

@@ -8322,6 +8322,7 @@ export default function ChatView(props: ChatViewProps) {
           <GameWorkbench
             threadRef={activeThreadRef}
             onAsk={askAgentToFixStable}
+            onOpenTurnDiff={onOpenTurnDiffStable}
             ownsTitleBarEnd={!rightPanelOpen}
           />
         </PreviewPanelShell>
@@ -8335,6 +8336,7 @@ export default function ChatView(props: ChatViewProps) {
           <GameWorkbench
             threadRef={activeThreadRef}
             onAsk={askAgentToFixStable}
+            onOpenTurnDiff={onOpenTurnDiffStable}
             ownsTitleBarEnd={false}
           />
         </RightPanelSheet>

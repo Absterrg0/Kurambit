@@ -432,8 +432,10 @@ function TuneFooter({
         : state.kind === "failed"
           ? state.text
           : state.kind === "kept"
-            ? "Kept as a build; your next change starts another"
-            : "Saved in the game as you let go; Undo takes it back";
+            ? "Kept; your next change starts a new build"
+            : state.kind === "saved"
+              ? "Saved as you let go"
+              : "Saved in the game";
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-border px-4 py-3">
       <div className="flex min-w-0 items-center gap-2">

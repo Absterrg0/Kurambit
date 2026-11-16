@@ -338,10 +338,10 @@ export function GameBuildStrip({
                 ? "That build is older than the strip reads"
                 : slot !== null
                   ? slot.label
-                  : showNow
-                    ? "Now: changed since the last build"
-                    : onStageBuild !== null
-                      ? `${buildName(onStageBuild)} on the Stage`
+                  : onStageBuild !== null
+                    ? `${buildName(onStageBuild)} on the Stage`
+                    : list?.folderEdited === true
+                      ? "Now: changed since the last build"
                       : list === null || marks.length === 0
                         ? "The game so far, before its first build"
                         : null}
@@ -567,12 +567,17 @@ function BuildThumb({
           title={buildName(build)}
           mark="initial"
           className={cn(
-            "h-10 w-18 rounded-md ring-1 ring-border ring-inset transition-shadow group-hover/thumb:ring-foreground/30 group-focus-visible/thumb:ring-2 group-focus-visible/thumb:ring-ring",
-            onStage && "ring-2 ring-live group-hover/thumb:ring-live",
-            picked && "ring-2 ring-strong-foreground",
+            "h-10 w-18 rounded-md",
             (undone || !build.available) && "opacity-50 saturate-50",
           )}
         >
+          <ThumbEdge
+            className={cn(
+              "group-hover/thumb:ring-foreground/30 group-focus-visible/thumb:ring-2 group-focus-visible/thumb:ring-ring",
+              onStage && "ring-2 ring-live group-hover/thumb:ring-live",
+              picked && "ring-2 ring-strong-foreground",
+            )}
+          />
           {state === null ? null : (
             <span
               aria-hidden="true"
@@ -613,6 +618,19 @@ function BuildThumb({
         </span>
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** A picture's edge, drawn over it: an inset ring on the picture itself would sit under its image. */
+function ThumbEdge({ className }: { className?: string | undefined }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute inset-0 z-10 rounded-md ring-1 ring-border ring-inset transition-shadow",
+        className,
+      )}
+    />
   );
 }
 
@@ -733,12 +751,10 @@ function NowThumb({
         gameName={gameName}
         fallback={fallback}
         threadRef={threadRef}
-        className={cn(
-          "h-10 w-18 rounded-md ring-1 ring-border ring-inset",
-          active && "ring-2 ring-live",
-          disabled && "opacity-50",
-        )}
-      />
+        className={cn("h-10 w-18 rounded-md", disabled && "opacity-50")}
+      >
+        <ThumbEdge className={active ? "ring-2 ring-live" : undefined} />
+      </GameNowPicture>
       <Text variant="caption" tone={active ? "strong" : "muted"} truncate render={<span />}>
         {label}
       </Text>

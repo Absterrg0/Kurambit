@@ -13,6 +13,7 @@ import {
   type GameCheck,
   type GameFactView,
   type GameSavedPlayReading,
+  type RunId,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import {
@@ -36,7 +37,6 @@ import {
   Undo2Icon,
 } from "lucide-react";
 
-import { useDiffPanelStore } from "../../diffPanelStore";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
@@ -73,7 +73,13 @@ import { Workbench } from "./GameWorkbenchParts";
  * Its facts as one tidy list, its saved plays within it, and what it changed as a plain diff
  * whose files open T3's diff view.
  */
-export function GameWorkbenchChecks({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function GameWorkbenchChecks({
+  threadRef,
+  onOpenTurnDiff,
+}: {
+  threadRef: ScopedThreadRef;
+  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+}) {
   const threadKey = scopedThreadKey(threadRef);
   const list = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -154,7 +160,7 @@ export function GameWorkbenchChecks({ threadRef }: { threadRef: ScopedThreadRef 
         }
       />
       <BuildChecks threadRef={threadRef} build={build} />
-      <WhatChanged threadRef={threadRef} build={build} />
+      <WhatChanged threadRef={threadRef} build={build} onOpenTurnDiff={onOpenTurnDiff} />
     </Workbench.Body>
   );
 }
@@ -228,7 +234,7 @@ function BuildHeader({
         </div>
         {onBackToStage === null ? null : (
           <Button size="xs" variant="ghost" onClick={onBackToStage}>
-            Show the Stage's
+            Back to the Stage's
           </Button>
         )}
         {canPlay ? (
@@ -943,7 +949,15 @@ const lines = (count: number) => count.toLocaleString("en-US");
  * What the build changed, as a plain diff: its files and lines in one line, then a row per file.
  * A file opens T3's diff view on it, as a chat turn's files do.
  */
-function WhatChanged({ threadRef, build }: { threadRef: ScopedThreadRef; build: GameBuild }) {
+function WhatChanged({
+  threadRef,
+  build,
+  onOpenTurnDiff,
+}: {
+  threadRef: ScopedThreadRef;
+  build: GameBuild;
+  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+}) {
   const turn =
     build.source._tag === "turn" && build.source.threadId === threadRef.threadId
       ? build.source.turn
@@ -964,9 +978,7 @@ function WhatChanged({ threadRef, build }: { threadRef: ScopedThreadRef; build: 
   const added = files.reduce((sum, file) => sum + file.additions, 0);
   const removed = files.reduce((sum, file) => sum + file.deletions, 0);
   const openDiff = (path?: string) => {
-    if (runId === null) return;
-    useDiffPanelStore.getState().selectTurn(threadRef, runId, path);
-    useRightPanelStore.getState().open(threadRef, "diff");
+    if (runId !== null) onOpenTurnDiff(runId, path);
   };
   return (
     <Workbench.Section

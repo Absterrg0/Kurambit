@@ -63,7 +63,8 @@ export function GameKeepGoingButton({ threadRef }: { threadRef: ScopedThreadRef 
           }
         >
           <FastForwardIcon className="size-3.5" aria-hidden="true" />
-          {keepGoingView.label}
+          {/* A narrow column (two panels open) keeps the icon; the name is in the tooltip. */}
+          <span className="hidden @[36rem]/stage-header:inline">{keepGoingView.label}</span>
         </TooltipTrigger>
         <TooltipPopup side="bottom">{keepGoingView.tooltip}</TooltipPopup>
       </Tooltip>

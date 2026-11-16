@@ -265,31 +265,37 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 A game opens as one column: the game on top, its play controls under it, then your chat with the
 agent and the box where you tell the game what to change. The play controls are **Restart**,
 **Pause** (which also lets you point at things) and **Can't lose** on the left with slow motion
-(¼×, ½×, 1×) and **Controls** beside them, and on the right the build that plays (a short list to
-jump to another), sound, **Fullscreen** and **Hide**. Hover a control for its key. Drag the edge
-under the play controls to give the chat more or less of the column. The column keeps a readable
-width; for a bigger game beside the chat, set **Settings → Appearance → Chat width** to Wide or Full.
+(¼×, ½×, 1×) and **Controls** beside them, and on the right sound, **Fullscreen** and **Hide**.
+Hover a control for its key. While the game is paused, or a run has ended, the bar shows the run's
+scrubber instead (see **Rewind and fork** below). Drag the edge under the controls to give the chat
+more or less of the column. The column keeps a readable width; for a bigger game beside the chat,
+set **Settings → Appearance → Chat width** to Wide or Full.
+
+Under the controls, **Builds** is the game's history on one line: the build on the Stage, **Compare**,
+**Undo** and **Redo**. Open it to see every build as a small picture in time order, the one on the
+Stage ringed, and each "try it N ways" message's versions together under what you asked. Click a
+picture to play that build and show its checks; while a version plays, **Keep** makes it the game.
 
 The bar on top has the game's name, which opens its menu (rename, folder, **Export…**, **Art…**),
 a line while work is under way (making the next build, keep going's step, or that your agent needs a
-choice), then Undo, Redo, the **⋯** menu, **Keep going** and **Workbench**.
+choice), then the **⋯** menu, **Keep going** and **Workbench**.
 
-The **Workbench** opens beside the game (`mod+Alt+C`, or **Workbench** in the command palette, which
-also opens each tab directly). Its tabs:
+The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
+which also opens each section directly). Drag its edge to resize it. Its sections:
 
-- **Run**: the run you are playing or just played. Its timeline to rewind, the game's own values
-  (score, health, timers) a second at a time, the game's console with its errors and logs, **Tell
-  the agent about this run**, and saving the run as a test play.
-- **Tune**: the values the running game reads, such as its speeds, jump height, timers and counts,
-  grouped by thing. Drag a name or a slider, or type a number, and the game changes at once; the
-  values are saved into the game as you let go, and each tuning session is one build Undo takes
-  back. If a game shows nothing to tune, **Ask your agent to expose them** asks for it.
+- **Tune**: the things the game names, by kind, and under them the picked thing's values, such as
+  its speed, jump height, timers and counts. Drag a value's field sideways to change it, or click it
+  to type; the game changes at once. Values are saved into the game as you let go, and a tuning
+  session is one build Undo takes back; **Keep as a build** ends the session, so your next change
+  starts another. **Put all back** returns every value to the game's own. If a game shows nothing to
+  tune, **Ask your agent to expose them** asks for it.
 - **Art**: the game's look, how its characters are made, and the art made for it.
-- **Checks**: the build's changelog (its files as code, art, audio and tuned values, and the
-  readings that moved), its checks, performance with draw calls and triangles, other screen sizes,
-  saved plays with **Replay**, and the bots' recordings. A build's checks in the chat open here.
-- **History**: every build and the latest "try it N ways" versions, with Undo, Redo, **Compare**
-  any two, and **Keep** for a version.
+- **Checks**: the build's checks, one line each with its reading and its recording, your saved test
+  plays under the check that replays them, **Measure again**, and **What changed**: its files with the
+  lines each gained and lost. Click a file to open it in the diff. A build's checks in the chat open
+  here.
+- **Debug**: the game's own values (score, health, timers) as it plays, and its console. The
+  section's name counts the errors and warnings logged.
 - **Decisions**: what the game remembers you decided, to edit, delete or add to.
 
 - **A three.js game is always on.** The stage plays the game folder itself, and **Restart** starts
@@ -309,24 +315,19 @@ also opens each tab directly). Its tabs:
   what a new package contains. Upload the extracted files to an ordinary static HTTP host and serve
   them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
   a WebAssembly export.
-- The right panel is resizable; drag its edge, or close it to give the game more room.
+- The Workbench and the right panel, where diffs and files open, are resizable; drag an edge, or
+  close one to give the game more room.
 - **Point at a thing.** Press Ctrl+Alt+F (⌘⌥F on a Mac), even while you play, or the Stage's pause
   button to freeze the game, then click a character or prop: the Workbench's **Tune** shows it
-  first, where its values tune the running game live, and it goes into the message box as a chip
+  picked, where its values tune the running game live, and it goes into the message box as a chip
   with the frame. Sending sends the frame, what the thing is and its values with your words. The
   chip's **×** or Esc stops pointing; Esc again plays on. While frozen, the selected thing's path
-  shows its last jumps on the game, and **Tune** shows how high and how long in the air, and its
-  speed over the last seconds, so you can see what a tuned value did.
-- **Replay your run (three.js).** A run you play to its end on the Stage is kept with its input.
-  **Your run** in a build's checks plays it again on that build, input for input, and says how it
-  ends there and the first second it played differently: "won at 41 s" on one build, "lost at
-  12 s" on the next. Your agent can do the same on the game as it is now.
+  shows its last jumps on the game, so you can see what a tuned value did.
 - **Your agent knows how you played (three.js).** Your next message tells the agent about the
   runs you played since its last turn: how each ended, or when you left it (Retry, the menu, a
   reload), and where you stood. It can replay any of them to a moment and look at it. To talk
-  about one run, press **Tell the agent about this run** in the Workbench's **Run** when it ends,
-  or while the game is frozen: it goes into the message box as a chip with its frame. The first
-  time you win, **Keep this win as a test play** there saves it as a test play in one click.
+  about one run, press **Tell the agent about this run** beside the scrubber when it ends, or while
+  the game is frozen: it goes into the message box as a chip with its frame.
 - **The game remembers what you decided.** When you undo a build, keep tuned values, or skip a
   keep-going step, Kurambit writes a line in the game's `.studio/decisions.md`, with the first
   sentence of your next message after an undo. To add your own standing preference, send
@@ -335,8 +336,8 @@ also opens each tab directly). Its tabs:
   that goes on hears each new one once, so the agent does not bring back what you turned down.
   The Workbench's **Decisions** lists them to edit, delete or add to. An undo never
   rewinds this file.
-- **Test plays (three.js).** After a run ends, the Workbench's **Run** → **Save as test play** saves it
-  under a name, such as a win or the run where a bug showed. Every build from then on replays it,
+- **Test plays (three.js).** After a run ends, **Save as test play** beside the scrubber saves it
+  under a name, such as a win or the run where a bug showed. Your first win is offered as one. Every build from then on replays it,
   and its checks say whether each saved play still ends the same way. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
   outside its update. Your agent saves its own winning runs the same way, and both of you can
@@ -347,14 +348,14 @@ also opens each tab directly). Its tabs:
   play differ, or that the run now ends earlier ("With the change, this run now ends at 1:40").
   A run on a title screen, an ended run, and runs over 10 minutes start fresh instead, and so does
   one that takes over 20 seconds to get back to.
-- **Rewind and fork (three.js).** While the game is frozen, or after a run ends, the timeline in
-  the Workbench's **Run** shows its seconds, its losses and its ending. Drag it to any second and let go: the
+- **Rewind and fork (three.js).** While the game is frozen, or after a run ends, the scrubber in
+  the Stage's controls shows the run's seconds, its losses and its ending. Drag it to any second and let go: the
   game replays your run to there, frozen. Change a value in **Tune** (or let your agent change the
   code), then **Play on**: the run goes on from that second as a new run, which your agent hears
   about and you can save as a test play. After a fork with tuned values, **As it was** and **With
   the change** play the same three seconds of your input after it both ways. If the game does not
-  repeat itself exactly (it times or picks something outside its update), the timeline says it
-  couldn't get back exactly.
+  repeat itself exactly (it times or picks something outside its update), the line by the game's
+  name says it couldn't get back exactly.
 - **Dev views (three.js).** The **⋯** menu's **Dev views** step a frozen game one frame at a
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose
