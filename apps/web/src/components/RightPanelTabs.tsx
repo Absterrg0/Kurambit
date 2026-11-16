@@ -27,7 +27,6 @@ import {
   TerminalSquare,
   Volume2Icon,
   VolumeOffIcon,
-  Wrench,
 } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -480,8 +479,6 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
-    case "workbench":
-      return "Workbench";
     case "files":
       return "Files";
     case "file":
@@ -555,8 +552,6 @@ function SurfaceIcon({
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
-    case "workbench":
-      return <Wrench className="size-3 shrink-0" />;
     case "files":
       return <Files className="size-3 shrink-0" />;
     case "file":

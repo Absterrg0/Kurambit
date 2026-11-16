@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { GameLogLine, GamePlayMark } from "@kurambit/contracts";
 
 /**
- * What the Workbench's Run tab watches of the folder's game, per thread: the run's once-a-second
+ * What the Workbench's Debug section watches of the folder's game, per thread: the run's once-a-second
  * marks (studio-mark) and the page's console (studio-log). In memory only, and bounded: a mark a
  * second and a few log batches a second are the only updates, so nothing here repaints per frame.
  */
@@ -66,3 +66,9 @@ export const useStageMarks = (threadKey: string): ReadonlyArray<GamePlayMark> =>
 
 export const useStageConsole = (threadKey: string) =>
   useStageWatches((all) => all[threadKey] ?? EMPTY);
+
+/** How many of the console's kept lines are errors, or warnings: the Debug switch's count. */
+export const useStageConsoleCount = (threadKey: string, level: "error" | "warn") =>
+  useStageWatches(
+    (all) => all[threadKey]?.lines.filter((line) => line.level === level).length ?? 0,
+  );

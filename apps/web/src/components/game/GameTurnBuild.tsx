@@ -15,7 +15,7 @@ import type { TurnDiffFileChange } from "../../types";
 import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
-import { showWorkbench } from "./gameRightPanel";
+import { showWorkbench } from "./gameWorkbenchPanel";
 import { buildName, checksLine, factsSettled } from "./gameBuilds.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
@@ -100,7 +100,7 @@ export function GameTurnBuild({
               build: build.id,
               snapshot: build,
             });
-            showWorkbench(threadRef, "checks");
+            showWorkbench("checks");
           }}
         >
           <span className="truncate">

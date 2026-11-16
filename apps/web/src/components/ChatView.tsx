@@ -1,6 +1,6 @@
 import { GameStage } from "./game/GameStage";
 import { GameWorkbench } from "./game/GameWorkbench";
-import { toggleWorkbench } from "./game/gameRightPanel";
+import { toggleWorkbench } from "./game/gameWorkbenchPanel";
 import { useStageSelectionChip } from "./game/gameComposerContext";
 import { stepStageFrame, toggleStageCannotLose, toggleStageDevView } from "./game/gameStageBridge";
 import { GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
@@ -222,6 +222,7 @@ import { subscribeComposerFocus } from "../lib/desktopSnapShot";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
 import { usePreviewPanelInlineSize } from "../hooks/usePreviewPanelInlineSize";
+import { PreviewPanelShell } from "./preview/PreviewPanelShell";
 import {
   RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
   type ThreadPanelPresentation,
@@ -1653,6 +1654,13 @@ export default function ChatView(props: ChatViewProps) {
     widthStorageKey: `kurambit:preview-panel-width:${activeThreadKey}`,
     ...(isGameThread ? { defaultWidth: 420 } : {}),
   });
+  // The game's Workbench is its own panel beside the column, with its own remembered width.
+  const workbenchOpen = useGameWorkspaceStore((state) => state.workbenchOpen);
+  const workbenchInlineSize = usePreviewPanelInlineSize(undefined, {
+    container: workspaceLayoutElement,
+    widthStorageKey: "kurambit:game-workbench-width",
+    defaultWidth: 400,
+  });
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
@@ -1693,6 +1701,13 @@ export default function ChatView(props: ChatViewProps) {
     panelAnimationDurationMs,
   );
   const rightPanelPresent = rightPanelPresence.present;
+  const workbenchPresence = usePanelPresence(
+    isGameThread && activeThreadRef !== null && workbenchOpen,
+    true,
+    panelAnimationsActive,
+    activeThreadKey,
+    panelAnimationDurationMs,
+  );
   const rightPanelControlsInPanel =
     shouldUsePlanSidebarSheet && rightPanelPresent && rightPanelOpen;
   const rightPanelControlsAtRoot = rightPanelPresent && !shouldUsePlanSidebarSheet;
@@ -5294,7 +5309,7 @@ export default function ChatView(props: ChatViewProps) {
       "game.workbench.toggle": () => {
         // Only a game thread has a Workbench.
         if (!isGameThread || activeThreadRef === null) return false;
-        toggleWorkbench(activeThreadRef);
+        toggleWorkbench();
       },
       // The Stage acts on these, so the keys, the palette and the timeline
       // share one path. A focused game never sees them: its frame is
@@ -7557,11 +7572,6 @@ export default function ChatView(props: ChatViewProps) {
         newShortcutLabel: newTerminalShortcutLabel ?? undefined,
         closeShortcutLabel: closeTerminalShortcutLabel ?? undefined,
       }}
-      gameWorkbench={
-        isGameThread ? (
-          <GameWorkbench threadRef={activeThreadRef} onAsk={askAgentToFixStable} />
-        ) : null
-      }
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
@@ -8303,6 +8313,32 @@ export default function ChatView(props: ChatViewProps) {
         ))}
       </div>
 
+      {workbenchPresence.present && !shouldUsePlanSidebarSheet && activeThreadRef ? (
+        <PreviewPanelShell
+          mode="inline"
+          open={workbenchOpen && !rightPanelMaximized}
+          inlineSize={workbenchInlineSize}
+        >
+          <GameWorkbench
+            threadRef={activeThreadRef}
+            onAsk={askAgentToFixStable}
+            ownsTitleBarEnd={!rightPanelOpen}
+          />
+        </PreviewPanelShell>
+      ) : null}
+      {workbenchPresence.present && shouldUsePlanSidebarSheet && activeThreadRef ? (
+        <RightPanelSheet
+          animationDurationMs={panelAnimationsActive ? panelAnimationDurationMs : 0}
+          open={workbenchOpen}
+          onClose={() => useGameWorkspaceStore.getState().setWorkbenchOpen(false)}
+        >
+          <GameWorkbench
+            threadRef={activeThreadRef}
+            onAsk={askAgentToFixStable}
+            ownsTitleBarEnd={false}
+          />
+        </RightPanelSheet>
+      ) : null}
       {rightPanelPresent && !shouldUsePlanSidebarSheet && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"

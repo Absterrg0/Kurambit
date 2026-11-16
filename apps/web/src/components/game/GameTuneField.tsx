@@ -1,9 +1,8 @@
+import { useRef } from "react";
 import { NumberField } from "@base-ui/react/number-field";
-import { Slider } from "@base-ui/react/slider";
 import type { GameThingValue } from "@kurambit/contracts";
 import { RotateCcwIcon } from "lucide-react";
 
-import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { NumberFieldInput } from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -11,9 +10,8 @@ import { Switch } from "../ui/switch";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** One row's columns: name, control, number, and the reset slot (kept so rows line up). */
-const ROW =
-  "grid h-8 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_3.75rem_1.5rem] items-center gap-2 ps-4 pe-1.5";
+/** One row's columns: the name and its unit, the field, and the reset slot (kept so rows line up). */
+const ROW = "grid h-7 grid-cols-[minmax(0,1fr)_6.5rem_1.5rem] items-center gap-2 ps-4 pe-2";
 
 /**
  * How a change ended: a pointer let go (the game takes the keys back), or the keyboard (focus
@@ -21,11 +19,15 @@ const ROW =
  */
 export type TuneCommit = "pointer" | "keyboard";
 
+const unitText = (value: GameThingValue, number: number) =>
+  `${number}${value.unit === undefined ? "" : ` ${value.unit}`}`;
+
 /**
- * One tuned value as an engine's inspector shows it: its name (drag it to scrub), a slider over
- * the range the game registered, and the number to type; a choice picks by name. It changes the
- * game as it moves (`onChange`) and saves when let go (`onCommit`). A value tuned away from the
- * game's own carries the live colour, says what the game's own is, and puts it back from its reset.
+ * One tuned value as an engine's inspector shows it: its name and unit, and a number field to
+ * drag sideways to scrub (as Blender and Figma do), click to type, with how far it sits in the
+ * range the game registered as a faint fill. A choice picks by name, a switch flips. It changes
+ * the game as it moves (`onChange`) and saves when let go (`onCommit`). A value tuned away from
+ * the game's own carries a small mark and a reset to put it back.
  */
 export function GameTuneField({
   label,
@@ -44,13 +46,14 @@ export function GameTuneField({
   onCommit: (next: number | boolean, how: TuneCommit) => void;
   onReset?: (() => void) | undefined;
 }) {
-  const changed = was !== undefined;
+  // The value a press on the field started from: a press that moved nothing is a click to type.
+  const pressedAt = useRef<number | null>(null);
+  const name = <Name label={label} unit={value.unit} changed={was !== undefined} />;
   const reset = <ResetSlot was={was} value={value} onReset={onReset} />;
   if (typeof value.value === "boolean")
     return (
       <div className={ROW}>
-        <Name label={label} changed={changed} />
-        <span />
+        {name}
         <span className="flex justify-end">
           <Switch
             checked={value.value}
@@ -69,32 +72,29 @@ export function GameTuneField({
   if (value.choices !== undefined && value.choices.length > 1) {
     const choices = value.choices;
     return (
-      <div className={ROW} data-changed={changed ? "" : undefined}>
-        <Name label={label} changed={changed} />
-        {/* The picker takes the slider's and the number's columns. */}
-        <div className="col-span-2 flex min-w-0">
-          <Select
-            value={String(Math.round(number))}
-            disabled={disabled}
-            onValueChange={(next) => {
-              const index = Number(next);
-              if (!Number.isInteger(index)) return;
-              onChange(index);
-              onCommit(index, "pointer");
-            }}
-          >
-            <SelectTrigger size="xs" className="min-w-0" aria-label={label}>
-              <SelectValue>{choices[Math.round(number)] ?? String(number)}</SelectValue>
-            </SelectTrigger>
-            <SelectPopup align="end" alignItemWithTrigger={false}>
-              {choices.map((choice, index) => (
-                <SelectItem key={choice} hideIndicator value={String(index)}>
-                  {choice}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-        </div>
+      <div className={ROW}>
+        {name}
+        <Select
+          value={String(Math.round(number))}
+          disabled={disabled}
+          onValueChange={(next) => {
+            const index = Number(next);
+            if (!Number.isInteger(index)) return;
+            onChange(index);
+            onCommit(index, "pointer");
+          }}
+        >
+          <SelectTrigger size="xs" className="min-w-0" aria-label={label}>
+            <SelectValue>{choices[Math.round(number)] ?? String(number)}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {choices.map((choice, index) => (
+              <SelectItem key={choice} hideIndicator value={String(index)}>
+                {choice}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
         {reset}
       </div>
     );
@@ -103,6 +103,7 @@ export function GameTuneField({
   const max = value.max;
   const ranged = min !== undefined && max !== undefined && max > min;
   const step = value.step ?? (ranged ? niceStep((max - min) / 100) : 0.01);
+  const share = ranged ? Math.min(1, Math.max(0, (number - min) / (max - min))) : null;
   return (
     <NumberField.Root
       value={number}
@@ -116,62 +117,61 @@ export function GameTuneField({
         if (next !== null && Number.isFinite(next)) onChange(next);
       }}
       onValueCommitted={(next, details) => {
-        if (next !== null && Number.isFinite(next))
-          onCommit(next, details.reason === "scrub" ? "pointer" : "keyboard");
+        if (next === null || !Number.isFinite(next)) return;
+        if (details.reason !== "scrub") {
+          onCommit(next, "keyboard");
+          return;
+        }
+        const from = pressedAt.current;
+        pressedAt.current = null;
+        // A press that moved nothing leaves the field focused to type in.
+        if (from !== next) onCommit(next, "pointer");
       }}
-      className={cn(ROW, "hover:bg-accent/50")}
-      data-changed={changed ? "" : undefined}
+      className={ROW}
     >
-      <NumberField.ScrubArea className="min-w-0 cursor-ew-resize select-none">
-        <Name label={label} unit={value.unit} changed={changed} />
-      </NumberField.ScrubArea>
-      {ranged ? (
-        <Slider.Root
-          value={number}
-          min={min}
-          max={max}
-          step={step}
-          disabled={disabled}
-          onValueChange={(next) => {
-            const single = Array.isArray(next) ? next[0] : next;
-            if (typeof single === "number") onChange(single);
-          }}
-          onValueCommitted={(next, details) => {
-            const single = Array.isArray(next) ? next[0] : next;
-            if (typeof single === "number")
-              onCommit(single, details.reason === "keyboard" ? "keyboard" : "pointer");
-          }}
-          aria-label={label}
+      {name}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <NumberField.ScrubArea
+              className="relative min-w-0 cursor-ew-resize select-none has-focus:cursor-text"
+              onPointerDown={() => {
+                pressedAt.current = number;
+              }}
+            />
+          }
         >
-          <Slider.Control className="flex h-6 w-full touch-none items-center">
-            <Slider.Track className="relative h-1 w-full rounded-full bg-foreground/10">
-              <Slider.Indicator
-                className={cn("rounded-full", changed ? "bg-live" : "bg-foreground/35")}
-              />
-              <Slider.Thumb className="size-3 rounded-full bg-strong-foreground shadow-sm outline-none ring-2 ring-background focus-visible:ring-ring" />
-            </Slider.Track>
-          </Slider.Control>
-        </Slider.Root>
-      ) : (
-        <span />
-      )}
-      {/* Enter keeps the typed number and hands the keys back to the game, as a drag does. */}
-      <NumberField.Group
-        className="contents"
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement)) return;
-          event.preventDefault();
-          const typed = Number(event.target.value);
-          if (Number.isFinite(typed)) onCommit(typed, "pointer");
-        }}
-      >
-        <NumberFieldInput variant="inspector" aria-label={label} />
-      </NumberField.Group>
+          {/* Enter keeps the typed number and hands the keys back to the game, as a drag does. */}
+          <NumberField.Group
+            className="contents"
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement)) return;
+              event.preventDefault();
+              const typed = Number(event.target.value);
+              if (Number.isFinite(typed)) onCommit(typed, "pointer");
+            }}
+          >
+            <NumberFieldInput variant="inspector" aria-label={label} />
+          </NumberField.Group>
+          {share === null ? null : (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 rounded-s-md bg-foreground/7"
+              style={{ width: `${share * 100}%` }}
+            />
+          )}
+        </TooltipTrigger>
+        <TooltipPopup side="left">
+          {ranged ? `${unitText(value, min)} to ${unitText(value, max)}` : label}
+          {" · drag to change, click to type"}
+        </TooltipPopup>
+      </Tooltip>
       {reset}
     </NumberField.Root>
   );
 }
 
+/** The value's name with its unit after it, quieter; a small mark before a tuned one. */
 function Name({
   label,
   unit,
@@ -182,15 +182,15 @@ function Name({
   changed: boolean;
 }) {
   return (
-    <Text
-      variant="meta"
-      tone={changed ? "inherit" : "muted"}
-      truncate
-      render={<span className={cn("block", changed && "text-live")} />}
-    >
-      {label}
-      {unit === undefined ? null : <span className="ms-1 text-dim-foreground">{unit}</span>}
-    </Text>
+    <span className="relative flex min-w-0 items-center">
+      {changed ? (
+        <span aria-label="tuned" className="absolute -start-2.5 size-1.5 rounded-full bg-live" />
+      ) : null}
+      <Text variant="meta" tone="default" truncate>
+        {label}
+        {unit === undefined ? null : <span className="ms-1.5 text-dim-foreground">{unit}</span>}
+      </Text>
+    </span>
   );
 }
 
@@ -210,15 +210,14 @@ function ResetSlot({
       ? was
         ? "on"
         : "off"
-      : (value.choices?.[Math.round(was)] ??
-        `${was}${value.unit === undefined ? "" : ` ${value.unit}`}`);
+      : (value.choices?.[Math.round(was)] ?? unitText(value, was));
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Button
             size="icon-xs"
-            variant="ghost"
+            variant="ghost-muted"
             aria-label={`Put back to ${before}`}
             onClick={onReset}
           />
@@ -231,7 +230,7 @@ function ResetSlot({
   );
 }
 
-/** A slider step a person would type: 1, 2 or 5 times a power of ten. */
+/** A drag step a person would type: 1, 2 or 5 times a power of ten. */
 const niceStep = (raw: number) => {
   if (!(raw > 0)) return 0.01;
   const power = 10 ** Math.floor(Math.log10(raw));

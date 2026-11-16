@@ -1,21 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import type {
-  GameBuildsResult,
-  GameThing,
-  GameThingValue,
-  ScopedThreadRef,
-} from "@kurambit/contracts";
-import { AsyncResult } from "effect/reactivity";
+import type { GameThing, GameThingValue, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
-import {
-  ChevronRightIcon,
-  CrosshairIcon,
-  RotateCcwIcon,
-  SlidersHorizontalIcon,
-  XIcon,
-} from "lucide-react";
+import { RotateCcwIcon, SlidersHorizontalIcon } from "lucide-react";
 import { createContext, use, useEffect, useRef, useState } from "react";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -23,21 +11,14 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn, randomUUID } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
-import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ThingLook, ThingsSection, useSelectNotice, valueLabel } from "./GameInspector";
+import { ThingLook, useSelectNotice, valueLabel } from "./GameInspector";
 import { GameTuneField, type TuneCommit } from "./GameTuneField";
 import { Workbench } from "./GameWorkbenchParts";
-import { buildName, formatBuildTime } from "./gameBuilds.logic";
-import {
-  clearStageSelection,
-  selectStageThing,
-  tuneStageValue,
-  useThreadStageBridge,
-} from "./gameStageBridge";
+import { hoverStageThing, tuneStageValue, useThreadStageBridge } from "./gameStageBridge";
 
 const NO_THINGS: ReadonlyArray<GameThing> = [];
 
@@ -47,16 +28,21 @@ const TuneSave = createContext<(id: string, value: GameThingValue, how: TuneComm
 );
 
 type SaveState =
+  | { readonly kind: "idle" }
   | { readonly kind: "saved" }
   | { readonly kind: "saving" }
   /** An agent's turn is changing the game: a save then would keep its half-made work. */
   | { readonly kind: "waiting" }
+  /** The session was kept as a build: the next value let go starts another. */
+  | { readonly kind: "kept" }
   | { readonly kind: "failed"; readonly text: string };
 
 /**
  * Saves tuned values into the game as they are let go, one at a time, each folding into the
- * session's one tuning build. While the agent's turn runs they wait (they still play), and save
- * once it ends, on top of its build. A failed save keeps its values for the next one.
+ * session's one tuning build, so a Restart keeps them and one Undo takes the session back. Keep
+ * as a build ends the session: what is let go after it folds into a new build. While the agent's
+ * turn runs, values wait (they still play) and save once it ends, on top of its build. A failed
+ * save keeps its values for the next one.
  */
 function useTuneSaver(threadRef: ScopedThreadRef) {
   const turnRunning = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
@@ -65,8 +51,10 @@ function useTuneSaver(threadRef: ScopedThreadRef) {
   const queue = useRef(new Map<string, Map<string, GameThingValue>>());
   // The last value saved per id and key: letting go where it already is saves nothing.
   const saved = useRef(new Map<string, number | boolean>());
+  // The next save starts a build of its own rather than fold into the session's.
+  const fresh = useRef(false);
   const busy = useRef(false);
-  const [state, setState] = useState<SaveState>({ kind: "saved" });
+  const [state, setState] = useState<SaveState>({ kind: "idle" });
   // One save at a time; what is let go meanwhile goes in the next, until none is left.
   const flush = useStableCallback(async () => {
     if (busy.current || !canSave) return;
@@ -82,9 +70,11 @@ function useTuneSaver(threadRef: ScopedThreadRef) {
         values: [...values.values()],
       }));
       queue.current = new Map();
+      const fold = !fresh.current;
+      fresh.current = false;
       const result = await keep({
         environmentId: threadRef.environmentId,
-        input: { threadId: threadRef.threadId, things, commandId: randomUUID(), fold: true },
+        input: { threadId: threadRef.threadId, things, commandId: randomUUID(), fold },
       });
       if (result._tag === "Failure") {
         // Back under anything tuned since, which is newer.
@@ -94,6 +84,7 @@ function useTuneSaver(threadRef: ScopedThreadRef) {
             if (!values.has(value.key)) values.set(value.key, value);
           queue.current.set(thing.id, values);
         }
+        fresh.current = !fold;
         setState({ kind: "failed", text: String(squashAtomCommandFailure(result)) });
         break;
       }
@@ -116,13 +107,36 @@ function useTuneSaver(threadRef: ScopedThreadRef) {
     queue.current.set(id, values);
     void flush();
   });
-  return { save, state, canSave, retry: () => void flush() };
+  const keepAsBuild = () => {
+    fresh.current = true;
+    setState({ kind: "kept" });
+  };
+  return { save, state, canSave, keepAsBuild, retry: () => void flush() };
 }
 
+/** Its values the person has tuned away from the game's own (tune.json holds just these). */
+const tunedValues = (thing: GameThing) =>
+  (thing.values ?? []).filter(
+    (value) => value.default !== undefined && value.default !== value.value,
+  );
+
+const KIND_GROUPS: ReadonlyArray<{ readonly kind: GameThing["kind"]; readonly label: string }> = [
+  { kind: "character", label: "Characters" },
+  { kind: "creature", label: "Creatures" },
+  { kind: "prop", label: "Props" },
+  { kind: "level", label: "Level" },
+  { kind: "effect", label: "Effects" },
+  { kind: "ui", label: "Interface" },
+  { kind: "rule", label: "Rules" },
+  { kind: "sound", label: "Sound" },
+  { kind: "other", label: "Other" },
+];
+
 /**
- * The Tune tab: every value the running game tunes (`ctx.tune`), grouped by thing, changing the
- * game as they move and saved into it as they are let go, so a Restart keeps them and Undo takes
- * the session back. The thing pointed at on the paused game comes first.
+ * Tune, as an engine's inspector: the things the game names (`ctx.thing`, `ctx.tune`) as a
+ * compact list by kind, and the picked thing's values under it as tight rows. Values change the
+ * game as they move and save into it as they are let go. Pointing at a thing on the paused Stage
+ * picks it here.
  */
 export function GameTunePanel({
   threadRef,
@@ -140,71 +154,75 @@ export function GameTunePanel({
     false,
   );
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
-  const selected = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
-  const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
+  const pointed = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
   const saver = useTuneSaver(threadRef);
-  const playing = status === "ready";
-  const groups = things.filter(
-    (thing) => (thing.values?.length ?? 0) > 0 && thing.id !== selected?.id,
-  );
-  const changed = [...(selected === null ? [] : [selected]), ...groups]
+  const [picked, setPicked] = useState<string | null>(null);
+  // A thing pointed at on the Stage is the one picked here, until another is.
+  const [followed, setFollowed] = useState<string | null>(null);
+  if ((pointed?.id ?? null) !== followed) {
+    setFollowed(pointed?.id ?? null);
+    if (pointed !== null) setPicked(pointed.id);
+  }
+  const changed = things
     .map((thing) => ({ thing, values: tunedValues(thing) }))
-    .filter((thing) => thing.values.length > 0);
-  const changedCount = changed.reduce((sum, thing) => sum + thing.values.length, 0);
+    .filter((entry) => entry.values.length > 0);
+  const changedCount = changed.reduce((sum, entry) => sum + entry.values.length, 0);
+  if (notice !== null || status !== "ready")
+    return (
+      <Workbench.Empty
+        icon={<SlidersHorizontalIcon />}
+        title={notice?.title ?? "Waiting for the game"}
+        body={notice?.body ?? "Its things and values show here once it answers."}
+      />
+    );
+  if (!things.some((thing) => (thing.values?.length ?? 0) > 0))
+    return (
+      <Workbench.Empty
+        icon={<SlidersHorizontalIcon />}
+        title="Nothing to tune on this screen"
+        body="Values show here once play starts. If none do, your agent can expose them."
+        action={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              onAsk(
+                "Make this game's key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.",
+              )
+            }
+          >
+            Ask your agent to expose them
+          </Button>
+        }
+      />
+    );
+  // The pointed thing as the game reports it (one of a group), else the listed one picked, else
+  // the first with values.
+  const shown =
+    (pointed !== null && pointed.id === picked ? pointed : null) ??
+    things.find((thing) => thing.id === picked) ??
+    things.find((thing) => (thing.values?.length ?? 0) > 0) ??
+    null;
   return (
     <TuneSave value={saver.save}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
-          {notice !== null || !playing ? (
-            <Workbench.Empty
-              icon={<SlidersHorizontalIcon />}
-              title={notice?.title ?? "Waiting for the game"}
-              body={notice?.body ?? "Its values show here once it answers."}
-            />
-          ) : (
-            <>
-              {selected === null ? null : (
-                <PointedThing threadRef={threadRef} thing={selected} disabled={!tunable} />
-              )}
-              <SelectedFeel threadKey={threadKey} />
-              {groups.map((thing) => (
-                <TuneGroup key={thing.id} thing={thing} disabled={!tunable} />
-              ))}
-              {groups.length === 0 && selected === null ? (
-                <Workbench.Empty
-                  icon={<SlidersHorizontalIcon />}
-                  title="Nothing to tune on this screen"
-                  body="Values show here once play starts. If none do, your agent can expose them."
-                  action={
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        onAsk(
-                          "Make this game's key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.",
-                        )
-                      }
-                    >
-                      Ask your agent to expose them
-                    </Button>
-                  }
-                />
-              ) : null}
-              {/* Paused, everything on screen can be pointed at, tunable or not. */}
-              {paused ? (
-                <div className="px-4 py-4">
-                  <ThingsSection threadRef={threadRef} />
-                </div>
-              ) : null}
-            </>
+        <ThingList
+          things={things}
+          picked={shown?.id ?? null}
+          pointed={pointed?.id ?? null}
+          onPick={setPicked}
+        />
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-border">
+          {shown === null ? null : (
+            <ThingValues threadRef={threadRef} thing={shown} disabled={!tunable} />
           )}
-          <KeptValues threadRef={threadRef} />
         </div>
         <TuneFooter
           changed={changed}
           changedCount={changedCount}
           state={saver.state}
           canSave={saver.canSave}
+          onKeep={saver.keepAsBuild}
           onRetry={saver.retry}
         />
       </div>
@@ -212,149 +230,87 @@ export function GameTunePanel({
   );
 }
 
-/** Its values the person has tuned away from the game's own (tune.json holds just these). */
-const tunedValues = (thing: GameThing) =>
-  (thing.values ?? []).filter(
-    (value) => value.default !== undefined && value.default !== value.value,
-  );
-
-/** The thing pointed at on the paused game: its values first, then where its look comes from. */
-function PointedThing({
-  threadRef,
-  thing,
-  disabled,
+/** Everything the game names, by kind, as an outliner lists a scene: a row each, the picked one lit. */
+function ThingList({
+  things,
+  picked,
+  pointed,
+  onPick,
 }: {
-  threadRef: ScopedThreadRef;
-  thing: GameThing;
-  disabled: boolean;
+  things: ReadonlyArray<GameThing>;
+  picked: string | null;
+  pointed: string | null;
+  onPick: (id: string) => void;
 }) {
   return (
-    <section
-      tabIndex={-1}
-      aria-label={`${thing.name}, pointed at`}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.altKey || event.ctrlKey || event.metaKey) return;
-        if (event.target instanceof HTMLInputElement) return;
-        event.preventDefault();
-        clearStageSelection();
-      }}
-      className="border-b border-border bg-accent/40 pb-2 outline-none"
+    <div
+      role="listbox"
+      aria-label="Things in the game"
+      className="flex max-h-[42%] shrink-0 flex-col overflow-y-auto py-1.5"
     >
-      <div className="flex h-10 items-center gap-2 ps-4 pe-2">
-        <CrosshairIcon className="size-3.5 shrink-0 text-live" aria-hidden="true" />
-        {thing.instance === undefined ? (
-          <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
-            {thing.name}
-          </Text>
-        ) : (
-          // Inside a group, as a design tool shows it: the group, then the one picked.
-          <h3 className="flex min-w-0 items-center gap-1">
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              className="-ms-1.5 min-w-0"
-              onClick={() => selectStageThing(thing.id)}
+      {KIND_GROUPS.map((group) => {
+        const rows = things.filter((thing) => thing.kind === group.kind);
+        if (rows.length === 0) return null;
+        return (
+          <div key={group.kind} role="group" aria-label={group.label} className="flex flex-col">
+            <Text
+              variant="caption"
+              tone="muted"
+              render={<span className="flex h-6 items-end ps-4 pb-0.5" />}
             >
-              <span className="truncate">{thing.name}</span>
-            </Button>
-            <ChevronRightIcon className="size-3 shrink-0 text-dim-foreground" aria-hidden="true" />
-            <Text variant="meta" tone="strong" emphasis numeric>
-              #{thing.instance.index + 1}
+              {group.label}
             </Text>
-          </h3>
-        )}
-        <span className="flex-1" />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Stop pointing at it"
-                onClick={clearStageSelection}
-              />
-            }
-          >
-            <XIcon aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipPopup side="left">Stop pointing at it (Esc)</TooltipPopup>
-        </Tooltip>
-      </div>
-      {thing.instance !== undefined ? (
-        <Text variant="caption" tone="muted" render={<p className="px-4 pb-2" />}>
-          One of {thing.instance.count}; its values are the whole group's.
-        </Text>
-      ) : (thing.instances ?? 0) > 1 ? (
-        <Text variant="caption" tone="muted" render={<p className="px-4 pb-2" />}>
-          All {thing.instances} of them. Double-click one in the game to pick just it.
-        </Text>
-      ) : null}
-      <TuneRows thing={thing} disabled={disabled} />
-      <div className="px-4 pt-2">
-        <ThingLook threadRef={threadRef} thing={thing} />
-      </div>
-    </section>
-  );
-}
-
-/** One thing's values under a header that folds them, the way an inspector groups components. */
-function TuneGroup({ thing, disabled }: { thing: GameThing; disabled: boolean }) {
-  const save = use(TuneSave);
-  const [open, setOpen] = useState(true);
-  const tuned = tunedValues(thing);
-  return (
-    <section className="border-b border-border">
-      <div className="group/tune-head flex h-9 items-center gap-1 ps-2 pe-2">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-        >
-          <ChevronRightIcon
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground motion-popup transition-transform",
-              open && "rotate-90",
-            )}
-            aria-hidden="true"
-          />
-          <Text variant="meta" tone="strong" emphasis truncate>
-            {thing.name}
-          </Text>
-          {tuned.length === 0 ? null : (
-            <Text variant="caption" tone="inherit" render={<span className="text-live" />}>
-              · {tuned.length} tuned
-            </Text>
-          )}
-        </button>
-        {tuned.length === 0 ? null : (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={`Put ${thing.name}'s values back to the game's own`}
-                  onClick={() => {
-                    for (const value of tuned) putBack(thing, value, save);
-                  }}
-                />
-              }
-            >
-              <RotateCcwIcon aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="left">
-              Put {thing.name}'s values back to the game's own
-            </TooltipPopup>
-          </Tooltip>
-        )}
-      </div>
-      {open ? (
-        <div className="pb-2">
-          <TuneRows thing={thing} disabled={disabled} />
-        </div>
-      ) : null}
-    </section>
+            {rows.map((thing) => {
+              const count = thing.values?.length ?? 0;
+              const tuned = tunedValues(thing).length > 0;
+              return (
+                <div key={thing.id} className="px-2">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={picked === thing.id}
+                    onClick={() => onPick(thing.id)}
+                    onPointerEnter={() => hoverStageThing(thing.id)}
+                    onPointerLeave={() => hoverStageThing(null)}
+                    className={cn(
+                      "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                      picked === thing.id && "surface-selected-soft text-strong-foreground",
+                    )}
+                  >
+                    <Text
+                      variant="meta"
+                      tone={count === 0 ? "muted" : "inherit"}
+                      truncate
+                      render={<span className="flex-1" />}
+                    >
+                      {thing.name}
+                    </Text>
+                    {pointed === thing.id ? (
+                      <Text variant="caption" tone="muted">
+                        pointed at
+                      </Text>
+                    ) : null}
+                    {tuned ? (
+                      <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
+                    ) : null}
+                    {count === 0 ? null : (
+                      <Text
+                        variant="caption"
+                        tone="muted"
+                        numeric
+                        render={<span className="w-4 text-end" />}
+                      >
+                        {count}
+                      </Text>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -369,38 +325,90 @@ const putBack = (
   save(thing.id, { ...value, value: value.default }, "keyboard");
 };
 
-function TuneRows({ thing, disabled }: { thing: GameThing; disabled: boolean }) {
+/** The picked thing's values as tight rows, then where its look comes from. */
+function ThingValues({
+  threadRef,
+  thing,
+  disabled,
+}: {
+  threadRef: ScopedThreadRef;
+  thing: GameThing;
+  disabled: boolean;
+}) {
   const save = use(TuneSave);
+  const values = thing.values ?? [];
+  const tuned = tunedValues(thing);
   return (
-    <div className="flex flex-col">
-      {(thing.values ?? []).map((value) => {
-        const tuned = value.default !== undefined && value.default !== value.value;
-        return (
-          <GameTuneField
-            key={value.key}
-            label={valueLabel(value)}
-            value={value}
-            was={tuned ? value.default : undefined}
-            disabled={disabled}
-            onChange={(next) => tuneStageValue(thing.id, value.key, next)}
-            onCommit={(next, how) => save(thing.id, { ...value, value: next }, how)}
-            onReset={tuned ? () => putBack(thing, value, save) : undefined}
-          />
-        );
-      })}
-    </div>
+    <Workbench.Section
+      title={thing.name}
+      label={`${thing.name}'s values`}
+      detail={
+        thing.instance !== undefined
+          ? `One of ${thing.instance.count}; its values are the group's`
+          : (thing.instances ?? 0) > 1
+            ? `All ${thing.instances}`
+            : KIND_GROUPS.find((group) => group.kind === thing.kind)?.label
+      }
+      aside={
+        tuned.length === 0 ? undefined : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  aria-label={`Put ${thing.name}'s values back to the game's own`}
+                  onClick={() => {
+                    for (const value of tuned) putBack(thing, value, save);
+                  }}
+                />
+              }
+            >
+              <RotateCcwIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup side="left">Put {thing.name}'s values back</TooltipPopup>
+          </Tooltip>
+        )
+      }
+    >
+      {values.length === 0 ? (
+        <Text variant="meta" tone="muted" render={<p className="px-4 py-1" />}>
+          No values to tune. Your agent can expose some with ctx.tune.
+        </Text>
+      ) : (
+        values.map((value) => {
+          const changed = value.default !== undefined && value.default !== value.value;
+          return (
+            <GameTuneField
+              key={value.key}
+              label={valueLabel(value)}
+              value={value}
+              was={changed ? value.default : undefined}
+              disabled={disabled}
+              onChange={(next) => tuneStageValue(thing.id, value.key, next)}
+              onCommit={(next, how) => save(thing.id, { ...value, value: next }, how)}
+              onReset={changed ? () => putBack(thing, value, save) : undefined}
+            />
+          );
+        })
+      )}
+      <div className="px-4 pt-2 empty:hidden">
+        <ThingLook threadRef={threadRef} thing={thing} />
+      </div>
+    </Workbench.Section>
   );
 }
 
 /**
- * Only while something is tuned: how many values differ from the game's own, whether they are
- * saved, and putting them all back. Undo in the top bar takes a session of tuning back too.
+ * Only while something is tuned: how many values differ from the game's own and whether they are
+ * saved, Keep as a build, and putting them all back.
  */
 function TuneFooter({
   changed,
   changedCount,
   state,
   canSave,
+  onKeep,
   onRetry,
 }: {
   changed: ReadonlyArray<{
@@ -410,6 +418,7 @@ function TuneFooter({
   changedCount: number;
   state: SaveState;
   canSave: boolean;
+  onKeep: () => void;
   onRetry: () => void;
 }) {
   const save = use(TuneSave);
@@ -422,21 +431,33 @@ function TuneFooter({
         ? "Saves when the agent's turn ends"
         : state.kind === "failed"
           ? state.text
-          : "Saved in the game";
+          : state.kind === "kept"
+            ? "Kept as a build; your next change starts another"
+            : "Saved in the game as you let go; Undo takes it back";
   return (
-    <div className="flex shrink-0 flex-col gap-1 border-t border-border bg-background px-4 py-3">
-      <div className="flex items-center gap-2">
+    <div className="flex shrink-0 flex-col gap-2 border-t border-border px-4 py-3">
+      <div className="flex min-w-0 items-center gap-2">
         <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-live" />
-        <Text variant="meta" tone="default" render={<span className="min-w-0 flex-1" />}>
-          {changedCount === 1 ? "1 value tuned" : `${changedCount} values tuned`}
+        <Text variant="meta" tone="default" numeric render={<span className="shrink-0" />}>
+          {changedCount === 1 ? "1 changed" : `${changedCount} changed`}
         </Text>
+        <Text
+          variant="caption"
+          tone={state.kind === "failed" ? "destructive" : "muted"}
+          truncate
+          render={<span role={state.kind === "failed" ? "alert" : "status"} className="flex-1" />}
+        >
+          {said}
+        </Text>
+      </div>
+      <div className="flex items-center justify-end gap-1.5">
         {state.kind === "failed" ? (
-          <Button size="sm" variant="ghost" onClick={onRetry}>
+          <Button size="xs" variant="ghost" onClick={onRetry}>
             Try again
           </Button>
         ) : null}
         <Button
-          size="sm"
+          size="xs"
           variant="ghost"
           onClick={() => {
             for (const { thing, values } of changed)
@@ -445,113 +466,15 @@ function TuneFooter({
         >
           Put all back
         </Button>
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={!canSave || state.kind !== "saved"}
+          onClick={onKeep}
+        >
+          Keep as a build
+        </Button>
       </div>
-      <Text
-        variant="caption"
-        tone={state.kind === "failed" ? "destructive" : "muted"}
-        render={<p role={state.kind === "failed" ? "alert" : "status"} />}
-      >
-        {said}
-      </Text>
     </div>
-  );
-}
-
-const FEEL_W = 240;
-const FEEL_H = 36;
-
-/**
- * The pointed thing's ground speed over its last seconds, and its last jump in numbers: what a
- * tuned speed or jump did, without a stopwatch. Drawn only when the game sends a new trace.
- */
-function SelectedFeel({ threadKey }: { threadKey: string }) {
-  const selected = useThreadStageBridge(threadKey, (state) => state.selected, null);
-  const feel = selected?.trace?.feel;
-  if (selected === null || feel === undefined) return null;
-  const top = Math.max(feel.top, 0.1);
-  const step = feel.speeds.length > 1 ? FEEL_W / (feel.speeds.length - 1) : 0;
-  const line = feel.speeds
-    .map(
-      (speed, i) =>
-        `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)} ${(FEEL_H - (Math.min(speed, top) / top) * FEEL_H).toFixed(1)}`,
-    )
-    .join(" ");
-  const jump = feel.jumps.at(-1);
-  return (
-    <Workbench.Section
-      title="Feel"
-      detail={`${selected.thing.name}'s ground speed over its last seconds`}
-      aside={
-        <Text variant="caption" tone="muted" numeric>
-          top {feel.top.toFixed(1)} m/s
-        </Text>
-      }
-      className="border-b border-border"
-    >
-      <svg
-        viewBox={`0 0 ${FEEL_W} ${FEEL_H}`}
-        preserveAspectRatio="none"
-        className="h-9 w-full overflow-visible"
-        aria-hidden="true"
-      >
-        <path
-          d={line}
-          fill="none"
-          className="stroke-primary"
-          strokeWidth={1.5}
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      {jump === undefined ? null : (
-        <Text variant="meta" tone="muted" numeric render={<p />}>
-          Last jump {jump.height.toFixed(2)} m high, {jump.seconds.toFixed(2)} s in the air,{" "}
-          {jump.distance.toFixed(1)} m long
-        </Text>
-      )}
-    </Workbench.Section>
-  );
-}
-
-/** Builds that kept values from the Stage, newest first: each tuning session is one. */
-const keptValuesBuilds = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
-  AsyncResult.isSuccess(result)
-    ? result.value.builds.filter(
-        (build) => build.source._tag === "saved" && build.source.edit === "values",
-      )
-    : null;
-
-/** The values kept as builds and when: a tuning session is one build, which Undo takes back. */
-function KeptValues({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const kept = useEnvironmentQuerySelector(
-    gameEnvironment.builds({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-    keptValuesBuilds,
-  );
-  if (kept == null || kept.length === 0) return null;
-  return (
-    <Workbench.Section
-      title="Kept as builds"
-      detail="Each tuning session saves as one build: Undo takes it back."
-    >
-      <ul className="flex flex-col gap-1">
-        {kept.slice(0, 12).map((build) => (
-          <li key={build.id} className="flex min-w-0 flex-col">
-            <span className="flex items-baseline gap-2">
-              <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
-                {buildName(build)}
-              </Text>
-              <Text variant="caption" tone="muted" numeric>
-                {formatBuildTime(build.at)}
-              </Text>
-            </span>
-            <Text variant="caption" tone="muted" render={<span className="break-words" />}>
-              {build.summary}
-            </Text>
-          </li>
-        ))}
-      </ul>
-    </Workbench.Section>
   );
 }

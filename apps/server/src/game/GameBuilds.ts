@@ -71,7 +71,7 @@ import { availableEngine, engineCapabilities, engineProfile } from "./engineProf
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
-import { sameTuneFile, tuneChanges, tuneFileText, tuneFileWith } from "./gameTune.ts";
+import { sameTuneFile, tuneFileText, tuneFileWith } from "./gameTune.ts";
 import { readTry, triesInRefs } from "./gameTries.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
@@ -207,7 +207,7 @@ export class GameBuilds extends Context.Service<
       a: GameBuildRef,
       b: GameBuildRef,
     ) => Effect.Effect<GameBuildComparison, GameOperationError>;
-    /** Every file the build changed from its base, and the tuned values among them. */
+    /** Every file the build changed from its base, with its lines added and removed. */
     readonly changes: (
       threadId: ThreadId,
       build: GameBuildId,
@@ -1260,37 +1260,27 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const row = yield* rowOf(g, id, yield* allEntries(g, 50, undefined));
-      if (row.base === null) return { files: row.files, count: row.fileCount, tunes: [] };
-      const between = (format: "numstat" | "patch", filePaths?: ReadonlyArray<string>) =>
-        checkpoints
-          .diffCheckpoints({
-            cwd: g.root,
-            fromCheckpointRef: CheckpointRef.make(row.base!),
-            toCheckpointRef: CheckpointRef.make(id),
-            ignoreWhitespace: false,
-            format,
-            relative: true,
-            ...(filePaths === undefined ? {} : { filePaths }),
-          })
-          .pipe(Effect.orElseSucceed(() => null));
-      const numstat = yield* between("numstat");
-      if (numstat === null) return { files: row.files, count: row.fileCount, tunes: [] };
+      if (row.base === null) return { files: row.files, count: row.fileCount };
+      const numstat = yield* checkpoints
+        .diffCheckpoints({
+          cwd: g.root,
+          fromCheckpointRef: CheckpointRef.make(row.base),
+          toCheckpointRef: CheckpointRef.make(id),
+          ignoreWhitespace: false,
+          format: "numstat",
+          relative: true,
+        })
+        .pipe(Effect.orElseSucceed(() => null));
+      if (numstat === null) return { files: row.files, count: row.fileCount };
       const files = parseTurnDiffFilesFromNumstat(numstat).filter((file) =>
         isRestored(g.lane)(file.path),
       );
-      const tuneFile = isAvailableEngine(g.engine) ? engineProfile(g.engine).tuneFile : null;
-      const tunePath = tuneFile === null ? null : `${g.lane}/${tuneFile}`;
-      const patch =
-        tunePath !== null && files.some((file) => file.path === tunePath)
-          ? yield* between("patch", [tunePath])
-          : null;
       return {
         files: files
           .toSorted((a, b) => b.additions + b.deletions - (a.additions + a.deletions))
           .slice(0, 300)
           .map(({ path, additions, deletions }) => ({ path, additions, deletions })),
         count: files.length,
-        tunes: patch === null ? [] : tuneChanges(patch).slice(0, 200),
       };
     });
 

@@ -29,8 +29,8 @@ export type GameStageRequest =
   | { readonly kind: "export" }
   | { readonly kind: "generated-art" };
 
-/** The Workbench's tabs beside the game: the run, its values, its art, the build's checks, history, decisions. */
-export const WORKBENCH_TABS = ["run", "tune", "art", "checks", "history", "decisions"] as const;
+/** The Workbench's sections beside the game: its values, its art, the build's checks, its page's log, decisions. */
+export const WORKBENCH_TABS = ["tune", "art", "checks", "debug", "decisions"] as const;
 export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];
 const isWorkbenchTab = (tab: unknown): tab is WorkbenchTab =>
   (WORKBENCH_TABS as ReadonlyArray<unknown>).includes(tab);
@@ -71,9 +71,15 @@ interface GameWorkspaceStoreState {
   /** Off, then 3, 4 and 2 ways, then off again: the composer's chip, its key and the palette. */
   cycleTryWays: (threadKey: string) => void;
   clearTryWays: (threadKey: string) => void;
-  /** The Workbench tab last shown, for every game. */
+  /** The Workbench beside the game is open, for every game. */
+  workbenchOpen: boolean;
+  setWorkbenchOpen: (open: boolean) => void;
+  /** The Workbench section last shown, for every game. */
   workbenchTab: WorkbenchTab;
   setWorkbenchTab: (tab: WorkbenchTab) => void;
+  /** The builds strip under the Stage shows its pictures, rather than its one folded line. */
+  buildStripOpen: boolean;
+  setBuildStripOpen: (open: boolean) => void;
 }
 
 const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
@@ -95,8 +101,12 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setGameHidden: (hidden) => set({ gameHidden: hidden }),
       pauseWhenAway: true,
       setPauseWhenAway: (on) => set({ pauseWhenAway: on }),
-      workbenchTab: "run",
+      workbenchOpen: false,
+      setWorkbenchOpen: (open) => set({ workbenchOpen: open }),
+      workbenchTab: "tune",
       setWorkbenchTab: (tab) => set({ workbenchTab: tab }),
+      buildStripOpen: false,
+      setBuildStripOpen: (open) => set({ buildStripOpen: open }),
       tryWays: {},
       cycleTryWays: (threadKey) =>
         set((state) => {
@@ -121,7 +131,9 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         chatShare: state.chatShare,
         gameHidden: state.gameHidden,
         pauseWhenAway: state.pauseWhenAway,
+        workbenchOpen: state.workbenchOpen,
         workbenchTab: state.workbenchTab,
+        buildStripOpen: state.buildStripOpen,
       }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
@@ -130,7 +142,9 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           chatShare: clampGameChatShare(saved?.chatShare ?? current.chatShare),
           gameHidden: saved?.gameHidden === true,
           pauseWhenAway: saved?.pauseWhenAway !== false,
-          workbenchTab: isWorkbenchTab(saved?.workbenchTab) ? saved.workbenchTab : "run",
+          workbenchOpen: saved?.workbenchOpen === true,
+          workbenchTab: isWorkbenchTab(saved?.workbenchTab) ? saved.workbenchTab : "tune",
+          buildStripOpen: saved?.buildStripOpen === true,
         };
       },
     },

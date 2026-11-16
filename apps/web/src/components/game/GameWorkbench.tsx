@@ -1,45 +1,43 @@
 import type { ScopedThreadRef } from "@kurambit/contracts";
-import {
-  ActivityIcon,
-  ClipboardCheckIcon,
-  HistoryIcon,
-  NotebookPenIcon,
-  PaletteIcon,
-  SlidersHorizontalIcon,
-} from "lucide-react";
-import type { ReactNode } from "react";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
+import { isElectron } from "../../env";
 import { useGameWorkspaceStore, type WorkbenchTab, WORKBENCH_TABS } from "../../gameWorkspaceStore";
+import { cn } from "../../lib/utils";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
+import { Text } from "../ui/text";
 import { GameDecisionsPanel } from "./GameDecisions";
-import { GameBuildDetail, GameLookPanel } from "./GameInspector";
+import { GameLookPanel } from "./GameInspector";
 import { GameTunePanel } from "./GameTune";
-import { GameWorkbenchHistory } from "./GameWorkbenchHistory";
-import { GameWorkbenchRun } from "./GameWorkbenchRun";
+import { GameWorkbenchChecks } from "./GameWorkbenchChecks";
+import { GameWorkbenchDebug } from "./GameWorkbenchDebug";
+import { useStageConsoleCount } from "./gameStageWatch";
 
-const TAB: Record<WorkbenchTab, { readonly label: string; readonly icon: ReactNode }> = {
-  run: { label: "Run", icon: <ActivityIcon aria-hidden="true" /> },
-  tune: { label: "Tune", icon: <SlidersHorizontalIcon aria-hidden="true" /> },
-  art: { label: "Art", icon: <PaletteIcon aria-hidden="true" /> },
-  checks: { label: "Checks", icon: <ClipboardCheckIcon aria-hidden="true" /> },
-  history: { label: "History", icon: <HistoryIcon aria-hidden="true" /> },
-  decisions: { label: "Decisions", icon: <NotebookPenIcon aria-hidden="true" /> },
+const LABEL: Record<WorkbenchTab, string> = {
+  tune: "Tune",
+  art: "Art",
+  checks: "Checks",
+  debug: "Debug",
+  decisions: "Decisions",
 };
 
 const isTab = (value: unknown): value is WorkbenchTab =>
   (WORKBENCH_TABS as ReadonlyArray<unknown>).includes(value);
 
 /**
- * The game's Workbench, beside the Stage: the run being played, its values, its art, the build's
- * checks, its history and the decisions every session reads. Only the open tab is mounted, so a
- * tab out of sight costs nothing.
+ * The game's Workbench, a side panel of its own beside the game's column: one slim switch over
+ * Tune, Art, Checks, Debug and Decisions. Only the open section is mounted, so one out of sight
+ * costs nothing. `ownsTitleBarEnd`: nothing sits to its right, so on the desktop its top row runs
+ * under the window's own controls.
  */
 export function GameWorkbench({
   threadRef,
   onAsk,
+  ownsTitleBarEnd,
 }: {
   threadRef: ScopedThreadRef;
   onAsk: (text: string) => void;
+  ownsTitleBarEnd: boolean;
 }) {
   const tab = useGameWorkspaceStore((state) => state.workbenchTab);
   const setTab = useGameWorkspaceStore((state) => state.setWorkbenchTab);
@@ -49,39 +47,79 @@ export function GameWorkbench({
       onValueChange={(next) => {
         if (isTab(next)) setTab(next);
       }}
-      className="@container/workbench flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="shrink-0 border-b border-border px-2 py-2">
-        <TabsList aria-label="Workbench" className="w-full">
+      <div
+        className={cn(
+          "flex h-(--workspace-topbar-height) shrink-0 items-center px-2",
+          isElectron && "drag-region",
+          ownsTitleBarEnd && "wco:pr-(--workspace-native-controls-inset)",
+        )}
+      >
+        <TabsList aria-label="Workbench" className="w-full [-webkit-app-region:no-drag]">
           {WORKBENCH_TABS.map((value) => (
-            // Names always; their icons join once the panel has the room. Each takes its name's
-            // width, so the longest ("Decisions") fits a narrow panel whole.
-            <TabsTab key={value} value={value} className="flex-auto">
-              <span className="hidden @[34rem]/workbench:contents">{TAB[value].icon}</span>
-              {TAB[value].label}
+            <TabsTab key={value} value={value}>
+              {LABEL[value]}
+              {value === "debug" ? <DebugCount threadRef={threadRef} /> : null}
             </TabsTab>
           ))}
         </TabsList>
       </div>
-      <TabsPanel value="run" className="flex min-h-0 flex-1 flex-col">
-        <GameWorkbenchRun threadRef={threadRef} />
-      </TabsPanel>
       <TabsPanel value="tune" className="flex min-h-0 flex-1 flex-col">
         <GameTunePanel threadRef={threadRef} onAsk={onAsk} />
       </TabsPanel>
-      {/* The game's look, characters and generated art, as the Look panel had them. */}
       <TabsPanel value="art" className="flex min-h-0 flex-1 flex-col">
         <GameLookPanel threadRef={threadRef} />
       </TabsPanel>
       <TabsPanel value="checks" className="flex min-h-0 flex-1 flex-col">
-        <GameBuildDetail threadRef={threadRef} />
+        <GameWorkbenchChecks threadRef={threadRef} />
       </TabsPanel>
-      <TabsPanel value="history" className="flex min-h-0 flex-1 flex-col">
-        <GameWorkbenchHistory threadRef={threadRef} />
+      <TabsPanel value="debug" className="flex min-h-0 flex-1 flex-col">
+        <GameWorkbenchDebug threadRef={threadRef} />
       </TabsPanel>
       <TabsPanel value="decisions" className="flex min-h-0 flex-1 flex-col">
         <GameDecisionsPanel threadRef={threadRef} />
       </TabsPanel>
     </Tabs>
+  );
+}
+
+/** The page's errors and warnings so far, in the colours the log gives them; nothing when none. */
+function DebugCount({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const threadKey = scopedThreadKey(threadRef);
+  const errors = useStageConsoleCount(threadKey, "error");
+  const warnings = useStageConsoleCount(threadKey, "warn");
+  if (errors === 0 && warnings === 0) return null;
+  return (
+    <span
+      className="flex items-center gap-1"
+      aria-label={[
+        errors === 0 ? null : `${errors} ${errors === 1 ? "error" : "errors"}`,
+        warnings === 0 ? null : `${warnings} ${warnings === 1 ? "warning" : "warnings"}`,
+      ]
+        .filter((part) => part !== null)
+        .join(", ")}
+    >
+      {errors === 0 ? null : (
+        <Text
+          variant="caption"
+          tone="inherit"
+          numeric
+          render={<span className="text-destructive-foreground" />}
+        >
+          {errors}
+        </Text>
+      )}
+      {warnings === 0 ? null : (
+        <Text
+          variant="caption"
+          tone="inherit"
+          numeric
+          render={<span className="text-warning-foreground" />}
+        >
+          {warnings}
+        </Text>
+      )}
+    </span>
   );
 }

@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { create } from "zustand";
+import { useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { type GameBuildId, type GamePlayOutcome, type ScopedThreadRef } from "@kurambit/contracts";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -7,7 +6,6 @@ import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { attachRunToComposer } from "./gameComposerContext";
 import type { StudioMessage } from "./GamePlaySurface";
-import type { StageRewind } from "./GameRunTimeline";
 
 export interface EndedRun {
   readonly kept: string;
@@ -78,46 +76,3 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
 }
 
 export type StageRuns = ReturnType<typeof useStageRuns>;
-
-/**
- * The Stage's runs and rewind as the Workbench's Run tab reads them: the Stage owns both (its game
- * frame posts the runs), and publishes them here per thread so the right panel needs no props
- * threaded through ChatView. In memory only; gone with the Stage.
- */
-export interface StageRunSession {
-  readonly runs: StageRuns;
-  readonly rewind: StageRewind;
-  /** Says how a save went, in the Stage's status line. */
-  readonly onNote: (text: string) => void;
-  /** Gives the game the keyboard: playing on from a rewind is playing. */
-  readonly onFocusGame: () => void;
-}
-
-const useRunSessions = create<Readonly<Record<string, StageRunSession>>>()(() => ({}));
-
-/** Publishes the Stage's runs and rewind each time what they show changes. */
-export function usePublishStageRuns(threadKey: string, session: StageRunSession) {
-  const { ended, lastEnded } = session.runs;
-  const { timeline, notice, busy, side } = session.rewind;
-  // The latest handlers; the state fields below are what make a new session worth publishing.
-  const read = useStableCallback(() => session);
-  useEffect(() => {
-    const now = read();
-    useRunSessions.setState({
-      [threadKey]: {
-        ...now,
-        runs: { ...now.runs, ended, lastEnded },
-        rewind: { ...now.rewind, timeline, notice, busy, side },
-      },
-    });
-    // Gone with the Stage; a newer publish replaces it in the same commit.
-    return () =>
-      useRunSessions.setState((all) => {
-        const { [threadKey]: _gone, ...rest } = all;
-        return rest;
-      }, true);
-  }, [threadKey, read, ended, lastEnded, timeline, notice, busy, side]);
-}
-
-export const useStageRunSession = (threadKey: string): StageRunSession | null =>
-  useRunSessions((all) => all[threadKey] ?? null);

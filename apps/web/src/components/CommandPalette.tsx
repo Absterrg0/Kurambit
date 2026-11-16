@@ -2,7 +2,7 @@
 
 import { showOpenGameDialog, useNewGame } from "./game/gameEntryStore";
 import { useTurnUndo } from "./game/useBuildActions";
-import { showWorkbench, toggleWorkbench } from "./game/gameRightPanel";
+import { showWorkbench, toggleWorkbench } from "./game/gameWorkbenchPanel";
 
 /** The Workbench's tabs as the palette finds them. */
 const WORKBENCH_PALETTE: ReadonlyArray<{
@@ -10,11 +10,6 @@ const WORKBENCH_PALETTE: ReadonlyArray<{
   readonly title: string;
   readonly searchTerms: ReadonlyArray<string>;
 }> = [
-  {
-    tab: "run",
-    title: "Run",
-    searchTerms: ["run", "rewind", "timeline", "values", "console", "errors", "logs", "test play"],
-  },
   {
     tab: "tune",
     title: "Tune",
@@ -37,12 +32,15 @@ const WORKBENCH_PALETTE: ReadonlyArray<{
       "recordings",
       "measure",
       "what changed",
+      "diff",
+      "saved plays",
+      "test play",
     ],
   },
   {
-    tab: "history",
-    title: "History",
-    searchTerms: ["history", "builds", "undo", "redo", "compare", "versions", "try", "keep"],
+    tab: "debug",
+    title: "Debug",
+    searchTerms: ["debug", "console", "errors", "warnings", "logs", "values", "watch"],
   },
   {
     tab: "decisions",
@@ -1654,7 +1652,7 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["workbench", "panel", "inspector", "hide", "show", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "game.workbench.toggle",
-      run: async () => toggleWorkbench(threadRef),
+      run: async () => toggleWorkbench(),
     });
     for (const tab of WORKBENCH_PALETTE) {
       actionItems.push({
@@ -1663,9 +1661,20 @@ function OpenCommandPaletteDialog(props: {
         title: `Workbench: ${tab.title}`,
         searchTerms: ["workbench", "game", ...tab.searchTerms],
         icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
-        run: async () => showWorkbench(threadRef, tab.tab),
+        run: async () => showWorkbench(tab.tab),
       });
     }
+    actionItems.push({
+      kind: "action",
+      value: "action:game-toggle-builds",
+      title: "Show or fold the builds",
+      searchTerms: ["builds", "history", "undo", "redo", "compare", "versions", "try", "keep"],
+      icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const store = useGameWorkspaceStore.getState();
+        store.setBuildStripOpen(!store.buildStripOpen);
+      },
+    });
     const requestStage = (request: GameStageRequest) => async () => {
       useGameWorkspaceStore.getState().requestStage(request);
     };

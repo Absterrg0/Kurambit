@@ -1,22 +1,33 @@
 import { useEffect, useRef, useState } from "react";
 import { Slider } from "@base-ui/react/slider";
+import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import type { GamePlay, ScopedThreadRef } from "@kurambit/contracts";
+import { FlagIcon, MessageSquarePlusIcon } from "lucide-react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn } from "../../lib/utils";
+import { gameEnvironment } from "../../state/game";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { attachRunToComposer } from "./gameComposerContext";
 import type { StudioMessage } from "./GamePlaySurface";
 import {
   replayStageRun,
+  requestStageRun,
   startStageFresh,
   takeStageRun,
   toggleStageFreeze,
   useStageBridge,
   useThreadStageBridge,
 } from "./gameStageBridge";
+import type { StageRuns } from "./useStageRuns";
 import {
   canCompare,
   clockLabel,
@@ -246,26 +257,55 @@ const stepsAt = (timeline: Timeline) =>
 export type StageRewind = ReturnType<typeof useStageRewind>;
 
 /**
- * The run's timeline, in the Workbench's Run tab: a scrubber over its seconds with its losses and
- * its ending marked. Dragging shows the second; letting go replays the run to it, frozen there.
- * Redraws only on input.
+ * The run's scrubber in the Stage's control bar, the way a video player's is: shown while the game
+ * is paused or a run has ended, its deaths and its ending marked. Dragging shows the second;
+ * letting go replays the run to it, frozen there, and playing on forks it. After a fork, "As it
+ * was" and "With the change" replay the seconds after it. Beside it, the run goes to the agent or
+ * is saved as a test play. Redraws only on input.
  */
-export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
+export function GameRunScrubber({
+  threadRef,
+  rewind,
+  runs,
+  onNote,
+}: {
+  threadRef: ScopedThreadRef;
+  rewind: StageRewind;
+  runs: StageRuns;
+  /** Says how a save went, in the Stage's status. */
+  onNote: (text: string) => void;
+}) {
   const { timeline, busy } = rewind;
+  const tellsRuns = useThreadStageBridge(
+    scopedThreadKey(threadRef),
+    (state) => state.status === "ready" && state.capabilities.includes("runs"),
+    false,
+  );
   const [dragging, setDragging] = useState<number | null>(null);
   if (timeline === null) return null;
   const length = Math.max(playSeconds(timeline.play), 0.1);
   const at = dragging ?? busy ?? timeline.at ?? length;
   const marks = runTimelineMarks(timeline.play);
-  const every = length > 120 ? 30 : length > 30 ? 10 : 5;
-  const ticks = Array.from({ length: Math.floor(length / every) }, (_, i) => (i + 1) * every);
+  const ended = runs.ended;
+  const tell = async () => {
+    // A paused run is asked of the game first; it answers with the run (useStageRuns).
+    if (ended === null) {
+      requestStageRun();
+      return;
+    }
+    await attachRunToComposer(threadRef, {
+      kept: ended.kept,
+      outcome: ended.outcome,
+      paused: false,
+    });
+  };
   return (
-    <div className="flex w-full min-w-0 items-center gap-2" data-game-run-timeline="">
-      <Text variant="caption" tone="default" numeric render={<span className="w-9 shrink-0" />}>
+    <div className="flex min-w-0 flex-1 items-center gap-2" data-game-run-scrubber="">
+      <Text variant="caption" tone="default" numeric render={<span className="shrink-0" />}>
         {clockLabel(at)}
       </Text>
       <Slider.Root
-        className="min-w-0 flex-1"
+        className="min-w-12 flex-1"
         value={Math.min(at, length)}
         min={0}
         max={length}
@@ -282,22 +322,15 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
         }}
         aria-label="Rewind the run to a second"
       >
-        <Slider.Control className="flex h-6 w-full touch-none items-center">
-          <Slider.Track className="relative h-1 w-full rounded-full bg-muted">
-            {ticks.map((second) => (
-              <span
-                key={second}
-                aria-hidden="true"
-                className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-border"
-                style={{ left: `${(second / length) * 100}%` }}
-              />
-            ))}
+        <Slider.Control className="flex h-8 w-full touch-none items-center">
+          <Slider.Track className="relative h-1 w-full rounded-full bg-foreground/12">
+            <Slider.Indicator className="rounded-full bg-foreground/30" />
             {timeline.fork === null ? null : (
               <TimelineMark
                 seconds={timeline.fork.seconds}
                 length={length}
                 label="went on from here"
-                className="h-3 w-0.5 bg-live"
+                className="h-3 w-0.5 rounded-full bg-live"
               />
             )}
             {marks.map((mark) => (
@@ -307,7 +340,7 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
                 length={length}
                 label={mark.label}
                 className={cn(
-                  "size-2 rounded-full ring-2 ring-background",
+                  "size-1.5 rounded-full ring-2 ring-background",
                   mark.kind === "won"
                     ? "bg-success"
                     : mark.kind === "loss"
@@ -316,23 +349,174 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
                 )}
               />
             ))}
-            <Slider.Thumb className="size-3 rounded-full bg-foreground shadow-sm ring-2 ring-background outline-none focus-visible:ring-ring" />
+            <Slider.Thumb className="size-3 rounded-full bg-strong-foreground shadow-sm ring-2 ring-background outline-none focus-visible:ring-ring" />
           </Slider.Track>
         </Slider.Control>
       </Slider.Root>
-      <Text
-        variant="caption"
-        tone="muted"
-        numeric
-        render={<span className="w-9 shrink-0 text-end" />}
-      >
+      <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
         {clockLabel(length)}
       </Text>
+      {rewind.comparable ? (
+        <ToggleGroup
+          aria-label="Compare the seconds after the fork"
+          variant="segmented"
+          size="xs"
+          className="shrink-0"
+          value={rewind.side === null ? [] : [rewind.side]}
+          disabled={busy !== null}
+          onValueChange={(value) => {
+            const next = value[0] === "before" || value[0] === "after" ? value[0] : rewind.side;
+            if (next !== null) void rewind.compare(next);
+          }}
+        >
+          <Toggle value="before">As it was</Toggle>
+          <Toggle value="after">With the change</Toggle>
+        </ToggleGroup>
+      ) : null}
+      <span className="flex shrink-0 items-center">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Tell the agent about this run"
+                disabled={busy !== null || (ended === null && !tellsRuns)}
+                onClick={() => void tell()}
+              />
+            }
+          >
+            <MessageSquarePlusIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-xs">
+            <span className="flex flex-col gap-1">
+              <TooltipLabel>Tell the agent about this run</TooltipLabel>
+              <span className="text-muted-foreground">
+                Its input and frame go in your next message
+              </span>
+            </span>
+          </TooltipPopup>
+        </Tooltip>
+        <SaveTestPlay threadRef={threadRef} runs={runs} onNote={onNote} />
+      </span>
     </div>
   );
 }
 
-/** One mark on the timeline, named on hover: a loss, the ending, the second the run went on from. */
+/** Saves the run that just ended as a test play every build replays, under a name. */
+function SaveTestPlay({
+  threadRef,
+  runs,
+  onNote,
+}: {
+  threadRef: ScopedThreadRef;
+  runs: StageRuns;
+  onNote: (text: string) => void;
+}) {
+  const savePlay = useAtomCommand(gameEnvironment.savePlay, { reportFailure: false });
+  const canSave = useAtomValue(gameEnvironment.savePlay.permissionAtom(threadRef.environmentId));
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const ended = runs.ended;
+  if (!canSave) return null;
+  const save = async () => {
+    if (ended === null) return;
+    setSaving(true);
+    setFailed(null);
+    // The save replays the run once on its own build first, which takes a moment.
+    const result = await savePlay({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, name: name.trim(), kept: ended.kept },
+    });
+    setSaving(false);
+    if (result._tag === "Failure") {
+      setFailed(String(squashAtomCommandFailure(result)));
+      return;
+    }
+    setOpen(false);
+    setName("");
+    runs.saved();
+    onNote(
+      `${result.value.replaced ? "Replaced" : "Saved"} "${result.value.name}" as a test play: every build replays it, in Checks.`,
+    );
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // A first win is offered under its own name.
+        if (next && name === "" && ended?.firstWin === true) setName("first win");
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Save as test play"
+                  disabled={ended === null}
+                />
+              }
+            />
+          }
+        >
+          <FlagIcon
+            aria-hidden="true"
+            className={ended?.firstWin === true ? "text-live" : undefined}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top" className="max-w-xs">
+          <span className="flex flex-col gap-1">
+            <TooltipLabel>Save as test play</TooltipLabel>
+            <span className="text-muted-foreground">
+              {ended === null
+                ? "Play the run to its end first"
+                : ended.firstWin
+                  ? "Your first win: every build replays it and says if it still ends the same"
+                  : "Every build replays it and says if it still ends the same"}
+            </span>
+          </span>
+        </TooltipPopup>
+      </Tooltip>
+      <PopoverPopup side="top" align="end" padding="compact" width="sm">
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save();
+          }}
+        >
+          <Input
+            size="sm"
+            value={name}
+            maxLength={60}
+            autoFocus
+            disabled={saving}
+            placeholder="Name this run"
+            aria-label="Name this run"
+            onChange={(event) => setName(event.currentTarget.value)}
+          />
+          {failed === null ? null : (
+            <Text variant="caption" tone="destructive" render={<p role="alert" />}>
+              {failed}
+            </Text>
+          )}
+          <Button size="sm" type="submit" disabled={saving || name.trim().length === 0}>
+            {saving ? "Checking it replays the same…" : "Save as test play"}
+          </Button>
+        </form>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+/** One mark on the scrubber, named on hover: a loss, the ending, the second the run went on from. */
 function TimelineMark({
   seconds,
   length,
@@ -356,25 +540,5 @@ function TimelineMark({
       />
       <TooltipPopup side="top">{`${clockLabel(seconds)} ${label}`}</TooltipPopup>
     </Tooltip>
-  );
-}
-
-/** "As it was" and "With the change" at a fork: each replays the seconds after it. */
-export function GameRunCompare({ rewind }: { rewind: StageRewind }) {
-  if (!rewind.comparable) return null;
-  return (
-    <ToggleGroup
-      aria-label="Compare the seconds after the fork"
-      variant="segmented"
-      value={rewind.side === null ? [] : [rewind.side]}
-      disabled={rewind.busy !== null}
-      onValueChange={(value) => {
-        const next = value[0] === "before" || value[0] === "after" ? value[0] : rewind.side;
-        if (next !== null) void rewind.compare(next);
-      }}
-    >
-      <Toggle value="before">As it was</Toggle>
-      <Toggle value="after">With the change</Toggle>
-    </ToggleGroup>
   );
 }

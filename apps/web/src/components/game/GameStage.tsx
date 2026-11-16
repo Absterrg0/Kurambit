@@ -1,8 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameRightPanel";
+import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
 import { GameStagePlayControls, GameStageViewControls } from "./GameStageControls";
 import { GameKeepGoingButton } from "./GameKeepGoingButton";
 import {
@@ -19,7 +18,6 @@ import {
   PanelTopOpenIcon,
   PencilIcon,
   PlayIcon,
-  Redo2Icon,
   RefreshCwIcon,
   TriangleAlertIcon,
   Undo2Icon,
@@ -57,8 +55,8 @@ import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { usePublishStageRuns, useStageRuns } from "./useStageRuns";
-import { useStageRewind } from "./GameRunTimeline";
+import { useStageRuns } from "./useStageRuns";
+import { GameRunScrubber, useStageRewind } from "./GameRunTimeline";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
@@ -85,13 +83,12 @@ import {
   MenuShortcut,
   MenuTrigger,
 } from "../ui/menu";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Skeleton } from "../ui/skeleton";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
-import { GameBuildHistory, type GameBuildSlot, type GameStripRequest } from "./GameBuildHistory";
+import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
 import { GameControlsMenu } from "./GameControlsMenu";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -410,10 +407,11 @@ function ThreadGameStage({
   const setGameHidden = useGameWorkspaceStore((state) => state.setGameHidden);
   const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
   const setPauseWhenAway = useGameWorkspaceStore((state) => state.setPauseWhenAway);
-  const panelOpen = useRightPanelStore(
-    (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
-  );
-  const workbenchShown = useWorkbenchShown(threadRef);
+  const workbenchShown = useWorkbenchShown();
+  // A panel to the column's right takes the title bar's end, under the desktop window controls.
+  const panelOpen =
+    useRightPanelStore((state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true) ||
+    workbenchShown;
   const workbenchTab = useGameWorkspaceStore((state) => state.workbenchTab);
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
@@ -446,7 +444,6 @@ function ThreadGameStage({
   const [mountRequestN] = useState(stageRequest?.n ?? 0);
   const [timelineRequest, setTimelineRequest] = useState<GameStripRequest | null>(null);
   const [reelOpen, setReelOpen] = useState(false);
-  const [buildsOpen, setBuildsOpen] = useState(false);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const threadKey = scopedThreadKey(threadRef);
@@ -535,7 +532,6 @@ function ThreadGameStage({
   });
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
-  const folderName = useEnvironmentQuerySelector(buildsAtom, folderBuildName);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
   const folderDoesNotStart = useEnvironmentQuerySelector(buildsAtom, folderDoesNotStartOf) === true;
   const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
@@ -819,7 +815,7 @@ function ThreadGameStage({
         setExportOpen(true);
         return;
       case "generated-art":
-        showWorkbench(threadRef, "art");
+        showWorkbench("art");
         return;
     }
   });
@@ -853,13 +849,6 @@ function ThreadGameStage({
     const key = frameFold?.key ?? "";
     setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
   });
-  // The Workbench's Run tab reads the runs and rewind this Stage owns.
-  usePublishStageRuns(threadKey, {
-    runs,
-    rewind,
-    onNote: setMessage,
-    onFocusGame: () => handleRequest({ kind: "focus" }, Date.now()),
-  });
   // Pointing at a thing on the Stage opens its values in the Workbench's Tune tab.
   const selectedThing = useThreadStageBridge(
     threadKey,
@@ -867,8 +856,7 @@ function ThreadGameStage({
     null,
   );
   useEffect(() => {
-    if (selectedThing !== null) showWorkbench(threadRef, "tune");
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a new pick opens Tune; the ref is the thread's.
+    if (selectedThing !== null) showWorkbench("tune");
   }, [selectedThing]);
   const takesRuns = useThreadStageBridge(
     threadKey,
@@ -1225,6 +1213,29 @@ function ThreadGameStage({
         ? `${turnUndo.action.kind === "redo" ? "Redoing" : turnUndo.action.kind === "undo" ? "Undoing" : "Going back to"} ${buildPhrase(buildName(turnUndo.view.build))}…`
         : null,
   });
+  // Paused or at a run's end, the bar shows the run's scrubber, like a video player's.
+  const scrubbing =
+    !collapsed &&
+    stageKind === "live" &&
+    playTarget === null &&
+    compare === null &&
+    rewind.timeline !== null &&
+    (frozen || runs.ended !== null || rewind.busy !== null);
+  // What the last rewind or compare found, said after the line's own news while the scrubber shows.
+  const shownStatus: ReadonlyArray<GameStatusPart> =
+    scrubbing && rewind.notice !== null
+      ? [
+          ...statusLine,
+          {
+            text: rewind.notice.text,
+            dot: null,
+            strong: false,
+            since: null,
+            hint: null,
+            short: null,
+          },
+        ]
+      : statusLine;
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking
@@ -1327,7 +1338,7 @@ function ThreadGameStage({
                   <DownloadIcon />
                   Export…
                 </MenuItem>
-                <MenuItem onClick={() => showWorkbench(threadRef, "art")}>
+                <MenuItem onClick={() => showWorkbench("art")}>
                   <PaletteIcon />
                   Art…
                 </MenuItem>
@@ -1339,7 +1350,7 @@ function ThreadGameStage({
               </MenuPopup>
             </Menu>
           )}
-          <GameStatusLine status={statusLine} />
+          <GameStatusLine status={shownStatus} />
           {/* An earlier build on the Stage says so in the line it already has, and its way back
               sits beside it: nothing is inserted over the Stage, so the column never moves. */}
           {playTarget !== null ? (
@@ -1349,23 +1360,6 @@ function ThreadGameStage({
             </Button>
           ) : null}
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
-          <IconAction
-            label={undoLabel}
-            detail={undoDetail}
-            shortcut={undoKey}
-            disabled={!turnUndoAllowed("undo")}
-            onClick={() => handleRequest({ kind: "undo" }, 0)}
-          >
-            <Undo2Icon className="size-3.5" aria-hidden="true" />
-          </IconAction>
-          <IconAction
-            label={redoLabel}
-            shortcut={redoKey}
-            disabled={!turnUndoAllowed("redo")}
-            onClick={() => handleRequest({ kind: "redo" }, 0)}
-          >
-            <Redo2Icon className="size-3.5" aria-hidden="true" />
-          </IconAction>
           <Menu>
             <Tooltip>
               <TooltipTrigger
@@ -1483,7 +1477,7 @@ function ThreadGameStage({
                   variant="ghost"
                   aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
                   aria-pressed={workbenchShown}
-                  onClick={() => toggleWorkbench(threadRef)}
+                  onClick={() => toggleWorkbench()}
                 />
               }
             >
@@ -1694,68 +1688,21 @@ function ThreadGameStage({
               onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
               onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
             />
-            <GameControlsMenu
-              threadRef={threadRef}
-              playing={phase.kind === "playing" && compare === null}
-              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-            />
+            {/* Paused or ended, the run's scrubber takes the bar's room; the controls are play's. */}
+            {scrubbing ? null : (
+              <GameControlsMenu
+                threadRef={threadRef}
+                playing={phase.kind === "playing" && compare === null}
+                onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+              />
+            )}
           </>
         ) : null}
-        <span className="min-w-2 flex-1" />
-        <Popover open={buildsOpen} onOpenChange={setBuildsOpen}>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <PopoverTrigger
-                  render={
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label="Jump to a build"
-                      disabled={compare !== null}
-                    />
-                  }
-                />
-              }
-            >
-              <HistoryIcon aria-hidden="true" />
-              <Text variant="meta" tone="default" truncate>
-                {/* The folder may hold no build while builds exist (the only one undone). */}
-                {playTarget?.label ?? folderName ?? (hasBuild ? "Builds" : "No builds yet")}
-              </Text>
-              <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              <TooltipLabel>Jump to a build</TooltipLabel>
-            </TooltipPopup>
-          </Tooltip>
-          {/* Below the bar, over the chat: choosing a build never covers the game. */}
-          <PopoverPopup
-            side="bottom"
-            align="end"
-            padding="compact"
-            keepMounted
-            className="w-[min(28rem,calc(100vw-2rem))]"
-          >
-            <GameBuildHistory
-              threadRef={threadRef}
-              gameName={gameName}
-              playing={playTarget?.build ?? null}
-              slot={buildSlot}
-              request={timelineRequest}
-              reelOpen={reelOpen}
-              onPlay={(build) => void playBuild(build)}
-              onPlayUnlisted={(ref) => void playBuild(ref)}
-              onLive={backToLive}
-              onCompare={setCompare}
-              onInspect={(build) => {
-                // The Workbench's Checks tab, when open, follows the build jumped to.
-                inspectBuild({ threadKey, build: build.id, snapshot: build });
-                setBuildsOpen(false);
-              }}
-            />
-          </PopoverPopup>
-        </Popover>
+        {scrubbing ? (
+          <GameRunScrubber threadRef={threadRef} rewind={rewind} runs={runs} onNote={setMessage} />
+        ) : (
+          <span className="min-w-2 flex-1" />
+        )}
         {collapsed ? null : (
           <GameStageViewControls
             threadRef={threadRef}
@@ -1765,6 +1712,33 @@ function ThreadGameStage({
             onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
           />
         )}
+      </div>
+      <div className="mx-auto w-full shrink-0" style={{ maxWidth: column ?? undefined }}>
+        <GameBuildStrip
+          threadRef={threadRef}
+          gameName={gameName}
+          playing={playTarget?.build ?? null}
+          slot={buildSlot}
+          request={timelineRequest}
+          reelOpen={reelOpen}
+          undo={{
+            canUndo: turnUndoAllowed("undo"),
+            canRedo: turnUndoAllowed("redo"),
+            undoLabel,
+            redoLabel,
+            undoDetail,
+            undoKey,
+            redoKey,
+            onUndo: () => handleRequest({ kind: "undo" }, 0),
+            onRedo: () => handleRequest({ kind: "redo" }, 0),
+          }}
+          onPlay={(build) => void playBuild(build)}
+          onPlayUnlisted={(ref) => void playBuild(ref)}
+          onLive={backToLive}
+          onCompare={setCompare}
+          // Checks follows the build picked here.
+          onInspect={(build) => inspectBuild({ threadKey, build: build.id, snapshot: build })}
+        />
       </div>
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
@@ -1797,51 +1771,6 @@ function ThreadGameStage({
         </DialogPopup>
       </Dialog>
     </section>
-  );
-}
-
-/** A header icon button with its name in a tooltip. */
-function IconAction({
-  label,
-  detail = null,
-  shortcut = null,
-  disabled = false,
-  side = "bottom",
-  onClick,
-  children,
-}: {
-  label: string;
-  /** What it does, under its name and key in the tooltip, as a menu item's note. */
-  detail?: string | null;
-  /** Its key, shown in the tooltip beside the label. */
-  shortcut?: string | null;
-  disabled?: boolean;
-  side?: "top" | "bottom";
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={detail === null ? label : `${label}. ${detail}`}
-            disabled={disabled}
-            onClick={onClick}
-          />
-        }
-      >
-        {children}
-      </TooltipTrigger>
-      <TooltipPopup side={side} className="max-w-xs">
-        <span className="flex flex-col gap-1">
-          <TooltipLabel shortcut={shortcut}>{label}</TooltipLabel>
-          {detail === null ? null : <span className="text-muted-foreground">{detail}</span>}
-        </span>
-      </TooltipPopup>
-    </Tooltip>
   );
 }
 

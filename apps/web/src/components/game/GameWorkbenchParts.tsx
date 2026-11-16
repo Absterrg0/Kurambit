@@ -4,16 +4,17 @@ import { cn } from "../../lib/utils";
 import { Text } from "../ui/text";
 
 /**
- * The Workbench's slots, the way ComposerBanner composes: each owns its classes, so the tabs are
- * a few lines of slots and read as one panel.
+ * The Workbench's slots, the way ComposerBanner composes: each owns its classes, so every section
+ * is a few lines of slots on one grid. Text starts 16px in, rows are 28px, and headings, readings
+ * and their marks line up from section to section, as T3's own panels do.
  */
 
-/** A tab's scrolling body: the tab's sections, one under the other. */
+/** A section's scrolling body: its parts one under the other, parted by hairlines. */
 function Body({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 flex-col divide-y divide-border overflow-y-auto scrollbar-gutter-both",
+        "flex min-h-0 flex-1 flex-col divide-y divide-border overflow-y-auto pb-2",
         className,
       )}
       {...props}
@@ -21,36 +22,39 @@ function Body({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-/** A titled part of a tab. The heading reads above its content; `aside` sits at its right. */
+/**
+ * A titled part: its heading on one line with a quieter count after it and its actions at the
+ * right, its rows under it.
+ */
 function Section({
   title,
   detail,
   aside,
-  className,
+  label,
   children,
 }: {
   title: string;
-  /** One quieter line under the title: a count, what the section reads from. */
+  /** A count or a reading after the title, quieter. */
   detail?: ReactNode;
   aside?: ReactNode;
-  className?: string;
+  /** The section's accessible name, when the title alone is not enough. */
+  label?: string;
   children?: ReactNode;
 }) {
   return (
-    <section className={cn("flex flex-col gap-2.5 px-4 py-3.5", className)}>
-      <div className="flex flex-col gap-0.5">
-        <div className="flex min-h-6 items-center gap-2">
-          <Text variant="meta" tone="strong" emphasis render={<h3 className="min-w-0 flex-1" />}>
-            {title}
-          </Text>
-          {aside === undefined ? null : <span className="flex items-center gap-1">{aside}</span>}
-        </div>
-        {detail === undefined || detail === null ? null : typeof detail === "string" ? (
-          <Text variant="caption" tone="muted" numeric render={<p />}>
+    <section aria-label={label ?? title} className="flex flex-col py-1.5">
+      <div className="flex h-8 min-w-0 items-center gap-2 ps-4 pe-2">
+        <Text variant="meta" tone="strong" emphasis render={<h3 className="shrink-0" />}>
+          {title}
+        </Text>
+        {detail === undefined || detail === null || detail === "" ? null : (
+          <Text variant="caption" tone="muted" numeric truncate render={<span />}>
             {detail}
           </Text>
-        ) : (
-          detail
+        )}
+        <span className="flex-1" />
+        {aside === undefined ? null : (
+          <span className="flex shrink-0 items-center gap-0.5">{aside}</span>
         )}
       </div>
       {children}
@@ -59,8 +63,52 @@ function Section({
 }
 
 /**
- * What a tab will show once there is something to show: a calm sentence in the tab's own place,
- * never a lone line in a blank column.
+ * One row of a section: a mark in a fixed column, its name, a reading right-aligned in tabular
+ * figures, and an end slot that keeps its width so readings line up whether a row has one or not.
+ */
+function Row({
+  mark,
+  name,
+  reading,
+  end,
+  muted = false,
+  className,
+  ...props
+}: Omit<ComponentProps<"div">, "children"> & {
+  mark?: ReactNode;
+  name: ReactNode;
+  reading?: ReactNode;
+  end?: ReactNode;
+  muted?: boolean;
+}) {
+  return (
+    <div className={cn("flex h-7 min-w-0 items-center gap-2 ps-4 pe-2", className)} {...props}>
+      {mark === undefined ? null : (
+        <span className="flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5">
+          {mark}
+        </span>
+      )}
+      <Text
+        variant="meta"
+        tone={muted ? "muted" : "default"}
+        truncate
+        render={<span className="flex-1" />}
+      >
+        {name}
+      </Text>
+      {reading === undefined || reading === null ? null : (
+        <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
+          {reading}
+        </Text>
+      )}
+      <span className="flex w-6 shrink-0 items-center justify-end">{end}</span>
+    </div>
+  );
+}
+
+/**
+ * What a section shows once there is something to show: a small glyph, one title, a line of
+ * explanation and at most one way forward, in the section's own place.
  */
 function Empty({
   icon,
@@ -74,38 +122,19 @@ function Empty({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 py-10 text-center">
-      <span className="mb-1 grid size-9 place-items-center rounded-lg surface-well text-muted-foreground [&_svg]:size-4">
+    <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 py-10 text-center">
+      <span aria-hidden="true" className="mb-2 inline-flex text-dim-foreground [&_svg]:size-4">
         {icon}
       </span>
-      <Text variant="label" tone="strong" render={<p />}>
+      <Text variant="label" tone="default" render={<p />}>
         {title}
       </Text>
-      <Text variant="meta" tone="muted" render={<p className="max-w-72" />}>
+      <Text variant="body" tone="muted" render={<p className="max-w-72" />}>
         {body}
       </Text>
-      {action === undefined ? null : <div className="mt-2">{action}</div>}
+      {action === undefined ? null : <div className="mt-3">{action}</div>}
     </div>
   );
 }
 
-/** A label and its value on one line, the value right-aligned in tabular figures. */
-function Stat({ label, value, tone }: { label: string; value: ReactNode; tone?: "bad" }) {
-  return (
-    <div className="flex min-h-7 items-center gap-3">
-      <Text variant="meta" tone="muted" render={<span className="min-w-0 flex-1" />}>
-        {label}
-      </Text>
-      <Text
-        variant="meta"
-        tone={tone === "bad" ? "destructive" : "default"}
-        numeric
-        render={<span className="shrink-0" />}
-      >
-        {value}
-      </Text>
-    </div>
-  );
-}
-
-export const Workbench = { Body, Section, Empty, Stat };
+export const Workbench = { Body, Section, Row, Empty };
