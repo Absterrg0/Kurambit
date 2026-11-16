@@ -300,7 +300,7 @@ function ThingPicker({
           <Button
             size="sm"
             variant="ghost"
-            className="min-w-0"
+            className="min-w-0 shrink"
             aria-label={`${picked.name}, ${kindLabel(picked.kind)}: pick another thing`}
           />
         }

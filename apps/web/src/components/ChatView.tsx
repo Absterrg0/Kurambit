@@ -1,6 +1,6 @@
 import { GameStage } from "./game/GameStage";
 import { GameWorkbench } from "./game/GameWorkbench";
-import { toggleWorkbench } from "./game/gameWorkbenchPanel";
+import { fitSidePanels, toggleWorkbench, useRowWidth } from "./game/gameWorkbenchPanel";
 import { useStageSelectionChip } from "./game/gameComposerContext";
 import { stepStageFrame, toggleStageCannotLose, toggleStageDevView } from "./game/gameStageBridge";
 import { GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
@@ -1719,6 +1719,20 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
+  // With the Workbench and the right panel both open, both give way before the game's column does.
+  const workspaceRowWidth = useRowWidth(isGameThread ? workspaceLayoutElement : null);
+  const sidePanelsFit =
+    workspaceRowWidth !== null && workbenchOpen && rightPanelOpen && !rightPanelMaximized
+      ? fitSidePanels(workspaceRowWidth, workbenchInlineSize.width, previewPanelInlineSize.width)
+      : null;
+  const shownWorkbenchSize =
+    sidePanelsFit === null
+      ? workbenchInlineSize
+      : { ...workbenchInlineSize, width: sidePanelsFit.workbench };
+  const shownRightPanelSize =
+    sidePanelsFit === null
+      ? previewPanelInlineSize
+      : { ...previewPanelInlineSize, width: sidePanelsFit.right };
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPresentation, setThreadPanelPresentation] =
     useState<ThreadPanelPresentation>("inline");
@@ -8317,7 +8331,7 @@ export default function ChatView(props: ChatViewProps) {
         <PreviewPanelShell
           mode="inline"
           open={workbenchOpen && !rightPanelMaximized}
-          inlineSize={workbenchInlineSize}
+          inlineSize={shownWorkbenchSize}
         >
           <GameWorkbench
             threadRef={activeThreadRef}
@@ -8348,7 +8362,7 @@ export default function ChatView(props: ChatViewProps) {
           keybindings={keybindings}
           getShortcutContext={getShortcutContextStable}
           maximized={rightPanelMaximized}
-          inlineSize={previewPanelInlineSize}
+          inlineSize={shownRightPanelSize}
           surfaces={renderedRightPanelSurfaces}
           environmentId={activeThreadRef.environmentId}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}
