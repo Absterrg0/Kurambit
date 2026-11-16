@@ -4,6 +4,7 @@ import { expect, it } from "vite-plus/test";
 
 import { canCompare, compareReplays, resumeNotice, type RunFork } from "./gameStageRewind";
 
+const decodePlay = Schema.decodeUnknownOption(GamePlay);
 const still = { k: [], p: [], b: [], c: [], m: [0, 0, 0, 0, 0, 0] as const };
 const right = { ...still, k: ["ArrowRight"] };
 const mark = (t: number, x: number) => ({ t, at: [x, 0.5, 0] as const, values: { coins: t } });
@@ -40,7 +41,7 @@ const forked: GamePlay = {
 };
 
 it("a run with a tuned value decodes, so it reaches the Stage and the agent", () => {
-  expect(Schema.decodeUnknownOption(GamePlay)(forked)._tag).toBe("Some");
+  expect(decodePlay(forked)._tag).toBe("Some");
 });
 
 it("compares the fork's own next seconds without and with the values tuned there", () => {
