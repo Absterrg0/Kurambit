@@ -1173,7 +1173,7 @@ export const openWebPlaySession = async (input: {
           }
           if (keptStorage !== null && endedWith === null) {
             // Leaving the page fires pagehide as closing the tab would, so a game
-            // that saves then (the starter shell's progress does) has written it.
+            // that saves then (KEEP_ACROSS_RUNS progress does) has written it.
             await page
               .goto("about:blank", { timeout: PLAY_BOUNDS.webLeaveMs })
               .catch(() => undefined);

@@ -581,13 +581,14 @@ through `start`/`update`/`stop`, because fixed steps, seeded chance and recorded
 replays, the Stage's freeze and the QA play stand on. It draws nothing a player sees: a new game
 starts as an empty page (the template is the bridge's `index.html` and `tune.json`; the game server
 answers a missing `main.js` with an empty module so the page boots) and draws its own title, HUD
-and look, entering its title through `GameState.title()` in `start`. The runtime tells the two
-kinds of page apart by markup, not a flag: a page carrying all of the old demo shell's
-`section.screen` elements gets that shell's screens, slow end beat and default look; any other page
-gets none, and the shell never touches its elements, whatever their ids. The template's
+and look, entering its title through `GameState.title()` in `start`. A game made on the older demo
+shell is told apart by markup, since its `game.json` looks like any other: its page carries all of
+that shell's `section.screen` elements. The runtime refuses such a page before it runs anything,
+and the server reads the same markup (`carriesOldShell`) so the game opens like one in a parked
+engine: status carries the message, Play and Keep going refuse. The template's
 `gameplayScene` is `index.html?play` (boots straight into a run, past any title) and the three.js
-check loads that entry after the plain page. The manifest's `project` (and `godotProject`, its
-legacy name, written beside it for older installs) names the engine project directory (`web` for
+check loads that entry after the plain page. The manifest's `project` (or `godotProject`, its
+legacy name in older games) names the engine project directory (`web` for
 three.js; `godot` or `unity` in older games), so snapshots,
 exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
 manifest, and every engine question the run has is the lane's engine profile.
@@ -606,15 +607,19 @@ resolve inside the runtime.
   live Stage, the check, bot and explore plays, and build copies. A selected export is served
   without it, because the export holds the runtime as files (`copyRuntimeInto`); that is what
   lets a release run from any static server, licences and provenance included.
-- Within a major, the API `main.js` uses stays backward compatible, and a minor or patch reaches
-  every game of that major on its next load. Bump `runtime.json`'s version with each change. A
-  breaking change is a new major folder; the old majors keep shipping, since games pin them.
+- Within a major, the bridge `main.js` uses stays backward compatible, and a minor or patch
+  reaches every game of that major on its next load. Bump `runtime.json`'s version with each
+  change. A breaking change is a new major folder; the old majors keep shipping, since games pin
+  them. The one exception: 1.7.0 dropped the old demo shell from major 1 rather than starting a
+  major 2, because its games are refused whole (above), so no game that still runs sees the break,
+  and a major 2 would have stranded every bridge-contract game pinned to 1.
 - The URL names only the major, so runtime files are served `no-cache` with a stat ETag rather
   than immutable: a reload revalidates (304) and keeps the browser's compiled modules.
 - Facts record the runtime the plays loaded (version and file digest), and two builds measured
   under different runtimes are not comparable, as with different renderers.
 - Games made before the runtime keep their copied `web/shell/` and `web/vendor/` and no
-  `runtime` key; nothing in the server converts them. Their facts carry no runtime.
+  `runtime` key; nothing in the server converts them. They are old demo-shell games too, so they
+  open without playing.
 
 Two constraints hold everywhere:
 

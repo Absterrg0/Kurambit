@@ -3,8 +3,8 @@
 Kurambit turns a written brief into a playable game. Your coding agent builds it as a three.js
 browser game, with Blender for its art; you direct it, play the result, and ask for changes.
 
-three.js is the one engine in this version. Godot and Unity games made with an earlier version
-still open: see [Godot and Unity games](#godot-and-unity-games).
+three.js is the one engine in this version. Godot and Unity games, and three.js games made on the
+older demo shell, still open: see [Games from earlier versions](#games-from-earlier-versions).
 
 ## Game tools
 
@@ -456,7 +456,7 @@ Each pack downloads once, the first time an agent looks inside it, into
 checked against the copy Kurambit was released with; if a source site has changed the file, that pack
 is refused rather than used.
 
-## Godot and Unity games
+## Games from earlier versions
 
 Godot and Unity are not available in this version, and a new game is always a three.js game. A
 Godot or Unity game you made with an earlier version still opens with its chats, builds and
@@ -464,6 +464,11 @@ history, and its stage says the engine is not available in this version; Kurambi
 check, play or export it, and its agent gets no engine tools. **Game tools** does not list Godot or
 Unity, and Kurambit leaves any copy you installed where it is. The game's `godot/` or `unity/`
 folder is a normal project you can open in that engine's own editor.
+
+A three.js game made on the older demo shell, whose title, pause, settings and end screens came
+from Kurambit rather than from the game, opens the same way: its stage says it was made with an
+older Kurambit and is not supported in this version, and Kurambit no longer plays it or keeps going
+on it.
 
 ## What is in a game folder
 
@@ -473,12 +478,10 @@ Each game is a self-contained git repository you can move, back up, or open on a
 - `web/` is the game: a static three.js project with `index.html`, `main.js` and `assets/`.
   three.js and Kurambit's bridge come from Kurambit's runtime, the version `game.json` names under
   `runtime`: Kurambit brings fixes to them without changing the game, and every Web export carries
-  its own copy, so a release plays from any web server. Games made before the runtime keep their
-  own copy in `web/shell/` and `web/vendor/`. A new game starts as an empty page: the agent makes
-  the whole game, its title, menus, HUD, light and look included, for your brief, while the
-  bridge gives the Stage, Tune, Controls, the checks and replays what they need. Games made on the
-  older demo shell keep its title, pause, settings and end screens. `web/credits.txt` lists the
-  credits its library assets' licences ask for.
+  its own copy, so a release plays from any web server. A game starts as an empty page: the agent
+  makes the whole game, its title, menus, HUD, light and look included, for your brief, while the
+  bridge gives the Stage, Tune, Controls, the checks and replays what they need. `web/credits.txt`
+  lists the credits its library assets' licences ask for.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
 - `.studio/` holds the game's bots, their run log, kept play saves, saved test plays and

@@ -1156,7 +1156,7 @@ function ThreadGameStage({
         </Button>
       </div>
     ) : null;
-  // A live game's folder plays its starter shell until the first build lands;
+  // A live game's folder plays an empty page until the first build lands;
   // the Stage says what is being made instead of showing a game that is not yet one.
   const shownPhase: typeof phase =
     stageKind === "live" &&
