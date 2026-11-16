@@ -3,7 +3,6 @@ import type { EnvironmentId, GameBuild, ScopedThreadRef } from "@kurambit/contra
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
-import { Text } from "../ui/text";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameKeyArt } from "./GameKeyArt";
 import { useBuildFrame } from "./gameStageBridge";
@@ -177,26 +176,6 @@ export function GamePicture({
       ) : null}
       {children}
     </div>
-  );
-}
-
-/**
- * Whose picture this is, written on a picture that stands in for something newer (Now's card,
- * the Scene's look, while the game has changed since that build). It appears once the picture
- * it names has loaded; the picture's box carries `group/sourced`.
- */
-export function PictureSourceBadge({ children }: { children: ReactNode }) {
-  return (
-    <Text
-      variant="micro"
-      tone="inherit"
-      truncate
-      render={
-        <span className="absolute top-1.5 left-1.5 z-20 max-w-[calc(100%-0.75rem)] rounded-sm bg-black/55 px-1.5 py-px text-white/80 opacity-0 transition-opacity motion-surface group-has-[[data-picture-loaded]]/sourced:opacity-100" />
-      }
-    >
-      {children}
-    </Text>
   );
 }
 

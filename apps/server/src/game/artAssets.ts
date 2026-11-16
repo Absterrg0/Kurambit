@@ -29,7 +29,7 @@ const MAX_WALK = 20_000;
 const MAX_RECORDS = 500;
 const MAX_GLTF_JSON = 8 * 1024 * 1024;
 /** Thumbnails the Art tab drew, by content, in the game's ignored builds folder. */
-export const ART_THUMBNAIL_DIR = "builds/thumbnails";
+const ART_THUMBNAIL_DIR = "builds/thumbnails";
 /** The game's one Blender scene, which every Blender-made model is exported from. */
 const BLEND_SOURCE = "art/blender/live.blend";
 
