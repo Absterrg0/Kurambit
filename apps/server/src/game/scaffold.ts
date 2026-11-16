@@ -203,28 +203,6 @@ export const gameTurnRules = (
   return `${everyTurn}${game.winSaved ? "" : `${FIRST_WIN_LINE}\n`}\n${KEEP_GOING_SECTION}`;
 };
 
-/** Games made before the turn rules moved out of AGENTS.md carry them as these sections. */
-const MOVED_SECTIONS = ["## Every turn\n", "## Keep going\n"];
-
-/**
- * A game's AGENTS.md without the turn rules it was made with, every other byte as it was; null
- * when it has none. A section runs to the next `## ` heading, which keeps the blank line before
- * it; the last section takes the blank line before itself instead.
- */
-export const withoutMovedSections = (agents: string): string | null => {
-  let updated = agents;
-  for (const heading of MOVED_SECTIONS) {
-    const at = updated.indexOf(`\n${heading}`);
-    if (at === -1) continue;
-    const next = updated.indexOf("\n## ", at + 1);
-    updated =
-      next === -1
-        ? updated.slice(0, at + 1).replace(/\n\n$/, "\n")
-        : `${updated.slice(0, at + 1)}${updated.slice(next + 1)}`;
-  }
-  return updated === agents ? null : updated;
-};
-
 /**
  * Files the studio owns for every game. The starter template's project tree
  * supplies the engine sources; see templates.ts.

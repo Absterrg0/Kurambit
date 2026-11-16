@@ -52,7 +52,7 @@ import { findKeyArt } from "./keyArt.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { gameRelative } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
-import { createEngine, firstTurnMessage, scaffoldFiles, withoutMovedSections } from "./scaffold.ts";
+import { createEngine, firstTurnMessage, scaffoldFiles } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -881,30 +881,6 @@ const make = Effect.gen(function* () {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
         );
-        const agentsFile = path.join(root, "AGENTS.md");
-        const agents = yield* fileSystem
-          .readFileString(agentsFile)
-          .pipe(Effect.orElseSucceed(() => null));
-        // Games made before the turn rules came from the harness carry a copy; drop it once.
-        const updated = agents === null ? null : withoutMovedSections(agents);
-        if (updated !== null)
-          yield* writeFileStringAtomically({
-            filePath: agentsFile,
-            contents: updated,
-            followLink: false,
-          }).pipe(
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-            Effect.provideService(Path.Path, path),
-            Effect.mapError(
-              (cause) =>
-                new GameOperationError({
-                  operation: "refresh-guidance",
-                  path: agentsFile,
-                  reason: "io",
-                  cause,
-                }),
-            ),
-          );
       }),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
