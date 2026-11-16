@@ -6300,6 +6300,14 @@ export default function ChatView(props: ChatViewProps) {
       );
       return;
     }
+    // A chat's first message starts it in its own folder; a try needs a chat to try from.
+    if (versions !== undefined && (isLocalDraftThread || baseBranchForWorktree)) {
+      setThreadError(
+        threadIdForSend,
+        "Trying several ways starts from a chat's game: send this chat's first message once.",
+      );
+      return;
+    }
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
@@ -6843,7 +6851,7 @@ export default function ChatView(props: ChatViewProps) {
           runtimeMode,
           interactionMode: sendInteractionMode,
           dispatchMode: turnDispatchMode,
-          ...(versions === undefined || bootstrap ? {} : { versions }),
+          ...(versions === undefined ? {} : { versions }),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
