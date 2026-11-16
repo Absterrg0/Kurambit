@@ -55,7 +55,7 @@ const clip = (text: string, max: number) =>
   text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 
 /** What version n of `of` is asked: the person's words, its number, and a different approach. */
-export const versionTask = (input: {
+const versionTask = (input: {
   readonly text: string;
   readonly n: number;
   readonly of: number;

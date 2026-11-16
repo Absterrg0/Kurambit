@@ -12,7 +12,7 @@ import {
   type RunId,
   ThreadId,
 } from "@kurambit/contracts";
-import { createHash } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as IdAllocator from "@kurambit/provider-core/server/IdAllocator";
@@ -24,7 +24,7 @@ import type * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
  * base64url and the try's run ordinal, since a run's id is derived from those two and a full id
  * would pass a ref name's 255-byte limit.
  */
-export const VERSIONS_FOLDER = `${gameRunRefsFolder("game-builds")}versions/`;
+const VERSIONS_FOLDER = `${gameRunRefsFolder("game-builds")}versions/`;
 
 export const tryBaseRef = (threadId: ThreadId, ordinal: number) =>
   checkpointRefForGameRun(
@@ -39,7 +39,7 @@ export const tryBaseRef = (threadId: ThreadId, ordinal: number) =>
 export const versionLeftRef = (childThreadId: ThreadId) =>
   checkpointRefForGameRun(
     "game-builds",
-    `versions/left/${createHash("sha256").update(childThreadId).digest("hex").slice(0, 32)}`,
+    `versions/left/${NodeCrypto.createHash("sha256").update(childThreadId).digest("hex").slice(0, 32)}`,
   );
 
 /** The chat and run of every try the refs name, from their base refs. */
@@ -59,7 +59,7 @@ export const tryStartCommandId = (runId: string) => CommandId.make(`game-version
 const versionCommandId = (runId: string, n: number) =>
   CommandId.make(`${tryStartCommandId(runId)}:version:${n}`);
 /** Version n's child thread, as the orchestrator derives it from its command. */
-export const versionThreadId = (runId: string, n: number) =>
+const versionThreadId = (runId: string, n: number) =>
   IdAllocator.derive.delegatedTaskThread({ commandId: versionCommandId(runId, n) });
 
 /** The notice a keep appends: its id carries the version, newest wins. */
@@ -72,7 +72,7 @@ const APPROACH_LINE = /^(?:\*\*)?approach:?(?:\*\*)?:?\s*/i;
  * The version's own line on its approach: the reply's "Approach:" line, which it is asked to
  * start with, else its first line of prose, without markdown.
  */
-export const approachOf = (reply: string | null) => {
+const approachOf = (reply: string | null) => {
   const lines = (reply ?? "")
     .split("\n")
     .map((each) => each.trim().replace(MARKDOWN_LEAD, ""))
