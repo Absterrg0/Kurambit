@@ -40,7 +40,7 @@ function useGameKey(command: "game.freeze" | "game.fullscreen" | "game.cannotLos
  * One group of the Stage's toolbar: its buttons sit in one well, the way an editor's play bar
  * groups play, pause and step, so the bar reads as a few tools rather than a row of icons.
  */
-export function StageToolbarGroup({ label, children }: { label: string; children: ReactNode }) {
+function StageToolbarGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div
       role="group"
