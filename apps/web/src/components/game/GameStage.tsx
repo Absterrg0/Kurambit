@@ -61,6 +61,7 @@ import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { GameRunCard, useStageRuns } from "./GameRunCard";
 import { GameSavedPlaysDialog } from "./GameSavedPlays";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -404,13 +405,8 @@ function ThreadGameStage({
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
-  const keepPlay = useAtomCommand(gameEnvironment.keepPlay, { reportFailure: false });
-  // The run this Stage last kept, which "Save as a test play" names.
-  const [lastKept, setLastKept] = useState<string | null>(null);
+  const runs = useStageRuns(threadRef);
   const [playsOpen, setPlaysOpen] = useState(false);
-  const canKeepPlay = useAtomValue(
-    gameEnvironment.keepPlay.permissionAtom(threadRef.environmentId),
-  );
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
@@ -820,16 +816,10 @@ function ThreadGameStage({
     if (liveOpenAsked) openLive();
   }, [liveOpenAsked, openLive]);
   const onStudioMessage = useStableCallback((studio: StudioMessage) => {
-    if (studio.type === "studio-play") {
-      // A run played to its end: kept, so a later build can play it again, and the person can
-      // save it as a test play.
-      if (canKeepPlay)
-        void keepPlay({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId, play: studio.play },
-        }).then((result) => {
-          if (result._tag === "Success") setLastKept(result.value.kept);
-        });
+    // A run, ended or left: kept, so the agent hears of it, a later build can play it again,
+    // and the person can save it as a test play.
+    if (studio.type === "studio-play" || studio.type === "studio-run-reset") {
+      runs.receive(studio);
       return;
     }
     const key = frameFold?.key ?? "";
@@ -1625,6 +1615,7 @@ function ThreadGameStage({
             bridge={{ threadKey, enabled: engine?.stageBridge === true, freezeKey }}
             overlay={<GameStageOverlay threadKey={threadKey} />}
           />
+          <GameRunCard threadRef={threadRef} runs={runs} onNote={setMessage} />
         </div>
       </div>
       <div
@@ -1741,7 +1732,7 @@ function ThreadGameStage({
         threadRef={threadRef}
         open={playsOpen}
         onOpenChange={setPlaysOpen}
-        kept={lastKept}
+        kept={runs.lastEnded}
       />
     </section>
   );

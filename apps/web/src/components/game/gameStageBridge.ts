@@ -260,6 +260,7 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
     case "studio-error":
     case "studio-visibility-ack":
     case "studio-play":
+    case "studio-run-reset":
       return;
   }
 }
@@ -470,6 +471,17 @@ export const setStageMuted = (muted: boolean) => {
   if (state.post === null || !state.capabilities.includes("mute")) return;
   state.post({ type: "studio-mute", on: muted });
   useStageBridge.setState({ muted });
+};
+
+/**
+ * Asks the game for its run so far, which it answers as a studio-play with `asked` set; false
+ * when the game on the Stage cannot (an older shell).
+ */
+export const requestStageRun = (): boolean => {
+  const state = useStageBridge.getState();
+  if (state.post === null || !state.capabilities.includes("runs")) return false;
+  state.post({ type: "studio-run-request" });
+  return true;
 };
 
 /** The canvas as a PNG data URL with no outline drawn, or null when the game cannot give one. */

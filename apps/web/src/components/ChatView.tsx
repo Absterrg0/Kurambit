@@ -9,8 +9,14 @@ import {
   toggleStageCannotLose,
   toggleStageDevView,
 } from "./game/gameStageBridge";
-import { stageFrameAttachment } from "./game/gameStageFrame";
-import { GamePointedChip, GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
+import { clearToldRun, readToldRun, useToldRun } from "./game/gameRunTell";
+import { stageFrameAttachment, stagePngAttachment } from "./game/gameStageFrame";
+import {
+  GamePointedChip,
+  GameSplitResize,
+  GameToldRunChip,
+  useLatestTurnUndone,
+} from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -73,6 +79,7 @@ import {
   type ChatFileAttachment,
   CommandId,
   DEFAULT_MODEL,
+  gameRunAskContext,
   gameStageAskContext,
   isProviderNativeSubagentThread,
   type EnvironmentId,
@@ -3090,6 +3097,11 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const scheduleComposerFocusStable = useStableCallback(scheduleComposerFocus);
+  // "Tell the agent about this run" on the Stage: the person's words go in the composer next.
+  const toldRun = useToldRun(activeThreadKey);
+  useEffect(() => {
+    if (toldRun !== null) scheduleComposerFocusStable();
+  }, [toldRun, scheduleComposerFocusStable]);
   const useArtifactTemplate = (template: CodexArtifactTemplate) => {
     const composer = composerRef.current;
     if (!composer) return;
@@ -5863,17 +5875,32 @@ export default function ChatView(props: ChatViewProps) {
         : null;
     const pointedFrame =
       pointedForSend === null ? null : await stageFrameAttachment(pointedForSend.thing.name);
-    const composerImages =
-      pointedFrame === null ? mergedComposerImages : [...mergedComposerImages, pointedFrame];
+    // A run the person is telling the agent about goes the same way: the frame when they asked,
+    // and its id, how it went and how to replay it.
+    const toldForSend =
+      isGameThread && activeThreadRef !== null && !directAnnotation
+        ? readToldRun(scopedThreadKey(activeThreadRef))
+        : null;
+    const toldFrame =
+      toldForSend?.frame == null ? null : await stagePngAttachment(toldForSend.frame, "run");
+    const composerImages = [
+      ...mergedComposerImages,
+      ...(pointedFrame === null ? [] : [pointedFrame]),
+      ...(toldFrame === null ? [] : [toldFrame]),
+    ];
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
     const promptForSend = directAnnotation
       ? ensureInlineContextReferences(promptRef.current, [
           previewAnnotationContextReference(directAnnotation.annotation),
         ])
-      : pointedForSend === null
+      : pointedForSend === null && toldForSend === null
         ? promptRef.current
-        : `${promptRef.current.trimEnd()}\n\n${gameStageAskContext(pointedForSend)}`;
+        : [
+            promptRef.current.trimEnd(),
+            ...(pointedForSend === null ? [] : [gameStageAskContext(pointedForSend)]),
+            ...(toldForSend === null ? [] : [gameRunAskContext(toldForSend)]),
+          ].join("\n\n");
     if (queuedRunEdit.isEditing) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
@@ -6600,6 +6627,7 @@ export default function ChatView(props: ChatViewProps) {
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
     if (pointedForSend !== null) clearStageSelection();
+    if (toldForSend !== null) clearToldRun();
 
     let firstComposerImageName: string | null = null;
     if (composerImagesSnapshot.length > 0) {
@@ -8168,6 +8196,7 @@ export default function ChatView(props: ChatViewProps) {
               {gameLayout ? (
                 <div className="pointer-events-auto mx-auto w-full max-w-(--chat-content-max-width)">
                   <GamePointedChip threadRef={activeThreadRef} />
+                  <GameToldRunChip threadRef={activeThreadRef} />
                 </div>
               ) : null}
               {composerLane}
