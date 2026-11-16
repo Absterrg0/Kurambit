@@ -159,13 +159,15 @@ export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }
                       </Button>
                     </form>
                   ) : (
-                    <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                      <Text variant="meta" tone="muted" numeric>
-                        {decision.date}
-                      </Text>
-                      <Text variant="label" render={<span className="min-w-0" />}>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <Text variant="meta" tone="default" render={<span className="break-words" />}>
                         {decision.text}
                       </Text>
+                      {decision.date === "" ? null : (
+                        <Text variant="caption" tone="muted" numeric>
+                          {decision.date}
+                        </Text>
+                      )}
                     </span>
                   )}
                   {canDecide && editing?.line !== decision.line ? (
