@@ -156,6 +156,7 @@ vi.mock("../components/ui/toast", () => ({
   },
 }));
 vi.mock("./useHandleNewThread", () => ({ useNewThreadHandler: () => async () => {} }));
+vi.mock("../components/game/useNewGameChat", () => ({ useNewChat: <T>(handle: T) => handle }));
 vi.mock("./useSettings", () => ({
   useClientSettings: (select: (settings: unknown) => unknown) =>
     select({

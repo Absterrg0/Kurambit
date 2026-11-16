@@ -682,7 +682,15 @@ export const GameCreateInput = Schema.Struct({
   runtimeMode: Schema.optionalKey(RuntimeMode),
 });
 export type GameCreateInput = typeof GameCreateInput.Type;
-export const GameOpenInput = Schema.Struct({ path: Schema.String, modelSelection: ModelSelection });
+export const GameOpenInput = Schema.Struct({
+  path: Schema.String,
+  modelSelection: ModelSelection,
+  /**
+   * A new chat on the game, empty, instead of its newest one. The game's empty chat is reused when
+   * it has one, so asking twice opens the same chat.
+   */
+  newChat: Schema.optionalKey(Schema.Boolean),
+});
 export const GameProjectResult = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,

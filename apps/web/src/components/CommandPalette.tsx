@@ -140,6 +140,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useNewChat } from "./game/useNewGameChat";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import {
   composerPromptLink,
@@ -769,8 +770,13 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    defaultProjectRef,
+    handleNewThread: handleNewDraft,
+  } = useHandleNewThread();
+  const handleNewThread = useNewChat(handleNewDraft);
   const paletteRouteTarget = useThreadRouteTarget();
   const projects = useProjects();
   const activeThreadRef =

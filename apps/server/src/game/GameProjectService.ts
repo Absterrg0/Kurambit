@@ -406,6 +406,8 @@ const make = Effect.gen(function* () {
     input: Pick<GameCreateInput, "modelSelection" | "runtimeMode">,
     options: {
       readonly resume?: boolean;
+      /** A new, empty chat: the game's empty one when it has one, else a fresh one. */
+      readonly newChat?: boolean;
       readonly firstTurn?: boolean;
       /** The person's picture, already saved as art/reference.png; the first message carries it. */
       readonly reference?: { readonly name: string; readonly bytes: Buffer };
@@ -450,8 +452,9 @@ const make = Effect.gen(function* () {
       ),
     );
     // Opening a folder is "continue this game", not "start another chat": the
-    // project's newest session already has the history and the context.
-    if (options.resume === true) {
+    // project's newest session already has the history and the context. A new chat reuses an
+    // empty one, so New chat pressed twice opens one chat, as T3's draft does.
+    if (options.resume === true || options.newChat === true) {
       const existingThreads = yield* threads
         .listProjectThreads({ projectId: project.id, includeSubagents: false })
         .pipe(
@@ -466,7 +469,11 @@ const make = Effect.gen(function* () {
           ),
         );
       const latest = existingThreads.find(
-        (thread) => thread.deletedAt === null && thread.archivedAt === null,
+        (thread) =>
+          thread.deletedAt === null &&
+          thread.archivedAt === null &&
+          (options.newChat !== true ||
+            (thread.latestRunId === null && thread.latestVisibleMessage === null)),
       );
       if (latest !== undefined)
         return { projectId: project.id, threadId: latest.id, root: canonicalRoot };
@@ -816,9 +823,11 @@ const make = Effect.gen(function* () {
       });
     }),
     open: (input) =>
-      register(NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())), input, {
-        resume: true,
-      }),
+      register(
+        NodePath.resolve(input.path.replace(/^~(?=\/|$)/, NodeOS.homedir())),
+        input,
+        input.newChat === true ? { newChat: true } : { resume: true },
+      ),
     resolve,
     read,
     exclusive: (threadId, name, work, options) =>

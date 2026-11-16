@@ -145,6 +145,7 @@ import {
 } from "../threadSelectionStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useNewChat } from "./game/useNewGameChat";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
@@ -2781,6 +2782,7 @@ export default function Sidebar() {
     },
   });
   const newThreadContext = useHandleNewThread();
+  const newChat = useNewChat(newThreadContext.handleNewThread);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -4386,7 +4388,7 @@ export default function Sidebar() {
 
   const startGameSession = (game: GameLibraryEntry) => {
     if (isMobile) setOpenMobile(false);
-    void newThreadContext.handleNewThread(scopeProjectRef(game.environmentId, game.projectId));
+    void newChat(scopeProjectRef(game.environmentId, game.projectId));
   };
   const newGameShortcutLabel = simplestShortcutLabelForCommand(keybindings, "chat.new");
   const searchShortcutLabel = shortcutLabelForCommand(keybindings, "commandPalette.toggle") ?? null;

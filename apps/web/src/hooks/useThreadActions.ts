@@ -31,6 +31,7 @@ import { isScratchProject } from "@kurambit/client-runtime/state/projects";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
+import { useNewChat } from "../components/game/useNewGameChat";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
@@ -303,7 +304,8 @@ export function useThreadActions() {
   const clearTerminalUiState = useTerminalUiStateStore((state) => state.clearTerminalUiState);
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const router = useRouter();
-  const handleNewThread = useNewThreadHandler();
+  // Archiving the open chat leaves for a new one: a game's own empty chat in a game.
+  const handleNewThread = useNewChat(useNewThreadHandler());
 
   const resolveThreadTarget = (target: ScopedThreadRef) => {
     const thread = readThreadShell(target);

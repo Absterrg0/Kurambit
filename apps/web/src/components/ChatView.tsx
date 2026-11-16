@@ -307,6 +307,7 @@ import { useClientSettingsHydrated, useEnvironmentSettings } from "../hooks/useS
 import { useNowMinute } from "../hooks/useNowMinute";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useNewChat } from "./game/useNewGameChat";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import {
@@ -1053,6 +1054,7 @@ export default function ChatView(props: ChatViewProps) {
   const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
+  const newChat = useNewChat(handleNewThread);
   const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
   const routeThreadRef = scopeThreadRef(environmentId, threadId);
   const routeThreadKey = scopedThreadKey(routeThreadRef);
@@ -1916,7 +1918,7 @@ export default function ChatView(props: ChatViewProps) {
   })() as ComposerBannerStackItem | null;
   const activeProjectDefaultModelSelection = activeProjectSettings.settings.defaultModelSelection;
   const handleNewThreadInActiveProject = () => {
-    startNewThreadForProject(activeProjectRef, handleNewThread);
+    startNewThreadForProject(activeProjectRef, newChat);
   };
   const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
