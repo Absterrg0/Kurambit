@@ -1354,10 +1354,18 @@ function ThreadGameStage({
           {/* An earlier build on the Stage says so in the line it already has, and its way back
               sits beside it: nothing is inserted over the Stage, so the column never moves. */}
           {playTarget !== null ? (
-            <Button size="xs" variant="outline" className="shrink-0" onClick={backToLive}>
+            <Button
+              size="xs"
+              variant="outline"
+              className="shrink-0"
+              aria-label="Back to the current game"
+              onClick={backToLive}
+            >
               <HistoryIcon aria-hidden="true" />
               <span className="hidden @[36rem]/stage-header:inline">Back to the current game</span>
-              <span className="@[36rem]/stage-header:hidden">Back</span>
+              <span className="hidden @[24rem]/stage-header:inline @[36rem]/stage-header:hidden">
+                Back
+              </span>
             </Button>
           ) : null}
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
