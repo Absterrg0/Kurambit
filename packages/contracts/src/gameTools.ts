@@ -25,7 +25,6 @@ import {
   GameExploreStartInput,
 } from "./gameExplore.ts";
 import { GameAssetsAddInput, GameAssetsSearchInput } from "./gameLibrary.ts";
-import { GamePlayName } from "./gamePlays.ts";
 import { GameKeepGoingInput, GameKeepGoingSteerInput } from "./gameRun.ts";
 import {
   GameUnityConsoleInput,
@@ -78,9 +77,12 @@ export const GamePlayToolInput = Schema.Struct({
   close: op(GameExploreCloseInput),
   bot: op(GameBotRunInput),
   bot_view: op(GameBotViewInput),
-  replay: op(Nothing),
-  save: op(Schema.Struct({ name: GamePlayName })),
-  plays: op(Schema.Struct({ delete: Schema.optionalKey(Schema.String) })),
+  replay: op(
+    Schema.Struct({
+      save: Schema.optionalKey(Schema.String),
+      delete: Schema.optionalKey(Schema.String),
+    }),
+  ),
   model_sheet: op(GameModelSheetInput),
 });
 export type GamePlayToolInput = typeof GamePlayToolInput.Type;

@@ -428,6 +428,16 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   tree in a capture of the working tree ([sourceTree](../../apps/server/src/game/sourceTree.ts)),
   never a walk of our own. Git records a link, not what it points at, so a link in the engine
   folder makes the sources unknown there.
+- **Saved plays are tests outside the build.** A run someone saves (`.studio/plays/`, committed,
+  outside `restoredPaths` so an undo never takes a test) is replayed by every build's measure in
+  its copy, inside the lane, right after the boot check; keep going's judge waits for it with the
+  boots. The plays live outside the engine folder, so the reading stores a hash of the saved set
+  and is measured again when the set changes, without a harness bump; rows from before it and
+  games with none read `no-saved-plays`, which no surface shows or counts and no reconcile owes.
+  A save is refused unless the run replays the same on its own build: during a step the shell
+  pins `Math.random`, `performance.now` and `Date.now` to the run's seed and game time, and what
+  a game reads outside that would make every reading noise. A changed ending is proposed as the
+  next step and never undone (only health undoes): it may be the change the person asked for.
 - **Game browsers draw on the GPU.** Once per server process, `makeGameBrowser` probes the pinned
   headless shell for a hardware WebGL backend (Linux: EGL, then Vulkan, on the GPU's render node,
   with no display in its environment) and every game browser launches with the first that drew on

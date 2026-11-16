@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema";
 import {
   firstPlayDifference,
   GameOperationError,
+  GamePlayName,
   type GameBuildId,
   type GameKeepPlayInput,
   type GamePlay,
@@ -38,6 +39,7 @@ import {
 } from "./playFiles.ts";
 
 const isGameOperationError = Schema.is(GameOperationError);
+const isPlayName = Schema.is(GamePlayName);
 
 export class GamePlays extends Context.Service<
   GamePlays,
@@ -154,6 +156,12 @@ const make = Effect.gen(function* () {
   const save: GamePlays["Service"]["save"] = (threadId, input) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
+      // The agent's name comes unchecked through its tool.
+      if (!isPlayName(input.name))
+        return yield* refused(
+          root,
+          "A test play's name is 1 to 60 letters, digits, spaces, dashes, underscores or apostrophes.",
+        );
       const kept = yield* latest(root, input.kept);
       if (kept === null)
         return yield* refused(

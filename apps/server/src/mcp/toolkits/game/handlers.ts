@@ -35,7 +35,6 @@ import {
   GameModelSheetResult,
   GameOperationError,
   GameReplayResult,
-  GameSavedPlaySummary,
   GameSavedPlaysReading,
   GameSavedPlaysResult,
   GameSavedListResult,
@@ -335,20 +334,19 @@ const playHandlers = {
         withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, view)).pipe(
           as(GameBotViewResult),
         ),
-      replay: () =>
-        withGame(GamePlays.GamePlays, (plays, threadId) => plays.replaySaved(threadId)).pipe(
-          as(Schema.Union([GameSavedPlaysReading, GameReplayResult])),
-        ),
-      save: ({ name }) =>
-        withGame(GamePlays.GamePlays, (plays, threadId) => plays.save(threadId, { name })).pipe(
-          as(Schema.Struct({ ...GameSavedPlaySummary.fields, replaced: Schema.Boolean })),
-        ),
-      plays: (input) =>
-        withGame(GamePlays.GamePlays, (plays, threadId) =>
-          input.delete === undefined
-            ? plays.saved(threadId)
-            : plays.remove(threadId, input.delete).pipe(Effect.andThen(plays.saved(threadId))),
-        ).pipe(as(GameSavedPlaysResult)),
+      // A save or a delete answers with the saved plays as they are then; else they replay.
+      replay: (input) =>
+        input.save === undefined && input.delete === undefined
+          ? withGame(GamePlays.GamePlays, (plays, threadId) => plays.replaySaved(threadId)).pipe(
+              as(Schema.Union([GameSavedPlaysReading, GameReplayResult])),
+            )
+          : withGame(GamePlays.GamePlays, (plays, threadId) =>
+              Effect.gen(function* () {
+                if (input.save !== undefined) yield* plays.save(threadId, { name: input.save });
+                if (input.delete !== undefined) yield* plays.remove(threadId, input.delete);
+                return yield* plays.saved(threadId);
+              }),
+            ).pipe(as(GameSavedPlaysResult)),
       model_sheet: modelSheet,
     }),
   ),

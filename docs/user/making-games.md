@@ -303,6 +303,12 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   **Your run** in a build's checks plays it again on that build, input for input, and says how it
   ends there and the first second it played differently: "won at 41 s" on one build, "lost at
   12 s" on the next. Your agent can do the same on the game as it is now.
+- **Test plays (three.js).** After a run ends, the Stage's **⋯** menu → **Test plays…** saves it
+  under a name, such as a win or the run where a bug showed. Every build from then on replays it,
+  and its checks say whether each saved play still ends the same way. A run that does not replay
+  the same on its own build is refused, with what differed: usually the game timing itself
+  outside its update. Your agent saves its own winning runs the same way, and both of you can
+  list and delete them.
 - **Dev views (three.js).** The **⋯** menu's **Dev views** step a frozen game one frame at a
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose

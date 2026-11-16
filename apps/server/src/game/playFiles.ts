@@ -82,7 +82,7 @@ export const keptPlay = async (
 };
 
 /** A saved play's file name: its name lowercased, each run of other characters a dash. */
-export const savedPlayFile = (name: string) =>
+const savedPlayFile = (name: string) =>
   `${
     name
       .trim()
