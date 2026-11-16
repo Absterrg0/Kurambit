@@ -10,7 +10,7 @@ import { GamePlay } from "./gamePlays.ts";
  * ignore what does not decode.
  *
  * The three.js shell (templates/runtime/three/1/shell/stage-bridge.js) is the
- * game end; Godot and Unity have none yet. A game says it has the bridge with
+ * game end; an engine without one has no bridge. A game says it has the bridge with
  * `studio-ready` carrying `bridge`. Shells from before the bridge post a bare
  * `{ type: "studio-ready" }` as their boot signal: that game has no bridge, and
  * the agent can update its shell. Every engine's shell answers `studio-visibility`.

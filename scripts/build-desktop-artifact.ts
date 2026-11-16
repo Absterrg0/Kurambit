@@ -3416,7 +3416,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
-      "Kurambit is a local desktop app for making games with coding agents: three.js browser games first, plus Godot and Unity games with Blender art.",
+      "Kurambit is a local desktop app for making games with coding agents: three.js browser games with Blender art.",
     license: "MIT",
     homepage: "https://kurambit.com",
     author: "Kurambit Tools",

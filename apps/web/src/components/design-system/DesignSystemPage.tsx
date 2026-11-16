@@ -522,10 +522,10 @@ function ButtonStateRow({ variant, label }: { variant: ButtonVariant; label: str
 
 /* Fields */
 
-const ENGINE_ITEMS = { threejs: "three.js", godot: "Godot", unity: "Unity" };
+const CAMERA_ITEMS = { side: "Side view", top: "Top down", third: "Third person" };
 
 function FieldsSection() {
-  const [engine, setEngine] = useState("threejs");
+  const [camera, setCamera] = useState("side");
   return (
     <Section
       id="fields"
@@ -554,24 +554,24 @@ function FieldsSection() {
       </Specimen>
       <Specimen label="Select" source="<Select> <SelectTrigger>">
         <Select
-          value={engine}
-          items={ENGINE_ITEMS}
+          value={camera}
+          items={CAMERA_ITEMS}
           onValueChange={(value) => {
-            if (typeof value === "string") setEngine(value);
+            if (typeof value === "string") setCamera(value);
           }}
         >
           <SelectTrigger className="w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectPopup>
-            {Object.entries(ENGINE_ITEMS).map(([value, label]) => (
+            {Object.entries(CAMERA_ITEMS).map(([value, label]) => (
               <SelectItem key={value} value={value}>
                 {label}
               </SelectItem>
             ))}
           </SelectPopup>
         </Select>
-        <Select value={engine} items={ENGINE_ITEMS} disabled>
+        <Select value={camera} items={CAMERA_ITEMS} disabled>
           <SelectTrigger className="w-48">
             <SelectValue />
           </SelectTrigger>

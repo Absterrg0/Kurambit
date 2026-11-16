@@ -10,7 +10,6 @@ import * as GameExport from "../../../game/GameExport.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
 import * as GameStage from "../../../game/GameStage.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
-import * as GameUnity from "../../../game/GameUnity.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as ServerConfig from "../../../config.ts";
@@ -58,7 +57,6 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(GameBlender.GameBlender)({}),
   Layer.mock(GameArt.GameArt)({}),
   Layer.mock(GameAssetLibrary.GameAssetLibrary)({}),
-  Layer.mock(GameUnity.GameUnity)({ hold: () => (effect) => effect }),
   Layer.mock(GameEngine.GameEngine)({}),
   Layer.mock(GameExport.GameExport)({}),
   Layer.mock(GameSavedMediaService.GameSavedMediaService)({}),

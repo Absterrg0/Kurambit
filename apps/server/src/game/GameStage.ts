@@ -7,21 +7,19 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
   GAME_LIVE_EVENT,
-  isGameEngineActive,
+  isAvailableEngine,
   type GameAction,
   type GameActionResult,
   type GameManifest,
   type GameOperationError,
   type ThreadId,
 } from "@kurambit/contracts";
-import { engineProfile, type GameEngineProfile } from "./engineProfile.ts";
+import { engineProfile, unavailableEngine, type GameEngineProfile } from "./engineProfile.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
-import * as GameEngine from "./GameEngine.ts";
 import * as GameExport from "./GameExport.ts";
 import * as GameOperations from "./GameOperations.ts";
-import * as GamePlayer from "./GamePlayer.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -69,7 +67,7 @@ export class GameStage extends Context.Service<
     /** Stop game: the caller's work, and while no run holds the game, every process of it; says what did not stop. */
     readonly stop: (threadId: ThreadId) => Effect.Effect<GameActionResult, GameOperationError>;
     /**
-     * Close the live Blender and Unity editors without saving, so a scene held
+     * Close the live editors (Blender) without saving, so a scene held
      * in memory cannot save over files restored on disk; the next call reopens them.
      */
     readonly closeLiveEditors: (root: string) => Effect.Effect<void>;
@@ -79,13 +77,11 @@ export class GameStage extends Context.Service<
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const processes = yield* GameProcesses.GameProcesses;
-  const engines = yield* GameEngine.GameEngine;
   const preview = yield* GamePreview.GamePreview;
   const liveBlender = yield* GameBlender.GameBlender;
   const gameBot = yield* GameBot.GameBot;
   const operations = yield* GameOperations.GameOperations;
   const exporter = yield* GameExport.GameExport;
-  const players = yield* GamePlayer.GamePlayer;
   const copies = yield* GameBuildCopies.GameBuildCopies;
   const statuses = yield* GameStatusService.GameStatusService;
   // Every client rereads a live game's status when its serve opens or stops.
@@ -96,15 +92,17 @@ const make = Effect.gen(function* () {
   const rebuild = (threadId: ThreadId) =>
     Effect.flatMap(projects.resolve(threadId), projects.read).pipe(
       Effect.flatMap((manifest) =>
-        engineProfile(manifest.engine.name).stage === "live"
-          ? exporter.export(threadId, "Web")
-          : projects.exclusive(threadId, "Build Web", exporter.publishWeb),
+        !isAvailableEngine(manifest.engine.name)
+          ? Effect.fail(unavailableEngine(manifest.engine.name))
+          : engineProfile(manifest.engine.name).stage === "live"
+            ? exporter.export(threadId, "Web")
+            : projects.exclusive(threadId, "Build Web", exporter.publishWeb),
       ),
     );
   /** What a game whose engine makes no Web build answers Play with. */
   const noWebPlay = (root: string, displayName: string): GameActionResult => ({
     success: false,
-    message: `${displayName} games make no Web build to play here. Export a Linux or Windows release from Export… in the Stage's More menu (game_builds op export for an agent), or explore and bot-play the game, which play its built player.`,
+    message: `${displayName} games make no Web build to play here. Export a release from Export… in the Stage's More menu (game_builds op export for an agent).`,
     path: root,
     url: null,
     process: null,
@@ -129,8 +127,8 @@ const make = Effect.gen(function* () {
   const play = Effect.fn("GameStage.play")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const engine = (yield* projects.read(root)).engine.name;
-    // A parked engine's game plays nothing, not even an export it made before.
-    if (!isGameEngineActive(engine)) return yield* GameEngine.parkedEngine(engine);
+    // A game in an engine this version does not have plays nothing, not even an export it made before.
+    if (!isAvailableEngine(engine)) return yield* unavailableEngine(engine);
     const profile = engineProfile(engine);
     if (profile.stage === "live")
       return yield* playLive(
@@ -204,7 +202,7 @@ const make = Effect.gen(function* () {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
     if (
-      !isGameEngineActive(manifest.engine.name) ||
+      !isAvailableEngine(manifest.engine.name) ||
       !engineProfile(manifest.engine.name).exportTargets.includes("Web")
     )
       return;
@@ -215,8 +213,8 @@ const make = Effect.gen(function* () {
   const gamePreview = Effect.fn("GameStage.preview")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
-    if (!isGameEngineActive(manifest.engine.name))
-      return yield* GameEngine.parkedEngine(manifest.engine.name);
+    if (!isAvailableEngine(manifest.engine.name))
+      return yield* unavailableEngine(manifest.engine.name);
     const profile = engineProfile(manifest.engine.name);
     if (profile.stage === "live")
       return yield* playLive(
@@ -230,23 +228,8 @@ const make = Effect.gen(function* () {
       if (result !== null) return result;
       return yield* rebuild(threadId);
     }
-    if (profile.play === "player") {
-      const prepared = yield* players.prepare(root);
-      return {
-        success: true,
-        message: `${profile.displayName} games play as a player of the current sources: ${prepared.player} is ready (${prepared.origin}). game_play op start and game_play op bot play it.`,
-        path: prepared.player,
-        url: null,
-        process: null,
-      };
-    }
     return noWebPlay(root, profile.displayName);
   });
-  const closeEngineEditor = (root: string) =>
-    projects.read(root).pipe(
-      Effect.flatMap((manifest) => engines.backendFor(manifest.engine.name)),
-      Effect.flatMap((backend) => backend.editor?.close(root) ?? Effect.void),
-    );
   const stop = Effect.fn("GameStage.stop")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     yield* operations.cancel(root);
@@ -257,7 +240,6 @@ const make = Effect.gen(function* () {
     const notStopped: string[] = [];
     for (const [what, stopping] of [
       ["the live Blender", liveBlender.stop(root)],
-      ["the live engine editor", closeEngineEditor(root)],
       ["its bot runs", gameBot.stop(root)],
     ] as const) {
       const exit = yield* Effect.exit(stopping);
@@ -292,11 +274,7 @@ const make = Effect.gen(function* () {
     preview: gamePreview,
     playCurrent,
     stop,
-    // Blender serves every engine's art; the engine's own live editor is its driver's.
-    closeLiveEditors: (root) =>
-      Effect.all([liveBlender.stop(root), closeEngineEditor(root).pipe(Effect.ignore)], {
-        discard: true,
-      }),
+    closeLiveEditors: (root) => liveBlender.stop(root),
   });
 });
 

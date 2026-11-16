@@ -39,12 +39,7 @@ import {
   GameSavedPlaysResult,
   GameSavedListResult,
   GameStatus,
-  GameUnityRecompileResult,
-  GameUnityScreenshotResult,
-  GameUnityTextResult,
-  GameUnityToolsResult,
   GameWebPackage,
-  GameWindowsPackage,
   gameModelChoice,
   THREE_VIEWPORT,
   type ThreadId,
@@ -64,7 +59,6 @@ import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
 import * as GameStage from "../../../game/GameStage.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
-import * as GameUnity from "../../../game/GameUnity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
@@ -73,7 +67,6 @@ import {
   GameCheckToolkit,
   GamePlayToolkit,
   GameToolkit,
-  GameUnityToolkit,
 } from "./tools.ts";
 import { GAME_TOOL_OPS, opRefusal, type GameToolName } from "./placement.ts";
 import type { GameEngineCapability } from "../../../game/engineProfile.ts";
@@ -445,42 +438,6 @@ const blenderHandlers = {
 } satisfies McpToolAccess.Handlers<typeof GameBlenderToolkit.tools>;
 export const layerBlender = McpToolAccess.toLayer(GameBlenderToolkit, blenderHandlers);
 
-const unityHandlers = {
-  game_unity: McpToolAccess.actsAsCaller((input) =>
-    dispatch("game_unity", input, {
-      tools: () =>
-        withGame(GameUnity.GameUnity, (unity, threadId) => unity.listTools(threadId)).pipe(
-          as(GameUnityToolsResult),
-        ),
-      edit: (edit) =>
-        withGame(GameUnity.GameUnity, (unity, threadId) => unity.edit(threadId, edit)).pipe(
-          as(GameUnityTextResult),
-        ),
-      eval: (code) =>
-        withGame(GameUnity.GameUnity, (unity, threadId) => unity.evaluate(threadId, code)).pipe(
-          as(GameUnityTextResult),
-        ),
-      recompile: () =>
-        withGame(GameEngine.GameEngine, (engines, threadId) => engines.recompile(threadId)).pipe(
-          as(GameUnityRecompileResult),
-        ),
-      play: (play) =>
-        withGame(GameUnity.GameUnity, (unity, threadId) => unity.play(threadId, play)).pipe(
-          as(GameUnityTextResult),
-        ),
-      console: (console) =>
-        withGame(GameUnity.GameUnity, (unity, threadId) => unity.console(threadId, console)).pipe(
-          as(GameUnityTextResult),
-        ),
-      screenshot: (screenshot) =>
-        withGame(GameUnity.GameUnity, (unity, threadId) =>
-          unity.screenshot(threadId, screenshot),
-        ).pipe(as(GameUnityScreenshotResult)),
-    }),
-  ),
-} satisfies McpToolAccess.Handlers<typeof GameUnityToolkit.tools>;
-export const layerUnity = McpToolAccess.toLayer(GameUnityToolkit, unityHandlers);
-
 const handlers = {
   game_builds: McpToolAccess.actsAsCaller((input) =>
     dispatch(
@@ -517,11 +474,9 @@ const handlers = {
           withGame(GameExport.GameExport, (exporter, threadId) =>
             exporter.export(threadId, release.target),
           ).pipe(as(GameActionResult)),
-        package: (pack) =>
+        package: () =>
           withGame(GameExport.GameExport, (exporter, threadId) =>
-            pack.target === "web"
-              ? exporter.packageWeb(threadId).pipe(as(GameWebPackage))
-              : exporter.packageWindows(threadId).pipe(as(GameWindowsPackage)),
+            exporter.packageWeb(threadId).pipe(as(GameWebPackage)),
           ),
         stop: () =>
           withGame(GameStage.GameStage, (stage, threadId) => stage.stop(threadId)).pipe(

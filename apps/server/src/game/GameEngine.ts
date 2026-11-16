@@ -11,9 +11,9 @@ import * as Option from "effect/Option";
 import {
   GameOperationError,
   gameOperationFault,
-  isGameEngineActive,
-  parkedEngineMessage,
-  type GameEngineId,
+  GameEngineId,
+  isAvailableEngine,
+  engineDisplayName,
   manifestProject,
   manifestRuntime,
   type GameManifest,
@@ -31,28 +31,24 @@ import {
   type GameModelSheetResult,
   type GameToolStatus,
   type GameViewport,
-  type GameUnityRecompileResult,
   type ThreadId,
 } from "@kurambit/contracts";
 import { commandDetail } from "./commandDetail.ts";
-import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { inGame } from "./gamePath.ts";
-import * as GameToolchain from "./GameToolchain.ts";
-import { makeGodotBackend } from "./GameGodotEngine.ts";
 import { makeThreeBackend } from "./GameThreeEngine.ts";
 import { runtimesDirectory } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
-import * as GameUnity from "./GameUnity.ts";
-import { makeUnityBackend } from "./GameUnityEngine.ts";
-import { engineProfile, type GameEngineProfile, type GameExportTarget } from "./engineProfile.ts";
+import {
+  unavailableEngine,
+  type GameEngineProfile,
+  type GameExportTarget,
+} from "./engineProfile.ts";
 import * as GameOperations from "./GameOperations.ts";
-import { limitIssues, mergeCheckIssues } from "./godotCheckOutput.ts";
-import { makeAtomicWriter } from "./gameFiles.ts";
+import { limitIssues, mergeCheckIssues } from "./checkIssues.ts";
 import { hashFile } from "./hashFile.ts";
 import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
-import type { WindowHost } from "./windowHost.ts";
 import { gameReference } from "./gameReference.ts";
 import type { SheetView } from "./webPlaySession.ts";
 import { replaySavedPlays, savedPlays } from "./playFiles.ts";
@@ -86,15 +82,8 @@ const referenceViews = (view?: {
   ];
 };
 
-/**
- * The game engines this build runs. The manifest still names one, so a
- * project that declares anything else fails here — before any engine
- * lookup or process launch — instead of being silently routed elsewhere.
- */
-const SUPPORTED_GAME_ENGINE_IDS = ["godot", "three", "unity"] as const;
 /** Clean checks kept for builds' facts: a turn's last few checks are the ones its build may match. */
 const CLEAN_CHECKS = 32;
-export type SupportedGameEngineId = (typeof SUPPORTED_GAME_ENGINE_IDS)[number];
 
 export interface GameEngineBinary {
   readonly path: string;
@@ -141,47 +130,14 @@ export interface GameEngineRelease {
   readonly notes: ReadonlyArray<string>;
 }
 
-/** What a play session's launch is given; the engine says how its runner starts from it. */
-export interface PlayProcessInput {
-  /** The engine project directory the sources play from. */
-  readonly projectDir: string;
-  /** The prepared player executable, for engines whose games play one; null otherwise. */
-  readonly player: string | null;
-  /** Where the runner reads its play-session request. */
-  readonly requestPath: string;
-  /** An ignored directory inside the game for runner files. */
-  readonly scriptDir: string;
-  /** Scratch outside the game for the process's own state and logs. */
-  readonly traceDir: string;
-  /** A kept session's stable save location (see gameKeptSaves); null starts with no saved data. */
-  readonly saves: string | null;
-  readonly viewport: GameViewport;
-  /** The window the runner gets (see windowHost); without one it must run headless or refuse. */
-  readonly window: WindowHost["kind"] | null;
-}
-
-/** One runner process: the caller puts it in a window host's window, tracks it and ends it. */
-export interface PlayProcess {
-  readonly executable: string;
-  readonly args: ReadonlyArray<string>;
-  /** The whole environment, display variables stripped; the display host adds its own. */
-  readonly env: NodeJS.ProcessEnv;
-  readonly cwd?: string;
-  /** Engine fields of the request beside the port and token. */
-  readonly request: { readonly expectedUserDataPrefix?: string };
-  /** Directories that hold nothing worth keeping once the session ends. */
-  readonly scratch: ReadonlyArray<string>;
-  /** A line for the session message about how input reaches the game; empty when nothing to add. */
-  readonly inputNote: string;
-}
-
 /**
  * One engine's driver. It owns everything engine-specific: the project and its
  * binary, its tool's status, import, check, the releases it makes and their
- * files, play, and its live editor's lifetime. The core (GameEngine,
- * GameExport, GameStage) owns stage order, source identity, staging,
- * publication and operation ownership, and asks this interface (or the
- * profile), never the engine's name, wherever engines differ.
+ * files, replays and model sheets. The core (GameEngine, GameExport, GameStage)
+ * owns stage order, source identity, staging, publication and operation
+ * ownership, and asks this interface (or the profile), never the engine's
+ * name, wherever engines differ. A new engine is one more of these, with its
+ * profile (engineProfile.ts), its GAME_ENGINES entry, template and skill.
  */
 export interface GameEngineBackend {
   readonly profile: GameEngineProfile;
@@ -189,7 +145,7 @@ export interface GameEngineBackend {
     root: string,
     manifest: GameManifest,
   ) => Effect.Effect<Omit<GameEngineContext, "root" | "runtime">, GameOperationError>;
-  /** The one tool this game's engine needs, for this project (Unity's editor by its version); null when it needs none. */
+  /** The one tool this game's engine needs, for this project; null when it needs none. */
   readonly toolStatus: (
     root: string,
     manifest: GameManifest,
@@ -252,21 +208,6 @@ export interface GameEngineBackend {
     },
   ) => Effect.Effect<GameEngineRelease, GameOperationError>;
   /**
-   * The game's one live editor, for engines that refuse a second editor on an
-   * open project; null when every operation runs its own process.
-   */
-  readonly editor: {
-    /** Runs work holding the editor, so another game cannot take it in between. */
-    readonly hold: (
-      root: string,
-    ) => <A, E, R>(work: Effect.Effect<A, E, R>) => Effect.Effect<A, E | GameOperationError, R>;
-    readonly close: (root: string) => Effect.Effect<void>;
-    /** Whether the project's first full import already ran. */
-    readonly warm: (ctx: GameEngineContext) => Effect.Effect<boolean>;
-    /** Opens the editor once (the project's first full import) and records it. */
-    readonly open: (ctx: GameEngineContext) => Effect.Effect<void, GameOperationError>;
-  } | null;
-  /**
    * Runs a person's kept play again on the game at `ctx` (its folder or a build's copy) from
    * the gameplay entry; "no-replay" when that game's shell has none. Null for engines whose
    * shell keeps no plays.
@@ -293,30 +234,6 @@ export interface GameEngineBackend {
         },
       ) => Effect.Effect<GameModelSheetResult | "no-sheet", GameOperationError>)
     | null;
-  /**
-   * How a play session (exploration or a bot) starts this engine's runner, a
-   * process speaking the play-session protocol over loopback. Null for
-   * engines whose games play as a browser page, which the browser host opens.
-   */
-  readonly playProcess:
-    | ((input: PlayProcessInput) => Effect.Effect<PlayProcess, GameOperationError>)
-    | null;
-  /**
-   * For engines whose games play as a built player folder: the release target
-   * sessions on this machine play, and where a game keeps players by source
-   * identity. Players are built through `release`; null otherwise.
-   */
-  readonly player: {
-    readonly playTarget: "Linux" | "Windows";
-    /** The player's executable inside a player folder. */
-    readonly executable: string;
-    /** The folder a game keeps the player of these sources in. */
-    readonly cacheDir: (root: string, sourceId: string) => string;
-    /** Whether a builds/logs entry is a kept player folder. */
-    readonly isCacheDir: (name: string) => boolean;
-    /** Whether a player folder holds everything the player needs. */
-    readonly complete: (directory: string) => Effect.Effect<boolean>;
-  } | null;
 }
 
 const unsupportedEngine = (engineName: string) =>
@@ -326,17 +243,8 @@ const unsupportedEngine = (engineName: string) =>
     reason: "invalid-input",
     detail:
       `Unsupported game engine "${engineName === "" ? "(missing)" : engineName}". ` +
-      `This build supports: ${SUPPORTED_GAME_ENGINE_IDS.join(", ")}. ` +
+      `This build supports: ${GameEngineId.literals.join(", ")}. ` +
       `The project was not imported, checked or exported; no engine process started.`,
-  });
-
-/** Engine work (import, check, export, play) never starts on a parked engine's game. */
-export const parkedEngine = (engine: GameEngineId) =>
-  new GameOperationError({
-    operation: "resolve-engine",
-    path: engine,
-    reason: "engine-parked",
-    detail: parkedEngineMessage(engine),
   });
 
 export class GameEngine extends Context.Service<
@@ -409,10 +317,6 @@ export class GameEngine extends Context.Service<
       threadId: ThreadId,
       input: GameModelSheetInput,
     ) => Effect.Effect<GameModelSheetResult, GameOperationError>;
-    /** `game_unity` op `recompile`: the live editor imports changed files and compiles, with C# errors at file:line. */
-    readonly recompile: (
-      threadId: ThreadId,
-    ) => Effect.Effect<GameUnityRecompileResult, GameOperationError>;
     /**
      * The one tool this game's engine needs, as the toolchain sees it for this
      * project. Asked on every status read, so an answer is kept briefly per game.
@@ -426,17 +330,11 @@ export class GameEngine extends Context.Service<
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
   const operations = yield* GameOperations.GameOperations;
-  const tools = yield* GameToolchain.GameToolchain;
-  const processes = yield* GameProcesses.GameProcesses;
-  const unity = yield* GameUnity.GameUnity;
   const gameBrowser = yield* makeGameBrowser;
   const templates = yield* GameTemplates.GameTemplates;
-  const writeAtomic = yield* makeAtomicWriter;
   const identify = yield* makeSourceIdentity;
   const backends = new Map<string, GameEngineBackend>([
-    ["godot", makeGodotBackend(processes, tools, writeAtomic)],
     ["three", makeThreeBackend(gameBrowser, Effect.map(templates.directory, runtimesDirectory))],
-    ["unity", makeUnityBackend(unity, tools)],
   ]);
   const backendFor = (engineName: string): Effect.Effect<GameEngineBackend, GameOperationError> => {
     const backend = backends.get(engineName);
@@ -444,11 +342,11 @@ const make = Effect.gen(function* () {
       ? Effect.fail(unsupportedEngine(engineName))
       : Effect.succeed(backend);
   };
-  /** The backend that runs a game's engine work; a parked engine's is refused. */
+  /** The backend that runs a game's engine work; an engine this version does not have is refused. */
   const runner = (manifest: GameManifest) =>
-    isGameEngineActive(manifest.engine.name)
+    isAvailableEngine(manifest.engine.name)
       ? backendFor(manifest.engine.name)
-      : Effect.fail(parkedEngine(manifest.engine.name));
+      : Effect.fail(unavailableEngine(manifest.engine.name));
   const context = Effect.fn("GameEngine.context")(function* (root: string) {
     const manifest = yield* projects.read(root);
     const backend = yield* runner(manifest);
@@ -460,14 +358,12 @@ const make = Effect.gen(function* () {
     return (yield* backend.importProject(ctx)).result;
   });
 
-  const snapshot = (root: string, project: string, backend: GameEngineBackend) =>
-    identify(root, project, backend.profile.derivedInput);
+  const snapshot = (root: string, project: string) => identify(root, project);
 
   /**
-   * Imports first: a fresh game has no .godot cache, so .tres files and
-   * class_names can resolve. Import is cache preparation, not the check
-   * itself: Godot's import can write sidecar files inside the project, so the
-   * inputs are read after it and before the checking script runs.
+   * Imports first: an engine's import prepares its caches, and may write
+   * files inside the project, so the inputs are read after it and before the
+   * check runs.
    */
   const checkSources = (
     root: string,
@@ -483,7 +379,7 @@ const make = Effect.gen(function* () {
       const { profile } = backend;
       const project = ctx.projectName;
       const imported = yield* backend.importProject(ctx);
-      const before = yield* snapshot(root, project, backend);
+      const before = yield* snapshot(root, project);
       // Sources that cannot be identified: a link or too many files is the
       // game's (a check error, through asResult), an unreadable tree ours.
       if (before.kind === "unknown")
@@ -517,18 +413,13 @@ const make = Effect.gen(function* () {
           file: projectFile,
           message: `${profile.displayName} exited with code ${run.exitCode}. ${commandDetail(run)}`,
         });
-      // A game created before gameplay entries is checked as it always was, but
-      // the warning says what the check did not cover rather than implying it did.
       const warnings = [
         ...(reported?.warnings ?? []),
         ...(executed.performance?.warning == null
           ? []
           : [{ file: `${project}/`, message: executed.performance.warning }]),
-        ...(manifest.gameplayScene == null && profile.check.withoutGameplayScene !== null
-          ? [{ file: "game.json", message: profile.check.withoutGameplayScene }]
-          : []),
       ];
-      const after = yield* snapshot(root, project, backend);
+      const after = yield* snapshot(root, project);
       if (after.kind === "unknown")
         return yield* sourceIdentityError(`${profile.displayName} check`, root, project, after);
       // Sources that moved during the check (the game may write its own
@@ -584,7 +475,7 @@ const make = Effect.gen(function* () {
       const backend = yield* runner(manifest);
       const project = yield* backend.resolveProject(root, manifest);
       const ctx = { root, ...project, runtime: manifestRuntime(manifest) };
-      const work = checkSources(
+      return yield* checkSources(
         root,
         backend,
         ctx,
@@ -594,9 +485,6 @@ const make = Effect.gen(function* () {
         options?.qa === true,
         options?.look === true,
       );
-      // With a live editor, import and check share one hold, as export does:
-      // another game cannot take the editor between them.
-      return yield* backend.editor === null ? work : backend.editor.hold(root)(work);
     }).pipe(Effect.catchTags({ GameOperationError: asResult }));
   });
 
@@ -604,8 +492,8 @@ const make = Effect.gen(function* () {
     lookup: (root: string) =>
       Effect.gen(function* () {
         const manifest = yield* projects.read(root);
-        // A parked engine's tool is not looked for, not even for its own games.
-        if (!isGameEngineActive(manifest.engine.name)) return null;
+        // An engine this version does not have has no tool to look for.
+        if (!isAvailableEngine(manifest.engine.name)) return null;
         const backend = yield* backendFor(manifest.engine.name);
         return yield* backend.toolStatus(root, manifest);
       }),
@@ -616,7 +504,7 @@ const make = Effect.gen(function* () {
 
   const viewport = Effect.fn("GameEngine.viewport")(function* (root: string) {
     const manifest = yield* projects.read(root);
-    const backend = yield* backendFor(manifest.engine.name);
+    const backend = yield* runner(manifest);
     // The project folder alone answers this; no binary is resolved.
     return yield* backend.viewport(yield* inGame(root, manifestProject(manifest)));
   });
@@ -632,11 +520,7 @@ const make = Effect.gen(function* () {
   const checkedIdentity = (root: string) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const snapshot = yield* identify(
-        root,
-        manifestProject(manifest),
-        engineProfile(manifest.engine.name).derivedInput,
-      );
+      const snapshot = yield* identify(root, manifestProject(manifest));
       if (snapshot.kind !== "known") return null;
       const manifestHash = yield* Effect.promise(() =>
         hashFile(NodePath.join(root, "game.json"), { noFollow: true }),
@@ -666,7 +550,7 @@ const make = Effect.gen(function* () {
   const checkLabel = (root: string) =>
     Effect.map(
       projects.read(root),
-      (manifest) => `${engineProfile(manifest.engine.name).displayName} check`,
+      (manifest) => `${engineDisplayName(manifest.engine.name)} check`,
     );
   const replayIn: GameEngine["Service"]["replayIn"] = (root, play) =>
     Effect.gen(function* () {
@@ -791,26 +675,6 @@ const make = Effect.gen(function* () {
         identity === null
           ? Effect.succeed(null)
           : Effect.map(Cache.getOption(cleanChecks, identity), Option.getOrNull),
-      ),
-    recompile: (threadId) =>
-      projects.exclusive(threadId, "Unity recompile", (root) =>
-        Effect.gen(function* () {
-          const { backend, ctx } = yield* context(root);
-          if (backend.editor === null)
-            return yield* new GameOperationError({
-              operation: "Unity recompile",
-              path: root,
-              reason: "invalid-input",
-              detail: "The game_unity tool works on Unity games; this game runs another engine.",
-            });
-          const imported = yield* backend.importProject(ctx);
-          return {
-            ok: imported.result.success,
-            errors: imported.issues,
-            warnings: [],
-            text: imported.result.message.slice(0, 4000),
-          };
-        }),
       ),
     toolStatus,
     viewport,

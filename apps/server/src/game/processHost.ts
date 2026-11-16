@@ -222,14 +222,8 @@ export const processFacts = async (pid: number): Promise<ProcessFacts | null> =>
 };
 
 /** Every process the OS lets this user see. */
-export const listProcesses = (): Promise<ProcessFacts[]> =>
+const listProcesses = (): Promise<ProcessFacts[]> =>
   HOST_OS === "linux" ? linuxList() : isWindows ? windowsList() : psList();
-
-/** A process's working directory; only Linux exposes another process's without a native helper. */
-export const processCwd = (pid: number): Promise<string | null> =>
-  HOST_OS === "linux"
-    ? NodeFSP.readlink(`/proc/${pid}/cwd`).catch(() => null)
-    : Promise.resolve(null);
 
 /** The launch tokens in a process's environment, where the OS shows it to its user (Linux). */
 const environTokens = async (pid: number): Promise<ReadonlyArray<string>> => {
@@ -325,16 +319,13 @@ const taskkill = (pid: number): void => {
   }).on("error", () => undefined);
 };
 
-/** Ends a Windows tree pid by pid, sparing what `keep` refuses; never `taskkill /T`. */
-const windowsTreeKill = async (
-  pid: number,
-  keep: ((facts: ProcessFacts) => boolean) | undefined,
-): Promise<void> => {
+/** Ends a Windows tree pid by pid; never `taskkill /T`. */
+const windowsTreeKill = async (pid: number): Promise<void> => {
   const all = await listProcesses();
   const root = all.find((facts) => facts.pid === pid);
   const members = root === undefined ? [] : windowsDescendants(all, [root]);
   taskkill(pid);
-  for (const member of members) if (keep?.(member) !== false) taskkill(member.pid);
+  for (const member of members) taskkill(member.pid);
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -558,18 +549,6 @@ export interface SpawnOwnedOptions {
    */
   readonly tree: boolean;
   /**
-   * Which of a Windows tree's descendants a stop may end; all when omitted.
-   * A Unity Licensing Client the editor started is the user's, never ours.
-   */
-  readonly keep?: ((facts: ProcessFacts) => boolean) | undefined;
-  /**
-   * Whether the child joins the kill-on-close job (Windows), dying with the
-   * server however it exits. False for a child whose launch record is reaped
-   * at the next start instead (the live Unity editor): the job is inherited,
-   * and a Licensing Client the editor starts must outlive us.
-   */
-  readonly joinsJob?: boolean | undefined;
-  /**
    * The child opens a window of its own (an engine or editor). Windows only:
    * such a child is not started hidden, since a hidden first show would keep
    * its window from ever drawing; tool children get no console window.
@@ -628,7 +607,7 @@ export const spawnOwned = (
     child.once("spawn", () => {
       const pid = child.pid;
       if (pid === undefined) return resolve(null);
-      if (options.joinsJob !== false) host.joinJob(pid);
+      host.joinJob(pid);
       void processFacts(pid).then(
         (facts) => resolve(facts === null ? null : { pid, start: facts.start, token }),
         () => resolve(null),
@@ -640,7 +619,7 @@ export const spawnOwned = (
     if (pid === undefined) return false;
     if (options.tree && isWindows) {
       if (!running()) return false;
-      void windowsTreeKill(pid, options.keep);
+      void windowsTreeKill(pid);
       return true;
     }
     if (options.tree) {
@@ -679,9 +658,7 @@ export const adoptLaunch = async (
  * Stops recorded launches that still verify as ours, with the rest of their
  * trees: descendants by parent link, members of their process groups and,
  * where the OS shows environments, any process carrying a recorded token
- * (helpers that left the group, such as Unity's import workers). `keep`
- * decides which of those tree members may be signalled at all; the recorded
- * roots always are. SIGTERM (Windows: forced termination of the tree), a
+ * (helpers that left the group). SIGTERM (Windows: forced termination of the tree), a
  * wait of up to `waitMs` for the roots, then SIGKILL for whatever is still
  * the same process, then a short wait so memory checks after a stop see
  * the memory back. Nothing that does not verify is ever signalled.
@@ -692,7 +669,6 @@ export const stopRecorded = async (
     readonly waitMs: number;
     /** A further check on each verified root (what it runs, for which project); all pass when omitted. */
     readonly owns?: (facts: ProcessFacts) => boolean;
-    readonly keep?: (facts: ProcessFacts) => boolean;
   },
 ): Promise<void> => {
   const roots: Array<{ readonly record: LaunchRecord; readonly facts: ProcessFacts }> = [];
@@ -708,7 +684,7 @@ export const stopRecorded = async (
       await listProcesses(),
       roots.map((root) => root.facts),
     ))
-      if (options.keep?.(facts) !== false) members.set(facts.pid, facts);
+      members.set(facts.pid, facts);
   } else {
     const all = await listProcesses();
     const rootPids = new Set(roots.map((root) => root.facts.pid));
@@ -730,7 +706,6 @@ export const stopRecorded = async (
         members.set(child.pid, child);
         queue.push(child.pid);
       }
-    for (const [pid, facts] of members) if (options.keep?.(facts) === false) members.delete(pid);
   }
   const signalled = new Map<number, string>();
   // Windows has no SIGTERM: process.kill ends the pid (TerminateProcess), one by one.

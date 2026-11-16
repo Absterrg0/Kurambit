@@ -1,9 +1,8 @@
 import {
-  ACTIVE_GAME_ENGINES,
   DEFAULT_GAME_ENGINE,
   GAME_ENGINES,
+  GameEngineId,
   type EnvironmentId,
-  type GameEngineId,
 } from "@kurambit/contracts";
 
 import { gameEnvironment } from "../../state/game";
@@ -25,17 +24,16 @@ export function useEngineReadiness(environmentId: EnvironmentId) {
 
 /**
  * The engine a form submits: the user's pick while it is ready, else the first
- * ready active engine that plays every turn (the lane being built), else any
- * ready active one. A parked engine is never chosen.
+ * ready engine that plays every turn (the lane being built), else any ready one.
  */
 export function chooseEngine(
   chosen: GameEngineId | null,
   ready: (id: GameEngineId) => boolean,
 ): GameEngineId {
-  if (chosen !== null && ACTIVE_GAME_ENGINES.includes(chosen) && ready(chosen)) return chosen;
+  if (chosen !== null && ready(chosen)) return chosen;
   return (
-    ACTIVE_GAME_ENGINES.find((id) => GAME_ENGINES[id].turnLoop && ready(id)) ??
-    ACTIVE_GAME_ENGINES.find((id) => ready(id)) ??
+    GameEngineId.literals.find((id) => GAME_ENGINES[id].turnLoop && ready(id)) ??
+    GameEngineId.literals.find((id) => ready(id)) ??
     DEFAULT_GAME_ENGINE
   );
 }

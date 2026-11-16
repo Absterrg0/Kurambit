@@ -32,13 +32,14 @@ import {
   type GameBuildRef,
   GameBuildRestoreResult,
   type GameBuildsResult,
-  type GameEngineId,
+  type GameEngineName,
+  isAvailableEngine,
   type GameKeepValuesInput,
   type GameKeepValuesResult,
   GameOperationError,
   manifestProject,
   type OrchestrationV2Run,
-  parkedEngineMessage,
+  unavailableEngineMessage,
   type ProjectId,
   RESTORE_BEFORE_LABEL,
   type RunId,
@@ -63,7 +64,7 @@ import * as GameRunControl from "./GameRunControl.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameStage from "./GameStage.ts";
 import { BuildName } from "./run/buildNames.ts";
-import { engineCapabilities, engineProfile } from "./engineProfile.ts";
+import { availableEngine, engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
@@ -109,14 +110,14 @@ const isoOfSeconds = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe
 const TURN_REFS = "refs/kurambit/orchestration-v2/checkpoints/";
 const MAX_FILES = 8;
 /** Why the Game panel cannot play a build of this engine's game, or null when it can. */
-const noPlayReason = (engine: GameEngineId) =>
-  !engineCapabilities(engine).has("play")
-    ? parkedEngineMessage(engine)
+const noPlayReason = (engine: GameEngineName) =>
+  !isAvailableEngine(engine)
+    ? unavailableEngineMessage(engine)
     : engineProfile(engine).stage === "window"
-      ? `${engineProfile(engine).displayName} builds play as a native player for facts and bots; the Game panel has no ${engineProfile(engine).displayName} Play yet.`
+      ? `${engineProfile(engine).displayName} builds play in their own window; the Game panel has no ${engineProfile(engine).displayName} Play yet.`
       : null;
-/** Whether a build of this engine's game is measured: never for a parked engine. */
-const measurable = (engine: GameEngineId) => engineCapabilities(engine).has("play");
+/** Whether a build of this engine's game is measured: never for an engine this version does not have. */
+const measurable = (engine: GameEngineName) => engineCapabilities(engine).has("play");
 const isGameBuildId = Schema.is(GameBuildId);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
@@ -465,7 +466,7 @@ const make = Effect.gen(function* () {
       return {
         root,
         projectId: shell.projectId,
-        engine: manifest.engine.name as GameEngineId,
+        engine: manifest.engine.name,
         lane: manifestProject(manifest),
       };
     });
@@ -1150,7 +1151,7 @@ const make = Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const build = yield* resolve(g, ref);
       if (!measurable(g.engine))
-        return { ...(yield* facts.read(build)), message: parkedEngineMessage(g.engine) };
+        return { ...(yield* facts.read(build)), message: unavailableEngineMessage(g.engine) };
       return yield* facts.measure(build, options);
     });
 
@@ -1158,7 +1159,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (!isGameBuildId(build)) return;
       const manifest = yield* projects.read(root);
-      const engine = manifest.engine.name as GameEngineId;
+      const engine = manifest.engine.name;
       if (!measurable(engine)) return;
       const lane = manifestProject(manifest);
       const [tree] = yield* checkpoints.resolveTrees({ cwd: root, revisions: [build], path: lane });
@@ -1392,7 +1393,9 @@ const make = Effect.gen(function* () {
   // folder that already held the build is fresh, so nothing rebuilds. A live
   // Stage serves the folder itself: its watch shows the restore.
   const playRestored = (threadId: ThreadId, g: Game) =>
-    engineProfile(g.engine).turnLoop && engineProfile(g.engine).stage === "export"
+    isAvailableEngine(g.engine) &&
+    engineProfile(g.engine).turnLoop &&
+    engineProfile(g.engine).stage === "export"
       ? Effect.forkIn(
           stage
             .playCurrent(threadId)
@@ -1637,7 +1640,7 @@ const make = Effect.gen(function* () {
   const keepValues: GameBuilds["Service"]["keepValues"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
-      const profile = engineProfile(g.engine);
+      const profile = engineProfile(yield* availableEngine(g.engine));
       if (profile.tuneFile === null)
         return yield* failed(
           "Keep values",
@@ -1889,8 +1892,8 @@ const make = Effect.gen(function* () {
     for (const summary of games)
       yield* Effect.gen(function* () {
         const manifest = yield* projects.read(summary.root);
-        const engine = manifest.engine.name as GameEngineId;
-        if (!engineProfile(engine).turnLoop) return;
+        const engine = manifest.engine.name;
+        if (!isAvailableEngine(engine) || !engineProfile(engine).turnLoop) return;
         const rows = yield* projections.listProjectTurnCheckpoints(summary.projectId, { limit: 5 });
         const newest = rows.find(
           (row) => row.cwd === summary.root && row.checkpoint.files.length > 0,
@@ -1923,8 +1926,8 @@ const make = Effect.gen(function* () {
   });
 
   // Measures owed from data, after a restart or between startup and the
-  // reactor's subscription: every row that still owes a tier. A parked
-  // engine's builds are not measured.
+  // reactor's subscription: every row that still owes a tier. Builds of an
+  // engine this version does not have are not measured.
   const reconcile: GameBuilds["Service"]["reconcile"] = Effect.gen(function* () {
     yield* settleRestores;
     for (const build of yield* facts.owed)

@@ -71,7 +71,7 @@ export class GameOperations extends Context.Service<
 
 /**
  * Operations report failure in more than one shape: action results use
- * `success` and the Godot check uses `ok`. The shared operation state has
+ * `success` and the check uses `ok`. The shared operation state has
  * to see both, or a failed build announces success to the stage.
  */
 const operationFailed = (result: unknown): boolean => {

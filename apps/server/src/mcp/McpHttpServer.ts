@@ -10,8 +10,6 @@ import {
   GamePlayTool,
   GamePlayToolkit,
   GameToolkit,
-  GameUnityTool,
-  GameUnityToolkit,
 } from "./toolkits/game/tools.ts";
 import { RETIRED_GAME_TOOLS, retiredToolMessage } from "./toolkits/game/placement.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
@@ -1085,10 +1083,6 @@ const layerGameToolkit = Layer.mergeAll(
   imageToolRegistration(
     registerGameImageTool(GameBlenderTool, GameBlenderToolkit),
     GameHandlers.layerBlender,
-  ),
-  imageToolRegistration(
-    registerGameImageTool(GameUnityTool, GameUnityToolkit),
-    GameHandlers.layerUnity,
   ),
   imageToolRegistration(
     registerGameImageTool(GameBuildsTool, GameToolkit, false),

@@ -134,7 +134,7 @@ it("blocks on tools only when no fresh build can be served without them", () => 
   expect(deriveGameStagePhase({ ...BASE, toolchainReady: false, hasWebBuild: true })).toEqual({
     kind: "tools-missing",
   });
-  // A fresh build is served from disk without launching Godot at all.
+  // A fresh build is served from disk without exporting again.
   expect(
     deriveGameStagePhase({
       ...BASE,
@@ -359,11 +359,8 @@ it("describes unknown source freshness and preserves selected Play", () => {
 });
 
 it("counts only the engine the game needs", () => {
-  const tool = (
-    name: "blender" | "godot" | "uv" | "unity",
-    status: "ready" | "warning" | "error",
-  ) => ({
-    tool: name,
+  const blender = (status: "ready" | "warning" | "error") => ({
+    tool: "blender" as const,
     installed: status !== "error",
     path: null,
     version: null,
@@ -372,21 +369,9 @@ it("counts only the engine the game needs", () => {
     message: "",
     downloadUrl: null,
   });
-  const withoutUnity = {
-    tools: [
-      tool("blender", "error"),
-      tool("godot", "warning"),
-      tool("uv", "ready"),
-      tool("unity", "error"),
-    ],
-  };
-  expect(toolchainReadyFor(withoutUnity, "godot")).toBe(true);
-  expect(toolchainReadyFor(withoutUnity, "three")).toBe(true);
-  expect(toolchainReadyFor(withoutUnity, "unity")).toBe(false);
-  const withoutGodot = { tools: [tool("godot", "error"), tool("unity", "ready")] };
-  expect(toolchainReadyFor(withoutGodot, "three")).toBe(true);
-  expect(toolchainReadyFor(withoutGodot, "godot")).toBe(false);
-  expect(toolchainReadyFor(withoutGodot, "unity")).toBe(true);
+  // three.js needs no tool of its own: Blender being missing does not stop it.
+  expect(toolchainReadyFor({ tools: [blender("error")] }, "three")).toBe(true);
+  expect(toolchainReadyFor({ tools: [] }, "three")).toBe(true);
 });
 
 // A new build is seen to start: from its title, not dropped into play like a live edit.

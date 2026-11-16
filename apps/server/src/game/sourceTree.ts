@@ -1,12 +1,10 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Hashes a derived input's normalised text and passes git its environment.
-import * as NodeCrypto from "node:crypto";
+// @effect-diagnostics nodeBuiltinImport:off -- Passes git its environment.
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import { CheckpointRef, GameOperationError } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import type { GameDerivedInput } from "./engineProfile.ts";
 
 /**
  * The engine folder's content identity is git's: the tree id of the folder in
@@ -31,7 +29,7 @@ const MAX_LISTING_BYTES = 64 * 1024 * 1024;
 
 const unknownIo = (detail: string): SourceIdentity => ({ kind: "unknown", reason: "io", detail });
 
-/** `(root, lane, derived) => identity`, over T3's checkpoint capture and git driver. */
+/** `(root, lane) => identity`, over T3's checkpoint capture and git driver. */
 export const makeSourceIdentity = Effect.gen(function* () {
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const git = yield* GitVcsDriver.GitVcsDriver;
@@ -88,9 +86,9 @@ export const makeSourceIdentity = Effect.gen(function* () {
   /**
    * The lane's tree in a folder that is no repository (a build's copy): a
    * throwaway object store and index over it, so equal files give the tree id
-   * the game folder's capture gives. Blobs are written only when they are read.
+   * the game folder's capture gives. No blob is written: only the tree id is read.
    */
-  const scratchTree = (root: string, lane: string, blobs: boolean) =>
+  const scratchTree = (root: string, lane: string) =>
     Effect.gen(function* () {
       const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "kurambit-source-" });
       yield* run(dir, ["init", "-q", "--bare", dir]);
@@ -101,18 +99,15 @@ export const makeSourceIdentity = Effect.gen(function* () {
         GIT_INDEX_FILE: NodePath.join(dir, "index"),
       };
       const scope = lane.length === 0 ? "." : lane;
-      if (blobs) yield* run(root, ["add", "-A", "--", scope], { env });
-      else {
-        const files = yield* run(
-          root,
-          ["ls-files", "-z", "--others", "--exclude-standard", "--", scope],
-          { env },
-        );
-        yield* run(root, ["update-index", "--add", "--info-only", "-z", "--stdin"], {
-          env,
-          stdin: files.stdout,
-        });
-      }
+      const files = yield* run(
+        root,
+        ["ls-files", "-z", "--others", "--exclude-standard", "--", scope],
+        { env },
+      );
+      yield* run(root, ["update-index", "--add", "--info-only", "-z", "--stdin"], {
+        env,
+        stdin: files.stdout,
+      });
       const written = yield* run(
         root,
         ["write-tree", "--missing-ok", ...(lane.length === 0 ? [] : [`--prefix=${lane}/`])],
@@ -121,12 +116,11 @@ export const makeSourceIdentity = Effect.gen(function* () {
       return { tree: written.stdout.trim(), env };
     });
 
-  /** The lane's identity from its tree: a link refuses it, a derived file counts by its normalised text. */
+  /** The lane's identity from its tree: a link refuses it. */
   const identityOf = (
     root: string,
     lane: string,
     tree: string,
-    derived: GameDerivedInput | null,
     env: NodeJS.ProcessEnv | undefined,
   ) =>
     Effect.gen(function* () {
@@ -142,51 +136,18 @@ export const makeSourceIdentity = Effect.gen(function* () {
           reason: "symlink",
           detail: NodePath.posix.join(lane, link.slice(link.indexOf("\t") + 1)),
         } as const;
-      if (derived === null) return { kind: "known", sourceId: tree } as const;
-      // git grep exits 1 when nothing matches.
-      const found = yield* run(
-        root,
-        ["grep", "-l", "-z", "-F", derived.marker, tree, "--", derived.glob],
-        {
-          env,
-          exits: [0, 1],
-        },
-      );
-      const paths = found.stdout
-        .split("\0")
-        .filter((name) => name.length > 0)
-        .map((name) => name.slice(tree.length + 1));
-      if (paths.length === 0) return { kind: "known", sourceId: tree } as const;
-      const normalised = new Map<string, string>();
-      for (const path of paths) {
-        const blob = yield* run(root, ["cat-file", "blob", `${tree}:${path}`], { env });
-        normalised.set(
-          path,
-          NodeCrypto.createHash("sha256").update(derived.normalise(blob.stdout)).digest("hex"),
-        );
-      }
-      // The listing again, with each derived file counted by its normalised text.
-      const hash = NodeCrypto.createHash("sha256");
-      for (const line of entries) {
-        const path = line.slice(line.indexOf("\t") + 1);
-        hash.update(`${path}\0${normalised.get(path) ?? line.slice(0, line.indexOf("\t"))}\n`);
-      }
-      return { kind: "known", sourceId: hash.digest("hex") } as const;
+      return { kind: "known", sourceId: tree } as const;
     });
 
-  return (
-    root: string,
-    lane: string,
-    derived: GameDerivedInput | null,
-  ): Effect.Effect<SourceIdentity> =>
+  return (root: string, lane: string): Effect.Effect<SourceIdentity> =>
     Effect.scoped(
       Effect.gen(function* () {
         const { tree, env } = (yield* checkpoints.isGitRepository(root))
           ? { tree: yield* capturedTree(root, lane), env: undefined }
-          : yield* scratchTree(root, lane, derived !== null);
+          : yield* scratchTree(root, lane);
         if (tree === null || tree.length === 0)
           return unknownIo(`${lane}/ holds no files git keeps`);
-        return yield* identityOf(root, lane, tree, derived, env);
+        return yield* identityOf(root, lane, tree, env);
       }),
     ).pipe(
       Effect.catch((error) =>

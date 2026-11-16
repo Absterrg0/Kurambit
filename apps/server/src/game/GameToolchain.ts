@@ -14,8 +14,6 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
-  isEngineToolActive,
-  UNITY_MIN_VERSION,
   type GameToolSource,
   type GameToolStatus,
   type GameToolchainStatus,
@@ -23,48 +21,19 @@ import {
 import * as ServerSettings from "../serverSettings.ts";
 import { commandDetail } from "./commandDetail.ts";
 import * as GameProcesses from "./GameProcesses.ts";
-import {
-  UNITY_DOWNLOAD_URL,
-  legacyUnityEditorRoot,
-  parseSecondaryInstallPath,
-  parseUnityLicense,
-  pickUnityEditor,
-  projectEditorVersion,
-  unityCliEnv,
-  unityCliPaths,
-  unityEditorDir,
-  unityEditorExecutable,
-  unityHubLocations,
-  unityLicenseFiles,
-  unityLicenseMessage,
-  unityVersionFromPath,
-  unityWindowsSupport,
-  type UnityEditorCandidate,
-  type UnityLicense,
-} from "./unityToolchain.ts";
-import {
-  UNITY_CLI_BUILDS,
-  UNITY_CLI_VERSION,
-  UV_BUILDS,
-  UV_VERSION,
-  plumbingHost,
-  type PlumbingBuild,
-} from "./plumbingBuilds.ts";
+import { UV_BUILDS, UV_VERSION, plumbingHost, type PlumbingBuild } from "./plumbingBuilds.ts";
 import { downloadPinned } from "./assetLibraryFiles.ts";
 import { fileSha256 } from "./fileHash.ts";
 import { openZipArchive } from "../zipArchive.ts";
 
 const DOWNLOADS = {
   blender: "https://www.blender.org/download/",
-  godot: "https://godotengine.org/download",
   uv: "https://docs.astral.sh/uv/getting-started/installation/",
-  unity: UNITY_DOWNLOAD_URL,
 } as const;
 const FFMPEG_DOWNLOAD = "https://ffmpeg.org/download.html";
-const NAMES = { blender: "Blender", godot: "Godot", uv: "uv", unity: "Unity" } as const;
+const NAMES = { blender: "Blender", uv: "uv" } as const;
 const REQUIRED = {
   blender: "Blender 4.2 or later",
-  godot: "Godot 4.7.x",
   uv: "uv 0.7 or later",
 } as const;
 /**
@@ -99,7 +68,7 @@ export const verifiedFile = async (
   verified.set(path, { identity, ok });
   return ok;
 };
-/** Kurambit's own data folder for helpers it fetches, and where earlier versions installed engines. */
+/** Kurambit's own data folder for helpers it fetches, and where earlier versions installed tools. */
 export const toolsDirectory = () =>
   NodePath.join(
     process.env.XDG_DATA_HOME || NodePath.join(NodeOS.homedir(), ".local/share"),
@@ -114,7 +83,7 @@ export const uvCacheEnv = (): Record<string, string> => ({
   UV_CACHE_DIR: NodePath.join(toolsDirectory(), "uv-cache"),
   UV_PYTHON_INSTALL_DIR: NodePath.join(toolsDirectory(), "uv-python"),
 });
-type BinaryTool = "blender" | "godot" | "uv";
+type BinaryTool = "blender" | "uv";
 type Platform = "linux" | "darwin" | "win32";
 const hostPlatform = (platform: NodeJS.Platform): Platform =>
   platform === "darwin" || platform === "win32" ? platform : "linux";
@@ -124,12 +93,11 @@ const validToolVersion = (tool: BinaryTool, version: string) => {
   const major = Number(match[1]),
     minor = Number(match[2]);
   if (tool === "uv") return major === 0 && minor >= 7;
-  return tool === "godot" ? major === 4 && minor === 7 : major > 4 || (major === 4 && minor >= 2);
+  return major > 4 || (major === 4 && minor >= 2);
 };
-/** The copies earlier Kurambit versions installed, before it stopped installing engines. */
+/** The copies earlier Kurambit versions installed, before it stopped installing tools. */
 const LEGACY_INSTALLS = {
   blender: "blender-4.5.14/blender",
-  godot: "godot-4.7.2/Godot_v4.7.2-stable_linux.x86_64",
   uv: `uv-${UV_VERSION}/uv`,
 } as const;
 const legacyInstall = (tool: BinaryTool, platform: Platform) =>
@@ -137,7 +105,6 @@ const legacyInstall = (tool: BinaryTool, platform: Platform) =>
   tool === "uv" && platform === "win32" ? `${LEGACY_INSTALLS.uv}.exe` : LEGACY_INSTALLS[tool];
 const ENV_OVERRIDES = {
   blender: "KURAMBIT_BLENDER",
-  godot: "KURAMBIT_GODOT",
   uv: "KURAMBIT_UV",
 } as const;
 export interface ToolCandidate {
@@ -149,7 +116,7 @@ export interface ToolCandidate {
  * a copy an earlier Kurambit installed, then PATH. An explicit path is the
  * only candidate, so a wrong override is reported instead of skipped.
  */
-export const toolCandidates = (
+const toolCandidates = (
   tool: BinaryTool,
   explicit: string,
   environment: string | undefined,
@@ -159,9 +126,7 @@ export const toolCandidates = (
 ): ReadonlyArray<ToolCandidate> => {
   if (explicit.trim()) return [{ path: NodePath.resolve(explicit.trim()), source: "settings" }];
   if (environment?.trim()) return [{ path: NodePath.resolve(environment.trim()), source: "env" }];
-  const names = (tool === "godot" ? ["godot", "godot4"] : [tool]).map((name) =>
-    platform === "win32" ? `${name}.exe` : name,
-  );
+  const names = [platform === "win32" ? `${tool}.exe` : tool];
   return [
     { path: NodePath.join(directory, legacyInstall(tool, platform)), source: "kurambit" },
     ...searchPath
@@ -173,13 +138,11 @@ export const toolCandidates = (
   ];
 };
 const describeCandidates = (tool: BinaryTool) =>
-  `the path in Settings > Game tools, ${ENV_OVERRIDES[tool]}, an earlier Kurambit install, then PATH (${tool === "godot" ? "godot, godot4" : tool})`;
+  `the path in Settings > Game tools, ${ENV_OVERRIDES[tool]}, an earlier Kurambit install, then PATH (${tool})`;
 export interface ResolvedTool {
   readonly path: string;
   readonly version: string;
   readonly source: GameToolSource;
-  /** Godot only: the export templates folder for this exact version. */
-  readonly templates: string | null;
 }
 type Probe =
   | { readonly kind: "missing" }
@@ -194,27 +157,13 @@ type Probe =
 export class GameToolchain extends Context.Service<
   GameToolchain,
   {
-    /** A detected Blender, Godot or uv, or why it cannot be used, with its download link. */
+    /** A detected Blender or uv, or why it cannot be used, with its download link. */
     readonly executable: (tool: BinaryTool) => Effect.Effect<ResolvedTool, GameOperationError>;
     /** uv for the live Blender view: detected, else fetched once into Kurambit's tools folder. */
     readonly uv: Effect.Effect<string, GameOperationError>;
-    /**
-     * The Unity editor a game opens with, the Unity CLI (fetched on first
-     * use) and the licence they will run under. Fails with an actionable
-     * reason before any editor starts.
-     */
-    readonly unity: (projectDir?: string) => Effect.Effect<UnityTools, GameOperationError>;
-    /**
-     * Every Unity editor and the CLI this server may have launched, usable
-     * or not: the only executables a Unity pid record may name.
-     */
-    readonly unityExecutables: Effect.Effect<UnityExecutables>;
-    /** Per-tool status. With a Unity project, Unity's entry speaks for that project's editor version. */
     /** Grows each time Kurambit fetches a tool, so a cached status of the toolchain knows it moved. */
     readonly revision: () => number;
-    readonly status: (options?: {
-      readonly unityProject?: string | undefined;
-    }) => Effect.Effect<GameToolchainStatus>;
+    readonly status: () => Effect.Effect<GameToolchainStatus>;
     /** Only the person installs and removes these, from Settings; never into their own Blender config. */
     readonly install: (tool: "mpfb") => Effect.Effect<GameToolchainStatus, GameOperationError>;
     readonly remove: (tool: "mpfb") => Effect.Effect<GameToolchainStatus, GameOperationError>;
@@ -222,26 +171,6 @@ export class GameToolchain extends Context.Service<
     readonly blenderExtension: (id: "mpfb") => Effect.Effect<string | null>;
   }
 >()("kurambit/game/GameToolchain") {}
-export interface UnityExecutables {
-  readonly cli: string;
-  /** The HOME every CLI call runs under. */
-  readonly cliHome: string;
-  readonly editors: ReadonlyArray<string>;
-}
-export interface UnityTools {
-  readonly cli: string;
-  readonly cliHome: string;
-  readonly editor: string;
-  /** The editor's version folder; its asset workers, shader compilers and Bee run from inside it. */
-  readonly editorDir: string;
-  readonly version: string;
-  readonly source: GameToolSource;
-  /** The project's own editor version when opening it in this newer editor upgrades it. */
-  readonly upgradesProject: string | null;
-  readonly license: Extract<UnityLicense, { kind: "active" }>;
-}
-type UnitySource = "settings" | "env" | "unity-hub" | "kurambit";
-type UnityCandidate = UnityEditorCandidate<UnitySource>;
 const isGameOperationError = Schema.is(GameOperationError);
 const make = Effect.gen(function* () {
   const processes = yield* GameProcesses.GameProcesses;
@@ -266,13 +195,7 @@ const make = Effect.gen(function* () {
     ),
   );
   const versionOf = (tool: BinaryTool, output: string) =>
-    output.match(
-      tool === "uv"
-        ? /\d+\.\d+\.\d+/
-        : tool === "godot"
-          ? /4\.\d+\.\d+\.[^\s]+/
-          : /Blender\s+\d+\.\d+\.\d+/,
-    )?.[0] ?? "unknown";
+    output.match(tool === "uv" ? /\d+\.\d+\.\d+/ : /Blender\s+\d+\.\d+\.\d+/)?.[0] ?? "unknown";
   /** `--version`, cached per file identity so a status poll never re-runs a large binary. */
   const probeVersion = (tool: BinaryTool, path: string) =>
     Effect.gen(function* () {
@@ -313,31 +236,13 @@ const make = Effect.gen(function* () {
       probes.set(path, entry);
       return entry;
     });
-  const godotTemplates = (godot: string, version: string) =>
-    Effect.promise(async () => {
-      const templateVersion = version.split(".").slice(0, 4).join(".");
-      const base = (await exists(NodePath.join(NodePath.dirname(godot), "._sc_")))
-        ? NodePath.join(NodePath.dirname(godot), "editor_data/export_templates")
-        : platform === "darwin"
-          ? NodePath.join(NodeOS.homedir(), "Library/Application Support/Godot/export_templates")
-          : platform === "win32"
-            ? NodePath.join(
-                process.env.APPDATA ?? NodePath.join(NodeOS.homedir(), "AppData/Roaming"),
-                "Godot/export_templates",
-              )
-            : NodePath.join(
-                process.env.XDG_DATA_HOME || NodePath.join(NodeOS.homedir(), ".local/share"),
-                "godot/export_templates",
-              );
-      return NodePath.join(base, templateVersion);
-    });
   /** The first usable candidate; else the first one found, with what is wrong with it. */
   const probe = (tool: BinaryTool): Effect.Effect<Probe, GameOperationError> =>
     Effect.gen(function* () {
       const config = yield* readSettings;
       const candidates = toolCandidates(
         tool,
-        tool === "blender" ? config.gameBlenderPath : tool === "godot" ? config.gameGodotPath : "",
+        tool === "blender" ? config.gameBlenderPath : "",
         process.env[ENV_OVERRIDES[tool]],
         directory,
         process.env.PATH ?? "",
@@ -354,7 +259,6 @@ const make = Effect.gen(function* () {
             path: candidate.path,
             source: candidate.source,
             version,
-            templates: tool === "godot" ? yield* godotTemplates(candidate.path, version) : null,
           } satisfies Probe;
         firstProblem ??= {
           kind: result.exitCode === 0 ? "wrong-version" : "broken",
@@ -428,42 +332,16 @@ const make = Effect.gen(function* () {
                 downloadUrl: DOWNLOADS[tool],
               }),
         } satisfies GameToolStatus;
-      const base = {
+      return {
         tool,
         installed: true,
         path: found.path,
         version: found.version,
         source: found.source,
-      };
-      if (found.templates === null)
-        return {
-          ...base,
-          status: "ready",
-          message: "Ready.",
-          downloadUrl: null,
-        } satisfies GameToolStatus;
-      const templates = found.templates;
-      const [hasBase, hasWindows] = yield* Effect.promise(() =>
-        Promise.all([hasBaseExportTemplates(templates), hasWindowsExportTemplates(templates)]),
-      );
-      const addTemplates = `open the Godot editor, choose Editor > Manage Export Templates and download them, or install the export templates .tpz from ${DOWNLOADS.godot}`;
-      return (
-        !hasBase
-          ? {
-              ...base,
-              status: "error",
-              message: `Godot ${found.version} has no export templates in ${templates}, so games cannot be built for play. To add them, ${addTemplates}.`,
-              downloadUrl: DOWNLOADS.godot,
-            }
-          : !hasWindows
-            ? {
-                ...base,
-                status: "warning",
-                message: `Ready for Web and Linux. Windows export templates are missing from ${templates}; to export for Windows, ${addTemplates}.`,
-                downloadUrl: DOWNLOADS.godot,
-              }
-            : { ...base, status: "ready", message: "Ready.", downloadUrl: null }
-      ) satisfies GameToolStatus;
+        status: "ready",
+        message: "Ready.",
+        downloadUrl: null,
+      } satisfies GameToolStatus;
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed({
@@ -645,250 +523,6 @@ const make = Effect.gen(function* () {
       return (yield* executable("uv")).path;
     }),
   );
-  const cliFiles = unityCliPaths(directory, platform);
-  const cliPath = () => process.env.KURAMBIT_UNITY_CLI?.trim() || cliFiles.cli;
-  const fetchUnityCli = Effect.gen(function* () {
-    if (plumbing === null)
-      return yield* new GameOperationError({
-        operation: "fetch-unity-cli",
-        path: cliFiles.cli,
-        reason: "unsupported-platform",
-        detail: "Unity publishes no CLI build for this OS and CPU.",
-      });
-    const build = UNITY_CLI_BUILDS[plumbing];
-    const stage = yield* makeStage("fetch-unity-cli");
-    yield* fetchPlumbing("fetch-unity-cli", build, stage).pipe(
-      Effect.flatMap((file) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (platform !== "win32") await NodeFSP.chmod(file, 0o755);
-            await NodeFSP.mkdir(cliFiles.cliDir, { recursive: true });
-            await NodeFSP.rename(file, cliFiles.cli);
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "fetch-unity-cli",
-              path: cliFiles.cli,
-              reason: "io",
-              cause,
-            }),
-        }),
-      ),
-      Effect.ensuring(dropStage(stage)),
-    );
-    const version = yield* processes.run({
-      root: logRoot,
-      executable: cliFiles.cli,
-      args: ["--version"],
-      operation: "unity-cli-version",
-      timeoutMs: 30_000,
-      env: unityCliEnv(cliFiles.installHome),
-      envMode: "replace",
-    });
-    if (version.exitCode !== 0 || !version.stdout.includes(UNITY_CLI_VERSION)) {
-      yield* Effect.promise(() => NodeFSP.rm(cliFiles.cli, { force: true }));
-      return yield* new GameOperationError({
-        operation: "fetch-unity-cli",
-        path: cliFiles.cli,
-        reason: "wrong-version",
-        detail: `The Unity CLI reported ${(version.stdout + version.stderr).slice(0, 200)}; expected ${UNITY_CLI_VERSION}.`,
-      });
-    }
-  });
-  const unityCli = fetchLock.withPermits(1)(
-    Effect.gen(function* () {
-      const cli = cliPath();
-      if (yield* Effect.promise(() => isExecutable(cli))) return cli;
-      if (cli !== cliFiles.cli)
-        return yield* new GameOperationError({
-          operation: "Unity",
-          path: cli,
-          reason: "tool-missing",
-          detail: `KURAMBIT_UNITY_CLI names ${cli}, which is not an executable file.`,
-        });
-      yield* fetchUnityCli;
-      revision += 1;
-      return cli;
-    }),
-  );
-  const hub = unityHubLocations(platform, NodeOS.homedir(), process.env.APPDATA);
-  const editorsUnder = (root: string, source: UnitySource) =>
-    Effect.promise(async () => {
-      const entries = await NodeFSP.readdir(root, { withFileTypes: true }).catch(() => []);
-      const found: UnityCandidate[] = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const editor = unityEditorExecutable(NodePath.join(root, entry.name), platform);
-        if (await isExecutable(editor))
-          found.push({ editor, source, version: unityVersionFromPath(editor) });
-      }
-      return found;
-    });
-  /** Explicit paths first (settings, env), then Unity Hub's folders, then an earlier Kurambit install. */
-  const unityCandidates = Effect.gen(function* () {
-    const config = yield* readSettings.pipe(Effect.orElseSucceed(() => null));
-    const explicit: UnityCandidate[] = [];
-    for (const [path, source] of [
-      [config?.gameUnityPath ?? "", "settings"],
-      [process.env.KURAMBIT_UNITY_EDITOR ?? "", "env"],
-    ] as const)
-      if (path.trim() !== "") {
-        const editor = NodePath.resolve(path.trim());
-        explicit.push({ editor, source, version: unityVersionFromPath(editor) });
-      }
-    const secondary = parseSecondaryInstallPath(
-      yield* Effect.promise(() =>
-        NodeFSP.readFile(hub.secondaryInstallPathFile, "utf8").catch(() => null),
-      ),
-    );
-    const hubRoots = [...new Set([hub.editors, ...(secondary === null ? [] : [secondary])])];
-    const detected: UnityCandidate[] = [];
-    for (const root of hubRoots) detected.push(...(yield* editorsUnder(root, "unity-hub")));
-    detected.push(...(yield* editorsUnder(legacyUnityEditorRoot(directory), "kurambit")));
-    return { explicit, detected };
-  });
-  const unityExecutables: GameToolchain["Service"]["unityExecutables"] = unityCandidates.pipe(
-    Effect.map(({ explicit, detected }) => ({
-      cli: cliPath(),
-      cliHome: cliFiles.installHome,
-      editors: [...new Set([...explicit, ...detected].map((candidate) => candidate.editor))],
-    })),
-  );
-  const unityMissing = (path: string, detail: string, reason: GameOperationError["reason"]) =>
-    new GameOperationError({ operation: "Unity", path, reason, detail });
-  const getUnity = `Install Unity Hub from ${UNITY_DOWNLOAD_URL} and add a Unity ${UNITY_MIN_VERSION} or later Unity 6 editor with Windows Build Support (Mono), or set its path in Settings > Game tools.`;
-  /** The editor for a project, or why there is none; the licence and CLI are checked by the caller. */
-  const unityEditor = (projectDir: string | undefined) =>
-    Effect.gen(function* () {
-      const { explicit, detected } = yield* unityCandidates;
-      const override = explicit[0];
-      if (override !== undefined && !(yield* Effect.promise(() => isExecutable(override.editor))))
-        return yield* unityMissing(
-          override.editor,
-          `${override.source === "settings" ? "The Unity editor path in Settings > Game tools" : "KURAMBIT_UNITY_EDITOR"} names ${override.editor}, which is not an executable file. ${getUnity}`,
-          "tool-missing",
-        );
-      const project =
-        projectDir === undefined
-          ? null
-          : projectEditorVersion(
-              yield* Effect.promise(() =>
-                NodeFSP.readFile(
-                  NodePath.join(projectDir, "ProjectSettings/ProjectVersion.txt"),
-                  "utf8",
-                ).catch(() => null),
-              ),
-            );
-      const choice = pickUnityEditor([...explicit, ...detected], project);
-      if (choice.kind === "none")
-        return yield* unityMissing(
-          hub.editors,
-          `No Unity editor was found. Kurambit looks at the path in Settings > Game tools, KURAMBIT_UNITY_EDITOR, Unity Hub's editors folder (${hub.editors}) and the folder in ${hub.secondaryInstallPathFile}, and an earlier Kurambit install. ${getUnity}`,
-          "tool-missing",
-        );
-      if (choice.kind === "unknown-version")
-        return yield* unityMissing(
-          choice.candidate.editor,
-          `Kurambit cannot tell which Unity version ${choice.candidate.editor} is: it reads the version from the folder the editor is installed in, the way Unity Hub names it (for example .../${UNITY_MIN_VERSION}/Editor/Unity). Point at an editor Unity Hub installed.`,
-          "wrong-version",
-        );
-      if (choice.kind === "older-than-project")
-        return yield* unityMissing(
-          choice.candidate.editor,
-          `This game's Unity project was saved by Unity ${choice.project.text}, newer than the newest usable editor here (${choice.candidate.version?.text} at ${choice.candidate.editor}); opening it there could break it. Add Unity ${choice.project.text} or later in Unity Hub. ${getUnity}`,
-          "wrong-version",
-        );
-      if (choice.kind === "unsupported")
-        return yield* unityMissing(
-          choice.candidate.editor,
-          `${choice.candidate.editor} is Unity ${choice.candidate.version?.text}; Kurambit needs Unity 6 at ${UNITY_MIN_VERSION} or later. ${getUnity}`,
-          "wrong-version",
-        );
-      return {
-        editor: choice.candidate.editor,
-        editorDir: unityEditorDir(choice.candidate.editor),
-        version: choice.candidate.version!.text,
-        source: choice.candidate.source,
-        upgradesProject: choice.upgradesProject?.text ?? null,
-      };
-    });
-  const licenseFiles = unityLicenseFiles(platform, process.env, NodeOS.homedir());
-  const readLicense = Effect.gen(function* () {
-    const xml = yield* Effect.promise(() =>
-      NodeFSP.readFile(licenseFiles.entitlement, "utf8").catch(() => null),
-    );
-    const serial = yield* Effect.promise(() =>
-      NodeFSP.stat(licenseFiles.serial).then(
-        (stat) => stat.isFile() && stat.size > 0,
-        () => false,
-      ),
-    );
-    return parseUnityLicense(xml, yield* Clock.currentTimeMillis, serial);
-  });
-  const unity: GameToolchain["Service"]["unity"] = (projectDir) =>
-    Effect.gen(function* () {
-      const editor = yield* unityEditor(projectDir);
-      const license = yield* readLicense;
-      if (license.kind !== "active")
-        return yield* new GameOperationError({
-          operation: "Unity",
-          path: licenseFiles.entitlement,
-          reason: "license-missing",
-          detail: unityLicenseMessage(license, licenseFiles.entitlement),
-        });
-      const cli = yield* unityCli;
-      return { ...editor, cli, cliHome: cliFiles.installHome, license };
-    });
-  const upgradeNotice = (version: string, project: string) =>
-    ` This game's Unity project was made with Unity ${project}, which is not installed; opening it in ${version} upgrades the project. Add Unity ${project} in Unity Hub to keep it on its own version.`;
-  const unityStatus = (projectDir: string | undefined) =>
-    Effect.gen(function* () {
-      const editor = yield* unityEditor(projectDir);
-      const base = {
-        tool: "unity" as const,
-        installed: true,
-        path: editor.editor,
-        version: editor.version,
-        source: editor.source,
-      };
-      const license = yield* readLicense;
-      if (license.kind !== "active")
-        return {
-          ...base,
-          status: "error",
-          message: unityLicenseMessage(license, licenseFiles.entitlement),
-          downloadUrl: UNITY_DOWNLOAD_URL,
-        } satisfies GameToolStatus;
-      const windows = yield* Effect.promise(() =>
-        exists(unityWindowsSupport(editor.editorDir, platform)),
-      );
-      const gaps =
-        (editor.upgradesProject === null
-          ? ""
-          : upgradeNotice(editor.version, editor.upgradesProject)) +
-        (windows
-          ? ""
-          : " Windows Build Support (Mono) is missing from this editor, so Windows exports are refused; add the module to this editor in Unity Hub.");
-      return {
-        ...base,
-        status: gaps === "" ? "ready" : "warning",
-        message: `Unity ${editor.version}. ${unityLicenseMessage(license, licenseFiles.entitlement)}${gaps}`,
-        downloadUrl: gaps === "" ? null : UNITY_DOWNLOAD_URL,
-      } satisfies GameToolStatus;
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed({
-          tool: "unity",
-          installed: error.reason === "wrong-version",
-          path: error.reason === "wrong-version" ? error.path : null,
-          version: null,
-          source: null,
-          status: "error",
-          message: error.detail ?? error.message,
-          downloadUrl: UNITY_DOWNLOAD_URL,
-        } satisfies GameToolStatus),
-      ),
-    );
   const mpfbFile = NodePath.join(directory, "blender-extensions", `mpfb-${MPFB.version}.zip`);
   const mpfbReady = Effect.promise(() => verifiedFile(mpfbFile, MPFB));
   const mpfbStatus = Effect.gen(function* () {
@@ -956,16 +590,11 @@ const make = Effect.gen(function* () {
           downloadUrl: FFMPEG_DOWNLOAD,
         };
   });
-  // A parked engine's tool is never looked for (GAME_ENGINES status).
-  const status: GameToolchain["Service"]["status"] = (options) =>
-    Effect.all([
-      binaryStatus("blender"),
-      ...(isEngineToolActive("godot") ? [binaryStatus("godot")] : []),
-      binaryStatus("uv"),
-      ...(isEngineToolActive("unity") ? [unityStatus(options?.unityProject)] : []),
-      mpfbStatus,
-      ffmpegStatus,
-    ]).pipe(Effect.map((tools) => ({ tools })));
+  // An engine that needs a tool of its own adds its detection here and to GameToolName.
+  const status: GameToolchain["Service"]["status"] = () =>
+    Effect.all([binaryStatus("blender"), binaryStatus("uv"), mpfbStatus, ffmpegStatus]).pipe(
+      Effect.map((tools) => ({ tools })),
+    );
   /** Fetched into a private stage and verified against its pin before it is moved into place. */
   const installMpfb = fetchLock.withPermits(1)(
     Effect.gen(function* () {
@@ -1027,8 +656,6 @@ const make = Effect.gen(function* () {
   return GameToolchain.of({
     executable,
     uv,
-    unity,
-    unityExecutables,
     status,
     revision: () => revision,
     // A change moves the revision, so the cached status the Settings row reads is fresh at once.
@@ -1049,41 +676,6 @@ const isExecutable = async (file: string) => {
   try {
     await NodeFSP.access(file, NodeFSP.constants.X_OK);
     return (await NodeFSP.stat(file)).isFile();
-  } catch {
-    return false;
-  }
-};
-const BASE_EXPORT_TEMPLATE_FILES = [
-  "web_nothreads_release.zip",
-  "web_nothreads_debug.zip",
-  "linux_release.x86_64",
-  "linux_debug.x86_64",
-  "version.txt",
-] as const;
-/**
- * Windows is a separate readiness signal: games already shipping Web and
- * Linux must keep exporting when only these files are missing.
- */
-const REQUIRED_WINDOWS_EXPORT_TEMPLATE_FILES = [
-  "windows_release_x86_64.exe",
-  "windows_debug_x86_64.exe",
-] as const;
-export const hasBaseExportTemplates = async (directory: string) =>
-  (
-    await Promise.all(
-      BASE_EXPORT_TEMPLATE_FILES.map((file) => exists(NodePath.join(directory, file))),
-    )
-  ).every(Boolean);
-export const hasWindowsExportTemplates = async (directory: string) =>
-  (
-    await Promise.all(
-      REQUIRED_WINDOWS_EXPORT_TEMPLATE_FILES.map((file) => exists(NodePath.join(directory, file))),
-    )
-  ).every(Boolean);
-const exists = async (file: string) => {
-  try {
-    await NodeFSP.access(file);
-    return true;
   } catch {
     return false;
   }

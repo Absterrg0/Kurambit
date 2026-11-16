@@ -8,12 +8,10 @@ import {
   RefreshCwIcon,
   FilmIcon,
   FolderIcon,
-  Gamepad2Icon,
   PersonStandingIcon,
   TerminalIcon,
 } from "lucide-react";
 import {
-  isEngineToolActive,
   type EnvironmentId,
   type GameToolchainChangeInput,
   type GameToolStatus,
@@ -37,8 +35,6 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsL
 
 // One line each; requirements and where a tool comes from sit behind the row's About.
 const TOOL_PURPOSE = {
-  godot: "The engine for native games.",
-  unity: "The engine for Unity games.",
   blender: "Models, rigs and renders game art.",
   uv: "Lets the agent work in a running Blender.",
   mpfb: "Makes human bodies for characters.",
@@ -55,9 +51,6 @@ const isBlenderHelper = (tool: GameToolStatus["tool"]): tool is keyof typeof BLE
   tool in BLENDER_HELPERS;
 
 const TOOL_ABOUT = {
-  godot: "Godot 4.7.x with its export templates.",
-  unity:
-    "A Unity 6 editor from Unity Hub (6000.6.7f1 or later) with Windows Build Support (Mono), and a Unity licence.",
   blender: "Blender 4.2 or later.",
   uv: "Kurambit fetches it itself when it is not installed.",
   mpfb: "MPFB2 2.0.18. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
@@ -66,8 +59,6 @@ const TOOL_ABOUT = {
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 const TOOL_ICONS = {
-  godot: Gamepad2Icon,
-  unity: Gamepad2Icon,
   blender: BoxIcon,
   uv: TerminalIcon,
   mpfb: PersonStandingIcon,
@@ -77,7 +68,6 @@ const TOOL_ICONS = {
 const SOURCE_LABELS = {
   settings: "Path set below",
   env: "Set by an environment variable",
-  "unity-hub": "From Unity Hub",
   kurambit: "Installed by Kurambit",
   path: "Found on this computer",
 } as const satisfies Record<NonNullable<GameToolStatus["source"]>, string>;
@@ -93,12 +83,7 @@ const INSTALLABLE: ReadonlySet<GameToolStatus["tool"]> = new Set<GameToolchainCh
   "mpfb",
 ]);
 
-// A parked engine's tool is not looked for, so its path is not asked for.
-const PATH_ROWS = [
-  { key: "gameGodotPath", title: "Godot executable", shown: isEngineToolActive("godot") },
-  { key: "gameUnityPath", title: "Unity editor", shown: isEngineToolActive("unity") },
-  { key: "gameBlenderPath", title: "Blender executable", shown: true },
-] as const;
+const PATH_ROWS = [{ key: "gameBlenderPath", title: "Blender executable" }] as const;
 type PathKey = (typeof PATH_ROWS)[number]["key"];
 
 /** Settings → Game tools, for the one computer the settings are scoped to. */
@@ -172,7 +157,7 @@ function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) 
           </Text>
         </div>
       ) : null}
-      {PATH_ROWS.filter((row) => row.shown).map((row) => (
+      {PATH_ROWS.map((row) => (
         <SettingsRow
           key={row.key}
           icon={<FolderIcon />}

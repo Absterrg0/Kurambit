@@ -23,8 +23,7 @@ import {
   GameManifest,
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
   gameModelChoice,
-  isGameEngineActive,
-  parkedEngineMessage,
+  isAvailableEngine,
   GameOperationError,
   gameTemplateForEngine,
   type GameCharacterRoute,
@@ -34,6 +33,7 @@ import {
   type GameOpenInput,
   type GameProjectResult,
   type GameSummary,
+  type GameViewport,
   manifestProject,
 } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
@@ -47,11 +47,10 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { stepLine } from "./run/runView.ts";
 import { stepNumber } from "../orchestration-v2/gameRun/decide.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
-import { engineProfile } from "./engineProfile.ts";
+import { engineProfile, engineViewport } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
-import { parseGodotViewport, type GodotViewport } from "./godotViewport.ts";
 import { realGameRoot } from "./gameRecord.ts";
-import { gameRelative, insideGame } from "./gamePath.ts";
+import { gameRelative } from "./gamePath.ts";
 import { ensureScaffold, refreshSkills } from "./runSetup.ts";
 import { createEngine, firstTurnMessage, scaffoldFiles, withoutMovedSections } from "./scaffold.ts";
 import { copyTemplateIntoGame } from "./templates.ts";
@@ -175,7 +174,7 @@ export class GameProjectService extends Context.Service<
     /** The manifest and the resolution the game plays at. */
     readonly inventory: (
       root: string,
-    ) => Effect.Effect<{ manifest: GameManifest; viewport: GodotViewport }, GameOperationError>;
+    ) => Effect.Effect<{ manifest: GameManifest; viewport: GameViewport }, GameOperationError>;
   }
 >()("kurambit/game/GameProjectService") {}
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
@@ -384,7 +383,7 @@ const make = Effect.gen(function* () {
     const lexicalRoot = NodePath.resolve(root);
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
     const manifest = yield* read(canonicalRoot);
-    if (options.resume === true)
+    if (options.resume === true && isAvailableEngine(manifest.engine.name))
       yield* refreshSkills(canonicalRoot, manifest.engine.name, yield* templates.directory).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
@@ -491,14 +490,6 @@ const make = Effect.gen(function* () {
           path: input.name,
           reason: "invalid-path",
           detail: "A game needs a name.",
-        });
-      const engine = createEngine(input);
-      if (!isGameEngineActive(engine))
-        return yield* new GameOperationError({
-          operation: "create-game",
-          path: input.name,
-          reason: "invalid-input",
-          detail: parkedEngineMessage(engine),
         });
       const unavailable =
         input.characters === undefined
@@ -884,8 +875,8 @@ const make = Effect.gen(function* () {
     refreshGuidance: (root) =>
       Effect.gen(function* () {
         const manifest = yield* read(root);
-        // A parked engine's game takes no new work, so a new server leaves its folder as it is.
-        if (!isGameEngineActive(manifest.engine.name)) return;
+        // A game in an engine this version does not have takes no new work, so its folder stays as it is.
+        if (!isAvailableEngine(manifest.engine.name)) return;
         yield* refreshSkills(root, manifest.engine.name, yield* templates.directory).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
@@ -917,22 +908,7 @@ const make = Effect.gen(function* () {
       }),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
-      // An engine with a fixed resolution (three.js, Unity) plays at it; Godot's is in project.godot.
-      const expensive = yield* Effect.tryPromise({
-        try: async () => {
-          const fixed = engineProfile(manifest.engine.name).viewport;
-          if (fixed !== null) return { viewport: { ...fixed } };
-          const engineRoot = insideGame(root, manifestProject(manifest));
-          const projectGodot = await NodeFSP.readFile(
-            NodePath.join(engineRoot, "project.godot"),
-            "utf8",
-          ).catch(() => "");
-          return { viewport: parseGodotViewport(projectGodot) };
-        },
-        catch: (cause) =>
-          new GameOperationError({ operation: "inventory", path: root, reason: "io", cause }),
-      });
-      return { manifest, viewport: expensive.viewport };
+      return { manifest, viewport: { ...engineViewport(manifest.engine.name) } };
     }),
   });
 });

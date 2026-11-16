@@ -13,20 +13,7 @@ const gameNamePlaceholder = "{{GAME_NAME}}";
 const gameNameEscapedPlaceholder = "{{GAME_NAME_ESCAPED}}";
 
 // Text files receive placeholder substitution; everything else is copied byte for byte.
-const textFileExtensions = [
-  ".godot",
-  ".tscn",
-  ".tres",
-  ".gd",
-  ".cfg",
-  ".md",
-  ".json",
-  ".html",
-  ".css",
-  ".js",
-  // Unity's ProjectSettings.asset carries the product name.
-  ".asset",
-];
+const textFileExtensions = [".cfg", ".md", ".json", ".html", ".css", ".js"];
 
 const isTemplateTextFile = (relativePath: string): boolean =>
   textFileExtensions.some((extension) => relativePath.endsWith(extension));
@@ -36,22 +23,11 @@ const substituteGameName = (text: string, gameName: string): string =>
     .replaceAll(gameNameEscapedPlaceholder, JSON.stringify(gameName).slice(1, -1))
     .replaceAll(gameNamePlaceholder, gameName);
 
-/**
- * Unity identifies a project by the productGUID in ProjectSettings.asset
- * (player prefs, analytics, cloud links); every game gets its own instead of
- * the template's.
- */
-const withProductGuid = (relativePath: string, text: string, guid: string): string =>
-  relativePath.endsWith("ProjectSettings.asset")
-    ? text.replace(/^(\s*productGUID: )[0-9a-f]{32}$/m, `$1${guid}`)
-    : text;
-
 const copyTemplateEntry = Effect.fnUntraced(function* (input: {
   readonly source: string;
   readonly target: string;
   readonly relativePath: string;
   readonly gameName: string;
-  readonly productGuid: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -66,21 +42,14 @@ const copyTemplateEntry = Effect.fnUntraced(function* (input: {
     return;
   }
   const text = yield* fs.readFileString(input.source);
-  yield* fs.writeFileString(
-    input.target,
-    withProductGuid(
-      input.relativePath,
-      substituteGameName(text, input.gameName),
-      input.productGuid,
-    ),
-  );
+  yield* fs.writeFileString(input.target, substituteGameName(text, input.gameName));
 });
 
 const copyFailure = (path: string) => (cause: unknown) =>
   new GameOperationError({ operation: "copy-template", path, reason: "io", cause });
 
 /**
- * Copies a starter template's engine tree (`godot/`, `web/`, `unity/`, whichever the
+ * Copies a starter template's engine tree (`web/` for three.js, whichever the
  * template ships) and `TEMPLATE.md` into a new game folder, substituting the
  * game name in text files.
  */
@@ -102,8 +71,6 @@ export const copyTemplateIntoGame = Effect.fn("GameTemplates.copyIntoGame")(func
       path: input.templateId,
       reason: "unknown-template",
     });
-  // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off -- A per-game project id, not a secret; the template copy needs no Crypto service for it.
-  const productGuid = globalThis.crypto.randomUUID().replaceAll("-", "");
   for (const tree of PROFILES.map((profile) => profile.projectDirectory)) {
     const treeSource = path.join(templateDirectory, tree);
     const treeExists = yield* fs.exists(treeSource).pipe(Effect.orElseSucceed(() => false));
@@ -119,7 +86,6 @@ export const copyTemplateIntoGame = Effect.fn("GameTemplates.copyIntoGame")(func
         target: path.join(treeTarget, relative),
         relativePath: relative,
         gameName: input.gameName,
-        productGuid,
       }).pipe(Effect.mapError(copyFailure(source)));
     }
   }

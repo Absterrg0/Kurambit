@@ -14,10 +14,8 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
-  manifestProject,
   type ThreadId,
   GAME_EXPLORE_BOUNDS,
-  EXPLORE_CAPTURE_BOUNDS,
   exploreCaptureIssues,
   exploreStepIssues,
   GameExploreStartInput,
@@ -38,17 +36,11 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesFor } from "./gameRuntime.ts";
-import { engineProfile } from "./engineProfile.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
-import * as GamePlayer from "./GamePlayer.ts";
-import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
-import { inGame } from "./gamePath.ts";
-import { ProcessHost } from "./processHost.ts";
-import { findWindowHost } from "./windowHost.ts";
 import {
   PlayClosed,
   PlayUnresponsive,
@@ -56,14 +48,9 @@ import {
   type PlayObservation,
   type PlaySession,
 } from "./playSession.ts";
-import { ensureGameDir, keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.ts";
+import { keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
-import {
-  openPagePlay,
-  openRunnerPlay,
-  type PlayDidNotBoot,
-  type PlayLaunch,
-} from "./playLaunch.ts";
+import { openPagePlay, type PlayDidNotBoot, type PlayLaunch } from "./playLaunch.ts";
 import { WebBrowserGone, WebPageCrashed } from "./webPlaySession.ts";
 import { makeSourceIdentity } from "./sourceTree.ts";
 import { keepPlay } from "./playFiles.ts";
@@ -71,59 +58,36 @@ import * as Scheduler from "../scheduling/Scheduler.ts";
 
 const decodePlay = Schema.decodeUnknownOption(GamePlay);
 
-/**
- * Free memory an explore session needs to start, in MB, from
- * whole-tree PSS peaks measured on this machine with small 2D games. A
- * native session peaked at 740 MB during its cold Godot import (about
- * 300 MB while playing); headroom covers bigger games' imports.
- */
-const EXPLORE_NATIVE_ROOM: MemoryRoom = {
-  what: "native exploration session",
-  neededMb: 1280,
-  env: "KURAMBIT_EXPLORE_NATIVE_MEMORY_MB",
-};
+/** Free memory an explore session needs to start, in MB, from whole-tree PSS peaks measured on this machine. */
 /** Headless Chromium peaked at 480 MB PSS and grows slowly over a session. */
 const EXPLORE_WEB_ROOM: MemoryRoom = {
   what: "web exploration session",
   neededMb: 1024,
   env: "KURAMBIT_EXPLORE_WEB_MEMORY_MB",
 };
-/**
- * A built Linux player under software GL and its private display: a small
- * 3D Unity game's player held 290 MB PSS; headroom covers bigger games. Its
- * build, when the session needs one, is the live editor's own memory guard.
- */
-const EXPLORE_PLAYER_ROOM: MemoryRoom = {
-  what: "Unity exploration session",
-  neededMb: 1024,
-  env: "KURAMBIT_EXPLORE_UNITY_MEMORY_MB",
-};
-
-/** Nominal commanded game time; a process runner's tap spans its physics-frame hold. */
-const exploreStepNominalMs = (step: GameExploreStep, target: "native" | "web"): number => {
-  if ("press" in step) return target === "native" ? 170 : 50;
+/** Nominal commanded game time. */
+const exploreStepNominalMs = (step: GameExploreStep): number => {
+  if ("press" in step) return 50;
   if ("waitMs" in step) return step.waitMs;
   if ("holdMs" in step) return step.holdMs;
   if ("ui" in step) return 100;
   return 0;
 };
 
-const exploreStepsNominalMs = (
-  steps: readonly GameExploreStep[],
-  target: "native" | "web",
-): number => {
+const exploreStepsNominalMs = (steps: readonly GameExploreStep[]): number => {
   let total = 0;
   // Whole milliseconds, so every sum of them is exact and the input cap and
   // the void rule never disagree in the last bit.
-  for (const step of steps) total += Math.round(exploreStepNominalMs(step, target));
+  for (const step of steps) total += Math.round(exploreStepNominalMs(step));
   return total;
 };
 
 /**
  * Bounded, persistent exploration sessions on the current game sources:
  * short act/observe cycles on one runner, with the frames and input each
- * thread spent kept as evidence. How a session plays is the engine's: a page
- * in headless Chromium, the engine's own native runner, or a built player.
+ * thread spent kept as evidence. A session plays the game's page in headless
+ * Chromium, speaking the play-session protocol (playSession.ts) an engine's
+ * runner would speak too.
  * Descriptive only: a session never qualifies or passes quality.
  */
 export class GameExplore extends Context.Service<
@@ -148,17 +112,14 @@ export class GameExplore extends Context.Service<
 
 const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
-  const processHost = yield* ProcessHost;
   const projects = yield* GameProjectService.GameProjectService;
-  const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const engines = yield* GameEngine.GameEngine;
   const gate = yield* GameMemoryGate.GameMemoryGate;
-  const players = yield* GamePlayer.GamePlayer;
   const stateDir = (yield* ServerConfig.ServerConfig).stateDir;
   const templates = yield* GameTemplates.GameTemplates;
   const evidenceDir = NodePath.join(stateDir, "explore-evidence");
-  // Each session's runner files, user:// tree and pictures. Kept off the temp
+  // Each session's pictures. Kept off the temp
   // dir (it may be RAM-backed) and gone with the session; none outlives a
   // restart, so whatever an earlier server left is removed now.
   const scratchBase = NodePath.join(stateDir, "game-explore");
@@ -192,8 +153,7 @@ const make = Effect.gen(function* () {
     Effect.catchCause((cause) => Effect.logWarning("Pruning explore evidence failed.", { cause })),
   );
   const identify = yield* makeSourceIdentity;
-  const snapshot = (root: string, project: string, backend: GameEngine.GameEngineBackend) =>
-    identify(root, project, backend.profile.derivedInput);
+  const snapshot = (root: string, project: string) => identify(root, project);
   interface ExploreSession {
     readonly id: string;
     readonly root: string;
@@ -205,11 +165,7 @@ const make = Effect.gen(function* () {
     readonly bootMs: number | null;
     readonly traceDir: string;
     readonly play: PlaySession;
-    /** Browser sessions run in real time and press for 50 ms; process runners hold the game and tap for 170 ms. */
-    readonly target: "native" | "web";
-    /** Whether acts can keep a picture: false for a headless runner. */
-    readonly pictures: boolean;
-    /** Ends what the launch started (process tree, served folder), after the session closed. */
+    /** Ends what the launch started (browser page, served folder), after the session closed. */
     readonly release: Effect.Effect<void>;
     /** Removed on close; pictures in the trace dir stay as evidence. */
     readonly scratch: ReadonlyArray<string>;
@@ -316,16 +272,7 @@ const make = Effect.gen(function* () {
     root: string,
     room: MemoryRoom,
     start: Effect.Effect<A, E, R>,
-    lock: { readonly name: string; readonly owner: string } | undefined,
-  ) =>
-    gate.admit(
-      "Explore session",
-      root,
-      room,
-      start,
-      undefined,
-      lock === undefined ? undefined : { lock },
-    );
+  ) => gate.admit("Explore session", root, room, start);
   // A write-through cache of the records under `evidenceDir`; a restart
   // reloads them, so a sample's earlier play still counts. A record enters it
   // only once it is on disk, so the cache never claims more than a restart reads.
@@ -550,79 +497,8 @@ const make = Effect.gen(function* () {
     readonly play: PlaySession;
     readonly release: Effect.Effect<void>;
     readonly scratch: ReadonlyArray<string>;
-    readonly pictures: boolean;
     readonly bootMs: number;
-    readonly inputNote: string;
   }
-  /**
-   * Starts the engine's runner process in a window host's window (headless
-   * when the engine runs without one and the machine has no host) and waits for its
-   * hello. Everything it started is ended on any failure, by PID only.
-   */
-  const openRunner = (input: {
-    readonly root: string;
-    readonly backend: GameEngine.GameEngineBackend;
-    readonly projectDir: string;
-    readonly player: string | null;
-    readonly viewport: GameViewport;
-    readonly id: string;
-    readonly traceDir: string;
-    readonly saves: string | null;
-    readonly bootTimeoutMs: number;
-    readonly what: string;
-  }) =>
-    Effect.gen(function* () {
-      const { root } = input;
-      const host = yield* Effect.promise(() => findWindowHost(processHost));
-      // The runner's script folder: fresh, under a logs folder checked to be the game's.
-      const scriptDir = NodePath.join(root, "builds/logs", `game-explore-${input.id}`);
-      yield* Effect.tryPromise({
-        try: async () => {
-          await ensureGameDir(root, "builds/logs");
-          await NodeFSP.mkdir(scriptDir);
-        },
-        catch: (cause) =>
-          new GameOperationError({
-            operation: "Explore session",
-            path: scriptDir,
-            reason: "io",
-            cause,
-          }),
-      });
-      const dropScratch = Effect.promise(() =>
-        Promise.all([
-          NodeFSP.rm(input.traceDir, { recursive: true, force: true }),
-          NodeFSP.rm(scriptDir, { recursive: true, force: true }),
-        ]),
-      ).pipe(Effect.ignore);
-      const launched = yield* openRunnerPlay(processes, {
-        operation: "Explore session",
-        process: "explore-play",
-        root,
-        backend: input.backend,
-        projectDir: input.projectDir,
-        player: input.player,
-        viewport: input.viewport,
-        host,
-        scriptDir,
-        traceDir: input.traceDir,
-        saves: input.saves,
-        timeoutMs: GAME_EXPLORE_BOUNDS.wallTtlMs + 60_000,
-        bootTimeoutMs: input.bootTimeoutMs,
-        what: input.what,
-      }).pipe(
-        Effect.onError(() => dropScratch),
-        Effect.catchTags({ PlayDidNotBoot: notBooted(root) }),
-      );
-      return {
-        play: launched.play,
-        release: releaseOf(launched),
-        scratch: launched.scratch,
-        pictures: host !== null,
-        bootMs: launched.bootMs,
-        inputNote: launched.inputNote,
-      } satisfies OpenedPlay;
-    });
   /** Registers an opened session and says what it is. */
   const exploreRegister = (
     threadId: ThreadId,
@@ -633,10 +509,6 @@ const make = Effect.gen(function* () {
       readonly traceDir: string;
       readonly sourceId: string;
       readonly viewport: GameViewport;
-      readonly target: "native" | "web";
-      readonly opening: string;
-      /** What the session plays: the sources themselves or a player built from them. */
-      readonly plays: string;
       /** The kept save location, or null when the session started with no saved data. */
       readonly saves: string | null;
     },
@@ -654,8 +526,6 @@ const make = Effect.gen(function* () {
         bootMs: opened.bootMs,
         traceDir: input.traceDir,
         play,
-        target: input.target,
-        pictures: opened.pictures,
         release: opened.release,
         scratch: [...opened.scratch, input.traceDir],
         lock: Semaphore.makeUnsafe(1),
@@ -688,10 +558,6 @@ const make = Effect.gen(function* () {
           ...observedFields(boot),
         });
       exploreLive.set(root, live);
-      const held = input.target === "native";
-      const noPicture = opened.pictures
-        ? ""
-        : "Runs headless without a picture (this machine has no private display: install Xvfb): state, text, ui and errors stay available. ";
       const savesNote =
         input.saves === null
           ? ""
@@ -704,143 +570,14 @@ const make = Effect.gen(function* () {
         booted: true,
         bootMs: opened.bootMs,
         message:
-          `${input.opening} exploration session ${input.id.slice(0, 8)} opened on ${input.plays} ${input.sourceId.slice(0, 12)} ` +
-          `at ${input.viewport.width}x${input.viewport.height} (${held ? "paused between calls" : "real time: the game keeps running between calls"}). ` +
-          `${savesNote}${opened.inputNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_play op close. ` +
-          `${noPicture}This session never qualifies the build.`,
+          `Exploration session ${input.id.slice(0, 8)} opened on the current sources ${input.sourceId.slice(0, 12)} ` +
+          `at ${input.viewport.width}x${input.viewport.height} (real time: the game keeps running between calls). ` +
+          `${savesNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_play op close. ` +
+          `This session never qualifies the build.`,
         callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
         wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
         idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
       } satisfies typeof GameExploreStartResult.Type;
-    });
-  /**
-   * Opens a session on the current game sources played by the engine's own
-   * runner: no export is built or served. The game is held between acts.
-   */
-  const exploreStartNative = (
-    threadId: ThreadId,
-    root: string,
-    input: typeof GameExploreStartInput.Type,
-  ) =>
-    Effect.gen(function* () {
-      const manifest = yield* projects.read(root);
-      const { backend, ctx } = yield* engines.context(root);
-      const saves = yield* keptSavesFor({
-        root,
-        engine: manifest.engine.name,
-        saves: input.saves,
-        operation: "Explore session",
-      });
-      const imported = (yield* backend.importProject(ctx)).result;
-      if (!imported.success)
-        return yield* new GameOperationError({
-          operation: "Explore session",
-          path: root,
-          reason: "command-failed",
-          detail:
-            `The ${backend.profile.displayName} import failed before the native session started.\n${imported.message}`.slice(
-              -2000,
-            ),
-        });
-      const before = yield* snapshot(root, ctx.projectName, backend);
-      if (before.kind !== "known")
-        return yield* exploreInvalid(
-          root,
-          "The game sources could not be identified before the native session ran; the result would not be current.",
-        );
-      const viewport = yield* backend.viewport(ctx.projectDir);
-      if (
-        viewport.width > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
-        viewport.height > EXPLORE_CAPTURE_BOUNDS.maxDimension ||
-        viewport.width < EXPLORE_CAPTURE_BOUNDS.minDimension ||
-        viewport.height < EXPLORE_CAPTURE_BOUNDS.minDimension
-      )
-        return yield* exploreInvalid(
-          root,
-          `The game's base viewport (${viewport.width}x${viewport.height}) does not fit the capture bounds. Change display/window/size in project.godot first.`,
-        );
-      const id = NodeCrypto.randomUUID();
-      const traceDir = NodePath.join(exploreScratchBase(), id);
-      const opened = yield* openRunner({
-        root,
-        backend,
-        projectDir: ctx.projectDir,
-        player: null,
-        viewport,
-        id,
-        traceDir,
-        saves,
-        bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
-        what: "The native runner",
-      });
-      return yield* exploreRegister(threadId, root, opened, {
-        id,
-        traceDir,
-        sourceId: before.sourceId,
-        viewport,
-        target: "native",
-        opening: "Native",
-        plays: "the current sources",
-        saves,
-      });
-    });
-  /**
-   * Opens a session on a built player of the current sources (see
-   * GamePlayer), on a private display. The game is held between acts.
-   */
-  const exploreStartPlayer = (
-    threadId: ThreadId,
-    root: string,
-    input: typeof GameExploreStartInput.Type,
-    prepared: GamePlayer.PreparedPlayer,
-  ) =>
-    Effect.gen(function* () {
-      // The player is already built: the engine's executable is not needed again.
-      const manifest = yield* projects.read(root);
-      const backend = yield* engines.backendFor(manifest.engine.name);
-      const engine = backend.profile.displayName;
-      const viewport = backend.profile.viewport;
-      if (viewport === null)
-        return yield* exploreInvalid(root, `${engine} games play no prepared player.`);
-      // Where the player came from stays in the server log: a blind sample's
-      // notes reach its comparator verbatim, and a sample that waited on a
-      // build must read the same as one that did not.
-      yield* Effect.logInfo(`${engine} explore session plays its player`, {
-        root,
-        sourceId: prepared.sourceId,
-        origin: prepared.origin,
-        ms: prepared.ms,
-      });
-      const saves = yield* keptSavesFor({
-        root,
-        engine: manifest.engine.name,
-        saves: input.saves,
-        operation: "Explore session",
-      });
-      const id = NodeCrypto.randomUUID();
-      const traceDir = NodePath.join(exploreScratchBase(), id);
-      const opened = yield* openRunner({
-        root,
-        backend,
-        projectDir: yield* inGame(root, manifestProject(manifest)),
-        player: prepared.player,
-        viewport,
-        id,
-        traceDir,
-        saves,
-        bootTimeoutMs: input.bootTimeoutMs ?? 90_000,
-        what: `The ${engine} player (log: ${NodePath.join(traceDir, "player.log")})`,
-      });
-      return yield* exploreRegister(threadId, root, opened, {
-        id,
-        traceDir,
-        sourceId: prepared.sourceId,
-        viewport,
-        target: "native",
-        opening: engine,
-        plays: "a Linux player of the current sources",
-        saves,
-      });
     });
   /**
    * Opens a session on the current sources of a browser game: the static
@@ -855,12 +592,7 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const { backend, ctx } = yield* engines.context(root);
       const viewport = backend.profile.viewport;
-      if (backend.profile.play !== "browser" || viewport === null)
-        return yield* exploreInvalid(
-          root,
-          "Web exploration plays browser games; this game runs on another engine.",
-        );
-      const before = yield* snapshot(root, ctx.projectName, backend);
+      const before = yield* snapshot(root, ctx.projectName);
       if (before.kind !== "known")
         return yield* exploreInvalid(
           root,
@@ -898,20 +630,9 @@ const make = Effect.gen(function* () {
           play: launched.play,
           release: releaseOf(launched),
           scratch: [],
-          pictures: true,
           bootMs: launched.bootMs,
-          inputNote: "",
         },
-        {
-          id,
-          traceDir,
-          sourceId: before.sourceId,
-          viewport,
-          target: "web",
-          opening: "Web",
-          plays: "the current sources",
-          saves,
-        },
+        { id, traceDir, sourceId: before.sourceId, viewport, saves },
       );
     });
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
@@ -929,21 +650,8 @@ const make = Effect.gen(function* () {
           return fresh;
         }),
       );
-      const engine = engineProfile((yield* projects.read(root)).engine.name);
-      const target = input.target ?? (engine.play === "browser" ? "web" : "native");
       const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
       if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
-      // A wrong target is refused before any claim, room or build.
-      if (target === "web" && engine.play !== "browser")
-        return yield* exploreInvalid(
-          root,
-          `${engine.displayName} web play is not in this build; start the session without a target (or with target native).`,
-        );
-      if (target === "native" && engine.play === "browser")
-        return yield* exploreInvalid(
-          root,
-          `This is a ${engine.displayName} browser game; start the session with target web.`,
-        );
       // Claimed in the step that finds the game free: a second start on it is
       // refused at once, never after both opened a runner.
       const existing = exploreLive.get(root);
@@ -957,32 +665,10 @@ const make = Effect.gen(function* () {
         if (exploreLive.get(root) === "starting") exploreLive.delete(root);
       });
       return yield* Effect.gen(function* () {
-        const native = target === "native" && engine.play === "native";
-        // The player build takes minutes and is the game's own exclusive
-        // operation, before this start's gate hold; the editor that builds it
-        // opens through the memory gate itself, and its refusal is marked like
-        // a gated start's, so a run replays a sample turn that never played.
-        const player =
-          engine.play === "player" ? yield* players.playerFor(String(threadId), root) : null;
-        const start =
-          target === "web"
-            ? exploreStartWeb(threadId, root, input)
-            : player !== null
-              ? exploreStartPlayer(threadId, root, input, player)
-              : exploreStartNative(threadId, root, input);
-        const room =
-          target === "web"
-            ? EXPLORE_WEB_ROOM
-            : player !== null
-              ? EXPLORE_PLAYER_ROOM
-              : EXPLORE_NATIVE_ROOM;
-        // A native start's import writes the folder: the game's operation lock,
-        // then the memory gate, through the boot (the order GameMemoryGate keeps).
         const started = yield* withExploreRoom(
           root,
-          room,
-          start,
-          native ? { name: "Explore session start", owner: String(threadId) } : undefined,
+          EXPLORE_WEB_ROOM,
+          exploreStartWeb(threadId, root, input),
         );
         const live = exploreLive.get(root);
         // A session whose start cannot be recorded is closed, not left open
@@ -1010,7 +696,7 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const file = `act-${String(callIndex).padStart(2, "0")}-observe.png`;
-      const screenshotPath = session.pictures ? NodePath.join(session.traceDir, file) : null;
+      const screenshotPath = NodePath.join(session.traceDir, file);
       const reply = yield* Effect.tryPromise({
         try: (signal) => session.play.act([...input.steps], screenshotPath, signal),
         // The game stopping, crashing or refusing the act is the build's; our
@@ -1039,10 +725,7 @@ const make = Effect.gen(function* () {
       yield* keepFinishedPlays(session);
       let keptScreenshot = "";
       let screenshotReason: string | undefined = undefined;
-      if (screenshotPath === null)
-        screenshotReason =
-          "This machine has no private display (install Xvfb), so the native session runs headless without a picture. State, text, ui and errors stay available.";
-      else if (
+      if (
         reply.screenshot &&
         (yield* Effect.promise(() =>
           NodeFSP.stat(screenshotPath)
@@ -1053,9 +736,7 @@ const make = Effect.gen(function* () {
         keptScreenshot = file;
       else
         screenshotReason =
-          session.target === "web"
-            ? "The browser returned no picture for this act; state and console messages stay available."
-            : "The native picture was unavailable even though a display was expected; state, text, ui and errors stay available.";
+          "The browser returned no picture for this act; state and console messages stay available.";
       const probe =
         reply.probe === null
           ? null
@@ -1152,7 +833,7 @@ const make = Effect.gen(function* () {
           session.id,
           `This session used its ${GAME_EXPLORE_BOUNDS.maxCalls} act calls; close it and start a new exploration.`,
         );
-      const nominalMs = exploreStepsNominalMs(input.steps, session.target);
+      const nominalMs = exploreStepsNominalMs(input.steps);
       if (!Number.isFinite(nominalMs) || nominalMs < 0)
         return yield* exploreInvalid(session.id, "The act has an invalid duration.");
       if (nominalMs > GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall)
@@ -1201,10 +882,7 @@ const make = Effect.gen(function* () {
               session.id,
               `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs}ms total nominal time; close it and start a new exploration.`,
             );
-          // Headless native acts persist no picture, so the image bound only
-          // covers acts that actually keep one. Web acts always keep one.
-          const keepsImage = session.pictures;
-          if (keepsImage && session.images + 1 > GAME_EXPLORE_BOUNDS.maxImages)
+          if (session.images + 1 > GAME_EXPLORE_BOUNDS.maxImages)
             return yield* exploreInvalid(
               session.id,
               `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxImages} persisted images; close it and start a new exploration.`,

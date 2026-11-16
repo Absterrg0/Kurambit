@@ -62,7 +62,6 @@ describe("command permissions", () => {
           WS_METHODS.gameCreate,
           WS_METHODS.gameOpen,
           WS_METHODS.gameAction,
-          WS_METHODS.gameWindowsPackage,
           WS_METHODS.gameWebPackage,
           WS_METHODS.gameWebExportUrl,
           WS_METHODS.gameMediaSave,

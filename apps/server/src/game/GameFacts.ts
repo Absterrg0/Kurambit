@@ -41,7 +41,9 @@ import {
   GameQaReport,
   GameSavedPlaysReading,
   type GameBotRunResult,
-  GameEngineId,
+  GameEngineName,
+  engineDisplayName,
+  isAvailableEngine,
   GameManifest,
   GameOperationError,
   manifestProject,
@@ -69,9 +71,8 @@ import { engineProfile } from "./engineProfile.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import { insideGame } from "./gamePath.ts";
 import { copyTree } from "./gameFiles.ts";
-import { isPathInside } from "./gameNativeUserDir.ts";
+import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import * as GameOperations from "./GameOperations.ts";
-import { HOST_OS } from "./processHost.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
@@ -141,7 +142,7 @@ export interface ResolvedBuild {
   readonly root: string;
   readonly build: GameBuildId;
   readonly key: string;
-  readonly engine: GameEngineId;
+  readonly engine: GameEngineName;
 }
 
 type Fact<K extends keyof GameBuildFacts> = GameBuildFacts[K];
@@ -149,7 +150,7 @@ const Stored = Schema.Struct({
   build: GameBuildId,
   /** Where the build was asked for, so a reconcile after a restart can measure what is owed. */
   root: Schema.optionalKey(Schema.String),
-  engine: Schema.optionalKey(GameEngineId),
+  engine: Schema.optionalKey(GameEngineName),
   measuredAt: Schema.NullOr(Schema.String),
   renderer: Schema.NullOr(Schema.String),
   runtime: Schema.optionalKey(Schema.String),
@@ -231,23 +232,20 @@ const NONE_SAVED = notMeasured(
 );
 const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => TIER_FACTS[tier]))];
 /**
- * Asset use is read from a browser page's requests, performance from its shell; an engine whose
- * game plays in its own process says why it has none of them, and never owes them.
+ * Asset use is read from a browser page's requests, performance from its shell. A build of an
+ * engine this version does not have played in that engine's own process, which measured none of
+ * them: it says so, and never owes them.
  */
 const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "qa", "savedPlays"]);
-const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "qa") =>
-  engineProfile(engine).play === "browser"
+const browserOnly = (engine: GameEngineName, fact: "use" | "performance" | "qa") =>
+  isAvailableEngine(engine)
     ? null
     : notMeasured(
-        fact === "use"
-          ? `${engineProfile(engine).displayName} games play in the engine's own process, where Kurambit does not record which files load; asset use is measured for games that play in a browser`
-          : fact === "performance"
-            ? `${engineProfile(engine).displayName} games play in the engine's own process, which does not report its frame times to Kurambit yet; performance is measured for games that play in a browser`
-            : `${engineProfile(engine).displayName} games have no QA play yet; it is played for three.js games`,
+        `${engineDisplayName(engine)} games played in their engine's own process, which never measured ${fact === "use" ? "asset use" : fact === "performance" ? "performance" : "a QA play"}`,
         false,
       );
-const useNotMeasured = (engine: GameEngineId) => browserOnly(engine, "use");
-const factsOf = (engine: GameEngineId | undefined): ReadonlyArray<FactName> =>
+const useNotMeasured = (engine: GameEngineName) => browserOnly(engine, "use");
+const factsOf = (engine: GameEngineName | undefined): ReadonlyArray<FactName> =>
   engine !== undefined && useNotMeasured(engine) !== null
     ? FACT_NAMES.filter((name) => !BROWSER_ONLY.has(name))
     : FACT_NAMES;
@@ -577,7 +575,7 @@ const make = Effect.gen(function* () {
     found: Found | null,
     bot: { readonly hash: string } | null,
     person: boolean,
-    engine: GameEngineId,
+    engine: GameEngineName,
     skilledWanted: boolean,
     runtime: string | null,
     savedSet: string,
@@ -647,34 +645,23 @@ const make = Effect.gen(function* () {
       }
     });
 
-  // On Linux a bot plays on Xvfb, where an engine may draw another way than
-  // the game does (the profile's xvfbRenderer); elsewhere it draws as the game does.
-  const rendererOf = (copy: string, engine: GameEngineId) => {
-    const profile = engineProfile(engine);
-    const renderer = profile.xvfbRenderer;
-    return renderer === null || HOST_OS !== "linux"
-      ? Effect.succeed(null)
-      : Effect.promise(async () =>
-          renderer.note(
-            await NodeFSP.readFile(
-              NodePath.join(copy, profile.projectDirectory, renderer.settings),
-              "utf8",
-            ).catch(() => ""),
-          ),
-        );
-  };
-
   // The build's own game.json names its engine folder; a copy that cannot say keeps the engine's default.
-  const projectOf = (copy: string, engine: GameEngineId) =>
+  const projectOf = (copy: string, engine: GameEngineName) =>
     Effect.promise(() =>
       NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
         .then((text) => manifestProject(decodeCopyManifest(text)))
         .catch(() => ""),
-    ).pipe(Effect.map((project) => project || engineProfile(engine).projectDirectory));
+    ).pipe(
+      Effect.map(
+        (project) =>
+          project || (isAvailableEngine(engine) ? engineProfile(engine).projectDirectory : ""),
+      ),
+    );
 
   /** The runtime the copy's plays load now, for a game that loads one (gameRuntime.ts). */
-  const runtimeOf = (copy: string, engine: GameEngineId) =>
+  const runtimeOf = (copy: string, engine: GameEngineName) =>
     Effect.promise(async () => {
+      if (!isAvailableEngine(engine)) return null;
       const major = await NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
         .then((text) => manifestRuntime(decodeCopyManifest(text)))
         .catch(() => null);
@@ -726,10 +713,7 @@ const make = Effect.gen(function* () {
         // A browser game's bots draw with the backend the server probed; its
         // renderer is recorded, so facts from the GPU and from SwiftShader are
         // never compared as alike.
-        const backend =
-          engineProfile(build.engine).play === "browser"
-            ? yield* gameBrowser(OWNER, root).pipe(Effect.option)
-            : Option.none();
+        const backend = yield* gameBrowser(OWNER, root).pipe(Effect.option);
         const software = Option.isSome(backend) && backend.value.software;
         {
           const { runtime: _measuredWith, ...rest } = stored;
@@ -738,7 +722,7 @@ const make = Effect.gen(function* () {
             ...rest,
             renderer: Option.isSome(backend)
               ? (backend.value.renderer ?? (software ? "SwiftShader (software)" : null))
-              : yield* rendererOf(copy, build.engine),
+              : null,
             ...(runtime === null ? {} : { runtime }),
           };
         }
@@ -871,7 +855,9 @@ const make = Effect.gen(function* () {
             const recorded = Object.values(plays);
             if (recorded.length === 0) return { use: none };
             const project = yield* projectOf(copy, build.engine);
-            const files = yield* Effect.promise(() => shippedFiles(copy, build.engine, project));
+            const engine = build.engine;
+            if (!isAvailableEngine(engine)) return { use: none };
+            const files = yield* Effect.promise(() => shippedFiles(copy, engine, project));
             const loaded = new Set(recorded.flatMap((each) => each.loaded));
             const generations = yield* Effect.promise(() =>
               generationsShipped(copy, files, loaded),
@@ -984,7 +970,7 @@ const make = Effect.gen(function* () {
                   NodePath.join(copy, ".studio", "bot"),
                   undefined,
                   // The harness's kit is its own: a game's file of that name never replaces it.
-                  (from) => isPathInside(from, NodePath.join(root, HARNESS_KIT)),
+                  (from) => isPathWithinRoot(from, NodePath.join(root, HARNESS_KIT)),
                 );
                 return true;
               } catch {

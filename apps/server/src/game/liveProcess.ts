@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Shared memory, launch-record, sweep and MCP helpers for the live editors' native boundary (GameBlender, GameUnity).
+// @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- Shared memory, launch-record, sweep and MCP helpers for the live editors' native boundary (GameBlender).
 // A live editor runs in a window host's window, records each launch on disk as
 // it starts, and is reaped only through launches that still verify as ours.
 import * as NodeFSP from "node:fs/promises";

@@ -31,10 +31,10 @@ describe("gameInitial", () => {
 
 describe("gameTemplateAppearance", () => {
   it("names the engine each starter uses, and says when it is paused", () => {
-    expect(gameTemplateAppearance("blank").label).toBe("Godot · paused");
-    expect(gameTemplateAppearance(null).label).toBe("Godot · paused");
+    expect(gameTemplateAppearance("blank").label).toBe("Godot · not available");
+    expect(gameTemplateAppearance(null).label).toBe("Godot · not available");
     expect(gameTemplateAppearance("blank-three").label).toBe("three.js");
-    expect(gameTemplateAppearance("blank-unity").label).toBe("Unity · paused");
+    expect(gameTemplateAppearance("blank-unity").label).toBe("Unity · not available");
   });
 });
 

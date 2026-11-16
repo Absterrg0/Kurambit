@@ -174,7 +174,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/game-tools",
     scope: "environment",
     environmentOnly: true,
-    searchTerms: ["blender godot unity hub executable paths install download toolchain"],
+    searchTerms: ["blender executable paths install download toolchain"],
   },
   {
     id: "art-providers",

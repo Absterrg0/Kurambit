@@ -13,7 +13,7 @@ import {
   type GameManifest,
   manifestProject,
 } from "@kurambit/contracts";
-import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, availableEngine, engineProfile, gamePaths } from "./engineProfile.ts";
 import { decodePng, measure, type Rgba } from "./run/spriteFacts.ts";
 import { walkFiles } from "./walkFiles.ts";
 import { lockSpriteInput, readGameStyle } from "./gameStyle.ts";
@@ -78,28 +78,15 @@ const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 const cleanRelative = (path: string) =>
   path.split("/").every((s) => SEGMENT.test(s) && s !== "." && s !== "..");
 
-/**
- * Why `output` (trimmed, no .png) is no place for this game's sprites, or
- * null. An engine that imports only one folder (Unity's case-sensitive
- * Assets/; on Linux `assets/` is another folder it never reads) takes them
- * only there.
- */
+/** Why `output` (trimmed, no .png) is no place for this game's sprites, or null. */
 export const spriteOutputIssue = (
   engine: GameEngineId,
   project: string,
   output: string,
 ): string | null => {
-  const { importRoot } = engineProfile(engine);
   const example = `${gamePaths(engine, project).sprites}/hero_walk`;
-  const under = importRoot === null ? `${project}/` : `${project}/${importRoot}/`;
-  if (output.startsWith(under) && cleanRelative(output)) return null;
-  const miscased =
-    importRoot !== null && output.toLowerCase().startsWith(under.toLowerCase())
-      ? ` ${engineProfile(engine).displayName} imports only ${under} (as written) and never loads ${output.slice(0, under.length - 1)}/; use ${under}${output.slice(under.length)}.`
-      : importRoot !== null && output.startsWith(`${project}/`)
-        ? ` ${engineProfile(engine).displayName} imports nothing outside ${under}.`
-        : "";
-  return `output must be a game-relative path prefix under ${under} such as ${example} (letters, digits, _ . -).${miscased}`;
+  if (output.startsWith(`${project}/`) && cleanRelative(output)) return null;
+  return `output must be a game-relative path prefix under ${project}/ such as ${example} (letters, digits, _ . -).`;
 };
 
 /**
@@ -300,9 +287,10 @@ export const renderSprites = (
     const locked = lockSpriteInput(requested, yield* readGameStyle(realRoot));
     const input = locked.input;
     const lane = manifestProject(manifest);
-    const profile = engineProfile(manifest.engine.name);
+    const engine = yield* availableEngine(manifest.engine.name);
+    const profile = engineProfile(engine);
     const output = input.output.trim().replace(/\.png$/i, "");
-    const issue = spriteOutputIssue(manifest.engine.name, lane, output);
+    const issue = spriteOutputIssue(engine, lane, output);
     if (issue !== null) return yield* fail(input.output, "invalid-path", issue);
     const dirRel = NodePath.posix.dirname(output);
     const base = NodePath.posix.basename(output);
@@ -338,7 +326,7 @@ export const renderSprites = (
     const palette =
       pixel?.palette === undefined
         ? null
-        : yield* paletteOf(realRoot, gamePaths(manifest.engine.name, lane).library, pixel.palette);
+        : yield* paletteOf(realRoot, gamePaths(engine, lane).library, pixel.palette);
     const scratch = yield* realDir(realRoot, SCRATCH);
     const rawDir = NodePath.join(scratch, "raw");
     yield* Effect.tryPromise({
@@ -677,28 +665,12 @@ export const renderSprites = (
           ]),
     ]);
 
-    // The animation name the example uses: a model copies it literally.
-    const stripKey =
-      input.action ??
-      (NodePath.basename(manifestRel)
-        .replace(/\.sprite\.json$/, "")
-        .split(/[_-]/)
-        .at(-1) ||
-        "anim");
     const text = [
       `Rendered ${frames.length} frame${frames.length === 1 ? "" : "s"} x ${views.length} view${views.length === 1 ? "" : "s"} (${views.map((v) => `${v.name}: azimuth ${v.azimuth}, elevation ${v.elevation}`).join("; ")}) of ${fit.objects.join(", ")}${playing === null ? "" : ` playing ${playing}`}; frames ${frames.join(", ")}.`,
       ...views.map(
         (_, vi) => `- ${spanText(files.slice(vi * frames.length, (vi + 1) * frames.length))}`,
       ),
-      `Manifest: ${manifestRel} (frame size, ${spriteManifest.fps} fps, ${spriteManifest.loop ? "loop" : "once"}, anchor per view): ${
-        profile.stripLoad === null
-          ? "read it for the frame rate and anchor"
-          : profile.stripLoad(
-              stripKey,
-              profile.resourcePath(manifestRel.slice(lane.length + 1)),
-              views[0]!.name,
-            )
-      }.`,
+      `Manifest: ${manifestRel} (frame size, ${spriteManifest.fps} fps, ${spriteManifest.loop ? "loop" : "once"}, anchor per view): read it for the frame rate and anchor.`,
       ...(sheetRel === undefined
         ? []
         : [

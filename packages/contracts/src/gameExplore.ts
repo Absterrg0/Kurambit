@@ -55,17 +55,13 @@ export const GameSaves = Schema.Literals(["fresh", "keep"]);
 export type GameSaves = typeof GameSaves.Type;
 
 /**
- * Exploration plays the current game sources with the game paused between
- * acts. Native games run Godot; three.js games load the static folder in
- * headless Chromium (real keyboard/mouse, screenshots, console errors, a
- * read-only `window.__studio` probe). The target defaults to the game's
- * engine when omitted.
+ * Exploration plays the current game sources: three.js games load the static
+ * folder in headless Chromium (real keyboard/mouse, screenshots, console
+ * errors, a read-only `window.__studio` probe).
  */
 export const GameExploreStartInput = Schema.Struct({
-  /** How long to wait for Godot to boot. */
+  /** How long to wait for the game to boot. */
   bootTimeoutMs: Schema.optionalKey(Schema.Finite),
-  /** Which runner to open. Omitted means the game's own engine. */
-  target: Schema.optionalKey(Schema.Literals(["native", "web"])),
   /** Omitted means `fresh`. */
   saves: Schema.optionalKey(GameSaves),
 });
@@ -219,7 +215,7 @@ export const GameExploreCloseResult = Schema.Struct({
 export type GameExploreCloseResult = typeof GameExploreCloseResult.Type;
 
 /** Capture width/height bounds for exploration viewports. */
-export const EXPLORE_CAPTURE_BOUNDS = { minDimension: 320, maxDimension: 1920 } as const;
+const EXPLORE_CAPTURE_BOUNDS = { minDimension: 320, maxDimension: 1920 } as const;
 
 /** Everything wrong with an exploration open request. Empty means the session may open. */
 export const exploreCaptureIssues = (input: {
@@ -236,7 +232,7 @@ export const exploreCaptureIssues = (input: {
 
 /**
  * Keys exploration can send. The browser needs a physical key or a DOM key
- * name; a Godot InputMap action name such as `ui_accept` has neither, so it
+ * name; an engine's input action name such as `ui_accept` has neither, so it
  * reaches the game as a key it never receives.
  */
 const BROWSER_KEY_NAMES: ReadonlySet<string> = new Set([
@@ -299,7 +295,7 @@ export const exploreStepIssues = (steps: readonly GameExploreStep[]): readonly s
         }
         if (key.length === 1 || BROWSER_KEY_NAMES.has(key)) continue;
         issues.push(
-          `Step ${index + 1} ${field} "${key}" is not a browser key. Exploration sends physical keys such as "Enter", "Space", "ArrowLeft", "w" or "F1", not Godot InputMap actions; use the key project.godot binds to the action here.`,
+          `Step ${index + 1} ${field} "${key}" is not a browser key. Exploration sends physical keys such as "Enter", "Space", "ArrowLeft", "w" or "F1", not input action names; use the key the game binds to the action.`,
         );
       }
   }

@@ -22,7 +22,7 @@ const BOT_DIR = ".studio/bot";
  * came from stay together, and the play bot, so an undo is exactly as before
  * and a build's skilled fact is measured with the bot it was made with. Notes,
  * plans and the rest of `.studio` stay as they are, and ignored engine caches
- * (`.godot`, `Library`) are never touched.
+ * are never touched.
  */
 export const restoredPaths = (lane: string) => [lane, "art", "ASSETS.md", "STYLE.json", BOT_DIR];
 

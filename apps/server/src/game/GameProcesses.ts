@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { GameOperationError, type GameProcessResult, type GameViewport } from "@kurambit/contracts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
-import { HOST_OS, ProcessHost, spawnOwned, type ProcessFacts } from "./processHost.ts";
+import { HOST_OS, ProcessHost, spawnOwned } from "./processHost.ts";
 import type { WindowCommand, WindowHost } from "./windowHost.ts";
 
 interface Running {
@@ -32,9 +32,9 @@ export interface StartedProcess {
 /**
  * Every way a child process can reach a display server. A headless child keeps
  * none of them: the server may itself have been started by a desktop session,
- * and an agent's `godot --write-movie` must not open a window on that session.
+ * and an agent's own engine or Blender run must not open a window on that session.
  */
-export const DISPLAY_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
+const DISPLAY_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
 /**
  * PATH discovery for standard executables. Env overrides exist for configured
  * tools (for example KURAMBIT_FFMPEG) and for tests.
@@ -68,7 +68,7 @@ const headlessEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
 };
 /**
  * Allowlisted base environment for children that execute engine or game
- * code (native Godot explore/bot runs, live Blender, headless Chromium).
+ * code (live Blender, headless Chromium).
  * Only process lookup, home, scratch, locale and heap knobs cross the
  * boundary; server secrets, provider credentials and unrelated tool
  * configuration stay behind. Display routes never cross here: a caller adds
@@ -93,8 +93,8 @@ export const engineChildEnv = (extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv => 
   if (source.TEMP !== undefined) env.TEMP = source.TEMP;
   if (source.TMP !== undefined) env.TMP = source.TMP;
   if (source.TMPDIR !== undefined) env.TMPDIR = source.TMPDIR;
-  // Godot on Windows finds its config, export templates and user:// through
-  // these; without them it falls back to the working directory (the game root).
+  // Programs on Windows find their config and user data through these; without
+  // them some fall back to the working directory (the game root).
   if (HOST_OS === "win32")
     for (const key of ["APPDATA", "LOCALAPPDATA", "USERPROFILE"] as const)
       if (source[key] !== undefined) env[key] = source[key];
@@ -128,14 +128,6 @@ interface ProcessInput {
    * is ever matched by name.
    */
   window?: { readonly host: WindowHost; readonly viewport: GameViewport } | undefined;
-  /**
-   * False for a child whose launch record is reaped at the next start (the
-   * live Unity editor): it stays out of the Windows kill-on-close job, so a
-   * Licensing Client it starts is not ended with the server.
-   */
-  joinsJob?: boolean | undefined;
-  /** Which of a Windows tree a stop may end (a Unity editor's Licensing Client never). */
-  keep?: ((facts: ProcessFacts) => boolean) | undefined;
   /**
    * False keeps the output in memory only: a short probe (a tool's
    * --version) leaves no log file behind for every call.
@@ -192,8 +184,6 @@ const make = Effect.gen(function* () {
           ? { ...input.env }
           : { ...headlessEnvironment(process.env), ...input.env },
       stdio: ["ignore", "pipe", "pipe"],
-      joinsJob: input.joinsJob,
-      keep: input.keep,
     } satisfies WindowCommand;
     const hosted =
       input.window === undefined

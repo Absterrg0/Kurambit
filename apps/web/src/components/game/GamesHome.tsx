@@ -6,14 +6,13 @@ import {
 } from "@kurambit/client-runtime/environment";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
-  ACTIVE_GAME_ENGINES,
   GAME_ENGINES,
+  GameEngineId,
   GAME_STYLE_DEFAULT_CHARACTERS,
   GAME_REFERENCE_MAX_DATA_URL_CHARS,
   GAME_STYLE_DEFAULT_LIBRARY,
   type EnvironmentId,
   type GameCharacterRoute,
-  type GameEngineId,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -377,18 +376,18 @@ function BriefBox({
             </TooltipTrigger>
             <TooltipPopup side="top">Attach a picture to aim for</TooltipPopup>
           </Tooltip>
-          {/* One active engine is no choice, so no picker shows. */}
-          {ACTIVE_GAME_ENGINES.length > 1 ? (
+          {/* One engine is no choice, so no picker shows. */}
+          {GameEngineId.literals.length > 1 ? (
             <ToggleGroup
               aria-label="Engine"
               variant="segmented"
               value={[engine]}
               onValueChange={(value) => {
-                const next = ACTIVE_GAME_ENGINES.find((id) => id === value[0]);
+                const next = GameEngineId.literals.find((id) => id === value[0]);
                 if (next !== undefined) setEngine(next);
               }}
             >
-              {ACTIVE_GAME_ENGINES.map((id) => (
+              {GameEngineId.literals.map((id) => (
                 <Toggle key={id} value={id} disabled={!engineReady(id)}>
                   {GAME_ENGINES[id].picker.short}
                 </Toggle>

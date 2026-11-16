@@ -10,7 +10,7 @@ import * as NodeStreamPromises from "node:stream/promises";
 import { GAME_SAVED_MEDIA_EVENT, type GameSavedMedia } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { isPathInside } from "./gameNativeUserDir.ts";
+import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 
 /** Game-relative; the scaffold's .gitignore ignores it, so saves stay out of commits and checkpoints. */
 export const SAVED_DIR = "saved";
@@ -82,7 +82,7 @@ const generatedSource = async (
   const base = NodePath.join(realRoot, GENERATED_DIR);
   // A generated folder that is itself a link leads out of the game.
   const realBase = await NodeFSP.realpath(base).catch(() => null);
-  if (realBase !== base || !isPathInside(real, base) || real === base)
+  if (realBase !== base || !isPathWithinRoot(real, base) || real === base)
     throw new SavedMediaError(
       "invalid-path",
       `${source} is not in this game's generated media (${GENERATED_DIR}); only those can be saved.`,

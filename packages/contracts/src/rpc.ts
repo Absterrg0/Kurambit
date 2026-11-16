@@ -33,7 +33,6 @@ import {
   GameSavedListInput,
   GameSavedListResult,
   GameSavedMedia,
-  GameWindowsPackageResult,
 } from "./game.ts";
 import {
   GameBuildCompareInput,
@@ -367,7 +366,6 @@ export const WS_METHODS = {
   gameCreate: "game.create",
   gameOpen: "game.open",
   gameAction: "game.action",
-  gameWindowsPackage: "game.windowsPackage",
   gameWebPackage: "game.webPackage",
   gameWebExportUrl: "game.webExportUrl",
   gameToolchainStatus: "game.toolchainStatus",
@@ -1477,11 +1475,6 @@ const WsGameActionRpc = Rpc.make(WS_METHODS.gameAction, {
   success: GameActionResult,
   error: gameError,
 });
-const WsGameWindowsPackageRpc = Rpc.make(WS_METHODS.gameWindowsPackage, {
-  payload: GameThreadInput,
-  success: GameWindowsPackageResult,
-  error: gameError,
-});
 const WsGameWebPackageRpc = Rpc.make(WS_METHODS.gameWebPackage, {
   payload: GameThreadInput,
   success: GameWebPackageResult,
@@ -1494,7 +1487,7 @@ const WsGameWebExportUrlRpc = Rpc.make(WS_METHODS.gameWebExportUrl, {
   error: gameError,
 });
 const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
-  /** With a thread, its game's own engine tool (Unity's editor by the project's version). */
+  /** With a thread, its game's own engine tool. */
   payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
   success: GameToolchainStatus,
   error: gameError,
@@ -1650,7 +1643,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameListRpc,
   WsGameOpenRpc,
   WsGameActionRpc,
-  WsGameWindowsPackageRpc,
   WsGameWebPackageRpc,
   WsGameWebExportUrlRpc,
   WsGameToolchainStatusRpc,

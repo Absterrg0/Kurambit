@@ -20,7 +20,6 @@ import {
   GameCheckTool,
   GamePlayTool,
   GameToolkit,
-  GameUnityTool,
 } from "../mcp/toolkits/game/tools.ts";
 import { firstTurnMessage, gameTurnRules, scaffoldFiles } from "./scaffold.ts";
 import { publishedInputSchema } from "../mcp/McpHttpServer.ts";
@@ -117,7 +116,6 @@ const GAME_TOOLS = [
   GamePlayTool,
   GameAssetsTool,
   GameBlenderTool,
-  GameUnityTool,
 ];
 
 /** Each tool the MCP server would list for a three.js chat with this model choice, by its own EnabledWhen. */

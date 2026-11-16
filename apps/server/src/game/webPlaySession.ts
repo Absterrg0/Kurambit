@@ -1,7 +1,11 @@
 // @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- This module owns headless Chromium for browser play sessions: wall-clock boot polling and real-time input.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
-import type { GameConsoleMessage, GameExploreStep } from "@kurambit/contracts";
+import {
+  PLAY_SESSION_PROTOCOL,
+  type GameConsoleMessage,
+  type GameExploreStep,
+} from "@kurambit/contracts";
 import {
   READ_STUDIO_PERF,
   READ_STUDIO_READY,
@@ -880,7 +884,7 @@ export const openWebPlaySession = async (input: {
     let perf: unknown = null;
     let scene: PageScene = input.sceneReport === true && sceneStarted === null ? "no-shell" : null;
     const session: WebPlaySession = {
-      protocol: 2,
+      protocol: PLAY_SESSION_PROTOCOL,
       capabilities: new Set(["realtime", "setState", "frames"]),
       boot: { probe: bootProbe, consoleMessages: bootConsole.messages },
       bootPerf: null,

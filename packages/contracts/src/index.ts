@@ -79,6 +79,5 @@ export * from "./gameBlender.ts";
 export * from "./gameLibrary.ts";
 export * from "./gameModel.ts";
 export * from "./gameStyle.ts";
-export * from "./gameUnity.ts";
 export * from "./gameStageBridge.ts";
 export * from "./gameTools.ts";

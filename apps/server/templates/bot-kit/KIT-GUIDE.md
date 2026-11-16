@@ -121,8 +121,7 @@ waits for the next tempo beat, too slow for a fast hit.
   overlap, engine errors. 2D games have no room rays: steer by position.
 - Not every engine reports everything. Browser (three.js) games give game
   state, player position, HUD text and page errors only, and skip id-clicks
-  (click at screen points). Unity games give no shape overlap and take no
-  `setState` writes. A missing field reads as unknown, so guard for it.
+  (click at screen points). A missing field reads as unknown, so guard for it.
 
 ## The harness's tiers (idle and masher)
 

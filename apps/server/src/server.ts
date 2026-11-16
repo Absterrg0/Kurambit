@@ -7,11 +7,9 @@ import * as GameEngine from "./game/GameEngine.ts";
 import * as GameExplore from "./game/GameExplore.ts";
 import * as GameExport from "./game/GameExport.ts";
 import * as GameMemoryGate from "./game/GameMemoryGate.ts";
-import * as GamePlayer from "./game/GamePlayer.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
 import * as GameStage from "./game/GameStage.ts";
 import * as GameStatusService from "./game/GameStatusService.ts";
-import * as GameUnity from "./game/GameUnity.ts";
 import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
@@ -534,10 +532,7 @@ const layerGameOperations = GameStage.layer.pipe(
   Layer.provideMerge(GameBot.layer),
   Layer.provideMerge(GameExplore.layer),
   Layer.provideMerge(GameExport.layer),
-  Layer.provide(GamePlayer.layer),
   Layer.provideMerge(GameEngine.layer),
-  // After GameEngine, so the engine backend and the game_unity tool share one live editor.
-  Layer.provideMerge(GameUnity.layer),
   Layer.provideMerge(GameBlender.layer),
   Layer.provideMerge(GameArt.layer),
   // After the editors, so every heavy start, editor opens included, shares one gate.

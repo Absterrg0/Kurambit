@@ -26,13 +26,6 @@ import {
 } from "./gameExplore.ts";
 import { GameAssetsAddInput, GameAssetsSearchInput } from "./gameLibrary.ts";
 import { GameKeepGoingInput, GameKeepGoingSteerInput } from "./gameRun.ts";
-import {
-  GameUnityConsoleInput,
-  GameUnityEditInput,
-  GameUnityEvalInput,
-  GameUnityPlayInput,
-  GameUnityScreenshotInput,
-} from "./gameUnity.ts";
 
 /** An op that takes nothing: `{}`. An empty Struct's JSON Schema would not say it is an object. */
 const Nothing = Schema.Record(Schema.String, Schema.Never);
@@ -128,7 +121,7 @@ export const GameBuildsToolInput = Schema.Struct({
     }),
   ),
   export: op(Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) })),
-  package: op(Schema.Struct({ target: Schema.Literals(["web", "windows"]) })),
+  package: op(Schema.Struct({ target: Schema.Literals(["web"]) })),
   stop: op(Nothing),
 });
 export type GameBuildsToolInput = typeof GameBuildsToolInput.Type;
@@ -141,14 +134,3 @@ export const GameKeepGoingToolInput = Schema.Struct({
   commandId,
 });
 export type GameKeepGoingToolInput = typeof GameKeepGoingToolInput.Type;
-
-export const GameUnityToolInput = Schema.Struct({
-  tools: op(Nothing),
-  edit: op(GameUnityEditInput),
-  eval: op(GameUnityEvalInput),
-  recompile: op(Nothing),
-  play: op(GameUnityPlayInput),
-  console: op(GameUnityConsoleInput),
-  screenshot: op(GameUnityScreenshotInput),
-});
-export type GameUnityToolInput = typeof GameUnityToolInput.Type;

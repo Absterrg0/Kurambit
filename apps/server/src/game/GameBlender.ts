@@ -114,7 +114,7 @@ import {
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
-import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, availableEngine, engineProfile, gamePaths } from "./engineProfile.ts";
 import { gltfTriangles } from "./assetFacts.ts";
 import { glbJson } from "./gltfJson.ts";
 import { packGlb } from "./glbPack.ts";
@@ -1362,7 +1362,10 @@ const make = Effect.gen(function* () {
 
   /** Where GLBs land in the engine project, from the manifest and its engine's layout. */
   const assetDirOf = (manifest: GameManifest) =>
-    gamePaths(manifest.engine.name, manifestProject(manifest)).blender;
+    Effect.map(
+      availableEngine(manifest.engine.name),
+      (engine) => gamePaths(engine, manifestProject(manifest)).blender,
+    );
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
     Effect.gen(function* () {
@@ -1778,7 +1781,7 @@ const make = Effect.gen(function* () {
           const glb = NodePath.join(out, `candidate.${NodeCrypto.randomUUID()}.glb`);
           return yield* Effect.gen(function* () {
             const rig = style?.rig === undefined ? null : resolveRig(style.rig);
-            const engine = (yield* projects.read(root)).engine.name;
+            const engine = yield* availableEngine((yield* projects.read(root)).engine.name);
             const pass = yield* runPass(root, out, glb, {
               images: engineProfile(engine).compressedModels ? "WEBP" : "AUTO",
               objects: digest.objects,
@@ -2747,7 +2750,7 @@ const make = Effect.gen(function* () {
               (yield* creatureRefusal(root, candidate));
             if (routeRefusal !== null)
               return yield* opError("blender-export", root, "invalid-input", routeRefusal);
-            const file = input.file ?? `${assetDirOf(manifest)}/${candidate.subject}.glb`;
+            const file = input.file ?? `${yield* assetDirOf(manifest)}/${candidate.subject}.glb`;
             if (
               !file.startsWith(`${engineDir}/`) ||
               file.split("/").some((segment) => segment === ".." || segment === "") ||
@@ -2764,14 +2767,14 @@ const make = Effect.gen(function* () {
               catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
             });
             const absolute = NodePath.join(directory, NodePath.posix.basename(file));
-            const profile = engineProfile(manifest.engine.name);
+            const profile = engineProfile(yield* availableEngine(manifest.engine.name));
             const compress = profile.compressedModels;
             if (input.simplify !== undefined && !compress)
               return yield* opError(
                 "blender-export",
                 root,
                 "invalid-input",
-                `simplify is for three.js games; ${manifest.engine.name} makes its own levels of detail when it imports the model.`,
+                `simplify is for three.js games; ${profile.displayName} makes its own levels of detail when it imports the model.`,
               );
             const reviewedBytes = yield* Effect.tryPromise({
               try: () => NodeFSP.readFile(NodePath.join(out, CANDIDATE_GLB)),

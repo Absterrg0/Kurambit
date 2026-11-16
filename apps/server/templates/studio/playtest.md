@@ -15,8 +15,7 @@ call it done.
 2. Passes: smoke (boots, menu, start, quit), feature (each system actually
    triggers), regression (what worked before still works), visual
    (frames against the key art).
-3. Godot and Unity games play as native builds that pause between acts;
-   three.js games play in a browser in real time. Use
+3. three.js games play in a browser in real time. Use
    held-key steps with durations chosen from observed control response.
    Batch them: a session allows a limited number of act calls, steps and
    seconds of input, so one short step per call runs out of calls in the

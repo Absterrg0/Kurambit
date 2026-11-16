@@ -10,10 +10,11 @@ import {
 /**
  * How the harness plays a running game: one session protocol every engine's
  * in-game runner speaks, so exploration and bots are clients of a session and
- * an engine adds only how to launch one. A process runner (Godot's runner
- * script, Unity's StudioProbe) reads a request file, connects out to the
- * loopback port it names and exchanges one JSON object per line; the browser
- * host speaks the same messages to a three.js page through Chromium.
+ * an engine adds only how to launch one. The browser host speaks these
+ * messages to a three.js page through Chromium. A native engine's process
+ * runner would read a request file, connect out to the loopback port it names
+ * and exchange one JSON object per line; earlier versions had that host for
+ * Godot and Unity, and git history keeps it.
  *
  * A session opens held: the runner says hello, then plays discrete acts with
  * the game paused between them, until a `realtime` command lets the game run
@@ -27,7 +28,7 @@ import {
  * closes, so a harness that dies leaves no game running.
  */
 export const PLAY_SESSION_PROTOCOL = 2;
-/** Every protocol a runner may speak; protocol 1 runners (older games' Unity probes) play without frames. */
+/** Every protocol a runner may speak; protocol 1 runners play without frames. */
 export const PlaySessionProtocol = Schema.Literals([1, 2]);
 
 /**
@@ -51,8 +52,6 @@ export const PlaySessionRequest = Schema.Struct({
   protocol: PlaySessionProtocol,
   port: Schema.Int,
   token: Schema.String,
-  /** Godot only: the isolated user:// root the runner must find itself under. */
-  expectedUserDataPrefix: Schema.optionalKey(Schema.String),
 });
 export type PlaySessionRequest = typeof PlaySessionRequest.Type;
 

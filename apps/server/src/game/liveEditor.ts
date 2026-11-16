@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The live editors' records and source guards on the native filesystem.
-// What the live editors (GameBlender, GameUnity) share about a session's life:
+// What a live editor (GameBlender) shares about a session's life with any other:
 // its launch record kept in the game folder and under the server's state dir
 // (so a crashed server's editor is reaped at the next start even when no one
 // reopens its game), whether it is still usable, and the source files it
@@ -36,7 +36,7 @@ const identityOf = (path: string): Promise<string | null> =>
 
 /**
  * The source files a live editor holds in memory and saves without reading
- * the disk first (Blender's live.blend, Unity's scenes). When one changed on
+ * the disk first (Blender's live.blend). When one changed on
  * disk while the session sat idle (a file restore, the user's own git), the
  * session is stale: saving would write the old scene over the restored one.
  * The session takes the identities again whenever its own work ends, so its
@@ -63,13 +63,6 @@ export class HeldSources {
     return null;
   }
 }
-
-/** Every `.unity` scene under a project's Assets/: what a Unity editor may hold open. */
-export const unityScenes = async (projectDir: string): Promise<ReadonlyArray<string>> => {
-  const assets = NodePath.join(projectDir, "Assets");
-  const names = await NodeFSP.readdir(assets, { recursive: true });
-  return names.filter((name) => name.endsWith(".unity")).map((name) => NodePath.join(assets, name));
-};
 
 /**
  * A kind of live editor's launch records: the game folder's copy (read only

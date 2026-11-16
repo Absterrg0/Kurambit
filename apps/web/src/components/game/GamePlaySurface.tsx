@@ -38,7 +38,7 @@ const frameStyle = (viewport: GameViewport) => ({
 });
 
 /**
- * What the app says to every engine's game: the Godot side's StudioProbe and the three.js shell
+ * What the app says to every engine's game: the three.js shell
  * pause and mute while hidden, restore when shown again, and answer with `studio-visibility-ack`.
  */
 const visibilityMessage = (visible: boolean): GameStageToGameMessage => ({

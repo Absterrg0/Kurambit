@@ -185,22 +185,6 @@ const refusal = (decided: ReturnType<Store["send"]>) =>
   Result.isFailure(decided) ? decided.failure.reason : "accepted";
 
 describe("a keep-going run", () => {
-  it("refuses an engine with no turn loop", () => {
-    const store = new Store();
-    expect(
-      refusal(
-        store.send({
-          type: "game-run.start",
-          runId: GameRunId.make("run_godot"),
-          engine: "godot",
-          lane: "godot",
-          profile: "autopilot",
-          budgetMinutes: 60,
-        }),
-      ),
-    ).toBe("no-turn-loop");
-  });
-
   // The person's model choice a step's turn started under is put back from this record when the
   // turn ends, so it must be on the step itself, not in a process's memory.
   it("records the model choice a step's turn started under on the step", () => {

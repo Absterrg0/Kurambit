@@ -2,7 +2,7 @@ import {
   type AuthMcpClientAccess,
   type EnvironmentId,
   type GameCharacterRoute,
-  type GameEngineId,
+  type GameEngineName,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
@@ -44,7 +44,7 @@ export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): R
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   /** The engine of the calling thread's game; null when the thread works in no game. */
-  readonly gameEngine?: GameEngineId | null;
+  readonly gameEngine?: GameEngineName | null;
   /**
    * The tool a `tools/call` request names, read from its body before the MCP server does; a
    * retired game tool is callable only by it, so it answers with where its work went.

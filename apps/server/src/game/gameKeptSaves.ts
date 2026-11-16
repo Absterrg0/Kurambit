@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { GameOperationError, type GameSaves } from "@kurambit/contracts";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
-import { isPathInside } from "./gameNativeUserDir.ts";
+import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import { insideGame } from "./gamePath.ts";
 import type { KeptStorage } from "./webPlaySession.ts";
 
@@ -30,7 +30,7 @@ export const ensureGameDir = async (root: string, relative: string): Promise<str
  * The one stable save location a kept play session of this game and engine
  * uses, created when missing. It must resolve inside the game's own
  * `.studio/saves/` even through links, so a game whose tree points it at the
- * user's real saves (HOME, ~/.local/share/godot, ~/.config/unity3d) is
+ * user's real saves (HOME, an engine's data folder) is
  * refused instead of written to.
  */
 export const keptSavesDir = async (root: string, engine: string): Promise<string> => {
@@ -38,7 +38,7 @@ export const keptSavesDir = async (root: string, engine: string): Promise<string
   const dir = await ensureGameDir(root, NodePath.join(KEPT_SAVES_DIR, engine));
   // Inside the game is not enough: a saves folder linked elsewhere in it is refused too.
   const realDir = await NodeFSP.realpath(dir);
-  if (!isPathInside(realDir, NodePath.join(await NodeFSP.realpath(root), KEPT_SAVES_DIR)))
+  if (!isPathWithinRoot(realDir, NodePath.join(await NodeFSP.realpath(root), KEPT_SAVES_DIR)))
     throw new Error(
       `The kept save location ${dir} resolves to ${realDir}, outside the game's ${KEPT_SAVES_DIR}/; kept saves are refused rather than written there.`,
     );

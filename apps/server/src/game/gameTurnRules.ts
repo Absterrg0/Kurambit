@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { GameManifest } from "@kurambit/contracts";
+import { GameManifest, isAvailableEngine } from "@kurambit/contracts";
 
 import { gameTurnRules } from "./scaffold.ts";
 
@@ -24,6 +24,8 @@ export const turnRulesForWorkspace = (cwd: string | null) =>
       ).pipe(
         Effect.map((text) => {
           const manifest = text === null ? Option.none() : decodeManifest(text);
-          return Option.isSome(manifest) ? gameTurnRules(manifest.value.engine.name) : undefined;
+          return Option.isSome(manifest) && isAvailableEngine(manifest.value.engine.name)
+            ? gameTurnRules(manifest.value.engine.name)
+            : undefined;
         }),
       );

@@ -4,9 +4,7 @@ import { Button } from "../ui/button";
 
 export const GAME_TOOL_NAMES = {
   blender: "Blender",
-  godot: "Godot",
   uv: "uv",
-  unity: "Unity",
   mpfb: "MPFB2",
   ffmpeg: "ffmpeg",
 } as const satisfies Record<GameToolStatus["tool"], string>;

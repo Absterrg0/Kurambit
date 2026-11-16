@@ -33,12 +33,8 @@ interface BuildOutcome {
 /** What a blind player must not see: files that differ by round, not by game. */
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
 
-/** Game code: the engine project, without what an engine import rewrites on its own. */
-const isGameCode = (lane: string) => (path: string) =>
-  path.startsWith(`${lane}/`) &&
-  !path.startsWith(`${lane}/.godot/`) &&
-  !path.endsWith(".import") &&
-  !path.endsWith(".uid");
+/** Game code: the engine project. */
+const isGameCode = (lane: string) => (path: string) => path.startsWith(`${lane}/`);
 
 const under = (roots: ReadonlyArray<string>, path: string) =>
   roots.some((root) => path === root || path.startsWith(`${root}/`));
@@ -139,8 +135,8 @@ export const captureBuild = (
 /**
  * One build op on the game folder. It always finishes: a stop waits for it
  * rather than leaving a half-restored folder. A restore first closes the
- * root's live editors, so a Unity scene held in memory is never saved over
- * the restored files.
+ * root's live editors, so a scene an editor holds in memory is never saved
+ * over the restored files.
  */
 export const buildStep = (
   deps: {

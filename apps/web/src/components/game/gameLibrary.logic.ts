@@ -1,4 +1,9 @@
-import { GAME_ENGINES, type GameSummary } from "@kurambit/contracts";
+import {
+  engineDisplayName,
+  isAvailableEngine,
+  templateEngine,
+  type GameSummary,
+} from "@kurambit/contracts";
 
 export interface GameTemplateAppearance {
   readonly label: string;
@@ -9,12 +14,12 @@ export interface GameTemplateAppearance {
 export const gameTemplateAppearance = (
   template: GameSummary["template"],
 ): GameTemplateAppearance => {
-  // Games from before templates were Godot games.
-  const engine =
-    Object.values(GAME_ENGINES).find((entry) => entry.template === template) ?? GAME_ENGINES.godot;
+  const engine = templateEngine(template);
   return {
-    // A parked engine's game says so on its card, not only once it is opened.
-    label: engine.status === "parked" ? `${engine.name} · paused` : engine.name,
+    // A game in an engine this version does not have says so on its card, not only once it is opened.
+    label: isAvailableEngine(engine)
+      ? engineDisplayName(engine)
+      : `${engineDisplayName(engine)} · not available`,
     initialClassName: "bg-foreground/8 text-foreground/80",
     coverClassName: "from-foreground/10 via-foreground/5 to-transparent",
   };

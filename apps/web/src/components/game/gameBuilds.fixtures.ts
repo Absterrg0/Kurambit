@@ -123,7 +123,7 @@ const FAKE_BUILDS: ReadonlyArray<GameBuild> = [
     files: [],
     fileCount: null,
     available: false,
-    noPlay: "Unity builds cannot be played here yet.",
+    noPlay: "This build cannot be played here.",
     noRestore: "This build's history was pruned.",
     still: null,
     base: null,

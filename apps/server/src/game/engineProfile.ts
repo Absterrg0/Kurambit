@@ -1,17 +1,20 @@
 // What the game layer asks of an engine that is plain data: directories, how its games
 // play, which harness duties apply and the engine's own prompt lines. No I/O, so the run's
-// pure policy reads it too. Engine behaviour (processes, editors, exports) is the
-// backend's, in GameEngine.ts; each backend carries its engine's profile.
-import type {
-  GameEngineId,
-  GameEngineStatus,
-  GameExportTarget,
-  GameStageKind,
-  GameViewport,
+// pure policy reads it too. A new engine adds its profile here, keyed by its GameEngineId.
+// Engine behaviour (processes, editors, exports) is the backend's, in GameEngine.ts; each
+// backend carries its engine's profile.
+import * as Effect from "effect/Effect";
+import {
+  GameOperationError,
+  isAvailableEngine,
+  unavailableEngineMessage,
+  type GameEngineId,
+  type GameEngineName,
+  type GameExportTarget,
+  type GameStageKind,
+  type GameViewport,
 } from "@kurambit/contracts";
-import { GODOT_PROFILE } from "./godotProfile.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
-import { UNITY_PROFILE } from "./unityProfile.ts";
 
 export type { GameExportTarget } from "@kurambit/contracts";
 
@@ -26,26 +29,13 @@ export interface GameProfileRelease {
   readonly packageable: boolean;
 }
 
-/**
- * A file the engine rewrites inside its own inputs without any source edit:
- * files matching `glob` that hold `marker` count by `normalise(text)`, not by
- * their bytes, in the source identity (sourceTree).
- */
-export interface GameDerivedInput {
-  readonly glob: string;
-  readonly marker: string;
-  readonly normalise: (text: string) => string;
-}
-
 export interface GameEngineProfile {
   readonly id: GameEngineId;
-  /** Active or parked (GAME_ENGINES' own answer, where the one switch lives). */
-  readonly status: GameEngineStatus;
   /** The live editors its games are made in, beyond the code: each one's agent tools need it. */
-  readonly editors: ReadonlyArray<"blender" | "unity">;
+  readonly editors: ReadonlyArray<"blender">;
   /**
    * When a chat turn changes the game, play and measure its build at once. Off
-   * for an engine whose build is too slow to follow every turn (parked lanes).
+   * for an engine whose build is too slow to follow every turn.
    */
   readonly turnLoop: boolean;
   /** How the Stage shows this engine's game (GAME_ENGINES' own answer). */
@@ -56,7 +46,7 @@ export interface GameEngineProfile {
    * games have no Stage bridge yet.
    */
   readonly tuneFile: string | null;
-  /** Short human name for honest operation messages ("Godot", "three.js", "Unity"). */
+  /** Short human name for honest operation messages ("three.js"). */
   readonly displayName: string;
   /** The engine project directory a new game gets; the run calls it the lane. */
   readonly projectDirectory: string;
@@ -64,11 +54,6 @@ export interface GameEngineProfile {
   readonly exportTargets: ReadonlyArray<GameExportTarget>;
   /** Every release it makes, by target. */
   readonly releases: ReadonlyArray<GameProfileRelease>;
-  /**
-   * Build input is what git sees of the project (its .gitignore leaves out the
-   * engine's output); this names an input file the engine itself rewrites.
-   */
-  readonly derivedInput: GameDerivedInput | null;
   /** A new game: the engine version the manifest records, the folders made beside the template's, and the opening of its AGENTS.md. */
   readonly scaffold: {
     readonly version: string;
@@ -77,13 +62,8 @@ export interface GameEngineProfile {
     /** .gitignore patterns for what the engine generates in its own games. */
     readonly ignores: ReadonlyArray<string>;
   };
-  /** The path a game's code loads a project-relative file by (res://x, ./x, Assets/x). */
+  /** The path a game's code loads a project-relative file by (./x). */
   readonly resourcePath: (projectRelative: string) => string;
-  /**
-   * Where art must sit for the engine to import it at all, relative to the
-   * project (Unity's case-sensitive Assets/); null when anywhere under it does.
-   */
-  readonly importRoot: string | null;
   /** Whether game_assets op import does work here; false when the project's files are the game as they are. */
   readonly importStep: boolean;
   /**
@@ -93,8 +73,6 @@ export interface GameEngineProfile {
   readonly compressedModels: boolean;
   /** How a sprite's ground line `ground` rows from the top becomes the node origin. */
   readonly groundHint: (width: number, height: number, ground: number) => string;
-  /** How the game loads a rendered strip's manifest; null when it reads it itself. */
-  readonly stripLoad: ((key: string, resource: string, view: string) => string) | null;
   /** How the game loads an exported model's sidecar; null when the engine imports the GLB itself. */
   readonly sidecarLoad: ((key: string, sidecar: string) => string) | null;
   /** Under the engine project directory: the game's art, its icon and title art, library packs and Blender exports. */
@@ -108,23 +86,8 @@ export interface GameEngineProfile {
     /** The file the game's credits screen reads, under the project directory. */
     readonly credits: string;
   };
-  /**
-   * How its plays on a private Linux display draw when that differs from the
-   * game's own renderer: the project settings file (under the project
-   * directory) and the note it gives, null when they draw alike.
-   */
-  readonly xvfbRenderer: {
-    readonly settings: string;
-    readonly note: (settings: string) => string | null;
-  } | null;
-  /** The fixed resolution its games boot, explore and bot-play at; null when the project settings declare it. */
-  readonly viewport: GameViewport | null;
-  /**
-   * How explore sessions and bot runs play a game: a page in headless
-   * Chromium, the engine's own runner on the sources, or a player built from
-   * the sources once per source identity.
-   */
-  readonly play: "browser" | "native" | "player";
+  /** The resolution its games boot, explore and bot-play at. */
+  readonly viewport: GameViewport;
   /**
    * The files of a Web release, relative to its directory: `exported` must be
    * nonempty after an export, `served` must stay present for Play. Null when
@@ -136,8 +99,6 @@ export interface GameEngineProfile {
   } | null;
   readonly check: {
     readonly timedOut: string;
-    /** The warning a check without a gameplay scene carries, when it then covers less. */
-    readonly withoutGameplayScene: string | null;
   };
   /** This engine's skill in the studio pack; a game keeps it and drops the other engines'. */
   readonly skill: string;
@@ -145,22 +106,38 @@ export interface GameEngineProfile {
 
 // Keyed by every engine id, so a new engine in the contracts does not compile without its profile.
 const BY_ID: Readonly<Record<GameEngineId, GameEngineProfile>> = {
-  godot: GODOT_PROFILE,
   three: THREE_PROFILE,
-  unity: UNITY_PROFILE,
 };
 export const PROFILES: ReadonlyArray<GameEngineProfile> = Object.values(BY_ID);
 
 export const engineProfile = (id: GameEngineId): GameEngineProfile => BY_ID[id];
+
+/** Engine work (import, check, export, play, art) never starts on a game in an engine this version does not have. */
+export const unavailableEngine = (engine: GameEngineName) =>
+  new GameOperationError({
+    operation: "resolve-engine",
+    path: engine,
+    reason: "engine-parked",
+    detail: unavailableEngineMessage(engine),
+  });
+/** A game's engine when this version has it; anything else is refused as unavailable. */
+export const availableEngine = (
+  engine: GameEngineName,
+): Effect.Effect<GameEngineId, GameOperationError> =>
+  isAvailableEngine(engine) ? Effect.succeed(engine) : Effect.fail(unavailableEngine(engine));
+
+/** The frame a game is shown in; a game in an engine this version does not have never plays, so it gets a plain 16:9. */
+export const engineViewport = (engine: GameEngineName): GameViewport =>
+  isAvailableEngine(engine) ? BY_ID[engine].viewport : { width: 1280, height: 720 };
 
 /** What an agent runs after it brought a file into the engine project. */
 export const afterAddingArt = (profile: GameEngineProfile) =>
   profile.importStep ? "Run game_assets op import, then game_check." : "Run game_check.";
 
 /**
- * What a game tool can need of its game's engine. `play` is every active
- * engine's: a parked engine has no capabilities, so its games' agents get
- * only the tools that need none (status, builds, saved media).
+ * What a game tool can need of its game's engine. `play` is every available
+ * engine's: an engine this version does not have gives none, so its games'
+ * agents get only the tools that need none (status, builds, saved media).
  */
 export type GameEngineCapability =
   | "play"
@@ -168,32 +145,24 @@ export type GameEngineCapability =
   | "tune"
   | "turnLoop"
   | "packageWeb"
-  | "packageWindows"
-  | "blender"
-  | "unity";
+  | "blender";
 const packageable = (profile: GameEngineProfile, target: GameExportTarget) =>
   profile.releases.some((release) => release.target === target && release.packageable);
 const capabilitiesOf = (profile: GameEngineProfile): ReadonlySet<GameEngineCapability> =>
-  new Set<GameEngineCapability>(
-    profile.status === "parked"
-      ? []
-      : [
-          "play",
-          ...(profile.importStep ? (["import"] as const) : []),
-          ...(profile.tuneFile === null ? [] : (["tune"] as const)),
-          ...(profile.turnLoop ? (["turnLoop"] as const) : []),
-          ...(packageable(profile, "Web") ? (["packageWeb"] as const) : []),
-          ...(packageable(profile, "Windows") ? (["packageWindows"] as const) : []),
-          ...profile.editors,
-        ],
-  );
+  new Set<GameEngineCapability>([
+    "play",
+    ...(profile.importStep ? (["import"] as const) : []),
+    ...(profile.tuneFile === null ? [] : (["tune"] as const)),
+    ...(profile.turnLoop ? (["turnLoop"] as const) : []),
+    ...(packageable(profile, "Web") ? (["packageWeb"] as const) : []),
+    ...profile.editors,
+  ]);
 const CAPABILITIES: Readonly<Record<GameEngineId, ReadonlySet<GameEngineCapability>>> = {
-  godot: capabilitiesOf(GODOT_PROFILE),
   three: capabilitiesOf(THREE_PROFILE),
-  unity: capabilitiesOf(UNITY_PROFILE),
 };
-export const engineCapabilities = (id: GameEngineId): ReadonlySet<GameEngineCapability> =>
-  CAPABILITIES[id];
+const NONE: ReadonlySet<GameEngineCapability> = new Set();
+export const engineCapabilities = (engine: GameEngineName): ReadonlySet<GameEngineCapability> =>
+  isAvailableEngine(engine) ? CAPABILITIES[engine] : NONE;
 
 /** A game's folders, game-relative with forward slashes, from its engine and its project folder. */
 export const gamePaths = (engine: GameEngineId, project: string) => {

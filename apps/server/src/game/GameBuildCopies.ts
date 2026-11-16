@@ -4,9 +4,8 @@
 // worktrees folder, never in the game repository, so playing or measuring an
 // old build never touches the game folder. Copies are content-addressed by
 // the build's engine project, so builds with the same project share one. A
-// copy names its game folder in COPY_OF, so a Unity copy reuses that folder's
-// import cache. This service sits below GameStage so Stop game reaches the
-// work on a game's copies too.
+// copy names its game folder in COPY_OF. This service sits below GameStage so
+// Stop game reaches the work on a game's copies too.
 //
 // One owner at a time: Play and a measurement of the same build share one
 // copy, and every engine step on it (a check, a bot run, a Web export) runs
@@ -36,7 +35,12 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import { NOT_IN_SAMPLE } from "./run/builds.ts";
-import { COPY_OF } from "./unityPlayerCache.ts";
+
+/**
+ * The file a copy of a build carries, naming the game folder it was copied
+ * from (every copy of that game names the same one).
+ */
+export const COPY_OF = ".kurambit-copy-of";
 
 /** Copies kept per game besides those in use: a compare pair and a little history. */
 const KEPT = 4;

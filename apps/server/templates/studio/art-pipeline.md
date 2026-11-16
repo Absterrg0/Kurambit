@@ -2,11 +2,10 @@
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
 The live Blender behind `game_blender` is your renderer and your
-modeller; you have no local Blender, Godot or image tools. Its `code` op
+modeller; you have no local Blender or image tools. Its `code` op
 resolves relative paths from the game root, and `~` there is its own home,
 not yours; print every path you write.
-`<assets>` is your lane's asset folder: `web/assets/`, `godot/assets/`, or
-`unity/Assets/Art/` for Unity (capital A: Unity imports nothing else).
+`<assets>` is your lane's asset folder: `web/assets/` for three.js.
 
 1. One palette, one silhouette language, one ground line. Movement, hurt, win
    and lose read at a glance. Put the set in one contact-sheet PNG, look at

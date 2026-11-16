@@ -1,5 +1,5 @@
 // The game tools an agent is handed: six, each one schema whose keys are its ops (gameTools.ts in
-// contracts), plus game_unity in Unity games. A tool earns its place only with what an agent
+// contracts). A tool earns its place only with what an agent
 // cannot get from its files, shell and code: the running game, measurements, builds and undo,
 // the person's keys, and managed Blender. Each op's answer is encoded by its own schema in the
 // handler, so the tool's success is that answer as it is.
@@ -13,7 +13,6 @@ import {
   GameKeepGoingToolInput,
   GameOperationFailure,
   GamePlayToolInput,
-  GameUnityToolInput,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
@@ -30,7 +29,6 @@ import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
 import * as GameStage from "../../../game/GameStage.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
-import * as GameUnity from "../../../game/GameUnity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { listedFor } from "./placement.ts";
@@ -140,16 +138,6 @@ export const GameKeepGoingTool = Tool.make("game_keep_going", {
   .annotate(Tool.Readonly, false)
   .annotate(McpSchema.EnabledWhen, listedFor("game_keep_going"));
 
-export const GameUnityTool = Tool.make("game_unity", {
-  description: `This Unity game's live editor on a private display. ${ONE_OP} tools: its editing tools with their schemas; edit: calls one, saving open scenes. eval: C# on its main thread. recompile: imports and compiles, with every C# error at file:line. play: enters or leaves play mode. console: recent entries. screenshot: the Game view as an image.`,
-  parameters: GameUnityToolInput,
-  ...answers,
-  dependencies: [GameUnity.GameUnity, GameEngine.GameEngine, ...caller],
-})
-  .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
-  .annotate(McpSchema.EnabledWhen, listedFor("game_unity"));
-
 /**
  * Each tool is registered over the HTTP transport, so pictures become image content and its schema
  * is published compacted (McpHttpServer.registerGameImageTool).
@@ -158,5 +146,4 @@ export const GameCheckToolkit = Toolkit.make(GameCheckTool);
 export const GamePlayToolkit = Toolkit.make(GamePlayTool);
 export const GameAssetsToolkit = Toolkit.make(GameAssetsTool);
 export const GameBlenderToolkit = Toolkit.make(GameBlenderTool);
-export const GameUnityToolkit = Toolkit.make(GameUnityTool);
 export const GameToolkit = Toolkit.make(GameBuildsTool, GameKeepGoingTool);

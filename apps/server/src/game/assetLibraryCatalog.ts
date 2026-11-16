@@ -819,7 +819,7 @@ export const CURATED_PACKS: ReadonlyArray<LibraryPack> = [
     style: "realistic humanoid base body",
     tags: "3d character humanoid base body male female hair hairstyles eyebrows rigged standard skeleton",
     description:
-      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF for Godot and the web, FBX for Unity); game_blender op character conforms them.",
+      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF); game_blender op character conforms them.",
     family: "quaternius-universal",
     rig: STANDARD_RIG,
     root: "Universal Base Characters[Standard]",
@@ -840,7 +840,7 @@ export const CURATED_PACKS: ReadonlyArray<LibraryPack> = [
     style: "humanoid mannequin",
     tags: "3d animation library humanoid retarget combat parkour melee farming zombie",
     description:
-      "43 more humanoid animations (combos, parkour, farming, zombie moves) on male and female mannequins (GLB for Godot, FBX for Unity), on the standard skeleton.",
+      "43 more humanoid animations (combos, parkour, farming, zombie moves) on male and female mannequins (GLB), on the standard skeleton.",
     family: "quaternius-universal",
     rig: STANDARD_RIG,
   },

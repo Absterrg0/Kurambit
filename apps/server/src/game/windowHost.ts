@@ -2,13 +2,7 @@
 import type * as NodeChildProcess from "node:child_process";
 import type { GameViewport } from "@kurambit/contracts";
 import { findExecutable } from "./GameProcesses.ts";
-import {
-  HOST_OS,
-  spawnOwned,
-  type OwnedProcess,
-  type ProcessFacts,
-  type ProcessHostState,
-} from "./processHost.ts";
+import { HOST_OS, spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 
 /**
  * What the harness needs from an OS to show a game: a window the game draws
@@ -20,7 +14,7 @@ import {
  * - Windows and macOS have no private display a user app can make (a virtual
  *   monitor needs a driver; macOS's API is private), so the window opens on
  *   the user's desktop at {@link OFFSCREEN_POSITION}, never minimized: a
- *   minimized Godot window stops drawing. Placing it is the launched
+ *   minimized engine window stops drawing. Placing it is the launched
  *   program's part, since every engine says it differently.
  */
 export interface WindowHost {
@@ -42,10 +36,6 @@ export interface WindowCommand {
   readonly cwd?: string | undefined;
   readonly stdio: NodeChildProcess.StdioOptions;
   readonly token?: string | undefined;
-  /** See SpawnOwnedOptions: stays out of the Windows kill-on-close job. */
-  readonly joinsJob?: boolean | undefined;
-  /** See SpawnOwnedOptions: which of a Windows tree a stop may end. */
-  readonly keep?: ((facts: ProcessFacts) => boolean) | undefined;
 }
 
 export interface HostedWindow {
@@ -61,7 +51,7 @@ export interface HostedWindow {
 }
 
 /** The Xvfb a window host launches, and the only Xvfb an editor record may name. */
-export const findXvfb = (): Promise<string | null> =>
+const findXvfb = (): Promise<string | null> =>
   findExecutable("Xvfb", { pathEnv: process.env.PATH, override: process.env.KURAMBIT_XVFB });
 
 /**
@@ -72,16 +62,12 @@ export const findXvfb = (): Promise<string | null> =>
 const DISPLAY_LOST_EXIT = 71;
 /** The exit a hosted command reports when its private display never started. */
 const DISPLAY_FAILED_EXIT = 70;
-/** Whether a hosted command's exit says its display, not the game, failed: our side. */
-export const isHostExit = (exitCode: number): boolean =>
-  exitCode === DISPLAY_FAILED_EXIT || exitCode === DISPLAY_LOST_EXIT;
-
 /**
  * Runs a command on its own Xvfb display, as xvfb-run does. Xvfb picks a free
  * display itself (`-displayfd`) and writes its number once it accepts clients,
  * so two launches at once never share one and nothing polls for it. The
  * display ends only after the command exits, so an engine never loses its
- * display mid-shutdown (Godot hangs in Xlib's exit path when it does); a game
+ * display mid-shutdown (an engine can hang in Xlib's exit path when it does); a game
  * that quits because its server died takes its display with it. A 24-bit
  * depth is required, or Xvfb rejects the screen and the game boots against a
  * dead display.
@@ -132,8 +118,6 @@ const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
         tree: true,
         window: true,
         token: command.token,
-        joinsJob: command.joinsJob,
-        keep: command.keep,
       },
     );
     owned.child.unref();
@@ -145,7 +129,7 @@ const xvfbHost = (host: ProcessHostState, xvfb: string): WindowHost => ({
   },
 });
 
-/** Far outside any monitor arrangement, as Genex ships for Godot on Windows and macOS. */
+/** Far outside any monitor arrangement, so a window on the person's own display is never seen. */
 export const OFFSCREEN_POSITION = { x: -10_000, y: -10_000 } as const;
 
 /** The command itself, owning its tree; its arguments place its window. */
@@ -159,8 +143,6 @@ const offscreenHost = (host: ProcessHostState): WindowHost => ({
       tree: true,
       window: true,
       token: command.token,
-      joinsJob: command.joinsJob,
-      keep: command.keep,
     });
     owned.child.unref();
     return {

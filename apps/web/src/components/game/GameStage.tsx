@@ -39,7 +39,7 @@ import type {
   GameBuildsResult,
   ScopedThreadRef,
 } from "@kurambit/contracts";
-import { GAME_ENGINES, parkedEngineMessage } from "@kurambit/contracts";
+import { gameEngineEntry, unavailableEngineMessage } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -607,7 +607,7 @@ function ThreadGameStage({
   }, [hidden]);
   const refresh = query.refresh;
   const data = query.data;
-  const liveStaged = data != null && GAME_ENGINES[data.manifest.engine.name].stage === "live";
+  const liveStaged = data != null && gameEngineEntry(data.manifest.engine.name)?.stage === "live";
   const gameName = useGameName(
     threadRef.environmentId,
     quietShell?.projectId ?? null,
@@ -851,8 +851,9 @@ function ThreadGameStage({
       // Read but not answered yet: the Stage's own shape, so nothing moves when it lands.
       <GameStageLoading />
     ) : null;
-  const engine = GAME_ENGINES[data.manifest.engine.name];
-  const stageKind = engine.stage;
+  // Null for a game in an engine this version does not have: it opens and plays nothing.
+  const engine = gameEngineEntry(data.manifest.engine.name);
+  const stageKind = engine?.stage ?? null;
   // The copy the stage was asked to play shows only while the server says it
   // plays, so a Stop from the palette, another client or an
   // agent takes the banner down. Until the status is read again after the ask,
@@ -875,7 +876,7 @@ function ThreadGameStage({
     data.operation !== null && turnEndedAt !== null && Date.parse(data.operation.at) >= turnEndedAt;
   const phase = deriveGameStagePhase({
     stage: stageKind,
-    parked: engine.status === "parked" ? parkedEngineMessage(data.manifest.engine.name) : null,
+    parked: engine === null ? unavailableEngineMessage(data.manifest.engine.name) : null,
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
     // A failure becomes the stage's own only when this chat's work failed: a
@@ -892,7 +893,7 @@ function ThreadGameStage({
     localError: error,
     errorAction,
     liveServe: data.live,
-    turnLoop: engine.turnLoop,
+    turnLoop: engine?.turnLoop === true,
     turnRunning,
     turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
     turnBuildPending: sawTurnEnd && endedTurnBuilt && !operationSinceTurnEnd,
@@ -913,8 +914,8 @@ function ThreadGameStage({
   // The turn's own build is coming: a Build & play now would race it and be refused.
   const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
-  // A parked engine's game builds and plays nothing here.
-  const webPlay = engine.status === "active" && data.exportTargets.includes("Web");
+  // A game in an engine this version does not have builds and plays nothing here.
+  const webPlay = engine !== null && data.exportTargets.includes("Web");
   const playEnabled =
     !awaitingTurnBuild && webPlay && canAct && (data.previewUrl !== null || !building);
   const stagingEnabled = canAct && !building;
@@ -1241,7 +1242,7 @@ function ThreadGameStage({
                   Rename
                 </MenuItem>
                 <GameFolderMenuItem threadRef={threadRef} root={data.root} />
-                <MenuItem disabled={engine.status === "parked"} onClick={() => setExportOpen(true)}>
+                <MenuItem disabled={engine === null} onClick={() => setExportOpen(true)}>
                   <DownloadIcon />
                   Export…
                 </MenuItem>
@@ -1309,7 +1310,7 @@ function ThreadGameStage({
             <MenuPopup align="end">
               <MenuGroup>
                 <MenuGroupLabel>On the Stage</MenuGroupLabel>
-                {engine.stageBridge && stageKind === "live" ? (
+                {engine?.stageBridge === true && stageKind === "live" ? (
                   <MenuItem
                     disabled={phase.kind !== "playing" || bridgeStatus === null}
                     onClick={() => {
@@ -1342,7 +1343,7 @@ function ThreadGameStage({
                     Reload the game
                   </MenuItem>
                 ) : null}
-                {stageKind === "export" && engine.status === "active" ? (
+                {stageKind === "export" ? (
                   <>
                     <MenuItem disabled={!playEnabled} onClick={() => void perform("preview")}>
                       <PlayIcon />
@@ -1361,7 +1362,7 @@ function ThreadGameStage({
                     {fullscreenKey === null ? null : <MenuShortcut>{fullscreenKey}</MenuShortcut>}
                   </MenuItem>
                 ) : null}
-                {engine.stageBridge ? (
+                {engine?.stageBridge === true ? (
                   <MenuItem onClick={() => setPlaysOpen(true)}>
                     <FlagIcon />
                     Test plays…
@@ -1621,7 +1622,7 @@ function ThreadGameStage({
             onTakeHeld={() => setFrameFold(playHeldFrame(frame))}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
-            bridge={{ threadKey, enabled: engine.stageBridge, freezeKey }}
+            bridge={{ threadKey, enabled: engine?.stageBridge === true, freezeKey }}
             overlay={<GameStageOverlay threadKey={threadKey} />}
           />
         </div>

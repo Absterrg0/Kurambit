@@ -1,4 +1,4 @@
-import { GAME_ENGINES, type ScopedThreadRef } from "@kurambit/contracts";
+import { isAvailableEngine, type ScopedThreadRef } from "@kurambit/contracts";
 import { FastForwardIcon } from "lucide-react";
 
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
@@ -40,7 +40,7 @@ export function GameKeepGoingButton({ threadRef }: { threadRef: ScopedThreadRef 
   // Keep going waits to know the game's engine.
   const canKeepGoing =
     status != null &&
-    GAME_ENGINES[status.manifest.engine.name].status === "active" &&
+    isAvailableEngine(status.manifest.engine.name) &&
     current !== null &&
     !working;
   return canKeepGoing ? (

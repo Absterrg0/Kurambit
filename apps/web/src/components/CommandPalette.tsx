@@ -50,7 +50,7 @@ import {
   type FilesystemBrowseResult,
   type GameAction,
   type GameStageCapability,
-  GAME_ENGINES,
+  gameEngineEntry,
   type ProjectId,
   type SourceControlDiscoveryResult,
   type SourceControlRepositoryInfo,
@@ -779,22 +779,15 @@ function OpenCommandPaletteDialog(props: {
   const isGameThread = useIsGameThread(activeThreadRef);
   // The same status read the stage mounts: Play exists only for an engine that
   // makes a Web build, and Rebuild only where the Stage plays an export.
-  // A parked engine's game builds and plays nothing, so it gets no play commands.
+  // A game in an engine this version does not have builds and plays nothing, so it gets no play commands.
   const gameStatus = useIsGameThreadStatus(activeThreadRef).data;
-  const gameEngineActive =
-    gameStatus != null && GAME_ENGINES[gameStatus.manifest.engine.name].status === "active";
-  const gameWebBuild = gameEngineActive && gameStatus?.exportTargets.includes("Web") === true;
-  const gameStageKind =
-    gameEngineActive && gameStatus != null
-      ? GAME_ENGINES[gameStatus.manifest.engine.name].stage
-      : null;
+  const gameEngine = gameStatus == null ? null : gameEngineEntry(gameStatus.manifest.engine.name);
+  const gameWebBuild = gameEngine !== null && gameStatus?.exportTargets.includes("Web") === true;
+  const gameStageKind = gameEngine?.stage ?? null;
   // Running is the live serve, or an export's preview, as the Stage reads them: the palette
   // offers Play or Stop, whichever applies, never both.
   const gameRunning = gameStatus?.live === "serving" || gameStatus?.previewUrl != null;
-  const gameStageBridge =
-    gameStatus !== null &&
-    gameStatus !== undefined &&
-    GAME_ENGINES[gameStatus.manifest.engine.name].stageBridge;
+  const gameStageBridge = gameEngine?.stageBridge === true;
   // What the game up on the Stage answers: its dev views and Can't lose, as its menu offers them.
   const stageThreadKey = activeThreadRef === null ? "" : scopedThreadKey(activeThreadRef);
   const stageCapabilities = useThreadStageBridge(
@@ -1900,7 +1893,7 @@ function OpenCommandPaletteDialog(props: {
         });
       }
     }
-    if (canGameAction && gameEngineActive)
+    if (canGameAction && gameEngine !== null)
       actionItems.push({
         kind: "action",
         value: "action:game-export",
@@ -1958,7 +1951,7 @@ function OpenCommandPaletteDialog(props: {
     kind: "action",
     value: "action:game-tools",
     title: "Open game tools",
-    searchTerms: ["game tools", "blender godot unity install download executable paths"],
+    searchTerms: ["game tools", "blender install download executable paths"],
     icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/game-tools" });

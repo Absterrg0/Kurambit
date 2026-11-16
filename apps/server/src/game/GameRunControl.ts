@@ -5,6 +5,9 @@ import {
   CommandId,
   GAME_ENGINES,
   GameRunId,
+  isAvailableEngine,
+  unavailableEngineMessage,
+  type GameEngineId,
   type OrchestrationV2GameRunCommand,
   type GameRunStep,
   type GameRunStepResult,
@@ -262,8 +265,11 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<string | null> =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root).pipe(Effect.orElseSucceed(() => null));
-      if (manifest !== null && !GAME_ENGINES[manifest.engine.name].turnLoop)
-        return NO_TURN_LOOP_SENTENCE;
+      if (manifest !== null) {
+        const engine = manifest.engine.name;
+        if (!isAvailableEngine(engine)) return unavailableEngineMessage(engine);
+        if (!GAME_ENGINES[engine].turnLoop) return NO_TURN_LOOP_SENTENCE;
+      }
       if (run === null || run.status === "ended" || run.threadId === threadId) return null;
       const shell = yield* threads
         .getThreadShell(run.threadId)
@@ -291,7 +297,7 @@ const make = Effect.gen(function* () {
   const scaffold = (
     threadId: ThreadId,
     root: string,
-    engineId: GameRun["engine"],
+    engineId: GameEngineId | undefined,
     fresh: boolean,
   ) =>
     engineId === undefined
@@ -383,6 +389,8 @@ const make = Effect.gen(function* () {
           ),
         );
       const engineId = manifest.engine.name;
+      if (!isAvailableEngine(engineId))
+        return yield* runError("set", threadId, "no-turn-loop", unavailableEngineMessage(engineId));
       if (!GAME_ENGINES[engineId].turnLoop)
         return yield* runError("set", threadId, "no-turn-loop", NO_TURN_LOOP_SENTENCE);
       // A paused run in this chat resumes, keeping its set-aside steps and notes.

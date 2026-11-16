@@ -39,7 +39,7 @@ const BUILD_META: Record<
   },
   Windows: {
     title: "Windows",
-    body: "A standalone 64-bit Windows release for Windows PCs. Download package zips this export, not later source edits. Play still serves the Web export.",
+    body: "A standalone 64-bit Windows release for Windows PCs. Play still serves the Web export.",
     icon: MonitorIcon,
     play: false,
   },
@@ -88,11 +88,7 @@ export function GameExports({
   onExport: (target: ExportTarget) => void;
 }) {
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
-  const packageWindows = useAtomCommand(gameEnvironment.packageWindows, { reportFailure: false });
   const packageWeb = useAtomCommand(gameEnvironment.packageWeb, { reportFailure: false });
-  const canPackageWindows = useAtomValue(
-    gameEnvironment.packageWindows.permissionAtom(threadRef.environmentId),
-  );
   const canPackageWeb = useAtomValue(
     gameEnvironment.packageWeb.permissionAtom(threadRef.environmentId),
   );
@@ -102,9 +98,9 @@ export function GameExports({
   );
   const openLink = useOpenLink(threadRef);
   const preparedConnection = usePreparedConnection(threadRef.environmentId);
-  const [packaging, setPackaging] = useState<"Windows" | "Web" | null>(null);
+  const [packaging, setPackaging] = useState<"Web" | null>(null);
   const [packageNotice, setPackageNotice] = useState<{
-    readonly target: "Windows" | "Web";
+    readonly target: "Web";
     readonly buildKey: string;
     readonly status: string | null;
     readonly error: string | null;
@@ -120,15 +116,14 @@ export function GameExports({
     checkedState !== null && checkedState.for === checkedFor ? checkedState.value : null;
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
-  const windowsBuild = builds.find((entry) => entry.target === "Windows");
   const webBuild = builds.find((entry) => entry.target === "Web");
   // A new export or selection can remove the package. Tie the ready message to
   // the build it described so the previous archive's notice disappears with it.
   const buildKey = (build: BuildEntry | undefined) =>
     build ? `${threadRef.threadId}\n${build.path}\n${build.updatedAt}` : null;
-  const packageNoticeFor = (target: "Windows" | "Web") => {
+  const packageNoticeFor = (target: "Web") => {
     if (packageNotice === null || packageNotice.target !== target) return null;
-    const key = buildKey(target === "Windows" ? windowsBuild : webBuild);
+    const key = buildKey(webBuild);
     return packageNotice.buildKey === key ? packageNotice : null;
   };
   const checkSources = async () => {
@@ -160,21 +155,15 @@ export function GameExports({
       failed(cause instanceof Error ? cause.message : String(cause)),
     );
   };
-  const downloadPackage = async (target: "Windows" | "Web") => {
+  const downloadPackage = async (target: "Web") => {
     if (operationRunning || packaging !== null) return;
-    const targetBuildKey = buildKey(target === "Windows" ? windowsBuild : webBuild) ?? "";
+    const targetBuildKey = buildKey(webBuild) ?? "";
     setPackaging(target);
     setPackageNotice(null);
-    const result =
-      target === "Web"
-        ? await packageWeb({
-            environmentId: threadRef.environmentId,
-            input: { threadId: threadRef.threadId },
-          })
-        : await packageWindows({
-            environmentId: threadRef.environmentId,
-            input: { threadId: threadRef.threadId },
-          });
+    const result = await packageWeb({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    });
     setPackaging(null);
     if (result._tag === "Failure") {
       setPackageNotice({
@@ -239,12 +228,9 @@ export function GameExports({
               }
             : BUILD_META[target];
         const build = builds.find((entry) => entry.target === target);
-        const canPackage =
-          canOperate &&
-          build?.packageable === true &&
-          (target === "Web" ? canPackageWeb : canPackageWindows);
+        const canPackage = canOperate && build?.packageable === true && canPackageWeb;
         const stale = target === "Web" && build !== undefined && webBuildStale;
-        const notice = target === "Linux" ? null : packageNoticeFor(target);
+        const notice = target === "Web" ? packageNoticeFor(target) : null;
         const Icon = meta.icon;
         return (
           <section
@@ -323,14 +309,12 @@ export function GameExports({
                       </>
                     ) : (
                       <>
-                        {(target === "Windows" || target === "Web") && build.packageable ? (
+                        {target === "Web" && build.packageable ? (
                           <Button
                             size="sm"
                             disabled={!canPackage || operationRunning || packaging !== null}
                             aria-busy={packaging === target}
-                            onClick={() =>
-                              void downloadPackage(target === "Web" ? "Web" : "Windows")
-                            }
+                            onClick={() => void downloadPackage("Web")}
                           >
                             <DownloadIcon className="size-3.5" aria-hidden="true" />
                             {packaging === target ? "Packaging…" : "Download package"}

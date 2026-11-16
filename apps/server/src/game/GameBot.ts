@@ -19,7 +19,7 @@ import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
-  isGameEngineActive,
+  isAvailableEngine,
   type GameBotMode,
   type GameBotPerf,
   type GameBotRunInput,
@@ -34,15 +34,13 @@ import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as BotEvidence from "./botEvidence.ts";
 import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
-import * as GamePlayer from "./GamePlayer.ts";
+import { unavailableEngine } from "./engineProfile.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { inGame } from "./gamePath.ts";
 import { findExecutable } from "./GameProcesses.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import { ProcessHost } from "./processHost.ts";
-import { findWindowHost } from "./windowHost.ts";
-import * as GameProcesses from "./GameProcesses.ts";
-import { PlayDidNotBoot, openPagePlay, openRunnerPlay } from "./playLaunch.ts";
+import { openPagePlay } from "./playLaunch.ts";
 import { encodePlayUse, PLAY_USE_FILE } from "./assetUse.ts";
 import { PLAY_PERF_FILE } from "./playPerf.ts";
 import { encodeSceneFile, keepSceneReport, SCENE_FILE } from "./sceneReport.ts";
@@ -66,14 +64,13 @@ import * as GameMemoryGate from "./GameMemoryGate.ts";
 import { runtimesFor } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
-import { isPathInside } from "./gameNativeUserDir.ts";
+import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import { PLAY_BOUNDS, bounded } from "./playSession.ts";
 
 /**
- * A Godot bot peaked at 710 MB in its import and 505 MB playing (Godot,
- * ffmpeg recording, its display, bot child); a Chromium bot at 630 MB. Each
- * run's import and boot hold the memory gate, so the next start's check sees
- * what this one took.
+ * A Chromium bot peaked at 630 MB (the page, ffmpeg recording, the bot
+ * child). Each run's boot holds the memory gate, so the next start's check
+ * sees what this one took.
  */
 const BOT_ROOM: MemoryRoom = {
   what: "bot run",
@@ -427,9 +424,7 @@ const tracesOf = async (root: string, runIds: ReadonlyArray<string>) => {
 const make = Effect.gen(function* () {
   const processHost = yield* ProcessHost;
   const engines = yield* GameEngine.GameEngine;
-  const players = yield* GamePlayer.GamePlayer;
   const projects = yield* GameProjectService.GameProjectService;
-  const processes = yield* GameProcesses.GameProcesses;
   const gameBrowser = yield* makeGameBrowser;
   const scheduler = yield* Scheduler.Scheduler;
   const gate = yield* GameMemoryGate.GameMemoryGate;
@@ -551,7 +546,7 @@ const make = Effect.gen(function* () {
       // A bot is a game file under .studio/bot/*.mjs; anything else is refused.
       const botDir = NodePath.resolve(root, ".studio/bot");
       const botFile = NodePath.resolve(root, input.file);
-      if (!isPathInside(botFile, botDir) || botFile === botDir || !botFile.endsWith(".mjs"))
+      if (!isPathWithinRoot(botFile, botDir) || botFile === botDir || !botFile.endsWith(".mjs"))
         return yield* opError(
           "Bot run",
           input.file,
@@ -576,18 +571,14 @@ const make = Effect.gen(function* () {
       // across runs). Ten at most; each run gets its own directory.
       const count = Math.min(10, Math.max(1, Math.floor(input.runs ?? 1)));
       const pathEnv = process.env.PATH ?? "";
-      // The engine says how its game plays: a browser page, its runner on the
-      // sources, or a prepared player. Everything else here is the same run.
       const manifest = yield* projects.read(root);
-      if (!isGameEngineActive(manifest.engine.name))
-        return yield* GameEngine.parkedEngine(manifest.engine.name);
+      if (!isAvailableEngine(manifest.engine.name))
+        return yield* unavailableEngine(manifest.engine.name);
       const backend = yield* engines.backendFor(manifest.engine.name);
-      const profile = backend.profile;
       const projectDir = yield* inGame(root, manifestProject(manifest));
-      const isWeb = profile.play === "browser";
       const viewport = yield* backend.viewport(projectDir);
-      const browser = isWeb ? yield* gameBrowser("Bot run", root) : null;
-      const runtimes = isWeb ? yield* runtimesFor(templates, manifest) : null;
+      const browser = yield* gameBrowser("Bot run", root);
+      const runtimes = yield* runtimesFor(templates, manifest);
       // The child program ships with the server, never from a game's folder.
       const childPath = NodePath.join(yield* templates.directory, "bot-child.mjs");
       const ffmpeg = yield* Effect.promise(() =>
@@ -600,33 +591,12 @@ const make = Effect.gen(function* () {
           "tool-missing",
           "ffmpeg is needed to record the play; install it (Settings > Game tools).",
         );
-      const host = isWeb ? null : yield* Effect.promise(() => findWindowHost(processHost));
-      if (host === null && !isWeb)
-        return yield* opError(
-          "Bot run",
-          "Xvfb",
-          "tool-missing",
-          "A bot run needs a window for the game, and this machine has no private display; install the system Xvfb package.",
-        );
       const saves = yield* keptSavesFor({
         root,
         engine: manifest.engine.name,
         saves: input.saves,
         operation: "Bot run",
       });
-      // The game's runner imports into its sources first, and that is a write
-      // of the folder: under the game's operation lock, then the memory gate,
-      // through the boot (GameMemoryGate fixes the order). A browser page and
-      // a prepared player write nothing.
-      const writesFolder = profile.play === "native";
-      const startLock = writesFolder
-        ? {
-            lock: {
-              name: "Bot run start",
-              owner: owner === undefined ? "system bot run" : String(owner),
-            },
-          }
-        : undefined;
       // One session object spans the whole call: drop() flips its flag, so
       // a stop between runs ends the call with the runs it has. A per-run
       // entry in the map would vanish with each run's cleanup and the loop
@@ -653,24 +623,6 @@ const make = Effect.gen(function* () {
                 effect,
                 Deferred.await(stopRequested).pipe(Effect.andThen(Effect.fail(stoppedError))),
               );
-            // A player of the current sources, built once per source identity
-            // (idempotent, so each run asks again cheaply); an editor that just
-            // built it closes, so it never plays beside the run. Sources that
-            // will not build are the game's: the run is not-booted.
-            const preparedPlayer =
-              profile.play === "player"
-                ? players.prepare(root).pipe(
-                    Effect.map((prepared): string | null => prepared.player),
-                    Effect.catchTags({
-                      GameOperationError: (error) =>
-                        error.reason === "command-failed"
-                          ? Effect.fail(
-                              new PlayDidNotBoot({ detail: error.message.slice(0, 2000) }),
-                            )
-                          : Effect.fail(error),
-                    }),
-                  )
-                : Effect.succeed(null);
             const out: GameBotRunResult[] = [];
             // What earlier runs of this call covered, told to each next run so
             // runs differ instead of collapsing onto one trajectory.
@@ -704,61 +656,24 @@ const make = Effect.gen(function* () {
                         : String(cause).slice(0, 2000),
                       cause,
                     );
-              const launch = (player: string | null) =>
-                isWeb
-                  ? openPagePlay({
-                      operation: "Bot run",
-                      root,
-                      projectDir,
-                      browser: browser!,
-                      viewport,
-                      bootTimeoutMs: PLAY_BOUNDS.bootMs,
-                      keptStorage: keptWebStorage(saves),
-                      recordUse: true,
-                      sceneReport: true,
-                      runtimes,
-                    })
-                  : openRunnerPlay(processes, {
-                      operation: "Bot run",
-                      process: "bot-play",
-                      root,
-                      backend,
-                      projectDir,
-                      player,
-                      viewport,
-                      host,
-                      scriptDir: runDir,
-                      traceDir: runDir,
-                      saves,
-                      timeoutMs: PLAY_BOUNDS.bootMs + (seconds + 300) * 1000,
-                      bootTimeoutMs: PLAY_BOUNDS.bootMs,
-                      what: "The game's runner",
-                    });
-              const imported = writesFolder
-                ? Effect.flatMap(engines.importProject(root), (result) =>
-                    result.success
-                      ? Effect.void
-                      : Effect.fail(
-                          new PlayDidNotBoot({
-                            detail:
-                              `The ${profile.displayName} import failed before the bot run started.\n${result.message}`.slice(
-                                -2000,
-                              ),
-                          }),
-                        ),
-                  )
-                : Effect.void;
               // The boot is the start's own memory peak, so it runs inside the gate.
               const open = untilStopped(
-                Effect.flatMap(preparedPlayer, (player) =>
-                  gate.admit(
-                    "Bot run",
+                gate.admit(
+                  "Bot run",
+                  root,
+                  BOT_ROOM,
+                  openPagePlay({
+                    operation: "Bot run",
                     root,
-                    BOT_ROOM,
-                    Effect.andThen(imported, launch(player)),
-                    undefined,
-                    startLock,
-                  ),
+                    projectDir,
+                    browser,
+                    viewport,
+                    bootTimeoutMs: PLAY_BOUNDS.bootMs,
+                    keptStorage: keptWebStorage(saves),
+                    recordUse: true,
+                    sceneReport: true,
+                    runtimes,
+                  }),
                 ),
               );
               // An interrupt does not wait for the play promise, and its finally

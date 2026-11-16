@@ -23,9 +23,7 @@ Original to this studio, kept short.
    clip you synthesize, print its length and peak and compare them.
 
 The working directory is the game root; print every path you write. Sound
-goes under your lane's asset folder: `godot/assets/sfx/`, `web/assets/sfx/`,
-or `unity/Assets/Audio/` for Unity (capital A: Unity imports only
-`unity/Assets/`):
+goes under your lane's asset folder, `web/assets/sfx/` for three.js:
 
 ```python
 import numpy as np, wave, os

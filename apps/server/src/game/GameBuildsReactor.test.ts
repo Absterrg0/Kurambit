@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
   CheckpointRef,
-  type GameEngineId,
+  type GameEngineName,
   type GameManifest,
   type OrchestrationV2DomainEvent,
   ThreadId,
@@ -25,7 +25,7 @@ const ROOT = "/games/arena";
 const REF = CheckpointRef.make("refs/kurambit/orchestration-v2/checkpoints/scope/ordinal/1");
 const OID = "a".repeat(40);
 
-const manifest = (engine: GameEngineId): GameManifest => ({
+const manifest = (engine: GameEngineName): GameManifest => ({
   schemaVersion: 1,
   name: "Arena",
   brief: "A brief.",
@@ -49,7 +49,7 @@ const captured = (threadId: string) =>
   }) as unknown as OrchestrationV2DomainEvent;
 
 const run = (
-  engine: GameEngineId,
+  engine: GameEngineName,
   relationship: string | null,
   turnStatus: "completed" | "interrupted" = "completed",
 ) =>
@@ -135,7 +135,7 @@ describe("GameBuildsReactor turn loop", () => {
     }),
   );
 
-  it.effect("plays nothing on a parked engine", () =>
+  it.effect("plays nothing on an engine this version does not have", () =>
     Effect.gen(function* () {
       const { played, measured } = yield* run("godot", null);
       assert.deepStrictEqual(played, []);

@@ -1049,8 +1049,6 @@ export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
 export const ServerSettings = Schema.Struct({
   gameBlenderPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  gameGodotPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  gameUnityPath: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   // Game Tools keys, under the names they were stored by before they were settings.
   gameSketchfabApiKey: TrimmedString.pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
@@ -1380,8 +1378,6 @@ const ModelSelectionPatch = Schema.Struct({
 
 export const ServerSettingsPatch = Schema.Struct({
   gameBlenderPath: Schema.optionalKey(Schema.String),
-  gameGodotPath: Schema.optionalKey(Schema.String),
-  gameUnityPath: Schema.optionalKey(Schema.String),
   gameSketchfabApiKey: Schema.optionalKey(TrimmedString),
   gamePolyPizzaApiKey: Schema.optionalKey(TrimmedString),
   gameOpenAiApiKey: Schema.optionalKey(TrimmedString),

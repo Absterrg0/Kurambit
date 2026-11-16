@@ -37,7 +37,7 @@ export interface HashedWebBuild {
 
 /**
  * A three.js build is a copy of its sources, so a Web build may hold as many
- * files as a game's sources may (and a Godot one a handful more).
+ * files as a game's sources may, and a few more.
  */
 const MAX_WEB_ARTIFACT_FILES = GAME_SOURCE_FILE_LIMIT + 100;
 

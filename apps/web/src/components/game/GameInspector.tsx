@@ -27,7 +27,8 @@ import {
   Undo2Icon,
 } from "lucide-react";
 import {
-  GAME_ENGINES,
+  engineDisplayName,
+  gameEngineEntry,
   GAME_STYLE_FILE,
   GameStyle,
   gameChecksView,
@@ -1564,10 +1565,10 @@ export function useSelectNotice(
 ): { readonly title: string; readonly body: string } | null {
   const engine = useIsGameThreadStatus(threadRef).data?.manifest.engine.name ?? null;
   const status = useThreadStageBridge(scopedThreadKey(threadRef), (state) => state.status, null);
-  if (engine !== null && !GAME_ENGINES[engine].stageBridge)
+  if (engine !== null && gameEngineEntry(engine)?.stageBridge !== true)
     return {
       title: "Not in this engine yet",
-      body: `Pointing at things in the running game is not in ${GAME_ENGINES[engine].name} yet.`,
+      body: `Pointing at things in the running game is not in ${engineDisplayName(engine)} yet.`,
     };
   if (status === "none")
     return {

@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
+  isAvailableEngine,
   manifestProject,
   type GameManifest,
   type GameOperationError,
@@ -28,7 +29,7 @@ import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import { modelChoice } from "./gameStyle.ts";
 import { makeSourceIdentity } from "./sourceTree.ts";
-import { COPY_OF } from "./unityPlayerCache.ts";
+import { COPY_OF } from "./GameBuildCopies.ts";
 
 /** What a client sees of a game: its status, the pushes that say it changed, and the tools it needs. */
 export class GameStatusService extends Context.Service<
@@ -49,7 +50,7 @@ export class GameStatusService extends Context.Service<
     readonly libraryEvents: Stream.Stream<GameOperationEvent>;
     /**
      * The toolchain's status for the Settings row and the stage's readiness,
-     * cached; with a thread, Unity's entry speaks for that game's editor version.
+     * cached; with a thread, the game's own engine tool speaks for its project.
      */
     readonly toolchain: (
       threadId?: ThreadId,
@@ -132,18 +133,16 @@ const make = Effect.gen(function* () {
     ),
     webFresh: (root, manifest) =>
       Effect.gen(function* () {
-        const profile = engineProfile(manifest.engine.name);
         const selected = yield* selectionOf(root);
         if (selected === null || selected === "damaged" || selected.sourceId === null) return false;
-        const current = yield* identify(root, manifestProject(manifest), profile.derivedInput);
+        const current = yield* identify(root, manifestProject(manifest));
         return current.kind === "known" && current.sourceId === selected.sourceId;
       }),
     toolchain: (threadId) =>
       Effect.gen(function* () {
         const status = yield* toolchainOf();
         if (threadId === undefined) return status;
-        // The game's own engine speaks for its project (Unity picks its editor
-        // by the project's version); the engine says which tool that is.
+        // The game's own engine speaks for its project; the engine says which tool that is.
         const own = yield* engines.toolStatus(yield* projects.resolve(threadId));
         return own === null
           ? status
@@ -153,13 +152,16 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const manifest = yield* projects.read(root);
       const inventory = yield* projects.inventory(root);
-      const profile = engineProfile(manifest.engine.name);
+      // A game in an engine this version does not have shows its builds and history, and plays nothing.
+      const profile = isAvailableEngine(manifest.engine.name)
+        ? engineProfile(manifest.engine.name)
+        : null;
       const read = yield* selectionOf(root);
       // A damaged selection record is a stale build (Rebuild writes a fresh
       // one), never a reason the game cannot be shown.
       const damaged = read === "damaged";
       const selected = damaged ? null : read;
-      const served = profile.web?.served ?? [];
+      const served = profile?.web?.served ?? [];
       const selectedPresent =
         selected === null
           ? null
@@ -178,14 +180,14 @@ const make = Effect.gen(function* () {
             });
       // A live-staged game plays its folder, which is never older than itself,
       // so its status reads no source identity at all.
-      const live = profile.stage === "live";
+      const live = profile?.stage === "live";
       // Freshness is a byte question against the snapshot the export recorded.
       // An unreadable tree cannot be shown to match, but it is also not proven
       // to differ.
       const current =
         live || selected === null || selected.sourceId === null
           ? null
-          : yield* identify(root, manifestProject(manifest), profile.derivedInput);
+          : yield* identify(root, manifestProject(manifest));
       const currentId = current?.kind === "known" ? current.sourceId : null;
       const matchesSelected =
         selected === null || selected.sourceId === null || currentId === null
@@ -211,7 +213,7 @@ const make = Effect.gen(function* () {
         // The releases the engine makes, as their files are now: Play follows
         // the selected record, dated by when it was selected.
         builds: [...(yield* exporter.releases(root))],
-        exportTargets: [...profile.exportTargets],
+        exportTargets: [...(profile?.exportTargets ?? [])],
         // Usability and source freshness are separate answers: the selected
         // build can be perfectly playable while the editable sources have moved
         // on, which is the normal state after an export.

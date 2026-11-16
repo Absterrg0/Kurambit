@@ -76,7 +76,7 @@ export const GameBotStatus = Schema.Struct({
 export type GameBotStatus = typeof GameBotStatus.Type;
 
 /**
- * Scene node counts over a Godot play run: start, peak and end, plus orphan
+ * Scene node counts over a play run, where the runner reports them: start, peak and end, plus orphan
  * nodes (out of the tree, never freed) at the end. Counts, not timings, so
  * they do not depend on the machine's load.
  */

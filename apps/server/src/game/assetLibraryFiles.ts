@@ -9,7 +9,7 @@ import * as NodeStreamPromises from "node:stream/promises";
 import * as Effect from "effect/Effect";
 import { GameOperationError, type GameEngineId, type GameLibraryKind } from "@kurambit/contracts";
 import { openZipArchive } from "../zipArchive.ts";
-import { isPathInside } from "./gameNativeUserDir.ts";
+import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
 import { readGltfJson } from "./gltfJson.ts";
 import { walkFiles } from "./walkFiles.ts";
@@ -245,24 +245,14 @@ const MEDIA: Record<string, LibraryMedia> = {
 // What each engine's project loads as shipped. .blend needs a Blender path at import, and
 // the three.js template vendors only GLTFLoader, so neither is offered there.
 const LOADABLE: Record<GameEngineId, ReadonlySet<string>> = {
-  godot: new Set(
-    "png jpg jpeg webp svg hdr exr glb gltf fbx obj dae ogg wav mp3 ttf otf txt xml json tmx tsx mtl bin".split(
-      " ",
-    ),
-  ),
   three: new Set(
     "png jpg jpeg webp svg glb gltf ogg wav mp3 ttf otf txt xml json tmx tsx bin".split(" "),
-  ),
-  unity: new Set(
-    "png jpg jpeg hdr exr glb gltf fbx obj ogg wav mp3 ttf otf txt xml json mtl bin".split(" "),
   ),
 };
 
 /** Model formats in the order an engine prefers them; Kenney ships every model in several. */
 const MODEL_RANK: Record<GameEngineId, ReadonlyArray<string>> = {
-  godot: ["glb", "gltf", "fbx", "obj", "dae"],
   three: ["glb", "gltf"],
-  unity: ["glb", "fbx", "gltf", "obj"],
 };
 
 const extensionOf = (path: string) => {
@@ -472,7 +462,7 @@ export const unpackArchive = (archivePath: string, target: string, limits: Unpac
         const problem = entryProblem(entry);
         if (problem !== null) return yield* unsafe(`Member ${shown} is ${problem}.`);
         const destination = NodePath.join(target, entry.fileName);
-        if (!isPathInside(destination, target) || destination === NodePath.resolve(target))
+        if (!isPathWithinRoot(destination, target) || destination === NodePath.resolve(target))
           return yield* unsafe(`Member ${shown} resolves outside the pack.`);
         if (!entry.fileName.endsWith("/")) {
           const key = NodePath.relative(target, destination);

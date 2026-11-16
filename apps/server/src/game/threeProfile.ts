@@ -8,7 +8,6 @@ import type { GameEngineProfile } from "./engineProfile.ts";
 
 export const THREE_PROFILE: GameEngineProfile = {
   id: "three",
-  status: GAME_ENGINES.three.status,
   editors: ["blender"],
   turnLoop: GAME_ENGINES.three.turnLoop,
   stage: GAME_ENGINES.three.stage,
@@ -17,7 +16,6 @@ export const THREE_PROFILE: GameEngineProfile = {
   projectDirectory: THREE_PROJECT_DIRECTORY,
   exportTargets: ["Web"],
   releases: [{ target: "Web", artifact: null, ships: "folder", packageable: true }],
-  derivedInput: null,
   scaffold: {
     version: THREE_PINNED_VERSION,
     directories: ["web/assets", "builds/web"],
@@ -28,15 +26,12 @@ Use the game_* tools to check, play, export and package the game; never launch y
 `,
   },
   resourcePath: (projectRelative) => `./${projectRelative}`,
-  importRoot: null,
   importStep: false,
   compressedModels: true,
   groundHint: (_width, height, ground) => {
     const up = Number(((height - ground) / height).toFixed(4));
     return `three.js: sprite.center.set(0.5, ${up}) on a THREE.Sprite, or geometry.translate(0, ${Number((0.5 - up).toFixed(4))} * planeHeight, 0) on a plane, puts the object's position on the ground line.`;
   },
-  stripLoad: null,
-  xvfbRenderer: null,
   sidecarLoad: (key, sidecar) =>
     `three.js games load the sidecar: ASSETS = { ${key}: "${sidecar}" }.`,
   layout: {
@@ -48,13 +43,11 @@ Use the game_* tools to check, play, export and package the game; never launch y
     credits: "credits.txt",
   },
   viewport: THREE_VIEWPORT,
-  play: "browser",
   // The release is a static copy of the folder: its entry proves the staging,
   // and Play needs the entry and the gameplay module.
   web: { exported: ["index.html"], served: ["index.html", "main.js"] },
   check: {
     timedOut: "The three.js check timed out: the page never reported ready within 60 s.",
-    withoutGameplayScene: null,
   },
   skill: "three",
 };

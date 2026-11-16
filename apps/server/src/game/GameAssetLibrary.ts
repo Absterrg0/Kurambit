@@ -73,7 +73,7 @@ import {
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
-import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, availableEngine, engineProfile, gamePaths } from "./engineProfile.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { walkFiles } from "./walkFiles.ts";
 
@@ -1450,7 +1450,7 @@ const make = Effect.gen(function* () {
   const search = (root: string, input: GameAssetsSearchInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const engine = manifest.engine.name;
+      const engine = yield* availableEngine(manifest.engine.name);
       if (input.pack === undefined)
         return yield* searchPacks(
           root,
@@ -1518,7 +1518,7 @@ const make = Effect.gen(function* () {
   const add = (root: string, input: GameAssetsAddInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const engine = manifest.engine.name;
+      const engine = yield* availableEngine(manifest.engine.name);
       const pack = yield* packOf(input.pack);
       // The lock is read (and a chosen one derived) before the pack is fetched, so a refused
       // pack costs no download and writes no lock.
@@ -1971,7 +1971,9 @@ const make = Effect.gen(function* () {
     entry: packOf,
     credit: (root, pack, operation) =>
       Effect.flatMap(projects.read(root), (manifest) =>
-        creditGame(root, manifest.engine.name, manifestProject(manifest), pack, operation),
+        Effect.flatMap(availableEngine(manifest.engine.name), (engine) =>
+          creditGame(root, engine, manifestProject(manifest), pack, operation),
+        ),
       ),
     packPicture,
   });

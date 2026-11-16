@@ -1804,14 +1804,6 @@ const layerWsRpc = (
         [WS_METHODS.gameCreate]: (input) => gameProjects.create(input),
         [WS_METHODS.gameOpen]: (input) => gameProjects.open(input),
         [WS_METHODS.gameAction]: ({ threadId, action }) => gameStage.action(threadId, action),
-        [WS_METHODS.gameWindowsPackage]: ({ threadId }) =>
-          gameExport
-            .packageWindows(threadId)
-            .pipe(
-              Effect.flatMap((packaged) =>
-                signPackage(threadId, "Package Windows build", packaged),
-              ),
-            ),
         [WS_METHODS.gameWebPackage]: ({ threadId }) =>
           gameExport
             .packageWeb(threadId)

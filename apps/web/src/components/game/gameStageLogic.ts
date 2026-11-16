@@ -30,7 +30,7 @@ export function toolchainReadyFor(toolchain: GameToolchainStatus, engine: GameEn
  * needs to know: work in flight, a loaded game, then what to do next.
  */
 export type GameStagePhase =
-  /** The game's engine is parked: it opens with its chat and builds, and nothing plays. */
+  /** This version does not have the game's engine: it opens with its chat and builds, and nothing plays. */
   | { kind: "parked"; message: string }
   | { kind: "tools-missing" }
   /** The agent's turn is making the game's first build: nothing to play yet, nothing to press. */
@@ -52,9 +52,9 @@ export type GameStagePhase =
   | { kind: "playing"; stale: boolean };
 
 export interface GameStageInput {
-  /** How the engine shows the game (`GAME_ENGINES[engine].stage`). */
-  stage: GameStageKind;
-  /** Why the game's engine is parked (`parkedEngineMessage`), or null while it is active. */
+  /** How the engine shows the game (`GAME_ENGINES[engine].stage`); null when this version does not have the engine. */
+  stage: GameStageKind | null;
+  /** Why this version does not play the game (`unavailableEngineMessage`), or null when it does. */
   parked?: string | null;
   toolchainReady: boolean;
   operation: GameStatus["operation"];

@@ -6,10 +6,8 @@
  *
  * - uv 0.9.8: the GitHub release's per-asset `.sha256` files and sizes
  *   (https://github.com/astral-sh/uv/releases/tag/0.9.8).
- * - Unity CLI 1.0.0-beta.15: the `binaries` (sha256, size) of its manifest,
- *   https://public-cdn.cloud.unity3d.com/hub/prod/cli/1.0.0-beta.15/latest.json.
  *
- * ffmpeg is not fetched: it is found like the engines (PATH or KURAMBIT_FFMPEG).
+ * ffmpeg is not fetched: it is found like Blender (PATH or KURAMBIT_FFMPEG).
  */
 export type PlumbingHost = `${"linux" | "darwin" | "win32"}-${"x64" | "arm64"}`;
 
@@ -82,48 +80,5 @@ export const UV_BUILDS: Readonly<Record<PlumbingHost, PlumbingBuild>> = {
     "zip",
     "911f354690319ef93f434ecaccd6a893861d231a2af0466b495edee9313d5759",
     19_403_408,
-  ),
-};
-
-export const UNITY_CLI_VERSION = "1.0.0-beta.15";
-
-const unityCli = (file: string, sha256: string, bytes: number): PlumbingBuild => ({
-  url: `https://public-cdn.cloud.unity3d.com/hub/prod/cli/${UNITY_CLI_VERSION}/${file}`,
-  sha256,
-  bytes,
-  archive: null,
-  dir: ".",
-});
-
-export const UNITY_CLI_BUILDS: Readonly<Record<PlumbingHost, PlumbingBuild>> = {
-  "linux-x64": unityCli(
-    "unity-linux-x64",
-    "cf3ddef260bba536332348bd5570fb80d90a8092784a893b30971f8ebf2a489e",
-    39_636_832,
-  ),
-  "linux-arm64": unityCli(
-    "unity-linux-arm64",
-    "919178bee9ba827f4f52b0fc5e713fcae663abf23512db73488dbcdb2342295f",
-    34_513_336,
-  ),
-  "darwin-x64": unityCli(
-    "unity-darwin-x64",
-    "865ed9de4dd13a4bcb331a343770dee66c8babefb6e1ad98f1256c5296ad1674",
-    36_210_368,
-  ),
-  "darwin-arm64": unityCli(
-    "unity-darwin-arm64",
-    "1e9e09d429062338dc6a56290075829e731763a9b3a3b6c963f3be0c12b248f4",
-    34_225_072,
-  ),
-  "win32-x64": unityCli(
-    "unity-windows-x64.exe",
-    "d0b19648ec313017958649abf524b8779fb0aadcdeb65ff7bb54a96bb1c1f0bb",
-    42_174_888,
-  ),
-  "win32-arm64": unityCli(
-    "unity-windows-arm64.exe",
-    "d871f7b6d84c9e414eb16a52258c4730a75ca215166249a3eb3e0cb1574b13da",
-    36_733_360,
   ),
 };

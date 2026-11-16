@@ -10,16 +10,15 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   gameOperationFault,
+  isAvailableEngine,
   type GameActionResult,
   type GameStatus,
   type GameWebPackage,
-  type GameWindowsPackage,
   type ThreadId,
 } from "@kurambit/contracts";
 import { ArchivePublishError, publishStaged, sweepPublished } from "./archivePublication.ts";
-import { commandDetail } from "./commandDetail.ts";
 import * as GameEngine from "./GameEngine.ts";
-import type { GameExportTarget } from "./engineProfile.ts";
+import { availableEngine, engineProfile, type GameExportTarget } from "./engineProfile.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -40,7 +39,6 @@ import {
   webBuildProblemText,
 } from "./webBuild.ts";
 import { packageWebRelease, WebPackageError, WEB_PACKAGES_DIRECTORY } from "./webPackage.ts";
-import { packageWindowsRelease, WindowsPackageError } from "./windowsPackage.ts";
 
 /** Short confirmation the creator reads after an export lands. */
 const WEB_READY_MESSAGE = "Web game is ready to play. Open it with Play.";
@@ -89,22 +87,18 @@ export type GameRelease = GameStatus["builds"][number];
 const releaseDirectory = (target: GameExportTarget) => `builds/${target.toLowerCase()}`;
 
 /** Staging names a crash may leave behind, by folder; each is swept before the next export. */
-const STAGING = /^\.release-|^\.staging-|\.partial$|^\.game-[0-9a-f-]{36}\.(?:exe|pck)$/;
-/** Leftovers of earlier publication code: Unity's `<dest>.old-*` and `.dest-*`, the old Windows backups. */
-const LEGACY_LEFTOVER =
-  /^(?:linux|windows)\.old-[0-9a-f-]{36}$|^\.(?:linux|windows)-[0-9a-f-]{36}$|^game\.(?:exe|pck)\.[0-9a-f-]{36}\.backup$/;
+const STAGING = /^\.release-|^\.staging-|\.partial$/;
 const io = (operation: string, path: string) => (cause: unknown) =>
   new GameOperationError({ operation, path, reason: "io", cause });
 
 /**
  * Stages one release beside its destination, has the engine write and check
  * it, proves the sources did not move under it, then publishes it. The one
- * path every release takes (an export, a Web build, a player a game keeps by
- * source identity), so staging, the source comparison and publication are
- * written once. Callers hold the game's operation lock (and the live editor,
- * where the engine has one, for the import before it).
+ * path every release takes (an export or a Web build), so staging, the source
+ * comparison and publication are written once. Callers hold the game's
+ * operation lock.
  */
-export const releaseTo = <P>(
+const releaseTo = <P>(
   backend: GameEngine.GameEngineBackend,
   ctx: GameEngine.GameEngineContext,
   input: {
@@ -189,7 +183,7 @@ export const releaseTo = <P>(
 };
 
 /** Publishes a checked staging folder over a release folder, as a game operation's error. */
-export const publishFolder = (operation: string, staging: string, destination: string) =>
+const publishFolder = (operation: string, staging: string, destination: string) =>
   Effect.tryPromise({
     try: () => publishStaged([{ staged: staging, final: destination }]),
     catch: (cause) =>
@@ -242,13 +236,6 @@ export class GameExport extends Context.Service<
       { readonly targets: ReadonlyArray<GameExportTarget>; readonly displayName: string },
       GameOperationError
     >;
-    /**
-     * Packages the already exported Windows release as a ZIP. It never exports;
-     * a missing or unusable release is an error and leaves earlier files alone.
-     */
-    readonly packageWindows: (
-      threadId: ThreadId,
-    ) => Effect.Effect<GameWindowsPackage, GameOperationError>;
     /**
      * Packages the exact immutable Web build Play currently serves as a
      * static-host ZIP. It never exports and never chooses another build.
@@ -321,7 +308,7 @@ const make = Effect.gen(function* () {
   const sweepLeftovers = (root: string) =>
     Effect.promise(async () => {
       const builds = NodePath.join(root, "builds");
-      const leftover = (name: string) => STAGING.test(name) || LEGACY_LEFTOVER.test(name);
+      const leftover = (name: string) => STAGING.test(name);
       for (const directory of [
         builds,
         NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY),
@@ -407,9 +394,9 @@ const make = Effect.gen(function* () {
     const operation = `export-${target.toLowerCase()}`;
     const work = Effect.gen(function* () {
       yield* backend.exportReady(ctx.binary, target);
-      // Import first: Godot's import writes engine-generated sidecars (*.import,
-      // *.uid and .godot/) inside the project. The source identity is taken after
-      // that import, so the release never sees them change under it.
+      // Import first: an engine's import may write generated files inside the
+      // project. The source identity is taken after it, so the release never
+      // sees them change under it.
       const imported = (yield* backend.importProject(ctx)).result;
       if (!imported.success) return imported;
       // The preset is part of the exported sources, so it is settled before the
@@ -429,7 +416,7 @@ const make = Effect.gen(function* () {
           preset: preset.name,
           operation,
           stagingParent: candidates,
-          identify: identify(root, ctx.projectName, backend.profile.derivedInput),
+          identify: identify(root, ctx.projectName),
           publish: (staging, _artifact, sourceId) =>
             publishCandidate(root, ctx.projectName, staging, sourceId),
         });
@@ -449,7 +436,7 @@ const make = Effect.gen(function* () {
         preset: preset.name,
         operation,
         stagingParent: NodePath.dirname(destination),
-        identify: identify(root, ctx.projectName, backend.profile.derivedInput),
+        identify: identify(root, ctx.projectName),
         publish: (staging, artifact) =>
           Effect.map(publishFolder(operation, staging, destination), (published) => ({
             path: NodePath.join(destination, artifact),
@@ -463,11 +450,9 @@ const make = Effect.gen(function* () {
         message: [...released.notes, ...presetNote, ...released.published.notes].join(" "),
       };
     });
-    // One hold for import and release where the engine has a live editor:
-    // another game cannot take the editor between them. A failure the game's
-    // own files cause (an editor that will not open the project for its
-    // compile errors) is the export's result, never an error about the export.
-    return yield* (backend.editor === null ? work : backend.editor.hold(root)(work)).pipe(
+    // A failure the game's own files cause is the export's result, never an
+    // error about the export.
+    return yield* work.pipe(
       Effect.catchTags({
         GameOperationError: (error) =>
           gameOperationFault(error.reason) === "build"
@@ -557,13 +542,17 @@ const make = Effect.gen(function* () {
         : { ...exported, message: WEB_READY_MESSAGE, url: served.url };
     });
 
+  /** The game's engine profile; a game in an engine this version does not have is refused as unavailable. */
   const profileOf = (root: string) =>
     Effect.flatMap(projects.read(root), (manifest) =>
-      Effect.map(engines.backendFor(manifest.engine.name), (backend) => backend.profile),
+      Effect.map(availableEngine(manifest.engine.name), engineProfile),
     );
 
   const releases = Effect.fn("GameExport.releases")(function* (root: string) {
-    const profile = yield* profileOf(root);
+    const manifest = yield* projects.read(root);
+    // Nothing this version makes: a game in an engine it does not have lists no releases.
+    if (!isAvailableEngine(manifest.engine.name)) return [];
+    const profile = engineProfile(manifest.engine.name);
     const found: GameRelease[] = [];
     const iso = (date: Date) => DateTime.formatIso(DateTime.fromDateUnsafe(date));
     for (const release of profile.releases) {
@@ -660,64 +649,6 @@ const make = Effect.gen(function* () {
         targets: profile.exportTargets,
         displayName: profile.displayName,
       })),
-    packageWindows: (threadId) =>
-      projects.exclusive(threadId, "Package Windows build", (root) =>
-        Effect.gen(function* () {
-          // Packaging reads files only, so it never resolves the engine's executable.
-          yield* unpackaged(root, "Windows", "Package Windows build");
-          yield* buildPathsInGame(root);
-          const packaged = yield* Effect.tryPromise({
-            try: (signal) => packageWindowsRelease({ root, signal }),
-            catch: (cause) =>
-              cause instanceof WindowsPackageError
-                ? new GameOperationError({
-                    operation: "Package Windows build",
-                    path: cause.path,
-                    reason:
-                      cause.kind === "missing" ||
-                      cause.kind === "invalid" ||
-                      cause.kind === "changed"
-                        ? "invalid-input"
-                        : "io",
-                    detail: cause.message,
-                    cause,
-                  })
-                : new GameOperationError({
-                    operation: "Package Windows build",
-                    path: NodePath.join(root, "builds/windows/game.exe"),
-                    reason: "io",
-                    detail:
-                      cause instanceof Error
-                        ? cause.message
-                        : "The Windows package could not be created.",
-                    cause,
-                  }),
-          });
-          const relative = NodePath.relative(root, packaged.archivePath)
-            .split(NodePath.sep)
-            .join("/");
-          return {
-            archivePath: packaged.archivePath,
-            fileName: packaged.fileName,
-            bytes: packaged.bytes,
-            sha256: packaged.sha256,
-            files: packaged.files.map((file) => ({
-              name: file.name,
-              bytes: file.bytes,
-              sha256: file.sha256,
-            })),
-            embeddedPck: packaged.embeddedPck,
-            executableBytes: packaged.executableBytes,
-            pckBytes: packaged.pckBytes,
-            pckFileCount: packaged.pckFileCount,
-            notes: [
-              ...packaged.notes,
-              `The ZIP contains the existing checked release files (${packaged.files.map((file) => file.name).join(" and ")}), not a new export. This machine did not run it on Windows.`,
-            ],
-            message: `Windows package ready at ${relative} (${Math.round(packaged.bytes / (1024 * 1024))} MB).`,
-          };
-        }),
-      ),
     webExportUrl: (threadId) =>
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
