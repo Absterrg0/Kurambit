@@ -81,9 +81,13 @@ export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }
     <Workbench.Body>
       <Workbench.Section
         title="Decisions"
-        detail="What you undid, kept or skipped, and what you asked to be remembered. Every new agent session on this game reads it, so it does not bring back what you turned down."
+        detail={decisions === null || decisions.length === 0 ? null : String(decisions.length)}
       >
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 px-4 pt-1">
+          <Text variant="caption" tone="muted" render={<p />}>
+            What you undid, kept or skipped, and what you asked to be remembered. Every new agent
+            session on this game reads it, so it does not bring back what you turned down.
+          </Text>
           {canDecide ? (
             <form
               className="flex items-center gap-2"

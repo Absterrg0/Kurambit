@@ -246,7 +246,7 @@ function ThingList({
     <div
       role="listbox"
       aria-label="Things in the game"
-      className="flex max-h-[42%] shrink-0 flex-col overflow-y-auto py-1.5"
+      className="flex max-h-[50%] shrink-0 flex-col overflow-y-auto py-1.5"
     >
       {KIND_GROUPS.map((group) => {
         const rows = things.filter((thing) => thing.kind === group.kind);
