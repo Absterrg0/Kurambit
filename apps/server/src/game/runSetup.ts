@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- The production run's files in the game folder: skill pack, bot kit, ignores.
+// @effect-diagnostics nodeBuiltinImport:off -- Kurambit's files in the game folder: skill pack, bot kit, ignores.
 // What a run puts in the game folder before and around its steps.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";

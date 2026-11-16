@@ -20,8 +20,8 @@ const MEMORY_POLL = "5 seconds" as const;
 
 /**
  * One gate for every start that allocates a lot at once (explore sessions,
- * bot runs). Blind samples and their bots start two at a time, and a check
- * made before the other half has allocated would pass both, so each start
+ * bot runs). Two starts can come at once (an agent's session and a build's
+ * measure), and a check made before the other has allocated would pass both, so each start
  * holds the gate from its final memory check through its own peak (the
  * import, the boot) and the next check sees what the last start took.
  *

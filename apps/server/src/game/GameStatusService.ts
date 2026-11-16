@@ -45,7 +45,7 @@ export class GameStatusService extends Context.Service<
     ) => Stream.Stream<GameOperationEvent, GameOperationError>;
     /**
      * The pushes a games library shows: games' own folders only, never the
-     * production run's sample copies, whose checks and builds change no card.
+     * build copies, whose checks and builds change no card.
      */
     readonly libraryEvents: Stream.Stream<GameOperationEvent>;
     /**
@@ -94,8 +94,8 @@ const make = Effect.gen(function* () {
     ),
     Effect.forkScoped,
   );
-  // A production run's sample copies name their game folder in COPY_OF; their
-  // checks and builds change nothing a library card shows.
+  // Build copies name their game folder in COPY_OF; their checks and builds
+  // change nothing a library card shows.
   const libraryRoots = new Map<string, boolean>();
   const isLibraryRoot = (root: string) =>
     Effect.promise(async () => {

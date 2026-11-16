@@ -14,10 +14,6 @@
     "./settings": {
       "types": "./src/settings.ts",
       "import": "./src/settings.ts"
-    },
-    "./legacyGameVisual": {
-      "types": "./src/legacyGameVisual.ts",
-      "import": "./src/legacyGameVisual.ts"
     }
   },
   "scripts": {

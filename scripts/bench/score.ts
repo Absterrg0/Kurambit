@@ -98,7 +98,7 @@ const FACTS_BEFORE_SCENE_REPORT: ReadonlySet<string> = new Set([
   "empty",
 ]);
 
-export const sceneFacts = (views: ReadonlyArray<GameFactView>) =>
+const sceneFacts = (views: ReadonlyArray<GameFactView>) =>
   views.filter((view) => !FACTS_BEFORE_SCENE_REPORT.has(view.id));
 
 const pass = (detail: string): Verdict => ({ result: "pass", detail });
@@ -219,7 +219,7 @@ const firstPlayableVerdict = (firstPlayableSeconds: number | null, booted: Verdi
  * which are not its code either. `web/assets/` is art, so only the rest of `web/`
  * is the game.
  */
-export const changesGameCode = (files: ReadonlyArray<string>) =>
+const changesGameCode = (files: ReadonlyArray<string>) =>
   files.some(
     (path) =>
       path.startsWith("web/") &&

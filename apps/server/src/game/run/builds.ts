@@ -30,7 +30,7 @@ interface BuildOutcome {
   readonly detail: string;
 }
 
-/** What a blind player must not see: files that differ by round, not by game. */
+/** What a build copy leaves out: harness records and notes, not the game. */
 export const NOT_IN_SAMPLE = [".studio", "NOTES.md"];
 
 /** Game code: the engine project. */

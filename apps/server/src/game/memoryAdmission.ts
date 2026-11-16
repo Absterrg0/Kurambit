@@ -1,5 +1,5 @@
 // Admission for work that needs free memory to start, where two starts at once
-// are the normal case (both halves of a blind sample pair, and their bots).
+// can come at once (an agent's play session beside a build's measure).
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import type * as Semaphore from "effect/Semaphore";

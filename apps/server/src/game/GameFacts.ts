@@ -333,7 +333,7 @@ export class GameFacts extends Context.Service<
     ) => Effect.Effect<ReadonlyMap<string, GameBuildFacts>>;
     /**
      * Measures what the build lacks (never measured, not measured with a
-     * reason waiting clears, an older harness, a changed tester bot; a
+     * reason waiting clears, an older harness, a changed play bot; a
      * person's also what a standing fault kept) and returns at once, or after
      * `waitFor` if it finishes sooner. Measures go by who asked: a person's,
      * then a chat turn's (`supersede`), then the rest; a running one that a
@@ -593,7 +593,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
-  // The tester's latest play bot on this game, with the hash of its file now.
+  // The latest play bot on this game, with the hash of its file now.
   const currentBot = (root: string) =>
     Effect.gen(function* () {
       const latest = yield* bots.latestPlayBot(root);
@@ -611,7 +611,7 @@ const make = Effect.gen(function* () {
   // What a measurement must do: everything under a new harness, else each
   // tier never measured or not measured for a reason waiting clears (and,
   // for a person, a standing fault they may have fixed), and the skilled
-  // tier again when the tester's bot changed, or once someone wants the play
+  // tier again when the play bot changed, or once someone wants the play
   // a chat turn's measure deferred.
   const planOf = (
     found: Found | null,
