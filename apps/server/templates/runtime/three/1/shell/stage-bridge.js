@@ -59,6 +59,18 @@ const LANE = "web/";
 const THINGS_EVERY_MS = 500;
 const HOVER = new THREE.Color(0xffffff);
 const SELECTED = new THREE.Color(0xe2582a);
+// A thing's kind as its name tag says it.
+const KIND_WORDS = {
+  character: "character",
+  creature: "creature",
+  prop: "prop",
+  level: "level",
+  effect: "effect",
+  ui: "interface",
+  rule: "rule",
+  sound: "sound",
+  other: "thing",
+};
 
 const framed = window.parent !== window;
 const toStage = (message) => {
@@ -544,12 +556,6 @@ export function createStageBridge({
     };
   };
 
-  // The rects the Stage last heard, as keys: a drawn frame whose rect moved (a resize, a replay
-  // playing on under the freeze, the free camera) posts again, so the Stage's labels never sit
-  // where the thing was a layout ago.
-  let postedSelected = "";
-  let postedHover = "";
-  const rectKey = (rect) => (rect === undefined ? "" : `${rect.x},${rect.y},${rect.w},${rect.h}`);
   const selectedRect = (seen) => {
     const instances = selectedIndex === null ? [] : instancedOf(selected);
     return instances.length > 0
@@ -558,7 +564,6 @@ export function createStageBridge({
   };
   const postHover = (record, seen) => {
     const rect = rectOf(record, seen);
-    postedHover = rectKey(rect);
     toStage({
       type: "studio-hover",
       id: record?.id ?? null,
@@ -567,13 +572,9 @@ export function createStageBridge({
   };
   const postSelected = () => {
     const seen = view();
-    if (selected === null) {
-      postedSelected = "";
-      return toStage({ type: "studio-selected", thing: null });
-    }
+    if (selected === null) return toStage({ type: "studio-selected", thing: null });
     const instances = selectedIndex === null ? [] : instancedOf(selected);
     const rect = selectedRect(seen);
-    postedSelected = rectKey(rect);
     const trace = instances.length > 0 ? undefined : traceOf(selected, seen);
     toStage({
       type: "studio-selected",
@@ -887,11 +888,172 @@ export function createStageBridge({
     }
   };
 
+  // The selection's name tags and its path, drawn here on a 2D layer over the canvas, in the same
+  // animation frame as the outline: tags the Stage drew from a posted rect landed a frame or two
+  // after the draw, so they shook and trailed whenever the frozen frame moved (a resize, the free
+  // camera, a replay under the freeze). Painted only on the frames a frozen Stage redraws, inside
+  // the frame's own timing, and never part of a capture (drawClean reads the game's canvas only).
+  let marks = null;
+  const markLayer = () => {
+    if (marks !== null) return marks;
+    const layer = document.createElement("canvas");
+    layer.setAttribute("aria-hidden", "true");
+    Object.assign(layer.style, {
+      position: "fixed",
+      left: "0",
+      top: "0",
+      pointerEvents: "none",
+      zIndex: "2147483647",
+    });
+    document.body.append(layer);
+    marks = { layer, paint: layer.getContext("2d"), shown: false };
+    return marks;
+  };
+  const clearMarks = () => {
+    if (marks === null || !marks.shown) return;
+    marks.paint.clearRect(0, 0, marks.layer.width, marks.layer.height);
+    marks.layer.style.display = "none";
+    marks.shown = false;
+  };
+  const MARK = `#${SELECTED.getHexString()}`;
+  const INK = "#13110f";
+  const PAPER = "#ecebe7";
+  const tag = (paint, rect, record, chosen, index) => {
+    const name = index === null ? record.name : `${record.name} #${index + 1}`;
+    const kind = KIND_WORDS[record.kind] ?? "thing";
+    paint.font = '500 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+    const nameW = paint.measureText(name).width;
+    paint.font = '400 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+    const kindW = paint.measureText(kind).width;
+    const w = nameW + kindW + 18;
+    const h = 20;
+    const x = Math.max(0, Math.min(rect.x, paint.canvas.clientWidth - w));
+    const y = Math.max(0, rect.y - 4 - h);
+    paint.fillStyle = chosen ? MARK : "rgba(19, 17, 15, 0.85)";
+    paint.beginPath();
+    paint.roundRect(x, y, w, h, 6);
+    paint.fill();
+    paint.textBaseline = "middle";
+    paint.fillStyle = chosen ? "#ffffff" : PAPER;
+    paint.font = '500 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+    paint.fillText(name, x + 6, y + h / 2);
+    paint.globalAlpha = 0.75;
+    paint.font = '400 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+    paint.fillText(kind, x + 12 + nameW, y + h / 2 + 0.5);
+    paint.globalAlpha = 1;
+  };
+  // A Catmull-Rom curve through `count` spans of `points` from span `from`; the points before
+  // and after give it its tangents.
+  const curve = (paint, points, from, count) => {
+    const at = (i) => points[Math.max(0, Math.min(points.length - 1, i))];
+    paint.beginPath();
+    paint.moveTo(at(from)[0], at(from)[1]);
+    for (let i = from; i < from + count && i + 1 < points.length; i += 1) {
+      const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+      paint.bezierCurveTo(
+        p1[0] + (p2[0] - p0[0]) / 6,
+        p1[1] + (p2[1] - p0[1]) / 6,
+        p2[0] - (p3[0] - p1[0]) / 6,
+        p2[1] - (p3[1] - p1[1]) / 6,
+        p2[0],
+        p2[1],
+      );
+    }
+    paint.stroke();
+  };
+  // The path over the last seconds: older is thinner and fainter, a dark line under it keeps it
+  // legible on a light floor; each jump's arc dashed, the last one's height and time beside it.
+  const path = (paint, trace) => {
+    const points = trace.points;
+    if (points.length < 2) return;
+    paint.lineCap = "round";
+    paint.lineJoin = "round";
+    const per = Math.max(1, Math.ceil((points.length - 1) / 24));
+    for (const [color, under] of [
+      [INK, true],
+      [MARK, false],
+    ]) {
+      paint.strokeStyle = color;
+      for (let start = 0; start < points.length - 1; start += per) {
+        const end = Math.min(points.length - 1, start + per);
+        const k = end / (points.length - 1);
+        paint.globalAlpha = under ? 0.12 + 0.2 * k : 0.3 + 0.7 * k;
+        paint.lineWidth = under ? 2.6 + 3.2 * k : 0.8 + 2.2 * k;
+        curve(paint, points, start, end - start);
+      }
+    }
+    paint.globalAlpha = 0.55;
+    paint.fillStyle = MARK;
+    paint.beginPath();
+    paint.arc(points[0][0], points[0][1], 3.5, 0, Math.PI * 2);
+    paint.fill();
+    paint.globalAlpha = 0.9;
+    const jumps = trace.feel?.jumps ?? [];
+    for (const [n, jump] of jumps.entries()) {
+      paint.strokeStyle = PAPER;
+      paint.lineWidth = 2;
+      paint.setLineDash([4, 3]);
+      curve(paint, jump.points, 0, jump.points.length - 1);
+      paint.setLineDash([]);
+      paint.fillStyle = PAPER;
+      paint.beginPath();
+      paint.arc(jump.apex[0], jump.apex[1], 3, 0, Math.PI * 2);
+      paint.fill();
+      if (n !== jumps.length - 1) continue;
+      const words = `${jump.height.toFixed(2)} m · ${jump.seconds.toFixed(2)} s`;
+      paint.font = '500 10px system-ui, -apple-system, "Segoe UI", sans-serif';
+      paint.textAlign = "center";
+      paint.textBaseline = "alphabetic";
+      paint.lineWidth = 3;
+      paint.strokeStyle = INK;
+      paint.strokeText(words, jump.apex[0], jump.apex[1] - 9);
+      paint.fillText(words, jump.apex[0], jump.apex[1] - 9);
+      paint.textAlign = "start";
+    }
+    paint.globalAlpha = 1;
+  };
+  const drawMarks = (seen) => {
+    const box = canvas.getBoundingClientRect();
+    const { layer, paint } = markLayer();
+    const ratio = window.devicePixelRatio || 1;
+    const w = Math.round(box.width * ratio);
+    const h = Math.round(box.height * ratio);
+    if (layer.width !== w || layer.height !== h) {
+      layer.width = w;
+      layer.height = h;
+    }
+    Object.assign(layer.style, {
+      display: "block",
+      left: `${box.left}px`,
+      top: `${box.top}px`,
+      width: `${box.width}px`,
+      height: `${box.height}px`,
+    });
+    marks.shown = true;
+    paint.setTransform(ratio, 0, 0, ratio, 0, 0);
+    paint.clearRect(0, 0, box.width, box.height);
+    // A thing as big as the view (the level, the sky) gets no tag: it would sit on the game's HUD.
+    const tagged = (rect) => rect !== undefined && rect.w * rect.h < box.width * box.height * 0.6;
+    const one = selected === null ? [] : instancedOf(selected);
+    if (selected !== null && one.length === 0) {
+      const trace = traceOf(selected, seen);
+      if (trace !== undefined) path(paint, trace);
+    }
+    if (hovered !== null && hovered !== selected) {
+      const rect = rectOf(hovered, seen);
+      if (tagged(rect)) tag(paint, rect, hovered, false, null);
+    }
+    if (selected !== null) {
+      const rect = selectedRect(seen);
+      if (tagged(rect)) tag(paint, rect, selected, true, one.length > 0 ? selectedIndex : null);
+    }
+  };
+
   /** After the frame's draw: the outline, or nothing at all unless frozen with something to show. */
   const overlay = () => {
-    if (!frozen || (hovered === null && selected === null)) return;
+    if (!frozen || (hovered === null && selected === null)) return clearMarks();
     const seen = view();
-    if (seen === null) return;
+    if (seen === null) return clearMarks();
     renderer.getDrawingBufferSize(maskSize);
     if (mask === null) mask = new THREE.WebGLRenderTarget(maskSize.x, maskSize.y);
     else if (mask.width !== maskSize.x || mask.height !== maskSize.y)
@@ -937,12 +1099,7 @@ export function createStageBridge({
       renderer.toneMapping = toneMapping;
       renderer.setClearColor(clearColor, clearAlpha);
     }
-    // The labels follow the outline in the frame that drew it, and inside its timing: only a
-    // drawn frozen frame reads the rects again, and only a moved one is posted.
-    if (!active) return;
-    if (selected !== null && rectKey(selectedRect(seen)) !== postedSelected) postSelected();
-    if (hovered !== null && hovered !== selected && rectKey(rectOf(hovered, seen)) !== postedHover)
-      postHover(hovered, seen);
+    drawMarks(seen);
   };
 
   /**
