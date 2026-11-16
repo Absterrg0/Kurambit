@@ -1463,6 +1463,8 @@ const make = Effect.gen(function* () {
         if (number !== undefined) return `Build ${number}`;
         if (entry?.source._tag === "saved")
           return `"${entry.source.label}${entry.source.nth === undefined ? "" : ` ${entry.source.nth}`}"`;
+        if (entry?.source._tag === "version")
+          return `version ${entry.source.n} of "${entry.source.request}"`;
         return `build ${id.slice(0, 7)}`;
       };
       const takenBack = yield* dropDecisions(
@@ -1516,6 +1518,11 @@ const make = Effect.gen(function* () {
           key: null,
         };
       }
+      if (entry.source._tag === "version")
+        return {
+          text: entry.source.approach === "" ? entry.summary : entry.source.approach,
+          key: nextKey(entry.source.request),
+        };
       const source = entry.source;
       const { messages } = yield* projections
         .getThreadRecords(source.threadId, ["messages"], {

@@ -30,6 +30,7 @@ import * as GameTries from "../orchestration-v2/gameVersions/GameTries.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as GameBuilds from "./GameBuilds.ts";
+import { recordDecision } from "./GameDecisions.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -398,6 +399,20 @@ const make = Effect.gen(function* () {
               ),
             ),
           );
+        if (result.moved === "restored") {
+          const others = read.versions.filter((each) => each.n !== input.n).map((each) => each.n);
+          yield* recordDecision(root, {
+            kind: "kept-over",
+            text: `Kept version ${input.n} of "${read.request}"${version.approach === "" ? "" : ` (${version.approach})`}${others.length === 0 ? "" : ` over ${others.join(" and ")}`}`,
+            build: version.build,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("A kept version could not be kept in the game's decisions.", {
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        }
         yield* operations.changed(root, GAME_BUILDS_EVENT, `Kept version ${input.n}.`);
       }
       return {
