@@ -119,7 +119,7 @@ const lineOf = (entry: Omit<Entry, "line">) => {
 };
 
 /** One line of the person's or the harness's words: no line breaks, no comment markers. */
-export const oneLine = (text: string, max = LINE_MAX) => {
+const oneLine = (text: string, max = LINE_MAX) => {
   const flat = text
     .replace(/<!--|-->/g, "")
     .replace(/\s+/g, " ")

@@ -57,6 +57,11 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("lets a reader see a game's decisions and only an operator change them", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.gameDecisions)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.gameDecide)).toBe(AuthOrchestrationOperateScope);
+  });
+
   it("separates ACP Registry discovery from provisioning", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverSearchAcpRegistry)).toBe(
       AuthOrchestrationReadScope,

@@ -309,6 +309,14 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   about one run, press **Tell the agent about this run** when it ends, or while the game is
   frozen: its frame goes with your next message. The first time you win, **Keep this win as a
   test play** saves it as a test play in one click.
+- **The game remembers what you decided.** When you undo a build, keep tuned values, or skip a
+  keep-going step, Kurambit writes a line in the game's `.studio/decisions.md`, with the first
+  sentence of your next message after an undo. To add your own standing preference, send
+  `/remember no music with lyrics` from the composer. Every new agent session on the game (a new
+  chat, a keep-going step, the first turn after a restart) reads the newest lines, and a chat
+  that goes on hears each new one once, so the agent does not bring back what you turned down.
+  The Stage's **⋯** menu → **Decisions…** lists them to edit, delete or add to. An undo never
+  rewinds this file.
 - **Test plays (three.js).** After a run ends, the Stage's **⋯** menu → **Test plays…** saves it
   under a name, such as a win or the run where a bug showed. Every build from then on replays it,
   and its checks say whether each saved play still ends the same way. A run that does not replay
@@ -449,5 +457,6 @@ Each game is a self-contained git repository you can move, back up, or open on a
   credits its library assets' licences ask for.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
-- `.studio/` holds the game's bots, their reports and kept play saves.
+- `.studio/` holds the game's bots, their reports, kept play saves, saved test plays and
+  `decisions.md`, what you decided about the game.
 - `saved/` holds the videos and images you chose to keep; it is not committed.

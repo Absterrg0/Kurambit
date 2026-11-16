@@ -301,6 +301,17 @@ of a process it keeps across turns, and Cursor sends them on the first prompt on
 every turn, the person's runs since the last one (`personRunsForWorkspace`), goes in front of the
 turn's message text instead, which every provider reads each turn.
 
+What the person decided (an undo and their next message's first sentence, tuned values kept, a
+step skipped, `/remember` notes) is a harness record, not a reasoning skill: a fresh session
+cannot know it, so `.studio/decisions.md` keeps it (`GameDecisions.ts`), outside `restoredPaths`
+so an undo never rewinds it, written only by the harness and by the person's own edits. It rides
+beside the message too, as `<kurambit_game_decisions>`. A session that starts fresh (no turn of
+its native session yet: a new chat, a keep-going step, a failed resume) or whose last turn began
+before this server did gets all of it, newest first; one that goes on gets only entries stamped
+since its native session last started a turn (`sessionLastTurnAt`), which is why each entry
+carries its time in a trailing comment the person never needs to touch. A line someone wrote by
+hand has no stamp, so only fresh sessions read it.
+
 ## Builds and facts
 
 - **A build is no record of its own.** [GameBuilds](../../apps/server/src/game/GameBuilds.ts)
@@ -488,7 +499,10 @@ cannot both find none.
 - **Never repeat.** Each proposal has a key (`fact:<id>`, `steer:<fnv>`, `next:<fnv>`; a retry
   carries the undone step's). Two misses of a key (undone, or kept with its target still bad), any
   step that changed nothing (it is never sent again as it was), or Skip set the key aside for the
-  run.
+  run. Across runs and chats, the look also reads the keys of what the person undid, went
+  back from or skipped from the game's decisions (`decidedKeys`), and passes over them the same
+  way: a person's undone turn carries the `next:` key of its request, so the Next line it acted on
+  is not proposed again.
 - **The play bot plays only when asked.** Writing one cost 4 to 10 minutes between steps and its
   one real-time run was noise, so no build's measure and no step plays it. The person asks with
   the Inspector's Measure button, or asks their agent to prove the game can be won: it writes
