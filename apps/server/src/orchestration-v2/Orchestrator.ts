@@ -6666,6 +6666,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         updatedAt: now,
         type: "system_notice",
         message: command.notice,
+        notice: "versions",
       };
       const at = { threadId: command.threadId, runId: run.id, nodeId: rootNode.id };
       // The notice first, then the versions: the turn reads as the request, what Kurambit does

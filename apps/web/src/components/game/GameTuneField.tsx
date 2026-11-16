@@ -11,7 +11,7 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 /** One row's columns: the name and its unit, the field, and the reset slot (kept so rows line up). */
-const ROW = "grid h-7 grid-cols-[minmax(0,1fr)_6.5rem_1.5rem] items-center gap-2 ps-4 pe-2";
+const ROW = "grid h-7 grid-cols-[minmax(0,2fr)_minmax(0,3fr)_1.5rem] items-center gap-2 ps-4 pe-2";
 
 /**
  * How a change ended: a pointer let go (the game takes the keys back), or the keyboard (focus
@@ -134,13 +134,22 @@ export function GameTuneField({
         <TooltipTrigger
           render={
             <NumberField.ScrubArea
-              className="relative min-w-0 cursor-ew-resize select-none has-focus:cursor-text"
+              className="relative min-w-0 cursor-ew-resize overflow-hidden rounded-md surface-well select-none has-focus:cursor-text"
               onPointerDown={() => {
                 pressedAt.current = number;
               }}
             />
           }
         >
+          {/* The range fill is the field's own background: how far the value sits between the
+              game's limits, under the number. */}
+          {share === null ? null : (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 bg-foreground/10"
+              style={{ width: `${share * 100}%` }}
+            />
+          )}
           {/* Enter keeps the typed number and hands the keys back to the game, as a drag does. */}
           <NumberField.Group
             className="contents"
@@ -151,15 +160,8 @@ export function GameTuneField({
               if (Number.isFinite(typed)) onCommit(typed, "pointer");
             }}
           >
-            <NumberFieldInput variant="inspector" aria-label={label} />
+            <NumberFieldInput variant="scrub" aria-label={label} />
           </NumberField.Group>
-          {share === null ? null : (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 left-0 rounded-s-md bg-foreground/7"
-              style={{ width: `${share * 100}%` }}
-            />
-          )}
         </TooltipTrigger>
         <TooltipPopup side="left">
           {ranged ? `${unitText(value, min)} to ${unitText(value, max)}` : label}

@@ -151,6 +151,7 @@ import {
   XIcon,
   ZapIcon,
   RotateCcwIcon,
+  SplitIcon,
 } from "lucide-react";
 import type {
   ComposerContextId,
@@ -4812,6 +4813,7 @@ type WorkEntryIconName =
   | "hammer"
   | "message-circle"
   | "search"
+  | "split"
   | "square-pen"
   | "terminal"
   | "pull-request"
@@ -5024,6 +5026,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <SearchIcon className={className} aria-hidden />;
     case "message-circle":
       return <MessageCircleIcon className={className} aria-hidden />;
+    case "split":
+      return <SplitIcon className={className} aria-hidden />;
     case "square-pen":
       return <SquarePenIcon className={className} aria-hidden />;
     case "terminal":
@@ -5160,6 +5164,12 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (workEntry.itemType === "user_input_request" || workEntry.itemType === "approval_request") {
     return "message-circle";
   }
+  // A try's versions starting reads as the versions it starts, not as a warning.
+  if (
+    workEntry.structuredPayload?.type === "system_notice" &&
+    workEntry.structuredPayload.notice === "versions"
+  )
+    return "split";
   if (workEntry.toolSurface) return workEntry.toolSurface;
   if (
     workEntry.structuredPayload?.type === "dynamic_tool" &&

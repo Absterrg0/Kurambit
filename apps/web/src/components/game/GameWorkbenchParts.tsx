@@ -63,8 +63,9 @@ function Section({
 }
 
 /**
- * One row of a section: a mark in a fixed column, its name, a reading right-aligned in tabular
- * figures, and an end slot that keeps its width so readings line up whether a row has one or not.
+ * One row of a section: a mark in a fixed column, its name, and its reading at the right in tabular
+ * figures. A reading that does not fit beside the name wraps under it as a quieter second line;
+ * neither is ever cut. The end slot keeps its width so readings line up.
  */
 function Row({
   mark,
@@ -82,34 +83,37 @@ function Row({
   muted?: boolean;
 }) {
   return (
-    <div className={cn("flex h-7 min-w-0 items-center gap-2 ps-4 pe-2", className)} {...props}>
+    <div
+      className={cn("flex min-h-7 min-w-0 items-start gap-2 py-1 ps-4 pe-2", className)}
+      {...props}
+    >
       {mark === undefined ? null : (
-        <span className="flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5">
+        <span className="flex h-5 w-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5">
           {mark}
         </span>
       )}
-      <Text
-        variant="meta"
-        tone={muted ? "muted" : "default"}
-        truncate
-        render={<span className="shrink" />}
-      >
-        {name}
-      </Text>
-      <span className="min-w-2 flex-1" />
-      {/* A long reading gives way before the name does. */}
-      {reading === undefined || reading === null ? null : (
+      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
         <Text
-          variant="caption"
-          tone="muted"
-          numeric
-          truncate
-          render={<span className="shrink-[3] text-end" />}
+          variant="meta"
+          tone={muted ? "muted" : "default"}
+          render={<span className="min-w-0 leading-5" />}
         >
-          {reading}
+          {name}
         </Text>
-      )}
-      <span className="flex w-6 shrink-0 items-center justify-end">{end}</span>
+        {/* Pushes a reading that fits to the right; one that wraps starts under the name. */}
+        <span aria-hidden="true" className="flex-1" />
+        {reading === undefined || reading === null ? null : (
+          <Text
+            variant="caption"
+            tone="muted"
+            numeric
+            render={<span className="min-w-0 leading-5" />}
+          >
+            {reading}
+          </Text>
+        )}
+      </span>
+      <span className="flex h-5 w-6 shrink-0 items-center justify-end">{end}</span>
     </div>
   );
 }

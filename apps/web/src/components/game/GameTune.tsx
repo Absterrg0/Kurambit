@@ -3,16 +3,25 @@ import type { GameThing, GameThingValue, ScopedThreadRef } from "@kurambit/contr
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
-import { RotateCcwIcon, SlidersHorizontalIcon } from "lucide-react";
-import { createContext, use, useEffect, useRef, useState } from "react";
+import { ChevronDownIcon, CrosshairIcon, RotateCcwIcon, SlidersHorizontalIcon } from "lucide-react";
+import { createContext, use, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { cn, randomUUID } from "../../lib/utils";
+import { randomUUID } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxTrigger,
+} from "../ui/combobox";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThingLook, useSelectNotice, valueLabel } from "./GameInspector";
@@ -206,15 +215,21 @@ export function GameTunePanel({
   return (
     <TuneSave value={saver.save}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <ThingList
-          things={things}
-          picked={shown?.id ?? null}
-          pointed={pointed?.id ?? null}
-          onPick={setPicked}
-        />
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-border">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {shown === null ? null : (
-            <ThingValues threadRef={threadRef} thing={shown} disabled={!tunable} />
+            <ThingValues
+              threadRef={threadRef}
+              thing={shown}
+              disabled={!tunable}
+              picker={
+                <ThingPicker
+                  things={things}
+                  picked={shown}
+                  pointed={pointed?.id ?? null}
+                  onPick={setPicked}
+                />
+              }
+            />
           )}
         </div>
         <TuneFooter
@@ -230,87 +245,104 @@ export function GameTunePanel({
   );
 }
 
-/** Everything the game names, by kind, as an outliner lists a scene: a row each, the picked one lit. */
-function ThingList({
+const kindLabel = (kind: GameThing["kind"]) =>
+  KIND_GROUPS.find((group) => group.kind === kind)?.label ?? "Other";
+
+/** The things in the outliner's order: by kind, then as the game named them. */
+const byKind = (things: ReadonlyArray<GameThing>) =>
+  KIND_GROUPS.flatMap((group) => things.filter((thing) => thing.kind === group.kind));
+
+/**
+ * The thing whose values show, as one row: its name and kind, opening a searchable menu of every
+ * thing the game names, by kind. Pointing at a thing on the Stage picks it here too.
+ */
+function ThingPicker({
   things,
   picked,
   pointed,
   onPick,
 }: {
   things: ReadonlyArray<GameThing>;
-  picked: string | null;
+  picked: GameThing;
   pointed: string | null;
   onPick: (id: string) => void;
 }) {
-  return (
-    <div
-      role="listbox"
-      aria-label="Things in the game"
-      className="flex max-h-[50%] shrink-0 flex-col overflow-y-auto py-1.5"
-    >
-      {KIND_GROUPS.map((group) => {
-        const rows = things.filter((thing) => thing.kind === group.kind);
-        if (rows.length === 0) return null;
-        return (
-          <div key={group.kind} role="group" aria-label={group.label} className="flex flex-col">
-            <Text
-              variant="caption"
-              tone="muted"
-              render={<span className="flex h-6 items-end ps-4 pb-0.5" />}
-            >
-              {group.label}
-            </Text>
-            {rows.map((thing) => {
-              const count = thing.values?.length ?? 0;
-              const tuned = tunedValues(thing).length > 0;
-              return (
-                <div key={thing.id} className="px-2">
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={picked === thing.id}
-                    onClick={() => onPick(thing.id)}
-                    onPointerEnter={() => hoverStageThing(thing.id)}
-                    onPointerLeave={() => hoverStageThing(null)}
-                    className={cn(
-                      "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                      picked === thing.id && "surface-selected-soft text-strong-foreground",
-                    )}
-                  >
-                    <Text
-                      variant="meta"
-                      tone={count === 0 ? "muted" : "inherit"}
-                      truncate
-                      render={<span className="flex-1" />}
-                    >
-                      {thing.name}
-                    </Text>
-                    {pointed === thing.id ? (
-                      <Text variant="caption" tone="muted">
-                        pointed at
-                      </Text>
-                    ) : null}
-                    {tuned ? (
-                      <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
-                    ) : null}
-                    {count === 0 ? null : (
-                      <Text
-                        variant="caption"
-                        tone="muted"
-                        numeric
-                        render={<span className="w-4 text-end" />}
-                      >
-                        {count}
-                      </Text>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+  const [query, setQuery] = useState("");
+  const items = byKind(things);
+  const needle = query.trim().toLowerCase();
+  const shownItems =
+    needle === ""
+      ? items
+      : items.filter(
+          (thing) =>
+            thing.name.toLowerCase().includes(needle) ||
+            kindLabel(thing.kind).toLowerCase().includes(needle),
         );
-      })}
-    </div>
+  return (
+    <Combobox
+      items={items}
+      filteredItems={shownItems}
+      autoHighlight
+      itemToStringLabel={(thing) => thing.name}
+      isItemEqualToValue={(a, b) => a.id === b.id}
+      value={items.find((thing) => thing.id === picked.id) ?? null}
+      onOpenChange={(open) => {
+        if (!open) setQuery("");
+        if (!open) hoverStageThing(null);
+      }}
+      onItemHighlighted={(thing) => hoverStageThing(thing?.id ?? null)}
+      onValueChange={(thing) => {
+        if (thing !== null) onPick(thing.id);
+      }}
+    >
+      <ComboboxTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className="min-w-0"
+            aria-label={`${picked.name}, ${kindLabel(picked.kind)}: pick another thing`}
+          />
+        }
+      >
+        <Text variant="label" tone="strong" truncate>
+          {picked.name}
+        </Text>
+        <Text variant="caption" tone="muted" render={<span className="shrink-0" />}>
+          {kindLabel(picked.kind)}
+        </Text>
+        <ChevronDownIcon className="shrink-0 text-dim-foreground" aria-hidden="true" />
+      </ComboboxTrigger>
+      <ComboboxPopup align="start" className="w-72">
+        <ComboboxSearchInput
+          aria-label="Find a thing"
+          placeholder="Find a thing"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <ComboboxEmpty>Nothing by that name.</ComboboxEmpty>
+        <ComboboxList>
+          {(thing: GameThing) => {
+            const count = thing.values?.length ?? 0;
+            return (
+              <ComboboxItem key={thing.id} value={thing}>
+                <span className="min-w-0 flex-1 truncate">{thing.name}</span>
+                {pointed === thing.id ? (
+                  <CrosshairIcon className="text-live" aria-label="pointed at" />
+                ) : null}
+                {tunedValues(thing).length > 0 ? (
+                  <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
+                ) : null}
+                <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
+                  {kindLabel(thing.kind)}
+                  {count === 0 ? "" : ` · ${count}`}
+                </Text>
+              </ComboboxItem>
+            );
+          }}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
   );
 }
 
@@ -330,27 +362,22 @@ function ThingValues({
   threadRef,
   thing,
   disabled,
+  picker,
 }: {
   threadRef: ScopedThreadRef;
   thing: GameThing;
   disabled: boolean;
+  picker: ReactNode;
 }) {
   const save = use(TuneSave);
   const values = thing.values ?? [];
   const tuned = tunedValues(thing);
   return (
-    <Workbench.Section
-      title={thing.name}
-      label={`${thing.name}'s values`}
-      detail={
-        thing.instance !== undefined
-          ? `One of ${thing.instance.count}; its values are the group's`
-          : (thing.instances ?? 0) > 1
-            ? `All ${thing.instances}`
-            : KIND_GROUPS.find((group) => group.kind === thing.kind)?.label
-      }
-      aside={
-        tuned.length === 0 ? undefined : (
+    <section aria-label={`${thing.name}'s values`} className="flex flex-col pb-2">
+      <div className="flex h-11 min-w-0 items-center gap-1 ps-2 pe-2">
+        {picker}
+        <span className="flex-1" />
+        {tuned.length === 0 ? null : (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -368,9 +395,15 @@ function ThingValues({
             </TooltipTrigger>
             <TooltipPopup side="left">Put {thing.name}'s values back</TooltipPopup>
           </Tooltip>
-        )
-      }
-    >
+        )}
+      </div>
+      {thing.instance !== undefined || (thing.instances ?? 0) > 1 ? (
+        <Text variant="caption" tone="muted" render={<p className="px-4 pb-1.5" />}>
+          {thing.instance !== undefined
+            ? `One of ${thing.instance.count}; its values are the group's`
+            : `All ${thing.instances} of them`}
+        </Text>
+      ) : null}
       {values.length === 0 ? (
         <Text variant="meta" tone="muted" render={<p className="px-4 py-1" />}>
           No values to tune. Your agent can expose some with ctx.tune.
@@ -395,7 +428,7 @@ function ThingValues({
       <div className="px-4 pt-2 empty:hidden">
         <ThingLook threadRef={threadRef} thing={thing} />
       </div>
-    </Workbench.Section>
+    </section>
   );
 }
 

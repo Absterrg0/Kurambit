@@ -84,16 +84,16 @@ export function NumberFieldInput({
   ...props
 }: NumberFieldPrimitive.Input.Props & {
   /**
-   * `inspector`: an engine inspector's value field, compact, mono and right-aligned on its own
-   * well; it takes the live colour while its root is `data-changed`.
+   * `scrub`: a drag-to-scrub field filling its cell, the value centred in it as Blender's are; its
+   * well stays clear so a range fill drawn under it shows through.
    */
-  variant?: "default" | "inspector";
+  variant?: "default" | "scrub";
 }): React.ReactElement {
-  if (variant === "inspector")
+  if (variant === "scrub")
     return (
       <NumberFieldPrimitive.Input
         className={cn(
-          "h-6 w-full min-w-0 rounded-md px-1.5 text-end font-mono text-caption tabular-nums text-foreground outline-none surface-well focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring in-data-changed:text-live in-data-changed:ring-1 in-data-changed:ring-inset in-data-changed:ring-live/50",
+          "relative h-6 w-full min-w-0 rounded-md bg-transparent px-2 text-center font-mono text-caption tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
           className,
         )}
         data-slot="number-field-input"

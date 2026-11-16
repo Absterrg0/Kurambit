@@ -1715,13 +1715,9 @@ function ThreadGameStage({
           />
         )}
       </div>
-      {/* Not counted in the game's fit: opening the strip takes its room from the chat, so the
-          game never changes size under the person. */}
-      <div
-        data-stage-spacer=""
-        className="mx-auto w-full shrink-0"
-        style={{ maxWidth: column ?? undefined }}
-      >
+      {/* Counted in the game's fit like the controls: opening the strip takes its room from the
+          game, so the chat keeps the share the person gave it and is never covered. */}
+      <div className="mx-auto w-full shrink-0" style={{ maxWidth: column ?? undefined }}>
         <GameBuildStrip
           threadRef={threadRef}
           gameName={gameName}

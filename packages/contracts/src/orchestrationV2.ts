@@ -1523,6 +1523,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("system_notice"),
     message: Schema.String,
+    /** What the notice is about, when it is news rather than a warning: a try's versions starting. */
+    notice: Schema.optionalKey(Schema.Literal("versions")),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2305,6 +2307,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("system_notice"),
     message: Schema.String,
+    /** What the notice is about, when it is news rather than a warning: a try's versions starting. */
+    notice: Schema.optionalKey(Schema.Literal("versions")),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
