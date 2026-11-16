@@ -34,13 +34,6 @@ export const opError = (
 export const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/** The middle value; null for none. */
-export const medianOf = (xs: ReadonlyArray<number>): number | null => {
-  if (xs.length === 0) return null;
-  const sorted = [...xs].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)]!;
-};
-
 /** The 4 m map cell a point falls in, over x and z: the one coverage grid. */
 export const cellOf = (x: number, z: number) => {
   const cx = Math.floor(x / 4) * 4;

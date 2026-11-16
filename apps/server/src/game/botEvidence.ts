@@ -1,9 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Bot evidence records are files the server owns.
-// A production run decides by a thread's bot runs: whether its tester ran a
-// bot, which bot a blind comparison replays, and the final video. The bot
-// service records each run here, under the server state dir and outside every
-// folder a role agent works in, the way explore evidence is kept; the game's
-// .studio/bot-results.jsonl is a copy for people and decides nothing.
+// The play bot's runs per thread: the skilled fact plays the game's latest one
+// (`latestPlay`). The bot service records each run here, under the server state
+// dir and outside every game folder, the way explore evidence is kept; the
+// game's .studio/bot-results.jsonl is a copy for people and decides nothing.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
@@ -14,6 +13,7 @@ const BotRun = Schema.Struct({
   runId: Schema.String,
   /** The bot file, relative to the game folder it ran in. */
   file: Schema.String,
+  /** "play"; runs recorded before exploration bots were removed may say "explore". */
   mode: Schema.String,
   won: Schema.Boolean,
   /** How the run ended, in the bot's words (a timeout, an error); absent on runs recorded before. */
@@ -40,7 +40,7 @@ const ThreadBotsJson = Schema.fromJsonString(ThreadBots);
 const decode = Schema.decodeUnknownOption(ThreadBotsJson);
 const encode = Schema.encodeSync(ThreadBotsJson);
 
-/** A tester makes a few calls of up to ten runs each; far more than a turn's worth stays. */
+/** A call makes up to ten runs; far more than a turn's worth stays. */
 export const KEPT_RUNS = 100;
 
 export const empty = (threadId: string, root: string): ThreadBots => ({
@@ -57,14 +57,8 @@ export const add = (record: ThreadBots, root: string, run: BotRun): ThreadBots =
   root,
   count: record.count + 1,
   runs: [...record.runs, run].slice(-KEPT_RUNS),
-  // An exploration bot wanders on purpose and says nothing about how far
-  // scripted play gets, so a blind comparison never replays one.
-  play: run.mode === "explore" ? record.play : run,
+  play: run,
 });
-
-/** The bot a blind comparison replays: the thread's latest play-mode run. */
-export const lastPlay = (record: ThreadBots) =>
-  record.play === null ? null : { file: record.play.file };
 
 /**
  * The record on disk: null when there is none. A record that does not decode,

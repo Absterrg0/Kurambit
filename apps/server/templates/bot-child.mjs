@@ -174,7 +174,7 @@ const handleObs = async (msg) => {
     if (needDecide && opts.length > 0) {
       lastDecisionAt = Date.now();
       const offered = offerable(opts, setSig);
-      // The player report lists offered options no run ever picked.
+      // The trace keeps what was offered beside what was picked.
       send({ op: "offered", t, options: offered.map((option) => String(option.name)) });
       const pick = pickOf(offered);
       if (pick !== current) {

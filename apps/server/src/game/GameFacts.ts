@@ -909,7 +909,7 @@ const make = Effect.gen(function* () {
         const runBot = (file: string, seconds: number) =>
           Effect.andThen(
             idleMachine,
-            withMachine(step(bots.runIn(copy, { file, seconds, mode: "play" as const }))).pipe(
+            withMachine(step(bots.runIn(copy, { file, seconds }))).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
             ),
           );

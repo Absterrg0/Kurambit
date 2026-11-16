@@ -110,7 +110,6 @@ const runIn = (
     videoPath: NodePath.join(runDir, "run.mp4"),
     tracePath,
     botFile,
-    mode: "play",
     seconds,
     ffmpeg: "ffmpeg",
     // The very object a stop flips, as GameBot shares it with the run.

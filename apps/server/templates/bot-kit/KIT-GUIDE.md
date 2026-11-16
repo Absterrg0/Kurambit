@@ -20,24 +20,12 @@ The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
   or later. Executors do the fast part in code every tick (steer, time a
   press); the policy chooses what to do.
 
-## Run types: what each run is for
+## What a run is for
 
-- **Win bot (`mode: "play"`).** Goal: finish the game or reach the ending.
-  Answers "can this be finished, and does it hold together?". Options are
-  the sensible plays toward the goal; `policy` encodes the best route you
-  know. Score it on the ending.
-- **Exploration bot (`mode: "explore"`).** Goal: try everything. Never try
-  to win. Options cover the mechanics broadly (every verb, every direction,
-  every usable thing, edge cases, limits), preferring what hasn't been tried
-  yet — Aura's rule for "an exploration". Do not score it on wins: a run
-  that never finishes still reports where play dies, stalls, or goes
-  untried. Several runs (`runs: 3+`) feed one player report.
-- **Player report.** After exploration runs the service writes
-  `.studio/player-report.md` from the run traces: endings, pick counts,
-  offered-but-never-picked options, first-action times, death/stall clusters
-  with positions and times, sampled areas, detector findings, explicit state
-  writes. Code states facts and interprets nothing. Reviewers read it as
-  facts; your notes say what you felt.
+A bot is a win bot: its goal is to finish the game or reach the ending, and
+it answers "can this be finished, and does it hold together?". Options are
+the sensible plays toward the goal; `policy` encodes the best route you
+know. Score it on the ending.
 
 ## Shape
 
@@ -64,7 +52,7 @@ export function status(obs) { /* running | done | failed + note */ }
 export function policy(obs, opts) { /* pick one of opts by name */ }
 ```
 
-## Option outcomes and run context (the exploration contract)
+## Option outcomes and run context
 
 An option's `run` must return `"done"` when it arrived or has nothing left
 to do, `"failed"` when it cannot work from here, else `"running"`. The
@@ -73,13 +61,13 @@ failed one rests 30 s), so the policy cannot re-pick an arrived option
 hundreds of times. Options that always return `"running"` stay on offer: a
 walker that reached its target but never says so is how runs collapse onto
 one spot. Give options their own facts: the policy reads them, and the
-report lists what was offered.
+trace lists what was offered.
 
 Every observation carries `runContext`: `{seed, runIndex, runTotal,
 priorRuns}` where each prior run is `{topOptions, cells, ending}`. Use it
 so runs of one call differ: seed the first choice from `seed`, and avoid
 opening with what earlier runs already covered. Tell the truth about it in
-`status` notes; the report states which run did what.
+`status` notes.
 
 ## Controllers
 

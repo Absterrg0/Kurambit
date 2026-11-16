@@ -8,7 +8,6 @@ import {
   GAME_BOT_BOUNDS,
   GameOperationError,
   type GameBotFinding,
-  type GameBotMode,
   type GameBotRunResult,
 } from "@kurambit/contracts";
 import {
@@ -57,7 +56,6 @@ export interface BotRunArgs {
   readonly videoPath: string;
   readonly tracePath: string;
   readonly botFile: string;
-  readonly mode: GameBotMode;
   readonly seconds: number;
   readonly ffmpeg: string;
   readonly session: Session;
@@ -570,7 +568,6 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
     const trace = {
       runId: args.runId,
       file: NodePath.relative(args.root, args.botFile),
-      mode: args.mode,
       goal,
       ticks,
       tickHz: Number(tickHz.toFixed(2)),
@@ -644,9 +641,7 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
       finalState: lastGameState,
       ...(perf === null ? {} : { perf }),
       finalPos: lastPos,
-      mode: args.mode,
       runIds: [args.runId],
-      reportPath: null,
       tracePath: args.tracePath,
       videoPath: args.videoPath,
       frames,
@@ -667,7 +662,7 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
  * measured. Its trace still says which, for game_play op bot_view.
  */
 export const runWithoutPlay = async (
-  args: Pick<BotRunArgs, "root" | "runId" | "botFile" | "mode" | "tracePath" | "videoPath">,
+  args: Pick<BotRunArgs, "root" | "runId" | "botFile" | "tracePath" | "videoPath">,
   input: {
     readonly goal: string;
     readonly state: "bot-error" | "not-booted";
@@ -694,9 +689,7 @@ export const runWithoutPlay = async (
     findings: [],
     finalState: {},
     finalPos: null,
-    mode: args.mode,
     runIds: [args.runId],
-    reportPath: null,
     tracePath: args.tracePath,
     videoPath: args.videoPath,
     frames: [],

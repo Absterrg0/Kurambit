@@ -15,8 +15,9 @@ import { FIRST_TURN_LEADS } from "@kurambit/shared/gameFirstTurn";
 
 import { engineProfile } from "./engineProfile.ts";
 
-// Harness output, never game content: the bot runs' log and report, kept play
-// saves and the person's saved media stay out of every build and checkpoint.
+// Harness output, never game content: the bot runs' log (and the player report earlier
+// versions wrote), kept play saves and the person's saved media stay out of every build and
+// checkpoint.
 export const RUN_STATE_IGNORES = [
   ".studio/bot-results.jsonl",
   ".studio/player-report.md",

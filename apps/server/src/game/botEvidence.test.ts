@@ -1,6 +1,6 @@
-// A run decides by a thread's bot runs, so the record must come back whole
-// after a restart, stay bounded without losing the bot a comparison replays,
-// and never read another thread's runs.
+// The skilled fact plays a thread's latest play bot, so the record must come
+// back whole after a restart, stay bounded, read as an earlier version wrote
+// it, and never read another thread's runs.
 // @effect-diagnostics nodeBuiltinImport:off -- The record is a file on disk; the test reads it back as a restart would.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -25,31 +25,31 @@ describe("bot evidence", () => {
     try {
       let record = BotEvidence.add(BotEvidence.empty("t", "/g"), "/g", run("p", "play"));
       for (let i = 0; i < BotEvidence.KEPT_RUNS; i++)
-        record = BotEvidence.add(record, "/g", run(`e${i}`, "explore"));
+        record = BotEvidence.add(record, "/g", run(`p${i}`, "play"));
       // The record as the atomic writer leaves it (its own tests cover the write).
       NodeFS.writeFileSync(recordPath(dir, "t"), JSON.stringify(record));
       const reloaded = await BotEvidence.read(dir, "t");
       expect(reloaded).toEqual(record);
       expect(record.count).toBe(BotEvidence.KEPT_RUNS + 1);
       expect(record.runs).toHaveLength(BotEvidence.KEPT_RUNS);
-      // The bot a comparison replays outlives the exploration runs after it.
-      expect(BotEvidence.lastPlay(reloaded as BotEvidence.ThreadBots)?.file).toBe(
-        ".studio/bot/play.mjs",
+      expect((reloaded as BotEvidence.ThreadBots).play?.runId).toBe(
+        `p${BotEvidence.KEPT_RUNS - 1}`,
       );
       expect(await BotEvidence.read(dir, "other")).toBeNull();
-      // A record written while runs named their decider still reads.
+      // A record written while runs named their decider, with exploration runs after its
+      // play run, still reads, and its play run is still the one the skilled fact plays.
       NodeFS.writeFileSync(
         recordPath(dir, "old"),
         JSON.stringify({
           ...BotEvidence.add(BotEvidence.empty("old", "/g"), "/g", run("p", "play")),
+          runs: [run("p", "play"), run("e", "explore")],
+          count: 2,
           play: { ...run("p", "play"), decider: "jev" },
         }),
       );
-      expect(
-        BotEvidence.lastPlay((await BotEvidence.read(dir, "old")) as BotEvidence.ThreadBots),
-      ).toEqual({
-        file: ".studio/bot/play.mjs",
-      });
+      expect(((await BotEvidence.read(dir, "old")) as BotEvidence.ThreadBots).play?.file).toBe(
+        ".studio/bot/play.mjs",
+      );
       // Another thread's record under this thread's name is no run of its own.
       NodeFS.copyFileSync(recordPath(dir, "t"), recordPath(dir, "u"));
       expect(await BotEvidence.read(dir, "u")).toBe("damaged");

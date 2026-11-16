@@ -14,13 +14,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Semaphore from "effect/Semaphore";
-import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
   isAvailableEngine,
-  type GameBotMode,
   type GameBotPerf,
   type GameBotRunInput,
   type GameBotRunResult,
@@ -52,14 +50,7 @@ import {
   writeKeptStorage,
 } from "./gameKeptSaves.ts";
 import { playBot, runWithoutPlay } from "./gameBotPlay.ts";
-import {
-  botEnding,
-  botFinalState,
-  cellOf,
-  medianOf,
-  opError,
-  type Session,
-} from "./gameBotRuntime.ts";
+import { botEnding, botFinalState, cellOf, opError, type Session } from "./gameBotRuntime.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import { runtimesFor } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
@@ -150,7 +141,6 @@ interface RunTrace {
   /** False on a run whose bot never ran: not a run on the record, nor in a report. */
   played?: boolean;
   file: string;
-  mode?: string;
   goal: string;
   ticks: number;
   gameSeconds: number;
@@ -188,237 +178,6 @@ const readTrace = async (root: string, runId: string): Promise<RunTrace | null> 
   } catch {
     return null;
   }
-};
-
-const fmtT = (t: number): string => `${t.toFixed(1)}s`;
-const fmtPos = (pos: [number, number, number] | null): string =>
-  pos === null ? "unknown" : `(${pos[0].toFixed(1)}, ${pos[1].toFixed(1)}, ${pos[2].toFixed(1)})`;
-const shortId = (runId: string): string => runId.slice(0, 8);
-
-/**
- * Facts-only player report across runs, written by code. States what
- * happened (positions, times, counts, clusters) and interprets nothing:
- * no causes, no fixes, no recommendations.
- */
-const playerReportText = (
-  picked: ReadonlyArray<{ runId: string; trace: RunTrace; mtime: number }>,
-  unreadable: number,
-): { text: string; runs: string[] } | null => {
-  // Oldest first so the report reads in play order.
-  const ordered = [...picked].sort((a, b) => a.mtime - b.mtime);
-  if (ordered.length === 0) return null;
-  const lines: string[] = [
-    "# Player report (facts only, by code)",
-    "",
-    `Runs: ${ordered.length}. No interpretation: positions, times and counts only.` +
-      (unreadable > 0 ? ` ${unreadable} run's trace could not be read and is left out.` : ""),
-    "",
-    "## Runs",
-    "",
-    "| run | bot | mode | game s | decisions | end | findings |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
-  ];
-  for (const { trace } of ordered)
-    lines.push(
-      `| ${shortId(trace.runId)} | ${trace.file ?? "?"} | ${trace.mode ?? ""} | ${Number(trace.gameSeconds ?? 0).toFixed(1)} | ${trace.decisions ?? 0} | ${trace.status?.state ?? "?"} | ${trace.findings?.length ?? 0} |`,
-    );
-  // Ending positions, in 2 m cells below. Old traces predate finalPos;
-  // those fall back to their last sampled position.
-  const endPosOf = (trace: RunTrace): [number, number, number] | null => {
-    if (trace.finalPos !== null && trace.finalPos !== undefined) return trace.finalPos;
-    for (let i = trace.samples.length - 1; i >= 0; i--) {
-      const pos = trace.samples[i]?.pos ?? null;
-      if (pos !== null) return pos;
-    }
-    return null;
-  };
-  lines.push("", "## Endings", "", "| run | end | note | final pos |", "| --- | --- | --- | --- |");
-  for (const { trace } of ordered) {
-    const note = String(trace.status?.note ?? "")
-      .replace(/\|/g, "/")
-      .slice(0, 160);
-    lines.push(
-      `| ${shortId(trace.runId)} | ${trace.status?.state ?? "?"} | ${note} | ${fmtPos(endPosOf(trace))} |`,
-    );
-  }
-  // Death/stall cluster: ending positions of runs that did not finish, plus
-  // every error-severity finding with a position, in 2 m cells.
-  const cells = new Map<string, { cx: number; cy: number; cz: number; hits: Array<string> }>();
-  const bump = (pos: [number, number, number] | null, label: string): void => {
-    if (pos === null) return;
-    const cx = Math.round(pos[0] / 2) * 2;
-    const cy = Math.round(pos[1] / 2) * 2;
-    const cz = Math.round(pos[2] / 2) * 2;
-    const key = `${cx},${cy},${cz}`;
-    const cell = cells.get(key) ?? { cx, cy, cz, hits: [] };
-    cell.hits.push(label);
-    cells.set(key, cell);
-  };
-  for (const { trace } of ordered) {
-    const id = shortId(trace.runId);
-    if (trace.status?.state !== "done" && trace.status?.state !== "budget")
-      bump(
-        endPosOf(trace),
-        `${id} end ${trace.status?.state} t=${fmtT(Number(trace.gameSeconds ?? 0))}`,
-      );
-    for (const finding of trace.findings ?? []) {
-      if (finding.severity === "error")
-        bump(finding.pos ?? null, `${id} ${finding.detector} t=${fmtT(Number(finding.t ?? 0))}`);
-    }
-  }
-  lines.push("", "## Death/stall positions (2 m cells)", "");
-  if (cells.size === 0)
-    lines.push("None: every run ended done/budget with no error finding carrying a position.");
-  else {
-    lines.push("| cell | hits | what |", "| --- | --- | --- |");
-    for (const cell of [...cells.values()].sort((a, b) => b.hits.length - a.hits.length))
-      lines.push(
-        `| (${cell.cx}, ${cell.cy}, ${cell.cz}) | ${cell.hits.length} | ${cell.hits.slice(0, 8).join("; ")} |`,
-      );
-  }
-  // Picks: what was done and how often; offered but never picked.
-  const pickCounts = new Map<string, { total: number; runs: Set<string>; firsts: number[] }>();
-  const offeredSet = new Set<string>();
-  for (const { trace } of ordered) {
-    const id = shortId(trace.runId);
-    const firstSeen = new Map<string, number>();
-    for (const pick of trace.picks ?? []) {
-      const name = String(pick.name ?? "?");
-      const entry = pickCounts.get(name) ?? { total: 0, runs: new Set<string>(), firsts: [] };
-      entry.total += 1;
-      entry.runs.add(id);
-      if (!firstSeen.has(name)) {
-        firstSeen.set(name, Number(pick.t ?? 0));
-        entry.firsts.push(Number(pick.t ?? 0));
-      }
-      pickCounts.set(name, entry);
-    }
-    for (const offer of trace.offered ?? [])
-      for (const name of offer.options ?? []) offeredSet.add(String(name));
-  }
-  lines.push(
-    "",
-    "## Options picked",
-    "",
-    "| option | picks | runs | first t (min / median) |",
-    "| --- | --- | --- | --- |",
-  );
-  const ranked = [...pickCounts.entries()].sort((a, b) => b[1].total - a[1].total);
-  if (ranked.length === 0) lines.push("| (none recorded) | 0 | 0 | - |");
-  for (const [name, entry] of ranked) {
-    const firsts = entry.firsts.sort((a, b) => a - b);
-    lines.push(
-      `| ${name} | ${entry.total} | ${entry.runs.size}/${ordered.length} | ${fmtT(firsts[0]!)} / ${fmtT(medianOf(firsts) ?? firsts[0]!)} |`,
-    );
-  }
-  const neverPicked = [...offeredSet].filter((name) => !pickCounts.has(name)).sort();
-  const rarePicked = ranked.filter(([, entry]) => entry.total <= 2).map(([name]) => name);
-  lines.push(
-    "",
-    `Offered but never picked (${neverPicked.length}): ${neverPicked.length === 0 ? "none" : neverPicked.join(", ")}.`,
-    "",
-    `Rarely picked, 2 or fewer picks total (${rarePicked.length}): ${rarePicked.length === 0 ? "none" : rarePicked.join(", ")}.`,
-  );
-  // Coverage: visited 4 m cells over x/z, bounding box, furthest reach.
-  const visited = new Map<string, { cx: number; cz: number; n: number }>();
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const { trace } of ordered) {
-    for (const sample of trace.samples ?? []) {
-      if (sample.pos === null) continue;
-      const [x, , z] = sample.pos;
-      if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minZ = Math.min(minZ, z);
-      maxZ = Math.max(maxZ, z);
-      const { cx, cz, key } = cellOf(x, z);
-      const cell = visited.get(key) ?? { cx, cz, n: 0 };
-      cell.n += 1;
-      visited.set(key, cell);
-    }
-  }
-  lines.push("", "## Areas (4 m cells over x/z, from position samples)", "");
-  if (visited.size === 0) lines.push("No position samples recorded.");
-  else {
-    const orderedCells = [...visited.values()].sort((a, b) => b.n - a.n);
-    lines.push(
-      `Visited cells: ${visited.size}. Bounding box x ${minX.toFixed(1)}..${maxX.toFixed(1)}, z ${minZ.toFixed(1)}..${maxZ.toFixed(1)}.`,
-      "",
-      `Most-sampled cells: ${orderedCells
-        .slice(0, 10)
-        .map((cell) => `(${cell.cx}, ${cell.cz}) x${cell.n}`)
-        .join("; ")}.`,
-    );
-    const inside: string[] = [];
-    for (let cx = Math.floor(minX / 4) * 4; cx <= maxX && inside.length < 60; cx += 4)
-      for (let cz = Math.floor(minZ / 4) * 4; cz <= maxZ && inside.length < 60; cz += 4)
-        if (!visited.has(`${cx},${cz}`)) inside.push(`(${cx}, ${cz})`);
-    const totalInside =
-      (Math.floor(maxX / 4) - Math.floor(minX / 4) + 1) *
-      (Math.floor(maxZ / 4) - Math.floor(minZ / 4) + 1);
-    lines.push(
-      "",
-      `Cells inside the bounding box never sampled: ${Math.max(0, totalInside - visited.size)}${inside.length > 0 ? ` (first ${inside.length}: ${inside.join("; ")})` : ""}.`,
-    );
-  }
-  // Findings grouped by detector.
-  const byDetector = new Map<string, Array<string>>();
-  for (const { trace } of ordered) {
-    const id = shortId(trace.runId);
-    for (const finding of trace.findings ?? []) {
-      const list = byDetector.get(finding.detector) ?? [];
-      list.push(
-        `${id} t=${fmtT(Number(finding.t ?? 0))} ${fmtPos(finding.pos ?? null)}: ${String(finding.summary ?? "").slice(0, 160)}`,
-      );
-      byDetector.set(finding.detector, list);
-    }
-  }
-  lines.push("", "## Detector findings", "");
-  if (byDetector.size === 0) lines.push("None.");
-  else
-    for (const [detector, list] of [...byDetector.entries()].sort(
-      (a, b) => b[1].length - a[1].length,
-    )) {
-      lines.push(`- ${detector} (${list.length}):`);
-      for (const item of list.slice(0, 20)) lines.push(`  - ${item}`);
-    }
-  // Explicit state writes are never play.
-  let writes = 0;
-  const writeLines: string[] = [];
-  for (const { trace } of ordered) {
-    for (const entry of trace.setStates ?? []) {
-      writes += 1;
-      if (writeLines.length < 20)
-        writeLines.push(
-          `- ${shortId(trace.runId)} t=${fmtT(Number((entry as { t?: unknown }).t ?? 0))}: ${String((entry as { target?: unknown }).target ?? "?")}`,
-        );
-    }
-  }
-  lines.push("", `## Explicit state writes: ${writes}`, "");
-  lines.push(
-    ...(writeLines.length > 0 ? writeLines : ["None. Runs without writes are pure input play."]),
-  );
-  return { text: `${lines.join("\n")}\n`, runs: ordered.map((entry) => entry.runId) };
-};
-
-/** The traces of exactly these runs, with how many could not be read. */
-const tracesOf = async (root: string, runIds: ReadonlyArray<string>) => {
-  const picked: Array<{ runId: string; trace: RunTrace; mtime: number }> = [];
-  let unreadable = 0;
-  for (const runId of runIds) {
-    const trace = await readTrace(root, runId);
-    if (trace === null) {
-      unreadable += 1;
-      continue;
-    }
-    if (trace.played === false) continue;
-    const stat = await NodeFSP.stat(traceFile(root, runId)).catch(() => null);
-    picked.push({ runId, trace, mtime: stat?.mtimeMs ?? 0 });
-  }
-  return { picked, unreadable };
 };
 
 const make = Effect.gen(function* () {
@@ -487,7 +246,7 @@ const make = Effect.gen(function* () {
           ),
         );
         // The game's latest play bot, as latestPlayBot answers it, follows the record.
-        if (run.mode !== "explore") latestPlays.set(root, run);
+        latestPlays.set(root, run);
       }),
     );
 
@@ -566,9 +325,7 @@ const make = Effect.gen(function* () {
         GAME_BOT_BOUNDS.maxSeconds,
         Math.max(GAME_BOT_BOUNDS.minSeconds, input.seconds ?? GAME_BOT_BOUNDS.defaultSeconds),
       );
-      const mode: GameBotMode = input.mode ?? "play";
-      // One call may make several sequential runs (exploration compares
-      // across runs). Ten at most; each run gets its own directory.
+      // One call may make several sequential runs. Ten at most; each run gets its own directory.
       const count = Math.min(10, Math.max(1, Math.floor(input.runs ?? 1)));
       const pathEnv = process.env.PATH ?? "";
       const manifest = yield* projects.read(root);
@@ -706,7 +463,6 @@ const make = Effect.gen(function* () {
                             videoPath,
                             tracePath,
                             botFile,
-                            mode,
                             seconds,
                             ffmpeg,
                             session,
@@ -787,7 +543,7 @@ const make = Effect.gen(function* () {
                   PlayDidNotBoot: (error) =>
                     Effect.promise(() =>
                       runWithoutPlay(
-                        { root, runId, botFile, mode, tracePath, videoPath },
+                        { root, runId, botFile, tracePath, videoPath },
                         { goal: "play the game", state: "not-booted", note: error.detail },
                       ),
                     ),
@@ -810,7 +566,7 @@ const make = Effect.gen(function* () {
                   recordRun(owner, root, {
                     runId,
                     file: NodePath.relative(root, botFile),
-                    mode,
+                    mode: "play",
                     won: one.status.state === "done",
                     ending: botEnding(one.status.state),
                     seconds: one.gameSeconds,
@@ -831,7 +587,6 @@ const make = Effect.gen(function* () {
                     final: botFinalState(one.finalState),
                     video: videoPath,
                     findings: one.findings.length,
-                    mode,
                     file: NodePath.relative(root, botFile),
                     at,
                   })}\n`,
@@ -878,15 +633,7 @@ const make = Effect.gen(function* () {
         return yield* opError("Bot run", root, "cancelled", "The run was stopped.");
       const last = each[each.length - 1]!;
       const runIds = each.map((entry) => entry.runId);
-      let reportPath: string | null = null;
-      if (mode === "explore" || each.length > 1) {
-        const written = yield* writeReport(
-          root,
-          yield* Effect.promise(() => tracesOf(root, runIds)),
-        );
-        if (written !== null) reportPath = written.rel;
-      }
-      if (each.length === 1) return { ...last, runIds, reportPath };
+      if (each.length === 1) return { ...last, runIds };
       const ticks = each.reduce((sum, entry) => sum + entry.ticks, 0);
       const decisions = each.reduce((sum, entry) => sum + entry.decisions, 0);
       const findings = each
@@ -901,12 +648,9 @@ const make = Effect.gen(function* () {
         decisions,
         findings,
         runIds,
-        reportPath,
         message:
-          `${mode === "explore" ? "Exploration" : "Bot"} "${NodePath.relative(root, botFile)}": ` +
-          `${each.length} runs, ending ${states}. ` +
+          `Bot "${NodePath.relative(root, botFile)}": ${each.length} runs, ending ${states}. ` +
           `${decisions} decisions, ${findings.length} finding(s). ` +
-          (reportPath === null ? "" : `Player report: ${reportPath}. `) +
           `Last run video: ${last.videoPath}`,
       };
     });
@@ -928,35 +672,6 @@ const make = Effect.gen(function* () {
               ),
         ),
       );
-
-  /** The report of these traces at .studio/player-report.md; null when there is none to write. */
-  const writeReport = (
-    root: string,
-    traces: {
-      readonly picked: Parameters<typeof playerReportText>[0];
-      readonly unreadable: number;
-    },
-  ) =>
-    Effect.gen(function* () {
-      const report = playerReportText(traces.picked, traces.unreadable);
-      if (report === null) return null;
-      const rel = ".studio/player-report.md";
-      // In the game folder, where an agent can plant a link at the file or a
-      // folder above it: the folder is checked, the file replaced.
-      const written = yield* Effect.tryPromise(() => ensureGameDir(root, ".studio")).pipe(
-        Effect.flatMap((studio) =>
-          fileServices(
-            writeFileStringAtomically({
-              filePath: NodePath.join(studio, "player-report.md"),
-              contents: report.text,
-              followLink: false,
-            }),
-          ),
-        ),
-        Effect.option,
-      );
-      return Option.isSome(written) ? { rel, runs: report.runs } : null;
-    });
 
   const view = (root: string, input: GameBotViewInput) =>
     Effect.gen(function* () {
