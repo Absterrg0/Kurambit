@@ -241,6 +241,7 @@ const CAUSE_WORDS: Readonly<Record<GameFactNotMeasuredCause, string>> = {
   "old-shell": "the game was made before Kurambit measured this; a new build adds it",
   "no-play-bot": "no play bot yet; Keep going writes one, or ask your agent for one",
   deferred: "the play bot plays a build when Keep going judges it or when you measure it",
+  "no-saved-plays": "no test play is saved yet: save a run from the Stage's menu",
 };
 
 /** PURE. Why a fact has no reading, as a person reads it: its cause's words, else the build's own reason. */

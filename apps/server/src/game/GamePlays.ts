@@ -1,54 +1,77 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Kept plays are small JSON files in the game's ignored builds folder.
-// A person's runs on the Stage, kept so a newer build can play them again. The three.js shell
-// records a run as it is played (shell/replay.js) and the Stage hands it here when it ends; a
-// replay runs the latest one on a build's copy (or the folder, for the agent) and says how it
-// ends there and the first second it plays differently. Plays live beside the game's logs in
-// builds/plays, which the game's git ignores, and only the newest few are kept.
-import * as NodeCrypto from "node:crypto";
-import * as NodeFSP from "node:fs/promises";
-import * as NodePath from "node:path";
-import * as Context from "effect/Context";
+// Runs played to an end, kept so a newer build can play them again, and the ones someone saved
+// as tests. The three.js shell records a run as it is played (shell/replay.js); the Stage hands
+// a person's here when it ends, and an agent's game_play session keeps its own (GameExplore).
+// A replay runs the latest kept run on a build's copy (or the folder, for the agent) and says
+// how it ends there and the first second it plays differently. A saved play (playFiles.ts) is
+// a kept run named as a test: saved only once it replays the same on the build it was played
+// on, then replayed by every build's measure (GameFacts, the Saved plays fact).
 import * as DateTime from "effect/DateTime";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   firstPlayDifference,
-  GameBuildId,
   GameOperationError,
-  GamePlay,
+  type GameBuildId,
   type GameKeepPlayInput,
+  type GamePlay,
   type GameReplayResult,
+  type GameSavePlayInput,
+  type GameSavedPlaySummary,
+  type GameSavedPlaysReading,
+  savedPlayReading,
+  savedPlayWords,
   type ThreadId,
 } from "@kurambit/contracts";
 import * as GameBuilds from "./GameBuilds.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameProjectService from "./GameProjectService.ts";
+import {
+  deleteSavedPlay,
+  keepPlay,
+  keptPlay,
+  replaySavedPlays,
+  SAVED_DIR,
+  savedPlays,
+  writeSavedPlay,
+} from "./playFiles.ts";
 
-const PLAYS = "builds/plays";
-/** Plays kept per game: the newest, since a replay plays the latest. */
-const KEPT = 10;
-
-const KeptPlay = Schema.fromJsonString(
-  Schema.Struct({ at: Schema.String, build: Schema.NullOr(GameBuildId), play: GamePlay }),
-);
-const decodeKept = Schema.decodeUnknownOption(KeptPlay);
-const encodeKept = Schema.encodeSync(KeptPlay);
+const isGameOperationError = Schema.is(GameOperationError);
 
 export class GamePlays extends Context.Service<
   GamePlays,
   {
-    /** Keeps a run the person played to its end, with the build it was played on. */
+    /** Keeps a run the person played to its end, with the build it was played on; its id. */
     readonly keep: (
       threadId: ThreadId,
       input: Omit<GameKeepPlayInput, "threadId">,
-    ) => Effect.Effect<void, GameOperationError>;
+    ) => Effect.Effect<{ readonly kept: string }, GameOperationError>;
     /** The latest kept play run again on a build's copy, or on the folder as it is now. */
     readonly replay: (
       threadId: ThreadId,
       target: GameBuildId | "folder",
     ) => Effect.Effect<GameReplayResult, GameOperationError>;
+    /**
+     * Saves a kept run (the newest, or `kept`) as a test play, once a replay on the build it
+     * was played on ends the same way; refused, with the first difference, when it does not.
+     */
+    readonly save: (
+      threadId: ThreadId,
+      input: Omit<GameSavePlayInput, "threadId">,
+    ) => Effect.Effect<GameSavedPlaySummary & { readonly replaced: boolean }, GameOperationError>;
+    /** The game's saved plays, newest saved first. */
+    readonly saved: (
+      threadId: ThreadId,
+    ) => Effect.Effect<ReadonlyArray<GameSavedPlaySummary>, GameOperationError>;
+    readonly remove: (threadId: ThreadId, name: string) => Effect.Effect<void, GameOperationError>;
+    /**
+     * `game_play` op `replay`: every saved play replayed on the folder as it is now; with none
+     * saved, the latest run played to an end.
+     */
+    readonly replaySaved: (
+      threadId: ThreadId,
+    ) => Effect.Effect<GameSavedPlaysReading | GameReplayResult, GameOperationError>;
   }
 >()("kurambit/game/GamePlays") {}
 
@@ -57,68 +80,55 @@ const make = Effect.gen(function* () {
   const builds = yield* GameBuilds.GameBuilds;
   const engines = yield* GameEngine.GameEngine;
 
+  // A refusal from inside a game path (a link out of the game) passes as it is.
   const io = (root: string, detail: string) => (cause: unknown) =>
-    new GameOperationError({ operation: "plays", path: root, reason: "io", detail, cause });
+    isGameOperationError(cause)
+      ? cause
+      : new GameOperationError({ operation: "plays", path: root, reason: "io", detail, cause });
+  const refused = (path: string, detail: string) =>
+    new GameOperationError({ operation: "plays", path, reason: "invalid-input", detail });
+
+  /** The folder's build, unless the folder was edited since that build. */
+  const folderBuild = (threadId: ThreadId) =>
+    builds.current(threadId).pipe(
+      Effect.map((current) => (current.edited ? null : current.build)),
+      Effect.orElseSucceed(() => null),
+    );
 
   const keep: GamePlays["Service"]["keep"] = (threadId, input) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
-      // The folder's build it was played on, unless the folder was edited since that build.
-      const build = yield* builds.current(threadId).pipe(
-        Effect.map((current) => (current.edited ? null : current.build)),
-        Effect.orElseSucceed(() => null),
-      );
+      const build = yield* folderBuild(threadId);
       const at = DateTime.formatIso(yield* DateTime.now);
-      const dir = NodePath.join(root, PLAYS);
-      const name = `${at.replace(/[:.]/g, "-")}-${NodeCrypto.randomBytes(3).toString("hex")}.json`;
-      yield* Effect.tryPromise({
-        try: async () => {
-          await NodeFSP.mkdir(dir, { recursive: true });
-          const temporary = NodePath.join(dir, `.${name}`);
-          await NodeFSP.writeFile(temporary, encodeKept({ at, build, play: input.play }));
-          await NodeFSP.rename(temporary, NodePath.join(dir, name));
-          const kept = (await NodeFSP.readdir(dir)).filter((each) => each.endsWith(".json")).sort();
-          for (const old of kept.slice(0, Math.max(0, kept.length - KEPT)))
-            await NodeFSP.rm(NodePath.join(dir, old), { force: true });
-        },
+      const kept = yield* Effect.tryPromise({
+        try: () => keepPlay(root, { at, build, play: input.play }),
         catch: io(root, "The play could not be kept."),
       });
+      return { kept };
     });
 
-  /** The newest kept play that still reads, or null. */
-  const latest = (root: string) =>
+  const latest = (root: string, id?: string) =>
     Effect.tryPromise({
-      try: async () => {
-        const dir = NodePath.join(root, PLAYS);
-        const names = await NodeFSP.readdir(dir).catch(() => [] as Array<string>);
-        const newestFirst = names
-          .filter((each) => each.endsWith(".json"))
-          .toSorted()
-          .toReversed();
-        for (const name of newestFirst) {
-          const kept = decodeKept(await NodeFSP.readFile(NodePath.join(dir, name), "utf8"));
-          if (Option.isSome(kept)) return kept.value;
-        }
-        return null;
-      },
+      try: () => keptPlay(root, id),
       catch: io(root, "The kept plays could not be read."),
     });
+
+  /** A play run on a build's copy, or on the folder as it is now. */
+  const replayOn = (threadId: ThreadId, root: string, target: GameBuildId | "folder") =>
+    target === "folder"
+      ? (play: GamePlay) => engines.replayIn(root, play)
+      : (play: GamePlay) => builds.inCopy(threadId, target, (copy) => engines.replayIn(copy, play));
 
   const replay: GamePlays["Service"]["replay"] = (threadId, target) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const kept = yield* latest(root);
       if (kept === null)
-        return yield* new GameOperationError({
-          operation: "replay",
-          path: NodePath.join(root, PLAYS),
-          reason: "invalid-input",
-          detail: "No play is kept yet: a run played on the Stage to its end is kept for replays.",
-        });
-      const run =
-        target === "folder"
-          ? yield* engines.replayIn(root, kept.play)
-          : yield* builds.inCopy(threadId, target, (copy) => engines.replayIn(copy, kept.play));
+        return yield* refused(
+          root,
+          "No play is kept yet: a run played on the Stage to its end is kept for replays.",
+        );
+      const run = yield* replayOn(threadId, root, target)(kept.play);
       return {
         kept: { at: kept.at, build: kept.build, outcome: kept.play.outcome },
         now: run.outcome,
@@ -126,7 +136,85 @@ const make = Effect.gen(function* () {
       } satisfies GameReplayResult;
     });
 
-  return GamePlays.of({ keep, replay });
+  const all = (root: string) =>
+    Effect.tryPromise({
+      try: () => savedPlays(root),
+      catch: io(root, "The saved plays could not be read."),
+    });
+
+  // The folder's build measured again, so its Saved plays fact follows the plays now saved.
+  const remeasure = (threadId: ThreadId, root: string) =>
+    builds.current(threadId).pipe(
+      Effect.flatMap((current) =>
+        current.build === null ? Effect.void : builds.measureIn(root, current.build),
+      ),
+      Effect.ignore,
+    );
+
+  const save: GamePlays["Service"]["save"] = (threadId, input) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const kept = yield* latest(root, input.kept);
+      if (kept === null)
+        return yield* refused(
+          root,
+          input.kept === undefined
+            ? "No run is kept yet: play one to its end, on the Stage or with game_play start and act, then save it."
+            : "That run is no longer kept (only the newest ten are): play it again and save it.",
+        );
+      // A play that does not repeat itself on its own build is noise, never a test.
+      const target = kept.build ?? "folder";
+      const run = yield* replayOn(threadId, root, target)(kept.play);
+      const check = savedPlayReading(input.name, kept.play, run);
+      if (check.reading !== "same")
+        return yield* refused(
+          root,
+          `"${input.name}" does not replay the same on ${kept.build === null ? "the folder it was played on" : "the build it was played on"}, so it was not saved as a test: ${savedPlayWords(check)}. The game reads something a replay does not repeat: usually its own timers or listeners, or chance or time outside ctx.random(), ctx.after() and update().`,
+        );
+      const before = yield* all(root);
+      const replaced = before.plays.some((each) => each.name === input.name);
+      const at = DateTime.formatIso(yield* DateTime.now);
+      yield* Effect.tryPromise({
+        try: () =>
+          writeSavedPlay(root, { name: input.name, at, build: kept.build, play: kept.play }),
+        catch: io(root, "The play could not be saved."),
+      });
+      yield* remeasure(threadId, root);
+      return { name: input.name, at, build: kept.build, outcome: kept.play.outcome, replaced };
+    });
+
+  const saved: GamePlays["Service"]["saved"] = (threadId) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      return (yield* all(root)).plays.map((each) => ({
+        name: each.name,
+        at: each.at,
+        build: each.build,
+        outcome: each.play.outcome,
+      }));
+    });
+
+  const remove: GamePlays["Service"]["remove"] = (threadId, name) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const deleted = yield* Effect.tryPromise({
+        try: () => deleteSavedPlay(root, name),
+        catch: io(root, "The saved play could not be deleted."),
+      });
+      if (!deleted)
+        return yield* refused(`${root}/${SAVED_DIR}`, `No saved play is called "${name}".`);
+      yield* remeasure(threadId, root);
+    });
+
+  const replaySaved: GamePlays["Service"]["replaySaved"] = (threadId) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const plays = yield* all(root);
+      if (plays.plays.length === 0) return yield* replay(threadId, "folder");
+      return yield* replaySavedPlays(plays, replayOn(threadId, root, "folder"));
+    });
+
+  return GamePlays.of({ keep, replay, save, saved, remove, replaySaved });
 });
 
 export const layer = Layer.effect(GamePlays, make);

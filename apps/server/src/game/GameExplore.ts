@@ -8,7 +8,9 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
@@ -31,6 +33,7 @@ import {
   type GameConsoleMessage,
   type GamePlaytestProbe,
   type GameViewport,
+  GamePlay,
 } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GameTemplates from "./GameTemplates.ts";
@@ -63,7 +66,10 @@ import {
 } from "./playLaunch.ts";
 import { WebBrowserGone, WebPageCrashed } from "./webPlaySession.ts";
 import { makeSourceIdentity } from "./sourceTree.ts";
+import { keepPlay } from "./playFiles.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+
+const decodePlay = Schema.decodeUnknownOption(GamePlay);
 
 /**
  * Free memory an explore session needs to start, in MB, from
@@ -428,6 +434,29 @@ const make = Effect.gen(function* () {
     return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s) and ${stepsLeft} step(s): about ${s(perAct)} s of input per act spends it.`;
   };
   /**
+   * The runs the agent played to an end in the session, kept as the Stage keeps a person's, so
+   * `game_play` op `save` can make one a test. Played on the folder as it was: no build.
+   */
+  const keepFinishedPlays = (session: ExploreSession) =>
+    Effect.gen(function* () {
+      const taken = yield* Effect.promise(() => session.play.takePlays?.() ?? Promise.resolve([]));
+      for (const raw of taken) {
+        const play = decodePlay(raw);
+        if (Option.isNone(play)) continue;
+        const at = DateTime.formatIso(yield* DateTime.now);
+        yield* Effect.tryPromise(() =>
+          keepPlay(session.root, { at, build: null, play: play.value }),
+        );
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Keeping an exploration's finished run failed.", {
+          sessionId: session.id,
+          cause,
+        }),
+      ),
+    );
+  /**
    * Releases a session's player and scratch. The caller holds the session
    * lock; the transition is uninterruptible once it starts so a cancelled
    * close cannot leave a half-removed profile behind.
@@ -436,6 +465,7 @@ const make = Effect.gen(function* () {
     Effect.uninterruptible(
       Effect.gen(function* () {
         if (session.closed) return null;
+        yield* keepFinishedPlays(session);
         session.closed = true;
         session.closeReason = reason;
         session.closedAt = DateTime.formatIso(yield* DateTime.now);
@@ -1006,6 +1036,7 @@ const make = Effect.gen(function* () {
           });
         },
       });
+      yield* keepFinishedPlays(session);
       let keptScreenshot = "";
       let screenshotReason: string | undefined = undefined;
       if (screenshotPath === null)

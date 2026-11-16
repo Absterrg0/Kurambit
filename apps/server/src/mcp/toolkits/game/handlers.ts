@@ -35,6 +35,9 @@ import {
   GameModelSheetResult,
   GameOperationError,
   GameReplayResult,
+  GameSavedPlaySummary,
+  GameSavedPlaysReading,
+  GameSavedPlaysResult,
   GameSavedListResult,
   GameStatus,
   GameUnityRecompileResult,
@@ -333,9 +336,19 @@ const playHandlers = {
           as(GameBotViewResult),
         ),
       replay: () =>
-        withGame(GamePlays.GamePlays, (plays, threadId) => plays.replay(threadId, "folder")).pipe(
-          as(GameReplayResult),
+        withGame(GamePlays.GamePlays, (plays, threadId) => plays.replaySaved(threadId)).pipe(
+          as(Schema.Union([GameSavedPlaysReading, GameReplayResult])),
         ),
+      save: ({ name }) =>
+        withGame(GamePlays.GamePlays, (plays, threadId) => plays.save(threadId, { name })).pipe(
+          as(Schema.Struct({ ...GameSavedPlaySummary.fields, replaced: Schema.Boolean })),
+        ),
+      plays: (input) =>
+        withGame(GamePlays.GamePlays, (plays, threadId) =>
+          input.delete === undefined
+            ? plays.saved(threadId)
+            : plays.remove(threadId, input.delete).pipe(Effect.andThen(plays.saved(threadId))),
+        ).pipe(as(GameSavedPlaysResult)),
       model_sheet: modelSheet,
     }),
   ),

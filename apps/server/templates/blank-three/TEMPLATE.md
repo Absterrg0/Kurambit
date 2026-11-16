@@ -21,6 +21,7 @@ exists the page runs nothing. This is all the bridge needs from it:
    `{ dash: { keys: ["ShiftLeft"], pad: ["rb"], mouse: [0] } }`. The Stage's Controls rebinds
    them, the QA play presses each one the game reads, and replays record them. Timers go through
    `ctx.after(seconds, fn)` and chance through `ctx.random()`, so a replay plays the same.
+   Runs saved as test plays (`.studio/plays/`) replay on every build, ending as they did.
 5. **Tunable values.** `ctx.tune(id, defaults, ranges)` returns a live object the Stage's Tune
    changes (read it every frame); `ctx.thing(object, { name, kind })` names what a person would
    select. `web/tune.json` holds the person's tuned values and wins over your defaults.

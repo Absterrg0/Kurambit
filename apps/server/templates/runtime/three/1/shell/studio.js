@@ -164,6 +164,7 @@ export function installStudio({
   scene,
   qa,
   replay,
+  takePlays,
   sheet,
   play,
 }) {
@@ -206,8 +207,12 @@ export function installStudio({
           },
         }),
     // A play the Stage kept, run again on this build from its seed and its input at each
-    // step (shell/replay.js): how it ended, and where the run stood each second.
-    replay: (play) => replay(play),
+    // step (shell/replay.js): how it ended, and where the run stood each second. `options`:
+    // { drawEvery } for a measuring replay.
+    replay: (play, options) => replay(play, options),
+    // The runs this page played to an end since the last call (shell/replay.js), for a harness
+    // session, which no Stage holds, to keep as the Stage keeps a person's.
+    takePlays: () => takePlays(),
     // The model sheet (shell/sheet.js): one named thing alone, from four sides, with its
     // size, triangles and draw calls; names() lists the things with a body.
     ...(sheet === undefined

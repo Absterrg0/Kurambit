@@ -217,7 +217,7 @@ export class GameBuilds extends Context.Service<
       options?: {
         readonly waitFor?: Duration.Input;
         readonly queue?: "person" | "background";
-        /** Wait only for the boot check and the QA play (GameFacts.measure). */
+        /** Wait only for the boot check, the QA play and the saved plays (GameFacts.measure). */
         readonly upTo?: "boots";
         /** Also play the game's play bot, to prove it can be won (GameFacts.measure). */
         readonly skilled?: boolean;

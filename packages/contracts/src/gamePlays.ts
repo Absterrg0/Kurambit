@@ -3,10 +3,10 @@ import { NonNegativeInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 
 /**
- * A person's run on the Stage, as the three.js shell keeps it
- * (templates/runtime/three/1/shell/replay.js): the run's seed, its fixed step, the raw input of
- * each step where it changed, what the Stage changed mid-run, where the run stood each second,
- * and how it ended. Replayed on another build, the same input meets that build's game.
+ * A run played to its end, as the three.js shell keeps it
+ * (templates/runtime/three/1/shell/replay.js): the run's seed, its fixed step, its clock, the raw
+ * input of each step where it changed, what the Stage changed mid-run, where the run stood each
+ * second, and how it ended. Replayed on another build, the same input meets that build's game.
  */
 const Code = Schema.String.check(Schema.isMaxLength(64));
 const Codes = Schema.Array(Code).check(Schema.isMaxLength(32));
@@ -58,6 +58,11 @@ export const GamePlay = Schema.Struct({
   seed: NonNegativeInt,
   /** The fixed step, in seconds: one frame at the display's rate the run was played at. */
   dt: Schema.Finite.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1 / 30)),
+  /**
+   * performance.now() and Date.now() as the run began: a step reads them plus its game time, so
+   * a replay times as the run did. Absent on plays kept before the clock was.
+   */
+  clock: Schema.optionalKey(Schema.Tuple([Schema.Finite, Schema.Finite])),
   steps: NonNegativeInt,
   inputs: Schema.Array(Schema.Tuple([NonNegativeInt, GamePlayInput])).check(
     Schema.isMaxLength(20_001),
@@ -70,6 +75,8 @@ export const GamePlay = Schema.Struct({
   ).check(Schema.isMaxLength(2_000)),
   marks: Schema.Array(GamePlayMark).check(Schema.isMaxLength(1_300)),
   outcome: GamePlayOutcome,
+  /** The game's named actions the run pressed: a build without one of them cannot replay it. */
+  actions: Schema.optionalKey(Schema.Array(Code).check(Schema.isMaxLength(64))),
 });
 export type GamePlay = typeof GamePlay.Type;
 
@@ -79,6 +86,8 @@ export const GameReplayRun = Schema.Struct({
   seconds: Schema.Finite,
   steps: NonNegativeInt,
   marks: Schema.Array(GamePlayMark).check(Schema.isMaxLength(1_600)),
+  /** The play pressed actions this build does not have, so it was not run. */
+  missing: Schema.optionalKey(Schema.Array(Code).check(Schema.isMaxLength(64))),
 });
 export type GameReplayRun = typeof GameReplayRun.Type;
 
@@ -88,6 +97,39 @@ export const GameKeepPlayInput = Schema.Struct({
   play: GamePlay,
 });
 export type GameKeepPlayInput = typeof GameKeepPlayInput.Type;
+/** A kept run's id, which "Save as a test play" names it by. */
+export const GameKeepPlayResult = Schema.Struct({ kept: Schema.String });
+
+/** A saved play's name, as the person or the agent gave it: also its file's name, made safe. */
+export const GamePlayName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(60),
+  Schema.isPattern(/^[\p{L}\p{N}][\p{L}\p{N} _'-]*$/u),
+);
+
+/**
+ * Saves a kept run as a test play, replayed on every build from now on: `kept` names the run
+ * (the Stage's, from keepPlay); without it, the newest run played to an end, by the person or
+ * the agent. Refused when the run does not replay the same on the build it was played on.
+ */
+export const GameSavePlayInput = Schema.Struct({
+  threadId: ThreadId,
+  name: GamePlayName,
+  kept: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(120))),
+});
+export type GameSavePlayInput = typeof GameSavePlayInput.Type;
+
+/** A saved play: its name, when it was saved, the build it was played on, how it ended. */
+export const GameSavedPlaySummary = Schema.Struct({
+  name: Schema.String,
+  at: Schema.String,
+  build: Schema.NullOr(GameBuildId),
+  outcome: GamePlayOutcome,
+});
+export type GameSavedPlaySummary = typeof GameSavedPlaySummary.Type;
+export const GameSavedPlaysResult = Schema.Array(GameSavedPlaySummary);
+export const GameDeletePlayInput = Schema.Struct({ threadId: ThreadId, name: Schema.String });
+export type GameDeletePlayInput = typeof GameDeletePlayInput.Type;
 
 /** The person's latest kept play, replayed on one build. */
 export const GameReplayInput = Schema.Struct({
@@ -141,4 +183,110 @@ export const firstPlayDifference = (
     if (moved) return { seconds: a.t, what: "the player is elsewhere" };
   }
   return null;
+};
+
+/** Saved plays a build's measure replays, newest saved first; past it, the rest wait their turn. */
+export const SAVED_PLAYS_PER_BUILD = 10;
+
+/**
+ * What a saved play did on a build: it ends the same way at about the same time (same), it ends
+ * otherwise or no longer ends (ending-changed), it ends the same after play moved somewhere else
+ * (plays-differently), or it pressed an action this build no longer has (cannot-replay).
+ */
+export const GameSavedPlayReading = Schema.Literals([
+  "same",
+  "ending-changed",
+  "plays-differently",
+  "cannot-replay",
+]);
+export type GameSavedPlayReading = typeof GameSavedPlayReading.Type;
+
+const PlayDifference = Schema.Struct({ seconds: Schema.Finite, what: Schema.String });
+
+export const GameSavedPlayReplay = Schema.Struct({
+  name: Schema.String,
+  reading: GameSavedPlayReading,
+  saved: GamePlayOutcome,
+  /** How the replay ended; null when it did not end by the saved end and a little after. */
+  now: Schema.NullOr(GamePlayOutcome),
+  /** The first second it stood elsewhere than the saved run, and what differed; null: never. */
+  differs: Schema.NullOr(PlayDifference),
+  /** cannot-replay: the actions this build no longer has. */
+  missing: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+export type GameSavedPlayReplay = typeof GameSavedPlayReplay.Type;
+
+/** The Saved plays fact: every saved play replayed on the build, in the build's copy. */
+export const GameSavedPlaysReading = Schema.Struct({
+  /**
+   * Which saved plays were replayed, as a hash of their names and contents: a play saved,
+   * changed or deleted since then is measured again.
+   */
+  set: Schema.String,
+  plays: Schema.Array(GameSavedPlayReplay).check(Schema.isMaxLength(SAVED_PLAYS_PER_BUILD)),
+  /** Saved plays past SAVED_PLAYS_PER_BUILD, older ones, not replayed on this build. */
+  skipped: NonNegativeInt,
+});
+export type GameSavedPlaysReading = typeof GameSavedPlaysReading.Type;
+
+/** A second either way, or a twentieth of the run: "at about the same time". */
+const sameTime = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, Math.max(a, b) * 0.05);
+
+/** PURE. A saved play's replay on a build, read against how it ended when it was saved. */
+export const savedPlayReading = (
+  name: string,
+  saved: GamePlay,
+  run: GameReplayRun,
+): GameSavedPlayReplay => {
+  const base = { name, saved: saved.outcome, now: run.outcome };
+  if (run.missing !== undefined && run.missing.length > 0)
+    return { ...base, reading: "cannot-replay", differs: null, missing: run.missing };
+  const differs = firstPlayDifference(saved.marks, run.marks);
+  const reading =
+    run.outcome === null || run.outcome.won !== saved.outcome.won
+      ? "ending-changed"
+      : differs === null && sameTime(run.outcome.seconds, saved.outcome.seconds)
+        ? "same"
+        : "plays-differently";
+  return { ...base, reading, differs };
+};
+
+/** PURE. One play's reading in words: "first boss win now loses at 30 s, health 40 → 0 at 28 s". */
+export const savedPlayWords = (play: GameSavedPlayReplay): string => {
+  const where =
+    play.differs === null ? "" : `, ${play.differs.what} at ${Math.round(play.differs.seconds)} s`;
+  switch (play.reading) {
+    case "same":
+      return `${play.name} ends the same (${playOutcomeWords(play.now)})`;
+    case "ending-changed":
+      return play.now === null
+        ? `${play.name} no longer ends (it ${playOutcomeWords(play.saved)})${where}`
+        : `${play.name} now ${play.now.won ? "wins" : "loses"} at ${Math.round(play.now.seconds)} s${where}`;
+    case "plays-differently":
+      return play.differs === null
+        ? `${play.name} ends the same way, at ${Math.round(play.now?.seconds ?? 0)} s instead of ${Math.round(play.saved.seconds)} s`
+        : `${play.name} plays differently${where}`;
+    case "cannot-replay":
+      return `${play.name} can't replay: it presses ${(play.missing ?? []).join(", ")}, which this build no longer has`;
+  }
+};
+
+/** PURE. The fact in a line: "3 of 4 end the same; first boss win now loses at 30 s, …". */
+export const savedPlaysWords = (reading: GameSavedPlaysReading): string => {
+  const total = reading.plays.length;
+  const same = reading.plays.filter((play) => play.reading === "same").length;
+  const skipped = reading.skipped > 0 ? ` (${reading.skipped} older not replayed)` : "";
+  if (same === total)
+    return `${total === 1 ? "The saved play ends" : `All ${total} saved plays end`} the same${skipped}`;
+  // An ending changed or a play that can't replay first: those are what a person acts on.
+  const order: ReadonlyArray<GameSavedPlayReading> = [
+    "ending-changed",
+    "cannot-replay",
+    "plays-differently",
+  ];
+  const off = reading.plays
+    .filter((play) => play.reading !== "same")
+    .toSorted((a, b) => order.indexOf(a.reading) - order.indexOf(b.reading));
+  const more = off.length > 1 ? ` (+${off.length - 1} more)` : "";
+  return `${same} of ${total} end the same; ${savedPlayWords(off[0]!)}${more}${skipped}`;
 };

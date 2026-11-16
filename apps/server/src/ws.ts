@@ -1845,9 +1845,13 @@ const layerWsRpc = (
             ...(commandId === undefined ? {} : { commandId }),
             ...(fold === undefined ? {} : { fold }),
           }),
-        [WS_METHODS.gameKeepPlay]: ({ threadId, play }) =>
-          gamePlays.keep(threadId, { play }).pipe(Effect.as({})),
+        [WS_METHODS.gameKeepPlay]: ({ threadId, play }) => gamePlays.keep(threadId, { play }),
         [WS_METHODS.gameReplay]: ({ threadId, build }) => gamePlays.replay(threadId, build),
+        [WS_METHODS.gameSavePlay]: ({ threadId, name, kept }) =>
+          gamePlays.save(threadId, { name, ...(kept === undefined ? {} : { kept }) }),
+        [WS_METHODS.gameSavedPlays]: ({ threadId }) => gamePlays.saved(threadId),
+        [WS_METHODS.gameDeletePlay]: ({ threadId, name }) =>
+          gamePlays.remove(threadId, name).pipe(Effect.as({})),
         [WS_METHODS.subscribeGameEvents]: (input) =>
           // The library listens to games' own folders only; a thread to its game.
           input.threadId === undefined

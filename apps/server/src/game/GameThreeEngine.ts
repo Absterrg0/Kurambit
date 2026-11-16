@@ -53,6 +53,12 @@ import {
 import { checkPerformance } from "./playPerf.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
+/**
+ * A replay draws one frame in this many: the harness reads how the run went, never its picture.
+ * In SwiftShader it is what makes a replay fit a build's measure (a 60 s play of a sword duel:
+ * 106 s drawing every frame, 11 s at one in 60); on a GPU stepping costs the most either way.
+ */
+const REPLAY_DRAW_EVERY = 30;
 /** A quick look's play: long enough for a frame rate (two seconds of frames) and a moved frame. */
 const LOOK_PLAY_MS = 2_500;
 /** Play before the sheet is drawn: start() has built the run and the clips have begun. */
@@ -577,7 +583,7 @@ export const makeThreeBackend = (
                     signal,
                   });
                   try {
-                    return await session.replay(input.play);
+                    return await session.replay(input.play, { drawEvery: REPLAY_DRAW_EVERY });
                   } finally {
                     await session.close();
                   }

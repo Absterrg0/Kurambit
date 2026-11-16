@@ -1,9 +1,11 @@
 // Record and replay. The shell steps play in fixed slices of real time (one display frame at the
 // display's own rate, measured), and a run's randomness comes from its seed: ctx.random(), and
-// Math.random while a step runs. A run's play is then its seed, its slice, the raw input each
+// Math.random while a step runs. While a step runs, performance.now() and Date.now() read the
+// run's own clock (its game time from the bases the play keeps), so a game timing itself with
+// them replays the same. A run's play is then its seed, its slice, its clock, the raw input each
 // step read and what the Stage changed mid-run; played again on any build, it is the same run
 // until the build plays differently. What a game reads outside ctx.input, ctx.keys and
-// ctx.mouse (its own listeners, the clock) is not in the play.
+// ctx.mouse (its own listeners, timers outside ctx.after) is not in the play.
 //
 // The Stage keeps a person's ended runs; the harness replays one with window.__studio.replay.
 
@@ -116,11 +118,12 @@ export function mark(time, player, state) {
 }
 
 /** Keeps one run's play as it is played: only the steps whose input changed. */
-export function createRecorder(seed, dt) {
+export function createRecorder(seed, dt, clock) {
   const play = {
     version: 1,
     seed,
     dt,
+    clock,
     steps: 0,
     inputs: [],
     events: [],
@@ -129,7 +132,13 @@ export function createRecorder(seed, dt) {
   };
   let last = "";
   let full = false;
+  /** The named actions the run pressed: a build without one of them cannot replay it. */
+  const actions = new Set();
   return {
+    /** After a step sampled its input: the actions held in it. */
+    actions(held) {
+      for (const name of held) actions.add(name);
+    },
     /** Before a step samples its input. */
     input(run, pad) {
       if (full) return;
@@ -149,10 +158,11 @@ export function createRecorder(seed, dt) {
       play.steps = steps;
       if (entry !== null) play.marks.push(entry);
     },
-    /** The run ended: the play, or null when it outgrew what is kept. */
-    finish(outcome) {
+    /** The run ended: the play, or null when it outgrew what is kept. `read`: the actions the game read. */
+    finish(outcome, read) {
       if (full) return null;
       play.outcome = outcome;
+      play.actions = [...actions].filter((name) => read.has(name)).slice(0, 64);
       return play;
     },
   };

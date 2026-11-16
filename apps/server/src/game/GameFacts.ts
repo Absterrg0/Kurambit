@@ -39,12 +39,14 @@ import {
   GameFactPending,
   GamePerformance,
   GameQaReport,
+  GameSavedPlaysReading,
   type GameBotRunResult,
   GameEngineId,
   GameManifest,
   GameOperationError,
   manifestProject,
   manifestRuntime,
+  noSavedPlays,
 } from "@kurambit/contracts";
 import {
   bootsFact,
@@ -74,6 +76,7 @@ import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
+import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
 /**
  * Changes when the server's reading of a measurement, or how templates/bot-child.mjs plays a
@@ -174,6 +177,13 @@ const Stored = Schema.Struct({
       GameFactPending,
     ]),
   ),
+  savedPlays: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GameSavedPlaysReading }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
   /** Each play's own use record, so a tier measured again replaces only its own. */
   plays: Schema.optionalKey(
     Schema.Struct({
@@ -194,25 +204,37 @@ const decodeCopyManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameMa
 
 /**
  * The facts a tier's run writes: only what a person acts on. The boot check (with the QA play),
- * then the random-input play (errors, freezes, frame rate), and the play bot only when someone
- * asks to prove the game can be won. use is every play's together: each play tier writes it
- * again with its own record added (the generation cards read it).
+ * the game's saved plays replayed, then the random-input play (errors, freezes, frame rate),
+ * and the play bot only when someone asks to prove the game can be won. use is every play's
+ * together: each play tier writes it again with its own record added (the generation cards
+ * read it).
  */
-type Tier = "boots" | "masher" | "skilled";
-type FactName = "boots" | "masher" | "skilled" | "use" | "performance" | "qa";
+type Tier = "boots" | "replays" | "masher" | "skilled";
+type FactName = "boots" | "masher" | "skilled" | "use" | "performance" | "qa" | "savedPlays";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   // The boot check plays the QA play too (GameEngine.checkIn), so its report lands with it.
   boots: ["boots", "qa"],
+  replays: ["savedPlays"],
   masher: ["masher", "performance", "use"],
   skilled: ["skilled", "use"],
 };
-const TIERS: ReadonlyArray<Tier> = ["boots", "masher", "skilled"];
+const TIERS: ReadonlyArray<Tier> = ["boots", "replays", "masher", "skilled"];
+/**
+ * A build no saved play was replayed on: the game had none (or none when it was measured, or
+ * it plays outside a browser, where no play is recorded). The fact is then not shown.
+ */
+const NONE_SAVED = notMeasured(
+  "no saved play was replayed on this build",
+  false,
+  false,
+  "no-saved-plays",
+);
 const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => TIER_FACTS[tier]))];
 /**
  * Asset use is read from a browser page's requests, performance from its shell; an engine whose
  * game plays in its own process says why it has none of them, and never owes them.
  */
-const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "qa"]);
+const BROWSER_ONLY: ReadonlySet<FactName> = new Set(["use", "performance", "qa", "savedPlays"]);
 const browserOnly = (engine: GameEngineId, fact: "use" | "performance" | "qa") =>
   engineProfile(engine).play === "browser"
     ? null
@@ -232,6 +254,7 @@ const factsOf = (engine: GameEngineId | undefined): ReadonlyArray<FactName> =>
 /** Each tier's step as the measuring line names it. */
 const TIER_STEP: Readonly<Record<Tier, string>> = {
   boots: "checking it starts",
+  replays: "replaying the saved plays",
   masher: "playing it with random input",
   skilled: "letting the play bot play it",
 };
@@ -268,7 +291,10 @@ interface Job {
   stopped: boolean;
   fiber: Fiber.Fiber<void> | null;
   readonly done: Deferred.Deferred<void>;
-  /** Its boot check (with the QA play) is in, or it had none to do: what keep going judges by. */
+  /**
+   * Its boot check (with the QA play) and its saved plays are in, or it had none to do: what
+   * keep going judges and proposes by.
+   */
   readonly booted: Deferred.Deferred<void>;
 }
 
@@ -295,8 +321,8 @@ export class GameFacts extends Context.Service<
      * build), it drops the game's other queued measures that asked the same:
      * only the newest turn is worth the wait. A running measure, a person's
      * and a run's are never dropped. `upTo: "boots"` waits only for the
-     * boot check and the QA play, the readings keep going judges a step by;
-     * the random-input play goes on behind it.
+     * boot check, the QA play and the saved plays, the readings keep going
+     * judges a step by; the random-input play goes on behind it.
      */
     readonly measure: (
       build: ResolvedBuild,
@@ -403,14 +429,21 @@ const make = Effect.gen(function* () {
       use: useNotMeasured(build.engine) ?? get("use"),
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
       qa: browserOnly(build.engine, "qa") ?? get("qa"),
+      savedPlays:
+        useNotMeasured(build.engine) !== null
+          ? NONE_SAVED
+          : pending("savedPlays")
+            ? ({ status: "pending" } as const)
+            : (stored?.savedPlays ?? NONE_SAVED),
     };
-    // An engine with no asset use or performance is not an incomplete measurement.
-    const counted =
-      useNotMeasured(build.engine) === null
-        ? Object.values(facts)
-        : Object.entries(facts).flatMap(([name, fact]) =>
-            BROWSER_ONLY.has(name as FactName) ? [] : [fact],
-          );
+    // An engine with no asset use or performance is not an incomplete measurement, nor is a
+    // game with no saved plays.
+    const counted = Object.entries(facts).flatMap(([name, fact]) =>
+      (useNotMeasured(build.engine) !== null && BROWSER_ONLY.has(name as FactName)) ||
+      (name === "savedPlays" && noSavedPlays(facts))
+        ? []
+        : [fact],
+    );
     const anyMeasured = FACT_NAMES.some((fact) => stored?.[fact] !== undefined);
     const state =
       job !== undefined
@@ -511,6 +544,15 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /** Which plays the game has saved now (playFiles.ts); "" for none or unreadable. */
+  const savedSetOf = (root: string) =>
+    Effect.promise(() =>
+      savedPlays(root).then(
+        (saved) => saved.set,
+        () => "",
+      ),
+    );
+
   // The tester's latest play bot on this game, with the hash of its file now.
   const currentBot = (root: string) =>
     Effect.gen(function* () {
@@ -538,6 +580,7 @@ const make = Effect.gen(function* () {
     engine: GameEngineId,
     skilledWanted: boolean,
     runtime: string | null,
+    savedSet: string,
   ): ReadonlySet<Tier> => {
     if (found === null || found.harness !== harness) return new Set(TIERS);
     // The same files on another runtime are another game to play: its readings are stale.
@@ -556,7 +599,23 @@ const make = Effect.gen(function* () {
       );
     };
     const tiers = new Set<Tier>();
-    for (const tier of TIERS) if (TIER_FACTS[tier].some(needs)) tiers.add(tier);
+    for (const tier of TIERS)
+      if (tier !== "replays" && TIER_FACTS[tier].some(needs)) tiers.add(tier);
+    // The saved plays are replayed again whenever they are not the ones last replayed here; a
+    // row from before saved plays existed replayed none.
+    const replayed = stored.savedPlays;
+    const replayedSet =
+      replayed === undefined ||
+      (replayed.status === "not-measured" && replayed.cause === "no-saved-plays")
+        ? ""
+        : replayed.status === "measured"
+          ? replayed.value.set
+          : null;
+    if (
+      owes.has("savedPlays") &&
+      (replayedSet === null ? needs("savedPlays") : replayedSet !== savedSet)
+    )
+      tiers.add("replays");
     const skilled = stored.skilled;
     const botChanged =
       bot === null
@@ -712,7 +771,6 @@ const make = Effect.gen(function* () {
                 );
           yield* write(browserOnly(build.engine, "qa") === null ? facts : { boots: facts.boots });
         }
-        yield* Deferred.succeed(booted, undefined);
         // The harness's own bots, fresh from the server's templates, never the game's.
         const kitWritten = yield* Effect.promise(async () => {
           const dir = NodePath.join(copy, HARNESS_KIT);
@@ -726,7 +784,7 @@ const make = Effect.gen(function* () {
         );
         const boots = stored.boots;
         const unbooted = boots?.status === "measured" && !boots.value.ok;
-        const blocked = unbooted
+        const unstarted = unbooted
           ? notMeasured("the build failed its boot check", false)
           : boots?.status !== "measured"
             ? notMeasured(
@@ -735,9 +793,42 @@ const make = Effect.gen(function* () {
                 false,
                 boots?.status === "not-measured" ? boots.cause : undefined,
               )
-            : !kitWritten
-              ? notMeasured("the harness's bots could not be written into the build's copy", true)
-              : null;
+            : null;
+        const blocked =
+          unstarted ??
+          (!kitWritten
+            ? notMeasured("the harness's bots could not be written into the build's copy", true)
+            : null);
+
+        // Every saved play, replayed in this copy inside the lane's hold. A replay never
+        // waits on real time, so it is measured on a software renderer too.
+        if (tiers.has("replays")) {
+          const saved = yield* Effect.promise(() =>
+            savedPlays(root).catch(() => ({ plays: [], set: "" })),
+          );
+          yield* write({
+            savedPlays:
+              saved.plays.length === 0
+                ? NONE_SAVED
+                : (unstarted ??
+                  (yield* replaySavedPlays(saved, (play) =>
+                    step(engines.replayIn(copy, play)),
+                  ).pipe(
+                    Effect.map((value) => ({ status: "measured" as const, value })),
+                    Effect.catchTags({
+                      GameOperationError: (error) =>
+                        Effect.succeed(
+                          faultOf(error) ??
+                            notMeasured(
+                              `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
+                              false,
+                            ),
+                        ),
+                    }),
+                  ))),
+          });
+        }
+        yield* Deferred.succeed(booted, undefined);
 
         // Each bot run says how busy the machine was, so a run slowed by other
         // work is never read as the game's slowness; it waits a while for an
@@ -960,10 +1051,12 @@ const make = Effect.gen(function* () {
             build.engine,
             skilled,
             yield* runtimeOf(build.root, build.engine),
+            yield* savedSetOf(build.root),
           );
           job.tiers = tiers;
           job.written.clear();
-          if (!tiers.has("boots")) yield* Deferred.succeed(job.booted, undefined);
+          if (!tiers.has("boots") && !tiers.has("replays"))
+            yield* Deferred.succeed(job.booted, undefined);
           if (tiers.size === 0) return;
           yield* operations.changed(
             build.root,
@@ -982,6 +1075,7 @@ const make = Effect.gen(function* () {
               build.engine,
               true,
               yield* runtimeOf(build.root, build.engine),
+              yield* savedSetOf(build.root),
             );
             job.tiers = again.has("skilled") ? new Set<Tier>(["skilled"]) : new Set<Tier>();
             job.written.clear();
@@ -1052,6 +1146,7 @@ const make = Effect.gen(function* () {
             build.engine,
             options.skilled === true,
             yield* runtimeOf(build.root, build.engine),
+            yield* savedSetOf(build.root),
           ).size > 0;
         if (!owes) return yield* read(build);
       }
@@ -1167,7 +1262,10 @@ const make = Effect.gen(function* () {
         if (
           stored?.root === undefined ||
           stored.engine === undefined ||
-          !factsOf(stored.engine).some((name) => stored[name] === undefined) ||
+          // Saved plays are replayed when a build is measured, never owed by a row from before.
+          !factsOf(stored.engine).some(
+            (name) => name !== "savedPlays" && stored[name] === undefined,
+          ) ||
           jobs.has(row.facts_key)
         )
           return [];

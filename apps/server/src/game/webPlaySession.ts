@@ -153,15 +153,19 @@ const RUN_QA = `(async () => {
 })()`;
 /** A kept play run again (shell/replay.js): far faster than real time, so a bound on its length is generous. */
 const REPLAY_MS = (seconds: number) => 60_000 + seconds * 1_000;
-const RUN_REPLAY = `(async (play) => {
+const RUN_REPLAY = `(async (play, options) => {
   const replay = window.__studio?.replay;
   if (typeof replay !== "function") return "no-replay";
   try {
-    return JSON.parse(JSON.stringify(await replay(play)));
+    return JSON.parse(JSON.stringify(await replay(play, options)));
   } catch {
     return null;
   }
 })`;
+const TAKE_PLAYS = `(() => {
+  const take = window.__studio?.takePlays;
+  return typeof take === "function" ? JSON.parse(JSON.stringify(take())) : [];
+})()`;
 /** One view of a model sheet, as shell/sheet.js draws it: a label and the direction it looks from. */
 export interface SheetView {
   readonly label: string;
@@ -394,8 +398,12 @@ export interface WebPlaySession extends PlaySession {
   /**
    * Runs a kept play again from its seed and input (shell/replay.js) and returns what the page
    * answered: null when it did not in time, "no-replay" when the shell has no replay.
+   * `drawEvery`: the page draws one frame in that many while it replays.
    */
-  readonly replay: (play: { readonly steps: number; readonly dt: number }) => Promise<unknown>;
+  readonly replay: (
+    play: { readonly steps: number; readonly dt: number },
+    options?: { readonly drawEvery: number },
+  ) => Promise<unknown>;
   /**
    * Lays the model sheet of one named thing over the page (shell/sheet.js) and returns its
    * measures; with null, the things it could draw. Null when the page did not answer in time,
@@ -880,12 +888,22 @@ export const openWebPlaySession = async (input: {
       keptStorage: () => kept,
       perf: () => perf,
       scene: () => scene,
-      replay: async (play) => {
+      replay: async (play, options) => {
         const answered = await bounded(
-          page.evaluate(`${RUN_REPLAY}(${JSON.stringify(play)})`).catch(() => null),
+          page
+            .evaluate(`${RUN_REPLAY}(${JSON.stringify(play)}, ${JSON.stringify(options ?? {})})`)
+            .catch(() => null),
           REPLAY_MS(play.steps * play.dt),
         );
         return answered === TIMED_OUT ? null : answered;
+      },
+      takePlays: async () => {
+        if (endedWith !== null) return [];
+        const taken = await bounded(
+          page.evaluate(TAKE_PLAYS).catch(() => null),
+          PLAY_BOUNDS.webCallMs,
+        );
+        return Array.isArray(taken) ? taken : [];
       },
       sheet: async (name, views) => {
         const answered = await bounded(

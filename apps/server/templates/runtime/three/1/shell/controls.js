@@ -337,6 +337,8 @@ export function createInput(controls) {
     },
     /** The actions the game has read since this run began. */
     reads,
+    /** The actions held in the last sample. */
+    held: () => now.keys(),
     settle() {
       settling = true;
     },

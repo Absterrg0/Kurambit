@@ -66,6 +66,11 @@ export interface PlaySession {
   readonly refusedStates: () => ReadonlyArray<{ readonly target: string; readonly error: string }>;
   /** Asks the runner to quit and lets go of the connection. Idempotent. */
   readonly close: () => Promise<void>;
+  /**
+   * The runs the game played to an end since the last call (the three.js shell's recorded
+   * plays, shell/replay.js), to keep as the Stage keeps a person's. Absent where none are kept.
+   */
+  readonly takePlays?: () => Promise<ReadonlyArray<unknown>>;
 }
 
 export type PlayTick =

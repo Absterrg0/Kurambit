@@ -9,6 +9,7 @@ import { GameCharacterRoute, GameStoredCharacterRoute } from "./gameStyle.ts";
 import { GameArtLanes } from "./gameArt.ts";
 import { GameSceneReport } from "./gameScene.ts";
 import { GameQaReport } from "./gameQa.ts";
+import { GameSavedPlaysReading } from "./gamePlays.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
   /** Local handle the bpy script reads as `ASSET_INPUTS[name]`. */
@@ -1008,6 +1009,21 @@ export const GameCheckResult = Schema.Struct({
         /** The game's copy of the shell predates the QA play: a new build adds it. */
         cause: Schema.optionalKey(Schema.Literal("old-shell")),
       }),
+    ]),
+  ),
+  /**
+   * A final check of a game with saved plays: each replayed on the folder as it is now, read
+   * against how it ended when saved ("2 of 3 end the same; first boss win now loses at 30 s").
+   * One that ends differently is a regression or the change you meant: say which.
+   */
+  savedPlays: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({
+        status: Schema.Literal("measured"),
+        text: Schema.String,
+        reading: GameSavedPlaysReading,
+      }),
+      Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
     ]),
   ),
 });

@@ -8,6 +8,7 @@ import { GameKeepGoingButton } from "./GameKeepGoingButton";
 import {
   CircleStopIcon,
   CrosshairIcon,
+  FlagIcon,
   SlidersHorizontalIcon,
   ChevronDownIcon,
   PaletteIcon,
@@ -60,6 +61,7 @@ import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { GameSavedPlaysDialog } from "./GameSavedPlays";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
@@ -403,6 +405,9 @@ function ThreadGameStage({
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const keepPlay = useAtomCommand(gameEnvironment.keepPlay, { reportFailure: false });
+  // The run this Stage last kept, which "Save as a test play" names.
+  const [lastKept, setLastKept] = useState<string | null>(null);
+  const [playsOpen, setPlaysOpen] = useState(false);
   const canKeepPlay = useAtomValue(
     gameEnvironment.keepPlay.permissionAtom(threadRef.environmentId),
   );
@@ -816,11 +821,14 @@ function ThreadGameStage({
   }, [liveOpenAsked, openLive]);
   const onStudioMessage = useStableCallback((studio: StudioMessage) => {
     if (studio.type === "studio-play") {
-      // A run played to its end: kept, so a later build can play it again.
+      // A run played to its end: kept, so a later build can play it again, and the person can
+      // save it as a test play.
       if (canKeepPlay)
         void keepPlay({
           environmentId: threadRef.environmentId,
           input: { threadId: threadRef.threadId, play: studio.play },
+        }).then((result) => {
+          if (result._tag === "Success") setLastKept(result.value.kept);
         });
       return;
     }
@@ -1353,6 +1361,12 @@ function ThreadGameStage({
                     {fullscreenKey === null ? null : <MenuShortcut>{fullscreenKey}</MenuShortcut>}
                   </MenuItem>
                 ) : null}
+                {engine.stageBridge ? (
+                  <MenuItem onClick={() => setPlaysOpen(true)}>
+                    <FlagIcon />
+                    Test plays…
+                  </MenuItem>
+                ) : null}
                 {hasSteps ? (
                   <MenuItem onClick={() => setReelOpen(!reelOpen)}>
                     <FilmIcon />
@@ -1722,6 +1736,12 @@ function ThreadGameStage({
           </DialogPanel>
         </DialogPopup>
       </Dialog>
+      <GameSavedPlaysDialog
+        threadRef={threadRef}
+        open={playsOpen}
+        onOpenChange={setPlaysOpen}
+        kept={lastKept}
+      />
     </section>
   );
 }

@@ -156,10 +156,18 @@ const MISS_LIMIT = 2;
 const TEXT_MAX = 8000;
 
 /**
- * The facts keep going shows on a step's record and proposes when bad: what a player would hit.
- * The play bot plays only when someone asks, so it is never watched.
+ * The facts keep going shows on a step's record and proposes when bad: what a player would hit,
+ * and a saved play that no longer ends the same. The play bot plays only when someone asks, so
+ * it is never watched.
  */
-const WATCHED: ReadonlySet<GameFactId> = new Set(["boots", "errors", "controls", "retry", "hud"]);
+const WATCHED: ReadonlySet<GameFactId> = new Set([
+  "boots",
+  "errors",
+  "controls",
+  "retry",
+  "hud",
+  "saved-plays",
+]);
 
 // ── The step's text: four templates, the facts' own wording and the agent's own line.
 const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
@@ -204,6 +212,7 @@ const FACT_GOAL: Readonly<Partial<Record<GameFactId, string>>> = {
   controls: "Make every declared control do something",
   retry: "Make Retry start a clean run",
   hud: "Keep the HUD on screen",
+  "saved-plays": "Make the saved plays end the way they did",
 };
 
 /**
@@ -515,7 +524,9 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
     () => referenceProposal(look),
     ...(facts === null || views === null
       ? []
-      : (["controls", "retry", "hud"] as const)
+      : // A saved play that ends otherwise is proposed, never undone: it may be the change
+        // the person asked for, and the step's agent says whether it was.
+        (["controls", "retry", "hud", "saved-plays"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
     () => {

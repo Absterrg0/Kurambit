@@ -26,6 +26,7 @@ import {
   type GameProcessResult,
   type GamePlay,
   type GameReplayRun,
+  savedPlaysWords,
   type GameModelSheetInput,
   type GameModelSheetResult,
   type GameToolStatus,
@@ -54,6 +55,7 @@ import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourc
 import type { WindowHost } from "./windowHost.ts";
 import { gameReference } from "./gameReference.ts";
 import type { SheetView } from "./webPlaySession.ts";
+import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
 /**
  * How an agent judges a model sheet, carried by the sheet's own result so it arrives exactly
@@ -666,6 +668,68 @@ const make = Effect.gen(function* () {
       projects.read(root),
       (manifest) => `${engineProfile(manifest.engine.name).displayName} check`,
     );
+  const replayIn: GameEngine["Service"]["replayIn"] = (root, play) =>
+    Effect.gen(function* () {
+      const manifest = yield* projects.read(root);
+      const { backend, ctx } = yield* context(root);
+      const refused = (detail: string) =>
+        new GameOperationError({
+          operation: "replay",
+          path: root,
+          reason: "invalid-input",
+          detail,
+        });
+      if (backend.replay === null)
+        return yield* refused(
+          `${backend.profile.displayName} games do not keep plays yet; three.js games do.`,
+        );
+      const run = yield* backend.replay(ctx, {
+        gameplayScene: manifest.gameplayScene ?? "",
+        play,
+      });
+      if (run === "no-replay")
+        return yield* refused(
+          "This build's copy of the shell predates replays, so it cannot play a kept run.",
+        );
+      return run;
+    });
+  // A final check replays the game's saved plays on the folder, once per state of the files
+  // and of the saved plays: the last reading per game.
+  const replayedSaved = new Map<
+    string,
+    { key: string; savedPlays: NonNullable<GameCheckResult["savedPlays"]> }
+  >();
+  const savedPlaysOn = (root: string) =>
+    Effect.gen(function* () {
+      const saved = yield* Effect.promise(() =>
+        savedPlays(root).catch(() => ({ plays: [], set: "" })),
+      );
+      if (saved.plays.length === 0) return {};
+      const identity = yield* checkedIdentity(root);
+      const key = identity === null ? null : `${identity}:${saved.set}`;
+      const known = replayedSaved.get(root);
+      if (key !== null && known !== undefined && known.key === key)
+        return { savedPlays: known.savedPlays };
+      const reading: NonNullable<GameCheckResult["savedPlays"]> = yield* replaySavedPlays(
+        saved,
+        (play) => replayIn(root, play),
+      ).pipe(
+        Effect.map((value) => ({
+          status: "measured" as const,
+          text: savedPlaysWords(value),
+          reading: value,
+        })),
+        Effect.catchTags({
+          GameOperationError: (error) =>
+            Effect.succeed({
+              status: "not-measured" as const,
+              why: `the saved plays could not be replayed: ${(error.detail ?? error.reason).split("\n")[0]}`,
+            }),
+        }),
+      );
+      if (key !== null) replayedSaved.set(root, { key, savedPlays: reading });
+      return { savedPlays: reading };
+    });
   return GameEngine.of({
     backendFor,
     context,
@@ -673,13 +737,13 @@ const make = Effect.gen(function* () {
     import: (threadId) => projects.exclusive(threadId, "Import", importProject),
     check: (threadId, owner, options) =>
       Effect.gen(function* () {
-        const label = yield* checkLabel(yield* projects.resolve(threadId));
-        return yield* projects.exclusive(
-          threadId,
-          label,
-          checkRemembered(options?.final === true),
-          { owner },
-        );
+        const root = yield* projects.resolve(threadId);
+        const label = yield* checkLabel(root);
+        const final = options?.final === true;
+        const result = yield* projects.exclusive(threadId, label, checkRemembered(final), {
+          owner,
+        });
+        return final && result.ok ? { ...result, ...(yield* savedPlaysOn(root)) } : result;
       }),
     cleanCheckAt: (root) => Effect.sync(() => cleanCheckTimes.get(root) ?? null),
     checkIn: (root, owner) =>
@@ -687,31 +751,7 @@ const make = Effect.gen(function* () {
         // The QA play's report is a build fact of its own, measured with the boot.
         operations.exclusive(root, label, check(root, { qa: true }), owner),
       ),
-    replayIn: (root, play) =>
-      Effect.gen(function* () {
-        const manifest = yield* projects.read(root);
-        const { backend, ctx } = yield* context(root);
-        const refused = (detail: string) =>
-          new GameOperationError({
-            operation: "replay",
-            path: root,
-            reason: "invalid-input",
-            detail,
-          });
-        if (backend.replay === null)
-          return yield* refused(
-            `${backend.profile.displayName} games do not keep plays yet; three.js games do.`,
-          );
-        const run = yield* backend.replay(ctx, {
-          gameplayScene: manifest.gameplayScene ?? "",
-          play,
-        });
-        if (run === "no-replay")
-          return yield* refused(
-            "This build's copy of the shell predates replays, so it cannot play a kept run.",
-          );
-        return run;
-      }),
+    replayIn,
     modelSheet: (threadId, input) =>
       projects.exclusive(threadId, "Model sheet", (root) =>
         Effect.gen(function* () {

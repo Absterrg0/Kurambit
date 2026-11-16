@@ -25,9 +25,10 @@
 //                                    // the title is up
 //
 // Play runs in fixed steps: update(dt) is called once per display frame at the display's own
-// rate (more on a slow frame), so a run plays the same on any machine, and ctx.random() (and
-// Math.random inside update) comes from the run's seed. The Stage keeps a person's runs and
-// plays them again on a newer build (shell/replay.js).
+// rate (more on a slow frame), so a run plays the same on any machine, ctx.random() (and
+// Math.random inside update) comes from the run's seed, and performance.now() and Date.now()
+// inside update read the run's own clock. The Stage keeps a person's runs and plays them again
+// on a newer build, and saved plays on every build (shell/replay.js).
 //
 // ctx, fresh each run: renderer, canvas, hud (the game's DOM layer), scene,
 // camera, player, ui (the HUD kit: counter, bar, timer, objective, toast,
@@ -187,9 +188,16 @@ const pointer = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
 /** The display's frame time, which a new run steps at. */
 const rate = createRate();
 const nativeRandom = Math.random;
+const nativeNow = performance.now;
+const nativeDateNow = Date.now;
 /** A play the next run replays (window.__studio.replay), and who waits for its end. */
 let nextReplay = null;
 let replayDone = null;
+/** A measuring replay draws one frame in this many: its answer is the run, not the picture. */
+let replayDrawEvery = 1;
+let replayFrames = 0;
+/** Runs played to an end on a page the Stage does not hold, for the harness to keep. */
+const finishedPlays = [];
 /** Most steps one frame runs: a slow frame catches up at most 0.1 s, as play always has. */
 const CATCH_UP_S = 0.1;
 /** A replay steps as fast as this much of each frame allows. */
@@ -197,17 +205,27 @@ const REPLAY_FRAME_MS = 12;
 /** Past where the kept run ended, a replay plays on this long before it calls the run unended. */
 const REPLAY_AFTER_S = 10;
 
-/** Runs `work` with Math.random drawing from the run's seed, so a replay draws the same. */
+/**
+ * Runs `work` with Math.random drawing from the run's seed and the clock reading the run's game
+ * time, so a replay draws and times the same.
+ */
 function seededWork(context, work) {
   Math.random = context.random;
+  performance.now = context.now;
+  Date.now = context.dateNow;
   try {
     return work();
   } finally {
     Math.random = nativeRandom;
+    performance.now = nativeNow;
+    Date.now = nativeDateNow;
   }
 }
 
-function newContext(seed = freshSeed()) {
+/** A run's clock bases: performance.now() and Date.now() as the run began. */
+const clockNow = () => [nativeNow.call(performance), nativeDateNow()];
+
+function newContext(seed = freshSeed(), clock = clockNow()) {
   const down = new Set();
   const pressed = new Set();
   const listeners = [];
@@ -270,7 +288,7 @@ function newContext(seed = freshSeed()) {
         );
       },
     });
-  return {
+  const context = {
     ctx,
     input,
     down,
@@ -281,6 +299,9 @@ function newContext(seed = freshSeed()) {
     timers,
     reported: false,
     random: ctx.random,
+    clock,
+    now: () => clock[0] + context.time * 1000,
+    dateNow: () => Math.floor(clock[1] + context.time * 1000),
     seed,
     dt: 1 / 60,
     steps: 0,
@@ -289,6 +310,7 @@ function newContext(seed = freshSeed()) {
     recorder: null,
     player: null,
   };
+  return context;
 }
 
 const keyNames = (event) => [
@@ -363,11 +385,12 @@ function startRun({ title = false } = {}) {
   show(null);
   const replaying = nextReplay;
   nextReplay = null;
-  run = newContext(replaying?.seed ?? freshSeed());
+  // A play from before the clock was kept times from now: its game time still matches.
+  run = newContext(replaying?.seed ?? freshSeed(), replaying?.clock ?? clockNow());
   run.mayTitle = title && replaying === null && !shellScreens;
   run.dt = replaying?.dt ?? rate.step();
   if (replaying === null) {
-    run.recorder = createRecorder(run.seed, run.dt);
+    run.recorder = createRecorder(run.seed, run.dt, run.clock);
     // How the Stage had play when the run began: a replay starts the same way.
     run.recorder.event("speed", studioSpeed);
     run.recorder.event("can-lose", !cannotLose());
@@ -573,8 +596,12 @@ onRunEnded((won, text, stats) => {
   };
   if (run.player !== null) finishReplay(outcome);
   else {
-    const play = run.recorder?.finish(outcome);
-    if (play != null) bridge.play(play);
+    const play = run.recorder?.finish(outcome, run.input.reads);
+    if (play != null) {
+      bridge.play(play);
+      finishedPlays.push(play);
+      if (finishedPlays.length > 3) finishedPlays.shift();
+    }
     // Play goes on past a game's own ending, and the kept play ends here.
     if (!shellScreens) run.recorder = null;
   }
@@ -584,6 +611,7 @@ onRunEnded((won, text, stats) => {
 function finishReplay(outcome) {
   const done = replayDone;
   replayDone = null;
+  replayDrawEvery = 1;
   done?.({
     outcome,
     seconds: Math.round(run.time * 10) / 10,
@@ -1035,6 +1063,7 @@ function step() {
   const dt = run.dt * studioSpeed * juiceShell.timeScale() * (endBeat > 0 ? END_BEAT_SCALE : 1);
   juiceShell.pass(run.dt);
   run.input.sample({ down, pressed, buttons, clicked, pad });
+  run.recorder?.actions(run.input.held());
   const stepping = run;
   seededWork(stepping, () => {
     const due = [];
@@ -1302,15 +1331,24 @@ const studio = installStudio({
   },
   bridge,
   scene: sceneReport,
-  // A kept play, run again from its seed with its input at each step (shell/replay.js).
-  replay(play) {
+  // A kept play, run again from its seed with its input at each step (shell/replay.js). A play
+  // that pressed an action this build no longer has cannot be replayed: it says which.
+  // `drawEvery`: a measuring replay draws one frame in that many.
+  replay(play, options = {}) {
+    const missing = (play.actions ?? []).filter((name) => !controls.has(name));
+    if (missing.length > 0)
+      return Promise.resolve({ outcome: null, seconds: 0, steps: 0, marks: [], missing });
     return new Promise((resolve) => {
       replayDone?.(null);
       replayDone = resolve;
       nextReplay = play;
       startRun();
+      replayDrawEvery = Math.max(1, Math.floor(Number(options.drawEvery) || 1));
+      replayFrames = 0;
     });
   },
+  // The runs this page played to an end since the last call, for a harness session to keep.
+  takePlays: () => finishedPlays.splice(0),
   // The harness's QA play: Retry is the end screen's own startRun.
   qa: createQa({
     controls,
@@ -1427,7 +1465,8 @@ renderer.setAnimationLoop((now) => {
         break;
       }
     }
-    redraw = true;
+    replayFrames += 1;
+    redraw = replayFrames % replayDrawEvery === 0;
   } else if (moving) {
     // Whole steps of the run's slice; a frame a little early or late still takes one.
     run.left += real;

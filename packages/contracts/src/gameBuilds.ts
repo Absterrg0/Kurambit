@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameQaReport, gameQaFindings, listedNames } from "./gameQa.ts";
+import { GameSavedPlaysReading, savedPlaysWords } from "./gamePlays.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -115,8 +116,8 @@ export type GameFactsState = typeof GameFactsState.Type;
 /**
  * The facts measured now, in display order: the shared names of the rail, compare, card and
  * tools. Only what a person acts on: does it start, does it play without errors, do the QA
- * play's controls, Retry and HUD hold, does it keep its frame rate, and (only when someone
- * asks) can Kurambit's play bot win it.
+ * play's controls, Retry and HUD hold, does it keep its frame rate, do the game's saved plays
+ * still end the same, and (only when someone asks) can Kurambit's play bot win it.
  */
 const MEASURED_FACT_IDS = [
   "boots",
@@ -125,6 +126,7 @@ const MEASURED_FACT_IDS = [
   "retry",
   "hud",
   "performance",
+  "saved-plays",
   "skilled",
 ] as const;
 export type GameMeasuredFactId = (typeof MEASURED_FACT_IDS)[number];
@@ -240,6 +242,7 @@ export type GameBuild = typeof GameBuild.Type;
  * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
  * - no-play-bot: the game has no play bot to measure skilled play with.
  * - deferred: the play bot plays only when the person or their agent asks for it.
+ * - no-saved-plays: the game had no saved play to replay. Such a fact is not shown at all.
  */
 export const GameFactNotMeasuredCause = Schema.Literals([
   "software",
@@ -248,6 +251,7 @@ export const GameFactNotMeasuredCause = Schema.Literals([
   "old-shell",
   "no-play-bot",
   "deferred",
+  "no-saved-plays",
 ]);
 export type GameFactNotMeasuredCause = typeof GameFactNotMeasuredCause.Type;
 
@@ -404,6 +408,17 @@ export const GameBuildFacts = Schema.Struct({
       }),
     ),
   ),
+  /** The game's saved plays (.studio/plays), each replayed on the build in its copy. */
+  savedPlays: gameFact(GameSavedPlaysReading).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "no saved play was replayed on this build",
+        cause: "no-saved-plays" as const,
+        retry: false,
+      }),
+    ),
+  ),
   /** For people and agents: what is measuring, queued behind what, about how long is left. */
   message: Schema.String,
 });
@@ -470,6 +485,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   colour: "Colour",
   "first-response": "First response",
   performance: "Performance",
+  "saved-plays": "Saved plays",
   assets: "Assets",
   use: "Asset use",
   "player-view": "Player in view",
@@ -689,6 +705,19 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
               },
         );
       });
+    case "saved-plays":
+      return from(facts.savedPlays, (reading) => {
+        const off = reading.plays.filter((play) => play.reading !== "same");
+        // A changed ending, or a play the build can no longer replay, is what a person acts on;
+        // a play that moved but ends the same may be the change they asked for.
+        const broke = off.some((play) => play.reading !== "plays-differently");
+        return {
+          text: savedPlaysWords(reading),
+          value: off.length,
+          tone: off.length === 0 ? "good" : broke ? "bad" : "neutral",
+          kind: off.length === 0 ? "same" : broke ? "changed" : "differs",
+        };
+      });
     case "performance":
       return from(facts.performance, (perf) => {
         const ms = (x: number) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
@@ -725,12 +754,18 @@ const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView
   }
 };
 
+/** A game with no saved play has no Saved plays fact: none is shown, compared or counted. */
+export const noSavedPlays = (facts: Pick<GameBuildFacts, "savedPlays">): boolean =>
+  facts.savedPlays.status === "not-measured" && facts.savedPlays.cause === "no-saved-plays";
+const shownIds = (facts: GameBuildFacts) =>
+  noSavedPlays(facts) ? GAME_FACT_IDS.filter((id) => id !== "saved-plays") : GAME_FACT_IDS;
+
 /**
  * PURE. A build's facts as display rows, in GameFactId order. The one wording
  * every surface and the agent tools share.
  */
 export const gameFactsView = (facts: GameBuildFacts): ReadonlyArray<GameFactView> =>
-  GAME_FACT_IDS.map((id) => {
+  shownIds(facts).map((id) => {
     const read = readFact(facts, id);
     return {
       id,
@@ -767,6 +802,7 @@ export const GAME_LEAD_FACTS = [
   "retry",
   "hud",
   "performance",
+  "saved-plays",
   "skilled",
 ] as const satisfies ReadonlyArray<GameMeasuredFactId>;
 
@@ -795,6 +831,7 @@ const CHECK_LABELS: Readonly<
   retry: "Retry starts clean",
   hud: "HUD fits the screen",
   performance: "Holds its frame rate",
+  "saved-plays": "Saved plays end the same",
   skilled: "Can be won by Kurambit's play bot",
 };
 
@@ -917,6 +954,23 @@ const checkWords = (
           ? { sentence: "HUD runs off the screen", value: `at ${off.width}×${off.height}` }
           : { sentence: "HUD text overlaps", value: plural(found.hud.length, "place") };
     }
+    case "saved-plays": {
+      if (facts.savedPlays.status !== "measured") return null;
+      const reading = facts.savedPlays.value;
+      const off = reading.plays.filter((play) => play.reading !== "same");
+      if (off.length === 0) return { sentence: "Saved plays end the same", value: null };
+      const ended = off.filter((play) => play.reading === "ending-changed").length;
+      const cannot = off.filter((play) => play.reading === "cannot-replay").length;
+      return {
+        sentence:
+          ended > 0
+            ? `${plural(ended, "saved play")} ${ended === 1 ? "ends" : "end"} differently`
+            : cannot > 0
+              ? `${plural(cannot, "saved play")} can't replay`
+              : `${plural(off.length, "saved play")} ${off.length === 1 ? "plays" : "play"} differently`,
+        value: `${reading.plays.length - off.length} of ${reading.plays.length} the same`,
+      };
+    }
     case "performance": {
       if (facts.performance.status !== "measured") return null;
       const perf = facts.performance.value;
@@ -969,7 +1023,12 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
 };
 
 /** For these numbers lower is better, for these higher; the other numbers are neutral. */
-const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["controls", "retry", "hud"]);
+const LOWER_IS_BETTER: ReadonlySet<GameFactId> = new Set([
+  "controls",
+  "retry",
+  "hud",
+  "saved-plays",
+]);
 const HIGHER_IS_BETTER: ReadonlySet<GameFactId> = new Set(["performance"]);
 const BROKE = BROKE_ENDINGS;
 /** How good a reading's kind is, for the facts whose kinds have an order; null for the rest. */
@@ -984,6 +1043,8 @@ const rank = (id: GameFactId, kind: string): number | null => {
       return kind === "clean" ? 1 : 0;
     case "skilled":
       return BROKE.has(kind) ? 0 : kind === "won" ? 2 : 1;
+    case "saved-plays":
+      return kind === "same" ? 2 : kind === "differs" ? 1 : 0;
     default:
       return null;
   }
@@ -1015,75 +1076,94 @@ export const diffBuildFacts = (
   b: GameBuildFacts | null,
   sides: BuildSides = { a: "A", b: "B" },
 ): ReadonlyArray<GameFactDelta> =>
-  GAME_FACT_IDS.map((id): GameFactDelta => {
-    if (a === null || b === null)
-      return notComparable(
-        id,
-        `${a === null ? sides.a : sides.b} has never been measured`,
-        null,
-        null,
-      );
-    const ra = readFact(a, id);
-    const rb = readFact(b, id);
-    const textA = ra._tag === "measured" ? ra.reading.text : null;
-    const textB = rb._tag === "measured" ? rb.reading.text : null;
-    if (ra._tag !== "measured" || rb._tag !== "measured")
-      return notComparable(
-        id,
-        [sideWhy(sides.a, ra), sideWhy(sides.b, rb)].filter((why) => why !== "").join("; "),
-        textA,
-        textB,
-      );
-    if (a.harness !== b.harness)
-      return notComparable(id, "measured by different versions of the harness", textA, textB);
-    // A GPU and a CPU renderer play a game at different speeds.
-    if (a.renderer !== b.renderer)
-      return notComparable(
-        id,
-        `measured on different renderers (${sides.a}: ${a.renderer ?? "not recorded"}; ${sides.b}: ${b.renderer ?? "not recorded"})`,
-        textA,
-        textB,
-      );
-    // A runtime update changes what every game of its major plays, not the game.
-    if (a.runtime !== b.runtime)
-      return notComparable(
-        id,
-        `measured with different Kurambit runtimes (${sides.a}: ${a.runtime ?? "the game's own"}; ${sides.b}: ${b.runtime ?? "the game's own"})`,
-        textA,
-        textB,
-      );
-    if (
-      id === "skilled" &&
-      a.skilled.status === "measured" &&
-      b.skilled.status === "measured" &&
-      a.skilled.value.bot.hash !== b.skilled.value.bot.hash
-    )
-      return notComparable(id, "the play bot changed between the two measurements", textA, textB);
-    const x = ra.reading;
-    const y = rb.reading;
-    const base = { id, label: LABELS[id], a: x.text, b: y.text, why: null };
-    if (x.kind !== y.kind) {
-      const before = rank(id, x.kind);
-      const after = rank(id, y.kind);
-      const tone =
-        before === null || after === null || before === after
-          ? "neutral"
-          : after > before
-            ? "better"
-            : "worse";
-      return { ...base, change: "changed", tone };
-    }
-    if (x.value === null || y.value === null || x.text === y.text)
-      return { ...base, change: "same", tone: "neutral" };
-    const change = y.value > x.value ? "up" : y.value < x.value ? "down" : "same";
+  GAME_FACT_IDS.flatMap((id): ReadonlyArray<GameFactDelta> => {
+    // Saved plays are compared only once some were replayed on either side.
+    if (id === "saved-plays" && (a === null || noSavedPlays(a)) && (b === null || noSavedPlays(b)))
+      return [];
+    return [diffFact(id, a, b, sides)];
+  });
+
+const diffFact = (
+  id: GameMeasuredFactId,
+  a: GameBuildFacts | null,
+  b: GameBuildFacts | null,
+  sides: BuildSides,
+): GameFactDelta => {
+  if (a === null || b === null)
+    return notComparable(
+      id,
+      `${a === null ? sides.a : sides.b} has never been measured`,
+      null,
+      null,
+    );
+  const ra = readFact(a, id);
+  const rb = readFact(b, id);
+  const textA = ra._tag === "measured" ? ra.reading.text : null;
+  const textB = rb._tag === "measured" ? rb.reading.text : null;
+  if (ra._tag !== "measured" || rb._tag !== "measured")
+    return notComparable(
+      id,
+      [sideWhy(sides.a, ra), sideWhy(sides.b, rb)].filter((why) => why !== "").join("; "),
+      textA,
+      textB,
+    );
+  if (a.harness !== b.harness)
+    return notComparable(id, "measured by different versions of the harness", textA, textB);
+  // A GPU and a CPU renderer play a game at different speeds.
+  if (a.renderer !== b.renderer)
+    return notComparable(
+      id,
+      `measured on different renderers (${sides.a}: ${a.renderer ?? "not recorded"}; ${sides.b}: ${b.renderer ?? "not recorded"})`,
+      textA,
+      textB,
+    );
+  // A runtime update changes what every game of its major plays, not the game.
+  if (a.runtime !== b.runtime)
+    return notComparable(
+      id,
+      `measured with different Kurambit runtimes (${sides.a}: ${a.runtime ?? "the game's own"}; ${sides.b}: ${b.runtime ?? "the game's own"})`,
+      textA,
+      textB,
+    );
+  if (
+    id === "skilled" &&
+    a.skilled.status === "measured" &&
+    b.skilled.status === "measured" &&
+    a.skilled.value.bot.hash !== b.skilled.value.bot.hash
+  )
+    return notComparable(id, "the play bot changed between the two measurements", textA, textB);
+  if (
+    id === "saved-plays" &&
+    a.savedPlays.status === "measured" &&
+    b.savedPlays.status === "measured" &&
+    a.savedPlays.value.set !== b.savedPlays.value.set
+  )
+    return notComparable(id, "the saved plays changed between the two measurements", textA, textB);
+  const x = ra.reading;
+  const y = rb.reading;
+  const base = { id, label: LABELS[id], a: x.text, b: y.text, why: null };
+  if (x.kind !== y.kind) {
+    const before = rank(id, x.kind);
+    const after = rank(id, y.kind);
     const tone =
-      change === "same" || !(LOWER_IS_BETTER.has(id) || HIGHER_IS_BETTER.has(id))
+      before === null || after === null || before === after
         ? "neutral"
-        : (change === "down") === LOWER_IS_BETTER.has(id)
+        : after > before
           ? "better"
           : "worse";
-    return { ...base, change, tone };
-  });
+    return { ...base, change: "changed", tone };
+  }
+  if (x.value === null || y.value === null || x.text === y.text)
+    return { ...base, change: "same", tone: "neutral" };
+  const change = y.value > x.value ? "up" : y.value < x.value ? "down" : "same";
+  const tone =
+    change === "same" || !(LOWER_IS_BETTER.has(id) || HIGHER_IS_BETTER.has(id))
+      ? "neutral"
+      : (change === "down") === LOWER_IS_BETTER.has(id)
+        ? "better"
+        : "worse";
+  return { ...base, change, tone };
+};
 
 /** A build named by id, or a chat turn's build by the turn the client already holds. */
 export const GameBuildRef = Schema.Union([

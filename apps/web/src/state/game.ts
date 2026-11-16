@@ -523,6 +523,19 @@ export const gameEnvironment = {
     label: "game:replay",
     tag: WS_METHODS.gameReplay,
   }),
+  // A kept run named as a test play, replayed on every build; read and deleted from the Stage.
+  savePlay: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:savePlay",
+    tag: WS_METHODS.gameSavePlay,
+  }),
+  savedPlays: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:savedPlays",
+    tag: WS_METHODS.gameSavedPlays,
+  }),
+  deletePlay: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:deletePlay",
+    tag: WS_METHODS.gameDeletePlay,
+  }),
   // Keep going's status for one chat: reread on run pushes only, so a step's
   // progress re-renders the control and the banner once per change, never on a timer.
   keepGoingStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
