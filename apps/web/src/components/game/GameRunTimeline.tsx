@@ -487,8 +487,16 @@ export function GameRunMenu({
                 setNaming(true);
               }}
             >
-              <FlagIcon />
-              Save as test play…
+              <FlagIcon className="mt-0.5 self-start" />
+              <span className="flex min-w-0 flex-col">
+                Save as test play…
+                {/* A test play is a whole run: until one ends there is nothing to save. */}
+                {ended === null ? (
+                  <Text variant="caption" tone="muted">
+                    Play a run to its end first
+                  </Text>
+                ) : null}
+              </span>
             </MenuItem>
           ) : null}
           {rewind.comparable ? (

@@ -649,13 +649,11 @@ function CheckRow({
               <Text
                 key={line}
                 variant="caption"
-                tone="default"
+                tone="muted"
                 render={<li className="break-words" />}
               >
                 {problem.message}
-                {problem.where === null ? null : (
-                  <span className="text-muted-foreground"> · {problem.where}</span>
-                )}
+                {problem.where === null ? null : ` · ${problem.where}`}
               </Text>
             );
           })}

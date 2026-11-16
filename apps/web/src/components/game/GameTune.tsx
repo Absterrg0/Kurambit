@@ -18,7 +18,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThingLook, useSelectNotice, valueLabel } from "./GameInspector";
 import { GameTuneField, type TuneCommit } from "./GameTuneField";
 import { Workbench } from "./GameWorkbenchParts";
-import { hoverStageThing, tuneStageValue, useThreadStageBridge } from "./gameStageBridge";
+import {
+  hoverStageThing,
+  selectStageThing,
+  tuneStageValue,
+  useThreadStageBridge,
+} from "./gameStageBridge";
 
 const NO_THINGS: ReadonlyArray<GameThing> = [];
 
@@ -207,7 +212,15 @@ export function GameTunePanel({
     <TuneSave value={saver.save}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto py-3">
-          <ThingList things={things} picked={shown?.id ?? null} onPick={setPicked} />
+          <ThingList
+            things={things}
+            picked={shown?.id ?? null}
+            onPick={(id) => {
+              setPicked(id);
+              // The Stage points at it too: the outline and Tune always name the same thing.
+              selectStageThing(id);
+            }}
+          />
           {shown === null ? null : (
             <ThingValues threadRef={threadRef} thing={shown} disabled={!tunable} />
           )}

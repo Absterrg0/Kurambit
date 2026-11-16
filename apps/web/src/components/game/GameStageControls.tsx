@@ -49,6 +49,7 @@ export function GameStageBar({
   threadRef,
   playing,
   live,
+  stopped,
   canReload,
   rewind,
   runs,
@@ -63,6 +64,11 @@ export function GameStageBar({
   playing: boolean;
   /** It is the folder's own game, so its runs can be rewound. */
   live: boolean;
+  /**
+   * The game on the Stage doesn't run (it doesn't start): play's own controls are off and the
+   * time reads 0:00. Restart, fullscreen and the run's menu stay.
+   */
+  stopped: boolean;
   canReload: boolean;
   rewind: StageRewind;
   runs: StageRuns;
@@ -84,7 +90,8 @@ export function GameStageBar({
   const cannotLoseKey = useGameKey("game.cannotLose.toggle");
   const fullscreenKey = useGameKey("game.fullscreen");
   // The bridge speaks for the folder's own game: a copy or a compare plays without it.
-  const can = (capability: string) => playing && live && ready && capabilities.includes(capability);
+  const can = (capability: string) =>
+    playing && live && !stopped && ready && capabilities.includes(capability);
   return (
     <div className="flex h-9 w-full min-w-0 items-center gap-1" data-game-play-controls="">
       <Control

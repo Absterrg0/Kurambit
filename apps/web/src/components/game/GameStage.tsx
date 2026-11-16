@@ -1653,6 +1653,7 @@ function ThreadGameStage({
             threadRef={threadRef}
             playing={phase.kind === "playing" && compare === null && stageKind !== "window"}
             live={stageKind === "live" && playTarget === null && compare === null}
+            stopped={folderDoesNotStart && failureVisible !== null && playTarget === null}
             canReload={
               stageKind === "live" &&
               playTarget === null &&

@@ -318,6 +318,10 @@ export const clearStageSelection = () => {
   useStageBridge.setState({ selected: null });
 };
 
+/** Points at a thing from Tune's list, as a click on the Stage does: one selection for both. */
+export const selectStageThing = (id: string) =>
+  useStageBridge.getState().post?.({ type: "studio-select", id });
+
 /** Outlines a thing from the Things list while frozen; null clears. */
 export const hoverStageThing = (id: string | null) =>
   useStageBridge.getState().post?.({ type: "studio-hover-thing", id });
