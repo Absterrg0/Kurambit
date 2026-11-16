@@ -33,6 +33,7 @@ import {
   GameStyle,
   gameChecksView,
   gameFactsView,
+  ownsUndo,
   type GameBuild,
   type GameBuildFacts,
   type GameBuildsResult,
@@ -1410,12 +1411,7 @@ function BuildActions({
   const restores = useBuildRestore(threadRef, list.restore);
   // The quiet shell: a streaming turn does not re-render the Inspector.
   const turnRunning = threadRuntimeIsActive(useQuietThreadShell(threadRef)?.runtime);
-  const latestUndoable =
-    list.builds.find(
-      (entry) =>
-        entry.source._tag === "turn" ||
-        (entry.source._tag === "saved" && entry.source.edit !== undefined),
-    ) ?? null;
+  const latestUndoable = list.builds.find((entry) => ownsUndo(entry.source)) ?? null;
   const action = !canAct
     ? null
     : turnStripRestore(

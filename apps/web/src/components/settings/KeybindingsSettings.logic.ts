@@ -404,6 +404,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "game.undoTurn": "Undo last change",
   "game.redoTurn": "Redo last change",
   "game.keepGoing.stop": "Stop Keep going",
+  "composer.tryWays": "Try the next message several ways",
   "chat.new": "New game",
   "chat.newLocal": "New chat",
   "chat.newWithoutProject": "New chat without a game",

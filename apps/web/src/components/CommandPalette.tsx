@@ -99,6 +99,7 @@ import {
   SwatchBookIcon,
   StepForwardIcon,
   SquarePlusIcon,
+  SplitIcon,
   Rotate3dIcon,
   SquareDashedIcon,
   GaugeIcon,
@@ -813,6 +814,7 @@ function OpenCommandPaletteDialog(props: {
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
   const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
+  const tryWays = useGameWorkspaceStore((state) => state.tryWays);
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
@@ -1831,6 +1833,26 @@ function OpenCommandPaletteDialog(props: {
           },
         ],
       });
+    // The composer's "try it N ways" for this chat's next message, as its chip cycles it.
+    const tryWaysNow = tryWays[scopedThreadKey(threadRef)];
+    actionItems.push({
+      kind: "action",
+      value: "action:game-try-ways",
+      title:
+        tryWaysNow === undefined
+          ? "Try the next message 3 ways"
+          : tryWaysNow === 3
+            ? "Try the next message 4 ways"
+            : tryWaysNow === 4
+              ? "Try the next message 2 ways"
+              : "Send the next message once",
+      description:
+        "Each version builds in its own copy of the game, for that many times the tokens",
+      searchTerms: ["try", "ways", "versions", "variants", "parallel", "options", "game"],
+      icon: <SplitIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "composer.tryWays",
+      run: async () => useGameWorkspaceStore.getState().cycleTryWays(scopedThreadKey(threadRef)),
+    });
     // Keep going: on, off and resume, and the Guided proposal's answers. A
     // pause's reason rides on the items that resume it.
     const keepGoingStatus = keepGoing.status;

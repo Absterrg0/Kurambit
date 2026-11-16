@@ -98,6 +98,7 @@ import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
+import { GameVersionsBar } from "./GameVersionsBar";
 import { GameBuildHistory, type GameBuildSlot, type GameStripRequest } from "./GameBuildHistory";
 import { GameControlsMenu } from "./GameControlsMenu";
 import { GameExports } from "./GameExports";
@@ -203,6 +204,9 @@ const changedSincePhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, un
   const build = result.value.builds.find((each) => each.id === result.value.current);
   return build === undefined ? null : buildPhrase(buildName(build));
 };
+
+const buildsListOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result) ? result.value : null;
 
 const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) &&
@@ -528,6 +532,7 @@ function ThreadGameStage({
     input: { threadId: threadRef.threadId },
   });
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
+  const buildsList = useEnvironmentQuerySelector(buildsAtom, buildsListOf) ?? null;
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const folderName = useEnvironmentQuerySelector(buildsAtom, folderBuildName);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
@@ -1755,6 +1760,15 @@ function ThreadGameStage({
           </>
         )}
       </div>
+      {buildsList === null ? null : (
+        <GameVersionsBar
+          threadRef={threadRef}
+          builds={buildsList.builds}
+          playing={playTarget?.build ?? null}
+          current={buildsList.current}
+          onPlay={(build) => void playBuild(build)}
+        />
+      )}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
           <DialogHeader>

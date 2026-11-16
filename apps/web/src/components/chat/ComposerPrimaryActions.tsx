@@ -7,6 +7,7 @@ import {
   PlayIcon,
   CornerUpRightIcon,
   ListPlusIcon,
+  SplitIcon,
 } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { formatContextWindowTokens } from "~/lib/contextWindow";
@@ -59,6 +60,9 @@ interface ComposerPrimaryActionsProps {
   compactBeforeSendTokens?: number | null;
   keepFullHistory?: boolean;
   onToggleKeepFullHistory?: () => void;
+  /** A game chat's "try it N ways" for its next message: null off, undefined not offered. */
+  tryWays?: number | null | undefined;
+  onCycleTryWays?: () => void;
 }
 
 const formatPendingPrimaryActionLabel = (input: {
@@ -114,6 +118,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compactBeforeSendTokens = null,
   keepFullHistory = false,
   onToggleKeepFullHistory,
+  tryWays,
+  onCycleTryWays,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
@@ -372,10 +378,50 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       <TooltipPopup>{submitTooltip}</TooltipPopup>
     </Tooltip>
   );
-  if (compactTokens === null) return submit;
+  const tryWaysChip =
+    tryWays === undefined ||
+    onCycleTryWays === undefined ||
+    showResume ||
+    isEditingQueuedMessage ? null : (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="sm"
+              variant={tryWays === null ? "ghost-muted" : "warning-outline"}
+              {...pointerFocusProps}
+              aria-pressed={tryWays !== null}
+              aria-label={
+                tryWays === null ? "Try the next message several ways" : `Try ${tryWays} ways`
+              }
+              disabled={!canOperateThread}
+              onClick={onCycleTryWays}
+            />
+          }
+        >
+          <SplitIcon aria-hidden="true" />
+          {tryWays === null ? "Once" : `${tryWays} ways`}
+        </TooltipTrigger>
+        <TooltipPopup>
+          {tryWays === null
+            ? "Send once. Click to try the next message 3 ways in parallel, for about 3× the tokens"
+            : `The next message is built ${tryWays} ways at once, each version in its own copy of the game: about ${tryWays}× the tokens. You play them and keep one. Click for ${tryWays === 3 ? 4 : tryWays === 4 ? 2 : "once"}`}
+        </TooltipPopup>
+      </Tooltip>
+    );
+  if (compactTokens === null)
+    return tryWaysChip === null ? (
+      submit
+    ) : (
+      <div data-chat-composer-try-ways="true" className="flex items-center gap-2">
+        {tryWaysChip}
+        {submit}
+      </div>
+    );
 
   return (
     <div data-chat-composer-compact-send="true" className="flex items-center gap-2">
+      {tryWaysChip}
       <Tooltip>
         <TooltipTrigger
           render={

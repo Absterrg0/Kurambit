@@ -161,6 +161,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     when: "gameThread && !editableFocus && !terminalFocus",
   },
   { key: "mod+alt+x", command: "game.keepGoing.stop", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+w", command: "composer.tryWays", when: "gameThread && !terminalFocus" },
   { key: "mod+t", command: "rightPanel.new", when: "rightPanelOpen && !terminalFocus" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
   { key: "mod+shift+d", command: "terminal.splitVertical", when: "terminalFocus" },

@@ -1212,6 +1212,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compactBeforeSendTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
+  /** A game chat's "try it N ways" for its next message: null off, undefined not offered. */
+  tryWays?: number | null | undefined;
+  onCycleTryWays?: () => void;
 }) {
   return (
     <>
@@ -1254,6 +1257,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compactBeforeSendTokens={props.compactBeforeSendTokens}
         keepFullHistory={props.keepFullHistory}
         onToggleKeepFullHistory={props.onToggleKeepFullHistory}
+        tryWays={props.tryWays}
+        {...(props.onCycleTryWays === undefined ? {} : { onCycleTryWays: props.onCycleTryWays })}
       />
     </>
   );
@@ -1359,6 +1364,9 @@ export interface ChatComposerProps {
   resumeCompactionTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
+  /** A game chat's "try it N ways" for its next message: null off, undefined not offered. */
+  tryWays?: number | null | undefined;
+  onCycleTryWays?: () => void;
   onUsageLimitsCommand?: (() => void) | undefined;
   environmentUnavailable: {
     readonly label: string;
@@ -7068,6 +7076,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     compactBeforeSendTokens={props.resumeCompactionTokens}
                     keepFullHistory={props.keepFullHistory}
                     onToggleKeepFullHistory={props.onToggleKeepFullHistory}
+                    tryWays={props.tryWays}
+                    {...(props.onCycleTryWays === undefined
+                      ? {}
+                      : { onCycleTryWays: props.onCycleTryWays })}
                     compactDisabled={
                       compactDisabled || noProviderAvailable || isSendBusy || isConnecting
                     }

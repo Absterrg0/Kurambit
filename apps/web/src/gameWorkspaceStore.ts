@@ -60,7 +60,14 @@ interface GameWorkspaceStoreState {
   /** The game pauses when the person clicks away from it (the chat, Tune) and plays on when they click back. */
   pauseWhenAway: boolean;
   setPauseWhenAway: (on: boolean) => void;
+  /** How many ways each chat's next message is tried, by thread key; absent sends it once. Not persisted. */
+  tryWays: Readonly<Record<string, number>>;
+  /** Off, then 3, 4 and 2 ways, then off again: the composer's chip, its key and the palette. */
+  cycleTryWays: (threadKey: string) => void;
+  clearTryWays: (threadKey: string) => void;
 }
+
+const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
 
 /** The game screen's layout preferences, one set for every game. */
 export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
@@ -79,6 +86,20 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setGameHidden: (hidden) => set({ gameHidden: hidden }),
       pauseWhenAway: true,
       setPauseWhenAway: (on) => set({ pauseWhenAway: on }),
+      tryWays: {},
+      cycleTryWays: (threadKey) =>
+        set((state) => {
+          const current = state.tryWays[threadKey];
+          const next = current === undefined ? 3 : TRY_WAYS_NEXT[current];
+          const { [threadKey]: _current, ...rest } = state.tryWays;
+          return { tryWays: next === undefined ? rest : { ...rest, [threadKey]: next } };
+        }),
+      clearTryWays: (threadKey) =>
+        set((state) => {
+          if (state.tryWays[threadKey] === undefined) return state;
+          const { [threadKey]: _current, ...rest } = state.tryWays;
+          return { tryWays: rest };
+        }),
     }),
     {
       name: "kurambit:game-workspace:v7",

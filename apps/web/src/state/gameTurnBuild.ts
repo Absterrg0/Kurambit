@@ -26,7 +26,13 @@ export const selectTurnBuild = (
   const build =
     runId === null
       ? latest
-      : list.builds.find((entry) => entry.source._tag === "turn" && entry.source.runId === runId);
+      : list.builds.find(
+          (entry) =>
+            // A try's turn is the version it kept.
+            (entry.source._tag === "turn" ||
+              (entry.source._tag === "version" && entry.source.kept)) &&
+            entry.source.runId === runId,
+        );
   return build === undefined
     ? null
     : {

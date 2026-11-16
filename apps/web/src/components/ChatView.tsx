@@ -5061,6 +5061,12 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const toggleKeepFullHistory = () => setKeepFullHistory(routeThreadKey, !keepFullHistory);
+  // "Try it N ways": a game chat's next message only, so it is cleared once that message is sent.
+  const tryWaysStored = useGameWorkspaceStore((state) => state.tryWays[routeThreadKey]);
+  const tryWays = isGameThread ? (tryWaysStored ?? null) : undefined;
+  const cycleTryWaysStable = useStableCallback(() =>
+    useGameWorkspaceStore.getState().cycleTryWays(routeThreadKey),
+  );
   const toggleKeepFullHistoryStable = useStableCallback(toggleKeepFullHistory);
   const handleRestoreThreadBranch = () => {
     if (!canWriteSourceControl) return;
@@ -5337,6 +5343,10 @@ export default function ChatView(props: ChatViewProps) {
       "game.fullscreen": () => requestGameStage({ kind: "fullscreen" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),
+      "composer.tryWays": ({ event }) => {
+        if (!isGameThread) return false;
+        if (!event.repeat) cycleTryWaysStable();
+      },
       "game.keepGoing.stop": ({ event }) => {
         if (keepGoingBanner.stop === null) return false;
         if (!event.repeat) keepGoingBanner.stop();
@@ -6279,6 +6289,17 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
 
+    const versions = tryWays ?? undefined;
+    if (
+      versions !== undefined &&
+      composerAttachmentsSnapshot.length + composerFilesSnapshot.length > 0
+    ) {
+      setThreadError(
+        threadIdForSend,
+        "Trying several ways sends text only: remove the attachments, or send it once.",
+      );
+      return;
+    }
     sendInFlightRef.current = true;
     const sendGeneration = ++composerSendGenerationRef.current;
     const attachmentCapabilitiesBeforeUpload = readLiveAttachmentCapabilities();
@@ -6822,10 +6843,12 @@ export default function ChatView(props: ChatViewProps) {
           runtimeMode,
           interactionMode: sendInteractionMode,
           dispatchMode: turnDispatchMode,
+          ...(versions === undefined || bootstrap ? {} : { versions }),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
       });
+      if (versions !== undefined) useGameWorkspaceStore.getState().clearTryWays(routeThreadKey);
       if (backgroundThreadRef) {
         markPromotedDraftThreadByRef(backgroundThreadRef);
         try {
@@ -7796,6 +7819,8 @@ export default function ChatView(props: ChatViewProps) {
                     bannerItems={composerBannerItems}
                     resumeCompactionTokens={resumeCompactionTokens}
                     keepFullHistory={keepFullHistory}
+                    tryWays={tryWays}
+                    onCycleTryWays={cycleTryWaysStable}
                     onToggleKeepFullHistory={toggleKeepFullHistoryStable}
                     onUsageLimitsCommand={
                       usageLimitsOffered && usageLimitsKey !== null && !composerHasNonPromptContent

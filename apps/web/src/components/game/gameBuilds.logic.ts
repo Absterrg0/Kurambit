@@ -39,6 +39,8 @@ export const buildName = (
         ? `${numbered} · Keep going`
         : // A small fix keeps its build's number: the person sees one build, fixed.
           `${numbered}${build.fix === undefined ? "" : ` · fix ${build.fix}`}`;
+    case "version":
+      return `Version ${source.n} of ${source.of}${source.kept ? " · kept" : ""}`;
     case "saved":
       if (source.edit !== undefined && build.number !== null) return `${numbered} · tuned`;
       return source.nth === undefined ? source.label : `${source.label} ${source.nth}`;
@@ -52,6 +54,7 @@ export const buildName = (
 export const buildCaption = (build: Pick<GameBuild, "source" | "summary" | "number">): string => {
   const source = build.source;
   if (source._tag === "saved") return build.summary;
+  if (source._tag === "version") return source.approach.trim() || source.request.trim();
   if (source.step === null) return source.request.trim() || build.summary;
   const move = source.step.move.trim();
   return move === ""
