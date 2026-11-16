@@ -1,6 +1,11 @@
 import { GameStage } from "./game/GameStage";
 import { GameWorkbench } from "./game/GameWorkbench";
-import { fitSidePanels, toggleWorkbench, useRowWidth } from "./game/gameWorkbenchPanel";
+import {
+  diffCrowdsGame,
+  fitSidePanels,
+  toggleWorkbench,
+  useRowWidth,
+} from "./game/gameWorkbenchPanel";
 import { useStageSelectionChip } from "./game/gameComposerContext";
 import { stepStageFrame, toggleStageCannotLose, toggleStageDevView } from "./game/gameStageBridge";
 import { GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
@@ -1733,6 +1738,29 @@ export default function ChatView(props: ChatViewProps) {
     sidePanelsFit === null
       ? previewPanelInlineSize
       : { ...previewPanelInlineSize, width: sidePanelsFit.right };
+  // The right panel opening in this thread (a diff from Checks) on a row too narrow for the game
+  // beside both panels closes the Workbench. A thread switch is no opening.
+  const rightPanelLastSeen = useRef({ thread: activeThreadKey, open: rightPanelOpen });
+  useEffect(() => {
+    const last = rightPanelLastSeen.current;
+    rightPanelLastSeen.current = { thread: activeThreadKey, open: rightPanelOpen };
+    const opened = last.thread === activeThreadKey && !last.open && rightPanelOpen;
+    if (
+      opened &&
+      isGameThread &&
+      workspaceRowWidth !== null &&
+      useGameWorkspaceStore.getState().workbenchOpen &&
+      diffCrowdsGame(workspaceRowWidth, workbenchInlineSize.width, previewPanelInlineSize.width)
+    )
+      useGameWorkspaceStore.getState().setWorkbenchOpen(false);
+  }, [
+    activeThreadKey,
+    rightPanelOpen,
+    isGameThread,
+    workspaceRowWidth,
+    workbenchInlineSize.width,
+    previewPanelInlineSize.width,
+  ]);
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPresentation, setThreadPanelPresentation] =
     useState<ThreadPanelPresentation>("inline");

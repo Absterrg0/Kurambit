@@ -4,7 +4,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import type { GamePlay, ScopedThreadRef } from "@kurambit/contracts";
-import { FlagIcon, MessageSquarePlusIcon } from "lucide-react";
+import { FlagIcon, MessageSquarePlusIcon, MoreHorizontalIcon, RotateCcwIcon } from "lucide-react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn } from "../../lib/utils";
@@ -12,10 +12,11 @@ import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Popover, PopoverPopup } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { attachRunToComposer } from "./gameComposerContext";
 import type { StudioMessage } from "./GamePlaySurface";
 import {
@@ -267,11 +268,14 @@ export function GameRunScrubber({
   threadRef,
   rewind,
   runs,
+  onRestart,
   onNote,
 }: {
   threadRef: ScopedThreadRef;
   rewind: StageRewind;
   runs: StageRuns;
+  /** A fresh run from the title. */
+  onRestart: () => void;
   /** Says how a save went, in the Stage's status. */
   onNote: (text: string) => void;
 }) {
@@ -301,9 +305,27 @@ export function GameRunScrubber({
   };
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2" data-game-run-scrubber="">
-      <Text variant="caption" tone="default" numeric render={<span className="shrink-0" />}>
-        {clockLabel(at)}
-      </Text>
+      {/* What the last rewind or compare found is the time's own note, said on hover and to
+          screen readers; the bar shows the moment itself. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Text
+              variant="caption"
+              tone="default"
+              numeric
+              aria-live="polite"
+              aria-description={rewind.notice?.text}
+              render={<span className="shrink-0" />}
+            />
+          }
+        >
+          {clockLabel(at)}
+        </TooltipTrigger>
+        <TooltipPopup side="top" className="max-w-xs">
+          {rewind.notice?.text ?? "Drag to rewind; play on from any second to fork the run"}
+        </TooltipPopup>
+      </Tooltip>
       <Slider.Root
         className="min-w-12 flex-1"
         value={Math.min(at, length)}
@@ -373,54 +395,45 @@ export function GameRunScrubber({
           <Toggle value="after">With the change</Toggle>
         </ToggleGroup>
       ) : null}
-      <span className="flex shrink-0 items-center">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Tell the agent about this run"
-                disabled={busy !== null || (ended === null && !tellsRuns)}
-                onClick={() => void tell()}
-              />
-            }
-          >
-            <MessageSquarePlusIcon aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipPopup side="top" className="max-w-xs">
-            <span className="flex flex-col gap-1">
-              <TooltipLabel>Tell the agent about this run</TooltipLabel>
-              <span className="text-muted-foreground">
-                Its input and frame go in your next message
-              </span>
-            </span>
-          </TooltipPopup>
-        </Tooltip>
-        <SaveTestPlay threadRef={threadRef} runs={runs} onNote={onNote} />
-      </span>
+      <RunActions
+        threadRef={threadRef}
+        runs={runs}
+        canTell={busy === null && (ended !== null || tellsRuns)}
+        onTell={() => void tell()}
+        onRestart={onRestart}
+        onNote={onNote}
+      />
     </div>
   );
 }
 
-/** Saves the run that just ended as a test play every build replays, under a name. */
-function SaveTestPlay({
+/**
+ * What to do with the run, in one menu at the scrubber's end: tell the agent about it, save it as
+ * a test play every build replays (named in a small form beside the menu), or start fresh.
+ */
+function RunActions({
   threadRef,
   runs,
+  canTell,
+  onTell,
+  onRestart,
   onNote,
 }: {
   threadRef: ScopedThreadRef;
   runs: StageRuns;
+  canTell: boolean;
+  onTell: () => void;
+  onRestart: () => void;
   onNote: (text: string) => void;
 }) {
   const savePlay = useAtomCommand(gameEnvironment.savePlay, { reportFailure: false });
   const canSave = useAtomValue(gameEnvironment.savePlay.permissionAtom(threadRef.environmentId));
-  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement | null>(null);
+  const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const ended = runs.ended;
-  if (!canSave) return null;
   const save = async () => {
     if (ended === null) return;
     setSaving(true);
@@ -435,7 +448,7 @@ function SaveTestPlay({
       setFailed(String(squashAtomCommandFailure(result)));
       return;
     }
-    setOpen(false);
+    setNaming(false);
     setName("");
     runs.saved();
     onNote(
@@ -443,76 +456,81 @@ function SaveTestPlay({
     );
   };
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        // A first win is offered under its own name.
-        if (next && name === "" && ended?.firstWin === true) setName("first win");
-      }}
-    >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <PopoverTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Save as test play"
-                  disabled={ended === null}
-                />
-              }
+    <>
+      <Menu>
+        <MenuTrigger
+          ref={anchor}
+          render={<Button size="icon-sm" variant="ghost" aria-label="Run actions" />}
+        >
+          <MoreHorizontalIcon aria-hidden="true" />
+          {/* A first win is worth keeping: a small mark says so without another button. */}
+          {ended?.firstWin === true ? (
+            <span
+              aria-hidden="true"
+              className="absolute top-1 right-1 size-1.5 rounded-full bg-live"
             />
-          }
-        >
-          <FlagIcon
-            aria-hidden="true"
-            className={ended?.firstWin === true ? "text-live" : undefined}
-          />
-        </TooltipTrigger>
-        <TooltipPopup side="top" className="max-w-xs">
-          <span className="flex flex-col gap-1">
-            <TooltipLabel>Save as test play</TooltipLabel>
-            <span className="text-muted-foreground">
+          ) : null}
+        </MenuTrigger>
+        <MenuPopup side="top" align="end">
+          <MenuItem disabled={!canTell} onClick={onTell}>
+            <MessageSquarePlusIcon />
+            Tell the agent about this run
+          </MenuItem>
+          {canSave ? (
+            <MenuItem
+              disabled={ended === null}
+              onClick={() => {
+                // A first win is offered under its own name.
+                if (name === "" && ended?.firstWin === true) setName("first win");
+                setNaming(true);
+              }}
+            >
+              <FlagIcon />
               {ended === null
-                ? "Play the run to its end first"
+                ? "Save as test play (play it to its end)"
                 : ended.firstWin
-                  ? "Your first win: every build replays it and says if it still ends the same"
-                  : "Every build replays it and says if it still ends the same"}
-            </span>
-          </span>
-        </TooltipPopup>
-      </Tooltip>
-      <PopoverPopup side="top" align="end" padding="compact" width="sm">
-        <form
-          className="flex flex-col gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void save();
-          }}
-        >
-          <Input
-            size="sm"
-            value={name}
-            maxLength={60}
-            autoFocus
-            disabled={saving}
-            placeholder="Name this run"
-            aria-label="Name this run"
-            onChange={(event) => setName(event.currentTarget.value)}
-          />
-          {failed === null ? null : (
-            <Text variant="caption" tone="destructive" render={<p role="alert" />}>
-              {failed}
-            </Text>
-          )}
-          <Button size="sm" type="submit" disabled={saving || name.trim().length === 0}>
-            {saving ? "Checking it replays the same…" : "Save as test play"}
-          </Button>
-        </form>
-      </PopoverPopup>
-    </Popover>
+                  ? "Save your first win as a test play…"
+                  : "Save as test play…"}
+            </MenuItem>
+          ) : null}
+          <MenuSeparator />
+          <MenuItem onClick={onRestart}>
+            <RotateCcwIcon />
+            Restart from the title
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      <Popover open={naming} onOpenChange={setNaming}>
+        <PopoverPopup anchor={anchor} side="top" align="end" padding="compact" width="sm">
+          <form
+            className="flex flex-col gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+          >
+            <Input
+              size="sm"
+              value={name}
+              maxLength={60}
+              autoFocus
+              disabled={saving}
+              placeholder="Name this run"
+              aria-label="Name this run"
+              onChange={(event) => setName(event.currentTarget.value)}
+            />
+            {failed === null ? null : (
+              <Text variant="caption" tone="destructive" render={<p role="alert" />}>
+                {failed}
+              </Text>
+            )}
+            <Button size="sm" type="submit" disabled={saving || name.trim().length === 0}>
+              {saving ? "Checking it replays the same…" : "Save as test play"}
+            </Button>
+          </form>
+        </PopoverPopup>
+      </Popover>
+    </>
   );
 }
 

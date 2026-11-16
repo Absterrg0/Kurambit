@@ -2,6 +2,7 @@ import {
   GAME_LEAD_FACTS,
   gameChecksView,
   gameFactName,
+  gameFactsView,
   gameQaFindings,
   gameScreensFindings,
   type GameBuild,
@@ -344,6 +345,20 @@ const sideWhy = (view: GameFactView | undefined): string | null =>
     : view.reading._tag === "pending"
       ? "still being measured"
       : notMeasuredWhy(view.reading);
+
+/**
+ * PURE. The readings that differ between two compared builds, lead checks first, without the
+ * ones that vary from run to run by themselves: what a turn changed, as Compare counts it.
+ */
+export const changedReadings = (compared: {
+  readonly deltas: ReadonlyArray<GameFactDelta>;
+  readonly factsA: GameBuildFacts;
+  readonly factsB: GameBuildFacts;
+}): ReadonlyArray<CompareRow> =>
+  compareRows(compared.deltas, gameFactsView(compared.factsA), gameFactsView(compared.factsB), {
+    a: allChecks(compared.factsA),
+    b: allChecks(compared.factsB),
+  }).rows.filter((row) => row.mark !== null && row.mark !== "=" && !VARIES_BY_ITSELF.has(row.id));
 
 /** Every check of a build, the lead ones and the rest, as the Inspector words them. */
 export const allChecks = (facts: GameBuildFacts) => {

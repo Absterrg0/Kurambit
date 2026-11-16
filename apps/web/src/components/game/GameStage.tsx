@@ -1221,21 +1221,6 @@ function ThreadGameStage({
     compare === null &&
     rewind.timeline !== null &&
     (frozen || runs.ended !== null || rewind.busy !== null);
-  // What the last rewind or compare found, said after the line's own news while the scrubber shows.
-  const shownStatus: ReadonlyArray<GameStatusPart> =
-    scrubbing && rewind.notice !== null
-      ? [
-          ...statusLine,
-          {
-            text: rewind.notice.text,
-            dot: null,
-            strong: false,
-            since: null,
-            hint: null,
-            short: null,
-          },
-        ]
-      : statusLine;
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking
@@ -1350,7 +1335,7 @@ function ThreadGameStage({
               </MenuPopup>
             </Menu>
           )}
-          <GameStatusLine status={shownStatus} />
+          <GameStatusLine status={statusLine} />
           {/* An earlier build on the Stage says so in the line it already has, and its way back
               sits beside it: nothing is inserted over the Stage, so the column never moves. */}
           {playTarget !== null ? (
@@ -1709,11 +1694,21 @@ function ThreadGameStage({
           </>
         ) : null}
         {scrubbing ? (
-          <GameRunScrubber threadRef={threadRef} rewind={rewind} runs={runs} onNote={setMessage} />
+          <GameRunScrubber
+            threadRef={threadRef}
+            rewind={rewind}
+            runs={runs}
+            onRestart={() => {
+              setFrameFold(reloadFrame(frame, Date.now()));
+              handleRequest({ kind: "focus" }, Date.now());
+            }}
+            onNote={setMessage}
+          />
         ) : (
           <span className="min-w-2 flex-1" />
         )}
-        {collapsed ? null : (
+        {/* Sound, fullscreen and hide are play's: they step aside for the scrubber. */}
+        {collapsed || scrubbing ? null : (
           <GameStageViewControls
             threadRef={threadRef}
             playing={phase.kind === "playing" && stageKind !== "window"}

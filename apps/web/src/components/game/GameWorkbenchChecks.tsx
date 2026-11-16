@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
@@ -13,11 +13,14 @@ import {
   type GameCheck,
   type GameFactView,
   type GameSavedPlayReading,
+  type GameThing,
+  type GameTuneChange,
   type RunId,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import {
   CheckIcon,
+  ChevronRightIcon,
   ClipboardCheckIcon,
   ClockIcon,
   ColumnsIcon,
@@ -41,7 +44,11 @@ import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
-import { useQuietThreadShell, useThreadCheckpointSummaries } from "../../state/entities";
+import {
+  useQuietThreadShell,
+  useThreadCheckpointSummaries,
+  useThreadProjection,
+} from "../../state/entities";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -53,6 +60,7 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import {
+  buildCaption,
   buildName,
   buildPhrase,
   formatBuildTime,
@@ -67,6 +75,9 @@ import { turnStripRestore } from "./gameTurnBuild.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
 import { Workbench } from "./GameWorkbenchParts";
+import { valueLabel } from "./GameInspector";
+import { useChangedSinceBase } from "./useChangedSinceBase";
+import { readNextLine } from "@kurambit/shared/gameNextLine";
 
 /**
  * The Workbench's Checks: the build picked in the strip or the chat, else the one on the Stage.
@@ -159,8 +170,13 @@ export function GameWorkbenchChecks({
             : null
         }
       />
+      <WhatChanged
+        threadRef={threadRef}
+        build={build}
+        list={data}
+        onOpenTurnDiff={onOpenTurnDiff}
+      />
       <BuildChecks threadRef={threadRef} build={build} />
-      <WhatChanged threadRef={threadRef} build={build} onOpenTurnDiff={onOpenTurnDiff} />
     </Workbench.Body>
   );
 }
@@ -350,33 +366,6 @@ function withLastReadings(facts: GameBuildFacts, last: GameBuildFacts | null): G
   return { ...facts, ...(merged as Pick<GameBuildFacts, (typeof FACT_KEYS)[number]>) };
 }
 
-/**
- * The heading's count, of the rows it heads ("6 of 9 pass"), in the words the strip and the chat
- * use for the same build. While measuring it counts only what has landed, never a verdict.
- */
-function checksSummary(facts: GameBuildFacts): string {
-  const view = gameChecksView(facts);
-  const busy = facts.state === "measuring" || facts.state === "queued";
-  const measured = (tone: "good" | "bad" | "neutral") =>
-    view.checks.filter((check) => check.reading._tag === "measured" && check.reading.tone === tone);
-  const pass = measured("good").length;
-  const toLook = measured("bad").length;
-  const notMeasured = view.checks.filter((check) => check.reading._tag === "not-measured").length;
-  if (!busy && measured("bad").some((check) => check.id === "boots"))
-    return ["Does not start", ...(notMeasured > 0 ? [`${notMeasured} not measured`] : [])].join(
-      " · ",
-    );
-  return [
-    busy
-      ? pass > 0
-        ? `${pass} pass so far`
-        : "Measuring"
-      : `${pass} of ${view.checks.length} pass`,
-    ...(toLook > 0 ? [`${toLook} to look at`] : []),
-    ...(notMeasured > 0 && !busy ? [`${notMeasured} not measured`] : []),
-  ].join(" · ");
-}
-
 function BuildChecks({ threadRef, build }: { threadRef: ScopedThreadRef; build: GameBuild }) {
   const facts = useEnvironmentQuery(
     build.available
@@ -410,8 +399,8 @@ function BuildChecks({ threadRef, build }: { threadRef: ScopedThreadRef; build: 
     <Workbench.Section
       title="Checks"
       detail={
-        shown !== null && shown.state !== "never" && build.available ? (
-          checksSummary(shown)
+        shown !== null && busy ? (
+          "Measuring"
         ) : shown === null && facts.error === null && build.available ? (
           <Skeleton className="h-3 w-28" />
         ) : null
@@ -490,27 +479,54 @@ function CheckRows({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: Ga
       : fact.id === "controls"
         ? silentControlsNote(facts)
         : null;
+  const passing = measured.filter(
+    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
+  );
+  const rest = measured.filter((check) => !passing.includes(check));
+  const busy = facts.state === "measuring" || facts.state === "queued";
+  const row = (check: GameCheck) => (
+    <div key={check.id} className="flex flex-col">
+      <CheckRow
+        threadRef={threadRef}
+        check={check}
+        // What stopped a game from starting, and what a player would hit, are the things to
+        // fix first: said, not hovered.
+        detail={
+          check.id === "boots" && facts.boots.status === "measured" && !facts.boots.value.ok
+            ? [facts.boots.value.detail]
+            : check.reading._tag === "measured" && check.reading.tone === "bad"
+              ? qaLines(facts, check.id)
+              : []
+        }
+        note={noteOf(check)}
+      />
+      {check.id === "saved-plays" ? <SavedPlays threadRef={threadRef} facts={facts} /> : null}
+    </div>
+  );
   return (
     <div className="flex flex-col">
-      {measured.map((check) => (
-        <div key={check.id} className="flex flex-col">
-          <CheckRow
-            threadRef={threadRef}
-            check={check}
-            // What stopped a game from starting, and what a player would hit, are the things to
-            // fix first: said, not hovered.
-            detail={
-              check.id === "boots" && facts.boots.status === "measured" && !facts.boots.value.ok
-                ? [facts.boots.value.detail]
-                : check.reading._tag === "measured" && check.reading.tone === "bad"
-                  ? qaLines(facts, check.id)
-                  : []
-            }
-            note={noteOf(check)}
-          />
-          {check.id === "saved-plays" ? <SavedPlays threadRef={threadRef} facts={facts} /> : null}
-        </div>
-      ))}
+      {/* The passing checks fold into one line; what is left to look at is listed under it. */}
+      <PassingLine
+        label={
+          rest.some(
+            (check) =>
+              check.id === "boots" &&
+              check.reading._tag === "measured" &&
+              check.reading.tone === "bad",
+          ) && !busy
+            ? "Does not start"
+            : busy
+              ? `${passing.length} pass so far`
+              : `${passing.length} of ${view.checks.length} pass`
+        }
+        failed={rest.some(
+          (check) => check.reading._tag === "measured" && check.reading.tone === "bad",
+        )}
+        count={passing.length}
+      >
+        {passing.map(row)}
+      </PassingLine>
+      {rest.map(row)}
       {pending > 0 ? (
         <Workbench.Row
           mark={<ClockIcon className="text-dim-foreground" aria-hidden="true" />}
@@ -523,6 +539,57 @@ function CheckRows({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: Ga
       ) : null}
       <NotMeasured checks={view.checks} note={noteOf} />
     </div>
+  );
+}
+
+/**
+ * The checks' one summary line ("6 of 9 pass"), which opens to the passing checks folded into it.
+ */
+function PassingLine({
+  label,
+  failed,
+  count,
+  children,
+}: {
+  label: string;
+  failed: boolean;
+  count: number;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const mark = failed ? (
+    <TriangleAlertIcon className="text-warning" aria-hidden="true" />
+  ) : (
+    <CheckIcon className="text-success" aria-hidden="true" />
+  );
+  return (
+    <>
+      {count === 0 ? (
+        <Workbench.Row mark={mark} name={label} />
+      ) : (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="cursor-pointer text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <Workbench.Row
+            mark={mark}
+            name={label}
+            end={
+              <ChevronRightIcon
+                className={cn(
+                  "size-3.5 text-dim-foreground motion-popup transition-transform",
+                  open && "rotate-90",
+                )}
+                aria-hidden="true"
+              />
+            }
+          />
+        </button>
+      )}
+      {open ? <div className="flex flex-col ps-5">{children}</div> : null}
+    </>
   );
 }
 
@@ -946,18 +1013,79 @@ function SavedPlays({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: G
 const lines = (count: number) => count.toLocaleString("en-US");
 
 /**
- * What the build changed, as a plain diff: its files and lines in one line, then a row per file.
- * A file opens T3's diff view on it, as a chat turn's files do.
+ * The first sentence of the agent's reply for the turn, without its markdown or its Next line: the
+ * build's headline in the words of the turn. The reply itself is the chat's.
+ */
+const firstSentence = (reply: string): string | null => {
+  const text = (
+    readNextLine(reply) === null ? reply : reply.trimEnd().split("\n").slice(0, -1).join("\n")
+  )
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .find(
+      (paragraph) => paragraph !== "" && !paragraph.startsWith("#") && !/^[-*\d]/.test(paragraph),
+    );
+  if (text === undefined) return null;
+  const plain = text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ");
+  const end = /[.!?](\s|$)/.exec(plain);
+  const sentence = end === null ? plain : plain.slice(0, end.index + 1);
+  return sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
+};
+
+const NO_THINGS: ReadonlyArray<GameThing> = [];
+
+/**
+ * A tuned value as a person says it, named from the running game where it can be: "Runner speed
+ * 7 → 9.5 m/s". A value first set in the tune file changed from the code's own, which the game
+ * reports as the value's default.
+ */
+const tuneLine = (change: GameTuneChange, things: ReadonlyArray<GameThing>) => {
+  const thing =
+    change.thing === null ? null : (things.find((each) => each.id === change.thing) ?? null);
+  const value = thing?.values?.find((each) => each.key === change.key);
+  const name =
+    `${thing?.name ?? change.thing ?? ""} ${(value === undefined ? change.key : valueLabel(value)).toLowerCase()}`.trim();
+  const own = value?.default === undefined ? null : String(value.default);
+  const from = change.from ?? own;
+  const to = change.to ?? own ?? "the game's own";
+  const unit = value?.unit === undefined ? "" : ` ${value.unit}`;
+  return from === null ? `${name} set to ${to}${unit}` : `${name} ${from} → ${to}${unit}`;
+};
+
+/** A saved play that no longer ends as it was recorded, as a person says it. */
+const savedPlayLine = (play: {
+  readonly name: string;
+  readonly reading: GameSavedPlayReading;
+  readonly differs: { readonly seconds: number } | null;
+}) =>
+  play.reading === "plays-differently"
+    ? `Saved play "${play.name}" now plays differently${play.differs === null ? "" : ` at ${Math.round(play.differs.seconds)} s`}`
+    : play.reading === "ending-changed"
+      ? `Saved play "${play.name}" now ends differently`
+      : play.reading === "cannot-replay"
+        ? `Saved play "${play.name}" can no longer be replayed`
+        : null;
+
+/** The most change lines said at once; the rest are counted. */
+const CHANGE_LINES = 4;
+
+/**
+ * What the build changed, in plain words first: the turn's headline, the values it tuned and the
+ * readings that moved since the build before. Then one quiet line of its files, which opens to a
+ * row per file; a file opens T3's diff view on it, as a chat turn's files do.
  */
 function WhatChanged({
   threadRef,
   build,
+  list,
   onOpenTurnDiff,
 }: {
   threadRef: ScopedThreadRef;
   build: GameBuild;
+  list: GameBuildsResult;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
 }) {
+  const [filesOpen, setFilesOpen] = useState(false);
   const turn =
     build.source._tag === "turn" && build.source.threadId === threadRef.threadId
       ? build.source.turn
@@ -965,6 +1093,25 @@ function WhatChanged({
   const runId =
     useThreadCheckpointSummaries(threadRef).find((entry) => entry.checkpointTurnCount === turn)
       ?.runId ?? null;
+  const reply = useThreadProjection(
+    runId === null ? null : threadRef,
+  )?.projection.messages.findLast(
+    (message) => message.role === "assistant" && !message.streaming && message.runId === runId,
+  );
+  const things = useThreadStageBridge(
+    scopedThreadKey(threadRef),
+    (state) => state.things,
+    NO_THINGS,
+  );
+  const facts = useEnvironmentQuery(
+    build.available
+      ? gameEnvironment.buildFacts({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, build: refOf(build) },
+        })
+      : null,
+  ).data;
+  const moved = useChangedSinceBase(threadRef, build, list);
   const changes = useEnvironmentQuery(
     build.available
       ? gameEnvironment.buildChanges({
@@ -973,6 +1120,30 @@ function WhatChanged({
         })
       : null,
   );
+  const source = build.source;
+  const headline =
+    (reply === undefined ? null : firstSentence(reply.text)) ??
+    (source._tag === "version"
+      ? source.approach.trim() || source.request.trim()
+      : source._tag === "turn"
+        ? buildCaption(build)
+        : null);
+  const savedPlays =
+    facts?.savedPlays.status === "measured"
+      ? facts.savedPlays.value.plays.flatMap((play) => {
+          const line = savedPlayLine(play);
+          return line === null ? [] : [line];
+        })
+      : [];
+  const movedLines = (moved?.changed ?? [])
+    .filter((row) => row.id !== "saved-plays")
+    .map((row) => `${row.name} ${row.a ?? "not measured"} → ${row.b ?? "not measured"}`);
+  const said = [
+    ...(changes.data?.tunes ?? []).map((change) => tuneLine(change, things)),
+    ...savedPlays,
+    ...movedLines,
+  ];
+  const shownLines = said.slice(0, headline === null ? CHANGE_LINES : CHANGE_LINES - 1);
   const files = changes.data?.files ?? build.files;
   const count = changes.data?.count ?? build.fileCount;
   const added = files.reduce((sum, file) => sum + file.additions, 0);
@@ -981,74 +1152,128 @@ function WhatChanged({
     if (runId !== null) onOpenTurnDiff(runId, path);
   };
   return (
-    <Workbench.Section
-      title="What changed"
-      detail={
-        count === null || count === 0 ? null : (
-          <>
-            {count === 1 ? "1 file" : `${count} files`}{" "}
-            <span className="text-success">+{lines(added)}</span>{" "}
-            <span className="text-destructive-foreground">−{lines(removed)}</span>
-          </>
-        )
-      }
-      aside={
-        runId === null || files.length === 0 ? undefined : (
-          <Button size="xs" variant="ghost" onClick={() => openDiff()}>
-            Open diff
-          </Button>
-        )
-      }
-    >
+    <Workbench.Section title="What changed">
+      <div className="flex flex-col gap-1 px-4 pb-1.5">
+        {headline === null ? null : (
+          <Text variant="body" tone="strong" render={<p className="break-words" />}>
+            {headline}
+          </Text>
+        )}
+        {shownLines.length === 0 ? null : (
+          <ul className="flex flex-col gap-0.5">
+            {shownLines.map((line) => (
+              <Text
+                key={line}
+                variant="meta"
+                tone="default"
+                numeric
+                render={<li className="break-words" />}
+              >
+                {line}
+              </Text>
+            ))}
+            {said.length > shownLines.length ? (
+              <Text variant="caption" tone="muted" render={<li />}>
+                and {said.length - shownLines.length} more
+              </Text>
+            ) : null}
+          </ul>
+        )}
+        {headline === null && shownLines.length === 0 && changes.data !== null ? (
+          <Text variant="meta" tone="muted" render={<p />}>
+            {count === null
+              ? "The first build: everything in it is new."
+              : "No change to say in words."}
+          </Text>
+        ) : null}
+      </div>
       {changes.data === null && changes.error === null && build.available ? (
         <div className="px-4 py-1.5">
           <Skeleton className="h-3 w-40" />
         </div>
-      ) : files.length === 0 ? (
-        <Note>
-          {count === null ? "The first build: everything in it is new." : "No game files changed."}
-        </Note>
-      ) : (
-        <ul className="flex flex-col">
-          {files.map((file) => {
-            const slash = file.path.lastIndexOf("/");
-            const body = (
-              <>
-                <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
-                  {slash === -1 ? null : (
-                    <span className="text-muted-foreground">{file.path.slice(0, slash + 1)}</span>
-                  )}
-                  {file.path.slice(slash + 1)}
+      ) : files.length === 0 ? null : (
+        <>
+          {/* The files, quietly: one line that opens to a row per file. */}
+          <div className="flex h-7 min-w-0 items-center gap-1 ps-2 pe-2">
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              aria-expanded={filesOpen}
+              onClick={() => setFilesOpen(!filesOpen)}
+            >
+              <ChevronRightIcon
+                aria-hidden="true"
+                className={cn("motion-popup transition-transform", filesOpen && "rotate-90")}
+              />
+              <Text variant="caption" tone="inherit" numeric>
+                {count === 1 ? "1 file" : `${count ?? files.length} files`}{" "}
+                <span className="text-success">+{lines(added)}</span>{" "}
+                <span className="text-destructive-foreground">−{lines(removed)}</span>
+              </Text>
+            </Button>
+            {runId === null ? null : (
+              <Button size="xs" variant="ghost-muted" onClick={() => openDiff()}>
+                Open diff
+              </Button>
+            )}
+          </div>
+          {filesOpen ? (
+            <ul className="flex flex-col">
+              {files.map((file) => {
+                const slash = file.path.lastIndexOf("/");
+                const body = (
+                  <>
+                    <Text
+                      variant="meta"
+                      tone="default"
+                      truncate
+                      render={<span className="flex-1" />}
+                    >
+                      {slash === -1 ? null : (
+                        <span className="text-muted-foreground">
+                          {file.path.slice(0, slash + 1)}
+                        </span>
+                      )}
+                      {file.path.slice(slash + 1)}
+                    </Text>
+                    <Text
+                      variant="caption"
+                      tone="muted"
+                      numeric
+                      render={<span className="shrink-0" />}
+                    >
+                      <span className="text-success">+{lines(file.additions)}</span>{" "}
+                      <span className="text-destructive-foreground">−{lines(file.deletions)}</span>
+                    </Text>
+                  </>
+                );
+                return (
+                  <li key={file.path} className="flex px-2">
+                    {runId === null ? (
+                      <div className="flex h-7 min-w-0 flex-1 items-center gap-2 ps-2 pe-2">
+                        {body}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openDiff(file.path)}
+                        aria-label={`Open the diff of ${file.path}`}
+                        className="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      >
+                        {body}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+              {count !== null && count > files.length ? (
+                <Text variant="caption" tone="muted" render={<li className="px-4 py-1" />}>
+                  and {count - files.length} more
                 </Text>
-                <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
-                  <span className="text-success">+{lines(file.additions)}</span>{" "}
-                  <span className="text-destructive-foreground">−{lines(file.deletions)}</span>
-                </Text>
-              </>
-            );
-            return (
-              <li key={file.path} className="flex px-2">
-                {runId === null ? (
-                  <div className="flex h-7 min-w-0 flex-1 items-center gap-2 ps-2 pe-2">{body}</div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => openDiff(file.path)}
-                    aria-label={`Open the diff of ${file.path}`}
-                    className="flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                  >
-                    {body}
-                  </button>
-                )}
-              </li>
-            );
-          })}
-          {count !== null && count > files.length ? (
-            <Text variant="caption" tone="muted" render={<li className="px-4 py-1" />}>
-              and {count - files.length} more
-            </Text>
+              ) : null}
+            </ul>
           ) : null}
-        </ul>
+        </>
       )}
     </Workbench.Section>
   );

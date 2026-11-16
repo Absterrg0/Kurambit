@@ -54,3 +54,13 @@ export function useRowWidth(row: HTMLElement | null): number | null {
     () => null,
   );
 }
+
+/** Below this, a game's column is too narrow to play in beside two side panels. */
+const GAME_COLUMN_ROOM = 560;
+
+/**
+ * PURE. Opening the right panel (a diff from Checks) beside the Workbench would leave the game's
+ * column under the room it needs: the Workbench closes then. Reopening it closes nothing.
+ */
+export const diffCrowdsGame = (row: number, workbench: number, right: number) =>
+  row - workbench - right < GAME_COLUMN_ROOM;

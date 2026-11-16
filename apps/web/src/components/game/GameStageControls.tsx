@@ -68,7 +68,7 @@ export function GameStagePlayControls({
   threadRef: ScopedThreadRef;
   playing: boolean;
   canReload: boolean;
-  /** The run's scrubber takes the bar: speed, a control of play, steps aside for it. */
+  /** The run's scrubber takes the bar: only Play stays; the rest of play's controls step aside. */
   scrubbing: boolean;
   onRestart: () => void;
   onFocus: () => void;
@@ -84,17 +84,20 @@ export function GameStagePlayControls({
   return (
     <div className="flex shrink-0 items-center gap-1.5" data-game-play-controls="">
       <StageToolbarGroup label="Play">
-        <Control
-          label="Restart the game"
-          detail="A fresh run from the title"
-          disabled={!playing || !canReload}
-          onClick={() => {
-            onRestart();
-            onFocus();
-          }}
-        >
-          <RotateCcwIcon aria-hidden="true" />
-        </Control>
+        {/* Paused or ended, the bar is the run's: Play stays, Restart moves to the run's menu. */}
+        {scrubbing ? null : (
+          <Control
+            label="Restart the game"
+            detail="A fresh run from the title"
+            disabled={!playing || !canReload}
+            onClick={() => {
+              onRestart();
+              onFocus();
+            }}
+          >
+            <RotateCcwIcon aria-hidden="true" />
+          </Control>
+        )}
         <Control
           label={paused ? "Play on" : "Pause"}
           detail={paused ? null : "Then click something in the game to point at it"}
@@ -108,7 +111,7 @@ export function GameStagePlayControls({
         >
           {paused ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
         </Control>
-        {ready && capabilities.includes("cannot-lose") ? (
+        {ready && capabilities.includes("cannot-lose") && !scrubbing ? (
           <Control
             label={cannotLose ? "Can't lose: on" : "Can't lose"}
             detail="A loss does not end the run, to tune a fight; the checks never see it"
