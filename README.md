@@ -16,7 +16,7 @@
 
 Kurambit is a desktop app for making games with coding agents. Describe a game, and the agent you
 already use (Codex, Claude Code, Cursor, Grok Build, OpenCode, or Antigravity) builds it with real
-production tools: Blender for models, Godot and Unity for native games and three.js for quick browser games.
+production tools: three.js for the game and Blender for its models.
 You play the result inside the app, ask for changes in plain language, and export a build.
 
 What sets it apart is the loop around the model. Kurambit plays every build with a separate tester
@@ -30,22 +30,19 @@ getting better.
 - **A production loop that plays its own builds.** Every new game is made by a run: the harness builds,
   plays every build with a separate tester session, compares builds blind so a worse one never
   lands, and stops when the game is done or stops getting better.
-- **Real tools, one execution system.** Agents reach Blender, Godot and Unity through Kurambit's own
+- **Real tools, one execution system.** Agents reach Blender and the running game through Kurambit's own
   `game_*` tools in the app's MCP server, which every provider session already gets. Nothing to
   configure per agent.
 - **Assets you can edit.** Each Blender asset keeps its `.blend` source and the script that made it.
-  The engine-ready `.glb` is exported into the Godot project.
-- **Play, revise, export.** Play the real build in the app, rebuild, and export Windows, Linux and
-  web builds. Follow-up requests ("make the rocks taller") revise the same sources and exports.
+  The engine-ready `.glb` is exported into the game's `web/` project.
+- **Play, revise, export.** Play the real build in the app, rebuild, and export a web build. Follow-up requests ("make the rocks taller") revise the same sources and exports.
 
 ## Requirements
 
 - Linux x86_64 (the platform this build targets and is tested on).
 - At least one coding agent installed and signed in, for example `codex login` or
   `claude auth login`. OpenCode and others can be enabled in **Settings → Providers**.
-- Blender and Godot. Kurambit installs pinned, checksum-verified copies for you from the Game panel
-  or **Settings → General → Game tools**: Blender 4.5.14 LTS and Godot 4.7.2 (with its export
-  templates), into `~/.local/share/kurambit/tools`. You can point it at your own executables instead.
+- Blender 4.2 or later for model art, found on PATH or set in **Settings → General → Game tools**.
 - `uvx` (or `uv`) on PATH for the live Blender view behind the `game_blender` tool. The
   **Install tools** button does not install it; get it from https://docs.astral.sh/uv/.
 
@@ -72,8 +69,8 @@ gitignored `.kurambit` directory. An installed build keeps its state in `~/.kura
   BRIEF.md         brief and art direction, editable
   AGENTS.md        instructions for the agent working on this game
   art/blender/     editable .blend sources
-  godot/           the Godot 4.7 project (scenes, scripts, exported .glb models)
-  builds/          web, Windows and Linux exports and operation logs (gitignored)
+  web/             the three.js project (index.html, main.js, assets and exported .glb models)
+  builds/          web exports and operation logs (gitignored)
   .studio/         production run rounds, notes, bots and videos
 ```
 

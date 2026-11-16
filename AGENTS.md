@@ -1,10 +1,10 @@
 # Kurambit
 
-Kurambit is a local desktop app for making games with coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves the Electron desktop app and the same UI in a local browser. On top of that agent harness sits the game layer: agents build Godot, Unity and three.js games, with Blender for art, through the server's `game_*` tools, and users play, revise, and export them in the app.
+Kurambit is a local desktop app for making games with coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves the Electron desktop app and the same UI in a local browser. On top of that agent harness sits the game layer: agents build three.js games, with Blender for art, through the server's `game_*` tools, and users play, revise, and export them in the app.
 
 ## Where Kurambit is going
 
-Kurambit does for games what T3 Code does for code. A brief becomes a playable, good-looking game in minutes, and every chat turn after that visibly makes it better: the turn's build plays on the Stage, the harness measures its facts (boots, can it be won or lost, does it freeze), and undo is one click. Keep going is the same loop repeated on top. Each step is proposed from the evidence, undone when a fact gets worse, and stopped when steps stop gaining anything. Any genre, aiming at a game with the shape of a Steam demo. Creators decide taste and direction; the harness measures, never judges taste for them, and never spends tokens on work that adds nothing. three.js is the lane being built first. Godot and Unity are parked native lanes, so keep the engine a parameter everywhere.
+Kurambit does for games what T3 Code does for code. A brief becomes a playable, good-looking game in minutes, and every chat turn after that visibly makes it better: the turn's build plays on the Stage, the harness measures its facts (boots, can it be won or lost, does it freeze), and undo is one click. Keep going is the same loop repeated on top. Each step is proposed from the evidence, undone when a fact gets worse, and stopped when steps stop gaining anything. Any genre, aiming at a game with the shape of a Steam demo. Creators decide taste and direction; the harness measures, never judges taste for them, and never spends tokens on work that adds nothing. three.js is the one engine for now. More engines come later (Godot and Unity were removed until then), so keep the engine a parameter everywhere.
 
 ## What we keep
 
@@ -59,7 +59,7 @@ We need to be on the same page with terminology. When communicating, use this la
 - **project** means an environment-local workspace record rooted at a directory.
 - **thread** means the durable conversation and work history for a project.
 - **turn** means one user-to-agent cycle, including follow-up work such as checkpointing.
-- **game** means a project whose root contains `game.json`: a git repository holding an engine project (Godot, Unity or three.js), its assets and the model's own documents.
+- **game** means a project whose root contains `game.json`: a git repository holding an engine project (three.js), its assets and the model's own documents.
 - **home** means the base data directory (`~/.kurambit`, `KURAMBIT_HOME`, or a dev checkout's `.kurambit`). Runtime state normally lives below its userdata directory.
 
 ## The three ways to hurt yourself
@@ -87,7 +87,7 @@ The most common defect in this repo is a change that works on the path you teste
 - `vp i` installs. Worktrees get this from the kurambit.json setup script; if module resolution looks broken, it probably did not run.
 - `vp run dev` starts server and web; `vp run dev:desktop` starts the desktop app. In a linked git worktree, state defaults to that worktree's gitignored `.kurambit`. In a plain clone it defaults to `~/.kurambit`, so pass `--home-dir <checkout>/.kurambit` (for example `node scripts/dev-runner.ts dev --home-dir $PWD/.kurambit`). An explicit `--home-dir` always wins. `KURAMBIT_HOME` overrides the default outside a worktree.
 - `/tmp` may be RAM-backed. Keep builds, exports, and scratch files on disk, for example `TMPDIR=~/.gs-tmp`. Keep it short: Unix socket paths have a 108-character limit.
-- Godot, Unity and Blender are the user's own installs, detected like providers (Settings path, env override, Unity Hub, an earlier Kurambit copy under `~/.local/share/kurambit/tools`, PATH); tests that need them skip when they are absent.
+- Blender is the user's own install, detected like a provider (Settings path, env override, an earlier Kurambit copy under `~/.local/share/kurambit/tools`, PATH); tests that need it skip when it is absent.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
 - To reuse web dev auth across worktrees, configure one fixed `KURAMBIT_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `kurambit.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
 - Stop what you started, by the PID you tracked. See rule 1.
@@ -149,7 +149,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect-smol/LLMS.md` for the Effect library itself.
 - `apps/web` - React/Vite UI. `apps/desktop` wraps it in Electron.
 - `apps/marketing` - the marketing site in `site/` (static pages plus the waitlist functions in `site/api`), deployed to kurambit.com by Vercel from `main`; see [Waitlist](docs/operations/waitlist.md). `assets/` holds the brand artwork and every icon rendered from it.
-- `apps/server/src/game` - the game layer: toolchain, game projects, Blender/Godot operations, processes, preview and playtest. Its MCP tools are in `apps/server/src/mcp/toolkits/game`.
+- `apps/server/src/game` - the game layer: toolchain, game projects, Blender operations, processes, preview and playtest. Its MCP tools are in `apps/server/src/mcp/toolkits/game`.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - client state and connection code shared by the web and desktop renderers.

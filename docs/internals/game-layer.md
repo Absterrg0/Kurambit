@@ -20,40 +20,36 @@ check that matters.
   on, so no game thread is owned by anything but its chat. Event logs still hold the role threads
   (`role` lineage) and run records an earlier Kurambit's production runs wrote; their shapes keep
   decoding, `role` threads are left out of a game's chats, and nothing else reads them.
-- The live editors (Blender with its pinned MCP addon per game; one batchmode Unity editor per
-  server, since one costs 2-3 GB, reached through the official `unity` CLI and its `unity mcp`
-  server) run on private displays with session.json launch records, reaping and idle shutdown
+- The live editor (Blender with its pinned MCP addon per game) runs on private displays with session.json launch records, reaping and idle shutdown
   (`liveProcess.ts`, `liveEditor.ts`). A session something showed unusable (its MCP child exited,
   a call timed out on a frozen main thread) closes when its last holder lets go, and the next call
   opens a fresh one; a session whose source on disk changed since it last opened or saved it
-  (Blender's live.blend, Unity's open scene) reopens instead of saving over it. A start cut short
+  (Blender's live.blend) reopens instead of saving over it. A start cut short
   stops what it launched. A record is acted on only while its process still verifies as the launch
   (below) and its command line names the executables the live toolchain would launch now, never
   paths from the record; of the editor's process tree only processes running from a detected
-  editor's directory, the CLI or Xvfb are signalled, and a Unity Licensing Client never is.
-  Both editors keep a copy of their record under the server state dir, reaped at startup, so a
+  editor's directory or Xvfb are signalled.
+  The editor keeps a copy of its record under the server state dir, reaped at startup, so a
   crashed server's editor dies even if its game is never reopened. Blender runs under its own
   user-folder override (`BLENDER_USER_RESOURCES`) and installs the addon where Blender itself
   says its user addons live, so no version or OS layout is assumed. Every call or operation holds the
   editor; another game's open closes it only while it is idle, and fails `busy` naming the holder.
-- `GameToolchain` detects the user's own Blender, and an active engine's own tool (Godot, Unity),
-  the way providers are detected, and never installs them: they are other vendors' software with their own upkeep and licences on
-  every OS. It fetches only harness plumbing (uv, the Unity CLI) itself, through `downloadPinned`
+- `GameToolchain` detects the user's own Blender, and an engine's own tool where its profile names
+  one (three.js needs none), the way providers are detected, and never installs them: they are
+  other vendors' software with their own upkeep and licences on every OS. It fetches only harness
+  plumbing (uv) itself, through `downloadPinned`
   against vendor-published sizes and SHA-256s.
 - Every process the game layer starts goes through one process host
   ([processHost.ts](../../apps/server/src/game/processHost.ts)), the only per-OS process code. A
   child carries a fresh launch token in its environment (and on its command line where the program
-  ignores extra arguments: the Unity editor, Blender), and its launch record is pid, OS start time
+  ignores extra arguments: Blender), and its launch record is pid, OS start time
   and token. A record is signalled only while the live process has that start time and carries that
   token, so a reused pid or a record an agent wrote never names another process. A tree is a
   process group on Linux and macOS; on Windows every owned child joins one kill-on-close Job Object
   held by a helper whose stdin is the server's pipe, so the tree dies with the server however it
-  exits; only a child whose launch record is reaped at the next start (the live Unity editor) stays
-  out of the job, since a Licensing Client it starts inherits the job and must outlive us. A tree
-  stop on Windows ends the root and its descendants pid by pid, never `/T`, so a `keep` filter can
-  spare what is the user's. Free memory is `os.freemem()` (libuv's MemAvailable
-  on Linux). Every in-game runner quits when its control socket closes, so a crashed server leaves
-  no game running; only the live editors outlive it, and their records reap them.
+  exits. A tree stop on Windows ends the root and its descendants pid by pid, never `/T`. Free memory is `os.freemem()` (libuv's MemAvailable
+  on Linux). Every game page closes with its browser, so a crashed server leaves no game running;
+  only the live editor outlives it, and its record reaps it.
 - `GameAssetLibrary` serves the pinned open library. Every entry is a "pack": a curated one in
   `assetLibraryCatalog.ts`, a generated one in `library/packs.json` (the rest of Kenney's 3D kits,
   Quaternius' site packs, KayKit), or one asset of a per-asset source (`assetLibrarySources.ts`:
@@ -129,7 +125,7 @@ check that matters.
   gltfpack: Blender cannot import meshopt, so the review measures the uncompressed candidate and
   the sidecar names the shipped bytes and triangles, which keeps the asset fact valid. The asset is its sidecar `<name>.asset.json` (skeleton, clips with ground speed,
   springs, height, source and licence), which the three.js shell reads from `ASSETS` and which
-  Godot and Unity can read later; GLB extras are not used because those engines drop them.
+  another engine can read later; GLB extras are not used because native engines drop them.
   Painting from a sheet (`game_blender` op `paint`) and carving (`game_blender` op `carve`) run in a
   one-shot Blender too, since their bakes outlast the live server's 180 s per command; the live
   scene only adopts the result, after checking its objects did not change meanwhile.
@@ -148,38 +144,39 @@ check that matters.
   MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
   person's request and never bundled.
 - An engine is two modules, and nothing above them names an engine. Its profile
-  (`godotProfile.ts`, `threeProfile.ts`, `unityProfile.ts`, read through `engineProfile.ts`) is pure
-  data the services, the client tables and the run's pure policy share: directories, its releases
-  (target, artifact, whether it ships as a file or a folder, whether Kurambit packages it), what of
-  the project is build input, how its games play, the harness's runner files, check messages, its
-  tool descriptions, skill and prompt lines. Its driver (`GameGodotEngine`, `GameThreeEngine`,
-  `GameUnityEngine`, registered in `GameEngine`) holds the behaviour that differs: the project and
-  its binary, its tool's status, viewport, import, check, writing one release into a staging folder
-  and checking its own files, how a play session starts its runner (`playProcess`; null for a
-  browser page), and the optional `editor` (a live editor that refuses a second user) and `player`
-  (where a game keeps its built players). A per-engine table outside a driver is a
-  `Record<GameEngineId, …>`, so a new engine does not compile without its entries. A Godot
-  game draws Forward+ in native exports and Compatibility in its Web export
-  (`rendering_method.web`), and every play on a private display forces Compatibility because Xvfb
-  has only software GL: the facts and frames the harness takes are Compatibility's. The template's
-  look therefore uses only what both renderers draw. The three.js look's default draws straight
-  to the canvas, as a plain three.js frame does, so a first build costs what it always did; its
-  post chain (AO, bloom, SMAA) runs only for the presets and options that ask for it, and a browser
-  drawing in software always takes the straight path, where full-screen passes cost several times
-  over. The game is
-  known by its manifest's engine id (and its project folder by `manifestProject`), never by the
-  folder's name; a run records the engine it started with (`runEngine` derives it from the lane for
-  older records).
-- Which engines Kurambit works on is one switch: `GAME_ENGINES[id].status` in
-  `packages/contracts/src/game.ts`, active or parked, read by the server and every client. Only
-  three.js is active. A parked engine keeps its profile, driver and tests, and compiles; nothing
-  new is made in it, its tool is not detected, and engine work on its existing games is refused
-  `engine-parked` (`GameEngine`'s runner), while their chats, builds and history still open.
+  (`threeProfile.ts`, read through `engineProfile.ts`) is pure data the services, the client
+  tables and the run's pure policy share: directories, its releases (target, artifact, whether it
+  ships as a file or a folder, whether Kurambit packages it), how its games play, check messages,
+  its tool descriptions, skill and prompt lines. Its driver (`GameThreeEngine`, registered in
+  `GameEngine` as a `GameEngineBackend`) holds the behaviour that differs: the project, its tool's
+  status, viewport, import, check, writing one release into a staging folder and checking its own
+  files, replays and model sheets. A per-engine table outside a driver is a
+  `Record<GameEngineId, …>` (`GAME_ENGINES` in contracts, the profiles, the capabilities), so a new
+  engine does not compile without its entries. Adding one is: its `GameEngineId` literal and
+  `GAME_ENGINES` entry, its profile and driver, its template (`templates/<id>/` plus a
+  `GAME_TEMPLATES` entry) and studio skill, and, if it needs a program of its own, a
+  `GameToolName` and its detection in `GameToolchain`. The Stage kinds (`live`, `export`,
+  `window`) and the play-session protocol below are already engine-neutral. The three.js look's
+  default draws straight to the canvas, as a plain three.js frame does, so a first build costs
+  what it always did; its post chain (AO, bloom, SMAA) runs only for the presets and options that
+  ask for it, and a browser drawing in software always takes the straight path, where full-screen
+  passes cost several times over. The game is known by its manifest's engine id (and its project
+  folder by `manifestProject`), never by the folder's name; a run records the engine it started
+  with (`runEngine` derives it from the lane for older records).
+- Stored records name engines this version does not have: earlier versions made Godot and Unity
+  games, and their `game.json`, facts rows, run records and events say so. Every schema that
+  decodes stored data reads `GameEngineName` (every engine ever named); `GameEngineId` is only the
+  engines this version runs, and `isAvailableEngine` narrows one to the other. Such a game still
+  opens with its chats, builds and history; engine work on it is refused `engine-parked`
+  (`unavailableEngine` in `engineProfile.ts`, worded "not available in this version"), its tool is
+  not looked for, and its agent gets no engine tools. The reason keeps its old literal because
+  stored errors and clients already decode it.
   The game tools an agent is listed follow from the same data. There are six, each one schema
   whose keys are its ops ([gameTools.ts](../../packages/contracts/src/gameTools.ts)); the op is the
   key rather than a tagged union because providers refuse a tool input that is not one object at
   the top. [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) says what each op
-  needs of the engine (`engineCapabilities`, derived from the profile, empty for a parked engine).
+  needs of the engine (`engineCapabilities`, derived from the profile, empty for an engine this
+  version does not have).
   A tool is listed from a game thread's first turn whenever the game runs any of its ops: its
   engine, and for `game_blender` the person's model choice (the routes that make models in
   Blender: blender, generated and code with the library on), so a code chat never reads Blender's
@@ -195,64 +192,26 @@ check that matters.
   person's mail or files. Claude enforces it with its strict MCP config and per-invocation
   settings; Codex, Cursor, Grok, OpenCode and Antigravity have no per-session way to drop the
   person's servers yet, so there it is not enforced.
-- Every release takes one path (`GameExport.releaseTo`): staged beside its destination, written and
-  checked by the driver, compared with the sources before and after (an unidentifiable tree is
-  refused before the engine runs), then published by `publishStaged`, which moves the incumbent
-  aside and puts it back on any failure. A native release replaces the whole `builds/<target>/`
-  folder; a Web build becomes the content-addressed candidate Play selects, and only the selected
-  build and the one before it are kept, with their preview servers; a kept Unity player is
-  published the same way. A crash between the two renames leaves a `.retired` copy with no final,
-  which the next export's sweep puts back. The check's verdict is `GameEngine.check`: everything
-  the game did is a check error or warning, and it fails only when a tool or the machine kept the
-  check from being made. Each engine has one error reading for import, export and check (Godot's
-  `parseGodotIssues`; Unity's `answerOf` over the CLI envelope), and a harness fault is
-  `tool-failed`, never `command-failed`. Godot owns the native process boundary (headless editor
-  import, check script, export presets); its check skips `.gdignore` folders and files every
-  export preset excludes, as the editor and exporter do. three.js owns a headless-Chromium
-  boundary: import is a no-op, the check loads the page (a page crash is the game's, a lost
-  browser a tool's), the release copies the folder. Unity refuses a second editor on an open
-  project, so every Unity operation goes through the game's live editor in `GameUnity`: import
-  refreshes and recompiles there, the check plays the first enabled build scene and the gameplay
-  scene; a game whose play mode never answers or advances no frame froze (an error, and the editor
-  is closed), one that runs below speed is a warning with its frame rate.
-  Unity editors run with the real HOME so they reach the user's Licensing Client; Kurambit only
-  reads the entitlement file to say whether a licence is active and never stores credentials.
-  Every `unity` CLI call (status, command, recompile, mcp) runs under the CLI's own HOME in the
-  tools directory, because the CLI logs each invocation with its full arguments to
-  `~/.config/unityhub/logs/cli-log.json`; it reaches the live editor through the project's
-  `Library/Pipeline` port file, so nothing Kurambit runs writes the user's Unity Hub data.
-  Blind samples play plain copies of a build, each a separate Unity project with no `Library/`.
-  Before an editor opens on one, `GameUnity` gives it a copy-on-write copy
-  (`fs.cp` with `COPYFILE_FICLONE`: a reflink or APFS clone where the filesystem has one) of its game folder's `Library/`, found through the folder the copy
-  names in `.kurambit-copy-of` and taken after the game folder's
-  idle editor closed, so only what differs in that build is reimported (about a minute warm,
-  against two cold). The compiled-script
-  state (`Bee/`, `ScriptAssemblies/`, the player data caches) is left out: it is keyed by the main
-  checkout's path, a player built from it lost the scene's MonoBehaviours, and the copy
-  recompiles its scripts anyway. The editor is
-  needed there only to build the Linux player; the role runner closes it before removing the
-  copy. Other checkouts whose `.git` is a file (submodules) are
-  refused.
+- Every release takes one path (`GameExport`'s `releaseTo`): staged beside its destination,
+  written and checked by the driver, compared with the sources before and after (an
+  unidentifiable tree is refused before the engine runs), then published by `publishStaged`, which
+  moves the incumbent aside and puts it back on any failure. A Web build becomes the
+  content-addressed candidate Play selects, and only the selected build and the one before it are
+  kept, with their preview servers. A crash between the two renames leaves a `.retired` copy with
+  no final, which the next export's sweep puts back. The check's verdict is `GameEngine.check`:
+  everything the game did is a check error or warning, and it fails only when a tool or the
+  machine kept the check from being made. A harness fault is `tool-failed`, never
+  `command-failed`. three.js owns a headless-Chromium boundary: import is a no-op, the check loads
+  the page (a page crash is the game's, a lost browser a tool's), the release copies the folder.
 - Web play shares the services: the browser host (`webPlaySession`) opens real-time
   headless-Chromium sessions on the served static folder (real keyboard/mouse, the read-only
   `window.__studio` probe, console and page errors; no pause between acts). `gameChromium`
   takes T3's pinned headless shell from `PreviewBrowser` (installed on first use, sandboxed as
   preview is, so three.js needs no browser on the machine) and holds the `__studio` snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
   without touching Preview state.
-- Unity play is a real Linux player of the current sources, built once per source identity
-  under `builds/logs/unity-play-*`, run in a window host's window. The role runner makes a Unity sample's
-  copy itself and readies its player before the thread exists, so neither side of a
-  comparison spends play time on a build: a copy-on-write copy of the game folder's player of
-  the same source identity (the content hash), else a build in the copy. The main checkout keeps its three most recently built or
-  copied players, so a best that keeps being sampled stays reusable; a best whose player was
-  pruned builds in its copy, still outside its clock. Where a player came from stays out of the explore result, since sample notes reach
-  the blind comparator verbatim. Bot runs play the same prepared player. The template's
-  `StudioProbe.cs` is Unity's play-session runner; input is queued on virtual Input System
-  devices, which is why the lane asks games to read input through the Input System.
-- `GameExplore` routes by the engine's play kind with an explicit target override:
-  `game_play` op `start` defaults to the game's lane, Godot web and native-on-three are refused plainly. The same
-  content-addressed export machinery (hash, compare, move into place, select) serves both lanes;
-  the expected-files check is engine-aware.
+- `game_play` op `start` plays the game's own lane. The same content-addressed export machinery
+  (hash, compare, move into place, select) serves exploration and Play; the expected-files check
+  is engine-aware.
 
 ## Play sessions
 
@@ -267,33 +226,23 @@ bound (`PLAY_BOUNDS` in [playSession.ts](../../apps/server/src/game/playSession.
 every call into a web page, and its end says by whose side: a game that exits, crashes or stops
 answering is evidence about the build (a bot run ends `crashed` or `unresponsive` with its trace
 and video), while our display or browser going away is a tool fault. A tick's `t` is the game's
-own clock on every engine: it stops while the game pauses itself (Godot counts physics frames only
-while the tree runs, Unity reads `Time.time`, a page sums its frames' clamped deltas).
+own clock on every engine: it stops while the game pauses itself (a page sums its frames'
+clamped deltas).
 
-- Godot's runner is one GDScript ([godotPlayRunner.ts](../../apps/server/src/game/godotPlayRunner.ts))
-  the server writes under the game's ignored `builds/logs/` for each session, so it always matches
-  the server.
-- Unity's runner is `Assets/Kurambit/StudioProbe.cs` inside the game, because a player only runs
-  code it was built with. The template ships it. A game whose probe predates the versioned
-  protocol still explores (it reads as protocol 0, acts only) but refuses bots with a message
-  saying so.
 - three.js has no runner process. The browser host speaks the protocol to the page through the
   shell's `window.__studio` bridge, which the game owns and may have edited, so the protocol stays in
   the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
   id-clicks are skipped and counted.
 
-Process runners connect out to a loopback port with a per-session token, and quit when that
-connection closes. Pictures and video belong to the engine, never the OS: each act's picture is
-written by the runner, and from protocol 2 a bot run asks `realtime` for frames, which the runner
-streams as JPEGs of its back buffer after draw (Godot: the viewport texture after
-`frame_post_draw`; Unity: `CaptureScreenshotIntoRenderTexture` downscaled on the GPU and read back
-with `AsyncGPUReadback`; the browser: the CDP screencast). Each frame carries the engine's own
-drawn-frame counter. [frameVideo.ts](../../apps/server/src/game/frameVideo.ts) pipes them into one
-ffmpeg on a wall-clock grid, repeating the last picture in a slot with no new one, so a game that
-draws slowly or stops looks exactly like that, and writes `run.frames.json` beside the video with
-each frame's counter, game time and arrival (the evidence route is `engine-frames`). The run's end
-frame is the runner's own `still`. A protocol 1 runner (an older game's Unity probe) still plays,
-without video.
+Pictures and video belong to the engine, never the OS: from protocol 2 a bot run asks `realtime`
+for frames, which the browser host streams from the CDP screencast. Each frame carries the
+engine's own drawn-frame counter. [frameVideo.ts](../../apps/server/src/game/frameVideo.ts) pipes
+them into one ffmpeg on a wall-clock grid, repeating the last picture in a slot with no new one, so
+a game that draws slowly or stops looks exactly like that, and writes `run.frames.json` beside the
+video with each frame's counter, game time and arrival (the evidence route is `engine-frames`). The
+run's end frame is the session's own `still`. A native engine would add a process runner speaking
+the same protocol over a loopback socket; earlier versions had one for Godot and Unity, and git
+history keeps it.
 
 The person's own play depends on how the engine is staged (`GAME_ENGINES[engine].stage`). A
 `live` engine (three.js) is played from its folder: `GamePreview.live`
@@ -305,8 +254,8 @@ so Play there takes no lock and records no operation, and Stop closes the watch 
 so nothing is pushed after it. What the person sees mid-turn is never a build: builds stay the
 turns' checkpoints, because facts, Undo and Go back need a fixed tree, and a folder the agent is
 still writing is not one. A `live` engine's Web export is a release only and never replaces the
-live serve. An `export` engine (Godot) plays the selected Web export, rebuilt when stale, and a
-`window` engine (Unity) plays in its own window.
+live serve. An `export` engine would play the selected Web export, rebuilt when stale, and a
+`window` engine in its own window; both kinds are kept for the next engine.
 
 The Stage talks to a live three.js game through the **Stage bridge**
 ([gameStageBridge.ts](../../packages/contracts/src/gameStageBridge.ts)): `postMessage` objects both
@@ -314,32 +263,22 @@ ends decode, since the game runs on its own origin. The game end is the shell's
 `stage-bridge.js`, inert until the Stage's first message, so plays and recordings never trace or
 outline. A game announces the bridge in `studio-ready`; a shell from before it posts a bare
 `studio-ready`, and so does the current `studio.js` refreshed into it as a harness file, which is
-why `studio.js` takes the bridge only as an optional input from `shell.js`. Godot and Unity have
-no bridge, and their `tuneFile` is null.
+why `studio.js` takes the bridge only as an optional input from `shell.js`. An engine without a
+bridge says so with a null `tuneFile` and `stageBridge: false`.
 
 So the harness needs exactly two things from an OS: a **process host**
 ([processHost.ts](../../apps/server/src/game/processHost.ts), above) and a **window host**
 ([windowHost.ts](../../apps/server/src/game/windowHost.ts)): one `launch(command, viewport)` that
-gives a game or editor a window it draws into, which the user never sees and which never takes
-focus. Exploration, bots and the live Unity editor (which runs the Unity check and builds players)
-and Blender all launch through it; the Godot check needs no window and runs headless. On Linux every launch gets its own Xvfb display, which Xvfb picks itself (`-displayfd`); the display outlives its command and ends right
-after it (an engine that loses its display mid-quit hangs in Xlib's exit path), so a game that quits
+gives a program a window it draws into, which the user never sees and which never takes focus.
+The live Blender launches through it today. On Linux every launch gets its own Xvfb display,
+which Xvfb picks itself (`-displayfd`); the display outlives its command and ends right after it
+(a program that loses its display mid-quit can hang in Xlib's exit path), so a program that quits
 because its server died takes its display along. Windows and macOS give an app no private display
 (a virtual monitor needs a driver there; macOS's API is private), so the window opens on the
-user's desktop far off every monitor, never minimized (a minimized Godot window stops drawing), and
-the launched program places it: Godot by `--position`, the Unity player by its probe
-(`SetWindowPos` without activation), Blender by `--window-geometry` with `--no-window-focus`. No
-capture code differs by OS. macOS stops Godot drawing in a window it counts as occluded, so there
-the runner registers an additional output to keep frames coming; what a Mac tester must confirm
-is in [macos-play-check.md](../operations/macos-play-check.md). Without a window host a native session runs headless where its engine
-can and refuses plainly otherwise; it never falls back to the user's display on Linux.
-
-On Windows, Unity plays a Windows player (macOS plays no Unity game yet). Godot's `user://` is
-isolated through the variables Godot reads on each OS (XDG on Linux, `%APPDATA%` on Windows, `HOME`
-on macOS; see [gameNativeUserDir.ts](../../apps/server/src/game/gameNativeUserDir.ts)). A Unity
-player on Windows keeps PlayerPrefs in the registry, which no environment can move, so its
-sessions share the game's real prefs there. Plumbing Kurambit fetches (uv, the Unity CLI) comes
-from one per-OS/CPU table of official builds with their published SHA-256
+user's desktop far off every monitor, never minimized (a minimized window can stop drawing), and
+the launched program places it: Blender by `--window-geometry` with `--no-window-focus`. It never
+falls back to the user's display on Linux. Plumbing Kurambit fetches (uv) comes from one
+per-OS/CPU table of official builds with their published SHA-256
 ([plumbingBuilds.ts](../../apps/server/src/game/plumbingBuilds.ts)).
 
 ## Tools
@@ -348,14 +287,7 @@ Agents reach the services through the `game_*` MCP toolkit; the client reaches t
 over RPC. A tool and its RPC twin call the same method of the service that owns the operation
 (GameBlender, GameExport, GameStage, ...); there is no facade between them. Thread-keyed methods
 resolve the thread's game and take its operation lock themselves (`GameProjectService.exclusive`),
-so a new operation touches one service. `game_unity`'s ops
-are a curated front for `unity mcp`: a fixed allowlist of editing tools behind its op
-`edit`, plus eval, recompile, play, screenshot and console; builds, tests, packages and
-editor lifecycle stay with Kurambit's own operations. The live editor runs with one asset import
-worker and `-job-worker-count 2` (the worker count is a per-user setting in
-`UserSettings/EditorUserSettings.asset`, rewritten before every start), because Unity's default
-three import workers cost about 0.7 GB each. Packaging, preview, stop and keep going's tools stay
-outside their catalog.
+so a new operation touches one service.
 
 A game's own `AGENTS.md` holds only its engine's guidance. The harness's rules travel with the
 turn instead, so changing them needs no migration of games already made: the first turn's steps
@@ -376,7 +308,7 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   one, which in a game includes whatever another chat or a restore did in between. A turn build
   counts from the newest build of the game captured before the turn began.
 - **Turn builds measure themselves.** On an engine whose profile has `turnLoop`
-  (three.js; Godot and Unity are parked), `GameBuildsReactor` takes a chat turn's checkpoint
+  (three.js), `GameBuildsReactor` takes a chat turn's checkpoint
   that changed files and measures the turn's build in the background. A live-staged engine's
   Stage already shows the folder (Play sessions, above), so nothing is built for it. An engine
   whose Stage plays a Web export also has the folder's Web build made current, as the chat's own
@@ -424,7 +356,7 @@ Codex also cuts each `additional_context` value past 4,000 bytes, so long texts 
   folder plus a harness id, so builds with the same project share facts, and facts from another
   harness are never compared. Owed work is data, not memory: a measure writes its row first, so
   a startup reconcile re-measures any row that still owes a tier. Exports, checks, explore,
-  Play's freshness and the Unity player key the working folder the same way: the engine folder's
+  and Play's freshness key the working folder the same way: the engine folder's
   tree in a capture of the working tree ([sourceTree](../../apps/server/src/game/sourceTree.ts)),
   never a walk of our own. Git records a link, not what it points at, so a link in the engine
   folder makes the sources unknown there.
@@ -598,42 +530,19 @@ measured by the harness's own bots (boots, the QA play, a random-input play),
 and keep going undoes a step that broke the game's health and stops when steps stop landing
 changes. Taste stays with the person; the harness never judges it for them. Craft advice lives in the skill pack under `apps/server/templates/studio/` and the bot
 kit under `apps/server/templates/bot-kit/`; both are copied into each game when a run starts, not the product.
-A game gets only its own engine's skill file (`three.md`, `godot-game.md`, `unity.md`), and the pack is
+A game gets only its own engine's skill file (`three.md` today), and the pack is
 refreshed between turns; a refresh deletes only Kurambit's own files by name (another engine's, or a
 retired skill in `runSetup.ts`), never one the person or agent put there. Keep the pack to what code does
 not already enforce: a rule a check, a strict tool or a template default holds belongs there, not in prose. A
 resume keeps the run's copy, so every build of one run is made and judged under the same guidance and no
 build carries harness text as its own work. `GameCreateInput.engine`
-(`godot` when omitted on the wire; the app defaults new games to the first ready engine with `turnLoop`, three.js today; `three` for the browser lane, `unity`) picks the starter template (`blank` /
-`blank-three` / `blank-unity`) and the scaffold (`godot/` Godot 4.7 project / `web/` static three.js
-project that loads three.js r0.180.0 and the shell from Kurambit's runtime / `unity/` Unity 6000.6.7f1 project); `copyTemplateIntoGame` copies whichever engine tree the template ships.
-The Godot starter's main scene is a genre-free demo shell (title, pause, settings, controls, end, credits)
-and it ships the `Juice` feel kit, because weak builder models skip or break both when they write
-them from scratch; the manifest's gameplay scene (`scenes/game.tscn`) is the seam the shell
-instances, so the check boots both. The shell pauses with `SceneTree.paused`, which is why the
-Godot play runner resumes the game's own pause after each act instead of forcing it off.
-The shells carry the controls as named actions (the Godot InputMap, the three.js runtime's `shell/controls.js`,
-`Controls.cs` over the Unity Input System)
-that players rebind on the Controls screen; every default keeps a keyboard key, because explore
-acts and bots press keys by name and cannot reach an action bound only to a gamepad.
-The Unity starter carries the same shell in `unity/Assets/Kurambit/Shell/`, built in code at
-startup rather than saved in a scene, so no starter UI depends on scene YAML a model might
-overwrite. Gameplay is `Game.unity`, which the shell loads additively as the active scene on Play
-and Retry; played on its own (the check, editor play) it boots straight into a run, which is why
-the template's `gameplayScene` is `Assets/Scenes/Game.unity`. Pause and the end screen use
-`Time.timeScale`, the same lever the StudioProbe holds the game with between acts, so the shell's
-end beat and Juice's hit pause count only time that runs. A Unity player can load only assets a
-scene or a `Resources/` asset references, so an `AssetPostprocessor` points
-`Kurambit/Resources/ShellAssets.asset` at the fixed files the art step writes (title art, font,
-click sound, credits) and sets `Assets/UI/icon.png` as the player icon when they import. The
-template's URP assets are committed as a player build re-saves them; an older serialization
-would make every new game's first build change its sources and fail the identity check. The
-URP global settings' `m_RuntimeSettings` list is the exception: every editor save empties it
-and every player build refills it, so whichever state a game committed, the next build flips it.
-The build-source identity reads that list as derived (the Unity profile's `derivedInput`, applied in [sourceTree.ts](../../apps/server/src/game/sourceTree.ts));
-counting it failed the first boot after every warm-up. Domain reload stays on (`EditorSettings` enter-play-mode options
-off): the kits keep static state, and a second play session in one editor would otherwise
-reach objects the previous session destroyed.
+(`three` when omitted, `DEFAULT_GAME_ENGINE`; the app defaults new games to the first ready engine
+with `turnLoop`) picks the starter template (`blank-three`) and the scaffold (`web/`, a static
+three.js project that loads three.js r0.180.0 and the shell from Kurambit's runtime);
+`copyTemplateIntoGame` copies whichever engine tree the template ships. The three.js shell carries
+the controls as named actions (`shell/controls.js`) that players rebind on the Controls screen;
+every default keeps a keyboard key, because explore acts and bots press keys by name and cannot
+reach an action bound only to a gamepad.
 The three.js runtime owns the render loop too and calls the gameplay module `web/main.js`
 through `start`/`update`/`stop`, because fixed steps, seeded chance and recorded input are what
 replays, the Stage's freeze and the QA play stand on. It draws nothing a player sees: a new game
@@ -644,8 +553,9 @@ kinds of page apart by markup, not a flag: a page carrying all of the old demo s
 `section.screen` elements gets that shell's screens, slow end beat and default look; any other page
 gets none, and the shell never touches its elements, whatever their ids. The template's
 `gameplayScene` is `index.html?play` (boots straight into a run, past any title) and the three.js
-check loads that entry after the plain page, like the Godot check runs `game.tscn`. The manifest's
-`godotProject` names the engine project directory for every lane (`web` for three.js, `unity`), so snapshots,
+check loads that entry after the plain page. The manifest's `project` (and `godotProject`, its
+legacy name, written beside it for older installs) names the engine project directory (`web` for
+three.js; `godot` or `unity` in older games), so snapshots,
 exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
 manifest, and every engine question the run has is the lane's engine profile.
 

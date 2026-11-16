@@ -3,8 +3,8 @@
 Kurambit turns a written brief into a playable game. Your coding agent builds it as a three.js
 browser game, with Blender for its art; you direct it, play the result, and ask for changes.
 
-three.js is the one engine for now. Godot and Unity games are paused while Kurambit focuses on
-three.js: see [Godot and Unity games](#godot-and-unity-games).
+three.js is the one engine in this version. Godot and Unity games made with an earlier version
+still open: see [Godot and Unity games](#godot-and-unity-games).
 
 ## Game tools
 
@@ -420,12 +420,12 @@ is refused rather than used.
 
 ## Godot and Unity games
 
-Godot and Unity games are paused while Kurambit focuses on three.js, and a new game is always a
-three.js game. A Godot or Unity game you made earlier still opens with its chats, builds and
-history, and its stage says the engine is paused; Kurambit does not build, check, play or export
-it, and its agent gets no engine tools. Kurambit no longer looks for Godot or Unity, so
-**Game tools** does not list them. The game's `godot/` or `unity/` folder is a normal project
-you can open in that engine's own editor.
+Godot and Unity are not available in this version, and a new game is always a three.js game. A
+Godot or Unity game you made with an earlier version still opens with its chats, builds and
+history, and its stage says the engine is not available in this version; Kurambit does not build,
+check, play or export it, and its agent gets no engine tools. **Game tools** does not list Godot or
+Unity, and Kurambit leaves any copy you installed where it is. The game's `godot/` or `unity/`
+folder is a normal project you can open in that engine's own editor.
 
 ## What is in a game folder
 
