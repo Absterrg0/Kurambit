@@ -48,6 +48,7 @@ const method = (name, fn) =>
 method("win", (text = "You win!", stats = {}) => end(true, text, stats));
 method("lose", (text = "Game over", stats = {}) => {
   if (canLose) end(false, text, stats);
+  else if (GameState.state === "playing") loseIgnored?.(text);
 });
 method("isPlaying", () => GameState.state === "playing");
 let shell = null;
@@ -75,6 +76,12 @@ function end(won, text, stats) {
 /** The shell's hook for win() and lose(). */
 export function onRunEnded(listener) {
   onEnded = listener;
+}
+
+let loseIgnored = null;
+/** The shell's hook for a lose() that Can't lose kept from ending the run. */
+export function onLoseIgnored(listener) {
+  loseIgnored = listener;
 }
 
 // Retry resets only plain data: numbers, strings, booleans, arrays, typed

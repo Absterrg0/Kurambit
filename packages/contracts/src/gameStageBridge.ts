@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
-import { GamePlay } from "./gamePlays.ts";
+import { GamePlay, GamePlayMark, GamePlayOutcome } from "./gamePlays.ts";
 
 /**
  * The bridge between the Stage and a running game: plain `postMessage`
@@ -35,6 +35,8 @@ export const GameStageCapability = Schema.Literals([
   "dev",
   /** Keeps the person's runs, left ones too, and answers studio-run-request. */
   "runs",
+  /** Hands the run so far to the Stage, and replays a run to a moment to go on from there live. */
+  "rewind",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -195,6 +197,38 @@ export const StudioRunRequest = Schema.Struct({
   type: Schema.Literal("studio-run-request"),
 });
 
+/**
+ * Asks for the run in play so far (answered with studio-run): for the Stage's timeline, or
+ * (`leave`) because the page is about to go away, when the Stage keeps it and resumes it on the
+ * page that comes up, so the page's own leaving keeps nothing.
+ */
+export const StudioRunTake = Schema.Struct({
+  type: Schema.Literal("studio-run-take"),
+  leave: Schema.Boolean,
+});
+
+/**
+ * Replays `play` from its seed up to a moment, as fast as the game steps, then hands it over to
+ * live play there, frozen: the person's input takes over and the run's recording goes on from
+ * it. The moment is `step` (exact: a reload's resume) or `at`, a second of play (the timeline).
+ * `pace`: from that step on the replay plays at the run's own pace, so a moment can be watched.
+ * `fork`: the run goes on as a new run from that second of the old one. Answered with
+ * studio-replayed, `id` echoed.
+ */
+export const StudioReplay = Schema.Struct({
+  type: Schema.Literal("studio-replay"),
+  id: Schema.Finite,
+  play: GamePlay,
+  step: Schema.optionalKey(NonNegativeInt),
+  at: Schema.optionalKey(Schema.Finite),
+  pace: Schema.optionalKey(NonNegativeInt),
+  fork: Schema.optionalKey(Schema.Finite),
+});
+export type StudioReplay = typeof StudioReplay.Type;
+
+/** A fresh run in play, not frozen: the Stage's "Start fresh" instead of where the person was. */
+export const StudioNewRun = Schema.Struct({ type: Schema.Literal("studio-new-run") });
+
 /** How fast play runs, 1 being the game's own pace: slow motion to look at a jump or a hit. */
 export const StudioSpeed = Schema.Struct({
   type: Schema.Literal("studio-speed"),
@@ -268,6 +302,9 @@ export const GameStageToGameMessage = Schema.Union([
   StudioThingsRequest,
   StudioCapture,
   StudioRunRequest,
+  StudioRunTake,
+  StudioReplay,
+  StudioNewRun,
   StudioControlsRequest,
   StudioRebind,
   StudioControlsReset,
@@ -369,6 +406,32 @@ export const StudioPlay = Schema.Struct({
   asked: Schema.optionalKey(Schema.Boolean),
 });
 
+/** The answer to studio-run-take: the run so far, or null with none in play (a title, an ending). */
+export const StudioRun = Schema.Struct({
+  type: Schema.Literal("studio-run"),
+  play: Schema.NullOr(GamePlay),
+});
+
+/**
+ * How a studio-replay went. It reached its moment and was handed over (`ended` null, `at` where
+ * it stands); or the run ended before it (`ended`, held there; playing on plays the ending out);
+ * or it did not run: the play pressed actions the game no longer has (`missing`), or getting
+ * back took longer than `slow` seconds. Those two start a fresh run, frozen. `marks`: where the
+ * replay stood each second, to read against the play's own.
+ */
+export const StudioReplayed = Schema.Struct({
+  type: Schema.Literal("studio-replayed"),
+  id: Schema.Finite,
+  ended: Schema.optionalKey(Schema.NullOr(GamePlayOutcome)),
+  seconds: Schema.optionalKey(Schema.Finite),
+  steps: Schema.optionalKey(NonNegativeInt),
+  marks: Schema.optionalKey(Schema.Array(GamePlayMark).check(Schema.isMaxLength(1_600))),
+  at: Schema.optionalKey(GamePlayMark),
+  missing: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(64))),
+  slow: Schema.optionalKey(Schema.Finite),
+});
+export type StudioReplayed = typeof StudioReplayed.Type;
+
 /** The run on screen is gone (a new run, the menu): the Stage takes down what it showed for it. */
 export const StudioRunReset = Schema.Struct({
   type: Schema.Literal("studio-run-reset"),
@@ -387,6 +450,8 @@ export const GameToStageMessage = Schema.Union([
   StudioFrame,
   StudioControls,
   StudioPlay,
+  StudioRun,
+  StudioReplayed,
   StudioRunReset,
 ]);
 export type GameToStageMessage = typeof GameToStageMessage.Type;

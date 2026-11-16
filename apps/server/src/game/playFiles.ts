@@ -100,7 +100,8 @@ export const keptPlay = async (
 
 /**
  * The runs kept after `since` (an ISO time), newest first, at most `most`. A run kept twice (paused
- * to tell the agent, then played on) has one seed and start: only its newest keep is listed.
+ * to tell the agent, or reloaded, then played on) has one seed and start: only its newest keep is
+ * listed.
  */
 export const keptSince = async (
   root: string,
@@ -116,7 +117,8 @@ export const keptSince = async (
     const kept = text === null ? Option.none() : decodeKept(text);
     if (Option.isNone(kept)) continue;
     const { play } = kept.value;
-    const run = `${play.seed}:${play.clock?.join(":") ?? ""}`;
+    // A run rewound and played on from a second of it is a run of its own.
+    const run = `${play.seed}:${play.clock?.join(":") ?? ""}:${play.fork ?? ""}`;
     if (seen.has(run)) continue;
     seen.add(run);
     runs.push({ ...kept.value, id: name.slice(0, -".json".length) });

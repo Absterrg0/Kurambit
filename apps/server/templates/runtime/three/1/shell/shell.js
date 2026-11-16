@@ -64,6 +64,7 @@ import {
   hasProgress,
   loadProgress,
   newRun,
+  onLoseIgnored,
   onRunEnded,
   onShellCalls,
   resetProgress,
@@ -77,7 +78,15 @@ import { createLook } from "./look.js";
 import { createHud } from "./hud.js";
 import { assets, onModelCopy, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
-import { createPlayer, createRate, createRecorder, freshSeed, mark, seeded } from "./replay.js";
+import {
+  continuation,
+  createPlayer,
+  createRate,
+  createRecorder,
+  freshSeed,
+  mark,
+  seeded,
+} from "./replay.js";
 import { createDevView } from "./dev-view.js";
 import { modelShell } from "./model.js";
 import { waterShell } from "./water.js";
@@ -190,14 +199,25 @@ const rate = createRate();
 const nativeRandom = Math.random;
 const nativeNow = performance.now;
 const nativeDateNow = Date.now;
-/** A play the next run replays (window.__studio.replay), and who waits for its end. */
+/** A play the next run replays (window.__studio.replay, studio-replay), and who waits for its end. */
 let nextReplay = null;
 let replayDone = null;
 /** A measuring replay draws one frame in this many: its answer is the run, not the picture. */
 let replayDrawEvery = 1;
 let replayFrames = 0;
-/** A replay asked to stop at a moment: the second of play it holds at, its frame drawn. */
-let replayStopAt = null;
+/** A replay asked to stop at a moment, `{ at }` a second of play or `{ step }`: null, to its end. */
+let replayStop = null;
+/**
+ * A Stage replay (studio-replay) going on: at its moment the run is handed over to live play,
+ * frozen. It keeps what the Stage had set (speed, Can't lose), which the replay's own recorded
+ * changes stand in for until then. Null otherwise.
+ */
+let handover = null;
+/** A Stage replay plays at the run's own pace from this step on, so a moment can be watched. */
+let replayPace = null;
+/** Each recent run's tuned values as it began, by seed and clock: a Stage replay starts from them. */
+const runTunes = new Map();
+const runKey = (play) => `${play.seed}:${play.clock?.join(":") ?? ""}`;
 /** Runs played to an end on a page the Stage does not hold, for the harness to keep. */
 const finishedPlays = [];
 /** Most steps one frame runs: a slow frame catches up at most 0.1 s, as play always has. */
@@ -206,6 +226,15 @@ const CATCH_UP_S = 0.1;
 const REPLAY_FRAME_MS = 12;
 /** Past where the kept run ended, a replay plays on this long before it calls the run unended. */
 const REPLAY_AFTER_S = 10;
+/** A Stage replay draws one frame in this many while it hurries to its moment. */
+const STAGE_REPLAY_DRAW_EVERY = 30;
+/**
+ * A Stage replay still short of its moment after this much real time gives up and starts a
+ * fresh run: a long run on a heavy game in software rendering would keep the person waiting.
+ */
+const STAGE_REPLAY_MAX_MS = 20_000;
+/** A loss Can't lose kept from ending the run is noted at most this often (play seconds). */
+const LOSS_NOTE_EVERY_S = 1;
 
 /**
  * Runs `work` with Math.random drawing from the run's seed and the clock reading the run's game
@@ -355,6 +384,8 @@ function dispose(scene) {
  */
 function leaveRun() {
   if (run === null || run.player !== null || run.recorder == null) return;
+  // Handed over by a replay and not played since: the run it came from was kept already.
+  if (run.steps === run.handedAt) return;
   const play = run.recorder.soFar(
     Math.round(run.time * 10) / 10,
     mark(run.time, run.ctx.player, GameState),
@@ -409,12 +440,16 @@ function startRun({ title = false } = {}) {
   run.dt = replaying?.dt ?? rate.step();
   if (replaying === null) {
     run.recorder = createRecorder(run.seed, run.dt, run.clock);
+    runTunes.set(runKey(run), bridge.tuneValues());
+    if (runTunes.size > 8) runTunes.delete(runTunes.keys().next().value);
     // How the Stage had play when the run began: a replay starts the same way.
     run.recorder.event("speed", studioSpeed);
     run.recorder.event("can-lose", !cannotLose());
   } else run.player = createPlayer(replaying);
   Juice.stage = run.ctx.scene;
   redraw = true;
+  // A replay begins with the values its run tuned, as they were when it began.
+  if (replaying !== null) bridge.presetTunes(replaying.tunes);
   // A throw here is reported like one in update(), so the loop still starts,
   // the menus keep working and the check sees the error itself.
   try {
@@ -426,6 +461,7 @@ function startRun({ title = false } = {}) {
     run.reported = true;
   } finally {
     if (run !== null) run.starting = false;
+    if (replaying !== null) bridge.presetTunes(null);
   }
   // The run's own programs compile before its first frame, so play never opens on a stall.
   const started = run;
@@ -600,6 +636,15 @@ onShellCalls({
   resume,
 });
 
+// A loss Can't lose kept from ending the run: the run's timeline shows it.
+onLoseIgnored((text) => {
+  const recorder = run?.recorder;
+  if (recorder == null) return;
+  if (run.lossNotedAt !== undefined && run.time - run.lossNotedAt < LOSS_NOTE_EVERY_S) return;
+  run.lossNotedAt = run.time;
+  recorder.event("loss", String(text ?? "").slice(0, 80));
+});
+
 onRunEnded((won, text, stats) => {
   if (run === null) return;
   releaseKeys();
@@ -634,19 +679,119 @@ function finishReplay(outcome) {
   const done = replayDone;
   replayDone = null;
   replayDrawEvery = 1;
-  const stopping = replayStopAt !== null;
-  replayStopAt = null;
-  if (stopping) {
-    run.stopped = true;
-    redraw = true;
-  }
-  done?.({
+  const stopping = replayStop !== null;
+  replayStop = null;
+  replayPace = null;
+  const handing = handover;
+  handover = null;
+  const result = {
     outcome,
     seconds: Math.round(run.time * 10) / 10,
     steps: run.steps,
     marks: run.player.marks,
     ...(stopping ? { stopped: mark(run.time, run.ctx.player, GameState) } : {}),
-  });
+  };
+  if (handing !== null && outcome === null) handOver(handing);
+  else if (stopping) {
+    run.stopped = true;
+    redraw = true;
+    // A Stage replay that ended before its moment holds at the ending; playing on plays the
+    // ending out, as a run that is no longer recorded.
+    if (handing !== null) {
+      run.playOut = true;
+      restoreStage(handing.live);
+      bridge.hold();
+    }
+  }
+  done?.(result);
+}
+
+/**
+ * The replay reached its moment: the run goes on live from here, frozen. The recorder takes over
+ * from what was replayed, so the run is one recording; the person's input moves it from now on.
+ */
+function handOver(handing) {
+  const source = run.player.play;
+  // What the Stage changed at this very step (a value tuned while frozen here) holds already.
+  run.player.events(run.steps, replayEvent);
+  run.recorder = createRecorder(
+    run.seed,
+    run.dt,
+    run.clock,
+    continuation(source, run.steps, run.player.marks, handing.fork),
+  );
+  run.player = null;
+  run.handedAt = run.steps;
+  restoreStage(handing.live);
+  redraw = true;
+  bridge.hold();
+}
+
+/** What the Stage had set before its replay, back now that the run is live again, and recorded. */
+function restoreStage(live) {
+  studioSpeed = live.speed;
+  setCanLose(live.canLose);
+  run?.recorder?.event("speed", live.speed);
+  run?.recorder?.event("can-lose", live.canLose);
+}
+
+/**
+ * The Stage's replay (studio-replay): the play run again from its seed up to a moment (`step`, or
+ * `at` a second of play) as fast as it steps, drawing now and then, then handed over to live
+ * play there, frozen. `pace`: from that step on it plays at the run's own pace, so a moment can be
+ * watched. `fork`: the run goes on as a new run from that second of the old one. A play that
+ * pressed an action this build lacks, or that takes too long to get back, starts a fresh run
+ * instead. Answered with studio-replayed, `id` echoed.
+ */
+function stageReplay({ id, play, step, at, pace, fork }) {
+  // A replay already going keeps what the Stage had set before it.
+  const live = handover?.live ?? { speed: studioSpeed, canLose: !cannotLose() };
+  const missing = (play.actions ?? []).filter((name) => !controls.has(name));
+  if (missing.length > 0) {
+    freshRun(live, true);
+    bridge.replayed({ id, missing });
+    return;
+  }
+  // A replay cut short by this one has no answer: the Stage asked for this one after it.
+  replayDone?.(null);
+  bridge.restoreTunes(runTunes.get(runKey(play)) ?? {});
+  nextReplay = play;
+  startRun();
+  replayStop = Number.isFinite(step) ? { step } : { at: Math.max(0, at) };
+  replayPace = Number.isFinite(pace) ? pace : null;
+  replayDrawEvery = STAGE_REPLAY_DRAW_EVERY;
+  replayFrames = 0;
+  handover = { id, live, fork, startedAt: nativeNow.call(performance) };
+  holdAudio(true);
+  replayDone = (result) => {
+    applyHold();
+    if (result === null) return;
+    bridge.replayed({
+      id,
+      ended: result.outcome,
+      seconds: result.seconds,
+      steps: result.steps,
+      marks: result.marks,
+      ...(result.stopped === undefined ? {} : { at: result.stopped }),
+    });
+  };
+}
+
+/** A fresh run in play, frozen when `frozen`: what a Stage replay that cannot get back gives. */
+function freshRun(live, frozen) {
+  replayDone?.(null);
+  replayDone = null;
+  replayStop = null;
+  replayPace = null;
+  handover = null;
+  replayDrawEvery = 1;
+  // Set before the run starts, so its recording starts with them.
+  studioSpeed = live.speed;
+  setCanLose(live.canLose);
+  startRun();
+  applyHold();
+  if (frozen) bridge.hold();
+  else bridge.release();
 }
 
 function showEnd() {
@@ -1086,6 +1231,25 @@ function replayEvent(kind, ...args) {
   else if (kind === "tune" && bridge.setTune(args[0], args[1], args[2])) modelShell.tuned(args[0]);
 }
 
+/** The run in play so far, however short, as a play that did not end; null with none recorded. */
+const runSoFar = () =>
+  run === null || run.player !== null
+    ? null
+    : (run.recorder?.soFar(
+        Math.round(run.time * 10) / 10,
+        mark(run.time, run.ctx.player, GameState),
+        run.input.reads,
+        { asked: true },
+      ) ?? null);
+
+/** A replay asked to stop at a moment has reached it. */
+const reachedStop = (stepping) =>
+  replayStop !== null &&
+  run === stepping &&
+  (replayStop.step !== undefined
+    ? stepping.steps >= replayStop.step
+    : stepping.time >= replayStop.at);
+
 /** One fixed step: this step's input, then the game, at the step's slice times the time scale. */
 function step() {
   const { down, pressed, buttons, clicked } = run;
@@ -1233,6 +1397,12 @@ const bridge = createStageBridge({
   view,
   freeze(on) {
     frozen = on;
+    // Playing on from a Stage replay that ended early: the ending plays out, unrecorded.
+    if (!on && run?.playOut === true) {
+      run.playOut = false;
+      run.stopped = false;
+      run.player = null;
+    }
     // The pointer is the Stage's while frozen; giving up the lock is not the pause press.
     if (on && document.pointerLockElement != null) {
       hadPointerLock = false;
@@ -1251,16 +1421,21 @@ const bridge = createStageBridge({
     run?.recorder?.event("can-lose", on);
   },
   // "Tell the agent about this run" while paused: the run so far, however short.
-  runSoFar: () =>
-    run === null || run.player !== null
-      ? null
-      : (run.recorder?.soFar(
-          Math.round(run.time * 10) / 10,
-          mark(run.time, run.ctx.player, GameState),
-          run.input.reads,
-          { asked: true },
-        ) ?? null),
-  tuned(id, key, value) {
+  runSoFar,
+  rewind: {
+    // The run so far for the Stage's timeline, or (`leave`) as its page goes away: it is the
+    // Stage's to keep and to resume on the new page, so the page's own leaving keeps nothing.
+    take(leave) {
+      const play = runSoFar();
+      if (play === null || !leave) return play;
+      run.recorder = null;
+      return { ...play, outcome: { ...play.outcome, text: "" } };
+    },
+    replay: stageReplay,
+    fresh: () => freshRun(handover?.live ?? { speed: studioSpeed, canLose: !cannotLose() }, false),
+  },
+  tuned(id, key, value, before) {
+    run?.recorder?.tuned(id, key, before);
     run?.recorder?.event("tune", id, key, value);
     // A model built from these values (shell/model.js tuned) is built again, frozen or not.
     modelShell.tuned(id);
@@ -1382,12 +1557,14 @@ const studio = installStudio({
       return Promise.resolve({ outcome: null, seconds: 0, steps: 0, marks: [], missing });
     return new Promise((resolve) => {
       replayDone?.(null);
+      handover = null;
+      replayPace = null;
       replayDone = resolve;
       nextReplay = play;
       startRun();
       replayDrawEvery = Math.max(1, Math.floor(Number(options.drawEvery) || 1));
       replayFrames = 0;
-      replayStopAt = Number.isFinite(options.at) ? Math.max(0, options.at) : null;
+      replayStop = Number.isFinite(options.at) ? { at: Math.max(0, options.at) } : null;
     });
   },
   // The runs this page played to an end since the last call, for a harness session to keep.
@@ -1484,11 +1661,17 @@ renderer.setAnimationLoop((now) => {
   last = now;
   if (!held && !document.hidden) rate.frame(elapsedMs);
   pollGamepad(now);
-  // Only unpaused, unheld time moves the run, the end beat included.
+  // Only unpaused, unheld time moves the run, the end beat included. A Stage replay goes on
+  // through the Stage's own holds (frozen, or the person clicked away to scrub its timeline).
+  const holding = handover !== null ? tabHidden || sheetShown : held;
   const moving =
-    run !== null && !run.compiling && !held && run.stopped !== true && (live() || endBeat > 0);
+    run !== null && !run.compiling && !holding && run.stopped !== true && (live() || endBeat > 0);
   let dt = 0;
-  if (moving && run.player !== null) {
+  if (handover !== null && nativeNow.call(performance) - handover.startedAt > STAGE_REPLAY_MAX_MS) {
+    const { id, live: before } = handover;
+    freshRun(before, true);
+    bridge.replayed({ id, slow: STAGE_REPLAY_MAX_MS / 1000 });
+  } else if (moving && run.player !== null && (replayPace === null || run.steps < replayPace)) {
     // A replay: as many steps as fit in part of a frame, never waiting on real time.
     const until = performance.now() + REPLAY_FRAME_MS;
     const stepping = run;
@@ -1496,8 +1679,9 @@ renderer.setAnimationLoop((now) => {
       // A step can end the run, or start another (a game that restarts itself).
       if (run !== stepping || stepping.stopped === true || performance.now() >= until) break;
       if (GameState.state !== "playing" && endBeat <= 0) break;
+      if (replayPace !== null && stepping.steps >= replayPace) break;
       dt += step();
-      if (replayStopAt !== null && run === stepping && stepping.time >= replayStopAt) {
+      if (reachedStop(stepping)) {
         finishReplay(null);
         break;
       }
@@ -1525,6 +1709,11 @@ renderer.setAnimationLoop((now) => {
     for (let i = 0; i < steps; i += 1) {
       if (run !== stepping) break;
       dt += step();
+      // A Stage replay watched at the run's own pace stops at its moment as it would fast.
+      if (run.player !== null && reachedStop(stepping)) {
+        finishReplay(null);
+        break;
+      }
       if (endBeat > 0 && (endBeat -= run.dt) <= 0) {
         showEnd();
         break;

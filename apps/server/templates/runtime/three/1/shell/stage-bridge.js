@@ -28,6 +28,7 @@ const CAPABILITIES = [
   "cannot-lose",
   "dev",
   "runs",
+  "rewind",
 ];
 const KINDS = new Set([
   "character",
@@ -77,6 +78,8 @@ const humanName = (key) => {
 // Tuned values outlive runs: a Retry keeps what the person set on the Stage.
 let saved = {};
 const tunes = new Map();
+// A replay's run starts from the values its play tuned, as they were when it began (presetTunes).
+let preset = {};
 
 /** Reads web/tune.json once at boot; a missing or broken file tunes nothing. */
 export async function loadTuning(url = "./tune.json") {
@@ -115,6 +118,17 @@ const clamp = (value, range) => {
 };
 const fits = (value, fallback) =>
   typeof fallback === "boolean" ? typeof value === "boolean" : finite(fallback) && finite(value);
+/** A run's play as the Stage sends it back (packages/contracts gamePlays.ts), in outline. */
+const isPlay = (play) =>
+  play?.version === 1 &&
+  Number.isInteger(play.seed) &&
+  finite(play.dt) &&
+  play.dt > 0 &&
+  play.dt <= 1 / 30 &&
+  Number.isInteger(play.steps) &&
+  Array.isArray(play.inputs) &&
+  Array.isArray(play.events) &&
+  Array.isArray(play.marks);
 
 /**
  * The Stage end of the bridge. The shell passes how to reach the run: `view()`
@@ -125,8 +139,9 @@ const fits = (value, fallback) =>
  * its own Controls screen does, saved with its settings, `canLose(on)`
  * lets a loss end the run or not (the Stage's "Can't lose" while tuning), and
  * `tuned(id, key, value)` hears each value the Stage changed (a run's play keeps it),
- * `runSoFar()` is the run in play so far as a play (or null), and
- * `dev` takes the Stage's dev views (shell/dev-view.js) and a frozen run's one-frame step.
+ * `runSoFar()` is the run in play so far as a play (or null),
+ * `dev` takes the Stage's dev views (shell/dev-view.js) and a frozen run's one-frame step, and
+ * `rewind` takes the run so far, replays a play to a moment and hands it over, or starts afresh.
  */
 export function createStageBridge({
   canvas,
@@ -142,6 +157,7 @@ export function createStageBridge({
   tuned,
   runSoFar,
   dev,
+  rewind,
 }) {
   let active = false;
   let frozen = false;
@@ -272,7 +288,11 @@ export function createStageBridge({
       const first = !(name in entry.defaults);
       entry.defaults[name] = fallback;
       if (first) {
-        const start = fits(file[name], fallback) ? file[name] : fallback;
+        const start = fits(preset[key]?.[name], fallback)
+          ? preset[key][name]
+          : fits(file[name], fallback)
+            ? file[name]
+            : fallback;
         entry.live[name] = typeof start === "number" ? clamp(start, range) : start;
       }
     }
@@ -1032,7 +1052,18 @@ export function createStageBridge({
       case "studio-dev":
         return ["bounds", "perf", "freeCamera"].every((key) => typeof data[key] === "boolean");
       case "studio-step":
+      case "studio-new-run":
         return true;
+      case "studio-run-take":
+        return typeof data.leave === "boolean";
+      case "studio-replay":
+        return (
+          finite(data.id) &&
+          isPlay(data.play) &&
+          (Number.isInteger(data.step) ? data.step >= 0 : finite(data.at) && data.at >= 0) &&
+          (data.pace === undefined || Number.isInteger(data.pace)) &&
+          (data.fork === undefined || finite(data.fork))
+        );
       case "studio-orbit":
         return finite(data.dx) && finite(data.dy) && finite(data.zoom) && data.zoom > 0;
       default:
@@ -1083,9 +1114,11 @@ export function createStageBridge({
         selectedIndex = null;
         postSelected();
         return redraw();
-      case "studio-tune":
-        if (setTune(data.id, data.key, data.value)) tuned?.(data.id, data.key, data.value);
+      case "studio-tune": {
+        const before = tunes.get(data.id)?.live[data.key];
+        if (setTune(data.id, data.key, data.value)) tuned?.(data.id, data.key, data.value, before);
         return redraw();
+      }
       case "studio-hover-thing": {
         const record = data.id === null ? null : (things.get(data.id) ?? null);
         if (record === hovered) return;
@@ -1125,6 +1158,12 @@ export function createStageBridge({
         // The selection's path and feel move on with the frame.
         if (selected !== null) postSelected();
         return redraw();
+      case "studio-run-take":
+        return toStage({ type: "studio-run", play: rewind?.take(data.leave) ?? null });
+      case "studio-replay":
+        return rewind?.replay(data);
+      case "studio-new-run":
+        return rewind?.fresh();
       case "studio-orbit":
         if (!frozen) return;
         dev?.orbit(data.dx, data.dy, data.zoom);
@@ -1186,6 +1225,47 @@ export function createStageBridge({
     /** A person's run on the Stage ended or was left: its play (shell/replay.js), for the Stage to keep. */
     play(recorded) {
       if (active) toStage({ type: "studio-play", play: recorded });
+    },
+    /** How the Stage's replay went (shell.js stageReplay). */
+    replayed(result) {
+      if (active) toStage({ type: "studio-replayed", ...result });
+    },
+    /** Freezes play as the Stage would, saying so: a replay handed over, frozen at its moment. */
+    hold: () => setFrozen(true),
+    release: () => setFrozen(false),
+    /**
+     * A replay's run begins with the values its play tuned as they were then (`values`, a play's
+     * tunes): set now on the things this page has, and taken by the ones its start() makes.
+     * Null lets go once the run has started.
+     */
+    presetTunes(values) {
+      preset = values ?? {};
+      for (const [id, entry] of tunes)
+        for (const [key, value] of Object.entries(preset[id] ?? {}))
+          if (fits(value, entry.defaults[key]))
+            entry.live[key] = typeof value === "number" ? clamp(value, entry.ranges[key]) : value;
+      changed = true;
+    },
+    /** Every tuned value now, by thing: what a run started with. */
+    tuneValues() {
+      const values = {};
+      for (const [id, entry] of tunes) values[id] = { ...entry.live };
+      return values;
+    },
+    /**
+     * Puts tuned values back as a run started with them (`values`, from tuneValues), the file's
+     * or the game's own for any it did not have: a replay of the run starts as it did.
+     */
+    restoreTunes(values) {
+      for (const [id, entry] of tunes) {
+        const file = saved[id] !== null && typeof saved[id] === "object" ? saved[id] : {};
+        for (const [key, fallback] of Object.entries(entry.defaults)) {
+          const start = values[id]?.[key] ?? (fits(file[key], fallback) ? file[key] : fallback);
+          entry.live[key] = typeof start === "number" ? clamp(start, entry.ranges[key]) : start;
+        }
+      }
+      changed = true;
+      if (selected !== null) postSelected();
     },
     get frozen() {
       return frozen;

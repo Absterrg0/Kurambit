@@ -77,16 +77,36 @@ export const GamePlay = Schema.Struct({
   inputs: Schema.Array(Schema.Tuple([NonNegativeInt, GamePlayInput])).check(
     Schema.isMaxLength(20_001),
   ),
-  /** [step, "speed" | "can-lose" | "tune", ...its values]. */
+  /**
+   * [step, "speed" | "can-lose" | "tune", ...its values], and [step, "loss", text]: a loss Can't
+   * lose kept from ending the run (a replay passes over it).
+   */
   events: Schema.Array(
+    // A tuned value is [step, "tune", thing, key, value]: five.
     Schema.Array(Schema.Union([Schema.String, Schema.Finite, Schema.Boolean])).check(
-      Schema.isMaxLength(4),
+      Schema.isMaxLength(5),
     ),
   ).check(Schema.isMaxLength(2_000)),
   marks: Schema.Array(GamePlayMark).check(Schema.isMaxLength(1_300)),
   outcome: GamePlayOutcome,
   /** The game's named actions the run pressed: a build without one of them cannot replay it. */
   actions: Schema.optionalKey(Schema.Array(Code).check(Schema.isMaxLength(64))),
+  /**
+   * The person rewound an earlier run of this seed to this second and went on from there: a new
+   * run whose play up to that second is the earlier one's.
+   */
+  fork: Schema.optionalKey(Schema.Finite),
+  /**
+   * Each value the Stage tuned during the run, as it was when the run began, by thing and key: a
+   * replay starts from them, though the tune file now holds what they were tuned to. Values the
+   * run never tuned are left to the build, so a build that changes them plays differently.
+   */
+  tunes: Schema.optionalKey(
+    Schema.Record(
+      Schema.String,
+      Schema.Record(Schema.String, Schema.Union([Schema.Finite, Schema.Boolean])),
+    ),
+  ),
 });
 export type GamePlay = typeof GamePlay.Type;
 

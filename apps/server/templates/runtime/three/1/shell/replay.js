@@ -8,7 +8,9 @@
 // ctx.mouse (its own listeners, timers outside ctx.after) is not in the play.
 //
 // The Stage keeps a person's runs, ended or left; the harness replays one with
-// window.__studio.replay, to its end or to a moment.
+// window.__studio.replay, to its end or to a moment. The Stage replays one to a moment and hands
+// it over to live play there (studio-replay): back where the person was after a reload, or
+// rewound to go on from an earlier second as a new run.
 
 /** Display rates a measured frame interval snaps to. */
 const RATES = [60, 75, 90, 100, 120, 144, 165, 240];
@@ -16,6 +18,8 @@ const RATES = [60, 75, 90, 100, 120, 144, 165, 240];
 const MAX_STEPS = 20 * 60 * 240;
 const MAX_CHANGES = 20_000;
 const MAX_EVENTS = 2_000;
+/** Things whose starting values a play keeps (a thing has at most 64 values). */
+const MAX_TUNED_THINGS = 64;
 /** A run left sooner than this is not kept: a misclick, or a reload as play began. */
 const LEFT_MIN_S = 2;
 
@@ -120,23 +124,30 @@ export function mark(time, player, state) {
   return { t: round(time, 1), at, values };
 }
 
-/** Keeps one run's play as it is played: only the steps whose input changed. */
-export function createRecorder(seed, dt, clock) {
+/**
+ * Keeps one run's play as it is played: only the steps whose input changed. `from`: the run
+ * goes on from a replay handed over to live play at `from.steps` (shell.js), so its play starts
+ * with what was replayed up to there and stays one recording.
+ */
+export function createRecorder(seed, dt, clock, from = null) {
   const play = {
     version: 1,
     seed,
     dt,
     clock,
-    steps: 0,
-    inputs: [],
-    events: [],
-    marks: [],
+    steps: from?.steps ?? 0,
+    inputs: from === null ? [] : [...from.inputs],
+    events: from === null ? [] : [...from.events],
+    marks: from === null ? [] : [...from.marks],
     outcome: null,
+    ...(Number.isFinite(from?.fork) ? { fork: from.fork } : {}),
+    ...(from?.tunes == null ? {} : { tunes: structuredClone(from.tunes) }),
   };
+  let tuned = Object.keys(play.tunes ?? {}).length;
   let last = "";
   let full = false;
   /** The named actions the run pressed: a build without one of them cannot replay it. */
-  const actions = new Set();
+  const actions = new Set(from?.actions ?? []);
   return {
     /** After a step sampled its input: the actions held in it. */
     actions(held) {
@@ -152,6 +163,17 @@ export function createRecorder(seed, dt, clock) {
         play.inputs.push([play.steps, now]);
       }
       if (play.inputs.length > MAX_CHANGES || play.steps > MAX_STEPS) full = true;
+    },
+    /** The Stage tuned a value that was `before`: the first time in the run, what it began at. */
+    tuned(id, key, before) {
+      if (full || (typeof before !== "number" && typeof before !== "boolean")) return;
+      play.tunes ??= {};
+      if (play.tunes[id] === undefined) {
+        if (tuned >= MAX_TUNED_THINGS) return;
+        tuned += 1;
+        play.tunes[id] = {};
+      }
+      if (!(key in play.tunes[id])) play.tunes[id][key] = before;
     },
     /** The Stage changed something mid-run: speed, Can't lose or a tuned value. */
     event(kind, ...args) {
@@ -192,21 +214,44 @@ export function createRecorder(seed, dt, clock) {
   };
 }
 
+/**
+ * What a run replayed to step `steps` goes on recording from when it is handed over to live play
+ * there: the play's input before that step and what the Stage changed up to it, with the marks
+ * this build stood at (`marks`), so the run stays one recording of this build. `fork`: the second
+ * of the play it was taken from, when the person goes on from there as a new run.
+ */
+export function continuation(play, steps, marks, fork) {
+  return {
+    steps,
+    inputs: play.inputs.filter(([step]) => step < steps),
+    events: play.events.filter(([step]) => step <= steps),
+    marks,
+    actions: play.actions ?? [],
+    fork: Number.isFinite(fork) ? fork : play.fork,
+    tunes: play.tunes,
+  };
+}
+
 /** Feeds a recorded play back step by step. */
 export function createPlayer(play) {
   let input = 0;
   let event = 0;
   let current = null;
+  const events = (steps, onEvent) => {
+    while (event < play.events.length && play.events[event][0] <= steps) {
+      const [, kind, ...args] = play.events[event];
+      onEvent(kind, ...args);
+      event += 1;
+    }
+  };
   return {
     play,
     marks: [],
+    /** What the Stage changed at or before step `steps` and was not put back yet. */
+    events,
     /** Before step `steps` samples: the run gets that step's input; returns the pad, if any. */
     input(run, steps, onEvent) {
-      while (event < play.events.length && play.events[event][0] <= steps) {
-        const [, kind, ...args] = play.events[event];
-        onEvent(kind, ...args);
-        event += 1;
-      }
+      events(steps, onEvent);
       while (input < play.inputs.length && play.inputs[input][0] <= steps) {
         current = play.inputs[input][1];
         input += 1;
