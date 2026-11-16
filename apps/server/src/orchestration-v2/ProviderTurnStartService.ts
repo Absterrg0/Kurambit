@@ -15,6 +15,7 @@ import {
 import * as Context from "effect/Context";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -48,6 +49,8 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { makeProviderFailure } from "@kurambit/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
+import { triesNote } from "../game/gameTries.ts";
+import * as GameTries from "./gameVersions/GameTries.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import {
   isRestartNoteContinuation,
@@ -84,8 +87,11 @@ const lastTurnEnded = (
   runs: ReadonlyArray<OrchestrationV2Run>,
   run: OrchestrationV2Run,
 ): { readonly lastTurnEndedAt?: DateTime.Utc } => {
+  // A try's run is the harness's, not a turn of this agent's.
   const ended = runs.flatMap((each) =>
-    each.ordinal < run.ordinal && each.completedAt !== null ? [each.completedAt] : [],
+    each.ordinal < run.ordinal && each.completedAt !== null && each.versions === undefined
+      ? [each.completedAt]
+      : [],
   );
   const [first, ...rest] = ended;
   return first === undefined
@@ -213,6 +219,7 @@ export const layer: Layer.Layer<
   | ProviderSessionManager.ProviderSessionManagerV2
   | RunExecutionService.RunExecutionServiceV2
   | RuntimePolicy.RuntimePolicyV2
+  | GameTries.GameTries
 > = Layer.effect(
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
@@ -230,6 +237,7 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const gameTries = yield* GameTries.GameTries;
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
     // These callbacks outlive startup while a run drains background work. Build
@@ -504,6 +512,39 @@ export const layer: Layer.Layer<
           });
         },
       );
+      // A try's versions are child threads the game layer makes; the chat's own
+      // provider never runs this turn, and `game-version.start` completes it.
+      if (run.versions !== undefined) {
+        const started = yield* Effect.exit(
+          gameTries.start({
+            threadId: projection.thread.id,
+            runId,
+            versions: run.versions,
+            text: message.text,
+          }),
+        );
+        if (Exit.isFailure(started)) {
+          const failure = Cause.findErrorOption(started.cause);
+          yield* settleRunBeforeStart({
+            signal: "versions",
+            status: "failed",
+            now: yield* DateTime.now,
+            providerInstanceId: run.providerInstanceId,
+            itemProviderThreadId: providerThread.id,
+            item: {
+              type: "error",
+              title: "The versions could not start",
+              failure: makeProviderFailure({
+                message: Option.isSome(failure)
+                  ? failure.value.message
+                  : "The versions could not start.",
+                class: "unknown",
+              }),
+            },
+          });
+        }
+        return;
+      }
       if (message.attachments.length === 0 && message.text.trimStart().startsWith("/")) {
         const isEmptyCompaction =
           message.text.trim().toLowerCase() === "/compact" && !projection.hasConversation;
@@ -1080,6 +1121,16 @@ export const layer: Layer.Layer<
       if (!runningWrite.committed) {
         return;
       }
+      const triesSince = yield* triesNote(
+        projectionStore,
+        projection.thread.id,
+        projection.runs,
+        run,
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("The chat's tries could not be read.", { cause }).pipe(Effect.as(null)),
+        ),
+      );
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
@@ -1406,6 +1457,7 @@ export const layer: Layer.Layer<
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,
         ...restartContinuationBaseline(projection.runs, run),
         ...lastTurnEnded(projection.runs, run),
+        ...(triesSince === null ? {} : { gameTries: triesSince }),
         message: {
           messageId: message.id,
           text: userText,

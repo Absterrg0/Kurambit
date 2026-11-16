@@ -3,6 +3,7 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
+import * as GameVersions from "./game/GameVersions.ts";
 import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
@@ -1195,6 +1196,7 @@ const layerWsRpc = (
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
+      const gameVersions = yield* GameVersions.GameVersions;
       const gamePlays = yield* GamePlays.GamePlays;
       const gameDecisions = yield* GameDecisions.GameDecisions;
       const gameToolchain = yield* GameToolchain.GameToolchain;
@@ -1831,6 +1833,9 @@ const layerWsRpc = (
         [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
         [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
           gameBuilds.restore(threadId, build, commandId, { person: true }),
+        [WS_METHODS.gameTries]: ({ threadId }) => gameVersions.tries(threadId),
+        [WS_METHODS.gameKeepVersion]: ({ threadId, runId, n, commandId }) =>
+          gameVersions.keep(threadId, { runId, n, commandId }),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
         [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId, fold }) =>
@@ -2980,6 +2985,7 @@ export const layer = Layer.unwrap(
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const gameBuilds = yield* GameBuilds.GameBuilds;
+    const gameVersions = yield* GameVersions.GameVersions;
     const gamePlays = yield* GamePlays.GamePlays;
     const gameDecisions = yield* GameDecisions.GameDecisions;
     const sql = yield* SqlClient.SqlClient;
@@ -3046,6 +3052,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provide(Layer.succeed(GameBuilds.GameBuilds, gameBuilds)),
+              Layer.provide(Layer.succeed(GameVersions.GameVersions, gameVersions)),
               Layer.provide(Layer.succeed(GamePlays.GamePlays, gamePlays)),
               Layer.provide(Layer.succeed(GameDecisions.GameDecisions, gameDecisions)),
               Layer.provideMerge(RpcSerialization.layerJson),

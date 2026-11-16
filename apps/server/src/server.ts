@@ -16,6 +16,7 @@ import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor
 import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
+import * as GameVersions from "./game/GameVersions.ts";
 import * as GameBuildsReactor from "./game/GameBuildsReactor.ts";
 import * as GameFacts from "./game/GameFacts.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
@@ -544,6 +545,8 @@ const layerGameOperations = GameStage.layer.pipe(
 const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GamePlays.layer),
   Layer.provideMerge(GameDecisions.layer),
+  // A try's versions: started for the orchestration runtime's GameTries, kept through GameBuilds.
+  Layer.provideMerge(GameVersions.layer),
   Layer.provideMerge(GameBuilds.layer),
   Layer.provideMerge(GameFacts.layer),
   Layer.provideMerge(GameRunControl.layer),

@@ -553,6 +553,8 @@ export interface RunExecutionServiceV2StartRootRunInput {
    * fresh. A game's turn is told the person's decisions since then, or all of them.
    */
   readonly sessionLastTurnAt?: DateTime.Utc;
+  /** What the person's tries ("try it N ways") since this agent's last turn built and kept. */
+  readonly gameTries?: string;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1422,6 +1424,9 @@ export const layer: Layer.Layer<
             ...(personRuns === null
               ? []
               : [`<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>`]),
+            ...(input.gameTries === undefined || input.message.text.trimStart().startsWith("/")
+              ? []
+              : [`<kurambit_game_versions>\n${input.gameTries}\n</kurambit_game_versions>`]),
           ];
           const turnInput = {
             appThread: input.appThread,

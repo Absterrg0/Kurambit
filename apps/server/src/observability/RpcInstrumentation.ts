@@ -26,6 +26,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameBuildMeasure]: "game",
   [WS_METHODS.gameBuildPlay]: "game",
   [WS_METHODS.gameBuildRestore]: "game",
+  [WS_METHODS.gameTries]: "game",
+  [WS_METHODS.gameKeepVersion]: "game",
   [WS_METHODS.gameBuildStop]: "game",
   [WS_METHODS.gameKeepValues]: "game",
   [WS_METHODS.gameKeepPlay]: "game",

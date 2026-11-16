@@ -43,6 +43,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as GameTries from "./gameVersions/GameTries.ts";
 import * as ProviderTurnStart from "./ProviderTurnStartService.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
@@ -127,6 +128,7 @@ function startWithMissingWorktree(
       Layer.mergeAll(
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
+        GameTries.layer,
         IdAllocator.layer,
         Layer.succeed(FileSystem.FileSystem, {
           exists: () => Effect.succeed(false),
@@ -627,6 +629,7 @@ function makeLocalCommandHarness(input: {
           prepareProviderHandoff: () => Effect.die("history read must fail first"),
         }),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
+        GameTries.layer,
         IdAllocator.layer,
         // Path.layer is POSIX; a real file system needs the host's path rules.
         layerWorktreeLocation(

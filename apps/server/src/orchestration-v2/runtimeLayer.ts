@@ -52,6 +52,7 @@ import * as ThreadLifecycleService from "./ThreadLifecycleService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
 import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
 import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
+import * as GameTries from "./gameVersions/GameTries.ts";
 import * as GameRunRecovery from "./gameRun/GameRunRecovery.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -162,9 +163,12 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
   ),
 );
 
+// A try's run is started by the game layer, which attaches its starter here.
+const layerGameTriesProvided = GameTries.layer;
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
+      layerGameTriesProvided,
       layerContextHandoffServiceProvided,
       layerEventSinkProvided,
       IdAllocator.layer,
@@ -362,6 +366,7 @@ const layerMcpAppRequestsProvided = McpAppRequests.layer.pipe(
 export const layer = Layer.mergeAll(
   layerCommandOutputHubProvided,
   layerGameRunJobsProvided,
+  layerGameTriesProvided,
   layerGameRunDecisionsProvided,
   layerGameRunRecoveryProvided,
   layerOrchestratorProvided,

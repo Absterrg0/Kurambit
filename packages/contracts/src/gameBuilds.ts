@@ -82,6 +82,24 @@ export const GameBuildSource = Schema.Union([
       }),
     ),
   }),
+  /**
+   * One version of a "try it N ways" message, built in a child thread of its own. It owns Undo
+   * once kept, as the turn the chat continues from.
+   */
+  Schema.TaggedStruct("version", {
+    /** The chat the person asked in. */
+    threadId: ThreadId,
+    /** The try's own run in that chat. */
+    runId: Schema.String,
+    /** The person's request, first line, at most 140 characters. */
+    request: Schema.String,
+    n: PositiveInt,
+    of: PositiveInt,
+    /** The version's own one line on its approach; empty when it gave none. */
+    approach: Schema.String,
+    /** The try's newest keep names this version. */
+    kept: Schema.Boolean,
+  }),
   /** The folder before a restore, or a person's kept edit. */
   Schema.TaggedStruct("saved", {
     label: Schema.String,
@@ -98,7 +116,9 @@ export type GameBuildSource = typeof GameBuildSource.Type;
 
 /** A build Undo belongs to while it is the game's newest: a chat turn's, or a person's kept edit. */
 export const ownsUndo = (source: GameBuildSource) =>
-  source._tag === "turn" || (source._tag === "saved" && source.edit !== undefined);
+  source._tag === "turn" ||
+  (source._tag === "version" && source.kept) ||
+  (source._tag === "saved" && source.edit !== undefined);
 
 /** A saved build's label for what the folder held when a restore replaced it. */
 export const RESTORE_BEFORE_LABEL = "The game before restore";
@@ -1365,6 +1385,44 @@ export const GameBuildRestoreInput = Schema.Struct({
   build: GameBuildRef,
   commandId: Schema.optionalKey(Schema.String),
 });
+/** One version of a try, as the Stage lists it. */
+export const GameTryVersion = Schema.Struct({
+  n: PositiveInt,
+  childThreadId: ThreadId,
+  /** Working in its own copy; ready with a build; stopped or failed with what it built, if anything. */
+  state: Schema.Literals(["working", "ready", "stopped", "failed"]),
+  build: Schema.NullOr(GameBuildId),
+  approach: Schema.String,
+});
+export type GameTryVersion = typeof GameTryVersion.Type;
+
+/** A "try it N ways" message of a chat and its versions. */
+export const GameTry = Schema.Struct({
+  threadId: ThreadId,
+  runId: Schema.String,
+  request: Schema.String,
+  at: IsoDateTime,
+  /** The build the versions started from: Undo after a keep goes back to it. */
+  base: Schema.NullOr(GameBuildId),
+  versions: Schema.Array(GameTryVersion),
+  /** The newest keep, when one was made. */
+  kept: Schema.NullOr(Schema.Struct({ n: PositiveInt, at: IsoDateTime })),
+});
+export type GameTry = typeof GameTry.Type;
+
+export const GameTriesInput = Schema.Struct({ threadId: ThreadId });
+/** The chat's tries, newest first. */
+export const GameTriesResult = Schema.Struct({ tries: Schema.Array(GameTry) });
+export type GameTriesResult = typeof GameTriesResult.Type;
+
+/** Keeps one version: the game folder becomes its build through the one restore path. */
+export const GameKeepVersionInput = Schema.Struct({
+  threadId: ThreadId,
+  runId: Schema.String,
+  n: PositiveInt,
+  commandId: Schema.String,
+});
+
 /** Stops one build's play copy; the folder's own Play is never touched. */
 export const GameBuildStopInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });
 export const GameBuildRestoreResult = Schema.Struct({

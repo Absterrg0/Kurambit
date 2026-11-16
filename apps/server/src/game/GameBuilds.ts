@@ -71,6 +71,7 @@ import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
 import { sameTuneFile, tuneFileText, tuneFileWith } from "./gameTune.ts";
+import { readTry, triesInRefs } from "./gameTries.ts";
 
 /** The refs a game with no run keeps its restores' "before" folders under. */
 const NO_RUN = "game-builds";
@@ -721,6 +722,56 @@ const make = Effect.gen(function* () {
       return change;
     });
 
+  /**
+   * The versions of every try of the game that have a build. They stay out of
+   * the builds a turn counts from (`saved`): the folder never held one unless it
+   * was kept, and a keep is a restore, which the turns already count from.
+   */
+  const versionEntries = (g: Game, refs: ReadonlyMap<string, string>) =>
+    Effect.gen(function* () {
+      const tries = yield* Effect.forEach(
+        triesInRefs(refs.keys()),
+        (each) =>
+          readTry(projections, refs, each.threadId, each.runId).pipe(
+            Effect.orElseSucceed(() => null),
+          ),
+        { concurrency: 4 },
+      );
+      const entries = yield* Effect.forEach(
+        tries.flatMap((read) =>
+          read === null ? [] : read.versions.map((version) => ({ read, version })),
+        ),
+        ({ read, version }) =>
+          Effect.gen(function* () {
+            if (version.build === null || !isGameBuildId(version.build)) return [];
+            const kept = read.kept?.n === version.n;
+            const change = yield* changeOf(g.root, g.lane, read.base, version.build);
+            return [
+              {
+                id: version.build,
+                // A kept version came into the folder when it was kept.
+                at: kept ? read.kept!.at : (version.capturedAt ?? read.at),
+                source: {
+                  _tag: "version",
+                  threadId: read.threadId,
+                  runId: read.runId,
+                  request: read.request === "" ? "(no request text)" : read.request,
+                  n: version.n,
+                  of: read.of,
+                  approach: version.approach,
+                  kept,
+                },
+                summary: version.approach === "" ? `Version ${version.n}` : version.approach,
+                files: change.files,
+                fileCount: change.count,
+                base: read.base,
+              } satisfies Entry,
+            ];
+          }),
+      );
+      return entries.flat();
+    });
+
   const noRunRestoreOf = (root: string) =>
     sql<{ readonly payload_json: string }>`
       SELECT payload_json FROM game_build_restores WHERE root = ${root}
@@ -832,7 +883,9 @@ const make = Effect.gen(function* () {
           })),
         );
       const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded, setups);
-      const savedPage = saved.filter((entry) => before === undefined || entry.at < before);
+      const savedPage = [...saved, ...(yield* versionEntries(g, byRef))].filter(
+        (entry) => before === undefined || entry.at < before,
+      );
       // A saved build is also a turn's at times; one entry each, the saved one first.
       const seen = new Set<string>();
       const merged = [...savedPage, ...turns.entries]

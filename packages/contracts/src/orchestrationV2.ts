@@ -554,6 +554,12 @@ export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
 
 export const ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE = "workspace_preparation_failed";
 
+/** How many versions a "try it N ways" message builds. */
+export const OrchestrationV2TryVersions = Schema.Int.check(
+  Schema.isBetween({ minimum: 2, maximum: 4 }),
+);
+export type OrchestrationV2TryVersions = typeof OrchestrationV2TryVersions.Type;
+
 export const OrchestrationV2Run = Schema.Struct({
   id: RunId,
   threadId: ThreadId,
@@ -592,6 +598,11 @@ export const OrchestrationV2Run = Schema.Struct({
    * provider thread held before and is told what the fresh runs did.
    */
   freshContext: Schema.optional(Schema.Boolean),
+  /**
+   * The person asked for this many versions of their message, each built in a
+   * child thread of its own; the server, not the provider, does the run itself.
+   */
+  versions: Schema.optional(OrchestrationV2TryVersions),
 });
 export type OrchestrationV2Run = typeof OrchestrationV2Run.Type;
 
@@ -2824,6 +2835,8 @@ export const OrchestrationV2Command = Schema.Union([
     usageLimitRecoveryRequestId: Schema.optional(CommandId),
     /** Start the run in a new native provider session (`OrchestrationV2Run.freshContext`). */
     freshContext: Schema.optional(Schema.Boolean),
+    /** Build the message this many ways in parallel (`OrchestrationV2Run.versions`). */
+    versions: Schema.optional(OrchestrationV2TryVersions),
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
     delegatedCompletion: Schema.optional(
       Schema.Struct({
@@ -3232,6 +3245,38 @@ const OrchestrationV2InternalCommand = Schema.Union([
     interactionMode: ProviderInteractionMode,
     evidenceDirectory: Schema.NullOr(TrimmedNonEmptyString),
     createdAt: Schema.optional(Schema.DateTimeUtc),
+  }),
+  /**
+   * A try's run, done by the game layer instead of a provider: its versions as
+   * child threads, each working in its own worktree of the game, then the run
+   * completed with `notice`, in one transaction. The children reuse the
+   * delegated-task path with no wake, so none can ever start a turn in the chat.
+   */
+  Schema.Struct({
+    type: Schema.Literal("game-version.start"),
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    versions: Schema.Array(
+      Schema.Struct({
+        n: PositiveInt,
+        task: TrimmedNonEmptyString,
+        title: TrimmedNonEmptyString,
+        worktreePath: TrimmedNonEmptyString,
+      }),
+    ),
+    notice: TrimmedNonEmptyString,
+  }),
+  /** The person kept one of a try's versions: a notice on the try's run, which records it. */
+  Schema.Struct({
+    type: Schema.Literal("game-version.kept"),
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    n: PositiveInt,
+    notice: TrimmedNonEmptyString,
   }),
   ...OrchestrationV2GameRunCommand.members,
 ]);

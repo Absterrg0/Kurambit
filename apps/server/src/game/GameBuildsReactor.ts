@@ -16,6 +16,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { forkParked } from "../serverActivation.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as GameBuilds from "./GameBuilds.ts";
+import * as GameVersions from "./GameVersions.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameStage from "./GameStage.ts";
@@ -46,6 +47,7 @@ export class GameBuildsReactor extends Context.Service<
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const builds = yield* GameBuilds.GameBuilds;
+  const versions = yield* GameVersions.GameVersions;
   const operations = yield* GameOperations.GameOperations;
   const projects = yield* GameProjectService.GameProjectService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -121,39 +123,45 @@ const make = Effect.gen(function* () {
           );
     }).pipe(Effect.ignore);
 
+  const turnChanged = (
+    event: Extract<OrchestrationV2DomainEvent, { type: "run.created" | "run.updated" }>,
+  ) => {
+    const run = event.payload;
+    const pending = GameBuilds.turnPending(run);
+    const was = pendingRuns.get(run.id);
+    if (pendingRuns.size > 2000) pendingRuns.clear();
+    pendingRuns.set(run.id, pending);
+    // A run settling with its checkpoint pushes from that checkpoint instead, once its build
+    // is recorded: a read before then could list it unfolded from the build it fixes.
+    if (
+      was === pending ||
+      (was === undefined && event.type === "run.created" && !pending) ||
+      (!pending && run.checkpointId !== null)
+    )
+      return Effect.void;
+    return pushTo(event, pending ? "A turn started." : "A turn settled.").pipe(Effect.ignore);
+  };
+
   const handle: GameBuildsReactor["Service"]["handle"] = (event) => {
     switch (event.type) {
       case "checkpoint.captured": {
         const runId = event.payload.runId;
         if (runId === null) return Effect.void;
         return Effect.flatMap(isRole(event.threadId), (role) =>
-          // A run's role turns are folded into its rounds: no rail changes for them.
+          // A run's role turns are folded into its rounds: no rail changes for them. A try's
+          // version is a child too: its build lands in the game's name.
           role
-            ? Effect.void
+            ? versions.landed(event)
             : event.payload.status === "ready" && event.payload.files.length > 0
               ? turnBuilt(event, runId)
               : pushTo(event, "A turn changed nothing.").pipe(Effect.ignore),
         );
       }
       case "run.created":
-      case "run.updated": {
-        const run = event.payload;
-        const pending = GameBuilds.turnPending(run);
-        const was = pendingRuns.get(run.id);
-        if (pendingRuns.size > 2000) pendingRuns.clear();
-        pendingRuns.set(run.id, pending);
-        // A run settling with its checkpoint pushes from that checkpoint instead, once its build
-        // is recorded: a read before then could list it unfolded from the build it fixes.
-        if (
-          was === pending ||
-          (was === undefined && event.type === "run.created" && !pending) ||
-          (!pending && run.checkpointId !== null)
-        )
-          return Effect.void;
+      case "run.updated":
         return Effect.flatMap(isRole(event.threadId), (role) =>
-          role ? Effect.void : pushTo(event, pending ? "A turn started." : "A turn settled."),
-        ).pipe(Effect.ignore);
-      }
+          role ? versions.landed(event) : turnChanged(event),
+        );
       case "game-run-round.recorded": {
         const record = event.payload.round;
         return pushTo(event, `Round ${record.round} landed.`).pipe(
@@ -198,7 +206,7 @@ const make = Effect.gen(function* () {
         ),
       ),
       Effect.andThen(
-        forkParked(builds.reconcile),
+        forkParked(Effect.andThen(versions.sweep, builds.reconcile)),
         // Guidance arrives with a new server: every game's skills follow it before its next turn.
         forkParked(
           projects.list().pipe(
