@@ -353,10 +353,10 @@ const playHandlers = {
         withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, view)).pipe(
           as(GameBotViewResult),
         ),
-      // A save or a delete answers with the saved plays as they are then; a run, with its
-      // moment as an image; else the saved plays replay.
+      // A save (of the last ended run, or of `run`) or a delete answers with the saved plays as
+      // they are then; a run, with its moment as an image; else the saved plays replay.
       replay: (input) =>
-        input.run !== undefined
+        input.run !== undefined && input.save === undefined
           ? replayMoment({ run: input.run, ...(input.at === undefined ? {} : { at: input.at }) })
           : input.save === undefined && input.delete === undefined
             ? withGame(GamePlays.GamePlays, (plays, threadId) => plays.replaySaved(threadId)).pipe(
@@ -364,7 +364,11 @@ const playHandlers = {
               )
             : withGame(GamePlays.GamePlays, (plays, threadId) =>
                 Effect.gen(function* () {
-                  if (input.save !== undefined) yield* plays.save(threadId, { name: input.save });
+                  if (input.save !== undefined)
+                    yield* plays.save(threadId, {
+                      name: input.save,
+                      ...(input.run === undefined ? {} : { kept: input.run }),
+                    });
                   if (input.delete !== undefined) yield* plays.remove(threadId, input.delete);
                   return yield* plays.saved(threadId);
                 }),

@@ -62,7 +62,7 @@ export const GameCheckTool = Tool.make("game_check", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_check"));
 
 export const GamePlayTool = Tool.make("game_play", {
-  description: `Drive the running game. ${ONE_OP} preview: the playable URL. start, act, close: a session of input batches, each answered with a frame, text, controls, errors. bot: a real-time run of a .studio/bot/ file, with video and findings; bot_view: a past one. replay: test plays every build replays; save names the last ended run; run, at: a run (id or name) at a second as an image. model_sheet: named models from six sides, with size and cost.`,
+  description: `Drive the running game. ${ONE_OP} preview: the playable URL. start, act, close: a session of input batches, each answered with a frame, text, controls, errors. bot: a real-time run of a .studio/bot/ file, with video and findings; bot_view: a past one. replay: test plays every build replays; save names the last ended run, or run; run, at: a run (id or name) at a second as an image. model_sheet: named models from six sides, with size and cost.`,
   parameters: GamePlayToolInput,
   ...answers,
   dependencies: [

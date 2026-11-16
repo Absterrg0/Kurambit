@@ -1,6 +1,7 @@
 // Runs played to an end, kept so a newer build can play them again, and the ones someone saved
 // as tests. The three.js shell records a run as it is played (shell/replay.js); the Stage hands
-// a person's here when it ends, and an agent's game_play session keeps its own (GameExplore).
+// a person's here when it ends, and an agent's game_play session and bot keep their own
+// (GameExplore, gameBotPlay).
 // A replay runs the latest kept run on a build's copy (or the folder, for the agent) and says
 // how it ends there and the first second it plays differently. A saved play (playFiles.ts) is
 // a kept run named as a test: saved only once it replays the same on the build it was played

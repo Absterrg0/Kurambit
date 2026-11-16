@@ -176,6 +176,12 @@ const make = Effect.gen(function* () {
     totalSteps: number;
     totalNominalMs: number;
     images: number;
+    /**
+     * Budgets granted: the session's acts, steps, input time and pictures are this many times
+     * GAME_EXPLORE_BOUNDS'. A start on the thread's own open session grants another, so a run
+     * longer than one budget plays to its end.
+     */
+    budgets: number;
     readonly actions: ExploreActAction[];
     closed: boolean;
     closeReason: string | null;
@@ -355,6 +361,12 @@ const make = Effect.gen(function* () {
         yield* writeEvidence(next);
       }),
     );
+  /** A session's bound: one budget's, times the budgets it was granted. */
+  const bound = (
+    session: ExploreSession,
+    key: "maxCalls" | "maxTotalSteps" | "maxTotalNominalMs" | "maxImages",
+  ) => GAME_EXPLORE_BOUNDS[key] * session.budgets;
+  const goOn = "game_play op start goes on with this run and another budget; close ends it.";
   const exploreBudget =
     `This session holds ${GAME_EXPLORE_BOUNDS.maxCalls} acts and ` +
     `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, about ` +
@@ -368,15 +380,16 @@ const make = Effect.gen(function* () {
   };
   const explorePace = (session: ExploreSession) => {
     const s = (ms: number) => (ms / 1000).toFixed(1);
-    const actsLeft = GAME_EXPLORE_BOUNDS.maxCalls - session.calls;
-    const stepsLeft = GAME_EXPLORE_BOUNDS.maxTotalSteps - session.totalSteps;
+    const actsLeft = bound(session, "maxCalls") - session.calls;
+    const stepsLeft = bound(session, "maxTotalSteps") - session.totalSteps;
     const earlierMs = inputUsedBefore(session.threadId, session.id);
-    const leftMs = GAME_EXPLORE_BOUNDS.maxTotalNominalMs - session.totalNominalMs;
+    const leftMs = bound(session, "maxTotalNominalMs") - session.totalNominalMs;
     const used =
       `input used: ${s(session.totalNominalMs)} s of this session's ` +
-      `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s` +
+      `${bound(session, "maxTotalNominalMs") / 1000} s` +
       (earlierMs > 0 ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)` : "");
-    if (actsLeft <= 0 || leftMs <= 0 || stepsLeft <= 0) return `${used}; this session is spent.`;
+    if (actsLeft <= 0 || leftMs <= 0 || stepsLeft <= 0)
+      return `${used}; this budget is spent: ${goOn}`;
     const perAct = Math.min(leftMs / actsLeft, GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall);
     return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s) and ${stepsLeft} step(s): about ${s(perAct)} s of input per act spends it.`;
   };
@@ -535,6 +548,7 @@ const make = Effect.gen(function* () {
         totalSteps: 0,
         totalNominalMs: 0,
         images: 0,
+        budgets: 1,
         actions: [],
         closed: false,
         closeReason: null,
@@ -635,6 +649,35 @@ const make = Effect.gen(function* () {
         { id, traceDir, sourceId: before.sourceId, viewport, saves },
       );
     });
+  /**
+   * The thread's own open session, granted another budget: the game plays on where it is, so a
+   * run longer than one budget reaches its end, and its ending is kept for a test play.
+   */
+  const exploreContinue = (session: ExploreSession) =>
+    session.lock.withPermits(1)(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        if (session.closed || now >= session.wallDeadlineMs)
+          return yield* exploreInvalid(
+            session.id,
+            "That exploration session is closed or expired; start a new one with game_play op start.",
+          );
+        session.budgets += 1;
+        session.lastActiveMs = now;
+        return {
+          sessionId: session.id,
+          buildId: session.buildId,
+          sourceId: session.sourceId,
+          viewport: { ...session.viewport },
+          booted: true,
+          bootMs: session.bootMs,
+          message: `Exploration session ${session.id.slice(0, 8)} goes on where the game is, with another budget; ${explorePace(session)}`,
+          callsLeft: bound(session, "maxCalls") - session.calls,
+          wallTtlMs: Math.max(0, session.wallDeadlineMs - now),
+          idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
+        } satisfies typeof GameExploreStartResult.Type;
+      }),
+    );
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
@@ -655,6 +698,13 @@ const make = Effect.gen(function* () {
       // Claimed in the step that finds the game free: a second start on it is
       // refused at once, never after both opened a runner.
       const existing = exploreLive.get(root);
+      if (
+        existing !== undefined &&
+        existing !== "starting" &&
+        existing.threadId === threadId &&
+        !existing.closed
+      )
+        return yield* exploreContinue(existing);
       if (existing !== undefined)
         return yield* exploreInvalid(
           existing === "starting" ? root : existing.id,
@@ -782,7 +832,7 @@ const make = Effect.gen(function* () {
           (uiResults.length > 0 ? `${received}/${uiResults.length} ui action(s) received; ` : "") +
           `${explorePace(session)} ` +
           `This observation is descriptive only, never a verdict.`,
-        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls - callIndex,
+        callsLeft: bound(session, "maxCalls") - callIndex,
         totalNominalMs: session.totalNominalMs,
       } satisfies typeof GameExploreActResult.Type;
     }).pipe(
@@ -828,10 +878,10 @@ const make = Effect.gen(function* () {
           session.id,
           `Use 1–${GAME_EXPLORE_BOUNDS.maxStepsPerCall} steps per act; this act has ${input.steps.length}.`,
         );
-      if (session.calls >= GAME_EXPLORE_BOUNDS.maxCalls)
+      if (session.calls >= bound(session, "maxCalls"))
         return yield* exploreInvalid(
           session.id,
-          `This session used its ${GAME_EXPLORE_BOUNDS.maxCalls} act calls; close it and start a new exploration.`,
+          `This session used its ${bound(session, "maxCalls")} act calls: ${goOn}`,
         );
       const nominalMs = exploreStepsNominalMs(input.steps);
       if (!Number.isFinite(nominalMs) || nominalMs < 0)
@@ -867,25 +917,25 @@ const make = Effect.gen(function* () {
           }
           // Budgets are checked under the session lock so concurrent acts
           // cannot each pass before either one accounts for itself.
-          if (session.calls >= GAME_EXPLORE_BOUNDS.maxCalls)
+          if (session.calls >= bound(session, "maxCalls"))
             return yield* exploreInvalid(
               session.id,
-              `This session used its ${GAME_EXPLORE_BOUNDS.maxCalls} act calls; close it and start a new exploration.`,
+              `This session used its ${bound(session, "maxCalls")} act calls: ${goOn}`,
             );
-          if (session.totalSteps + input.steps.length > GAME_EXPLORE_BOUNDS.maxTotalSteps)
+          if (session.totalSteps + input.steps.length > bound(session, "maxTotalSteps"))
             return yield* exploreInvalid(
               session.id,
-              `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxTotalSteps} total steps; close it and start a new exploration.`,
+              `This act would exceed the session's ${bound(session, "maxTotalSteps")} total steps: ${goOn}`,
             );
-          if (session.totalNominalMs + nominalMs > GAME_EXPLORE_BOUNDS.maxTotalNominalMs)
+          if (session.totalNominalMs + nominalMs > bound(session, "maxTotalNominalMs"))
             return yield* exploreInvalid(
               session.id,
-              `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxTotalNominalMs}ms total nominal time; close it and start a new exploration.`,
+              `This act would exceed the session's ${bound(session, "maxTotalNominalMs")}ms total nominal time: ${goOn}`,
             );
-          if (session.images + 1 > GAME_EXPLORE_BOUNDS.maxImages)
+          if (session.images + 1 > bound(session, "maxImages"))
             return yield* exploreInvalid(
               session.id,
-              `This act would exceed the session's ${GAME_EXPLORE_BOUNDS.maxImages} persisted images; close it and start a new exploration.`,
+              `This act would exceed the session's ${bound(session, "maxImages")} persisted images: ${goOn}`,
             );
           const callIndex = session.calls + 1;
           session.calls = callIndex;

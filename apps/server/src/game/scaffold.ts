@@ -91,7 +91,7 @@ const SCOPE_LINES = `- **Do everything the person asked in this message,** and o
 - Install nothing the person did not ask for; the game_* tools are your toolchain.`;
 /** Said until a saved play wins the game: "can it be won" is then replayed on every build. */
 const FIRST_WIN_LINE =
-  "- **No saved play wins this game yet.** Once it can be won, win it with `game_play` and save that run (op `replay` `save`), so every later build replays it.";
+  "- **No saved play wins this game yet.** Once it can be won, win it with a `game_play` bot or session and save that run (op `replay` `save`), so every later build replays it.";
 const UNDO_LINE =
   "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.";
 

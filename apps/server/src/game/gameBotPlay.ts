@@ -7,9 +7,14 @@ import * as NodeURL from "node:url";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
+  GamePlay,
+  keptRunTag,
+  playOutcomeWords,
   type GameBotFinding,
   type GameBotRunResult,
 } from "@kurambit/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import {
   CHILD_EXTRA_MS,
   CHILD_FIRST_INPUT_MS,
@@ -37,8 +42,34 @@ import {
 import { spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 import { VIDEO_FPS, VIDEO_WIDTH, openFrameVideo, type FrameVideo } from "./frameVideo.ts";
 import type { PlayLaunch } from "./playLaunch.ts";
+import { keepPlay } from "./playFiles.ts";
 
 const END_SETTLE_MS = 1500;
+
+const decodePlay = Schema.decodeUnknownOption(GamePlay);
+
+/**
+ * The runs the shell recorded while the bot played, kept as the Stage keeps a person's: a bot's
+ * winning run is a test play like any other once game_play op replay saves it. Played on the
+ * folder as it was: no build. Their tags and how each ended, for the result; a run the game
+ * never ended is not kept.
+ */
+const keepBotRuns = async (play: BotLaunch["play"], root: string) => {
+  const taken = await (play.takePlays?.() ?? Promise.resolve([])).catch(() => []);
+  const kept: Array<string> = [];
+  for (const raw of taken) {
+    const decoded = decodePlay(raw);
+    if (Option.isNone(decoded) || decoded.value.outcome.left === true) continue;
+    const id = await keepPlay(root, {
+      at: new Date().toISOString(),
+      build: null,
+      play: decoded.value,
+    }).catch(() => null);
+    if (id !== null)
+      kept.push(`\`${keptRunTag(id)}\` (${playOutcomeWords(decoded.value.outcome)})`);
+  }
+  return kept;
+};
 
 /** What the launch hands the bot run: the session, how it ended, and how to end what it started. */
 export type BotLaunch = Pick<PlayLaunch, "play" | "stop" | "ended">;
@@ -533,6 +564,7 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
         error: `this game's runner takes no state writes, so ${target} was never sent; the game's harness files predate them`,
       })),
     ];
+    const keptRuns = await keepBotRuns(play, args.root);
     await play.close();
     const videoFacts = (await video?.finish()) ?? null;
     // Every child ends with the run: the bot child's stdin pipe closes so its
@@ -610,7 +642,10 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
         : ` Video (engine frames): ${args.videoPath}, ${videoFacts.distinctFrames} distinct frames` +
           (videoFacts.longestStallMs >= 2000
             ? `; the game drew no new frame for ${(videoFacts.longestStallMs / 1000).toFixed(1)} s at its longest.`
-            : "."));
+            : ".")) +
+      (keptRuns.length === 0
+        ? ""
+        : ` Its run is kept as ${keptRuns.join(", ")}: game_play op replay {"save": "<name>", "run": "<id>"} makes it a test play every build replays.`);
     // The trace carries what game_play op bot_view shows, so a view after a restart reads it from disk.
     const kept = {
       ...trace,
