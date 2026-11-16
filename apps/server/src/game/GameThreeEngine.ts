@@ -196,9 +196,9 @@ const qaOf = (played: { readonly raw: unknown; readonly ms: number } | null): Ga
 
 /**
  * Play at each other screen size: long enough to start a run, draw at that size and throw what
- * the size makes the game throw. It costs a boot per size, so it stays short.
+ * the size makes the game throw. Every build's measure pays a boot per size, so it stays short.
  */
-const SCREEN_PLAY_MS = 1_500;
+const SCREEN_PLAY_MS = 1_000;
 const decodeScreenRead = Schema.decodeUnknownOption(
   Schema.Struct({
     canvas: Schema.NullOr(Schema.Struct({ width: Schema.Finite, height: Schema.Finite })),
@@ -211,90 +211,110 @@ const decodeScreenRead = Schema.decodeUnknownOption(
   }),
 );
 
-/**
- * The gameplay entry booted fresh at phone portrait and at widescreen, each played a moment
- * and read as a player there sees it: whether it starts, what it throws that the check's own
- * size did not (`known`), how much of the window its canvas covers and whether the HUD's DOM
- * text stays on it, with a frame. A HUD drawn in the canvas is not in the DOM: not measured.
- * Also the bytes its page loads to start. Our browser failing is ours: not measured.
- */
-const playScreens = async (input: {
+type ScreenInput = {
   readonly browser: GameBrowser;
   readonly url: string;
   readonly root: string;
   readonly folder: string;
   readonly known: ReadonlySet<string>;
   readonly signal: AbortSignal;
-}): Promise<GameCheckScreens> => {
-  const started = Date.now();
-  const sizes: Array<GameScreenSize> = [];
-  let bytes: number | null = null;
-  try {
-    for (const size of GAME_SCREEN_SIZES) {
-      input.signal.throwIfAborted();
-      const errors: Array<string> = [];
-      const heard = (text: string) => {
-        const line = text.slice(0, 200);
-        if (!input.known.has(line) && !errors.includes(line) && errors.length < 3)
-          errors.push(line);
-      };
-      const at = { name: size.name, width: size.width, height: size.height };
-      const session = await openWebPlaySession({
-        browser: input.browser,
-        url: input.url,
-        width: size.width,
-        height: size.height,
-        bootTimeoutMs: BOOT_TIMEOUT_MS,
-        signal: input.signal,
-        onPageEvent: (event) => {
-          if (event.kind === "pageerror") heard(event.text);
-          else if (event.kind === "script-failed")
-            heard(`script failed to load: ${event.url} (${event.status})`);
-          else if (event.level === "error" && !/favicon\.ico/i.test(event.text)) heard(event.text);
-        },
-        stopOnPageError: true,
-        countBytes: true,
-      }).catch((cause: unknown) => {
-        if (cause instanceof WebPageCrashed) {
-          heard(`the page crashed: ${cause.message}`);
-          return null;
-        }
-        if (cause instanceof WebPageNotReady) return null;
-        throw cause;
-      });
-      if (session === null) {
-        sizes.push({ ...at, booted: false, canvas: null, errors, hudOff: null, frame: null });
-        continue;
-      }
+};
+
+/** One size: booted fresh, played a moment, read, its frame kept, and the bytes it loaded. */
+const playScreen = async (
+  input: ScreenInput,
+  size: (typeof GAME_SCREEN_SIZES)[number],
+): Promise<{ readonly size: GameScreenSize; readonly bytes: number | null }> => {
+  const errors: Array<string> = [];
+  const heard = (text: string) => {
+    const line = text.slice(0, 200);
+    if (!input.known.has(line) && !errors.includes(line) && errors.length < 3) errors.push(line);
+  };
+  const at = { name: size.name, width: size.width, height: size.height };
+  const session = await openWebPlaySession({
+    browser: input.browser,
+    url: input.url,
+    width: size.width,
+    height: size.height,
+    bootTimeoutMs: BOOT_TIMEOUT_MS,
+    signal: input.signal,
+    onPageEvent: (event) => {
+      if (event.kind === "pageerror") heard(event.text);
+      else if (event.kind === "script-failed")
+        heard(`script failed to load: ${event.url} (${event.status})`);
+      else if (event.level === "error" && !/favicon\.ico/i.test(event.text)) heard(event.text);
+    },
+    stopOnPageError: true,
+    countBytes: true,
+  }).catch((cause: unknown) => {
+    if (cause instanceof WebPageCrashed) {
+      heard(`the page crashed: ${cause.message}`);
+      return null;
+    }
+    if (cause instanceof WebPageNotReady) return null;
+    throw cause;
+  });
+  if (session === null)
+    return {
+      size: { ...at, booted: false, canvas: null, errors, hudOff: null, frame: null },
+      bytes: null,
+    };
+  const frame = NodePath.join(input.folder, `screen-${size.name}.png`);
+  // Closed even when the play is stopped part way: the session owns a browser.
+  const { read, kept } = await (async () => {
+    try {
       await playRandomly(session.input, SCREEN_PLAY_MS, input.signal);
       const read = Option.getOrNull(decodeScreenRead(await session.screen()));
-      if (read === null) heard("the page stopped answering at this size");
-      const frame = NodePath.join(input.folder, `screen-${size.name}.png`);
-      const kept = await session.still(frame);
+      return { read, kept: await session.still(frame) };
+    } finally {
       await session.close();
-      const loaded = session.loadedBytes();
-      if (loaded !== null) bytes = Math.max(bytes ?? 0, loaded);
-      const hud = read?.hud ?? null;
-      sizes.push({
-        ...at,
-        booted: true,
-        canvas:
-          read?.canvas == null
-            ? null
-            : { width: Math.round(read.canvas.width), height: Math.round(read.canvas.height) },
-        errors,
-        hudOff: hud === null || hud.texts === 0 ? null : hud.off.slice(0, 8),
-        frame: kept ? NodePath.relative(input.root, frame) : null,
-      });
     }
-  } catch (cause) {
-    if (input.signal.aborted) throw cause;
+  })();
+  if (read === null) heard("the page stopped answering at this size");
+  const hud = read?.hud ?? null;
+  return {
+    size: {
+      ...at,
+      booted: true,
+      canvas:
+        read?.canvas == null
+          ? null
+          : { width: Math.round(read.canvas.width), height: Math.round(read.canvas.height) },
+      errors,
+      hudOff: hud === null || hud.texts === 0 ? null : hud.off.slice(0, 8),
+      frame: kept ? NodePath.relative(input.root, frame) : null,
+    },
+    bytes: session.loadedBytes(),
+  };
+};
+
+/**
+ * The gameplay entry booted fresh at phone portrait and at widescreen, side by side so a build
+ * waits for one boot, not two, each played a moment and read as a player there sees it: whether
+ * it starts, what it throws that the check's own size did not (`known`), how much of the window
+ * its canvas covers and whether the HUD's DOM text stays on it, with a frame. A HUD drawn in the
+ * canvas is not in the DOM: not measured. Also the bytes its page loads to start. Our browser
+ * failing is ours: not measured.
+ */
+const playScreens = async (input: ScreenInput): Promise<GameCheckScreens> => {
+  const started = Date.now();
+  // Settled, not raced: a size whose browser failed never leaves the other's open behind it.
+  const played = await Promise.allSettled(GAME_SCREEN_SIZES.map((size) => playScreen(input, size)));
+  const failed = played.find((each) => each.status === "rejected");
+  if (failed !== undefined) {
+    if (input.signal.aborted) throw failed.reason;
+    const cause: unknown = failed.reason;
     return {
       status: "not-measured",
       why: `the browser failed while opening the game at other screen sizes: ${(cause instanceof Error ? cause.message : String(cause)).slice(0, 200)}`,
     };
   }
-  const report = { sizes, bytes };
+  const done = played.flatMap((each) => (each.status === "fulfilled" ? [each.value] : []));
+  const loaded = done.flatMap((each) => (each.bytes === null ? [] : [each.bytes]));
+  const report = {
+    sizes: done.map((each) => each.size),
+    bytes: loaded.length === 0 ? null : Math.max(...loaded),
+  };
   return {
     status: "measured",
     problems: gameScreensFindings(report).map((found) => `${found.said}: ${found.fix}`),

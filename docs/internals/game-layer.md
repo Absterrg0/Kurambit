@@ -442,8 +442,9 @@ cannot both find none.
   chat's newest `Next:` line, so a reply without one never wipes the plan (one parser, `packages/shared/src/gameNextLine.ts`, so the person sees in
   the Next banner exactly the line the run will use), in a fixed order: the person's notes, a
   blocker, a retry of an undone step, a failing fact, the agent's next line. Only
-  what a player would hit is proposed (errors, controls, Retry, HUD). A build is measured only
-  for what a person acts on: it boots, the QA play, one random-input play for errors, freezes and
+  what a player would hit is proposed (errors, controls, Retry, HUD, other screen sizes), and only
+  health (boots, errors) undoes. A build is measured only for what a person acts on: it boots, the
+  QA play and the game at phone and widescreen, one random-input play for errors, freezes and
   frame rate. Endings with no or random input, motion, input response, the scene report's rows and
   asset counts were cut: nobody acted on them, and the plays cost minutes between steps.
 - **Nothing between steps waits on a play.** The look reads the facts measured on the folder's
