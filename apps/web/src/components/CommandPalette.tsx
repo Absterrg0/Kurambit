@@ -1600,6 +1600,14 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "game.tune.toggle",
       run: async () => toggleGameTab(threadRef, "tune"),
     });
+    actionItems.push({
+      kind: "action",
+      value: "action:game-toggle-build",
+      title: "Show or hide Build",
+      searchTerms: ["build", "checks", "facts", "recordings", "measure", "panel", "game"],
+      icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+      run: async () => toggleGameTab(threadRef, "build"),
+    });
     const requestStage = (request: GameStageRequest) => async () => {
       useGameWorkspaceStore.getState().requestStage(request);
     };

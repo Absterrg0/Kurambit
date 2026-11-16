@@ -10,6 +10,7 @@ import {
   CrosshairIcon,
   FlagIcon,
   SlidersHorizontalIcon,
+  ClipboardCheckIcon,
   ChevronDownIcon,
   PaletteIcon,
   DownloadIcon,
@@ -1515,6 +1516,25 @@ function ThreadGameStage({
               </TooltipPopup>
             </Tooltip>
           }
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={buildTabShown ? "Hide Build" : "Show the build's checks"}
+                  aria-pressed={buildTabShown}
+                  onClick={() => toggleGameTab(threadRef, "build")}
+                />
+              }
+            >
+              <ClipboardCheckIcon className="size-3.5" aria-hidden="true" />
+              Build
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              <TooltipLabel>Checks, recordings and what changed</TooltipLabel>
+            </TooltipPopup>
+          </Tooltip>
         </div>
       </header>
       {/* Hidden, the game stays mounted out of sight, so showing it again keeps its progress. */}
