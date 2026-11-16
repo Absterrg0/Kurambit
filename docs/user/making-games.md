@@ -264,7 +264,8 @@ A game opens as one column: the game on top, its play controls under it, then yo
 agent and the box where you tell the game what to change. The play controls are **Restart**,
 **Pause** (which also lets you point at things) and slow motion (¼×, ½×, 1×) on the left, and on the
 right the build that plays with its checks as marks, sound and **Fullscreen**. Drag the edge under
-the play controls to give the chat more or less of the column.
+the play controls to give the chat more or less of the column. The column keeps a readable width; for
+a bigger game beside the chat, set **Settings → Appearance → Chat width** to Wide or Full.
 
 The bar on top has the game's name, which opens its menu (rename, folder, **Export…**, **Look…**),
 a line while work is under way (making the next build, keep going's step, or that your agent needs a

@@ -41,7 +41,7 @@ import type {
   GameBuildsResult,
   ScopedThreadRef,
 } from "@kurambit/contracts";
-import { gameEngineEntry, unavailableEngineMessage } from "@kurambit/contracts";
+import { type ChatWidth, gameEngineEntry, unavailableEngineMessage } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -62,6 +62,7 @@ import { shellEnvironment } from "../../state/shell";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useClientSettings } from "../../hooks/useSettings";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { GameRunCard, useStageRuns } from "./GameRunCard";
 import { GameDecisionsDialog } from "./GameDecisions";
@@ -213,8 +214,16 @@ const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) 
   AsyncResult.isSuccess(result) &&
   result.value.builds.some((each) => each.source._tag === "turn" && each.source.step !== null);
 
-/** The widest the game's column grows, so its chat never reads as one long line. */
-const GAME_COLUMN_MAX = 1040;
+/**
+ * The widest the game's column grows: the chat's readable width from the Chat width setting, the
+ * --chat-content-max-width index.css gives each choice, so its chat never reads as one long line.
+ * Read from the setting, not the root's variable, which follows the setting a commit later.
+ */
+const readableColumn = (chatWidth: ChatWidth) =>
+  chatWidth === "full"
+    ? Number.POSITIVE_INFINITY
+    : (chatWidth === "wide" ? 72 : 46) *
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
 /** The least the chat under the game keeps, whatever its share: its composer and a reply. */
 const CHAT_ROOM_MIN = 220;
 /**
@@ -222,9 +231,17 @@ const CHAT_ROOM_MIN = 220;
  * lane allows, as tall as the room left once the chat keeps its share below. `taken` is the
  * height of the Stage's own rows (its top bar and controls).
  */
-const gameColumnFit = (centre: HTMLElement, taken: number, ratio: number, chatShare: number) => {
-  const gutter = centre.clientWidth >= 640 ? 48 : 12;
-  const lane = Math.min(GAME_COLUMN_MAX, centre.clientWidth - 2 * gutter);
+const gameColumnFit = (
+  centre: HTMLElement,
+  taken: number,
+  ratio: number,
+  chatShare: number,
+  chatWidth: ChatWidth,
+) => {
+  // The chat lane's own gutter (index.css .chat-composer-lane): 3rem from a 640px window, so the
+  // game shares the chat's edges at every width.
+  const gutter = window.matchMedia("(min-width: 640px)").matches ? 48 : 12;
+  const lane = Math.min(readableColumn(chatWidth), centre.clientWidth - 2 * gutter);
   const chat = Math.max(CHAT_ROOM_MIN, chatShare * centre.clientHeight);
   const height = Math.floor(
     Math.max(0, Math.min(lane * ratio, centre.clientHeight - taken - chat)),
@@ -313,6 +330,7 @@ function NoWebGlCard() {
  */
 export function GameStageLoading() {
   const chatShare = useGameWorkspaceStore((state) => state.chatShare);
+  const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const sectionRef = useRef<HTMLElement>(null);
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
   useLayoutEffect(() => {
@@ -324,7 +342,7 @@ export function GameStageLoading() {
       for (const child of section.children)
         if (child instanceof HTMLElement && child.dataset.stageFit === undefined)
           taken += child.offsetHeight;
-      const next = gameColumnFit(centre, taken, 9 / 16, chatShare);
+      const next = gameColumnFit(centre, taken, 9 / 16, chatShare, chatWidth);
       setFit(next);
       // The composer under it already ends where the game will.
       centre.style.setProperty("--chat-content-max-width", `${next.width}px`);
@@ -335,7 +353,7 @@ export function GameStageLoading() {
       stop();
       centre.style.removeProperty("--chat-content-max-width");
     };
-  }, [chatShare]);
+  }, [chatShare, chatWidth]);
   return (
     <section
       ref={sectionRef}
@@ -638,6 +656,7 @@ function ThreadGameStage({
   const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
   const chatShare = useGameWorkspaceStore((state) => state.chatShare);
+  const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const [titleUnderControls, setTitleUnderControls] = useState(true);
   const hasStatus = data != null;
   useLayoutEffect(() => {
@@ -670,7 +689,13 @@ function ThreadGameStage({
           child.dataset.stageSpacer === undefined
         )
           taken += child.offsetHeight;
-      const fit = gameColumnFit(centre, taken, viewportHeight / viewportWidth, chatShare);
+      const fit = gameColumnFit(
+        centre,
+        taken,
+        viewportHeight / viewportWidth,
+        chatShare,
+        chatWidth,
+      );
       const next = { width: fit.width, height: fit.height };
       setStageFit((previous) =>
         previous !== null &&
@@ -694,7 +719,7 @@ function ThreadGameStage({
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight, comparing, chatShare]);
+  }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth]);
   const stageFitStyle =
     stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width };
   // The game, its controls, the chat and the composer are one column with one pair of edges:

@@ -309,7 +309,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "chat-width",
     title: "Chat width",
     to: "/settings/appearance",
-    searchTerms: ["chat width wide full column layout messages composer monitor"],
+    searchTerms: ["chat width wide full column layout messages composer monitor game stage bigger"],
   },
   {
     id: "panel-animations",
