@@ -266,8 +266,9 @@ A game opens as one column: the game on top, its play controls under it, then yo
 agent and the box where you tell the game what to change. The play controls are **Restart**,
 **Pause** (which also lets you point at things) and **Can't lose** on the left with slow motion
 (¼×, ½×, 1×) and **Controls** beside them, and on the right sound, **Fullscreen** and **Hide**.
-Hover a control for its key. While the game is paused, or a run has ended, the bar shows the run's
-scrubber instead (see **Rewind and fork** below). Drag the edge under the controls to give the chat
+Hover a control for its key. While the game is paused, or a run has ended, the bar becomes the
+run's: **Play**, its scrubber and time, and a **⋯** menu to tell the agent about the run, save it as
+a test play or restart (see **Rewind and fork** below); the other controls come back when you play. Drag the edge under the controls to give the chat
 more or less of the column. The column keeps a readable width; for a bigger game beside the chat,
 set **Settings → Appearance → Chat width** to Wide or Full.
 
@@ -291,10 +292,13 @@ which also opens each section directly). Drag its edge to resize it. Its section
   starts another. **Put all back** returns every value to the game's own. If a game shows nothing to
   tune, **Ask your agent to expose them** asks for it.
 - **Art**: the game's look, how its characters are made, and the art made for it.
-- **Checks**: the build's checks, one line each with its reading and its recording, your saved test
-  plays under the check that replays them, **Measure again**, and **What changed**: its files with the
-  lines each gained and lost. Click a file to open it in the diff. A build's checks in the chat open
-  here.
+- **Checks**: first what the build changed in words (the turn's headline, the values it tuned, and
+  the saved plays and readings that moved since the build before), then its files as one line that
+  opens to each file's lines; click a file to open it in the diff. Then its checks as one line, such
+  as "6 of 9 pass", which opens to the passing ones, with what is left to look at listed under it,
+  your saved test plays under the check that replays them, and **Measure again**. A build's checks
+  in the chat open here. Opening a diff on a narrow window closes the Workbench to give the game
+  room; open it again to see both.
 - **Debug**: the game's own values (score, health, timers) as it plays, and its console. The
   section's name counts the errors and warnings logged.
 - **Decisions**: what the game remembers you decided, to edit, delete or add to.
@@ -327,7 +331,7 @@ which also opens each section directly). Drag its edge to resize it. Its section
 - **Your agent knows how you played (three.js).** Your next message tells the agent about the
   runs you played since its last turn: how each ended, or when you left it (Retry, the menu, a
   reload), and where you stood. It can replay any of them to a moment and look at it. To talk
-  about one run, press **Tell the agent about this run** beside the scrubber when it ends, or while
+  about one run, choose **Tell the agent about this run** in the scrubber's **⋯** menu when it ends, or while
   the game is frozen: it goes into the message box as a chip with its frame.
 - **The game remembers what you decided.** When you undo a build, keep tuned values, or skip a
   keep-going step, Kurambit writes a line in the game's `.studio/decisions.md`, with the first
@@ -337,7 +341,7 @@ which also opens each section directly). Drag its edge to resize it. Its section
   that goes on hears each new one once, so the agent does not bring back what you turned down.
   The Workbench's **Decisions** lists them to edit, delete or add to. An undo never
   rewinds this file.
-- **Test plays (three.js).** After a run ends, **Save as test play** beside the scrubber saves it
+- **Test plays (three.js).** After a run ends, **Save as test play** in the scrubber's **⋯** menu saves it
   under a name, such as a win or the run where a bug showed. Your first win is offered as one. Every build from then on replays it,
   and its checks say whether each saved play still ends the same way. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
