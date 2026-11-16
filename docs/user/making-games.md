@@ -283,8 +283,9 @@ choice), then the **⋯** menu, **Keep going** and **Workbench**.
 The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
 which also opens each section directly). Drag its edge to resize it. Its sections:
 
-- **Tune**: the things the game names, by kind, and under them the picked thing's values, such as
-  its speed, jump height, timers and counts. Drag a value's field sideways to change it, or click it
+- **Tune**: the picked thing's values, such as its speed, jump height, timers and counts. Its name
+  at the top opens a searchable menu of everything the game names, by kind; pointing at a thing on
+  the paused game picks it too. Drag a value's field sideways to change it, or click it
   to type; the game changes at once. Values are saved into the game as you let go, and a tuning
   session is one build Undo takes back; **Keep as a build** ends the session, so your next change
   starts another. **Put all back** returns every value to the game's own. If a game shows nothing to
