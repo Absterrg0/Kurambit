@@ -402,11 +402,12 @@ export interface WebPlaySession extends PlaySession {
   /**
    * Runs a kept play again from its seed and input (shell/replay.js) and returns what the page
    * answered: null when it did not in time, "no-replay" when the shell has no replay.
-   * `drawEvery`: the page draws one frame in that many while it replays.
+   * `drawEvery`: the page draws one frame in that many while it replays; `at`: it stops and
+   * holds at that second of play, its frame drawn.
    */
   readonly replay: (
     play: { readonly steps: number; readonly dt: number },
-    options?: { readonly drawEvery: number },
+    options?: { readonly drawEvery: number; readonly at?: number },
   ) => Promise<unknown>;
   /**
    * Lays the model sheet of one named thing over the page (shell/sheet.js) and returns its

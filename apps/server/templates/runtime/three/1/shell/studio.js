@@ -208,7 +208,7 @@ export function installStudio({
         }),
     // A play the Stage kept, run again on this build from its seed and its input at each
     // step (shell/replay.js): how it ended, and where the run stood each second. `options`:
-    // { drawEvery } for a measuring replay.
+    // { drawEvery } for a measuring replay, { at } to stop and hold at a second of play.
     replay: (play, options) => replay(play, options),
     // The runs this page played to an end since the last call (shell/replay.js), for a harness
     // session, which no Stage holds, to keep as the Stage keeps a person's.

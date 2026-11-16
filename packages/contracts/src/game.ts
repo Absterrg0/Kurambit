@@ -498,14 +498,13 @@ export type GamePlaytestState = typeof GamePlaytestState.Type;
 const GamePointerPosition = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 export const GamePlaytestStep = Schema.Union([
   Schema.Struct({
+    // Its description stands for every key field here (hold, key, keys): the tools' text is budgeted.
     press: Schema.String.annotate({
       description: 'A browser key name ("Enter", "w", "ArrowLeft").',
     }),
   }),
   Schema.Struct({
-    hold: Schema.String.annotate({
-      description: "A browser key name.",
-    }),
+    hold: Schema.String,
     holdMs: Schema.Number,
   }),
   Schema.Struct({
@@ -513,9 +512,7 @@ export const GamePlaytestStep = Schema.Union([
     holdMs: Schema.Number,
   }),
   Schema.Struct({
-    key: Schema.String.annotate({
-      description: "A browser key name.",
-    }),
+    key: Schema.String,
     holdMs: Schema.Number,
   }),
   Schema.Struct({
@@ -529,7 +526,7 @@ export const GamePlaytestStep = Schema.Union([
     x: Schema.optionalKey(Schema.Number),
     y: Schema.optionalKey(Schema.Number),
     click: Schema.Literals(["left", "middle", "right"]).annotate({
-      description: "A mouse button, clicked at x, y or the canvas centre.",
+      description: "A mouse button, clicked at x, y or the centre.",
     }),
   }),
   Schema.Struct({

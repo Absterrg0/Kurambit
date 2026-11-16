@@ -196,6 +196,8 @@ let replayDone = null;
 /** A measuring replay draws one frame in this many: its answer is the run, not the picture. */
 let replayDrawEvery = 1;
 let replayFrames = 0;
+/** A replay asked to stop at a moment: the second of play it holds at, its frame drawn. */
+let replayStopAt = null;
 /** Runs played to an end on a page the Stage does not hold, for the harness to keep. */
 const finishedPlays = [];
 /** Most steps one frame runs: a slow frame catches up at most 0.1 s, as play always has. */
@@ -347,7 +349,23 @@ function dispose(scene) {
   });
 }
 
+/**
+ * A run the person leaves before it ends (Retry, the menu, a reload, the Stage closing): kept by
+ * the Stage as left, so the agent hears of it too. A run nobody played is not posted.
+ */
+function leaveRun() {
+  if (run === null || run.player !== null || run.recorder == null) return;
+  const play = run.recorder.soFar(
+    Math.round(run.time * 10) / 10,
+    mark(run.time, run.ctx.player, GameState),
+    run.input.reads,
+  );
+  run.recorder = null;
+  if (play !== null) bridge.play(play);
+}
+
 function clearRun() {
+  leaveRun();
   endSerial += 1;
   endBeat = 0;
   ending = null;
@@ -596,7 +614,8 @@ onRunEnded((won, text, stats) => {
   };
   if (run.player !== null) finishReplay(outcome);
   else {
-    const play = run.recorder?.finish(outcome, run.input.reads);
+    const where = mark(run.time, run.ctx.player, GameState);
+    const play = run.recorder?.finish({ ...outcome, where }, run.input.reads);
     if (play != null) {
       bridge.play(play);
       finishedPlays.push(play);
@@ -607,16 +626,26 @@ onRunEnded((won, text, stats) => {
   }
 });
 
-/** The replay's answer: how its run ended (null when it had not) and where it stood each second. */
+/**
+ * The replay's answer: how its run ended (null when it had not) and where it stood each second.
+ * A replay asked to stop at a moment holds there, or where it ended before it, its frame drawn.
+ */
 function finishReplay(outcome) {
   const done = replayDone;
   replayDone = null;
   replayDrawEvery = 1;
+  const stopping = replayStopAt !== null;
+  replayStopAt = null;
+  if (stopping) {
+    run.stopped = true;
+    redraw = true;
+  }
   done?.({
     outcome,
     seconds: Math.round(run.time * 10) / 10,
     steps: run.steps,
     marks: run.player.marks,
+    ...(stopping ? { stopped: mark(run.time, run.ctx.player, GameState) } : {}),
   });
 }
 
@@ -992,6 +1021,8 @@ window.addEventListener("pointerup", (event) => run?.buttons.delete(event.button
 window.addEventListener("pointercancel", (event) => run?.buttons.delete(event.button));
 // Exported web builds pause when their tab is hidden. The studio stage hides
 // with CSS, which leaves the page visible, so its own hold is unaffected.
+// A reload or the Stage closing leaves the run in play: the Stage keeps it as left.
+window.addEventListener("pagehide", leaveRun);
 document.addEventListener("visibilitychange", () => {
   if (shellScreens) {
     if (document.visibilityState === "hidden") pause();
@@ -1219,6 +1250,16 @@ const bridge = createStageBridge({
     setCanLose(on);
     run?.recorder?.event("can-lose", on);
   },
+  // "Tell the agent about this run" while paused: the run so far, however short.
+  runSoFar: () =>
+    run === null || run.player !== null
+      ? null
+      : (run.recorder?.soFar(
+          Math.round(run.time * 10) / 10,
+          mark(run.time, run.ctx.player, GameState),
+          run.input.reads,
+          { asked: true },
+        ) ?? null),
   tuned(id, key, value) {
     run?.recorder?.event("tune", id, key, value);
     // A model built from these values (shell/model.js tuned) is built again, frozen or not.
@@ -1333,7 +1374,8 @@ const studio = installStudio({
   scene: sceneReport,
   // A kept play, run again from its seed with its input at each step (shell/replay.js). A play
   // that pressed an action this build no longer has cannot be replayed: it says which.
-  // `drawEvery`: a measuring replay draws one frame in that many.
+  // `drawEvery`: a measuring replay draws one frame in that many. `at`: it stops and holds at
+  // that second of play (or where it ended before), its frame drawn.
   replay(play, options = {}) {
     const missing = (play.actions ?? []).filter((name) => !controls.has(name));
     if (missing.length > 0)
@@ -1345,6 +1387,7 @@ const studio = installStudio({
       startRun();
       replayDrawEvery = Math.max(1, Math.floor(Number(options.drawEvery) || 1));
       replayFrames = 0;
+      replayStopAt = Number.isFinite(options.at) ? Math.max(0, options.at) : null;
     });
   },
   // The runs this page played to an end since the last call, for a harness session to keep.
@@ -1442,7 +1485,8 @@ renderer.setAnimationLoop((now) => {
   if (!held && !document.hidden) rate.frame(elapsedMs);
   pollGamepad(now);
   // Only unpaused, unheld time moves the run, the end beat included.
-  const moving = run !== null && !run.compiling && !held && (live() || endBeat > 0);
+  const moving =
+    run !== null && !run.compiling && !held && run.stopped !== true && (live() || endBeat > 0);
   let dt = 0;
   if (moving && run.player !== null) {
     // A replay: as many steps as fit in part of a frame, never waiting on real time.
@@ -1450,9 +1494,13 @@ renderer.setAnimationLoop((now) => {
     const stepping = run;
     for (;;) {
       // A step can end the run, or start another (a game that restarts itself).
-      if (run !== stepping || performance.now() >= until) break;
+      if (run !== stepping || stepping.stopped === true || performance.now() >= until) break;
       if (GameState.state !== "playing" && endBeat <= 0) break;
       dt += step();
+      if (replayStopAt !== null && run === stepping && stepping.time >= replayStopAt) {
+        finishReplay(null);
+        break;
+      }
       if (endBeat > 0 && (endBeat -= run.dt) <= 0) {
         showEnd();
         break;
@@ -1466,7 +1514,7 @@ renderer.setAnimationLoop((now) => {
       }
     }
     replayFrames += 1;
-    redraw = replayFrames % replayDrawEvery === 0;
+    redraw = stepping.stopped === true || replayFrames % replayDrawEvery === 0;
   } else if (moving) {
     // Whole steps of the run's slice; a frame a little early or late still takes one.
     run.left += real;

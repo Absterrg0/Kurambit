@@ -583,7 +583,14 @@ export const makeThreeBackend = (
                     signal,
                   });
                   try {
-                    return await session.replay(input.play, { drawEvery: REPLAY_DRAW_EVERY });
+                    const answered = await session.replay(input.play, {
+                      drawEvery: REPLAY_DRAW_EVERY,
+                      ...(input.moment === undefined ? {} : { at: input.moment.at }),
+                    });
+                    // The page holds the moment's frame once it answers.
+                    if (input.moment !== undefined && answered !== null && answered !== "no-replay")
+                      await session.still(input.moment.image);
+                    return answered;
                   } finally {
                     await session.close();
                   }

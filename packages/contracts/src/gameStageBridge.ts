@@ -33,6 +33,8 @@ export const GameStageCapability = Schema.Literals([
   "controls",
   "cannot-lose",
   "dev",
+  /** Keeps the person's runs, left ones too, and answers studio-run-request. */
+  "runs",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -185,6 +187,13 @@ export const StudioThingsRequest = Schema.Struct({
 export const StudioCapture = Schema.Struct({
   type: Schema.Literal("studio-capture"),
 });
+/**
+ * Asks for the run in play so far, as a play that has not ended (left), for "Tell the agent
+ * about this run" while paused: answered with studio-play, `asked` set.
+ */
+export const StudioRunRequest = Schema.Struct({
+  type: Schema.Literal("studio-run-request"),
+});
 
 /** How fast play runs, 1 being the game's own pace: slow motion to look at a jump or a hit. */
 export const StudioSpeed = Schema.Struct({
@@ -258,6 +267,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioHoverThing,
   StudioThingsRequest,
   StudioCapture,
+  StudioRunRequest,
   StudioControlsRequest,
   StudioRebind,
   StudioControlsReset,
@@ -349,10 +359,19 @@ export const StudioFrame = Schema.Struct({
   png: Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/)),
 });
 
-/** A person's run on the Stage ended: its play, for the Stage to keep (gamePlays.ts). */
+/**
+ * A person's run on the Stage ended, or was left (Retry, the menu, a reload): its play, for the
+ * Stage to keep (gamePlays.ts). `asked`: the answer to studio-run-request, the run so far.
+ */
 export const StudioPlay = Schema.Struct({
   type: Schema.Literal("studio-play"),
   play: GamePlay,
+  asked: Schema.optionalKey(Schema.Boolean),
+});
+
+/** The run on screen is gone (a new run, the menu): the Stage takes down what it showed for it. */
+export const StudioRunReset = Schema.Struct({
+  type: Schema.Literal("studio-run-reset"),
 });
 
 export const GameToStageMessage = Schema.Union([
@@ -368,6 +387,7 @@ export const GameToStageMessage = Schema.Union([
   StudioFrame,
   StudioControls,
   StudioPlay,
+  StudioRunReset,
 ]);
 export type GameToStageMessage = typeof GameToStageMessage.Type;
 

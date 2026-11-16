@@ -79,6 +79,20 @@ const restartContinuationBaseline = (
   return source === undefined ? {} : { baselineFromOrdinal: Math.max(0, source.ordinal - 1) };
 };
 
+/** When the thread's latest earlier turn ended, if one did. */
+const lastTurnEnded = (
+  runs: ReadonlyArray<OrchestrationV2Run>,
+  run: OrchestrationV2Run,
+): { readonly lastTurnEndedAt?: DateTime.Utc } => {
+  const ended = runs.flatMap((each) =>
+    each.ordinal < run.ordinal && each.completedAt !== null ? [each.completedAt] : [],
+  );
+  const [first, ...rest] = ended;
+  return first === undefined
+    ? {}
+    : { lastTurnEndedAt: rest.reduce<DateTime.Utc>((a, b) => DateTime.max(a, b), first) };
+};
+
 /** The run asked for a fresh context, or carries on one that did across a restart. */
 const inFreshSession = (
   runs: ReadonlyArray<OrchestrationV2Run>,
@@ -1279,7 +1293,11 @@ export const layer: Layer.Layer<
             ...(noteContinuation ? promptedInput : turnInput),
             message: {
               ...turnInput.message,
-              text: context === "" ? userText : `${context}\n\nUser message:\n${userText}`,
+              // The turn's own text: the message, with what run execution put beside it.
+              text:
+                context === ""
+                  ? turnInput.message.text
+                  : `${context}\n\nUser message:\n${turnInput.message.text}`,
             },
           }).pipe(
             // A pending marker would make the next turn abandon this native
@@ -1360,6 +1378,7 @@ export const layer: Layer.Layer<
         shouldFinalizeRun: runControls.shouldFinalizeRun,
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,
         ...restartContinuationBaseline(projection.runs, run),
+        ...lastTurnEnded(projection.runs, run),
         message: {
           messageId: message.id,
           text: userText,

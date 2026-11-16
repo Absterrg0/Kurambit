@@ -91,6 +91,12 @@ export interface GameEngineBinary {
   readonly templates: string | null;
 }
 
+/** A replay stopped at a second of play, its frame kept as a PNG at `image`. */
+export interface ReplayMoment {
+  readonly at: number;
+  readonly image: string;
+}
+
 export interface GameEngineContext {
   readonly root: string;
   /** Absolute directory of the engine project. */
@@ -210,12 +216,17 @@ export interface GameEngineBackend {
   /**
    * Runs a person's kept play again on the game at `ctx` (its folder or a build's copy) from
    * the gameplay entry; "no-replay" when that game's shell has none. Null for engines whose
-   * shell keeps no plays.
+   * shell keeps no plays. With `moment`, it stops at that second of play and keeps the frame
+   * there as `moment.image`.
    */
   readonly replay:
     | ((
         ctx: GameEngineContext,
-        input: { readonly gameplayScene: string; readonly play: GamePlay },
+        input: {
+          readonly gameplayScene: string;
+          readonly play: GamePlay;
+          readonly moment?: ReplayMoment;
+        },
       ) => Effect.Effect<GameReplayRun | "no-replay", GameOperationError>)
     | null;
   /**
@@ -311,6 +322,7 @@ export class GameEngine extends Context.Service<
     readonly replayIn: (
       root: string,
       play: GamePlay,
+      moment?: ReplayMoment,
     ) => Effect.Effect<GameReplayRun, GameOperationError>;
     /** `game_play` op `model_sheet`: the named things alone, from four sides, with their size and cost. */
     readonly modelSheet: (
@@ -552,7 +564,7 @@ const make = Effect.gen(function* () {
       projects.read(root),
       (manifest) => `${engineDisplayName(manifest.engine.name)} check`,
     );
-  const replayIn: GameEngine["Service"]["replayIn"] = (root, play) =>
+  const replayIn: GameEngine["Service"]["replayIn"] = (root, play, moment) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const { backend, ctx } = yield* context(root);
@@ -570,6 +582,7 @@ const make = Effect.gen(function* () {
       const run = yield* backend.replay(ctx, {
         gameplayScene: manifest.gameplayScene ?? "",
         play,
+        ...(moment === undefined ? {} : { moment }),
       });
       if (run === "no-replay")
         return yield* refused(

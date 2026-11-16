@@ -27,6 +27,7 @@ const CAPABILITIES = [
   "controls",
   "cannot-lose",
   "dev",
+  "runs",
 ];
 const KINDS = new Set([
   "character",
@@ -123,7 +124,8 @@ const fits = (value, fallback) =>
  * silences the game, `controls` lists, rebinds and resets the game's actions as
  * its own Controls screen does, saved with its settings, `canLose(on)`
  * lets a loss end the run or not (the Stage's "Can't lose" while tuning), and
- * `tuned(id, key, value)` hears each value the Stage changed (a run's play keeps it), and
+ * `tuned(id, key, value)` hears each value the Stage changed (a run's play keeps it),
+ * `runSoFar()` is the run in play so far as a play (or null), and
  * `dev` takes the Stage's dev views (shell/dev-view.js) and a frozen run's one-frame step.
  */
 export function createStageBridge({
@@ -138,6 +140,7 @@ export function createStageBridge({
   controls,
   canLose,
   tuned,
+  runSoFar,
   dev,
 }) {
   let active = false;
@@ -926,6 +929,8 @@ export function createStageBridge({
     named.clear();
     for (const id of tunes.keys()) add(placeholder(id));
     hovered = null;
+    // The run on screen is gone (a new one, the menu): the Stage takes down what it showed for it.
+    if (active) toStage({ type: "studio-run-reset" });
     if (selected !== null) {
       selected = null;
       selectedIndex = null;
@@ -1018,6 +1023,7 @@ export function createStageBridge({
         return typeof data.on === "boolean";
       case "studio-things-request":
       case "studio-capture":
+      case "studio-run-request":
       case "studio-controls-request":
       case "studio-controls-reset":
         return true;
@@ -1096,6 +1102,11 @@ export function createStageBridge({
         return postThings();
       case "studio-capture":
         return capture();
+      case "studio-run-request": {
+        const recorded = runSoFar?.() ?? null;
+        if (recorded !== null) toStage({ type: "studio-play", play: recorded, asked: true });
+        return;
+      }
       case "studio-controls-request":
         return postControls();
       case "studio-rebind":
@@ -1172,7 +1183,7 @@ export function createStageBridge({
     overlay,
     reset,
     setTune,
-    /** A person's run ended on the Stage: its play (shell/replay.js), for the Stage to keep. */
+    /** A person's run on the Stage ended or was left: its play (shell/replay.js), for the Stage to keep. */
     play(recorded) {
       if (active) toStage({ type: "studio-play", play: recorded });
     },

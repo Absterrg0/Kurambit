@@ -37,7 +37,7 @@ import * as Stream from "effect/Stream";
 
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
-import { turnRulesForWorkspace } from "../game/gameTurnRules.ts";
+import { personRunsForWorkspace, turnRulesForWorkspace } from "../game/gameTurnRules.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -542,6 +542,8 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
   /** The ordinal whose checkpoint stands in for this run's baseline when that was never captured. */
   readonly baselineFromOrdinal?: number;
+  /** When the thread's previous turn ended: a game's turn rules name the person's runs since. */
+  readonly lastTurnEndedAt?: DateTime.Utc;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1384,6 +1386,16 @@ export const layer: Layer.Layer<
           }));
           // A game's turn rules come from the harness each turn, never from a copy in the game.
           const harnessInstructions = yield* turnRulesForWorkspace(input.runtimePolicy.cwd);
+          // What the person played since the last turn goes beside their message; a slash
+          // command stays first in the prompt, and gets none.
+          const personRuns = input.message.text.trimStart().startsWith("/")
+            ? null
+            : yield* personRunsForWorkspace(
+                input.runtimePolicy.cwd,
+                input.lastTurnEndedAt === undefined
+                  ? undefined
+                  : DateTime.formatIso(input.lastTurnEndedAt),
+              );
           const turnInput = {
             appThread: input.appThread,
             threadId: input.run.threadId,
@@ -1401,7 +1413,13 @@ export const layer: Layer.Layer<
             attemptId: input.attemptId,
             rootNodeId: input.rootNode.id,
             providerThread: input.providerThread,
-            message: input.message,
+            message:
+              personRuns === null
+                ? input.message
+                : {
+                    ...input.message,
+                    text: `<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>\n\n${input.message.text}`,
+                  },
             modelSelection: input.modelSelection,
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),

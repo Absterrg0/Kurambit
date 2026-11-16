@@ -50,6 +50,16 @@ export const GamePlayOutcome = Schema.Struct({
   text: Schema.String.check(Schema.isMaxLength(200)),
   /** Seconds of play when it ended. */
   seconds: Schema.Finite,
+  /**
+   * The person left the run before it ended (Retry, the menu, a reload, the Stage closing, or
+   * paused to tell the agent): it neither won nor lost, so it is never replayed as a test.
+   */
+  left: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * Where a recorded run stood as it ended or was left, which its once-a-second marks can miss
+   * (the fall itself): what the agent hears of the person's runs.
+   */
+  where: Schema.optionalKey(GamePlayMark),
 });
 export type GamePlayOutcome = typeof GamePlayOutcome.Type;
 
@@ -88,6 +98,8 @@ export const GameReplayRun = Schema.Struct({
   marks: Schema.Array(GamePlayMark).check(Schema.isMaxLength(1_600)),
   /** The play pressed actions this build does not have, so it was not run. */
   missing: Schema.optionalKey(Schema.Array(Code).check(Schema.isMaxLength(64))),
+  /** Asked to stop at a moment: where the run stood when it stopped there. */
+  stopped: Schema.optionalKey(GamePlayMark),
 });
 export type GameReplayRun = typeof GameReplayRun.Type;
 
@@ -155,11 +167,55 @@ export const GameReplayResult = Schema.Struct({
 });
 export type GameReplayResult = typeof GameReplayResult.Type;
 
-/** PURE. "won at 41 s", "lost at 12 s". */
+/** PURE. "won at 41 s", "lost at 12 s", "left at 12 s". */
 export const playOutcomeWords = (outcome: GamePlayOutcome | null) =>
   outcome === null
     ? "still playing"
-    : `${outcome.won ? "won" : "lost"} at ${Math.round(outcome.seconds)} s`;
+    : `${outcome.left === true ? "left" : outcome.won ? "won" : "lost"} at ${Math.round(outcome.seconds)} s`;
+
+/**
+ * `game_play` op `replay` with `run`: one run (a saved play, or a kept run by its id) replayed on
+ * the folder to a moment, with the frame there and where it stood.
+ */
+export const GameReplayMoment = Schema.Struct({
+  run: Schema.String,
+  /** How the run went when it was played. */
+  played: GamePlayOutcome,
+  /** The second of play the replay stopped at. */
+  at: Schema.Finite,
+  /** It ended on the folder before that moment; null: still in play there. */
+  ended: Schema.NullOr(GamePlayOutcome),
+  /** The player's position and the game's own values at that moment. */
+  player: Schema.NullOr(Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite])),
+  values: Schema.Record(Schema.String, Schema.Union([Schema.Finite, Schema.Boolean])),
+  /** The first second, up to that moment, it played differently than when it was played. */
+  differs: Schema.NullOr(Schema.Struct({ seconds: Schema.Finite, what: Schema.String })),
+  /** The frame at that moment, relative to the game; null when none was drawn. */
+  image: Schema.NullOr(Schema.String),
+});
+export type GameReplayMoment = typeof GameReplayMoment.Type;
+
+/**
+ * PURE. The short id a kept run goes by with the agent: the random end of its id, which the
+ * replay and the save take as well as the whole id.
+ */
+export const keptRunTag = (kept: string) => kept.slice(kept.lastIndexOf("-") + 1);
+
+/**
+ * PURE. What "Tell the agent about this run" adds to the person's message, beside the frame: the
+ * run's id, how it went and how to see any moment of it.
+ */
+export const gameRunAskContext = (run: {
+  readonly kept: string;
+  readonly outcome: GamePlayOutcome;
+  readonly paused: boolean;
+}): string => {
+  const how = run.paused
+    ? `paused at ${Math.round(run.outcome.seconds)} s`
+    : `${playOutcomeWords(run.outcome)}${run.outcome.text === "" ? "" : ` ("${run.outcome.text}")`}`;
+  const tag = keptRunTag(run.kept);
+  return `The person is telling you about their run \`${tag}\` on the Stage, ${how}; the attached frame is the game when they asked. \`game_play\` op \`replay\` \`{"run": "${tag}", "at": <seconds>}\` shows any moment of it.`;
+};
 
 /** PURE. The first second two runs stood apart, and what differed: the player, or a value. */
 export const firstPlayDifference = (

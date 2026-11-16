@@ -92,6 +92,9 @@ const SCOPE_LINES = `- **Do everything the person asked in this message,** and o
 - **A question:** answer it and change nothing; your previous \`Next:\` line stands, so repeat it.
 - **Look as often as you need; check in full once the work is done.** \`game_check\` is a quick look: a frame of play, its errors and frame rate. Before you end the turn, run its op \`final\`, which also plays the scene report and the QA play, and fix what they list. A clean check says the game runs, not that the work is done.
 - Install nothing the person did not ask for; the game_* tools are your toolchain.`;
+/** Said until a saved play wins the game: "can it be won" is then replayed on every build. */
+const FIRST_WIN_LINE =
+  "- **No saved play wins this game yet.** Once it can be won, win it with `game_play` and save that run (op `replay` `save`), so every later build replays it.";
 const UNDO_LINE =
   "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.";
 
@@ -194,9 +197,13 @@ export const firstTurnMessage = (
  * `harnessInstructions`) rather than writing them into the game, so a change to them reaches
  * every game at once.
  */
-export const gameTurnRules = (engine: GameEngineId): string | undefined => {
+export const gameTurnRules = (
+  engine: GameEngineId,
+  game: { readonly winSaved: boolean } = { winSaved: false },
+): string | undefined => {
   const everyTurn = everyTurnSection(engine);
-  return everyTurn === undefined ? undefined : `${everyTurn}\n${KEEP_GOING_SECTION}`;
+  if (everyTurn === undefined) return undefined;
+  return `${everyTurn}${game.winSaved ? "" : `${FIRST_WIN_LINE}\n`}\n${KEEP_GOING_SECTION}`;
 };
 
 /** Games made before the turn rules moved out of AGENTS.md carry them as these sections. */

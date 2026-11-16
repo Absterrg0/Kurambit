@@ -7,7 +7,8 @@
 // until the build plays differently. What a game reads outside ctx.input, ctx.keys and
 // ctx.mouse (its own listeners, timers outside ctx.after) is not in the play.
 //
-// The Stage keeps a person's ended runs; the harness replays one with window.__studio.replay.
+// The Stage keeps a person's runs, ended or left; the harness replays one with
+// window.__studio.replay, to its end or to a moment.
 
 /** Display rates a measured frame interval snaps to. */
 const RATES = [60, 75, 90, 100, 120, 144, 165, 240];
@@ -15,6 +16,8 @@ const RATES = [60, 75, 90, 100, 120, 144, 165, 240];
 const MAX_STEPS = 20 * 60 * 240;
 const MAX_CHANGES = 20_000;
 const MAX_EVENTS = 2_000;
+/** A run left sooner than this is not kept: a misclick, or a reload as play began. */
+const LEFT_MIN_S = 2;
 
 /** A seeded stream of numbers in [0, 1) (mulberry32): the same seed, the same run. */
 export function seeded(seed) {
@@ -160,10 +163,31 @@ export function createRecorder(seed, dt, clock) {
     },
     /** The run ended: the play, or null when it outgrew what is kept. `read`: the actions the game read. */
     finish(outcome, read) {
-      if (full) return null;
+      if (full || play.outcome !== null) return null;
       play.outcome = outcome;
       play.actions = [...actions].filter((name) => read.has(name)).slice(0, 64);
       return play;
+    },
+    /**
+     * The run so far as a play that did not end, `seconds` in and standing at `where` (a mark):
+     * null once it ended or when it outgrew what is kept. Unless the person `asked` for it
+     * (paused to tell the agent), also null when it is too short or they pressed nothing: a run
+     * a reload cut while nobody played is not a run they left.
+     */
+    soFar(seconds, where, read, { asked = false } = {}) {
+      const played = play.inputs.some(
+        ([, input]) => input.k.length > 0 || input.b.length > 0 || input.g !== undefined,
+      );
+      if (full || play.outcome !== null) return null;
+      if (!asked && (seconds < LEFT_MIN_S || !played)) return null;
+      return {
+        ...play,
+        inputs: [...play.inputs],
+        events: [...play.events],
+        marks: [...play.marks],
+        outcome: { won: false, text: asked ? "paused" : "", seconds, left: true, where },
+        actions: [...actions].filter((name) => read.has(name)).slice(0, 64),
+      };
     },
   };
 }

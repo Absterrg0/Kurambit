@@ -74,6 +74,8 @@ export const GamePlayToolInput = Schema.Struct({
     Schema.Struct({
       save: Schema.optionalKey(Schema.String),
       delete: Schema.optionalKey(Schema.String),
+      run: Schema.optionalKey(Schema.String),
+      at: Schema.optionalKey(Schema.Finite),
     }),
   ),
   model_sheet: op(GameModelSheetInput),

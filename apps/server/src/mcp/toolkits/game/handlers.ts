@@ -36,6 +36,7 @@ import {
   GameOperationError,
   GameReplayResult,
   GameSavedPlaysReading,
+  GameReplayMoment,
   GameSavedPlaysResult,
   GameSavedListResult,
   GameStatus,
@@ -300,6 +301,31 @@ const modelSheet = (input: Parameters<GameEngine.GameEngine["Service"]["modelShe
     ),
   );
 
+/** One run replayed to a moment, its frame as an image. */
+const replayMoment = (input: { readonly run: string; readonly at?: number }) =>
+  Effect.gen(function* () {
+    const moment = yield* withGame(GamePlays.GamePlays, (plays, threadId) =>
+      plays.moment(threadId, input),
+    );
+    const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
+      projects.resolve(threadId),
+    );
+    const shot =
+      moment.image === null
+        ? null
+        : yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(root, moment.image!)).then(png, () => null),
+          );
+    return { ...moment, ...(shot === null ? {} : { screenshots: [shot] }) };
+  }).pipe(
+    as(
+      Schema.Struct({
+        ...GameReplayMoment.fields,
+        screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
+      }),
+    ),
+  );
+
 const playHandlers = {
   game_play: McpToolAccess.actsAsCaller((input) =>
     dispatch("game_play", input, {
@@ -327,19 +353,22 @@ const playHandlers = {
         withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, view)).pipe(
           as(GameBotViewResult),
         ),
-      // A save or a delete answers with the saved plays as they are then; else they replay.
+      // A save or a delete answers with the saved plays as they are then; a run, with its
+      // moment as an image; else the saved plays replay.
       replay: (input) =>
-        input.save === undefined && input.delete === undefined
-          ? withGame(GamePlays.GamePlays, (plays, threadId) => plays.replaySaved(threadId)).pipe(
-              as(Schema.Union([GameSavedPlaysReading, GameReplayResult])),
-            )
-          : withGame(GamePlays.GamePlays, (plays, threadId) =>
-              Effect.gen(function* () {
-                if (input.save !== undefined) yield* plays.save(threadId, { name: input.save });
-                if (input.delete !== undefined) yield* plays.remove(threadId, input.delete);
-                return yield* plays.saved(threadId);
-              }),
-            ).pipe(as(GameSavedPlaysResult)),
+        input.run !== undefined
+          ? replayMoment({ run: input.run, ...(input.at === undefined ? {} : { at: input.at }) })
+          : input.save === undefined && input.delete === undefined
+            ? withGame(GamePlays.GamePlays, (plays, threadId) => plays.replaySaved(threadId)).pipe(
+                as(Schema.Union([GameSavedPlaysReading, GameReplayResult])),
+              )
+            : withGame(GamePlays.GamePlays, (plays, threadId) =>
+                Effect.gen(function* () {
+                  if (input.save !== undefined) yield* plays.save(threadId, { name: input.save });
+                  if (input.delete !== undefined) yield* plays.remove(threadId, input.delete);
+                  return yield* plays.saved(threadId);
+                }),
+              ).pipe(as(GameSavedPlaysResult)),
       model_sheet: modelSheet,
     }),
   ),

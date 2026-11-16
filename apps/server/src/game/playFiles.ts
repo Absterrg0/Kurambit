@@ -55,7 +55,7 @@ const writeAtomically = async (dir: string, name: string, text: string) => {
 /** Keeps a run played to its end; returns its id. Older runs past the newest few go. */
 export const keepPlay = async (root: string, kept: KeptPlay): Promise<string> => {
   const dir = await ensureGameDir(root, KEPT_DIR);
-  const id = `${kept.at.replace(/[:.]/g, "-")}-${NodeCrypto.randomBytes(3).toString("hex")}`;
+  const id = `${keptId(kept.at)}-${NodeCrypto.randomBytes(3).toString("hex")}`;
   await writeAtomically(dir, `${id}.json`, encodeKept(kept));
   const names = (await NodeFSP.readdir(dir)).filter((each) => each.endsWith(".json")).sort();
   for (const old of names.slice(0, Math.max(0, names.length - KEPT)))
@@ -63,22 +63,65 @@ export const keepPlay = async (root: string, kept: KeptPlay): Promise<string> =>
   return id;
 };
 
-/** A kept run by its id, or the newest that still reads; null when there is none. */
+/** A kept run's id: when it was kept, then a few random characters; its file sorts by it. */
+const keptId = (at: string) => at.replace(/[:.]/g, "-");
+
+/** Kept runs' file names, newest first; only those kept after `since` (an ISO time) when given. */
+const keptNames = async (root: string, since?: string) => {
+  const dir = insideGame(root, KEPT_DIR, { root: "allowed" });
+  const after = since === undefined ? "" : keptId(since);
+  const names = (await NodeFSP.readdir(dir).catch(() => [] as Array<string>))
+    .filter((each) => each.endsWith(".json") && each > after)
+    .toSorted()
+    .toReversed();
+  return { dir, names };
+};
+
+/**
+ * A kept run by its id or its tag (keptRunTag), or the newest that ended (won or lost) and still
+ * reads; null when there is none. A run the person left is replayed only by its id: it is no
+ * ending to test against.
+ */
 export const keptPlay = async (
   root: string,
   id?: string,
 ): Promise<(KeptPlay & { readonly id: string }) | null> => {
-  const dir = insideGame(root, KEPT_DIR, { root: "allowed" });
-  const names = await NodeFSP.readdir(dir).catch(() => [] as Array<string>);
-  const newestFirst = names
-    .filter((each) => each.endsWith(".json") && (id === undefined || each === `${id}.json`))
-    .toSorted()
-    .toReversed();
-  for (const name of newestFirst) {
+  const { dir, names } = await keptNames(root);
+  const named = (each: string) =>
+    id === undefined || each === `${id}.json` || (id.length >= 6 && each.endsWith(`-${id}.json`));
+  for (const name of names.filter(named)) {
     const kept = decodeKept(await NodeFSP.readFile(NodePath.join(dir, name), "utf8"));
-    if (Option.isSome(kept)) return { ...kept.value, id: name.slice(0, -".json".length) };
+    if (Option.isNone(kept) || (id === undefined && kept.value.play.outcome.left === true))
+      continue;
+    return { ...kept.value, id: name.slice(0, -".json".length) };
   }
   return null;
+};
+
+/**
+ * The runs kept after `since` (an ISO time), newest first, at most `most`. A run kept twice (paused
+ * to tell the agent, then played on) has one seed and start: only its newest keep is listed.
+ */
+export const keptSince = async (
+  root: string,
+  since: string | undefined,
+  most: number,
+): Promise<ReadonlyArray<KeptPlay & { readonly id: string }>> => {
+  const { dir, names } = await keptNames(root, since);
+  const runs: Array<KeptPlay & { readonly id: string }> = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (runs.length >= most) break;
+    const text = await NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null);
+    const kept = text === null ? Option.none() : decodeKept(text);
+    if (Option.isNone(kept)) continue;
+    const { play } = kept.value;
+    const run = `${play.seed}:${play.clock?.join(":") ?? ""}`;
+    if (seen.has(run)) continue;
+    seen.add(run);
+    runs.push({ ...kept.value, id: name.slice(0, -".json".length) });
+  }
+  return runs;
 };
 
 /** A saved play's file name: its name lowercased, each run of other characters a dash. */
