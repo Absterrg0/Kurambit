@@ -195,13 +195,15 @@ export function ModelViewer({
     if (ready && opened) post({ type: "look", tint: look.tint, scale: look.scale });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `post` reads the frame.
   }, [ready, opened, look.tint, look.scale]);
+  // One handle for the viewer's life: its calls read the page as it is when they run.
+  const picture = useStableCallback(() => pictures.ask(post));
+  const lookNow = useStableCallback((next: { readonly tint?: number; readonly scale?: number }) =>
+    post({ type: "look", ...next }),
+  );
   useEffect(() => {
-    handle({
-      picture: () => pictures.ask(post),
-      look: (next) => post({ type: "look", ...next }),
-    });
+    handle({ picture, look: lookNow });
     return () => handle(null);
-  });
+  }, [handle, picture, lookNow]);
   const info = state.kind === "open" ? state.info : null;
   const clips = info?.clips ?? [];
   const duration = clips[clip]?.duration ?? 0;
