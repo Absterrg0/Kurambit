@@ -4,7 +4,14 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import type { GamePlay, ScopedThreadRef } from "@kurambit/contracts";
-import { FlagIcon, MessageSquarePlusIcon, MoreHorizontalIcon, RotateCcwIcon } from "lucide-react";
+import {
+  FlagIcon,
+  HistoryIcon,
+  KeyboardIcon,
+  MessageSquarePlusIcon,
+  MoreHorizontalIcon,
+  PanelTopCloseIcon,
+} from "lucide-react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn } from "../../lib/utils";
@@ -15,9 +22,10 @@ import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup } from "../ui/popover";
 import { Text } from "../ui/text";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { attachRunToComposer } from "./gameComposerContext";
+import { GameControlsMenu } from "./GameControlsMenu";
+import { useStageMarks } from "./gameStageWatch";
 import type { StudioMessage } from "./GamePlaySurface";
 import {
   replayStageRun,
@@ -180,9 +188,15 @@ export function useStageRewind(threadRef: ScopedThreadRef, keep: (message: Studi
     keep({ type: "studio-play", play });
   });
 
+  /**
+   * To a second of the run, from anywhere on the timeline: a run still playing is paused and
+   * taken as it stands first, so a click while playing rewinds as one while paused does.
+   */
   const rewindTo = useStableCallback(async (seconds: number) => {
-    const source = timeline?.play;
-    if (source === undefined) return;
+    const live = !useStageBridge.getState().frozen;
+    if (live) toggleStageFreeze();
+    const source = live || timeline === null ? await takeStageRun(false) : timeline.play;
+    if (source === null) return;
     const replayed = await replay({ play: source, at: seconds, fork: seconds }, seconds);
     if (replayed === null) return;
     const read = rewindNotice(source, replayed);
@@ -257,40 +271,166 @@ const stepsAt = (timeline: Timeline) =>
 
 export type StageRewind = ReturnType<typeof useStageRewind>;
 
+/** The run so far as a playing game reports it, a mark a second: its length. */
+const liveLength = (marks: ReadonlyArray<{ readonly t: number }>) => marks.at(-1)?.t ?? 0;
+
 /**
- * The run's scrubber in the Stage's control bar, the way a video player's is: shown while the game
- * is paused or a run has ended, its deaths and its ending marked. Dragging shows the second;
- * letting go replays the run to it, frozen there, and playing on forks it. After a fork, "As it
- * was" and "With the change" replay the seconds after it. Beside it, the run goes to the agent or
- * is saved as a test play. Redraws only on input.
+ * The run's timeline in the control bar, always there: while playing, a quiet line of the run so
+ * far; paused or ended, the run with its losses, its ending and a fork marked. Dragging or
+ * clicking it at any moment pauses and rewinds to that second. Its one time sits after it.
+ * Redraws only on input and on the game's once-a-second mark.
  */
-export function GameRunScrubber({
+export function GameRunTimeline({
+  threadRef,
+  rewind,
+  ended,
+  enabled,
+}: {
+  threadRef: ScopedThreadRef;
+  rewind: StageRewind;
+  /** The run reached its end and stands on its end screen. */
+  ended: boolean;
+  /** The folder's own game plays and can be rewound; a copy or a parked engine cannot. */
+  enabled: boolean;
+}) {
+  const threadKey = scopedThreadKey(threadRef);
+  const { timeline, busy } = rewind;
+  const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
+  const marks = useStageMarks(threadKey);
+  const [dragging, setDragging] = useState<number | null>(null);
+  // Paused, ended or rewinding, the timeline is the run taken from the game; playing, the run so far.
+  // Not the folder's game (a copy, a compare, a state card): a quiet empty line.
+  const held = enabled && timeline !== null && (frozen || busy !== null || ended);
+  const runSoFar = enabled ? liveLength(marks) : 0;
+  const length = Math.max(held ? playSeconds(timeline.play) : runSoFar, 0.1);
+  const at = dragging ?? busy ?? (held ? (timeline.at ?? length) : runSoFar);
+  const runMarks = held ? runTimelineMarks(timeline.play) : [];
+  const fork = enabled ? (timeline?.fork ?? null) : null;
+  const started = held || (enabled && marks.length > 0);
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3" data-game-run-timeline="">
+      <Slider.Root
+        className="min-w-12 flex-1"
+        value={Math.min(at, length)}
+        min={0}
+        max={length}
+        step={0.1}
+        disabled={!enabled || !started || busy !== null}
+        onValueChange={(next) => {
+          const single = Array.isArray(next) ? next[0] : next;
+          if (typeof single === "number") setDragging(single);
+        }}
+        onValueCommitted={(next) => {
+          const single = Array.isArray(next) ? next[0] : next;
+          setDragging(null);
+          if (typeof single === "number") void rewind.rewindTo(single);
+        }}
+        aria-label="Run timeline: drag to rewind"
+      >
+        <Slider.Control className="group/timeline flex h-9 w-full touch-none items-center">
+          <Slider.Track className="relative h-0.5 w-full rounded-full bg-foreground/12">
+            <Slider.Indicator className="rounded-full bg-foreground/40" />
+            {fork === null || fork.seconds > length ? null : (
+              <TimelineMark
+                seconds={fork.seconds}
+                length={length}
+                label="went on from here"
+                className="h-2.5 w-px bg-foreground"
+              />
+            )}
+            {runMarks.map((mark) => (
+              <TimelineMark
+                key={`${mark.kind}:${mark.seconds}:${mark.label}`}
+                seconds={mark.seconds}
+                length={length}
+                label={mark.label}
+                className={cn(
+                  "size-1.5 rounded-full",
+                  mark.kind === "won"
+                    ? "bg-success"
+                    : mark.kind === "loss"
+                      ? "bg-warning"
+                      : "bg-destructive",
+                )}
+              />
+            ))}
+            {/* The knob shows where a drag starts: on hover while playing, always while held. */}
+            <Slider.Thumb
+              className={cn(
+                "size-2.5 rounded-full bg-foreground outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                !held && dragging === null && "opacity-0 group-hover/timeline:opacity-100",
+              )}
+            />
+          </Slider.Track>
+        </Slider.Control>
+      </Slider.Root>
+      {/* The one time; what the last rewind or replay found is its note, on hover. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Text
+              variant="caption"
+              tone="muted"
+              numeric
+              aria-description={rewind.notice?.text}
+              render={<span className="w-9 shrink-0 text-end" />}
+            />
+          }
+        >
+          {clockLabel(at)}
+        </TooltipTrigger>
+        <TooltipPopup side="top" className="max-w-xs">
+          {rewind.notice?.text ?? "Drag the timeline to rewind; play on from any second to fork"}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
+/**
+ * The run's menu at the bar's end: tell the agent about the run, save it as a test play (named in
+ * a small form beside the menu), replay a fork as it was, the game's controls, and hiding the game.
+ */
+export function GameRunMenu({
   threadRef,
   rewind,
   runs,
-  onRestart,
+  playing,
   onNote,
+  onHide,
+  onFocus,
 }: {
   threadRef: ScopedThreadRef;
   rewind: StageRewind;
   runs: StageRuns;
-  /** A fresh run from the title. */
-  onRestart: () => void;
-  /** Says how a save went, in the Stage's status. */
+  /** A game plays on the Stage, so it has controls to show. */
+  playing: boolean;
   onNote: (text: string) => void;
+  onHide: () => void;
+  onFocus: () => void;
 }) {
-  const { timeline, busy } = rewind;
+  const threadKey = scopedThreadKey(threadRef);
+  const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const tellsRuns = useThreadStageBridge(
-    scopedThreadKey(threadRef),
+    threadKey,
     (state) => state.status === "ready" && state.capabilities.includes("runs"),
     false,
   );
-  const [dragging, setDragging] = useState<number | null>(null);
-  if (timeline === null) return null;
-  const length = Math.max(playSeconds(timeline.play), 0.1);
-  const at = dragging ?? busy ?? timeline.at ?? length;
-  const marks = runTimelineMarks(timeline.play);
+  const hasControls = useThreadStageBridge(
+    threadKey,
+    (state) => state.status === "ready" && state.capabilities.includes("controls"),
+    false,
+  );
+  const savePlay = useAtomCommand(gameEnvironment.savePlay, { reportFailure: false });
+  const canSave = useAtomValue(gameEnvironment.savePlay.permissionAtom(threadRef.environmentId));
+  const anchor = useRef<HTMLButtonElement | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const ended = runs.ended;
+  const canTell = rewind.busy === null && (ended !== null || (frozen && tellsRuns));
   const tell = async () => {
     // A paused run is asked of the game first; it answers with the run (useStageRuns).
     if (ended === null) {
@@ -303,137 +443,6 @@ export function GameRunScrubber({
       paused: false,
     });
   };
-  return (
-    <div className="flex min-w-0 flex-1 items-center gap-2" data-game-run-scrubber="">
-      {/* What the last rewind or compare found is the time's own note, said on hover and to
-          screen readers; the bar shows the moment itself. */}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Text
-              variant="caption"
-              tone="default"
-              numeric
-              aria-live="polite"
-              aria-description={rewind.notice?.text}
-              render={<span className="shrink-0" />}
-            />
-          }
-        >
-          {clockLabel(at)}
-        </TooltipTrigger>
-        <TooltipPopup side="top" className="max-w-xs">
-          {rewind.notice?.text ?? "Drag to rewind; play on from any second to fork the run"}
-        </TooltipPopup>
-      </Tooltip>
-      <Slider.Root
-        className="min-w-12 flex-1"
-        value={Math.min(at, length)}
-        min={0}
-        max={length}
-        step={0.1}
-        disabled={busy !== null}
-        onValueChange={(next) => {
-          const single = Array.isArray(next) ? next[0] : next;
-          if (typeof single === "number") setDragging(single);
-        }}
-        onValueCommitted={(next) => {
-          const single = Array.isArray(next) ? next[0] : next;
-          setDragging(null);
-          if (typeof single === "number") void rewind.rewindTo(single);
-        }}
-        aria-label="Rewind the run to a second"
-      >
-        <Slider.Control className="flex h-8 w-full touch-none items-center">
-          <Slider.Track className="relative h-1 w-full rounded-full bg-foreground/12">
-            <Slider.Indicator className="rounded-full bg-foreground/30" />
-            {timeline.fork === null ? null : (
-              <TimelineMark
-                seconds={timeline.fork.seconds}
-                length={length}
-                label="went on from here"
-                className="h-3 w-0.5 rounded-full bg-live"
-              />
-            )}
-            {marks.map((mark) => (
-              <TimelineMark
-                key={`${mark.kind}:${mark.seconds}:${mark.label}`}
-                seconds={mark.seconds}
-                length={length}
-                label={mark.label}
-                className={cn(
-                  "size-1.5 rounded-full ring-2 ring-background",
-                  mark.kind === "won"
-                    ? "bg-success"
-                    : mark.kind === "loss"
-                      ? "bg-warning"
-                      : "bg-destructive",
-                )}
-              />
-            ))}
-            <Slider.Thumb className="size-3 rounded-full bg-strong-foreground shadow-sm ring-2 ring-background outline-none focus-visible:ring-ring" />
-          </Slider.Track>
-        </Slider.Control>
-      </Slider.Root>
-      <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
-        {clockLabel(length)}
-      </Text>
-      {rewind.comparable ? (
-        <ToggleGroup
-          aria-label="Compare the seconds after the fork"
-          variant="segmented"
-          size="xs"
-          className="shrink-0"
-          value={rewind.side === null ? [] : [rewind.side]}
-          disabled={busy !== null}
-          onValueChange={(value) => {
-            const next = value[0] === "before" || value[0] === "after" ? value[0] : rewind.side;
-            if (next !== null) void rewind.compare(next);
-          }}
-        >
-          <Toggle value="before">As it was</Toggle>
-          <Toggle value="after">With the change</Toggle>
-        </ToggleGroup>
-      ) : null}
-      <RunActions
-        threadRef={threadRef}
-        runs={runs}
-        canTell={busy === null && (ended !== null || tellsRuns)}
-        onTell={() => void tell()}
-        onRestart={onRestart}
-        onNote={onNote}
-      />
-    </div>
-  );
-}
-
-/**
- * What to do with the run, in one menu at the scrubber's end: tell the agent about it, save it as
- * a test play every build replays (named in a small form beside the menu), or start fresh.
- */
-function RunActions({
-  threadRef,
-  runs,
-  canTell,
-  onTell,
-  onRestart,
-  onNote,
-}: {
-  threadRef: ScopedThreadRef;
-  runs: StageRuns;
-  canTell: boolean;
-  onTell: () => void;
-  onRestart: () => void;
-  onNote: (text: string) => void;
-}) {
-  const savePlay = useAtomCommand(gameEnvironment.savePlay, { reportFailure: false });
-  const canSave = useAtomValue(gameEnvironment.savePlay.permissionAtom(threadRef.environmentId));
-  const anchor = useRef<HTMLButtonElement | null>(null);
-  const [naming, setNaming] = useState(false);
-  const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState<string | null>(null);
-  const ended = runs.ended;
   const save = async () => {
     if (ended === null) return;
     setSaving(true);
@@ -463,16 +472,9 @@ function RunActions({
           render={<Button size="icon-sm" variant="ghost" aria-label="Run actions" />}
         >
           <MoreHorizontalIcon aria-hidden="true" />
-          {/* A first win is worth keeping: a small mark says so without another button. */}
-          {ended?.firstWin === true ? (
-            <span
-              aria-hidden="true"
-              className="absolute top-1 right-1 size-1.5 rounded-full bg-live"
-            />
-          ) : null}
         </MenuTrigger>
         <MenuPopup side="top" align="end">
-          <MenuItem disabled={!canTell} onClick={onTell}>
+          <MenuItem disabled={!canTell} onClick={() => void tell()}>
             <MessageSquarePlusIcon />
             Tell the agent about this run
           </MenuItem>
@@ -486,20 +488,36 @@ function RunActions({
               }}
             >
               <FlagIcon />
-              {ended === null
-                ? "Save as test play (play it to its end)"
-                : ended.firstWin
-                  ? "Save your first win as a test play…"
-                  : "Save as test play…"}
+              Save as test play…
+            </MenuItem>
+          ) : null}
+          {rewind.comparable ? (
+            <MenuItem
+              disabled={rewind.busy !== null}
+              onClick={() => void rewind.compare(rewind.side === "before" ? "after" : "before")}
+            >
+              <HistoryIcon />
+              {rewind.side === "before" ? "Replay with the change" : "Replay as it was"}
             </MenuItem>
           ) : null}
           <MenuSeparator />
-          <MenuItem onClick={onRestart}>
-            <RotateCcwIcon />
-            Restart from the title
+          <MenuItem disabled={!playing || !hasControls} onClick={() => setControlsOpen(true)}>
+            <KeyboardIcon />
+            Show controls
+          </MenuItem>
+          <MenuItem onClick={onHide}>
+            <PanelTopCloseIcon />
+            Hide the game
           </MenuItem>
         </MenuPopup>
       </Menu>
+      <GameControlsMenu
+        threadRef={threadRef}
+        open={controlsOpen}
+        anchor={anchor}
+        onOpenChange={setControlsOpen}
+        onFocus={onFocus}
+      />
       <Popover open={naming} onOpenChange={setNaming}>
         <PopoverPopup anchor={anchor} side="top" align="end" padding="compact" width="sm">
           <form

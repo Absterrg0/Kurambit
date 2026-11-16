@@ -3,7 +3,6 @@ import type { ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import {
   MaximizeIcon,
-  PanelTopCloseIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -16,8 +15,10 @@ import type { ReactNode } from "react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { Button } from "../ui/button";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
+import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { GameRunMenu, GameRunTimeline, type StageRewind } from "./GameRunTimeline";
 import {
   setStageCannotLose,
   setStageMuted,
@@ -26,8 +27,10 @@ import {
   useStageCannotLose,
   useThreadStageBridge,
 } from "./gameStageBridge";
+import type { StageRuns } from "./useStageRuns";
 
-const SPEEDS = [0.25, 0.5, 1] as const;
+const SPEEDS = [1, 0.5, 0.25] as const;
+const SPEED_WORDS: Record<(typeof SPEEDS)[number], string> = { 1: "1×", 0.5: "½×", 0.25: "¼×" };
 const NONE: ReadonlyArray<string> = [];
 
 /** The key a game command has here, as its tooltip says it. */
@@ -37,155 +40,149 @@ function useGameKey(command: "game.freeze" | "game.fullscreen" | "game.cannotLos
 }
 
 /**
- * One group of the Stage's toolbar: its buttons sit in one well, the way an editor's play bar
- * groups play, pause and step, so the bar reads as a few tools rather than a row of icons.
+ * The control bar under the Stage, one layout in every state: Play or Pause and Restart, the run's
+ * timeline taking the room with its time, then speed, Can't lose, sound, fullscreen and the run's
+ * menu. Nothing appears, disappears or moves between playing, paused, ended and forked: only the
+ * Play icon and the timeline's knob change. A control the game cannot use is disabled, not gone.
  */
-function StageToolbarGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div
-      role="group"
-      aria-label={label}
-      className="flex h-8 shrink-0 items-center gap-0.5 rounded-lg p-0.5 surface-well"
-    >
-      {children}
-    </div>
-  );
-}
-
-/**
- * The toolbar's play group, the way an engine's play bar works: restart, pause (which also
- * lets you point at things), Can't lose, and slow motion beside them. Each hands the keyboard
- * back to the game.
- */
-export function GameStagePlayControls({
+export function GameStageBar({
   threadRef,
   playing,
+  live,
   canReload,
-  scrubbing,
+  rewind,
+  runs,
   onRestart,
+  onFullscreen,
+  onHide,
   onFocus,
+  onNote,
 }: {
   threadRef: ScopedThreadRef;
+  /** A game plays on the Stage (not a compare, not a state card). */
   playing: boolean;
+  /** It is the folder's own game, so its runs can be rewound. */
+  live: boolean;
   canReload: boolean;
-  /** The run's scrubber takes the bar: only Play stays; the rest of play's controls step aside. */
-  scrubbing: boolean;
+  rewind: StageRewind;
+  runs: StageRuns;
   onRestart: () => void;
+  onFullscreen: () => void;
+  onHide: () => void;
+  /** Gives the game the keyboard back after a control took it. */
   onFocus: () => void;
+  onNote: (text: string) => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
   const capabilities = useThreadStageBridge(threadKey, (state) => state.capabilities, NONE);
   const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
   const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
+  const muted = useThreadStageBridge(threadKey, (state) => state.muted, false);
   const cannotLose = useStageCannotLose(threadKey);
   const freezeKey = useGameKey("game.freeze");
   const cannotLoseKey = useGameKey("game.cannotLose.toggle");
-  return (
-    <div className="flex shrink-0 items-center gap-1.5" data-game-play-controls="">
-      <StageToolbarGroup label="Play">
-        {/* Paused or ended, the bar is the run's: Play stays, Restart moves to the run's menu. */}
-        {scrubbing ? null : (
-          <Control
-            label="Restart the game"
-            detail="A fresh run from the title"
-            disabled={!playing || !canReload}
-            onClick={() => {
-              onRestart();
-              onFocus();
-            }}
-          >
-            <RotateCcwIcon aria-hidden="true" />
-          </Control>
-        )}
-        <Control
-          label={paused ? "Play on" : "Pause"}
-          detail={paused ? null : "Then click something in the game to point at it"}
-          shortcut={freezeKey}
-          pressed={paused}
-          disabled={!playing || !ready || !capabilities.includes("freeze")}
-          onClick={() => {
-            toggleStageFreeze();
-            if (paused) onFocus();
-          }}
-        >
-          {paused ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
-        </Control>
-        {ready && capabilities.includes("cannot-lose") && !scrubbing ? (
-          <Control
-            label={cannotLose ? "Can't lose: on" : "Can't lose"}
-            detail="A loss does not end the run, to tune a fight; the checks never see it"
-            shortcut={cannotLoseKey}
-            pressed={cannotLose}
-            disabled={!playing}
-            onClick={() => {
-              setStageCannotLose(threadKey, !cannotLose);
-              onFocus();
-            }}
-          >
-            <ShieldIcon aria-hidden="true" />
-          </Control>
-        ) : null}
-      </StageToolbarGroup>
-      {ready && capabilities.includes("speed") && !scrubbing ? (
-        <ToggleGroup
-          aria-label="Game speed"
-          variant="segmented"
-          size="xs"
-          disabled={!playing}
-          value={[String(speed)]}
-          onValueChange={(value) => {
-            const next = Number(value[0]);
-            if (!Number.isFinite(next) || next <= 0) return;
-            setStageSpeed(next);
-            onFocus();
-          }}
-        >
-          {SPEEDS.map((each) => (
-            <Toggle key={each} value={String(each)} aria-label={`${each} times speed`}>
-              {each === 0.25 ? "¼×" : each === 0.5 ? "½×" : "1×"}
-            </Toggle>
-          ))}
-        </ToggleGroup>
-      ) : null}
-    </div>
-  );
-}
-
-/** The toolbar's view group: sound, fullscreen, and folding the game away. */
-export function GameStageViewControls({
-  threadRef,
-  playing,
-  onFullscreen,
-  onHide,
-  onFocus,
-}: {
-  threadRef: ScopedThreadRef;
-  playing: boolean;
-  onFullscreen: () => void;
-  onHide: () => void;
-  onFocus: () => void;
-}) {
-  const threadKey = scopedThreadKey(threadRef);
-  const capabilities = useThreadStageBridge(threadKey, (state) => state.capabilities, NONE);
-  const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
-  const muted = useThreadStageBridge(threadKey, (state) => state.muted, false);
   const fullscreenKey = useGameKey("game.fullscreen");
+  // The bridge speaks for the folder's own game: a copy or a compare plays without it.
+  const can = (capability: string) => playing && live && ready && capabilities.includes(capability);
   return (
-    <StageToolbarGroup label="View">
-      {ready && capabilities.includes("mute") ? (
-        <Control
-          label={muted ? "Sound on" : "Mute"}
-          pressed={muted}
-          disabled={!playing}
-          onClick={() => {
-            setStageMuted(!muted);
-            onFocus();
-          }}
-        >
-          {muted ? <VolumeXIcon aria-hidden="true" /> : <Volume2Icon aria-hidden="true" />}
-        </Control>
-      ) : null}
+    <div className="flex h-9 w-full min-w-0 items-center gap-1" data-game-play-controls="">
+      <Control
+        label={paused ? "Play" : "Pause"}
+        detail={paused ? null : "Then click something in the game to point at it"}
+        shortcut={freezeKey}
+        pressed={paused}
+        disabled={!can("freeze")}
+        onClick={() => {
+          toggleStageFreeze();
+          if (paused) onFocus();
+        }}
+      >
+        {paused ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
+      </Control>
+      <Control
+        label="Restart"
+        detail="A fresh run from the title"
+        disabled={!playing || !canReload}
+        onClick={() => {
+          onRestart();
+          onFocus();
+        }}
+      >
+        <RotateCcwIcon aria-hidden="true" />
+      </Control>
+      <span className="w-2 shrink-0" aria-hidden="true" />
+      <GameRunTimeline
+        threadRef={threadRef}
+        rewind={rewind}
+        ended={runs.ended !== null}
+        enabled={live && can("rewind")}
+      />
+      <span className="w-1 shrink-0" aria-hidden="true" />
+      <Menu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Speed: ${SPEED_WORDS[speed as (typeof SPEEDS)[number]] ?? `${speed}×`}`}
+                    disabled={!can("speed")}
+                  />
+                }
+              />
+            }
+          >
+            <Text variant="label" tone="inherit" numeric>
+              {SPEED_WORDS[speed as (typeof SPEEDS)[number]] ?? `${speed}×`}
+            </Text>
+          </TooltipTrigger>
+          <TooltipPopup side="top">Speed</TooltipPopup>
+        </Tooltip>
+        <MenuPopup side="top" align="center">
+          <MenuRadioGroup
+            value={String(speed)}
+            onValueChange={(value) => {
+              const next = Number(value);
+              if (!Number.isFinite(next) || next <= 0) return;
+              setStageSpeed(next);
+              onFocus();
+            }}
+          >
+            {SPEEDS.map((each) => (
+              <MenuRadioItem key={each} value={String(each)}>
+                {SPEED_WORDS[each]}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuPopup>
+      </Menu>
+      <Control
+        label={cannotLose ? "Can't lose: on" : "Can't lose"}
+        detail="A loss does not end the run, to tune a fight; the checks never see it"
+        shortcut={cannotLoseKey}
+        pressed={cannotLose}
+        disabled={!can("cannot-lose")}
+        onClick={() => {
+          setStageCannotLose(threadKey, !cannotLose);
+          onFocus();
+        }}
+      >
+        <ShieldIcon aria-hidden="true" />
+      </Control>
+      <Control
+        label={muted ? "Sound on" : "Mute"}
+        pressed={muted}
+        disabled={!can("mute")}
+        onClick={() => {
+          setStageMuted(!muted);
+          onFocus();
+        }}
+      >
+        {muted ? <VolumeXIcon aria-hidden="true" /> : <Volume2Icon aria-hidden="true" />}
+      </Control>
       <Control
         label="Fullscreen"
         shortcut={fullscreenKey}
@@ -194,14 +191,16 @@ export function GameStageViewControls({
       >
         <MaximizeIcon aria-hidden="true" />
       </Control>
-      <Control
-        label="Hide the game"
-        detail="The chat takes the column; the game pauses"
-        onClick={onHide}
-      >
-        <PanelTopCloseIcon aria-hidden="true" />
-      </Control>
-    </StageToolbarGroup>
+      <GameRunMenu
+        threadRef={threadRef}
+        rewind={rewind}
+        runs={runs}
+        playing={playing}
+        onNote={onNote}
+        onHide={onHide}
+        onFocus={onFocus}
+      />
+    </div>
   );
 }
 

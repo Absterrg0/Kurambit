@@ -63,9 +63,10 @@ export function GameBuildStill({
 /**
  * What a picture that will not come shows on the game's pigment: its name as a title card
  * (covers and build slots), its initial (icons), a plain "No picture" (evidence, where a
- * name would pass for a frame), or nothing (a picture drawn over it anyway).
+ * name would pass for a frame), a plain neutral surface (a build in History, where a letter or
+ * the game's colour would read as a picture), or nothing (a picture drawn over it anyway).
  */
-export type GamePictureMark = "name" | "initial" | "absent" | "none";
+export type GamePictureMark = "name" | "initial" | "absent" | "blank" | "none";
 
 /**
  * A game with no picture: its own pigment with its name as a title card, or its initial at icon
@@ -85,6 +86,7 @@ function GameTitleMark({
   const name = (title ?? gameName).trim();
   // Evidence with no frame is a neutral well, like a picture still coming: the game's pigment
   // would read as a picture of something.
+  if (mark === "blank") return <span aria-hidden="true" className="absolute inset-0 bg-muted" />;
   if (mark === "absent")
     return (
       <span aria-hidden="true" className="absolute inset-0 bg-muted">

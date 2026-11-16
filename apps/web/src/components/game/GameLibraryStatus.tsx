@@ -27,7 +27,7 @@ import { derivePhase } from "../../session-logic";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarThreadStatus } from "../Sidebar.logic";
 import { buildName, doesNotStart } from "./gameBuilds.logic";
-import { gameLibraryStatus, type GameLibraryStatus } from "./gameStatusLine.logic";
+import { gameLibraryStatus, type GameLibraryStatus } from "./gameLibraryStatus.logic";
 import type { GameLibraryEntry } from "./useGameLibrary";
 
 /** The folder's build when the list names it, else the newest; null before any, undefined unread. */

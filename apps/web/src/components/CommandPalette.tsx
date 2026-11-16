@@ -1666,14 +1666,11 @@ function OpenCommandPaletteDialog(props: {
     }
     actionItems.push({
       kind: "action",
-      value: "action:game-toggle-builds",
-      title: "Show or fold the builds",
+      value: "action:game-history",
+      title: "Show the game's history",
       searchTerms: ["builds", "history", "undo", "redo", "compare", "versions", "try", "keep"],
       icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        const store = useGameWorkspaceStore.getState();
-        store.setBuildStripOpen(!store.buildStripOpen);
-      },
+      run: async () => useGameWorkspaceStore.getState().requestStage({ kind: "history" }),
     });
     const requestStage = (request: GameStageRequest) => async () => {
       useGameWorkspaceStore.getState().requestStage(request);

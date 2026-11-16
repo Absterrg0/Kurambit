@@ -3,13 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
-import {
-  ChevronRightIcon,
-  FastForwardIcon,
-  GitCompareIcon,
-  Redo2Icon,
-  Undo2Icon,
-} from "lucide-react";
+import { FastForwardIcon, Redo2Icon, TriangleAlertIcon, Undo2Icon } from "lucide-react";
 import type {
   GameBuild,
   GameBuildId,
@@ -19,7 +13,6 @@ import type {
 } from "@kurambit/contracts";
 
 import type { GameStageRequest } from "../../gameWorkspaceStore";
-import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn, randomUUID } from "../../lib/utils";
 import { gameEnvironment, olderBuildPages } from "../../state/game";
@@ -96,18 +89,34 @@ type StripItem =
       readonly builds: ReadonlyArray<GameBuild>;
     };
 
-/** The builds oldest first, a try's versions together under their request. */
+/**
+ * The builds oldest first, a try's versions together under their request at the place its first
+ * version landed, in their own order (1, 2, 3), whichever finished first.
+ */
 const stripItems = (marks: ReadonlyArray<GameBuild>): ReadonlyArray<StripItem> => {
   const items: Array<StripItem> = [];
+  const tries = new Map<string, number>();
   for (const build of marks) {
     const source = build.source;
-    const last = items.at(-1);
-    if (source._tag !== "version") items.push({ kind: "build", build });
-    else if (last?.kind === "try" && last.runId === source.runId)
-      items[items.length - 1] = { ...last, builds: [...last.builds, build] };
-    else items.push({ kind: "try", runId: source.runId, request: source.request, builds: [build] });
+    if (source._tag !== "version") {
+      items.push({ kind: "build", build });
+      continue;
+    }
+    const at = tries.get(source.runId);
+    const group = at === undefined ? undefined : items[at];
+    if (at !== undefined && group?.kind === "try")
+      items[at] = { ...group, builds: [...group.builds, build] };
+    else {
+      tries.set(source.runId, items.length);
+      items.push({ kind: "try", runId: source.runId, request: source.request, builds: [build] });
+    }
   }
-  return items;
+  const versionOf = (build: GameBuild) => (build.source._tag === "version" ? build.source.n : 0);
+  return items.map((item) =>
+    item.kind === "try"
+      ? { ...item, builds: item.builds.toSorted((a, b) => versionOf(a) - versionOf(b)) }
+      : item,
+  );
 };
 
 /** A build's short name under its picture; its tooltip has the whole one. */
@@ -119,19 +128,21 @@ const shortName = (build: GameBuild) => {
 };
 
 /**
- * The game's builds as a strip under the Stage's controls: small pictures in time order with the
- * one on the Stage marked, a try's versions grouped under what was asked with Keep, Undo and Redo,
- * and Compare any two. Folded, it is one line. A picture plays its build and shows it in Checks.
- * It is the one place the history lives: the chat's cards, the palette and the keys reach it
- * through the Stage's requests.
+ * The game's History, in the popover under the header's build button: Undo, Redo and Compare,
+ * then the builds as pictures in time order, oldest left, the one on the Stage ringed, a try's
+ * versions grouped under what was asked with Keep. A picture plays its build and shows it in
+ * Checks. It stays mounted while the popover is closed: the chat's cards, the palette and the keys
+ * reach it through the Stage's requests, and a compare's pick opens it.
  */
-export function GameBuildStrip({
+export function GameHistory({
   threadRef,
   gameName,
   playing,
   slot,
   request,
   reelOpen,
+  open,
+  onOpen,
   undo,
   onPlay,
   onPlayUnlisted,
@@ -146,6 +157,10 @@ export function GameBuildStrip({
   slot: GameBuildSlot | null;
   request: GameStripRequest | null;
   reelOpen: boolean;
+  /** The popover is open: the row scrolls to the newest when it opens. */
+  open: boolean;
+  /** Opens the popover, for a compare's pick. */
+  onOpen: () => void;
   undo: GameStripUndo;
   /** Plays an earlier build from a copy. */
   onPlay: (build: GameBuild) => void;
@@ -157,8 +172,6 @@ export function GameBuildStrip({
   /** Shows a build in Checks. */
   onInspect: (build: GameBuild) => void;
 }) {
-  const stripOpen = useGameWorkspaceStore((state) => state.buildStripOpen);
-  const setStripOpen = useGameWorkspaceStore((state) => state.setBuildStripOpen);
   const still = useStageStill(scopedThreadKey(threadRef));
   const first = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -223,7 +236,7 @@ export function GameBuildStrip({
       start === "any" ? (others.length === 2 ? others : null) : others.length === 1 ? others : null;
     if (only === null) {
       setPicking(start);
-      setStripOpen(true);
+      onOpen();
     } else if (start === "any") onCompare([refOf(only[0]!), refOf(only[1]!)]);
     else onCompare([start, refOf(only[0]!)]);
   };
@@ -291,8 +304,6 @@ export function GameBuildStrip({
   const showNow =
     slot === null && list !== null && (list.folderEdited === true || playing !== null);
   const items = stripItems(marks);
-  const open = stripOpen || pickingNow || reelOpen;
-  const onStageBuild = marks.find((build) => build.id === onStage) ?? null;
   const thumb = (build: GameBuild, label: ReactNode = shortName(build)) => (
     <BuildThumb
       key={build.id}
@@ -308,59 +319,21 @@ export function GameBuildStrip({
       onClick={() => (pickingNow ? pick(build) : play(build))}
     />
   );
+  const note =
+    picking !== null
+      ? firstPicked === null
+        ? "Pick the first build to compare"
+        : `Pick a build to compare with ${buildName(firstPicked)}`
+      : sought !== null
+        ? "Finding that build…"
+        : notFound
+          ? "That build is older than History reads"
+          : slot !== null
+            ? slot.label
+            : null;
   return (
-    <section aria-label="Builds" className="flex min-w-0 flex-col" data-game-build-strip="">
+    <section aria-label="History" className="flex min-w-0 flex-col gap-3" data-game-history="">
       <div className="flex h-8 min-w-0 items-center gap-1">
-        <Button
-          size="xs"
-          variant="ghost"
-          className="-ms-2 shrink-0"
-          aria-expanded={open}
-          onClick={() => {
-            if (pickingNow) setPicking(null);
-            setStripOpen(!open);
-          }}
-        >
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={cn("motion-popup transition-transform", open && "rotate-90")}
-          />
-          Builds
-        </Button>
-        <Text variant="caption" tone="muted" numeric truncate render={<span className="flex-1" />}>
-          {picking !== null
-            ? firstPicked === null
-              ? "Pick the first build to compare"
-              : `Pick a build to compare with ${buildName(firstPicked)}`
-            : sought !== null
-              ? "Finding that build…"
-              : notFound
-                ? "That build is older than the strip reads"
-                : slot !== null
-                  ? slot.label
-                  : onStageBuild !== null
-                    ? `${buildName(onStageBuild)} on the Stage`
-                    : list?.folderEdited === true
-                      ? "Now: changed since the last build"
-                      : list === null || marks.length === 0
-                        ? "The game so far, before its first build"
-                        : null}
-        </Text>
-        {picking !== null ? (
-          <Button size="xs" variant="ghost" onClick={() => setPicking(null)}>
-            Cancel
-          </Button>
-        ) : marks.length < 2 ? null : (
-          <StripAction
-            label="Compare two builds"
-            detail="Pick two, then play them side by side with their checks"
-            onClick={() =>
-              startCompare(onStage === null ? "any" : { _tag: "build", build: onStage })
-            }
-          >
-            <GitCompareIcon aria-hidden="true" />
-          </StripAction>
-        )}
         <StripAction
           label={undo.undoLabel}
           detail={undo.undoDetail}
@@ -378,94 +351,119 @@ export function GameBuildStrip({
         >
           <Redo2Icon aria-hidden="true" />
         </StripAction>
+        <Text variant="caption" tone="muted" truncate render={<span className="ms-2 flex-1" />}>
+          {note}
+        </Text>
+        {picking !== null ? (
+          <Button size="xs" variant="ghost-muted" onClick={() => setPicking(null)}>
+            Cancel
+          </Button>
+        ) : marks.length < 2 ? null : (
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            onClick={() =>
+              startCompare(onStage === null ? "any" : { _tag: "build", build: onStage })
+            }
+          >
+            Compare
+          </Button>
+        )}
       </div>
-      {open ? (
-        <div className="flex min-w-0 flex-col gap-2 pb-2">
-          {reelOpen ? (
-            <GameReel
-              threadRef={threadRef}
-              marks={marks}
-              onPlay={play}
-              onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
-            />
-          ) : null}
-          <StripRow count={items.length + (showNow ? 1 : 0) + (slot === null ? 0 : 1)}>
-            {olderNext !== null ? (
-              <Button
-                size="xs"
-                variant="ghost"
-                className="mt-2.5 shrink-0 self-start"
-                onClick={() => setOlderCount(olderCount + 1)}
-              >
-                Older
-              </Button>
-            ) : null}
-            {list === null ? (
-              first.error !== null ? (
-                <Text variant="caption" tone="muted" render={<p className="py-3" />}>
-                  {first.error}
-                </Text>
-              ) : (
-                [0, 1, 2].map((n) => (
-                  <Skeleton key={n} shape="card" className="h-10 w-18 shrink-0" />
-                ))
-              )
-            ) : marks.length === 0 && slot === null ? (
-              <NowThumb
-                threadRef={null}
-                gameName={gameName}
-                still={still}
-                fallback={null}
-                label="Now"
-                active
-              />
-            ) : null}
-            {items.map((item) =>
-              item.kind === "build" ? (
-                thumb(item.build)
-              ) : (
-                <TryGroup
-                  key={item.runId}
-                  threadRef={threadRef}
-                  item={item}
-                  list={list}
-                  playing={playing}
-                >
-                  {item.builds.map((build) => thumb(build))}
-                </TryGroup>
-              ),
-            )}
-            {showNow && list !== null ? (
-              <NowThumb
-                threadRef={threadRef}
-                gameName={gameName}
-                still={still}
-                fallback={
-                  list.folderEdited === true
-                    ? (list.builds.find((build) => build.id === list.current) ?? null)
-                    : null
-                }
-                label="Now"
-                active={onStage === null}
-                disabled={pickingNow}
-                onClick={onLive}
-              />
-            ) : null}
-            {slot === null ? null : <SlotThumb slot={slot} />}
-          </StripRow>
-        </div>
+      {reelOpen ? (
+        <GameReel
+          threadRef={threadRef}
+          marks={marks}
+          onPlay={play}
+          onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
+        />
       ) : null}
+      <StripRow open={open} count={items.length + (showNow ? 1 : 0) + (slot === null ? 0 : 1)}>
+        {olderNext !== null ? (
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            className="shrink-0 self-center"
+            onClick={() => setOlderCount(olderCount + 1)}
+          >
+            Older
+          </Button>
+        ) : null}
+        {list === null ? (
+          first.error !== null ? (
+            <Text variant="caption" tone="muted" render={<p className="py-3" />}>
+              {first.error}
+            </Text>
+          ) : (
+            [0, 1, 2].map((n) => <Skeleton key={n} shape="card" className="h-13.5 w-24 shrink-0" />)
+          )
+        ) : marks.length === 0 && slot === null ? (
+          <NowThumb
+            threadRef={null}
+            gameName={gameName}
+            still={still}
+            fallback={null}
+            label="Now"
+            active
+          />
+        ) : null}
+        {items.map((item) =>
+          item.kind === "build" ? (
+            thumb(item.build)
+          ) : (
+            <TryGroup
+              key={item.runId}
+              threadRef={threadRef}
+              item={item}
+              list={list}
+              playing={playing}
+            >
+              {item.builds.map((build) => thumb(build))}
+            </TryGroup>
+          ),
+        )}
+        {showNow && list !== null ? (
+          <NowThumb
+            threadRef={threadRef}
+            gameName={gameName}
+            still={still}
+            fallback={
+              list.folderEdited === true
+                ? (list.builds.find((build) => build.id === list.current) ?? null)
+                : null
+            }
+            label="Now"
+            active={onStage === null}
+            disabled={pickingNow}
+            onClick={onLive}
+          />
+        ) : null}
+        {slot === null ? null : <SlotThumb slot={slot} />}
+      </StripRow>
     </section>
   );
 }
 
 /** The pictures in one scrolling row that starts at the newest, and stays there as builds land. */
-function StripRow({ count, children }: { count: number; children: ReactNode }) {
+function StripRow({
+  open,
+  count,
+  children,
+}: {
+  open: boolean;
+  count: number;
+  children: ReactNode;
+}) {
   const row = useRef<HTMLDivElement | null>(null);
+  // The popover lays its content out a frame after it opens: the scroll waits for that frame.
   useLayoutEffect(() => {
     const node = row.current;
-    if (node !== null && count > 0) node.scrollLeft = node.scrollWidth;
-  }, [count]);
+    if (node === null || !open || count === 0) return;
+    const frame = requestAnimationFrame(() => {
+      node.scrollLeft = node.scrollWidth;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, count]);
   return (
     <div
       ref={row}
@@ -556,7 +554,7 @@ function BuildThumb({
             aria-label={`${buildName(build)}, ${formatBuildTime(build.at)}${onStage ? ", on the Stage" : ""}`}
             disabled={!build.available && !picking}
             onClick={onClick}
-            className="group/thumb flex w-18 shrink-0 cursor-pointer flex-col items-start gap-1 rounded-md text-left outline-none disabled:cursor-default"
+            className="group/thumb flex w-24 shrink-0 cursor-pointer flex-col items-start gap-1.5 rounded-md text-left outline-none disabled:cursor-default"
           />
         }
       >
@@ -565,9 +563,9 @@ function BuildThumb({
           gameName={gameName}
           build={build}
           title={buildName(build)}
-          mark="initial"
+          mark="blank"
           className={cn(
-            "h-10 w-18 rounded-md",
+            "h-13.5 w-24 rounded-md",
             (undone || !build.available) && "opacity-50 saturate-50",
           )}
         >
@@ -578,23 +576,24 @@ function BuildThumb({
               picked && "ring-2 ring-strong-foreground",
             )}
           />
+          {state === "failed" ? (
+            <span aria-hidden="true" className="absolute inset-0 grid place-items-center">
+              <TriangleAlertIcon className="size-4 text-muted-foreground" />
+            </span>
+          ) : null}
           {state === null ? null : (
             <span
               aria-hidden="true"
               className={cn(
-                "absolute top-1 right-1 size-1.5 rounded-full ring-1 ring-black/40",
-                state === "measuring"
-                  ? "bg-live"
-                  : state === "failed"
-                    ? "bg-destructive"
-                    : "bg-warning",
+                "absolute top-1.5 right-1.5 size-1.5 rounded-full",
+                state === "measuring" ? "bg-muted-foreground" : "bg-destructive",
               )}
             />
           )}
         </GameBuildStill>
         <Text
           variant="caption"
-          tone={onStage ? "strong" : "muted"}
+          tone={onStage ? "default" : "muted"}
           numeric
           truncate
           render={
@@ -634,13 +633,12 @@ function ThumbEdge({ className }: { className?: string | undefined }) {
   );
 }
 
-/** The one mark a picture carries: being measured, does not start, or something to look at. */
-const thumbState = (build: GameBuild): "measuring" | "failed" | "look" | null => {
+/** The one mark a picture carries: being measured, or does not start. */
+const thumbState = (build: GameBuild): "measuring" | "failed" | null => {
   const state = build.facts.state;
   if (state === "queued" || state === "measuring") return "measuring";
   if (!factsSettled(build.facts)) return null;
-  if (doesNotStart(build.facts)) return "failed";
-  return build.facts.bad > 0 ? "look" : null;
+  return doesNotStart(build.facts) ? "failed" : null;
 };
 
 /**
@@ -689,17 +687,17 @@ function TryGroup({
     <div
       role="group"
       aria-label={`Tried ${item.builds.length} ways: ${item.request}`}
-      className="flex shrink-0 flex-col gap-1 border-s border-border ps-2"
+      className="flex shrink-0 flex-col gap-1.5"
     >
-      <div className="flex h-6 max-w-full items-center gap-1.5">
+      <div className="flex h-6 max-w-full items-center gap-2">
         <Tooltip>
           <TooltipTrigger
             render={
               <Text
                 variant="caption"
-                tone="default"
+                tone="muted"
                 truncate
-                render={<span className="max-w-48 min-w-0" />}
+                render={<span className="max-w-60 min-w-0" />}
               />
             }
           >
@@ -710,8 +708,8 @@ function TryGroup({
           </TooltipPopup>
         </Tooltip>
         {shown !== null && shown.source._tag === "version" && !inFolder && canKeep ? (
-          <Button size="xs" variant="outline" disabled={keeping} onClick={() => void keep(shown)}>
-            {keeping ? "Keeping…" : `Keep ${shown.source.n}`}
+          <Button size="xs" variant="secondary" disabled={keeping} onClick={() => void keep(shown)}>
+            {keeping ? "Keeping…" : `Keep version ${shown.source.n}`}
           </Button>
         ) : kept !== undefined && kept.source._tag === "version" ? (
           <Text variant="caption" tone="muted" numeric>
@@ -751,7 +749,7 @@ function NowThumb({
         gameName={gameName}
         fallback={fallback}
         threadRef={threadRef}
-        className={cn("h-10 w-18 rounded-md", disabled && "opacity-50")}
+        className={cn("h-13.5 w-24 rounded-md", disabled && "opacity-50")}
       >
         <ThumbEdge className={active ? "ring-2 ring-live" : undefined} />
       </GameNowPicture>
@@ -761,7 +759,7 @@ function NowThumb({
     </>
   );
   if (onClick === undefined)
-    return <div className="flex w-18 shrink-0 flex-col items-start gap-1">{body}</div>;
+    return <div className="flex w-24 shrink-0 flex-col items-start gap-1.5">{body}</div>;
   return (
     <button
       type="button"
@@ -769,7 +767,7 @@ function NowThumb({
       aria-current={active ? "true" : undefined}
       disabled={disabled}
       onClick={onClick}
-      className="flex w-18 shrink-0 cursor-pointer flex-col items-start gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default"
+      className="flex w-24 shrink-0 cursor-pointer flex-col items-start gap-1.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default"
     >
       {body}
     </button>
@@ -780,9 +778,9 @@ function NowThumb({
 function SlotThumb({ slot }: { slot: GameBuildSlot }) {
   return (
     <Tooltip>
-      <TooltipTrigger render={<div className="flex w-18 shrink-0 flex-col items-start gap-1" />}>
-        <span className="flex h-10 w-18 items-center justify-center rounded-md border border-dashed border-foreground/25">
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
+      <TooltipTrigger render={<div className="flex w-24 shrink-0 flex-col items-start gap-1.5" />}>
+        <span className="flex h-13.5 w-24 items-center justify-center rounded-md bg-muted">
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-muted-foreground" />
         </span>
         <Text variant="caption" tone="muted" truncate render={<span className="w-full" />}>
           {slot.name}

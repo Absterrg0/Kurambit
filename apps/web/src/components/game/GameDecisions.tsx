@@ -83,7 +83,7 @@ export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }
         title="Decisions"
         detail={decisions === null || decisions.length === 0 ? null : String(decisions.length)}
       >
-        <div className="flex flex-col gap-4 px-4 pt-1">
+        <div className="flex flex-col gap-3 px-4 pt-1">
           <Text variant="caption" tone="muted" render={<p />}>
             What you undid, kept or skipped, and what you asked to be remembered. Every new agent
             session on this game reads it, so it does not bring back what you turned down.
@@ -105,7 +105,12 @@ export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }
                 aria-label="Something for every session to remember"
                 onChange={(event) => setNote(event.currentTarget.value)}
               />
-              <Button size="sm" type="submit" disabled={busy || trimmed.length === 0}>
+              <Button
+                size="sm"
+                variant="secondary"
+                type="submit"
+                disabled={busy || trimmed.length === 0}
+              >
                 Remember this
               </Button>
             </form>
@@ -121,7 +126,7 @@ export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }
               here.
             </Text>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col gap-3">
               {decisions.toReversed().map((decision) => (
                 <li key={`${decision.line}:${decision.text}`} className="flex items-center gap-2">
                   {editing?.line === decision.line ? (
@@ -164,7 +169,7 @@ export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }
                     </form>
                   ) : (
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <Text variant="meta" tone="default" render={<span className="break-words" />}>
+                      <Text variant="body" tone="default" render={<span className="break-words" />}>
                         {decision.text}
                       </Text>
                       {decision.date === "" ? null : (

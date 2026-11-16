@@ -84,8 +84,8 @@ export function NumberFieldInput({
   ...props
 }: NumberFieldPrimitive.Input.Props & {
   /**
-   * `scrub`: a drag-to-scrub field filling its cell, the value centred in it as Blender's are; its
-   * well stays clear so a range fill drawn under it shows through.
+   * `scrub`: an inspector's borderless value, right-aligned in tabular figures; the field around it
+   * draws the hover and focus.
    */
   variant?: "default" | "scrub";
 }): React.ReactElement {
@@ -93,7 +93,7 @@ export function NumberFieldInput({
     return (
       <NumberFieldPrimitive.Input
         className={cn(
-          "relative h-6 w-full min-w-0 rounded-md bg-transparent px-2 text-center font-mono text-caption tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+          "h-7 w-full min-w-0 bg-transparent text-end text-body tabular-nums text-foreground outline-none",
           className,
         )}
         data-slot="number-field-input"

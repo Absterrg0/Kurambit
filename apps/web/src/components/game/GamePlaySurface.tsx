@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   AppWindowIcon,
-  MousePointerClickIcon,
   PauseIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -20,12 +19,11 @@ import {
   type StudioError,
 } from "@kurambit/contracts";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
-import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
-import { useStageBridgeFrame, useThreadStageBridge } from "./gameStageBridge";
+import { useStageBridgeFrame } from "./gameStageBridge";
 import type { GameStagePhase } from "./gameStageLogic";
 
 /**
@@ -121,21 +119,18 @@ export function GamePlaySurface({
   /** Changes when something asks for the game to have the keyboard. */
   focusRequest: number;
   /**
-   * The Stage bridge this frame owns while it plays: its thread's key, whether its engine speaks
-   * it, and the key that freezes the game, for the Stage's hint.
+   * The Stage bridge this frame owns while it plays: its thread's key and whether its engine
+   * speaks it.
    */
   bridge: {
     readonly threadKey: string;
     readonly enabled: boolean;
-    readonly freezeKey: string | null;
   };
   /** Drawn over the playing game: the frozen game's pointer layer, names and path. */
   overlay?: ReactNode;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
-  // Frozen, the game is pointed at, not played: its "Click to play" cover would sit on the selection.
-  const frozen = useThreadStageBridge(bridge.threadKey, (state) => state.frozen, false);
   const onBridgeMessage = useStageBridgeFrame(
     `${bridge.threadKey}\0${frameKey}`,
     playing ? frame : null,
@@ -158,8 +153,6 @@ export function GamePlaySurface({
             onBridgeMessage={onBridgeMessage}
             focusRequest={focusRequest}
             onFrame={setFrame}
-            frozen={frozen}
-            freezeKey={bridge.enabled ? bridge.freezeKey : null}
           />
         ) : (
           <StageStateCard
@@ -247,8 +240,6 @@ export function GameFrame({
   onBridgeMessage,
   focusRequest = 0,
   onFrame,
-  frozen = false,
-  freezeKey = null,
   gameName,
 }: {
   url: string;
@@ -264,10 +255,6 @@ export function GameFrame({
   focusRequest?: number;
   /** Hands the iframe to the Stage bridge. */
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
-  /** The Stage froze the game to point at it: its hint says how to point instead. */
-  frozen?: boolean;
-  /** The key that freezes this game, for its hint; null when it cannot be frozen. */
-  freezeKey?: string | null;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
@@ -283,6 +270,7 @@ export function GameFrame({
   // focusing its first button) would otherwise take the keyboard from wherever the person is.
   const pointerOver = useRef(false);
   const invitedAt = useRef(0);
+  const tabbedAt = useRef(0);
   useEffect(() => {
     // Where the keyboard was before the game took it, to hand it back.
     let before: HTMLElement | null =
@@ -292,7 +280,10 @@ export function GameFrame({
         before = event.target;
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Tab") invitedAt.current = performance.now();
+      if (event.key === "Tab") {
+        invitedAt.current = performance.now();
+        tabbedAt.current = invitedAt.current;
+      }
     };
     // A page that focuses itself sends no focus event to its frame: the app's window only blurs.
     let check = 0;
@@ -302,7 +293,8 @@ export function GameFrame({
         const frame = frameRef.current;
         if (frame === null || document.activeElement !== frame) return;
         if (performance.now() - invitedAt.current < 1000) {
-          setKeyboardFocused(true);
+          // The ring is Tab's alone: a control handing the game the keys back draws none.
+          setKeyboardFocused(performance.now() - tabbedAt.current < 1000);
           return;
         }
         // A click in the frame activates this window too (user activation reaches ancestor
@@ -451,8 +443,9 @@ export function GameFrame({
         sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-downloads"
         // A game page that sets no colour scheme is light: the frame says so too, so its canvas
         // stays transparent over the black instead of painting white in the dark theme.
-        // Its keyboard focus is the app's ring, drawn inside: the frame's box clips anything outside.
-        className="size-full border-0 bg-black [color-scheme:light] focus-visible:outline-3 focus-visible:-outline-offset-3 focus-visible:outline-ring focus-visible:outline-solid"
+        // Its keyboard focus is the ring drawn over it when Tab brought it there (keyboardFocused):
+        // focus handed back after a control is no keyboard visit, so the frame draws none itself.
+        className="size-full border-0 bg-black [color-scheme:light] outline-none"
         onPointerEnter={() => {
           pointerOver.current = true;
         }}
@@ -485,47 +478,18 @@ export function GameFrame({
           className="pointer-events-none absolute inset-0 z-30 ring-3 ring-ring ring-inset"
         />
       ) : null}
-      {/* One quiet line in a corner that lets every click through. The frame belongs to the
-          game, so the click hint shows only while the pointer is over it; a warning or a
-          freeze always shows. */}
-      {unacknowledged || frozen || away || !frameFocused ? (
+      {/* The frame belongs to the game: the bar's Play says it is paused, and a click on the
+          frame plays on. The one hint left is a hide the game never confirmed. */}
+      {unacknowledged ? (
         <Text
           variant="caption"
           tone="inherit"
           render={
-            <span
-              className={cn(
-                "pointer-events-none absolute bottom-3 left-3 z-20 flex h-6 items-center gap-2 rounded-md bg-black/60 px-2 text-stage-foreground/85 backdrop-blur-sm transition-opacity",
-                !unacknowledged && !frozen && !away && "opacity-0 group-hover/stage:opacity-100",
-              )}
-            />
+            <span className="pointer-events-none absolute bottom-3 left-3 z-20 flex h-6 items-center gap-1.5 rounded-md bg-black/60 px-2 text-warning-foreground backdrop-blur-sm" />
           }
         >
-          {unacknowledged ? (
-            <StageHint>
-              <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
-              Game may still be running
-            </StageHint>
-          ) : null}
-          {frozen ? (
-            <StageHint>
-              <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
-              Paused
-            </StageHint>
-          ) : away ? (
-            <StageHint>
-              <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
-              Paused · click to play on
-            </StageHint>
-          ) : frameFocused ? null : (
-            <>
-              <StageHint>
-                <MousePointerClickIcon className="size-3 shrink-0" aria-hidden="true" />
-                Click to play
-              </StageHint>
-              {freezeKey === null ? null : <StageHint muted>{freezeKey} freezes</StageHint>}
-            </>
-          )}
+          <TriangleAlertIcon className="size-3 shrink-0" aria-hidden="true" />
+          Game may still be running
         </Text>
       ) : null}
     </>
@@ -564,16 +528,6 @@ function StartingCard({ name, onReload }: { name: string; onReload: () => void }
         ) : null}
       </div>
     </div>
-  );
-}
-
-function StageHint({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
-  return (
-    <span
-      className={muted ? "flex items-center gap-1.5 text-stage-muted" : "flex items-center gap-1.5"}
-    >
-      {children}
-    </span>
   );
 }
 

@@ -1,12 +1,11 @@
 import type { GameStageControl, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { KeyboardIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type RefObject, useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Popover, PopoverPopup } from "../ui/popover";
 import { Text } from "../ui/text";
 import {
   rebindStageControl,
@@ -21,15 +20,20 @@ const NO_CAPABILITIES: ReadonlyArray<string> = [];
  * How to play this build, and the keys to change: the game's own action table (the one its
  * Controls screen and every `ctx.input` check read), listed with each action's keys and gamepad
  * buttons. A key rebinds as the game's screen does (pressed, it moves over or swaps) and is saved
- * with the game's settings, so the game's own menu agrees. Opens over the chat, never the game.
+ * with the game's settings, so the game's own menu agrees. It has no button of its own: the
+ * control bar's run menu opens it, anchored to that menu's trigger, over the chat, never the game.
  */
 export function GameControlsMenu({
   threadRef,
-  playing,
+  open,
+  anchor,
+  onOpenChange,
   onFocus,
 }: {
   threadRef: ScopedThreadRef;
-  playing: boolean;
+  open: boolean;
+  anchor: RefObject<HTMLElement | null>;
+  onOpenChange: (open: boolean) => void;
   onFocus: () => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
@@ -41,9 +45,11 @@ export function GameControlsMenu({
   const ready = useThreadStageBridge(threadKey, (state) => state.status === "ready", false);
   const controls = useThreadStageBridge(threadKey, (state) => state.controls, null);
   const note = useThreadStageBridge(threadKey, (state) => state.controlsNote, null);
-  const [open, setOpen] = useState(false);
   // The action waiting for its new key; Escape gives it up.
   const [listening, setListening] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) requestStageControls();
+  }, [open]);
   useEffect(() => {
     if (!open || listening === null) return;
     const onKey = (event: KeyboardEvent) => {
@@ -62,19 +68,18 @@ export function GameControlsMenu({
     <Popover
       open={open}
       onOpenChange={(next) => {
-        setOpen(next);
+        onOpenChange(next);
         setListening(null);
-        if (next) requestStageControls();
-        else onFocus();
+        if (!next) onFocus();
       }}
     >
-      <PopoverTrigger
-        render={<Button size="sm" variant="ghost" disabled={!playing} aria-label="Controls" />}
+      <PopoverPopup
+        anchor={anchor}
+        side="bottom"
+        align="end"
+        padding="compact"
+        className="w-[24rem]"
       >
-        <KeyboardIcon aria-hidden="true" />
-        Controls
-      </PopoverTrigger>
-      <PopoverPopup side="bottom" align="start" padding="compact" className="w-[24rem]">
         <div className="flex flex-col gap-2 py-1">
           <div className="flex items-baseline justify-between gap-2 px-1">
             <Text variant="meta" tone="strong" emphasis render={<h3 />}>

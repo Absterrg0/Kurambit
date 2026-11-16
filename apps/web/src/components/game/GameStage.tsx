@@ -1,8 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
-import { GameStagePlayControls, GameStageViewControls } from "./GameStageControls";
+import { GameStageBar } from "./GameStageControls";
 import { GameKeepGoingButton } from "./GameKeepGoingButton";
 import {
   CircleStopIcon,
@@ -12,7 +12,6 @@ import {
   FilmIcon,
   StepForwardIcon,
   FolderOpenIcon,
-  HistoryIcon,
   MoreHorizontalIcon,
   PanelRightIcon,
   PanelTopOpenIcon,
@@ -20,7 +19,6 @@ import {
   PlayIcon,
   RefreshCwIcon,
   TriangleAlertIcon,
-  Undo2Icon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -56,7 +54,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useStageRuns } from "./useStageRuns";
-import { GameRunScrubber, useStageRewind } from "./GameRunTimeline";
+import { useStageRewind } from "./GameRunTimeline";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
@@ -84,12 +82,11 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
-import { StatusDot } from "../ui/status-dot";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
-import { GameBuildStrip, type GameBuildSlot, type GameStripRequest } from "./GameBuildStrip";
-import { GameControlsMenu } from "./GameControlsMenu";
+import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHistory";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
@@ -101,7 +98,6 @@ import {
   keepBuildFrame,
   useBuildFrame,
   captureStageFrame,
-  useGameFreezeKey,
   useThreadStageBridge,
   setStageDevView,
   stepStageFrame,
@@ -113,8 +109,6 @@ import { buildName, buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.
 import { nextBuildOf } from "./GameLibraryStatus";
 import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
-import { GameElapsed } from "./GameElapsed";
-import { gameStatusLine, type GameStatusPart } from "./gameStatusLine.logic";
 import { GameFrame, GameFrameBox, GamePlaySurface, type StudioMessage } from "./GamePlaySurface";
 import {
   buildFailurePrompt,
@@ -135,6 +129,17 @@ const BUSY_LABELS: Record<GameAction, string> = {
   stop: "Stopping",
   "export-linux": "Exporting for Linux",
   "export-windows": "Exporting for Windows",
+};
+
+// The build the folder holds as the header's History button names it: "Build 4".
+const folderBuildShort = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
+  if (!AsyncResult.isSuccess(result)) return null;
+  const build = result.value.builds.find((each) => each.id === result.value.current);
+  return build === undefined
+    ? null
+    : build.number === null
+      ? buildName(build)
+      : `Build ${build.number}`;
 };
 
 // The build the folder holds, by name, for the held build's chip.
@@ -444,6 +449,7 @@ function ThreadGameStage({
   const [mountRequestN] = useState(stageRequest?.n ?? 0);
   const [timelineRequest, setTimelineRequest] = useState<GameStripRequest | null>(null);
   const [reelOpen, setReelOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const threadKey = scopedThreadKey(threadRef);
@@ -531,6 +537,7 @@ function ThreadGameStage({
     input: { threadId: threadRef.threadId },
   });
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
+  const folderShort = useEnvironmentQuerySelector(buildsAtom, folderBuildShort);
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
   const folderDoesNotStart = useEnvironmentQuerySelector(buildsAtom, folderDoesNotStartOf) === true;
@@ -601,7 +608,6 @@ function ThreadGameStage({
   const stageRef = useRef<HTMLElement | null>(null);
   const playerIn = usePlayerInGame(stageRef);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const freezeKey = useGameFreezeKey();
   // A compact switch unmounts nothing, but focus would die with the hidden
   // pane's button. Move it to the stage when the stage comes back.
   const stageWasHidden = useRef(hidden);
@@ -814,6 +820,9 @@ function ThreadGameStage({
       case "export":
         setExportOpen(true);
         return;
+      case "history":
+        setHistoryOpen(true);
+        return;
       case "generated-art":
         showWorkbench("art");
         return;
@@ -847,7 +856,9 @@ function ThreadGameStage({
       return;
     }
     const key = frameFold?.key ?? "";
-    setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
+    // Only an error sets it: the page's ready can follow an error its own start threw, and a
+    // reload clears it by its frame key.
+    if (studio.type === "studio-error") setStudioError({ key, text: studio.message });
   });
   // Pointing at a thing on the Stage opens its values in the Workbench's Tune tab.
   const selectedThing = useThreadStageBridge(
@@ -975,11 +986,6 @@ function ThreadGameStage({
     !awaitingTurnBuild && webPlay && canAct && (data.previewUrl !== null || !building);
   const stagingEnabled = canAct && !building;
   const rebuildEnabled = stagingEnabled && webPlay && !awaitingTurnBuild;
-  const buildingStartedAt =
-    busy?.startedAt ??
-    (operationState === "running" && data.operation !== null
-      ? Date.parse(data.operation.at)
-      : null);
   const operation = data.operation;
   // Only this thread's own operations land as news here: a production run's
   // captures and checks on the game are its own work, not this chat's.
@@ -1076,10 +1082,6 @@ function ThreadGameStage({
     data.previewUrl !== null ||
     playTarget !== null ||
     (buildPlays?.length ?? 0) > 0;
-  const buildingMessage =
-    operationState === "running" && data.operation !== null
-      ? data.operation.message
-      : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
   const inspectorKey = shortcutLabelForCommand(keybindings, "game.workbench.toggle", {
     context: { gameThread: true },
   });
@@ -1100,66 +1102,46 @@ function ThreadGameStage({
     if (document.fullscreenElement) void document.exitFullscreen();
     else void playSurfaceOf(stageRef.current)?.requestFullscreen();
   };
-  const statusBanner =
+  const dismissNotice = () => {
+    setError(null);
+    setMessage(null);
+    setPlayRef(null);
+    setDismissedRevision(operation?.revision ?? null);
+    setStudioError(null);
+  };
+  // The Stage's one small line, at its bottom-left: an error while playing, else the last thing
+  // said (a save, an action's answer), else a stale export. Each can be dismissed.
+  const stageToast =
     failureVisible !== null ? (
-      <div className="flex items-center gap-2 border-t border-destructive/20 bg-destructive/8 px-3 py-1.5 text-meta text-destructive-foreground">
+      <StageToast tone="error" onDismiss={dismissNotice} detail={failureVisible}>
         <TriangleAlertIcon className="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
-        <span className="line-clamp-2 min-w-0 flex-1 break-words">
-          {failureVisible.split("\n")[0] ?? failureVisible}
-        </span>
-        <Button
-          size="xs"
-          variant="ghost"
-          className="shrink-0"
-          onClick={() => onAskAgent(failurePrompt)}
-        >
-          Ask agent to fix
+        <span className="truncate">{errorWhere(failureVisible)}</span>
+        <Button size="xs" variant="link" onClick={() => onAskAgent(failurePrompt)}>
+          Ask the agent
         </Button>
-      </div>
+      </StageToast>
     ) : liveError !== null && !noWebGl ? (
       // Mid-turn, a save may be half-written: the error is named, not alarmed.
-      <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-meta text-muted-foreground">
-        <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1">
-          <TruncatedText
-            text={`The game threw while an agent is editing it: ${liveError}`}
-            className="block"
-          />
-        </span>
-      </div>
+      <StageToast tone="muted" onDismiss={dismissNotice} detail={liveError}>
+        <span className="truncate">The game threw while your agent edits it</span>
+      </StageToast>
     ) : noticeVisible !== null ? (
-      <div className="flex items-center gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-meta text-muted-foreground">
-        <span className="min-w-0 flex-1">
-          <TruncatedText text={noticeVisible} className="block" />
-        </span>
-        <Button
-          size="icon-micro"
-          variant="ghost"
-          className="shrink-0"
-          aria-label="Dismiss status"
-          onClick={() => {
-            setError(null);
-            setMessage(null);
-            setPlayRef(null);
-            setDismissedRevision(operation?.revision ?? null);
-          }}
-        >
-          <XIcon className="size-3" aria-hidden="true" />
-        </Button>
-      </div>
+      <StageToast tone="muted" onDismiss={dismissNotice} detail={noticeVisible}>
+        <span className="truncate">{noticeVisible}</span>
+      </StageToast>
     ) : staleChipVisible ? (
-      <div className="flex items-center gap-2 border-t border-warning/20 bg-warning-surface/50 px-3 py-1.5 text-meta text-warning-foreground">
-        <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1">This web export is older than the latest changes.</span>
+      <StageToast tone="muted" detail="This web export is older than the latest changes">
+        <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden="true" />
+        <span className="truncate">Web export is older than the changes</span>
         <Button
           size="xs"
-          variant="warning-outline"
+          variant="link"
           disabled={!rebuildEnabled}
           onClick={() => void perform("rebuild")}
         >
           Rebuild
         </Button>
-      </div>
+      </StageToast>
     ) : null;
   // A live game's folder plays an empty page until the first build lands;
   // the Stage says what is being made instead of showing a game that is not yet one.
@@ -1187,40 +1169,8 @@ function ThreadGameStage({
     keepGoingStatus.proposal?.deadline != null
       ? clockTime(keepGoingStatus.proposal.deadline)
       : null;
-  const statusLine = gameStatusLine({
-    phase: shownPhase.kind,
-    onStage: playTarget === null ? stageBuildName : buildPhrase(playTarget.label),
-    onStageDoesNotStart: playTarget === null && folderDoesNotStart,
-    onStageNamedElsewhere: true,
-    copy: playTarget !== null,
-    known: buildsRead,
-    needsChoice:
-      quietShell !== null && (quietShell.hasPendingApprovals || quietShell.hasPendingUserInput),
-    keepGoingStep: keepGoingHere ? keepGoingStatus.step : null,
-    keepGoingLive: keepGoingHere,
-    keepGoingStartsAt,
-    turnRunning,
-    turnStartedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
-    nextBuild: nextBuildNumber,
-    operation: building ? { text: buildingMessage, since: buildingStartedAt } : null,
-    live: stageKind === "live",
-    changedSince: playTarget === null ? (changedSince ?? null) : null,
-    measured: hasBuild,
-    firstPlayable,
-    landing,
-    restoring:
-      turnUndo.restoring && turnUndo.view !== null && turnUndo.action !== null
-        ? `${turnUndo.action.kind === "redo" ? "Redoing" : turnUndo.action.kind === "undo" ? "Undoing" : "Going back to"} ${buildPhrase(buildName(turnUndo.view.build))}…`
-        : null,
-  });
-  // Paused or at a run's end, the bar shows the run's scrubber, like a video player's.
-  const scrubbing =
-    !collapsed &&
-    stageKind === "live" &&
-    playTarget === null &&
-    compare === null &&
-    rewind.timeline !== null &&
-    (frozen || runs.ended !== null || rewind.busy !== null);
+  // The header names what plays: a copy by its own name, else the folder's build.
+  const historyLabel = playTarget?.label ?? folderShort ?? (hasBuild ? "History" : "No builds yet");
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking
@@ -1335,24 +1285,64 @@ function ThreadGameStage({
               </MenuPopup>
             </Menu>
           )}
-          <GameStatusLine status={statusLine} />
-          {/* An earlier build on the Stage says so in the line it already has, and its way back
-              sits beside it: nothing is inserted over the Stage, so the column never moves. */}
-          {playTarget !== null ? (
-            <Button
-              size="xs"
-              variant="outline"
-              className="shrink-0"
-              aria-label="Back to the current game"
-              onClick={backToLive}
+          {/* What plays on the Stage, as a button that opens the game's History. */}
+          <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="ghost-muted"
+                  className="min-w-0 shrink"
+                  aria-label={`${historyLabel}: History`}
+                />
+              }
             >
-              <HistoryIcon aria-hidden="true" />
-              <span className="hidden @[36rem]/stage-header:inline">Back to the current game</span>
-              <span className="hidden @[24rem]/stage-header:inline @[36rem]/stage-header:hidden">
-                Back
-              </span>
-            </Button>
-          ) : null}
+              <Text variant="label" tone="inherit" truncate>
+                {historyLabel}
+              </Text>
+              <ChevronDownIcon aria-hidden="true" />
+            </PopoverTrigger>
+            {/* Kept mounted: the chat's cards, the palette and the keys reach History's requests
+                while it is closed. */}
+            <PopoverPopup
+              side="bottom"
+              align="start"
+              padding="compact"
+              keepMounted
+              className="w-[34rem]"
+            >
+              <GameHistory
+                threadRef={threadRef}
+                gameName={gameName}
+                playing={playTarget?.build ?? null}
+                slot={buildSlot}
+                request={timelineRequest}
+                reelOpen={reelOpen}
+                open={historyOpen}
+                onOpen={() => setHistoryOpen(true)}
+                undo={{
+                  canUndo: turnUndoAllowed("undo"),
+                  canRedo: turnUndoAllowed("redo"),
+                  undoLabel,
+                  redoLabel,
+                  undoDetail,
+                  undoKey,
+                  redoKey,
+                  onUndo: () => handleRequest({ kind: "undo" }, 0),
+                  onRedo: () => handleRequest({ kind: "redo" }, 0),
+                }}
+                onPlay={(build) => void playBuild(build)}
+                onPlayUnlisted={(ref) => void playBuild(ref)}
+                onLive={backToLive}
+                onCompare={(pair) => {
+                  setHistoryOpen(false);
+                  setCompare(pair);
+                }}
+                // Checks follows the build picked here.
+                onInspect={(build) => inspectBuild({ threadKey, build: build.id, snapshot: build })}
+              />
+            </PopoverPopup>
+          </Popover>
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
           <Menu>
             <Tooltip>
@@ -1467,7 +1457,7 @@ function ThreadGameStage({
             <TooltipTrigger
               render={
                 <Button
-                  size="sm"
+                  size="icon-sm"
                   variant="ghost"
                   aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
                   aria-pressed={workbenchShown}
@@ -1475,16 +1465,10 @@ function ThreadGameStage({
                 />
               }
             >
-              <PanelRightIcon className="size-3.5" aria-hidden="true" />
-              <span className="hidden @[36rem]/stage-header:inline">Workbench</span>
+              <PanelRightIcon aria-hidden="true" />
             </TooltipTrigger>
-            <TooltipPopup side="bottom" className="max-w-xs">
-              <span className="flex flex-col gap-1">
-                <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
-                <span className="text-muted-foreground">
-                  Your run, values, art, checks, history and decisions
-                </span>
-              </span>
+            <TooltipPopup side="bottom">
+              <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
             </TooltipPopup>
           </Tooltip>
         </div>
@@ -1573,33 +1557,27 @@ function ThreadGameStage({
         >
           {noWebGl ? <NoWebGlCard /> : null}
           {/* Inside the Stage's own edges: a build that does not start says so in the Stage's
-            middle, with the way to fix it and the way back; any other error lies over the
-            Stage's top edge. Neither takes a row, so the Stage keeps its size. */}
+            middle, with the way to fix it and the way back; anything else is one small line at
+            its bottom-left. Neither takes a row, so the Stage keeps its size. */}
           {folderDoesNotStart && failureVisible !== null && stageBuildName !== null ? (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-6">
               {/* Its own dark backing: the words never depend on what the dead game painted. */}
-              <div className="pointer-events-auto flex max-w-lg min-w-0 flex-col items-center gap-2 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
-                <TriangleAlertIcon className="size-5 text-destructive" aria-hidden="true" />
+              <div className="pointer-events-auto flex max-w-lg min-w-0 flex-col items-center gap-3 rounded-xl bg-stage-well px-6 py-5 text-center text-stage-foreground shadow-lg">
                 <Text variant="label" tone="inherit" render={<p role="alert" />}>
-                  {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} does not start`}
-                </Text>
-                {/* What happened in plain words, then the error itself as its own detail, whole. */}
-                <Text variant="meta" tone="inherit" render={<p className="opacity-75" />}>
-                  An error in the game's code stops it before it starts.
+                  {`${stageBuildName.charAt(0).toUpperCase()}${stageBuildName.slice(1)} doesn't start`}
                 </Text>
                 <Text
                   variant="caption"
                   tone="inherit"
-                  render={
-                    <p className="line-clamp-3 max-w-full rounded-md bg-white/6 px-2.5 py-1.5 text-left font-mono break-words" />
-                  }
+                  mono
+                  render={<p className="line-clamp-3 max-w-full break-words opacity-75" />}
                 >
                   {failureVisible.split("\n")[0] ?? failureVisible}
                 </Text>
-                <div className="mt-1 flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   {keepGoingStartsAt === null ? (
-                    <Button size="sm" variant="overlay" onClick={() => onAskAgent(failurePrompt)}>
-                      Ask your agent to fix it
+                    <Button size="sm" onClick={() => onAskAgent(failurePrompt)}>
+                      Ask the agent to fix it
                     </Button>
                   ) : (
                     // Keep going already has the agent's next step waiting, in the row above the
@@ -1614,17 +1592,14 @@ function ThreadGameStage({
                       variant="overlay"
                       onClick={() => handleRequest({ kind: "undo" }, 0)}
                     >
-                      <Undo2Icon aria-hidden="true" />
                       Undo
                     </Button>
                   ) : null}
                 </div>
               </div>
             </div>
-          ) : statusBanner === null ? null : (
-            <div className="absolute inset-x-0 top-0 z-20 overflow-hidden rounded-t-xl bg-background shadow-sm">
-              {statusBanner}
-            </div>
+          ) : (
+            stageToast
           )}
           <GamePlaySurface
             phase={shownPhase}
@@ -1658,14 +1633,14 @@ function ThreadGameStage({
             onTakeHeld={() => showFold(playHeldFrame(frame))}
             onStudioMessage={onStudioMessage}
             focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
-            bridge={{ threadKey, enabled: engine?.stageBridge === true, freezeKey }}
+            bridge={{ threadKey, enabled: engine?.stageBridge === true }}
             overlay={<GameStageOverlay threadKey={threadKey} />}
           />
         </div>
       </div>
       <div
         data-game-controls=""
-        className="mx-auto flex h-12 w-full shrink-0 items-center gap-1.5"
+        className="mx-auto flex h-9 w-full shrink-0 items-center"
         style={{ maxWidth: column ?? undefined }}
       >
         {collapsed ? (
@@ -1673,80 +1648,29 @@ function ThreadGameStage({
             <PanelTopOpenIcon aria-hidden="true" />
             Show the game
           </Button>
-        ) : stageKind === "live" ? (
-          <>
-            <GameStagePlayControls
-              threadRef={threadRef}
-              playing={phase.kind === "playing" && compare === null}
-              canReload={data.previewUrl !== null}
-              scrubbing={scrubbing}
-              onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
-              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-            />
-            {/* Paused or ended, the run's scrubber takes the bar's room; the controls are play's. */}
-            {scrubbing ? null : (
-              <GameControlsMenu
-                threadRef={threadRef}
-                playing={phase.kind === "playing" && compare === null}
-                onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-              />
-            )}
-          </>
-        ) : null}
-        {scrubbing ? (
-          <GameRunScrubber
+        ) : (
+          <GameStageBar
             threadRef={threadRef}
+            playing={phase.kind === "playing" && compare === null && stageKind !== "window"}
+            live={stageKind === "live" && playTarget === null && compare === null}
+            canReload={
+              stageKind === "live" &&
+              playTarget === null &&
+              compare === null &&
+              data.previewUrl !== null
+            }
             rewind={rewind}
             runs={runs}
-            onRestart={() => {
-              setFrameFold(reloadFrame(frame, Date.now()));
-              handleRequest({ kind: "focus" }, Date.now());
-            }}
-            onNote={setMessage}
-          />
-        ) : (
-          <span className="min-w-2 flex-1" />
-        )}
-        {/* Sound, fullscreen and hide are play's: they step aside for the scrubber. */}
-        {collapsed || scrubbing ? null : (
-          <GameStageViewControls
-            threadRef={threadRef}
-            playing={phase.kind === "playing" && stageKind !== "window"}
+            onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
             onFullscreen={toggleFullscreen}
             onHide={() => setGameHidden(true)}
             onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+            onNote={setMessage}
           />
         )}
       </div>
-      {/* Counted in the game's fit like the controls: opening the strip takes its room from the
-          game, so the chat keeps the share the person gave it and is never covered. */}
-      <div className="mx-auto w-full shrink-0" style={{ maxWidth: column ?? undefined }}>
-        <GameBuildStrip
-          threadRef={threadRef}
-          gameName={gameName}
-          playing={playTarget?.build ?? null}
-          slot={buildSlot}
-          request={timelineRequest}
-          reelOpen={reelOpen}
-          undo={{
-            canUndo: turnUndoAllowed("undo"),
-            canRedo: turnUndoAllowed("redo"),
-            undoLabel,
-            redoLabel,
-            undoDetail,
-            undoKey,
-            redoKey,
-            onUndo: () => handleRequest({ kind: "undo" }, 0),
-            onRedo: () => handleRequest({ kind: "redo" }, 0),
-          }}
-          onPlay={(build) => void playBuild(build)}
-          onPlayUnlisted={(ref) => void playBuild(ref)}
-          onLive={backToLive}
-          onCompare={setCompare}
-          // Checks follows the build picked here.
-          onInspect={(build) => inspectBuild({ threadKey, build: build.id, snapshot: build })}
-        />
-      </div>
+      {/* The 12px between the bar and the chat: no message starts against the controls. */}
+      <div aria-hidden="true" className="h-3 shrink-0" />
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
           <DialogHeader>
@@ -1781,99 +1705,54 @@ function ThreadGameStage({
   );
 }
 
-/** Truncated text keeps its full value in a styled tooltip, not a native title. */
-function TruncatedText({ text, className }: { text: string; className?: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className={cn("truncate", className)} />}>
-        {text}
-      </TooltipTrigger>
-      <TooltipPopup side="bottom" className="max-w-md">
-        {text}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
+/** Where an error happened, as its first line names it: "Error · main.js:85". */
+const errorWhere = (error: string) => {
+  const line = error.split("\n")[0] ?? error;
+  const at = /([\w./-]+\.\w+:\d+)(?::\d+)?\)?\s*$/.exec(line)?.[1] ?? null;
+  return at === null
+    ? `Error · ${line.length > 48 ? `${line.slice(0, 47)}…` : line}`
+    : `Error · ${at.split("/").at(-1)}`;
+};
 
-function GameStatusLine({ status }: { status: ReadonlyArray<GameStatusPart> }) {
-  const hints = status.map((part) => part.hint).filter((hint) => hint !== null);
-  // The full line when it fits, else each phrase's short form: never an ellipsis mid-word. An
-  // unseen copy of the full line is measured against the room the line has.
-  const full = useRef<HTMLSpanElement | null>(null);
-  const room = useRef<HTMLSpanElement | null>(null);
-  const [short, setShort] = useState(false);
-  const hasShort = status.some((part) => part.short !== null);
-  useLayoutEffect(() => {
-    const measured = full.current;
-    const box = room.current;
-    if (measured === null || box === null || !hasShort) return;
-    // The line's room is its own width and the top bar's spacer after it.
-    const spacer = box
-      .closest("[data-game-topbar]")
-      ?.querySelector<HTMLElement>("[data-topbar-spacer]");
-    const check = () =>
-      setShort(
-        measured.scrollWidth > box.clientWidth + Math.max(0, (spacer?.clientWidth ?? 0) - 8) + 1,
-      );
-    check();
-    // The unseen full line resizes when its words change, so it re-measures then too.
-    return observeResize([box, measured, ...(spacer == null ? [] : [spacer])], check);
-  }, [hasShort]);
-  const parts = (shortForm: boolean) =>
-    status.map((part, index) => (
-      <span key={part.text} className="flex min-w-0 items-center gap-1.5">
-        {/* A thin rule between what plays and the work under way: a phrase's own dots join
-            its words, the rule parts two phrases. */}
-        {index > 0 ? (
-          <span aria-hidden="true" className="mx-0.5 h-3 w-px shrink-0 bg-border" />
-        ) : null}
-        {part.dot === "live" ? (
-          <StatusDot tone="live" pulse />
-        ) : part.dot === "failed" ? (
-          // The mark the strip, the Stage and the Inspector give a build that does not start.
-          <TriangleAlertIcon className="size-3 shrink-0 text-destructive" aria-hidden="true" />
-        ) : null}
-        <Text variant="meta" tone={part.strong ? "default" : "muted"} truncate>
-          {shortForm ? (part.short ?? part.text) : part.text}
-        </Text>
-        {part.since === null ? null : (
-          <Text variant="meta" tone="muted" numeric>
-            <GameElapsed since={part.since} prefix="· " />
-          </Text>
-        )}
-      </span>
-    ));
-  const line = (
-    <span
-      ref={room}
-      role="status"
-      className="relative flex min-w-0 shrink items-center gap-1.5 overflow-hidden whitespace-nowrap"
-    >
-      {parts(short && hasShort)}
-      {hasShort ? (
-        <span
-          ref={full}
-          aria-hidden="true"
-          className="invisible absolute top-0 left-0 flex w-max items-center gap-1.5"
-        >
-          {parts(false)}
-        </span>
-      ) : null}
-    </span>
-  );
-  if (hints.length === 0) return line;
-  // The line is the app's most compressed sentence: hovering it says it in full.
+/** The Stage's one small line, over its bottom-left corner: what it says, in full on hover. */
+function StageToast({
+  tone,
+  detail,
+  onDismiss,
+  children,
+}: {
+  tone: "error" | "muted";
+  detail: string;
+  onDismiss?: () => void;
+  children: ReactNode;
+}) {
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="flex min-w-0 shrink" />}>{line}</TooltipTrigger>
-      <TooltipPopup side="bottom" align="start" className="max-w-sm">
-        <span className="flex flex-col gap-1">
-          {hints.map((hint) => (
-            <span key={hint}>{hint}</span>
-          ))}
-        </span>
-      </TooltipPopup>
-    </Tooltip>
+    <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)]">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Text
+              variant="caption"
+              tone="inherit"
+              role={tone === "error" ? "alert" : "status"}
+              render={
+                <div className="pointer-events-auto flex h-7 min-w-0 items-center gap-1.5 rounded-md bg-black/70 ps-2 pe-1 text-stage-foreground backdrop-blur-sm" />
+              }
+            />
+          }
+        >
+          {children}
+          {onDismiss === undefined ? null : (
+            <Button size="icon-micro" variant="overlay" aria-label="Dismiss" onClick={onDismiss}>
+              <XIcon aria-hidden="true" />
+            </Button>
+          )}
+        </TooltipTrigger>
+        <TooltipPopup side="top" align="start" className="max-w-sm whitespace-pre-wrap">
+          {detail}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
   );
 }
 

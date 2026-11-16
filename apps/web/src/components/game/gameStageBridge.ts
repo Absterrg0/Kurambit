@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useAtomValue } from "@effect/atom-react";
 import { create } from "zustand";
 import {
   type GamePlay,
@@ -14,8 +13,6 @@ import {
   type StudioReplayed,
 } from "@kurambit/contracts";
 
-import { shortcutLabelForCommand } from "../../keybindings";
-import { primaryServerKeybindingsAtom } from "../../state/server";
 import { watchLog, watchMark, watchRunReset } from "./gameStageWatch";
 
 /**
@@ -281,12 +278,6 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
     case "studio-play":
       return;
   }
-}
-
-/** The key that freezes the game to point at things, as the person's keybindings say it. */
-export function useGameFreezeKey(): string | null {
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  return shortcutLabelForCommand(keybindings, "game.freeze", { context: { gameThread: true } });
 }
 
 /** The folder's game's last frame on this thread's Stage, or null before it has shown one. */

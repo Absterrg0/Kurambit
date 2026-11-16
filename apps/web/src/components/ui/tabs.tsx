@@ -19,19 +19,35 @@ function Tabs({ className, ...props }: TabsPrimitive.Root.Props) {
 }
 
 /**
- * The segmented track. The open tab's raised pill is one element that slides
- * between tabs on the motion tokens, so reduced motion makes it jump.
+ * The track. `segmented` (the default): the open tab's raised pill is one element that slides
+ * between tabs on the motion tokens, so reduced motion makes it jump. `underline`: plain text tabs
+ * with a 1px line under the open one, laid on the row's bottom hairline, as a panel header's tabs.
  */
-function TabsList({ className, children, ...props }: TabsPrimitive.List.Props) {
+function TabsList({
+  className,
+  children,
+  variant = "segmented",
+  ...props
+}: TabsPrimitive.List.Props & { variant?: "segmented" | "underline" }) {
   return (
     <TabsPrimitive.List
-      className={cn("relative flex h-8 w-fit gap-0.5 rounded-lg p-0.5 surface-well", className)}
+      className={cn(
+        variant === "underline"
+          ? "relative flex h-full w-fit items-stretch gap-4"
+          : "relative flex h-8 w-fit gap-0.5 rounded-lg p-0.5 surface-well",
+        className,
+      )}
       data-slot="tabs-list"
+      data-variant={variant}
       {...props}
     >
       <TabsPrimitive.Indicator
         ref={enableSlideAfterFirstPlacement}
-        className="pointer-events-none absolute top-(--active-tab-top) left-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) rounded-md surface-raised data-ready:transition-[translate,width] data-ready:ease-enter"
+        className={
+          variant === "underline"
+            ? "pointer-events-none absolute bottom-0 left-0 h-px w-(--active-tab-width) translate-x-(--active-tab-left) bg-foreground data-ready:transition-[translate,width] data-ready:ease-enter"
+            : "pointer-events-none absolute top-(--active-tab-top) left-0 h-(--active-tab-height) w-(--active-tab-width) translate-x-(--active-tab-left) rounded-md surface-raised data-ready:transition-[translate,width] data-ready:ease-enter"
+        }
         data-slot="tabs-indicator"
       />
       {children}
@@ -45,7 +61,7 @@ function TabsTab({ className, ...props }: TabsPrimitive.Tab.Props) {
   return (
     <TabsPrimitive.Tab
       className={cn(
-        "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid focus-visible:ring-4 focus-visible:ring-background focus-visible:ring-inset data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
+        "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none in-data-[variant=underline]:flex-none in-data-[variant=underline]:rounded-none in-data-[variant=underline]:px-0 in-data-[variant=underline]:text-label in-data-[variant=underline]:data-active:text-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid focus-visible:ring-4 focus-visible:ring-background focus-visible:ring-inset data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
         className,
       )}
       data-slot="tabs-tab"

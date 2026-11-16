@@ -50,7 +50,7 @@ function Section({
     <section className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5">
         <div className="flex min-h-6 items-center gap-2">
-          <Text variant="meta" tone="strong" emphasis render={<h3 />}>
+          <Text variant="label" tone="strong" render={<h3 />}>
             {title}
           </Text>
           {aside === undefined ? null : <span className="ml-auto flex items-center">{aside}</span>}
@@ -70,13 +70,9 @@ function Section({
   );
 }
 
-/** Rows on one field surface, split by hairlines. */
+/** Rows grouped by spacing alone, edge to edge with the section's text: no box around them. */
 function Rows({ children }: { children: ReactNode }) {
-  return (
-    <div className="surface-card-settings flex flex-col divide-y divide-border overflow-hidden rounded-lg">
-      {children}
-    </div>
-  );
+  return <div className="flex flex-col">{children}</div>;
 }
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
@@ -120,7 +116,7 @@ export function useSelectNotice(
 export function GameLookPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
-      <div className="mx-auto w-full max-w-160 p-4">
+      <div className="mx-auto w-full max-w-160 px-4 py-3">
         <LookSection threadRef={threadRef} />
       </div>
     </div>
@@ -201,8 +197,8 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
         </div>
       ) : null}
       <Rows>
-        <div className="flex min-h-9 items-center gap-2.5 px-3 py-1.5">
-          <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+        <div className="flex min-h-8 items-center gap-2.5 py-1">
+          <Text variant="body" tone="default" render={<span className="flex-1" />}>
             Style
           </Text>
           {style === null ? (
@@ -237,8 +233,8 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
             </>
           )}
         </div>
-        <div className="flex min-h-9 items-center gap-2.5 ps-3 pe-1.5">
-          <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+        <div className="flex min-h-8 items-center gap-2.5">
+          <Text variant="body" tone="default" render={<span className="flex-1" />}>
             Models
           </Text>
           <GameCharacterRoutePicker threadRef={threadRef} />
@@ -247,9 +243,9 @@ function LookSection({ threadRef }: { threadRef: ScopedThreadRef }) {
           type="button"
           aria-expanded={artOpen}
           onClick={() => setArtOpen(!artOpen)}
-          className="flex min-h-9 items-center gap-2.5 px-3 text-left hover:bg-accent focus-visible:bg-accent"
+          className="-mx-2 flex min-h-8 items-center gap-2.5 rounded-md px-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
         >
-          <Text variant="meta" tone="default" render={<span className="flex-1" />}>
+          <Text variant="body" tone="default" render={<span className="flex-1" />}>
             Generated art
           </Text>
           {choosing > 0 ? (

@@ -262,31 +262,31 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 
 ## Play and revise
 
-A game opens as one column: the game on top, its play controls under it, then your chat with the
-agent and the box where you tell the game what to change. The play controls are **Restart**,
-**Pause** (which also lets you point at things) and **Can't lose** on the left with slow motion
-(¼×, ½×, 1×) and **Controls** beside them, and on the right sound, **Fullscreen** and **Hide**.
-Hover a control for its key. While the game is paused, or a run has ended, the bar becomes the
-run's: **Play**, its scrubber and time, and a **⋯** menu to tell the agent about the run, save it as
-a test play or restart (see **Rewind and fork** below); the other controls come back when you play. Drag the edge under the controls to give the chat
-more or less of the column. The column keeps a readable width; for a bigger game beside the chat,
-set **Settings → Appearance → Chat width** to Wide or Full.
-
-Under the controls, **Builds** is the game's history on one line: the build on the Stage, **Compare**,
-**Undo** and **Redo**. Open it to see every build as a small picture in time order, the one on the
-Stage ringed, and each "try it N ways" message's versions together under what you asked. Click a
-picture to play that build and show its checks; while a version plays, **Keep** makes it the game.
+A game opens as one column: the game on top, its control bar under it, then your chat with the
+agent and the box where you tell the game what to change. The bar is the same while you play, pause
+or rewind: **Pause** (or **Play**) and **Restart**, the run's timeline with its time, then the speed
+(1×, ½×, ¼×), **Can't lose**, sound, **Fullscreen**, and a **⋯** menu to tell the agent about the
+run, save it as a test play, show the game's controls or hide the game. Hover a control for its key.
+Drag the edge under the bar to give the chat more or less of the column. The column keeps a readable
+width; for a bigger game beside the chat, set **Settings → Appearance → Chat width** to Wide or
+Full.
 
 The bar on top has the game's name, which opens its menu (rename, folder, **Export…**, **Art…**),
-a line while work is under way (making the next build, keep going's step, or that your agent needs a
-choice), then the **⋯** menu, **Keep going** and **Workbench**.
+then the build on the Stage, such as **Build 4**, which opens **History**: **Undo**, **Redo** and
+**Compare**, then every build as a small picture in time order with the one on the Stage ringed,
+and each "try it N ways" message's versions together under what you asked. Click a picture to
+play that build and show its checks; while a version plays, **Keep** makes it the game. On the
+right are the **⋯** menu, **Keep going** and the Workbench button.
+
+If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
+it** and **Undo**. An error while you play shows as one small line in the game's corner.
 
 The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
 which also opens each section directly). Drag its edge to resize it. Its sections:
 
-- **Tune**: the picked thing's values, such as its speed, jump height, timers and counts. Its name
-  at the top opens a searchable menu of everything the game names, by kind; pointing at a thing on
-  the paused game picks it too. Drag a value's field sideways to change it, or click it
+- **Tune**: everything the game names, by kind, and under it the picked thing's values, such as
+  its speed, jump height, timers and counts. Pointing at a thing on the paused game picks it too.
+  Drag a value sideways to change it, or click it
   to type; the game changes at once. Values are saved into the game as you let go, and a tuning
   session is one build Undo takes back; **Keep as a build** ends the session, so your next change
   starts another. **Put all back** returns every value to the game's own. If a game shows nothing to
@@ -331,7 +331,7 @@ which also opens each section directly). Drag its edge to resize it. Its section
 - **Your agent knows how you played (three.js).** Your next message tells the agent about the
   runs you played since its last turn: how each ended, or when you left it (Retry, the menu, a
   reload), and where you stood. It can replay any of them to a moment and look at it. To talk
-  about one run, choose **Tell the agent about this run** in the scrubber's **⋯** menu when it ends, or while
+  about one run, choose **Tell the agent about this run** in the bar's **⋯** menu when it ends, or while
   the game is frozen: it goes into the message box as a chip with its frame.
 - **The game remembers what you decided.** When you undo a build, keep tuned values, or skip a
   keep-going step, Kurambit writes a line in the game's `.studio/decisions.md`, with the first
@@ -341,7 +341,7 @@ which also opens each section directly). Drag its edge to resize it. Its section
   that goes on hears each new one once, so the agent does not bring back what you turned down.
   The Workbench's **Decisions** lists them to edit, delete or add to. An undo never
   rewinds this file.
-- **Test plays (three.js).** After a run ends, **Save as test play** in the scrubber's **⋯** menu saves it
+- **Test plays (three.js).** After a run ends, **Save as test play** in the bar's **⋯** menu saves it
   under a name, such as a win or the run where a bug showed. Your first win is offered as one. Every build from then on replays it,
   and its checks say whether each saved play still ends the same way. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
@@ -349,18 +349,18 @@ which also opens each section directly). Drag its edge to resize it. Its section
   list and delete them.
 - **Back where you were (three.js).** When your agent changes the game while you play, **Reload**
   brings the new game back to the moment you were at, frozen, replaying your run on the changed
-  code: press **Play on** to keep going, or **Start fresh**. It says where the change first made
-  play differ, or that the run now ends earlier ("With the change, this run now ends at 1:40").
+  code: press **Play** to keep going, or **Restart**. Hovering the bar's time says where the change
+  first made play differ, or that the run now ends earlier ("With the change, this run now ends at
+  1:40").
   A run on a title screen, an ended run, and runs over 10 minutes start fresh instead, and so does
   one that takes over 20 seconds to get back to.
-- **Rewind and fork (three.js).** While the game is frozen, or after a run ends, the scrubber in
-  the Stage's controls shows the run's seconds, its losses and its ending. Drag it to any second and let go: the
-  game replays your run to there, frozen. Change a value in **Tune** (or let your agent change the
+- **Rewind and fork (three.js).** The bar's timeline shows the run so far; paused or after a run
+  ends, it marks its losses and its ending. Drag or click it at any moment and let go: the game
+  pauses and replays your run to there, frozen. Change a value in **Tune** (or let your agent change the
   code), then **Play on**: the run goes on from that second as a new run, which your agent hears
-  about and you can save as a test play. After a fork with tuned values, **As it was** and **With
-  the change** play the same three seconds of your input after it both ways. If the game does not
-  repeat itself exactly (it times or picks something outside its update), the line by the game's
-  name says it couldn't get back exactly.
+  about and you can save as a test play, and the timeline marks the second it went on from. After a
+  fork with tuned values, **Replay as it was** in the bar's **⋯** menu plays the same three seconds
+  of your input without the change.
 - **Dev views (three.js).** The **⋯** menu's **Dev views** step a frozen game one frame at a
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose

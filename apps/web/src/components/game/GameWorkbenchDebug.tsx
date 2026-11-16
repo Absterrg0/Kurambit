@@ -148,7 +148,6 @@ function Values({ marks }: { marks: ReadonlyArray<GamePlayMark> }) {
             <Text
               variant="meta"
               tone="default"
-              mono
               numeric
               render={<span className="w-14 shrink-0 text-end" />}
             >
@@ -171,7 +170,6 @@ function LogLine({ line }: { line: StageConsoleLine }) {
       <Text
         variant="caption"
         tone="dim"
-        mono
         numeric
         render={<span className="w-10 shrink-0 text-end" />}
       >

@@ -42,9 +42,9 @@ function Section({
   children?: ReactNode;
 }) {
   return (
-    <section aria-label={label ?? title} className="flex flex-col py-1.5">
+    <section aria-label={label ?? title} className="flex flex-col py-3">
       <div className="flex h-8 min-w-0 items-center gap-2 ps-4 pe-2">
-        <Text variant="meta" tone="strong" emphasis render={<h3 className="shrink-0" />}>
+        <Text variant="label" tone="strong" render={<h3 className="shrink-0" />}>
           {title}
         </Text>
         {detail === undefined || detail === null || detail === "" ? null : (

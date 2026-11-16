@@ -27,6 +27,8 @@ export type GameStageRequest =
   | { readonly kind: "undo" }
   | { readonly kind: "redo" }
   | { readonly kind: "export" }
+  /** The header's History popover opens. */
+  | { readonly kind: "history" }
   | { readonly kind: "generated-art" };
 
 /** The Workbench's sections beside the game: its values, its art, the build's checks, its page's log, decisions. */
@@ -77,9 +79,6 @@ interface GameWorkspaceStoreState {
   /** The Workbench section last shown, for every game. */
   workbenchTab: WorkbenchTab;
   setWorkbenchTab: (tab: WorkbenchTab) => void;
-  /** The builds strip under the Stage shows its pictures, rather than its one folded line. */
-  buildStripOpen: boolean;
-  setBuildStripOpen: (open: boolean) => void;
 }
 
 const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
@@ -105,8 +104,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setWorkbenchOpen: (open) => set({ workbenchOpen: open }),
       workbenchTab: "tune",
       setWorkbenchTab: (tab) => set({ workbenchTab: tab }),
-      buildStripOpen: false,
-      setBuildStripOpen: (open) => set({ buildStripOpen: open }),
+
       tryWays: {},
       cycleTryWays: (threadKey) =>
         set((state) => {
@@ -133,7 +131,6 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         pauseWhenAway: state.pauseWhenAway,
         workbenchOpen: state.workbenchOpen,
         workbenchTab: state.workbenchTab,
-        buildStripOpen: state.buildStripOpen,
       }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
@@ -144,7 +141,6 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           pauseWhenAway: saved?.pauseWhenAway !== false,
           workbenchOpen: saved?.workbenchOpen === true,
           workbenchTab: isWorkbenchTab(saved?.workbenchTab) ? saved.workbenchTab : "tune",
-          buildStripOpen: saved?.buildStripOpen === true,
         };
       },
     },

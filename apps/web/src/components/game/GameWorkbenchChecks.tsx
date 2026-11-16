@@ -149,21 +149,12 @@ export function GameWorkbenchChecks({
       />
     );
   const side = inspected?.side;
-  const where =
-    side !== undefined
-      ? `Compare, side ${side}`
-      : build.id === onStageId
-        ? "On the Stage"
-        : onStageId === null && inspected === null
-          ? "The game changed since; the next build measures it"
-          : "Not on the Stage";
   return (
     <Workbench.Body key={build.id}>
       <BuildHeader
         threadRef={threadRef}
         build={build}
         list={data}
-        where={where}
         onBackToStage={
           inspected !== null && side === undefined && build.id !== onStageId
             ? () => inspectBuild(null)
@@ -198,13 +189,11 @@ function BuildHeader({
   threadRef,
   build,
   list,
-  where,
   onBackToStage,
 }: {
   threadRef: ScopedThreadRef;
   build: GameBuild;
   list: GameBuildsResult;
-  where: string;
   /** Shows the build on the Stage again, when this one was picked and is not on it. */
   onBackToStage: (() => void) | null;
 }) {
@@ -239,13 +228,13 @@ function BuildHeader({
   const canPickCompare = build.available && list.builds.some((entry) => entry.id !== build.id);
   return (
     <div className="flex flex-col gap-1 pt-2.5 pb-2">
-      <div className="flex min-h-10 items-center gap-2 ps-4 pe-2">
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex h-8 items-center gap-2 ps-4 pe-2">
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <Text variant="label" tone="strong" truncate render={<h2 />}>
             {buildName(build)}
           </Text>
-          <Text variant="caption" tone="muted" numeric truncate>
-            {where} · {formatBuildTime(build.at)}
+          <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
+            {formatBuildTime(build.at)}
           </Text>
         </div>
         {onBackToStage === null ? null : (
@@ -584,7 +573,7 @@ function PassingLine({
           />
         </button>
       )}
-      {open ? <div className="flex flex-col ps-5">{children}</div> : null}
+      {open ? <div className="flex flex-col">{children}</div> : null}
     </>
   );
 }
@@ -654,16 +643,54 @@ function CheckRow({
       />
       {detail.length > 0 ? (
         <ul className="flex flex-col gap-0.5 ps-9.5 pe-4 pb-1.5">
-          {detail.map((line) => (
-            <Text key={line} variant="caption" tone="muted" render={<li className="break-words" />}>
-              {line}
-            </Text>
-          ))}
+          {detail.map((line) => {
+            const problem = problemText(line);
+            return (
+              <Text
+                key={line}
+                variant="caption"
+                tone="default"
+                render={<li className="break-words" />}
+              >
+                {problem.message}
+                {problem.where === null ? null : (
+                  <span className="text-muted-foreground"> · {problem.where}</span>
+                )}
+              </Text>
+            );
+          })}
         </ul>
       ) : null}
     </>
   );
 }
+
+/**
+ * A problem's line as a person reads it: the message itself, and where it happened (the file and
+ * line, or what the bot was doing) said after it, without the harness's "check failed:" and the
+ * browser's "Page error:" and "Uncaught Error:" wording.
+ */
+const problemText = (line: string): { message: string; where: string | null } => {
+  let rest = line.trim().replace(/^check failed:\s*/i, "");
+  let where: string | null = null;
+  const file = /^([\w./-]+\.\w+(?::\d+)*):\s*/.exec(rest);
+  if (file !== null) {
+    where = file[1]!.split("/").at(-1) ?? file[1]!;
+    rest = rest.slice(file[0].length);
+  }
+  const doing = /^([^:]{1,40}?):\s*(?=(?:Page error|Uncaught \w*|\w*Error)\b)/.exec(rest);
+  if (doing !== null) {
+    where = where ?? doing[1]!;
+    rest = rest.slice(doing[0].length);
+  }
+  rest = rest.replace(/^(?:Page error|Uncaught \w*Error|Uncaught|\w*Error):\s*/, "");
+  const at = /\s*\(([\w./-]+\.\w+:\d+)(?::\d+)?\)\s*$/.exec(rest);
+  if (at !== null) {
+    rest = rest.slice(0, at.index);
+    where = at[1]!.split("/").at(-1) ?? at[1]!;
+  }
+  return { message: rest === "" ? line : rest, where };
+};
 
 type RunEvidence = GameFactView["evidence"][number];
 const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextIcon } as const;
@@ -1131,8 +1158,9 @@ function WhatChanged({
           return line === null ? [] : [line];
         })
       : [];
+  // A reading that got worse is a problem Checks lists under it: said once, there.
   const movedLines = (moved?.changed ?? [])
-    .filter((row) => row.id !== "saved-plays")
+    .filter((row) => row.id !== "saved-plays" && row.tone !== "worse")
     .map((row) => `${row.name} ${row.a ?? "not measured"} → ${row.b ?? "not measured"}`);
   const said = [
     ...(changes.data?.tunes ?? []).map((change) => tuneLine(change, things)),

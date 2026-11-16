@@ -3,25 +3,16 @@ import type { GameThing, GameThingValue, ScopedThreadRef } from "@kurambit/contr
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
-import { ChevronDownIcon, CrosshairIcon, RotateCcwIcon, SlidersHorizontalIcon } from "lucide-react";
-import { createContext, use, useEffect, useRef, useState, type ReactNode } from "react";
+import { RotateCcwIcon, SlidersHorizontalIcon } from "lucide-react";
+import { createContext, use, useEffect, useRef, useState } from "react";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { randomUUID } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import {
-  Combobox,
-  ComboboxEmpty,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxPopup,
-  ComboboxSearchInput,
-  ComboboxTrigger,
-} from "../ui/combobox";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThingLook, useSelectNotice, valueLabel } from "./GameInspector";
@@ -215,21 +206,10 @@ export function GameTunePanel({
   return (
     <TuneSave value={saver.save}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto py-3">
+          <ThingList things={things} picked={shown?.id ?? null} onPick={setPicked} />
           {shown === null ? null : (
-            <ThingValues
-              threadRef={threadRef}
-              thing={shown}
-              disabled={!tunable}
-              picker={
-                <ThingPicker
-                  things={things}
-                  picked={shown}
-                  pointed={pointed?.id ?? null}
-                  onPick={setPicked}
-                />
-              }
-            />
+            <ThingValues threadRef={threadRef} thing={shown} disabled={!tunable} />
           )}
         </div>
         <TuneFooter
@@ -245,104 +225,60 @@ export function GameTunePanel({
   );
 }
 
-const kindLabel = (kind: GameThing["kind"]) =>
-  KIND_GROUPS.find((group) => group.kind === kind)?.label ?? "Other";
-
-/** The things in the outliner's order: by kind, then as the game named them. */
-const byKind = (things: ReadonlyArray<GameThing>) =>
-  KIND_GROUPS.flatMap((group) => things.filter((thing) => thing.kind === group.kind));
-
 /**
- * The thing whose values show, as one row: its name and kind, opening a searchable menu of every
- * thing the game names, by kind. Pointing at a thing on the Stage picks it here too.
+ * Everything the game names, by kind, as an outliner lists a scene: a row each, the picked one on
+ * the selection background, a tuned one marked at its end. Hovering a row outlines it on a frozen
+ * Stage; pointing at a thing on the Stage picks it here.
  */
-function ThingPicker({
+function ThingList({
   things,
   picked,
-  pointed,
   onPick,
 }: {
   things: ReadonlyArray<GameThing>;
-  picked: GameThing;
-  pointed: string | null;
+  picked: string | null;
   onPick: (id: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const items = byKind(things);
-  const needle = query.trim().toLowerCase();
-  const shownItems =
-    needle === ""
-      ? items
-      : items.filter(
-          (thing) =>
-            thing.name.toLowerCase().includes(needle) ||
-            kindLabel(thing.kind).toLowerCase().includes(needle),
-        );
   return (
-    <Combobox
-      items={items}
-      filteredItems={shownItems}
-      autoHighlight
-      itemToStringLabel={(thing) => thing.name}
-      isItemEqualToValue={(a, b) => a.id === b.id}
-      value={items.find((thing) => thing.id === picked.id) ?? null}
-      onOpenChange={(open) => {
-        if (!open) setQuery("");
-        if (!open) hoverStageThing(null);
-      }}
-      onItemHighlighted={(thing) => hoverStageThing(thing?.id ?? null)}
-      onValueChange={(thing) => {
-        if (thing !== null) onPick(thing.id);
-      }}
-    >
-      <ComboboxTrigger
-        render={
-          <Button
-            size="sm"
-            variant="ghost"
-            className="min-w-0 shrink"
-            aria-label={`${picked.name}, ${kindLabel(picked.kind)}: pick another thing`}
-          />
-        }
-      >
-        <Text variant="label" tone="strong" truncate>
-          {picked.name}
-        </Text>
-        <Text variant="caption" tone="muted" render={<span className="shrink-0" />}>
-          {kindLabel(picked.kind)}
-        </Text>
-        <ChevronDownIcon className="shrink-0 text-dim-foreground" aria-hidden="true" />
-      </ComboboxTrigger>
-      <ComboboxPopup align="start" className="w-72">
-        <ComboboxSearchInput
-          aria-label="Find a thing"
-          placeholder="Find a thing"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <ComboboxEmpty>Nothing by that name.</ComboboxEmpty>
-        <ComboboxList>
-          {(thing: GameThing) => {
-            const count = thing.values?.length ?? 0;
-            return (
-              <ComboboxItem key={thing.id} value={thing}>
-                <span className="min-w-0 flex-1 truncate">{thing.name}</span>
-                {pointed === thing.id ? (
-                  <CrosshairIcon className="text-live" aria-label="pointed at" />
-                ) : null}
-                {tunedValues(thing).length > 0 ? (
-                  <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
-                ) : null}
-                <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
-                  {kindLabel(thing.kind)}
-                  {count === 0 ? "" : ` · ${count}`}
-                </Text>
-              </ComboboxItem>
-            );
-          }}
-        </ComboboxList>
-      </ComboboxPopup>
-    </Combobox>
+    <div role="listbox" aria-label="Things in the game" className="flex flex-col gap-3">
+      {KIND_GROUPS.map((group) => {
+        const rows = things.filter((thing) => thing.kind === group.kind);
+        if (rows.length === 0) return null;
+        return (
+          <div key={group.kind} role="group" aria-label={group.label} className="flex flex-col">
+            {/* A group of one named as the group ("Rules") needs no heading over it. */}
+            {rows.length === 1 && rows[0]?.name === group.label ? null : (
+              <Text variant="caption" tone="muted" render={<span className="px-4 pb-1" />}>
+                {group.label}
+              </Text>
+            )}
+            {rows.map((thing) => (
+              <div key={thing.id} className="px-2">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={picked === thing.id}
+                  onClick={() => onPick(thing.id)}
+                  onPointerEnter={() => hoverStageThing(thing.id)}
+                  onPointerLeave={() => hoverStageThing(null)}
+                  className={cn(
+                    "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                    picked === thing.id && "surface-selected-soft",
+                  )}
+                >
+                  <Text variant="body" tone="default" truncate render={<span className="flex-1" />}>
+                    {thing.name}
+                  </Text>
+                  {tunedValues(thing).length > 0 ? (
+                    <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
+                  ) : null}
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -362,21 +298,20 @@ function ThingValues({
   threadRef,
   thing,
   disabled,
-  picker,
 }: {
   threadRef: ScopedThreadRef;
   thing: GameThing;
   disabled: boolean;
-  picker: ReactNode;
 }) {
   const save = use(TuneSave);
   const values = thing.values ?? [];
   const tuned = tunedValues(thing);
   return (
-    <section aria-label={`${thing.name}'s values`} className="flex flex-col pb-2">
-      <div className="flex h-11 min-w-0 items-center gap-1 ps-2 pe-2">
-        {picker}
-        <span className="flex-1" />
+    <section aria-label={`${thing.name}'s values`} className="flex flex-col">
+      <div className="flex h-8 min-w-0 items-center gap-2 ps-4 pe-2">
+        <Text variant="label" tone="strong" truncate render={<h3 className="flex-1" />}>
+          {thing.name}
+        </Text>
         {tuned.length === 0 ? null : (
           <Tooltip>
             <TooltipTrigger
@@ -398,14 +333,14 @@ function ThingValues({
         )}
       </div>
       {thing.instance !== undefined || (thing.instances ?? 0) > 1 ? (
-        <Text variant="caption" tone="muted" render={<p className="px-4 pb-1.5" />}>
+        <Text variant="caption" tone="muted" render={<p className="px-4 pb-1" />}>
           {thing.instance !== undefined
             ? `One of ${thing.instance.count}; its values are the group's`
             : `All ${thing.instances} of them`}
         </Text>
       ) : null}
       {values.length === 0 ? (
-        <Text variant="meta" tone="muted" render={<p className="px-4 py-1" />}>
+        <Text variant="body" tone="muted" render={<p className="px-4 py-1" />}>
           No values to tune. Your agent can expose some with ctx.tune.
         </Text>
       ) : (
@@ -433,8 +368,9 @@ function ThingValues({
 }
 
 /**
- * Only while something is tuned: how many values differ from the game's own and whether they are
- * saved, Keep as a build, and putting them all back.
+ * Only while something is tuned: how many values differ from the game's own, across how many
+ * things, then putting them all back and keeping them as a build. A save that failed says so in
+ * place of the count, with Try again.
  */
 function TuneFooter({
   changed,
@@ -456,60 +392,67 @@ function TuneFooter({
 }) {
   const save = use(TuneSave);
   if (changedCount === 0 && state.kind !== "failed") return null;
-  const said = !canSave
-    ? "Playing, not saved: this connection cannot change the game"
-    : state.kind === "saving"
-      ? "Saving…"
-      : state.kind === "waiting"
-        ? "Saves when the agent's turn ends"
-        : state.kind === "failed"
-          ? state.text
-          : state.kind === "kept"
-            ? "Kept; your next change starts a new build"
-            : state.kind === "saved"
-              ? "Saved as you let go"
-              : "Saved in the game";
+  const count = `${changedCount} changed${changed.length > 1 ? ` in ${changed.length} things` : ""}`;
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-border px-4 py-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-live" />
-        <Text variant="meta" tone="default" numeric render={<span className="shrink-0" />}>
-          {changedCount === 1 ? "1 changed" : `${changedCount} changed`}
-        </Text>
+    <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border px-4">
+      {state.kind === "failed" ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Text
+                variant="meta"
+                tone="destructive"
+                truncate
+                role="alert"
+                render={<span className="min-w-0 flex-1" />}
+              />
+            }
+          >
+            Not saved
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-sm">
+            {state.text}
+          </TooltipPopup>
+        </Tooltip>
+      ) : (
         <Text
-          variant="caption"
-          tone={state.kind === "failed" ? "destructive" : "muted"}
+          variant="meta"
+          tone="muted"
+          numeric
           truncate
-          render={<span role={state.kind === "failed" ? "alert" : "status"} className="flex-1" />}
+          role="status"
+          render={<span className="min-w-0 flex-1" />}
         >
-          {said}
+          {!canSave
+            ? `${count}, not saved: this connection cannot change the game`
+            : state.kind === "waiting"
+              ? `${count}, saved when the agent's turn ends`
+              : count}
         </Text>
-      </div>
-      <div className="flex items-center justify-end gap-1.5">
-        {state.kind === "failed" ? (
-          <Button size="xs" variant="ghost" onClick={onRetry}>
-            Try again
-          </Button>
-        ) : null}
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={() => {
-            for (const { thing, values } of changed)
-              for (const value of values) putBack(thing, value, save);
-          }}
-        >
-          Put all back
+      )}
+      {state.kind === "failed" ? (
+        <Button size="sm" variant="ghost" onClick={onRetry}>
+          Try again
         </Button>
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={!canSave || state.kind !== "saved"}
-          onClick={onKeep}
-        >
-          Keep as a build
-        </Button>
-      </div>
+      ) : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          for (const { thing, values } of changed)
+            for (const value of values) putBack(thing, value, save);
+        }}
+      >
+        Put all back
+      </Button>
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={!canSave || state.kind !== "saved"}
+        onClick={onKeep}
+      >
+        Keep as a build
+      </Button>
     </div>
   );
 }

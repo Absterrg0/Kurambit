@@ -4,7 +4,11 @@ import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { isElectron } from "../../env";
 import { useGameWorkspaceStore, type WorkbenchTab, WORKBENCH_TABS } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
+import { XIcon } from "lucide-react";
+
+import { Button } from "../ui/button";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Text } from "../ui/text";
 import { GameDecisionsPanel } from "./GameDecisions";
 import { GameLookPanel } from "./GameInspector";
@@ -54,12 +58,16 @@ export function GameWorkbench({
     >
       <div
         className={cn(
-          "flex h-(--workspace-topbar-height) shrink-0 items-center px-2",
+          "flex h-(--workspace-topbar-height) shrink-0 items-stretch gap-2 border-b border-border ps-4 pe-2",
           isElectron && "drag-region",
           ownsTitleBarEnd && "wco:pr-(--workspace-native-controls-inset)",
         )}
       >
-        <TabsList aria-label="Workbench" className="w-full [-webkit-app-region:no-drag]">
+        <TabsList
+          variant="underline"
+          aria-label="Workbench"
+          className="min-w-0 [-webkit-app-region:no-drag]"
+        >
           {WORKBENCH_TABS.map((value) => (
             <TabsTab key={value} value={value}>
               {LABEL[value]}
@@ -67,6 +75,23 @@ export function GameWorkbench({
             </TabsTab>
           ))}
         </TabsList>
+        <span className="flex-1" />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Close the Workbench"
+                className="self-center [-webkit-app-region:no-drag]"
+                onClick={() => useGameWorkspaceStore.getState().setWorkbenchOpen(false)}
+              />
+            }
+          >
+            <XIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">Close the Workbench</TooltipPopup>
+        </Tooltip>
       </div>
       <TabsPanel value="tune" className="flex min-h-0 flex-1 flex-col">
         <GameTunePanel threadRef={threadRef} onAsk={onAsk} />
@@ -87,42 +112,27 @@ export function GameWorkbench({
   );
 }
 
-/** The page's errors and warnings so far, in the colours the log gives them; nothing when none. */
+/**
+ * The page's errors so far, else its warnings, as one quiet number after the word: in the error
+ * colour only for errors. Nothing when there are none.
+ */
 function DebugCount({ threadRef }: { threadRef: ScopedThreadRef }) {
   const threadKey = scopedThreadKey(threadRef);
   const errors = useStageConsoleCount(threadKey, "error");
   const warnings = useStageConsoleCount(threadKey, "warn");
   if (errors === 0 && warnings === 0) return null;
   return (
-    <span
-      className="flex items-center gap-1"
-      aria-label={[
-        errors === 0 ? null : `${errors} ${errors === 1 ? "error" : "errors"}`,
-        warnings === 0 ? null : `${warnings} ${warnings === 1 ? "warning" : "warnings"}`,
-      ]
-        .filter((part) => part !== null)
-        .join(", ")}
+    <Text
+      variant="caption"
+      tone={errors > 0 ? "destructive" : "muted"}
+      numeric
+      aria-label={
+        errors > 0
+          ? `${errors} ${errors === 1 ? "error" : "errors"}`
+          : `${warnings} ${warnings === 1 ? "warning" : "warnings"}`
+      }
     >
-      {errors === 0 ? null : (
-        <Text
-          variant="caption"
-          tone="inherit"
-          numeric
-          render={<span className="text-destructive-foreground" />}
-        >
-          {errors}
-        </Text>
-      )}
-      {warnings === 0 ? null : (
-        <Text
-          variant="caption"
-          tone="inherit"
-          numeric
-          render={<span className="text-warning-foreground" />}
-        >
-          {warnings}
-        </Text>
-      )}
-    </span>
+      {errors > 0 ? errors : warnings}
+    </Text>
   );
 }
