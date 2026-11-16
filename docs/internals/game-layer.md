@@ -430,6 +430,20 @@ hand has no stamp, so only fresh sessions read it.
 - **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the
   `game-builds` run-ref folder. The record is written before the folder moves, and a restart
   settles a restore it cut short by running its moves again.
+- **A try's versions never write the game folder.** "Try N ways" is a chat turn the harness does,
+  never the chat's provider: `ProviderTurnStartService` hands a run with `versions` to the game
+  layer (`GameTries`, attached by [GameVersions](../../apps/server/src/game/GameVersions.ts)),
+  which captures the folder as the try's base and adds a detached git worktree per version, then
+  `game-version.start` makes the version children (the delegated-task path, wake `never`, so each
+  is read-only once made) and completes the turn in one transaction. A version's `game_*` tools
+  resolve its worktree, with its own operation lock, so only Keep moves the folder: the one
+  restore, then a `system_notice` on the try's run that records which version was kept and when
+  (the rail reads the newest one to give that version Undo) and a `kept-over` decision. A try is
+  no record of its own ([gameTries.ts](../../apps/server/src/game/gameTries.ts)): version n's
+  thread id derives from the try's run, and its refs are keyed by the chat and the run's ordinal,
+  since a run id passes a ref name's 255 bytes. T3's recovery cancels a version's turn without a
+  checkpoint, so a worktree is removed only once its work is a build: its checkpoint, or a capture
+  of what it left (`versions/left/`).
 
 ## Keep going
 

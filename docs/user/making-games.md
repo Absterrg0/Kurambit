@@ -402,6 +402,15 @@ game); `mod+Alt+G` puts the keyboard in the game. The command palette has each o
 **Compare builds…**, **Export…** and **Go back to a build…**. A game you clicked into owns the
 keyboard, and its keys never reach Kurambit: click outside the game before using these.
 
+**Try several ways.** For a change where taste decides ("make the dash feel better"), the chip
+beside send (`mod+Alt+W`, or **Try the next message 3 ways** in the command palette) sends your next
+message 3, 4 or 2 ways at once. Each version works in its own copy of the game with a session of
+its own and takes a different approach, so it costs that many times the tokens. The Stage lists
+them as **Version 1**, **2** and **3** with each one's approach and checks; choose one to play it
+and **Keep version 2** to put it in the game folder. Undo takes it back, and the others stay in the
+builds list, where **Go back** brings one back. It sends text only, and not while Keep going is on.
+A version a restart cut off keeps what it had built.
+
 **Facts** are what Kurambit measured by playing the build, only what you would act on: whether
 it boots, whether it crashes or stops answering in a minute of random input, and for a three.js
 game a QA pass (it presses every control the game declares on a fresh run, ends a run and presses
