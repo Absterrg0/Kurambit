@@ -54,8 +54,9 @@ export function GameWorkbench({
       <div className="shrink-0 border-b border-border px-2 py-2">
         <TabsList aria-label="Workbench" className="w-full">
           {WORKBENCH_TABS.map((value) => (
-            // Names always; their icons join once the panel has the room.
-            <TabsTab key={value} value={value}>
+            // Names always; their icons join once the panel has the room. Each takes its name's
+            // width, so the longest ("Decisions") fits a narrow panel whole.
+            <TabsTab key={value} value={value} className="flex-auto">
               <span className="hidden @[34rem]/workbench:contents">{TAB[value].icon}</span>
               {TAB[value].label}
             </TabsTab>

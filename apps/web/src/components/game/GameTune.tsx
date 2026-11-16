@@ -16,7 +16,7 @@ import {
   SlidersHorizontalIcon,
   XIcon,
 } from "lucide-react";
-import { type ReactNode, createContext, use, useEffect, useRef, useState } from "react";
+import { createContext, use, useEffect, useRef, useState } from "react";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -158,16 +158,8 @@ export function GameTunePanel({
           {notice !== null || !playing ? (
             <Workbench.Empty
               icon={<SlidersHorizontalIcon />}
-              title={
-                notice === null || notice.title === "The game isn't on the Stage"
-                  ? "Play the game to tune it"
-                  : notice.title
-              }
-              body={
-                notice === null || notice.title === "The game isn't on the Stage"
-                  ? "Its speeds, jump height, timers and counts show here while it runs on the Stage, to change as you play."
-                  : notice.body
-              }
+              title={notice?.title ?? "Waiting for the game"}
+              body={notice?.body ?? "Its values show here once it answers."}
             />
           ) : (
             <>
@@ -179,7 +171,8 @@ export function GameTunePanel({
                 <TuneGroup key={thing.id} thing={thing} disabled={!tunable} />
               ))}
               {groups.length === 0 && selected === null ? (
-                <TuneNote
+                <Workbench.Empty
+                  icon={<SlidersHorizontalIcon />}
                   title="Nothing to tune on this screen"
                   body="Values show here once play starts. If none do, your agent can expose them."
                   action={
@@ -224,21 +217,6 @@ const tunedValues = (thing: GameThing) =>
   (thing.values ?? []).filter(
     (value) => value.default !== undefined && value.default !== value.value,
   );
-
-/** A short line where values would be, with what to do next. */
-function TuneNote({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
-  return (
-    <div className="flex flex-col items-start gap-1 px-4 py-5">
-      <Text variant="meta" tone="strong" emphasis render={<p />}>
-        {title}
-      </Text>
-      <Text variant="meta" tone="muted" render={<p />}>
-        {body}
-      </Text>
-      {action === undefined ? null : <div className="mt-2">{action}</div>}
-    </div>
-  );
-}
 
 /** The thing pointed at on the paused game: its values first, then where its look comes from. */
 function PointedThing({

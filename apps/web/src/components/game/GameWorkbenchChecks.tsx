@@ -12,7 +12,7 @@ import {
   type GameTuneChange,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
-import { ChevronRightIcon, GitCompareIcon, PlayIcon } from "lucide-react";
+import { ChevronRightIcon, GitCompareIcon, LoaderCircleIcon, PlayIcon } from "lucide-react";
 
 import { useDiffPanelStore } from "../../diffPanelStore";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -26,6 +26,7 @@ import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Text } from "../ui/text";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { buildName, buildPhrase } from "./gameBuilds.logic";
 import { GameBuildStill } from "./GameBuildStill";
@@ -96,10 +97,14 @@ const lineCounts = (files: GameBuild["files"]) => {
   );
 };
 
-/** One tuned value as the changelog says it: "jump 9 → 12", a new one "jump 12", a dropped one "jump back to default". */
+/**
+ * One tuned value as the changelog says it: "jump 9 → 12"; one first set in the tune file "jump
+ * set to 12" (the value it replaced is the code's default, which the file never held); a dropped
+ * one "jump 12 → the game's own".
+ */
 const tuneWords = (change: GameTuneChange) =>
   change.from === null
-    ? `${change.key} ${change.to}`
+    ? `${change.key} set to ${change.to}`
     : change.to === null
       ? `${change.key} ${change.from} → the game's own`
       : `${change.key} ${change.from} → ${change.to}`;
@@ -299,7 +304,7 @@ export function BuildPerformance({ facts }: { facts: GameBuildFacts }) {
           value={perf.low1 === null ? "not measured" : `${Math.round(perf.low1)} fps`}
         />
         <Workbench.Stat
-          label="GPU per frame"
+          label="GPU time"
           value={perf.gpuMs === null ? "not measured" : `${perf.gpuMs.toFixed(1)} ms`}
         />
         <Workbench.Stat
@@ -491,17 +496,27 @@ export function BuildSavedPlays({
                     : `${Math.round(play.differs.seconds)} s · ${play.differs.what}`}
                 </Text>
               </TableCell>
-              <TableCell>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  disabled={!canRead || !rewinds || busy !== null}
-                  aria-label={`Replay ${play.name} on the Stage`}
-                  onClick={() => void replay(play.name)}
-                >
-                  <PlayIcon aria-hidden="true" />
-                  {busy === play.name ? "Replaying…" : "Replay"}
-                </Button>
+              <TableCell className="w-8">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        disabled={!canRead || !rewinds || busy !== null}
+                        aria-label={`Replay ${play.name} on the Stage`}
+                        onClick={() => void replay(play.name)}
+                      />
+                    }
+                  >
+                    {busy === play.name ? (
+                      <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+                    ) : (
+                      <PlayIcon aria-hidden="true" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Replay it on the Stage</TooltipPopup>
+                </Tooltip>
               </TableCell>
             </TableRow>
           ))}

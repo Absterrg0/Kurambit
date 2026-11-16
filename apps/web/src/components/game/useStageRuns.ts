@@ -67,7 +67,14 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
     });
   });
 
-  return { lastEnded, ended, dismiss: () => setEnded(null), receive };
+  return {
+    lastEnded,
+    ended,
+    dismiss: () => setEnded(null),
+    /** A run was just saved as a test play: the shown win is no longer the game's first. */
+    saved: () => setEnded((current) => (current === null ? null : { ...current, firstWin: false })),
+    receive,
+  };
 }
 
 export type StageRuns = ReturnType<typeof useStageRuns>;

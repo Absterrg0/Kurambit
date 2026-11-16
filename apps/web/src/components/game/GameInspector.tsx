@@ -8,6 +8,7 @@ import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
   CheckIcon,
   ChevronDownIcon,
+  ClipboardCheckIcon,
   CircleIcon,
   ClockIcon,
   ColumnsIcon,
@@ -101,6 +102,7 @@ import { turnStripRestore } from "./gameTurnBuild.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
+import { Workbench } from "./GameWorkbenchParts";
 import {
   BuildChangelog,
   BuildPerformance,
@@ -222,23 +224,17 @@ function BuildTab({ threadRef }: { threadRef: ScopedThreadRef }) {
         </div>
       </div>
     ) : (
-      <div className="flex flex-col gap-4 p-4">
-        <Empty variant="well">
-          {/* The top bar already says it is not measured: this says what comes next. A game
-              whose turn has run is never told its first change is still to come: the turn's
-              build may be a moment from landing, or the turn changed nothing. */}
-          <EmptyHeader>
-            <EmptyTitle>
-              {shell?.latestRun == null ? "Build 1 comes from your first change" : "No build yet"}
-            </EmptyTitle>
-            <EmptyDescription>
-              {shell?.latestRun == null
-                ? "Tell your game what to change in the chat. Your agent's change becomes build 1, and a bot plays it and checks it here."
-                : "Build 1 lands here when a turn of your agent changes the game."}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
+      <Workbench.Empty
+        icon={<ClipboardCheckIcon />}
+        title={shell?.latestRun == null ? "Build 1 comes from your first change" : "No build yet"}
+        // A game whose turn has run is never told its first change is still to come: the turn's
+        // build may be a moment from landing, or the turn changed nothing.
+        body={
+          shell?.latestRun == null
+            ? "Tell your game what to change in the chat. Your agent's change becomes build 1, and its checks, performance and saved plays show here."
+            : "Build 1 lands here when a turn of your agent changes the game."
+        }
+      />
     );
   const detail = (
     <BuildDetail
@@ -1426,8 +1422,8 @@ export function useSelectNotice(
     };
   if (status === null)
     return {
-      title: "The game isn't on the Stage",
-      body: "Play it on the Stage and the characters, props and rules it names show here.",
+      title: "Play the game to tune it",
+      body: "Its speeds, jump height, timers and counts show here while it runs on the Stage, to change as you play.",
     };
   if (status === "waiting")
     return {

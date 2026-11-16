@@ -62,12 +62,18 @@ export function GameWorkbenchRun({ threadRef }: { threadRef: ScopedThreadRef }) 
   // Frozen or ended, the run's own recording; while playing, the marks as they arrive.
   const marks = live.length > 0 ? live : (timeline?.play.marks ?? live);
   const consoleState = useStageConsole(threadKey);
-  if (status === null && marks.length === 0 && consoleState.lines.length === 0)
+  // Nothing played, logged or ended yet: one calm line of what will show, not four empty sections.
+  if (
+    marks.length === 0 &&
+    consoleState.lines.length === 0 &&
+    timeline === null &&
+    session?.runs.ended == null
+  )
     return (
       <Workbench.Empty
         icon={<ActivityIcon />}
-        title="Play the game on the Stage"
-        body="Your run shows here as you play: a timeline to rewind it, its values over time, and the game's console."
+        title={status === null ? "Play the game on the Stage" : "Your run shows here as you play"}
+        body="A timeline to rewind it, the game's values over time, and its console."
       />
     );
   return (
@@ -341,6 +347,8 @@ function ValuesWatch({ marks }: { marks: ReadonlyArray<GamePlayMark> }) {
   );
 }
 
+const CONSOLE_ROW_PX = 22;
+const CONSOLE_MAX_PX = 224;
 const LEVEL_ICON_CLASS = { error: "text-destructive", warn: "text-warning" } as const;
 
 function ConsoleRow({ line }: { line: StageConsoleLine }) {
@@ -404,12 +412,16 @@ function StageConsole({ threadKey }: { threadKey: string }) {
           Nothing logged yet. The game's errors and console lines show here as they happen.
         </Text>
       ) : (
-        <div className="h-56 rounded-md surface-well px-2 py-1">
+        // As tall as its lines up to a scrolling 14 rem, so a quiet game's console stays small.
+        <div
+          className="rounded-md surface-well px-2 py-1"
+          style={{ height: Math.min(CONSOLE_MAX_PX, lines.length * CONSOLE_ROW_PX + 8) }}
+        >
           <LegendList<StageConsoleLine>
             data={lines}
             keyExtractor={(line) => String(line.n)}
             renderItem={({ item }) => <ConsoleRow line={item} />}
-            estimatedItemSize={20}
+            estimatedItemSize={CONSOLE_ROW_PX}
             maintainScrollAtEnd
             initialScrollIndex={Math.max(0, lines.length - 1)}
             className="h-full overflow-x-hidden overscroll-y-contain"
@@ -425,6 +437,7 @@ function TestPlays({ threadRef }: { threadRef: ScopedThreadRef }) {
   const { environmentId } = threadRef;
   const session = useStageRunSession(scopedThreadKey(threadRef));
   const kept = session?.runs.lastEnded ?? null;
+  const shown = session?.runs.ended?.kept ?? null;
   const savePlay = useAtomCommand(gameEnvironment.savePlay, { reportFailure: false });
   const listPlays = useAtomCommand(gameEnvironment.savedPlays, { reportFailure: false });
   const deletePlay = useAtomCommand(gameEnvironment.deletePlay, { reportFailure: false });
@@ -439,11 +452,14 @@ function TestPlays({ threadRef }: { threadRef: ScopedThreadRef }) {
     if (result._tag === "Success") setPlays(result.value);
     else setNote({ text: String(squashAtomCommandFailure(result)), failed: true });
   });
-  // Read when shown, and again after each run ends: the agent saves and deletes plays too.
-  const refreshAfter = useStableCallback((_ended: string | null) => refresh());
+  // Read when shown, after each run ends and once the shown run goes (kept as a win above):
+  // the agent saves and deletes plays too.
+  const refreshAfter = useStableCallback((_ended: string | null, _shown: string | null) =>
+    refresh(),
+  );
   useEffect(() => {
-    void refreshAfter(kept);
-  }, [refreshAfter, kept]);
+    void refreshAfter(kept, shown);
+  }, [refreshAfter, kept, shown]);
   const save = async () => {
     if (kept === null) return;
     setBusy(true);
@@ -458,6 +474,7 @@ function TestPlays({ threadRef }: { threadRef: ScopedThreadRef }) {
       return;
     }
     setName("");
+    session?.runs.saved();
     setNote({
       text: `${result.value.replaced ? "Replaced" : "Saved"} "${result.value.name}": every build replays it from now on.`,
       failed: false,

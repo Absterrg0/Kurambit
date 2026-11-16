@@ -94,7 +94,7 @@ export function GameStagePlayControls({
         </Control>
         <Control
           label={paused ? "Play on" : "Pause"}
-          detail={paused ? null : "Paused, click something in the game to point at it"}
+          detail={paused ? null : "Then click something in the game to point at it"}
           shortcut={freezeKey}
           pressed={paused}
           disabled={!playing || !ready || !capabilities.includes("freeze")}
