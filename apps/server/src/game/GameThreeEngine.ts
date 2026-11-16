@@ -56,7 +56,7 @@ const BOOT_TIMEOUT_MS = 60_000;
 /**
  * A replay draws one frame in this many: the harness reads how the run went, never its picture.
  * In SwiftShader it is what makes a replay fit a build's measure (a 60 s play of a sword duel:
- * 106 s drawing every frame, 11 s at one in 60); on a GPU stepping costs the most either way.
+ * 106 s drawing every frame, 8 s at one in 30); on a GPU stepping costs the most either way.
  */
 const REPLAY_DRAW_EVERY = 30;
 /** A quick look's play: long enough for a frame rate (two seconds of frames) and a moved frame. */
