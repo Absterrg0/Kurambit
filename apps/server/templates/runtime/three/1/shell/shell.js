@@ -740,7 +740,9 @@ function step() {
   const marking = run.steps % Math.max(1, Math.round(1 / run.dt)) === 0;
   const entry = marking ? mark(run.time, run.ctx.player, GameState) : null;
   run.recorder?.stepped(run.steps, entry);
-  if (entry !== null) run.player?.marks.push(entry);
+  if (entry !== null && run.player !== null) run.player.marks.push(entry);
+  // A person's own play only: a replay racing to its moment is not the run they watch.
+  else if (entry !== null) bridge.mark(entry);
   clearFrameInput();
   return dt;
 }

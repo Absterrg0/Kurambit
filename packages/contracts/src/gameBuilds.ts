@@ -1370,6 +1370,27 @@ export type GameBuildComparison = typeof GameBuildComparison.Type;
 
 /** facts (read only), measure and play name one build. */
 export const GameBuildRefInput = Schema.Struct({ threadId: ThreadId, build: GameBuildRef });
+
+/** One tuned value a build changed in the tune file: "jump 9 → 12". Null: absent on that side. */
+export const GameTuneChange = Schema.Struct({
+  /** The thing's id, when the change's own lines name it. */
+  thing: Schema.NullOr(Schema.String),
+  key: Schema.String,
+  from: Schema.NullOr(Schema.String),
+  to: Schema.NullOr(Schema.String),
+});
+export type GameTuneChange = typeof GameTuneChange.Type;
+
+/** Everything a build changed from the build it was made from, read when one build is shown. */
+export const GameBuildChanges = Schema.Struct({
+  /** Most changed first. */
+  files: Schema.Array(GameBuildFile).check(Schema.isMaxLength(300)),
+  /** Null when there is no build before it to diff with. */
+  count: Schema.NullOr(NonNegativeInt),
+  tunes: Schema.Array(GameTuneChange).check(Schema.isMaxLength(200)),
+});
+export type GameBuildChanges = typeof GameBuildChanges.Type;
+export const GameBuildChangesInput = Schema.Struct({ threadId: ThreadId, build: GameBuildId });
 /** A measure the person asked for; `skilled` also plays the game's play bot, to prove it can be won. */
 export const GameBuildMeasureInput = Schema.Struct({
   ...GameBuildRefInput.fields,

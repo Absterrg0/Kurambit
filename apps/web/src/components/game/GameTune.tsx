@@ -1,9 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { GameThing, GameThingValue, ScopedThreadRef } from "@kurambit/contracts";
+import type {
+  GameBuildsResult,
+  GameThing,
+  GameThingValue,
+  ScopedThreadRef,
+} from "@kurambit/contracts";
+import { AsyncResult } from "effect/reactivity";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
-import { ChevronRightIcon, CrosshairIcon, RotateCcwIcon, XIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CrosshairIcon,
+  RotateCcwIcon,
+  SlidersHorizontalIcon,
+  XIcon,
+} from "lucide-react";
 import { type ReactNode, createContext, use, useEffect, useRef, useState } from "react";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -11,12 +23,15 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn, randomUUID } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThingLook, ThingsSection, useSelectNotice, valueLabel } from "./GameInspector";
 import { GameTuneField, type TuneCommit } from "./GameTuneField";
+import { Workbench } from "./GameWorkbenchParts";
+import { buildName, formatBuildTime } from "./gameBuilds.logic";
 import {
   clearStageSelection,
   selectStageThing,
@@ -140,18 +155,26 @@ export function GameTunePanel({
     <TuneSave value={saver.save}>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-gutter-both">
-          {notice !== null ? (
-            <TuneNote title={notice.title} body={notice.body} />
-          ) : !playing ? (
-            <TuneNote
-              title="Play the game to tune it"
-              body="Its speeds, jump height, timers and counts show here while it runs."
+          {notice !== null || !playing ? (
+            <Workbench.Empty
+              icon={<SlidersHorizontalIcon />}
+              title={
+                notice === null || notice.title === "The game isn't on the Stage"
+                  ? "Play the game to tune it"
+                  : notice.title
+              }
+              body={
+                notice === null || notice.title === "The game isn't on the Stage"
+                  ? "Its speeds, jump height, timers and counts show here while it runs on the Stage, to change as you play."
+                  : notice.body
+              }
             />
           ) : (
             <>
               {selected === null ? null : (
                 <PointedThing threadRef={threadRef} thing={selected} disabled={!tunable} />
               )}
+              <SelectedFeel threadKey={threadKey} />
               {groups.map((thing) => (
                 <TuneGroup key={thing.id} thing={thing} disabled={!tunable} />
               ))}
@@ -182,6 +205,7 @@ export function GameTunePanel({
               ) : null}
             </>
           )}
+          <KeptValues threadRef={threadRef} />
         </div>
         <TuneFooter
           changed={changed}
@@ -452,5 +476,104 @@ function TuneFooter({
         {said}
       </Text>
     </div>
+  );
+}
+
+const FEEL_W = 240;
+const FEEL_H = 36;
+
+/**
+ * The pointed thing's ground speed over its last seconds, and its last jump in numbers: what a
+ * tuned speed or jump did, without a stopwatch. Drawn only when the game sends a new trace.
+ */
+function SelectedFeel({ threadKey }: { threadKey: string }) {
+  const selected = useThreadStageBridge(threadKey, (state) => state.selected, null);
+  const feel = selected?.trace?.feel;
+  if (selected === null || feel === undefined) return null;
+  const top = Math.max(feel.top, 0.1);
+  const step = feel.speeds.length > 1 ? FEEL_W / (feel.speeds.length - 1) : 0;
+  const line = feel.speeds
+    .map(
+      (speed, i) =>
+        `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)} ${(FEEL_H - (Math.min(speed, top) / top) * FEEL_H).toFixed(1)}`,
+    )
+    .join(" ");
+  const jump = feel.jumps.at(-1);
+  return (
+    <Workbench.Section
+      title="Feel"
+      detail={`${selected.thing.name}'s ground speed over its last seconds`}
+      aside={
+        <Text variant="caption" tone="muted" numeric>
+          top {feel.top.toFixed(1)} m/s
+        </Text>
+      }
+      className="border-b border-border"
+    >
+      <svg
+        viewBox={`0 0 ${FEEL_W} ${FEEL_H}`}
+        preserveAspectRatio="none"
+        className="h-9 w-full overflow-visible"
+        aria-hidden="true"
+      >
+        <path
+          d={line}
+          fill="none"
+          className="stroke-primary"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      {jump === undefined ? null : (
+        <Text variant="meta" tone="muted" numeric render={<p />}>
+          Last jump {jump.height.toFixed(2)} m high, {jump.seconds.toFixed(2)} s in the air,{" "}
+          {jump.distance.toFixed(1)} m long
+        </Text>
+      )}
+    </Workbench.Section>
+  );
+}
+
+/** Builds that kept values from the Stage, newest first: each tuning session is one. */
+const keptValuesBuilds = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result)
+    ? result.value.builds.filter(
+        (build) => build.source._tag === "saved" && build.source.edit === "values",
+      )
+    : null;
+
+/** The values kept as builds and when: a tuning session is one build, which Undo takes back. */
+function KeptValues({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const kept = useEnvironmentQuerySelector(
+    gameEnvironment.builds({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+    keptValuesBuilds,
+  );
+  if (kept == null || kept.length === 0) return null;
+  return (
+    <Workbench.Section
+      title="Kept as builds"
+      detail="Each tuning session saves as one build: Undo takes it back."
+    >
+      <ul className="flex flex-col gap-1">
+        {kept.slice(0, 12).map((build) => (
+          <li key={build.id} className="flex min-w-0 flex-col">
+            <span className="flex items-baseline gap-2">
+              <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
+                {buildName(build)}
+              </Text>
+              <Text variant="caption" tone="muted" numeric>
+                {formatBuildTime(build.at)}
+              </Text>
+            </span>
+            <Text variant="caption" tone="muted" render={<span className="break-words" />}>
+              {build.summary}
+            </Text>
+          </li>
+        ))}
+      </ul>
+    </Workbench.Section>
   );
 }

@@ -8,16 +8,7 @@ import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
 import type { ChatFileAttachment } from "./types";
 
-const RIGHT_PANEL_KINDS = [
-  "diff",
-  "files",
-  "file",
-  "preview",
-  "terminal",
-  "tune",
-  "look",
-  "build",
-] as const;
+const RIGHT_PANEL_KINDS = ["diff", "files", "file", "preview", "terminal", "workbench"] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
 export type RightPanelSurface =
@@ -32,12 +23,8 @@ export type RightPanelSurface =
       splitDirection?: "horizontal" | "vertical";
     }
   | { id: "diff"; kind: "diff" }
-  /** A game's live values: jump height, speeds, timers, tuned while it plays. */
-  | { id: "tune"; kind: "tune" }
-  /** A game's look: its style, how characters are made, its generated art. */
-  | { id: "look"; kind: "look" }
-  /** A game build's checks, what it changed and its recordings. */
-  | { id: "build"; kind: "build" }
+  /** A game's Workbench: its run, values, checks, history and decisions, as tabs of its own. */
+  | { id: "workbench"; kind: "workbench" }
   | {
       id: "files";
       kind: "files";
@@ -59,7 +46,7 @@ export type RightPanelSurface =
     };
 
 const RIGHT_PANEL_STORAGE_KEY = "kurambit:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 15;
+const RIGHT_PANEL_STORAGE_VERSION = 16;
 
 const isPullRequestsPanelKey = (threadKey: string) => threadKey.endsWith(":pull-requests-panel");
 
@@ -164,12 +151,8 @@ const singletonSurface = (
       return { id: "diff", kind };
     case "files":
       return { id: "files", kind };
-    case "tune":
-      return { id: "tune", kind };
-    case "look":
-      return { id: "look", kind };
-    case "build":
-      return { id: "build", kind };
+    case "workbench":
+      return { id: "workbench", kind };
   }
 };
 

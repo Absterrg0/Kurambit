@@ -1825,6 +1825,7 @@ const layerWsRpc = (
           gameBuilds.list(threadId, { before, limit }),
         [WS_METHODS.gameBuildCompare]: ({ threadId, a, b }) => gameBuilds.compare(threadId, a, b),
         [WS_METHODS.gameBuildFacts]: ({ threadId, build }) => gameBuilds.facts(threadId, build),
+        [WS_METHODS.gameBuildChanges]: ({ threadId, build }) => gameBuilds.changes(threadId, build),
         [WS_METHODS.gameBuildMeasure]: ({ threadId, build, skilled }) =>
           gameBuilds.measure(threadId, build, {
             queue: "person",
@@ -1850,6 +1851,7 @@ const layerWsRpc = (
         [WS_METHODS.gameSavePlay]: ({ threadId, name, kept }) =>
           gamePlays.save(threadId, { name, ...(kept === undefined ? {} : { kept }) }),
         [WS_METHODS.gameSavedPlays]: ({ threadId }) => gamePlays.saved(threadId),
+        [WS_METHODS.gameSavedPlay]: ({ threadId, name }) => gamePlays.savedPlay(threadId, name),
         [WS_METHODS.gameDeletePlay]: ({ threadId, name }) =>
           gamePlays.remove(threadId, name).pipe(Effect.as({})),
         [WS_METHODS.gameDecisions]: ({ threadId }) => gameDecisions.list(threadId),

@@ -510,7 +510,7 @@ export function GameFrame({
           {frozen ? (
             <StageHint>
               <PauseIcon className="size-3 shrink-0" aria-hidden="true" />
-              Paused · click something to point at it
+              Paused
             </StageHint>
           ) : away ? (
             <StageHint>

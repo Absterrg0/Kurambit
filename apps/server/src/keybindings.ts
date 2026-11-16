@@ -121,7 +121,8 @@ const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
  * an old name would read as an invalid entry, which stops the default sync for the whole file.
  */
 const RENAMED_KEYBINDING_COMMANDS: ReadonlyMap<string, KeybindingRule["command"]> = new Map([
-  ["game.chat.toggle", "game.tune.toggle"],
+  ["game.chat.toggle", "game.workbench.toggle"],
+  ["game.tune.toggle", "game.workbench.toggle"],
 ]);
 
 const renamedEntry = (entry: unknown): unknown => {

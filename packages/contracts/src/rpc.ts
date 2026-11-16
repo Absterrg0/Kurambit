@@ -35,6 +35,8 @@ import {
   GameSavedMedia,
 } from "./game.ts";
 import {
+  GameBuildChanges,
+  GameBuildChangesInput,
   GameBuildCompareInput,
   GameBuildComparison,
   GameBuildFacts,
@@ -57,6 +59,7 @@ import {
   GameDeletePlayInput,
   GameKeepPlayInput,
   GameKeepPlayResult,
+  GamePlay,
   GameReplayInput,
   GameReplayResult,
   GameSavePlayInput,
@@ -392,6 +395,7 @@ export const WS_METHODS = {
   gameKeepVersion: "game.keepVersion",
   gameBuildCompare: "game.buildCompare",
   gameBuildFacts: "game.buildFacts",
+  gameBuildChanges: "game.buildChanges",
   gameBuildMeasure: "game.buildMeasure",
   gameBuildPlay: "game.buildPlay",
   gameBuildRestore: "game.buildRestore",
@@ -401,6 +405,7 @@ export const WS_METHODS = {
   gameReplay: "game.replay",
   gameSavePlay: "game.savePlay",
   gameSavedPlays: "game.savedPlays",
+  gameSavedPlay: "game.savedPlay",
   gameDeletePlay: "game.deletePlay",
   gameDecisions: "game.decisions",
   gameDecide: "game.decide",
@@ -1581,6 +1586,11 @@ const WsGameBuildFactsRpc = Rpc.make(WS_METHODS.gameBuildFacts, {
   success: GameBuildFacts,
   error: gameError,
 });
+const WsGameBuildChangesRpc = Rpc.make(WS_METHODS.gameBuildChanges, {
+  payload: GameBuildChangesInput,
+  success: GameBuildChanges,
+  error: gameError,
+});
 const WsGameBuildMeasureRpc = Rpc.make(WS_METHODS.gameBuildMeasure, {
   payload: GameBuildMeasureInput,
   success: GameBuildFacts,
@@ -1629,6 +1639,12 @@ const WsGameSavePlayRpc = Rpc.make(WS_METHODS.gameSavePlay, {
 const WsGameSavedPlaysRpc = Rpc.make(WS_METHODS.gameSavedPlays, {
   payload: GameThreadInput,
   success: GameSavedPlaysResult,
+  error: gameError,
+});
+/** One saved play's recording, to replay on the Stage. */
+const WsGameSavedPlayRpc = Rpc.make(WS_METHODS.gameSavedPlay, {
+  payload: GameDeletePlayInput,
+  success: GamePlay,
   error: gameError,
 });
 const WsGameDeletePlayRpc = Rpc.make(WS_METHODS.gameDeletePlay, {
@@ -1691,6 +1707,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameBuildsRpc,
   WsGameBuildCompareRpc,
   WsGameBuildFactsRpc,
+  WsGameBuildChangesRpc,
   WsGameBuildMeasureRpc,
   WsGameBuildPlayRpc,
   WsGameBuildRestoreRpc,
@@ -1702,6 +1719,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameReplayRpc,
   WsGameSavePlayRpc,
   WsGameSavedPlaysRpc,
+  WsGameSavedPlayRpc,
   WsGameDeletePlayRpc,
   WsGameDecisionsRpc,
   WsGameDecideRpc,

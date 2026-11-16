@@ -118,9 +118,6 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
       }}
     >
       {selected?.trace !== undefined ? <StageTrace trace={selected.trace} /> : null}
-      {selected?.trace?.feel !== undefined ? (
-        <FeelReadout name={selected.thing.name} feel={selected.trace.feel} />
-      ) : null}
       {hovered !== null && tagged(hover?.rect) ? (
         <NameTag rect={hover.rect} thing={hovered} />
       ) : null}
@@ -262,46 +259,6 @@ function StageTrace({ trace }: { trace: GameStageTrace }) {
         </g>
       ))}
     </svg>
-  );
-}
-
-const SPARK_W = 132;
-const SPARK_H = 28;
-
-/**
- * The selection's ground speed over the same seconds as its path, oldest at the left, and its
- * top speed and last jump in numbers: what a tuned speed or jump did, without a stopwatch.
- */
-function FeelReadout({ name, feel }: { name: string; feel: NonNullable<GameStageTrace["feel"]> }) {
-  const top = Math.max(feel.top, 0.1);
-  const step = feel.speeds.length > 1 ? SPARK_W / (feel.speeds.length - 1) : 0;
-  const line = feel.speeds
-    .map(
-      (speed, i) =>
-        `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)} ${(SPARK_H - (Math.min(speed, top) / top) * SPARK_H).toFixed(1)}`,
-    )
-    .join(" ");
-  const jump = feel.jumps.at(-1);
-  return (
-    <div className="pointer-events-none absolute right-3 bottom-3 flex flex-col gap-1 rounded-md bg-black/70 px-2.5 py-2 text-stage-foreground">
-      <Text variant="caption" tone="inherit" numeric render={<span />}>
-        {name} · top speed {feel.top.toFixed(1)} m/s
-      </Text>
-      <svg width={SPARK_W} height={SPARK_H} className="overflow-visible" aria-hidden>
-        <path d={line} fill="none" className="stroke-stage-mark" strokeWidth={1.5} />
-      </svg>
-      {jump === undefined ? null : (
-        <Text
-          variant="caption"
-          tone="inherit"
-          numeric
-          render={<span className="text-stage-muted" />}
-        >
-          Last jump {jump.height.toFixed(2)} m high, {jump.seconds.toFixed(2)} s in the air,{" "}
-          {jump.distance.toFixed(1)} m long
-        </Text>
-      )}
-    </div>
   );
 }
 

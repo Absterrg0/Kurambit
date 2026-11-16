@@ -437,8 +437,39 @@ export const StudioRunReset = Schema.Struct({
   type: Schema.Literal("studio-run-reset"),
 });
 
+/**
+ * Where the run in play stands, as the recorder kept it this second (gamePlays.ts marks): the
+ * Workbench's values watch draws from these, one a second, so it never asks the game per frame.
+ */
+export const StudioMark = Schema.Struct({
+  type: Schema.Literal("studio-mark"),
+  mark: GamePlayMark,
+});
+
+export const GameLogLevel = Schema.Literals(["error", "warn", "log"]);
+export type GameLogLevel = typeof GameLogLevel.Type;
+export const GameLogLine = Schema.Struct({
+  level: GameLogLevel,
+  text: Schema.String.check(Schema.isMaxLength(500)),
+  /** Seconds since the page loaded. */
+  t: Schema.Finite,
+});
+export type GameLogLine = typeof GameLogLine.Type;
+
+/**
+ * The page's errors and console lines since the last batch, at most a few times a second: the
+ * Workbench's console. `dropped` counts lines a chatty game logged past the batch's room.
+ */
+export const StudioLog = Schema.Struct({
+  type: Schema.Literal("studio-log"),
+  lines: Schema.Array(GameLogLine).check(Schema.isMaxLength(50)),
+  dropped: Schema.optionalKey(NonNegativeInt),
+});
+
 export const GameToStageMessage = Schema.Union([
   StudioReady,
+  StudioMark,
+  StudioLog,
   StudioError,
   StudioVisibilityAck,
   StudioThings,

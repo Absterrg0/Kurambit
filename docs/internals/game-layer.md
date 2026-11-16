@@ -520,7 +520,7 @@ cannot both find none.
   is not proposed again.
 - **The play bot plays only when asked.** Writing one cost 4 to 10 minutes between steps and its
   one real-time run was noise, so no build's measure and no step plays it. The person asks with
-  the Inspector's Measure button, or asks their agent to prove the game can be won: it writes
+  Measure again in the Workbench's Checks, or asks their agent to prove the game can be won: it writes
   `.studio/bot/play.mjs` with the bot kit, wins one run with `game_play` op `bot`, and calls
   `game_check` op `facts` with `skilled: true`. Otherwise the skilled fact reads not measured with why
   (`deferred`, `no-play-bot`). `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own

@@ -73,6 +73,11 @@ export class GamePlays extends Context.Service<
     readonly saved: (
       threadId: ThreadId,
     ) => Effect.Effect<ReadonlyArray<GameSavedPlaySummary>, GameOperationError>;
+    /** One saved play's recording, by its name, for the Stage to replay. */
+    readonly savedPlay: (
+      threadId: ThreadId,
+      name: string,
+    ) => Effect.Effect<GamePlay, GameOperationError>;
     readonly remove: (threadId: ThreadId, name: string) => Effect.Effect<void, GameOperationError>;
     /**
      * `game_play` op `replay`: every saved play replayed on the folder as it is now; with none
@@ -222,6 +227,15 @@ const make = Effect.gen(function* () {
       }));
     });
 
+  const savedPlay: GamePlays["Service"]["savedPlay"] = (threadId, name) =>
+    Effect.gen(function* () {
+      const root = yield* projects.resolve(threadId);
+      const found = (yield* all(root)).plays.find((each) => each.name === name);
+      if (found === undefined)
+        return yield* refused(`${root}/${SAVED_DIR}`, `No saved play is called "${name}".`);
+      return found.play;
+    });
+
   const remove: GamePlays["Service"]["remove"] = (threadId, name) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
@@ -287,7 +301,7 @@ const make = Effect.gen(function* () {
       } satisfies GameReplayMoment;
     });
 
-  return GamePlays.of({ keep, replay, save, saved, remove, replaySaved, moment });
+  return GamePlays.of({ keep, replay, save, saved, savedPlay, remove, replaySaved, moment });
 });
 
 export const layer = Layer.effect(GamePlays, make);

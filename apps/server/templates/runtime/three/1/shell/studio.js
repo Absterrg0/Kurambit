@@ -24,11 +24,67 @@ const whereFrom = (url, line) => {
 const firstFrame = (stack) =>
   /\((\S+:\d+:\d+)\)|at (\S+:\d+:\d+)|@(\S+:\d+:\d+)/.exec(String(stack ?? ""));
 
+// The Workbench's console: the page's errors and console lines, sent up in batches a few times
+// a second, so a game that logs every frame costs one message per batch, not one per line.
+// Framed pages only; the clock and timer are the page's own, before a run's replay clock.
+const LOG_BATCH_MS = 250;
+const LOG_BATCH_LINES = 50;
+const pageMs = performance.now.bind(performance);
+const pageTimeout = window.setTimeout.bind(window);
+let logLines = [];
+let logDropped = 0;
+let logPending = false;
+const flushLog = () => {
+  logPending = false;
+  toStage({
+    type: "studio-log",
+    lines: logLines,
+    ...(logDropped > 0 ? { dropped: logDropped } : {}),
+  });
+  logLines = [];
+  logDropped = 0;
+};
+const logText = (args) =>
+  args
+    .map((arg) => {
+      if (typeof arg === "string") return arg;
+      if (arg instanceof Error) return arg.message;
+      try {
+        return JSON.stringify(arg) ?? String(arg);
+      } catch {
+        return String(arg);
+      }
+    })
+    .join(" ")
+    .slice(0, 500);
+const logLine = (level, args) => {
+  if (!framed) return;
+  if (logLines.length >= LOG_BATCH_LINES) logDropped += 1;
+  else logLines.push({ level, text: logText(args), t: Math.round(pageMs()) / 1000 });
+  if (logPending) return;
+  logPending = true;
+  pageTimeout(flushLog, LOG_BATCH_MS);
+};
+if (framed)
+  for (const [method, level] of [
+    ["log", "log"],
+    ["info", "log"],
+    ["warn", "warn"],
+    ["error", "error"],
+  ]) {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+      logLine(level, args);
+      original(...args);
+    };
+  }
+
 // Installed when this module first evaluates, before the game module runs,
 // so errors while the game loads land here too.
 export const errors = [];
 let told = false;
 const record = (message, stack, where) => {
+  logLine("error", [String(message)]);
   if (errors.length < 50)
     errors.push({
       message: String(message).slice(0, 500),

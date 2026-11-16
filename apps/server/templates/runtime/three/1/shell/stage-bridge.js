@@ -544,12 +544,36 @@ export function createStageBridge({
     };
   };
 
+  // The rects the Stage last heard, as keys: a drawn frame whose rect moved (a resize, a replay
+  // playing on under the freeze, the free camera) posts again, so the Stage's labels never sit
+  // where the thing was a layout ago.
+  let postedSelected = "";
+  let postedHover = "";
+  const rectKey = (rect) => (rect === undefined ? "" : `${rect.x},${rect.y},${rect.w},${rect.h}`);
+  const selectedRect = (seen) => {
+    const instances = selectedIndex === null ? [] : instancedOf(selected);
+    return instances.length > 0
+      ? instanceRect(instances, selectedIndex, seen)
+      : rectOf(selected, seen);
+  };
+  const postHover = (record, seen) => {
+    const rect = rectOf(record, seen);
+    postedHover = rectKey(rect);
+    toStage({
+      type: "studio-hover",
+      id: record?.id ?? null,
+      ...(rect === undefined ? {} : { rect }),
+    });
+  };
   const postSelected = () => {
     const seen = view();
-    if (selected === null) return toStage({ type: "studio-selected", thing: null });
+    if (selected === null) {
+      postedSelected = "";
+      return toStage({ type: "studio-selected", thing: null });
+    }
     const instances = selectedIndex === null ? [] : instancedOf(selected);
-    const rect =
-      instances.length > 0 ? instanceRect(instances, selectedIndex, seen) : rectOf(selected, seen);
+    const rect = selectedRect(seen);
+    postedSelected = rectKey(rect);
     const trace = instances.length > 0 ? undefined : traceOf(selected, seen);
     toStage({
       type: "studio-selected",
@@ -913,6 +937,12 @@ export function createStageBridge({
       renderer.toneMapping = toneMapping;
       renderer.setClearColor(clearColor, clearAlpha);
     }
+    // The labels follow the outline in the frame that drew it, and inside its timing: only a
+    // drawn frozen frame reads the rects again, and only a moved one is posted.
+    if (!active) return;
+    if (selected !== null && rectKey(selectedRect(seen)) !== postedSelected) postSelected();
+    if (hovered !== null && hovered !== selected && rectKey(rectOf(hovered, seen)) !== postedHover)
+      postHover(hovered, seen);
   };
 
   /**
@@ -1100,12 +1130,7 @@ export function createStageBridge({
           postSelected();
         } else if (record !== hovered) {
           hovered = record;
-          const rect = rectOf(record, view());
-          toStage({
-            type: "studio-hover",
-            id: record?.id ?? null,
-            ...(rect === undefined ? {} : { rect }),
-          });
+          postHover(record, view());
         }
         return redraw();
       }
@@ -1123,12 +1148,7 @@ export function createStageBridge({
         const record = data.id === null ? null : (things.get(data.id) ?? null);
         if (record === hovered) return;
         hovered = record;
-        const rect = rectOf(record, view());
-        toStage({
-          type: "studio-hover",
-          id: record?.id ?? null,
-          ...(rect === undefined ? {} : { rect }),
-        });
+        postHover(record, view());
         return redraw();
       }
       case "studio-things-request":
@@ -1228,6 +1248,10 @@ export function createStageBridge({
     /** A person's run on the Stage ended or was left: its play (shell/replay.js), for the Stage to keep. */
     play(recorded) {
       if (active) toStage({ type: "studio-play", play: recorded });
+    },
+    /** Where the person's run stands this second (replay.js mark): the Workbench's values watch. */
+    mark(entry) {
+      if (active) toStage({ type: "studio-mark", mark: entry });
     },
     /** How the Stage's replay went (shell.js stageReplay). */
     replayed(result) {

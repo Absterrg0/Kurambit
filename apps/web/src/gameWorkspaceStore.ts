@@ -29,6 +29,12 @@ export type GameStageRequest =
   | { readonly kind: "export" }
   | { readonly kind: "generated-art" };
 
+/** The Workbench's tabs beside the game: the run, its values, its art, the build's checks, history, decisions. */
+export const WORKBENCH_TABS = ["run", "tune", "art", "checks", "history", "decisions"] as const;
+export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];
+const isWorkbenchTab = (tab: unknown): tab is WorkbenchTab =>
+  (WORKBENCH_TABS as ReadonlyArray<unknown>).includes(tab);
+
 /** How much of the game's column the chat under it keeps, as a share of the column's height. */
 const GAME_CHAT_SHARE_DEFAULT = 0.38;
 const clampGameChatShare = (share: number) =>
@@ -65,6 +71,9 @@ interface GameWorkspaceStoreState {
   /** Off, then 3, 4 and 2 ways, then off again: the composer's chip, its key and the palette. */
   cycleTryWays: (threadKey: string) => void;
   clearTryWays: (threadKey: string) => void;
+  /** The Workbench tab last shown, for every game. */
+  workbenchTab: WorkbenchTab;
+  setWorkbenchTab: (tab: WorkbenchTab) => void;
 }
 
 const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
@@ -86,6 +95,8 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setGameHidden: (hidden) => set({ gameHidden: hidden }),
       pauseWhenAway: true,
       setPauseWhenAway: (on) => set({ pauseWhenAway: on }),
+      workbenchTab: "run",
+      setWorkbenchTab: (tab) => set({ workbenchTab: tab }),
       tryWays: {},
       cycleTryWays: (threadKey) =>
         set((state) => {
@@ -110,6 +121,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         chatShare: state.chatShare,
         gameHidden: state.gameHidden,
         pauseWhenAway: state.pauseWhenAway,
+        workbenchTab: state.workbenchTab,
       }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<GameWorkspaceStoreState> | null;
@@ -118,6 +130,7 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
           chatShare: clampGameChatShare(saved?.chatShare ?? current.chatShare),
           gameHidden: saved?.gameHidden === true,
           pauseWhenAway: saved?.pauseWhenAway !== false,
+          workbenchTab: isWorkbenchTab(saved?.workbenchTab) ? saved.workbenchTab : "run",
         };
       },
     },

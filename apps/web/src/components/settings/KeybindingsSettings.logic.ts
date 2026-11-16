@@ -390,7 +390,7 @@ export function buildKeybindingCommandOptions(
 // conflict warnings, without its group heading beside it.
 // One pattern: a short verb and its object, no articles; a toggle says Toggle.
 const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
-  "game.tune.toggle": "Show or hide Tune",
+  "game.workbench.toggle": "Show or hide the Workbench",
   "game.focus": "Focus game, or leave it",
   "game.freeze": "Freeze or resume game",
   "game.stepFrame": "Step frozen game one frame",

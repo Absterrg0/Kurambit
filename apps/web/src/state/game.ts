@@ -481,6 +481,13 @@ export const gameEnvironment = {
       buildFactsSignal(`${environmentId}\0${input.threadId}\0${refKey(input.build)}`),
     isFinal: (facts) => facts.state === "measured",
   }),
+  // What one build changed: read once, since a build's change never does.
+  buildChanges: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:buildChanges",
+    tag: WS_METHODS.gameBuildChanges,
+    staleTimeMs: 5 * 60_000,
+    idleTtlMs: 5 * 60_000,
+  }),
   buildCompare: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:buildCompare",
     tag: WS_METHODS.gameBuildCompare,
@@ -543,6 +550,10 @@ export const gameEnvironment = {
   savedPlays: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:savedPlays",
     tag: WS_METHODS.gameSavedPlays,
+  }),
+  savedPlay: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:savedPlay",
+    tag: WS_METHODS.gameSavedPlay,
   }),
   deletePlay: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:deletePlay",

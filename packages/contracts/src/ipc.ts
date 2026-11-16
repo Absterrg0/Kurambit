@@ -767,6 +767,8 @@ export interface PreviewAnnotationPayload {
   pageUrl: string;
   pageTitle: string | null;
   comment: string;
+  /** The chip's name when the comment is context rather than the person's words (the game's Stage). */
+  label?: string;
   elements: ReadonlyArray<PreviewAnnotationElementTarget>;
   regions: ReadonlyArray<PreviewAnnotationRegionTarget>;
   strokes: ReadonlyArray<PreviewAnnotationStrokeTarget>;
@@ -781,6 +783,7 @@ export const PreviewAnnotationPayloadSchema: Schema.Codec<PreviewAnnotationPaylo
     pageUrl: Schema.String,
     pageTitle: Schema.NullOr(Schema.String),
     comment: Schema.String,
+    label: Schema.optionalKey(Schema.String),
     elements: Schema.Array(PreviewAnnotationElementTargetSchema),
     regions: Schema.Array(PreviewAnnotationRegionTargetSchema),
     strokes: Schema.Array(PreviewAnnotationStrokeTargetSchema),

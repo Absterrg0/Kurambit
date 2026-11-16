@@ -2,15 +2,11 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { showGameTab, toggleGameTab, useGameTabShown } from "./gameRightPanel";
+import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameRightPanel";
 import { GameStagePlayControls, GameStageViewControls } from "./GameStageControls";
 import { GameKeepGoingButton } from "./GameKeepGoingButton";
 import {
   CircleStopIcon,
-  CrosshairIcon,
-  FlagIcon,
-  SlidersHorizontalIcon,
-  ClipboardCheckIcon,
   ChevronDownIcon,
   PaletteIcon,
   DownloadIcon,
@@ -18,14 +14,11 @@ import {
   StepForwardIcon,
   FolderOpenIcon,
   HistoryIcon,
-  MaximizeIcon,
-  MinimizeIcon,
   MoreHorizontalIcon,
-  PanelTopCloseIcon,
+  PanelRightIcon,
   PanelTopOpenIcon,
   PencilIcon,
   PlayIcon,
-  NotebookPenIcon,
   Redo2Icon,
   RefreshCwIcon,
   TriangleAlertIcon,
@@ -64,10 +57,8 @@ import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { GameRunCard, useStageRuns } from "./GameRunCard";
-import { GameDecisionsDialog } from "./GameDecisions";
+import { usePublishStageRuns, useStageRuns } from "./useStageRuns";
 import { useStageRewind } from "./GameRunTimeline";
-import { GameSavedPlaysDialog } from "./GameSavedPlays";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
@@ -100,7 +91,6 @@ import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
-import { GameVersionsBar } from "./GameVersionsBar";
 import { GameBuildHistory, type GameBuildSlot, type GameStripRequest } from "./GameBuildHistory";
 import { GameControlsMenu } from "./GameControlsMenu";
 import { GameExports } from "./GameExports";
@@ -206,9 +196,6 @@ const changedSincePhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, un
   const build = result.value.builds.find((each) => each.id === result.value.current);
   return build === undefined ? null : buildPhrase(buildName(build));
 };
-
-const buildsListOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
-  AsyncResult.isSuccess(result) ? result.value : null;
 
 const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) &&
@@ -426,15 +413,12 @@ function ThreadGameStage({
   const panelOpen = useRightPanelStore(
     (state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true,
   );
-  const tuneShown = useGameTabShown(threadRef, "tune");
-  const buildTabShown = useGameTabShown(threadRef, "build");
+  const workbenchShown = useWorkbenchShown(threadRef);
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const runs = useStageRuns(threadRef);
   const rewind = useStageRewind(threadRef, runs.receive);
-  const [playsOpen, setPlaysOpen] = useState(false);
-  const [decisionsOpen, setDecisionsOpen] = useState(false);
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
@@ -473,7 +457,6 @@ function ThreadGameStage({
     false,
   );
   const devViews = useStageDevViews(threadKey);
-  const bridgeStatus = useThreadStageBridge(threadKey, (state) => state.status, null);
   const keepGoing = useKeepGoing(threadRef);
   // A focus request, for the frame on screen when it came: each frame acts on a new one only.
   const [focusRequest, setFocusRequest] = useState<{
@@ -493,7 +476,6 @@ function ThreadGameStage({
   // stage's first read: an older one would greet the user with a build they
   // already know about. Revisions are the server's, so no clock is compared.
   const [seenRevision, setSeenRevision] = useState<number | null>(null);
-  const [fullscreen, setFullscreen] = useState(false);
   // The fold of what the play surface runs across reads; state, so the render
   // below can pin this serve without touching refs.
   const [frameFold, setFrameFold] = useState<GameFrameFold | null>(null);
@@ -551,7 +533,6 @@ function ThreadGameStage({
     input: { threadId: threadRef.threadId },
   });
   const hasBuild = useEnvironmentQuerySelector(buildsAtom, hasAnyBuild) === true;
-  const buildsList = useEnvironmentQuerySelector(buildsAtom, buildsListOf) ?? null;
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const folderName = useEnvironmentQuerySelector(buildsAtom, folderBuildName);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
@@ -742,11 +723,6 @@ function ThreadGameStage({
     previousTurnRunning.current = turnRunning;
     if (wasRunning && !turnRunning) refresh();
   }, [turnRunning, refresh]);
-  useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement !== null);
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
 
   const perform = async (stageAction: GameAction) => {
     if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
@@ -842,7 +818,7 @@ function ThreadGameStage({
         setExportOpen(true);
         return;
       case "generated-art":
-        showGameTab(threadRef, "look");
+        showWorkbench(threadRef, "art");
         return;
     }
   });
@@ -876,6 +852,23 @@ function ThreadGameStage({
     const key = frameFold?.key ?? "";
     setStudioError(studio.type === "studio-error" ? { key, text: studio.message } : null);
   });
+  // The Workbench's Run tab reads the runs and rewind this Stage owns.
+  usePublishStageRuns(threadKey, {
+    runs,
+    rewind,
+    onNote: setMessage,
+    onFocusGame: () => handleRequest({ kind: "focus" }, Date.now()),
+  });
+  // Pointing at a thing on the Stage opens its values in the Workbench's Tune tab.
+  const selectedThing = useThreadStageBridge(
+    threadKey,
+    (state) => state.selected?.thing.id ?? null,
+    null,
+  );
+  useEffect(() => {
+    if (selectedThing !== null) showWorkbench(threadRef, "tune");
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a new pick opens Tune; the ref is the thread's.
+  }, [selectedThing]);
   const takesRuns = useThreadStageBridge(
     threadKey,
     (state) => state.status === "ready" && state.capabilities.includes("rewind"),
@@ -1098,10 +1091,7 @@ function ThreadGameStage({
     operationState === "running" && data.operation !== null
       ? data.operation.message
       : `${busy === null ? "Working" : BUSY_LABELS[busy.action]}…`;
-  const fullscreenKey = shortcutLabelForCommand(keybindings, "game.fullscreen", {
-    context: { gameThread: true },
-  });
-  const inspectorKey = shortcutLabelForCommand(keybindings, "game.tune.toggle", {
+  const inspectorKey = shortcutLabelForCommand(keybindings, "game.workbench.toggle", {
     context: { gameThread: true },
   });
   const devKey = (
@@ -1336,9 +1326,9 @@ function ThreadGameStage({
                   <DownloadIcon />
                   Export…
                 </MenuItem>
-                <MenuItem onClick={() => showGameTab(threadRef, "look")}>
+                <MenuItem onClick={() => showWorkbench(threadRef, "art")}>
                   <PaletteIcon />
-                  Look…
+                  Art…
                 </MenuItem>
                 <MenuSeparator />
                 <MenuItem onClick={() => void navigate({ to: "/settings/game-tools" })}>
@@ -1400,20 +1390,6 @@ function ThreadGameStage({
             <MenuPopup align="end">
               <MenuGroup>
                 <MenuGroupLabel>On the Stage</MenuGroupLabel>
-                {engine?.stageBridge === true && stageKind === "live" ? (
-                  <MenuItem
-                    disabled={phase.kind !== "playing" || bridgeStatus === null}
-                    onClick={() => {
-                      toggleStageFreeze();
-                      // Focus the Stage, so Esc works here for a game without the bridge's keys.
-                      stageRef.current?.focus({ preventScroll: true });
-                    }}
-                  >
-                    <CrosshairIcon />
-                    {frozen ? "Play on" : "Freeze to point at things"}
-                    {freezeKey === null ? null : <MenuShortcut>{freezeKey}</MenuShortcut>}
-                  </MenuItem>
-                ) : null}
                 {stageKind !== "window" ? (
                   <MenuCheckboxItem
                     variant="switch"
@@ -1423,15 +1399,6 @@ function ThreadGameStage({
                   >
                     Pause when I click away
                   </MenuCheckboxItem>
-                ) : null}
-                {stageKind === "live" ? (
-                  <MenuItem
-                    disabled={data.previewUrl === null}
-                    onClick={() => setFrameFold(reloadFrame(frame, Date.now()))}
-                  >
-                    <RefreshCwIcon />
-                    Reload the game
-                  </MenuItem>
                 ) : null}
                 {stageKind === "export" ? (
                   <>
@@ -1445,23 +1412,6 @@ function ThreadGameStage({
                     </MenuItem>
                   </>
                 ) : null}
-                {stageKind !== "window" ? (
-                  <MenuItem disabled={phase.kind !== "playing"} onClick={toggleFullscreen}>
-                    {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
-                    {fullscreen ? "Leave fullscreen" : "Fullscreen"}
-                    {fullscreenKey === null ? null : <MenuShortcut>{fullscreenKey}</MenuShortcut>}
-                  </MenuItem>
-                ) : null}
-                {engine?.stageBridge === true ? (
-                  <MenuItem onClick={() => setPlaysOpen(true)}>
-                    <FlagIcon />
-                    Test plays…
-                  </MenuItem>
-                ) : null}
-                <MenuItem onClick={() => setDecisionsOpen(true)}>
-                  <NotebookPenIcon />
-                  Decisions…
-                </MenuItem>
                 {hasSteps ? (
                   <MenuItem onClick={() => setReelOpen(!reelOpen)}>
                     <FilmIcon />
@@ -1524,46 +1474,28 @@ function ThreadGameStage({
             </MenuPopup>
           </Menu>
           <GameKeepGoingButton threadRef={threadRef} />
-          {
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    aria-label={tuneShown ? "Hide Tune" : "Tune the game"}
-                    aria-pressed={tuneShown}
-                    onClick={() => toggleGameTab(threadRef, "tune")}
-                  />
-                }
-              >
-                <SlidersHorizontalIcon className="size-3.5" aria-hidden="true" />
-                Tune
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">
-                <TooltipLabel shortcut={inspectorKey}>
-                  Live values: jump height, speeds, timers
-                </TooltipLabel>
-              </TooltipPopup>
-            </Tooltip>
-          }
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
                   size="sm"
                   variant="ghost"
-                  aria-label={buildTabShown ? "Hide Build" : "Show the build's checks"}
-                  aria-pressed={buildTabShown}
-                  onClick={() => toggleGameTab(threadRef, "build")}
+                  aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
+                  aria-pressed={workbenchShown}
+                  onClick={() => toggleWorkbench(threadRef)}
                 />
               }
             >
-              <ClipboardCheckIcon className="size-3.5" aria-hidden="true" />
-              Build
+              <PanelRightIcon className="size-3.5" aria-hidden="true" />
+              Workbench
             </TooltipTrigger>
-            <TooltipPopup side="bottom">
-              <TooltipLabel>Checks, recordings and what changed</TooltipLabel>
+            <TooltipPopup side="bottom" className="max-w-xs">
+              <span className="flex flex-col gap-1">
+                <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
+                <span className="text-muted-foreground">
+                  Your run, values, art, checks, history and decisions
+                </span>
+              </span>
             </TooltipPopup>
           </Tooltip>
         </div>
@@ -1584,7 +1516,7 @@ function ThreadGameStage({
               viewport={data.viewport}
               gameName={gameName}
               hidden={hidden}
-              inspectorOpen={buildTabShown}
+              inspectorOpen={workbenchShown}
               onPair={setCompare}
               onClose={() => setCompare(null)}
             />
@@ -1740,18 +1672,11 @@ function ThreadGameStage({
             bridge={{ threadKey, enabled: engine?.stageBridge === true, freezeKey }}
             overlay={<GameStageOverlay threadKey={threadKey} />}
           />
-          <GameRunCard
-            threadRef={threadRef}
-            runs={runs}
-            rewind={rewind}
-            onNote={setMessage}
-            onFocusGame={() => handleRequest({ kind: "focus" }, Date.now())}
-          />
         </div>
       </div>
       <div
         data-game-controls=""
-        className="mx-auto flex h-11 w-full shrink-0 items-center gap-1.5"
+        className="mx-auto flex h-12 w-full shrink-0 items-center gap-1.5"
         style={{ maxWidth: column ?? undefined }}
       >
         {collapsed ? (
@@ -1777,17 +1702,32 @@ function ThreadGameStage({
         ) : null}
         <span className="min-w-2 flex-1" />
         <Popover open={buildsOpen} onOpenChange={setBuildsOpen}>
-          <PopoverTrigger
-            render={
-              <Button size="sm" variant="ghost" aria-label="Builds" disabled={compare !== null} />
-            }
-          >
-            <Text variant="meta" tone="default" truncate>
-              {/* The folder may hold no build while builds exist (the only one undone). */}
-              {playTarget?.label ?? folderName ?? (hasBuild ? "Builds" : "No builds yet")}
-            </Text>
-            <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
-          </PopoverTrigger>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PopoverTrigger
+                  render={
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label="Jump to a build"
+                      disabled={compare !== null}
+                    />
+                  }
+                />
+              }
+            >
+              <HistoryIcon aria-hidden="true" />
+              <Text variant="meta" tone="default" truncate>
+                {/* The folder may hold no build while builds exist (the only one undone). */}
+                {playTarget?.label ?? folderName ?? (hasBuild ? "Builds" : "No builds yet")}
+              </Text>
+              <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              <TooltipLabel>Jump to a build</TooltipLabel>
+            </TooltipPopup>
+          </Tooltip>
           {/* Below the bar, over the chat: choosing a build never covers the game. */}
           <PopoverPopup
             side="bottom"
@@ -1808,36 +1748,23 @@ function ThreadGameStage({
               onLive={backToLive}
               onCompare={setCompare}
               onInspect={(build) => {
+                // The Workbench's Checks tab, when open, follows the build jumped to.
                 inspectBuild({ threadKey, build: build.id, snapshot: build });
-                showGameTab(threadRef, "build");
                 setBuildsOpen(false);
               }}
             />
           </PopoverPopup>
         </Popover>
         {collapsed ? null : (
-          <>
-            <GameStageViewControls
-              threadRef={threadRef}
-              playing={phase.kind === "playing" && stageKind !== "window"}
-              onFullscreen={toggleFullscreen}
-              onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
-            />
-            <IconAction label="Hide the game" side="top" onClick={() => setGameHidden(true)}>
-              <PanelTopCloseIcon className="size-3.5" aria-hidden="true" />
-            </IconAction>
-          </>
+          <GameStageViewControls
+            threadRef={threadRef}
+            playing={phase.kind === "playing" && stageKind !== "window"}
+            onFullscreen={toggleFullscreen}
+            onHide={() => setGameHidden(true)}
+            onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
+          />
         )}
       </div>
-      {buildsList === null ? null : (
-        <GameVersionsBar
-          threadRef={threadRef}
-          builds={buildsList.builds}
-          playing={playTarget?.build ?? null}
-          current={buildsList.current}
-          onPlay={(build) => void playBuild(build)}
-        />
-      )}
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
         <DialogPopup className="max-w-2xl">
           <DialogHeader>
@@ -1868,17 +1795,6 @@ function ThreadGameStage({
           </DialogPanel>
         </DialogPopup>
       </Dialog>
-      <GameSavedPlaysDialog
-        threadRef={threadRef}
-        open={playsOpen}
-        onOpenChange={setPlaysOpen}
-        kept={runs.lastEnded}
-      />
-      <GameDecisionsDialog
-        threadRef={threadRef}
-        open={decisionsOpen}
-        onOpenChange={setDecisionsOpen}
-      />
     </section>
   );
 }

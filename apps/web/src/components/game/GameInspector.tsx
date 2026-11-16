@@ -8,7 +8,6 @@ import { stageBuildId } from "./gameBuildTimeline.logic";
 import {
   CheckIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   CircleIcon,
   ClockIcon,
   ColumnsIcon,
@@ -47,19 +46,12 @@ import {
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
-import { useDiffPanelStore } from "../../diffPanelStore";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
 import { cn } from "../../lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
-import {
-  useQuietThreadShell,
-  useThreadCheckpointSummaries,
-  useThreadProjection,
-} from "../../state/entities";
-import { readNextLine } from "@kurambit/shared/gameNextLine";
-import ChatMarkdown from "../ChatMarkdown";
+import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
@@ -108,8 +100,13 @@ import {
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
-import { useChangedSinceBase } from "./useChangedSinceBase";
 import { useTurnLanding } from "./useTurnLanding";
+import {
+  BuildChangelog,
+  BuildPerformance,
+  BuildSavedPlays,
+  BuildScreens,
+} from "./GameWorkbenchChecks";
 
 function Notice({ children }: { children: ReactNode }) {
   return (
@@ -168,8 +165,8 @@ function Rows({ children }: { children: ReactNode }) {
 // ─── Build ────────────────────────────────────────────────────────────────────
 
 /**
- * The right panel's Build tab: the build picked from the builds list or the chat, else the one on
- * the Stage, with its checks, what it changed and its recordings.
+ * The Workbench's Checks tab: the build picked from the history or the chat, else the one on the
+ * Stage, with what it changed, its checks, performance, screens, saved plays and recordings.
  */
 export function GameBuildDetail({ threadRef }: { threadRef: ScopedThreadRef }) {
   // The tab scrolls as a whole: a build's checks, changes and recordings are taller than a window.
@@ -327,8 +324,8 @@ function BuildDetail({
       <Recordings threadRef={threadRef} build={build} facts={factsData} />
     ) : null;
   return (
-    <div className="flex flex-col">
-      <div className="flex flex-col gap-3 border-b border-border p-4">
+    <div className="flex flex-col divide-y divide-border">
+      <div className="flex flex-col gap-3 px-4 py-3.5">
         {heading === null ? null : (
           <div className="flex items-start gap-2 rounded-md bg-accent px-2.5 py-1.5">
             <Text variant="caption" tone="default" render={<p className="min-w-0 flex-1" />}>
@@ -377,8 +374,8 @@ function BuildDetail({
           </div>
         )}
       </div>
-      {recordings === null ? null : <div className="border-b border-border p-4">{recordings}</div>}
-      <div className="border-b border-border p-4">
+      <BuildChangelog threadRef={threadRef} build={build} list={list} />
+      <div className="px-4 py-3.5">
         <Section
           title="Checks"
           detail={
@@ -395,21 +392,10 @@ function BuildDetail({
             factsData.state !== "never" &&
             factsData.state !== "measuring" &&
             factsData.state !== "queued" ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label="Measure again"
-                      onClick={() => void measure.send(build.id, true)}
-                    />
-                  }
-                >
-                  <RefreshCwIcon aria-hidden="true" />
-                </TooltipTrigger>
-                <TooltipPopup side="top">Measure again</TooltipPopup>
-              </Tooltip>
+              <Button size="xs" variant="ghost" onClick={() => void measure.send(build.id, true)}>
+                <RefreshCwIcon aria-hidden="true" />
+                Measure again
+              </Button>
             ) : undefined
           }
         >
@@ -443,10 +429,7 @@ function BuildDetail({
               ) : null}
             </div>
           ) : (
-            <>
-              <Checks threadRef={threadRef} facts={factsData} />
-              <SinceBase threadRef={threadRef} build={build} list={list} />
-            </>
+            <Checks threadRef={threadRef} facts={factsData} />
           )}
           {measureAnswer !== null && measureAnswer.failed ? (
             <Text variant="meta" tone="destructive" render={<p role="alert" />}>
@@ -455,14 +438,19 @@ function BuildDetail({
           ) : null}
         </Section>
       </div>
+      {factsData === null || factsData.state === "never" ? null : (
+        <>
+          <BuildPerformance facts={factsData} />
+          <BuildScreens threadRef={threadRef} facts={factsData} />
+          <BuildSavedPlays threadRef={threadRef} facts={factsData} />
+        </>
+      )}
       {build.available ? (
-        <div className="border-b border-border p-4">
+        <div className="px-4 py-3.5">
           <YourRun threadRef={threadRef} build={build} list={list} />
         </div>
       ) : null}
-      <div className="p-4">
-        <WhatChanged threadRef={threadRef} build={build} />
-      </div>
+      {recordings === null ? null : <div className="px-4 py-3.5">{recordings}</div>}
     </div>
   );
 }
@@ -540,65 +528,6 @@ function YourRun({
     </Section>
   );
 }
-
-/**
- * What the build changed in the readings since the build it was made from, in a line, with
- * the way to see them side by side: the change a turn made, without opening Compare. Only
- * once both are measured, so nothing being measured is ever said to differ.
- */
-function SinceBase({
-  threadRef,
-  build,
-  list,
-}: {
-  threadRef: ScopedThreadRef;
-  build: GameBuild;
-  list: GameBuildsResult;
-}) {
-  const requestStage = useGameWorkspaceStore((state) => state.requestStage);
-  const since = useChangedSinceBase(threadRef, build, list);
-  if (since === null) return null;
-  const { base, changed } = since;
-  const differ = changed.length;
-  const from = buildPhrase(buildName(base));
-  return (
-    <div className="flex flex-col gap-1 px-1">
-      <div className="flex items-center gap-2">
-        <Text variant="meta" tone="muted" render={<p className="min-w-0 flex-1" />}>
-          {differ === 0
-            ? `No reading differs from ${from}.`
-            : `${differ} ${differ === 1 ? "reading differs" : "readings differ"} from ${from}:`}
-        </Text>
-        {differ === 0 ? null : (
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => requestStage({ kind: "compare", pair: [refOf(base), refOf(build)] })}
-          >
-            <GitCompareIcon aria-hidden="true" />
-            Compare
-          </Button>
-        )}
-      </div>
-      {/* The count is never left to stand for the change: the readings that moved are named,
-          from the one before to this one. Compare has the rest. */}
-      {changed.slice(0, SINCE_BASE_SHOWN).map((row) => (
-        <Text key={row.id} variant="meta" tone="default" numeric render={<p />}>
-          {row.name}: <span className="text-muted-foreground">{row.a ?? "not measured"}</span> →{" "}
-          {row.b ?? "not measured"}
-        </Text>
-      ))}
-      {differ > SINCE_BASE_SHOWN ? (
-        <Text variant="meta" tone="muted" render={<p />}>
-          and {differ - SINCE_BASE_SHOWN} more in Compare
-        </Text>
-      ) : null}
-    </div>
-  );
-}
-
-/** How many changed readings the Build tab names before it sends the rest to Compare. */
-const SINCE_BASE_SHOWN = 2;
 
 const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextIcon } as const;
 
@@ -1123,83 +1052,6 @@ function CheckRow({
             </Text>
           ))}
         </ul>
-      ) : null}
-    </div>
-  );
-}
-
-/** What the build changed, folded to one row: it opens this chat's diff, else lists the files. */
-/**
- * What the build changed, in place: its files, most changed first. The code diff is a
- * deliberate second step, so a click here never turns the game screen into a code view.
- */
-/** A reply's own words, without the `Next:` line it ends on (the composer offers that). */
-const withoutNextLine = (reply: string): string => {
-  const lines = reply.trimEnd().split("\n");
-  return readNextLine(reply) === null ? reply.trim() : lines.slice(0, -1).join("\n").trim();
-};
-
-/**
- * What a build changed, in the agent's words: its reply for the turn that made the build. The
- * code itself is the diff, one click away in the side panel.
- */
-function WhatChanged({ threadRef, build }: { threadRef: ScopedThreadRef; build: GameBuild }) {
-  const turn =
-    build.source._tag === "turn" && build.source.threadId === threadRef.threadId
-      ? build.source.turn
-      : null;
-  const runId =
-    useThreadCheckpointSummaries(threadRef).find((entry) => entry.checkpointTurnCount === turn)
-      ?.runId ?? null;
-  const reply = useThreadProjection(
-    runId === null ? null : threadRef,
-  )?.projection.messages.findLast(
-    (message) => message.role === "assistant" && !message.streaming && message.runId === runId,
-  );
-  const words = reply === undefined ? "" : withoutNextLine(reply.text);
-  const count = build.fileCount ?? build.files.length;
-  if (words === "" && runId === null) return null;
-  const openDiff = () => {
-    if (runId === null) return;
-    useDiffPanelStore.getState().selectTurn(threadRef, runId);
-    useRightPanelStore.getState().open(threadRef, "diff");
-  };
-  return (
-    <Section
-      title="What changed"
-      aside={
-        runId === null ? undefined : (
-          <Button size="xs" variant="ghost" onClick={openDiff}>
-            {count === 0 ? "Code changes" : count === 1 ? "1 file" : `${count} files`}
-            <ChevronRightIcon aria-hidden="true" />
-          </Button>
-        )
-      }
-    >
-      {words === "" ? null : <ClampedReply text={words} threadRef={threadRef} />}
-    </Section>
-  );
-}
-
-/** The agent's reply, a few lines of it until asked for the rest: the whole of it is in the chat. */
-function ClampedReply({ text, threadRef }: { text: string; threadRef: ScopedThreadRef }) {
-  const [open, setOpen] = useState(false);
-  const long = text.length > 420;
-  return (
-    <div className="flex flex-col items-start gap-1">
-      <div className={cn("relative w-full", long && !open && "max-h-40 overflow-hidden")}>
-        <ChatMarkdown text={text} cwd={undefined} threadRef={threadRef} />
-        {long && !open ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-background to-transparent"
-          />
-        ) : null}
-      </div>
-      {long ? (
-        <Button size="xs" variant="ghost" className="-ms-2" onClick={() => setOpen(!open)}>
-          {open ? "Show less" : "Show all"}
-        </Button>
       ) : null}
     </div>
   );

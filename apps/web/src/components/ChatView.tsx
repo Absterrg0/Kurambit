@@ -1,22 +1,9 @@
 import { GameStage } from "./game/GameStage";
-import { GameBuildDetail, GameLookPanel } from "./game/GameInspector";
-import { GameTunePanel } from "./game/GameTune";
-import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
-import {
-  clearStageSelection,
-  readThreadStageSelection,
-  stepStageFrame,
-  toggleStageCannotLose,
-  toggleStageDevView,
-} from "./game/gameStageBridge";
-import { clearToldRun, readToldRun, useToldRun } from "./game/gameRunTell";
-import { stageFrameAttachment, stagePngAttachment } from "./game/gameStageFrame";
-import {
-  GamePointedChip,
-  GameSplitResize,
-  GameToldRunChip,
-  useLatestTurnUndone,
-} from "./game/GameDirectionBar";
+import { GameWorkbench } from "./game/GameWorkbench";
+import { toggleWorkbench } from "./game/gameRightPanel";
+import { useStageSelectionChip } from "./game/gameComposerContext";
+import { stepStageFrame, toggleStageCannotLose, toggleStageDevView } from "./game/gameStageBridge";
+import { GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -79,8 +66,6 @@ import {
   type ChatFileAttachment,
   CommandId,
   DEFAULT_MODEL,
-  gameRunAskContext,
-  gameStageAskContext,
   isProviderNativeSubagentThread,
   type EnvironmentId,
   type MessageId,
@@ -574,8 +559,6 @@ const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 // broadcast to all shell subscribers.
 const VISIT_DISPATCH_THROTTLE_MS = 10_000;
 // A game playing on the Stage: a key typed outside any field on its screen is meant for it.
-// Games whose Tune tab this session has opened once; closing it after that is the person's call.
-const TUNE_OFFERED = new Set<string>();
 const GAME_FRAME_ON_STAGE = '[data-game-stage="true"] iframe[data-game-frame]';
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 function useDraftHeroLayoutTransition(
@@ -1668,21 +1651,14 @@ export default function ChatView(props: ChatViewProps) {
   const previewPanelInlineSize = usePreviewPanelInlineSize(undefined, {
     container: workspaceLayoutElement,
     widthStorageKey: `kurambit:preview-panel-width:${activeThreadKey}`,
-    ...(isGameThread ? { defaultWidth: 360 } : {}),
+    ...(isGameThread ? { defaultWidth: 420 } : {}),
   });
   // A remembered Inspector width only means something while both panes fit. The
   // measurement uses the workspace row after the sidebar, and stops fitting
   // the stored width while compact so a narrow preview cannot rewrite it.
   const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
-  // A game opens with Tune beside it the first time this session, so its values are in view.
-  const panelHasTune = rightPanelState.surfaces.some((surface) => surface.kind === "tune");
-  useEffect(() => {
-    if (!isGameThread || activeThreadRef === null || panelHasTune) return;
-    const key = scopedThreadKey(activeThreadRef);
-    if (TUNE_OFFERED.has(key)) return;
-    TUNE_OFFERED.add(key);
-    showGameTab(activeThreadRef, "tune");
-  }, [isGameThread, activeThreadRef, panelHasTune]);
+  // The thing pointed at on the Stage rides in the composer as a chip, as a preview annotation does.
+  useStageSelectionChip(isGameThread ? activeThreadRef : null);
   const decideForGame = useGameDecide(isGameThread ? activeThreadRef : null);
   const requestGameStage = (request: GameStageRequest): false | void => {
     if (!isGameThread) return false;
@@ -3102,11 +3078,6 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
   const scheduleComposerFocusStable = useStableCallback(scheduleComposerFocus);
-  // "Tell the agent about this run" on the Stage: the person's words go in the composer next.
-  const toldRun = useToldRun(activeThreadKey);
-  useEffect(() => {
-    if (toldRun !== null) scheduleComposerFocusStable();
-  }, [toldRun, scheduleComposerFocusStable]);
   const useArtifactTemplate = (template: CodexArtifactTemplate) => {
     const composer = composerRef.current;
     if (!composer) return;
@@ -5320,10 +5291,10 @@ export default function ChatView(props: ChatViewProps) {
         openThreadFindStable();
       },
       "rightPanel.toggle": () => toggleRightPanelStable(),
-      "game.tune.toggle": () => {
-        // Only a game thread has the builds this shortcut shows and hides.
+      "game.workbench.toggle": () => {
+        // Only a game thread has a Workbench.
         if (!isGameThread || activeThreadRef === null) return false;
-        toggleGameTab(activeThreadRef, "tune");
+        toggleWorkbench(activeThreadRef);
       },
       // The Stage acts on these, so the keys, the palette and the timeline
       // share one path. A focused game never sees them: its frame is
@@ -5923,40 +5894,14 @@ export default function ChatView(props: ChatViewProps) {
         previewAnnotations: sendContextPreviewAnnotations,
         direct: directAnnotation,
       });
-    // A thing pointed at on the frozen Stage goes with the message: the frame,
-    // what the thing is and its values, so the agent can find it in the code.
-    const pointedForSend =
-      isGameThread && activeThreadRef !== null && !directAnnotation
-        ? readThreadStageSelection(scopedThreadKey(activeThreadRef))
-        : null;
-    const pointedFrame =
-      pointedForSend === null ? null : await stageFrameAttachment(pointedForSend.thing.name);
-    // A run the person is telling the agent about goes the same way: the frame when they asked,
-    // and its id, how it went and how to replay it.
-    const toldForSend =
-      isGameThread && activeThreadRef !== null && !directAnnotation
-        ? readToldRun(scopedThreadKey(activeThreadRef))
-        : null;
-    const toldFrame =
-      toldForSend?.frame == null ? null : await stagePngAttachment(toldForSend.frame, "run");
-    const composerImages = [
-      ...mergedComposerImages,
-      ...(pointedFrame === null ? [] : [pointedFrame]),
-      ...(toldFrame === null ? [] : [toldFrame]),
-    ];
+    const composerImages = mergedComposerImages;
     // A direct "send annotation" writes the draft and sends in the same tick; the reference
     // must be in the text now, not after the next render.
     const promptForSend = directAnnotation
       ? ensureInlineContextReferences(promptRef.current, [
           previewAnnotationContextReference(directAnnotation.annotation),
         ])
-      : pointedForSend === null && toldForSend === null
-        ? promptRef.current
-        : [
-            promptRef.current.trimEnd(),
-            ...(pointedForSend === null ? [] : [gameStageAskContext(pointedForSend)]),
-            ...(toldForSend === null ? [] : [gameRunAskContext(toldForSend)]),
-          ].join("\n\n");
+      : promptRef.current;
     if (queuedRunEdit.isEditing) {
       // Edit mode repurposes the composer: sending saves the queued message
       // in place instead of dispatching a new turn.
@@ -6701,8 +6646,6 @@ export default function ChatView(props: ChatViewProps) {
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
-    if (pointedForSend !== null) clearStageSelection();
-    if (toldForSend !== null) clearToldRun();
 
     let firstComposerImageName: string | null = null;
     if (composerImagesSnapshot.length > 0) {
@@ -7614,13 +7557,11 @@ export default function ChatView(props: ChatViewProps) {
         newShortcutLabel: newTerminalShortcutLabel ?? undefined,
         closeShortcutLabel: closeTerminalShortcutLabel ?? undefined,
       }}
-      gameTune={
+      gameWorkbench={
         isGameThread ? (
-          <GameTunePanel threadRef={activeThreadRef} onAsk={askAgentToFixStable} />
+          <GameWorkbench threadRef={activeThreadRef} onAsk={askAgentToFixStable} />
         ) : null
       }
-      gameLook={isGameThread ? <GameLookPanel threadRef={activeThreadRef} /> : null}
-      gameBuild={isGameThread ? <GameBuildDetail threadRef={activeThreadRef} /> : null}
       files={{
         projectName: activeProject?.title ?? null,
         workspaceRoot: activeWorkspaceRoot,
@@ -8272,12 +8213,6 @@ export default function ChatView(props: ChatViewProps) {
                   : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
               }
             >
-              {gameLayout ? (
-                <div className="pointer-events-auto mx-auto w-full max-w-(--chat-content-max-width)">
-                  <GamePointedChip threadRef={activeThreadRef} />
-                  <GameToldRunChip threadRef={activeThreadRef} />
-                </div>
-              ) : null}
               {composerLane}
             </div>
 

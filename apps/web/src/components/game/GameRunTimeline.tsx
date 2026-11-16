@@ -246,8 +246,9 @@ const stepsAt = (timeline: Timeline) =>
 export type StageRewind = ReturnType<typeof useStageRewind>;
 
 /**
- * The run's timeline: a scrubber over its seconds with its losses and its ending marked. Dragging
- * shows the second; letting go replays the run to it, frozen there. Redraws only on input.
+ * The run's timeline, in the Workbench's Run tab: a scrubber over its seconds with its losses and
+ * its ending marked. Dragging shows the second; letting go replays the run to it, frozen there.
+ * Redraws only on input.
  */
 export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
   const { timeline, busy } = rewind;
@@ -260,12 +261,7 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
   const ticks = Array.from({ length: Math.floor(length / every) }, (_, i) => (i + 1) * every);
   return (
     <div className="flex w-full min-w-0 items-center gap-2" data-game-run-timeline="">
-      <Text
-        variant="caption"
-        tone="inherit"
-        numeric
-        render={<span className="w-10 shrink-0 text-end" />}
-      >
+      <Text variant="caption" tone="default" numeric render={<span className="w-9 shrink-0" />}>
         {clockLabel(at)}
       </Text>
       <Slider.Root
@@ -287,12 +283,12 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
         aria-label="Rewind the run to a second"
       >
         <Slider.Control className="flex h-6 w-full touch-none items-center">
-          <Slider.Track className="relative h-1 w-full rounded-full bg-white/15">
+          <Slider.Track className="relative h-1 w-full rounded-full bg-muted">
             {ticks.map((second) => (
               <span
                 key={second}
                 aria-hidden="true"
-                className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-white/25"
+                className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-border"
                 style={{ left: `${(second / length) * 100}%` }}
               />
             ))}
@@ -311,7 +307,7 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
                 length={length}
                 label={mark.label}
                 className={cn(
-                  "size-2 rounded-full ring-1 ring-black/40",
+                  "size-2 rounded-full ring-2 ring-background",
                   mark.kind === "won"
                     ? "bg-success"
                     : mark.kind === "loss"
@@ -320,15 +316,15 @@ export function GameRunTimeline({ rewind }: { rewind: StageRewind }) {
                 )}
               />
             ))}
-            <Slider.Thumb className="size-3 rounded-full bg-stage-foreground shadow-sm ring-2 ring-black/40 outline-none focus-visible:ring-ring" />
+            <Slider.Thumb className="size-3 rounded-full bg-foreground shadow-sm ring-2 ring-background outline-none focus-visible:ring-ring" />
           </Slider.Track>
         </Slider.Control>
       </Slider.Root>
       <Text
         variant="caption"
-        tone="inherit"
+        tone="muted"
         numeric
-        render={<span className="shrink-0 opacity-75" />}
+        render={<span className="w-9 shrink-0 text-end" />}
       >
         {clockLabel(length)}
       </Text>

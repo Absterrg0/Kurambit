@@ -1,87 +1,14 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
-import { CrosshairIcon, PlayIcon, XIcon } from "lucide-react";
-import { playOutcomeWords, type RunId, type ScopedThreadRef } from "@kurambit/contracts";
-import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import type { RunId, ScopedThreadRef } from "@kurambit/contracts";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
-import { Text } from "../ui/text";
-import { clearToldRun, useToldRun } from "./gameRunTell";
-import { clearStageSelection, useThreadStageBridge } from "./gameStageBridge";
 
 import { useTurnUndo } from "./useBuildActions";
 
 /** The latest turn's build was undone: its reply and its Next no longer describe the game. */
 export function useLatestTurnUndone(threadRef: ScopedThreadRef | null, runId: RunId | null) {
   return useTurnUndo(threadRef, runId).action?.kind === "redo";
-}
-
-/**
- * The thing pointed at on the frozen Stage, attached to the next message: the
- * frame, what the thing is and its values go with it. The × stops pointing.
- */
-export function GamePointedChip({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const thing = useThreadStageBridge(
-    scopedThreadKey(threadRef),
-    (state) => state.selected?.thing ?? null,
-    null,
-  );
-  if (thing === null) return null;
-  return (
-    <div className="flex min-w-0 items-center gap-2 px-4 pb-1.5" data-game-pointed="">
-      <span className="flex h-6 min-w-0 items-center gap-1.5 rounded-md bg-primary/15 ps-2 pe-0.5 text-strong-foreground">
-        <CrosshairIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <Text variant="meta" tone="inherit" truncate>
-          {thing.instance === undefined ? thing.name : `${thing.name} #${thing.instance.index + 1}`}
-        </Text>
-        <Button
-          size="icon-micro"
-          variant="ghost"
-          aria-label={`Stop pointing at the ${thing.name.toLowerCase()}`}
-          onClick={clearStageSelection}
-        >
-          <XIcon aria-hidden="true" />
-        </Button>
-      </span>
-      <Text variant="caption" tone="muted" truncate>
-        Your next message is about this
-      </Text>
-    </div>
-  );
-}
-
-/**
- * The run the person is telling the agent about from the Stage, attached to the next message:
- * its frame, its id and how it went go with it. The × takes it off.
- */
-export function GameToldRunChip({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const told = useToldRun(scopedThreadKey(threadRef));
-  if (told === null) return null;
-  const words = told.paused
-    ? `Run paused at ${Math.round(told.outcome.seconds)} s`
-    : `Run ${playOutcomeWords(told.outcome)}`;
-  return (
-    <div className="flex min-w-0 items-center gap-2 px-4 pb-1.5" data-game-told-run="">
-      <span className="flex h-6 min-w-0 items-center gap-1.5 rounded-md bg-primary/15 ps-2 pe-0.5 text-strong-foreground">
-        <PlayIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <Text variant="meta" tone="inherit" truncate>
-          {words}
-        </Text>
-        <Button
-          size="icon-micro"
-          variant="ghost"
-          aria-label="Stop telling the agent about this run"
-          onClick={clearToldRun}
-        >
-          <XIcon aria-hidden="true" />
-        </Button>
-      </span>
-      <Text variant="caption" tone="muted" truncate>
-        Your next message is about this run
-      </Text>
-    </div>
-  );
 }
 
 /**

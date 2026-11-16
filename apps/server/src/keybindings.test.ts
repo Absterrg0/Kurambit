@@ -332,7 +332,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       assert.deepStrictEqual(
         persisted.filter((entry) => entry.command.startsWith("game.") && entry.key === "alt+t"),
-        [{ ...old, command: "game.tune.toggle" }],
+        [{ ...old, command: "game.workbench.toggle" }],
       );
       assert.ok(persisted.some((entry) => entry.command === "composer.sendBackground"));
     }).pipe(Effect.provide(layerKeybindings())),

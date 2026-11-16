@@ -2,7 +2,54 @@
 
 import { showOpenGameDialog, useNewGame } from "./game/gameEntryStore";
 import { useTurnUndo } from "./game/useBuildActions";
-import { showGameTab, toggleGameTab } from "./game/gameRightPanel";
+import { showWorkbench, toggleWorkbench } from "./game/gameRightPanel";
+
+/** The Workbench's tabs as the palette finds them. */
+const WORKBENCH_PALETTE: ReadonlyArray<{
+  readonly tab: WorkbenchTab;
+  readonly title: string;
+  readonly searchTerms: ReadonlyArray<string>;
+}> = [
+  {
+    tab: "run",
+    title: "Run",
+    searchTerms: ["run", "rewind", "timeline", "values", "console", "errors", "logs", "test play"],
+  },
+  {
+    tab: "tune",
+    title: "Tune",
+    searchTerms: ["tune", "values", "sliders", "feel", "speed", "jump"],
+  },
+  {
+    tab: "art",
+    title: "Art",
+    searchTerms: ["art", "look", "style", "characters", "palette", "generated"],
+  },
+  {
+    tab: "checks",
+    title: "Checks",
+    searchTerms: [
+      "checks",
+      "build",
+      "facts",
+      "performance",
+      "screens",
+      "recordings",
+      "measure",
+      "what changed",
+    ],
+  },
+  {
+    tab: "history",
+    title: "History",
+    searchTerms: ["history", "builds", "undo", "redo", "compare", "versions", "try", "keep"],
+  },
+  {
+    tab: "decisions",
+    title: "Decisions",
+    searchTerms: ["decisions", "remember", "memory", "notes"],
+  },
+];
 import { useKeepGoing } from "./game/useKeepGoing";
 import {
   CHARACTER_ROUTES,
@@ -95,7 +142,6 @@ import {
   SettingsIcon,
   SkipForwardIcon,
   SquarePenIcon,
-  ShapesIcon,
   SwatchBookIcon,
   StepForwardIcon,
   SquarePlusIcon,
@@ -167,7 +213,11 @@ import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { gameEnvironment, stageAfterGameAction } from "../state/game";
-import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
+import {
+  useGameWorkspaceStore,
+  type GameStageRequest,
+  type WorkbenchTab,
+} from "../gameWorkspaceStore";
 import { useIsGameThread, useIsGameThreadStatus } from "../hooks/useIsGameThread";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -1599,21 +1649,23 @@ function OpenCommandPaletteDialog(props: {
       });
     actionItems.push({
       kind: "action",
-      value: "action:game-toggle-tune",
-      title: "Show or hide Tune",
-      searchTerms: ["tune", "values", "inspector", "panel", "hide", "show", "game"],
+      value: "action:game-toggle-workbench",
+      title: "Show or hide the Workbench",
+      searchTerms: ["workbench", "panel", "inspector", "hide", "show", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "game.tune.toggle",
-      run: async () => toggleGameTab(threadRef, "tune"),
+      shortcutCommand: "game.workbench.toggle",
+      run: async () => toggleWorkbench(threadRef),
     });
-    actionItems.push({
-      kind: "action",
-      value: "action:game-toggle-build",
-      title: "Show or hide Build",
-      searchTerms: ["build", "checks", "facts", "recordings", "measure", "panel", "game"],
-      icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
-      run: async () => toggleGameTab(threadRef, "build"),
-    });
+    for (const tab of WORKBENCH_PALETTE) {
+      actionItems.push({
+        kind: "action",
+        value: `action:game-workbench-${tab.tab}`,
+        title: `Workbench: ${tab.title}`,
+        searchTerms: ["workbench", "game", ...tab.searchTerms],
+        icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+        run: async () => showWorkbench(threadRef, tab.tab),
+      });
+    }
     const requestStage = (request: GameStageRequest) => async () => {
       useGameWorkspaceStore.getState().requestStage(request);
     };
@@ -1719,14 +1771,6 @@ function OpenCommandPaletteDialog(props: {
       searchTerms: ["hide", "show", "fold", "collapse", "chat", "stage", "game"],
       icon: <PanelTopCloseIcon className={ITEM_ICON_CLASS} />,
       run: async () => useGameWorkspaceStore.getState().setGameHidden(!gameHidden),
-    });
-    actionItems.push({
-      kind: "action",
-      value: "action:game-look",
-      title: "Look…",
-      searchTerms: ["look", "style", "art", "characters", "palette", "game"],
-      icon: <ShapesIcon className={ITEM_ICON_CLASS} />,
-      run: async () => showGameTab(threadRef, "look"),
     });
     // The game's latest turn build, the one the timeline selects by default.
     const latestBuild = turnUndo.view?.build ?? null;

@@ -1,30 +1,32 @@
 import type { ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
+import { useGameWorkspaceStore, type WorkbenchTab } from "../../gameWorkspaceStore";
 import { useRightPanelStore } from "../../rightPanelStore";
 
 /**
- * A game's inspectors are tabs of T3's right panel: Tune (live values), Look (its style) and Build
- * (a build's checks, changes and recordings). The game, its chat and its builds stay in the column.
+ * A game's Workbench is one tab of T3's right panel, with tabs of its own (Run, Tune, Checks,
+ * History, Decisions). The game, its chat and its controls stay in the column.
  */
-type GameTab = "tune" | "look" | "build";
-
-const shownTab = (ref: ScopedThreadRef) => {
+const workbenchShown = (ref: ScopedThreadRef) => {
   const state = useRightPanelStore.getState().byThreadKey[scopedThreadKey(ref)];
-  return state?.isOpen === true ? state.activeSurfaceId : null;
+  return state?.isOpen === true && state.activeSurfaceId === "workbench";
 };
 
-export const showGameTab = (ref: ScopedThreadRef, tab: GameTab) =>
-  useRightPanelStore.getState().open(ref, tab);
-
-/** The tab, or the panel closed when that tab is what it shows. */
-export const toggleGameTab = (ref: ScopedThreadRef, tab: GameTab) => {
-  if (shownTab(ref) === tab) useRightPanelStore.getState().close(ref);
-  else showGameTab(ref, tab);
+/** Opens the Workbench, on `tab` when given, else the tab it last showed. */
+export const showWorkbench = (ref: ScopedThreadRef, tab?: WorkbenchTab) => {
+  if (tab !== undefined) useGameWorkspaceStore.getState().setWorkbenchTab(tab);
+  useRightPanelStore.getState().open(ref, "workbench");
 };
 
-export const useGameTabShown = (ref: ScopedThreadRef, tab: GameTab) =>
+/** The Workbench, or the panel closed when the Workbench is what it shows. */
+export const toggleWorkbench = (ref: ScopedThreadRef) => {
+  if (workbenchShown(ref)) useRightPanelStore.getState().close(ref);
+  else showWorkbench(ref);
+};
+
+export const useWorkbenchShown = (ref: ScopedThreadRef) =>
   useRightPanelStore((state) => {
     const thread = state.byThreadKey[scopedThreadKey(ref)];
-    return thread?.isOpen === true && thread.activeSurfaceId === tab;
+    return thread?.isOpen === true && thread.activeSurfaceId === "workbench";
   });
