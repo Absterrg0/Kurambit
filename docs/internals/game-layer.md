@@ -401,21 +401,14 @@ hand has no stamp, so only fresh sessions read it.
   not comparable, and a too-slow run in software is "not measured", never the game's slowness.
   The browser keeps what each backend printed to the probe, and a play drawn in software leaves
   the performance fact "not measured" with that output: a harness fault, never the game's.
-- **On a GPU, the no-input and random-input plays share it.** Measured on the Iris Xe laptop
-  (5 builds of 5 games, 3 runs each way): facts took 132 s alone and 70 s shared at the median,
-  with no verdict changed beyond the run-to-run noise and no play re-played. A shared play whose
-  reading sharing could explain is played again alone before it is stored (`sharedPlaySuspect`).
-  In SwiftShader plays slowed from 1× to 0.08× real time beside each other, so there they take
-  turns; the tester's bot always plays alone. Revisit only with new measurements.
 - **One play lane, by who waits.** A build's measure and `game_check`'s play each hold the
   server's one [play lane](../../apps/server/src/game/playLane.ts), so no two of them share the
-  GPU and none of their readings needs a "shared" caveat; a measure's two lanes above are one
-  hold. Holds go to an agent's check, then a person's measure, then a chat turn's, then the
-  rest, first asked within each. A holder that a waiter outranks is interrupted at once and runs
+  GPU and none of their readings needs a "shared" caveat. Holds go to an agent's check, then a
+  person's measure, then a chat turn's, then the rest, first asked within each. A holder that a waiter outranks is interrupted at once and runs
   again from its row on its next turn, so a half-played tier is never a fact, and the waiter
   waits only for that teardown (a bot run's stop, bounded in GameBot) plus the holds of its own
   rank ahead of it. An agent's `game_play` op `bot` and explore sessions are outside the lane, and
-  another program on the GPU was never visible: `sharedPlaySuspect` covers what that slows.
+  another program on the GPU is not visible to it.
 - **Only a measurement is a fact.** A tool or machine fault is stored as "not measured": with
   `retry` when waiting can clear it, or as `standing` when it needs a person (their next measure
   tries it again). Tier endings are read from the shell's run state, never from a bot's word.
@@ -424,9 +417,8 @@ hand has no stamp, so only fresh sessions read it.
   reads meaning out of `why`, which is the agents' text and free to change.
 - **Facts skip what is already known or not needed.** The boot check is not run again when this
   server's own final `game_check` (op `final`, the one that also plays the scene report and the
-  QA play) booted the same bytes (engine folder and `game.json`) clean, and the
-  tester's bot plays a chat turn's build only while keep going, which judges by it, is on; a
-  person's measure and keep going's own measures always play it.
+  QA play) booted the same bytes (engine folder and `game.json`) clean, and the play bot plays a
+  build only when asked (below).
 - **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the
   `game-builds` run-ref folder. The record is written before the folder moves, and a restart
   settles a restore it cut short by running its moves again.

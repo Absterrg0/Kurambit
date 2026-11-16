@@ -8,10 +8,11 @@ still open: see [Godot and Unity games](#godot-and-unity-games).
 
 ## Game tools
 
-three.js games play without anything installed, but measuring them needs **ffmpeg**: Kurambit
-records each bot play with it, and a build's play facts and **Keep going** are read from those
-recordings. Without ffmpeg a build is only checked for booting, and Keep going stops at once,
-since it could not judge a step; once ffmpeg is installed, measure the build again. Art tools are programs you install yourself, the same
+three.js games play without anything installed, but part of measuring them needs **ffmpeg**:
+Kurambit records each bot play with it, and a build's random-input play (errors, freezes, frame
+rate) is read from that recording. Without ffmpeg that play reads **Not measured**, while booting,
+the QA play and saved test plays are still measured; once ffmpeg is installed, measure the build
+again. Art tools are programs you install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
 **Settings → Game tools** shows each one's status, where it was found, and a **Get**
 button for the vendor's download page when it is missing or the wrong version. After installing
@@ -429,7 +430,7 @@ could not measure says **Not measured** and why, and never counts as a result: i
 
 ## Keep a video or image
 
-Bot videos, explore screenshots and the blind players' frame sheets live with the game's logs, which
+Bot videos and play screenshots live with the game's logs, which
 **Settings → Storage** deletes after a while (14 days by default). To keep one, ask your agent to
 save it, or choose **Save** under it where Kurambit shows it. The copy goes
 into the game's `saved/` folder under a dated name such as `2026-11-05 round 2 bot run.mp4`; open it
@@ -480,6 +481,6 @@ Each game is a self-contained git repository you can move, back up, or open on a
   credits its library assets' licences ask for.
 - `art/blender/` holds the editable `.blend` files.
 - `builds/` holds exports and operation logs and is not committed.
-- `.studio/` holds the game's bots, their reports, kept play saves, saved test plays and
+- `.studio/` holds the game's bots, their run log, kept play saves, saved test plays and
   `decisions.md`, what you decided about the game.
 - `saved/` holds the videos and images you chose to keep; it is not committed.
