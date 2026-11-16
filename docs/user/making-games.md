@@ -303,6 +303,12 @@ other tabs. `mod+Alt+C` shows or hides Tune.
   **Your run** in a build's checks plays it again on that build, input for input, and says how it
   ends there and the first second it played differently: "won at 41 s" on one build, "lost at
   12 s" on the next. Your agent can do the same on the game as it is now.
+- **Your agent knows how you played (three.js).** Your next message tells the agent about the
+  runs you played since its last turn: how each ended, or when you left it (Retry, the menu, a
+  reload), and where you stood. It can replay any of them to a moment and look at it. To talk
+  about one run, press **Tell the agent about this run** when it ends, or while the game is
+  frozen: its frame goes with your next message. The first time you win, **Keep this win as a
+  test play** saves it as a test play in one click.
 - **Test plays (three.js).** After a run ends, the Stage's **⋯** menu → **Test plays…** saves it
   under a name, such as a win or the run where a bug showed. Every build from then on replays it,
   and its checks say whether each saved play still ends the same way. A run that does not replay

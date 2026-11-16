@@ -296,7 +296,10 @@ turn input's `harnessInstructions`, which run execution fills from the cwd's `ga
 adapter sends where it sends the orchestration text. The MCP `initialize` instructions cannot
 carry them: Codex keeps about its first line, Claude cuts at 4,096 characters, Grok at 2,048.
 Codex also cuts each `additional_context` value past 4,000 bytes, so long texts go in several keys
-(`codexContextEntries`).
+(`codexContextEntries`). The rules must change rarely: Claude reads them into the system prompt
+of a process it keeps across turns, and Cursor sends them on the first prompt only. What changes
+every turn, the person's runs since the last one (`personRunsForWorkspace`), goes in front of the
+turn's message text instead, which every provider reads each turn.
 
 ## Builds and facts
 
