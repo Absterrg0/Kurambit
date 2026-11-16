@@ -87,6 +87,43 @@ const humanName = (key) => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
+// An ASSETS model's own look, by its asset path: a scale and a tint over its colours, tuned on the
+// Stage or in the Workbench's Art tab like any value and kept in tune.json, so a change is a
+// build. At their defaults nothing of the model is touched.
+const ASSET_LOOK = { scale: 1, tint: 0xffffff };
+const ASSET_LOOK_RANGES = {
+  scale: { min: 0.1, max: 10, step: 0.05, unit: "×" },
+  tint: { min: 0, max: 0xffffff, step: 1, label: "Tint", colour: true },
+};
+/**
+ * Scales a copy's insides about its origin, so the game's own scale of the copy multiplies it,
+ * and multiplies its materials' colours (shared by every copy of the model) by the tint.
+ */
+const applyAssetLook = (copy, look) => {
+  const before = copy.userData.kurambitScale ?? 1;
+  const scale = Number.isFinite(look.scale) && look.scale > 0 ? look.scale : 1;
+  if (scale !== before) {
+    for (const child of copy.children) {
+      child.position.multiplyScalar(scale / before);
+      child.scale.multiplyScalar(scale / before);
+    }
+    copy.userData.kurambitScale = scale;
+  }
+  const tint = Number.isFinite(look.tint) ? look.tint : 0xffffff;
+  copy.traverse((node) => {
+    for (const material of [node.material ?? []].flat()) {
+      if (material.color === undefined) continue;
+      // Its own colour, as a number, so a material the game clones keeps it readable.
+      if (material.userData.kurambitColor === undefined) {
+        if (tint === 0xffffff) continue;
+        material.userData.kurambitColor = material.color.getHex();
+      }
+      material.color.setHex(material.userData.kurambitColor).multiply(TINT.setHex(tint));
+    }
+  });
+};
+const TINT = new THREE.Color();
+
 // Tuned values outlive runs: a Retry keeps what the person set on the Stage.
 let saved = {};
 const tunes = new Map();
@@ -183,6 +220,9 @@ export function createStageBridge({
   let traceClock = 0;
   const things = new Map();
   const byObject = new Map();
+  // Asset paths whose look values are tuned, and this run's copies of each.
+  const lookIds = new Set();
+  const lookCopies = new Map();
   const named = new Map();
 
   // One thing: { id, name, kind, object, asset, auto, placeholder, ring, head, count }.
@@ -269,17 +309,23 @@ export function createStageBridge({
     if (things.get(label)?.placeholder === true) {
       things.delete(label);
       add({ id: label, name: label, kind: source.kind, object: copy, asset, auto: false });
-      return;
+    } else {
+      const { id, n } = unique(path, "#");
+      add({
+        id,
+        name: n === null ? label : `${label} ${n}`,
+        kind: source.kind,
+        object: copy,
+        asset,
+        auto: true,
+      });
     }
-    const { id, n } = unique(path, "#");
-    add({
-      id,
-      name: n === null ? label : `${label} ${n}`,
-      kind: source.kind,
-      object: copy,
-      asset,
-      auto: true,
-    });
+    lookIds.add(path);
+    const look = tune(path, ASSET_LOOK, ASSET_LOOK_RANGES);
+    let copies = lookCopies.get(path);
+    if (copies === undefined) lookCopies.set(path, (copies = new Set()));
+    copies.add(copy);
+    applyAssetLook(copy, look);
   };
 
   /** ctx.tune: the live values of one thing, from tune.json over the game's defaults. */
@@ -308,7 +354,7 @@ export function createStageBridge({
         entry.live[name] = typeof start === "number" ? clamp(start, range) : start;
       }
     }
-    if (!things.has(key)) {
+    if (!things.has(key) && !lookIds.has(key)) {
       // ctx.tune("Fox") names ASSETS.fox's copy when the game never called ctx.thing: the
       // values belong on the Fox a person clicks, keyed by the id tune.json is read by.
       let copy;
@@ -347,6 +393,7 @@ export function createStageBridge({
         ...(entry.labels[key] === undefined ? {} : { label: entry.labels[key] }),
         ...(range.choices === undefined ? {} : { choices: range.choices }),
         ...(text(range.unit, 12) ? { unit: range.unit } : {}),
+        ...(range.colour === true ? { colour: true } : {}),
       };
     });
   };
@@ -1134,7 +1181,8 @@ export function createStageBridge({
     things.clear();
     byObject.clear();
     named.clear();
-    for (const id of tunes.keys()) add(placeholder(id));
+    for (const id of tunes.keys()) if (!lookIds.has(id)) add(placeholder(id));
+    lookCopies.clear();
     hovered = null;
     // The run on screen is gone (a new one, the menu): the Stage takes down what it showed for it.
     if (active) toStage({ type: "studio-run-reset" });
@@ -1200,6 +1248,7 @@ export function createStageBridge({
           ? clamp(value, range)
           : clamp(Math.round(value), range);
     changed = true;
+    for (const copy of lookCopies.get(id) ?? []) applyAssetLook(copy, entry.live);
     if (selected?.id === id) postSelected();
     return true;
   };

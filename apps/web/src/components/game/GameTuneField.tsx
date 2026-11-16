@@ -9,6 +9,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { colourHex, GameColourField } from "./GameColourField";
 
 /**
  * One row's grid, the same in every row: the name, the value right-aligned in a fixed column, and
@@ -72,6 +73,22 @@ export function GameTuneField({
       </div>
     );
   const number = value.value;
+  if (value.colour === true)
+    return (
+      <div className={ROW}>
+        {name}
+        <span className="flex justify-end">
+          <GameColourField
+            label={label}
+            value={number}
+            disabled={disabled}
+            onChange={onChange}
+            onCommit={(next) => onCommit(next, "pointer")}
+          />
+        </span>
+        {reset}
+      </div>
+    );
   if (value.choices !== undefined && value.choices.length > 1) {
     const choices = value.choices;
     return (
@@ -204,7 +221,9 @@ function ResetSlot({
       ? was
         ? "on"
         : "off"
-      : (value.choices?.[Math.round(was)] ?? unitText(value, was));
+      : value.colour === true
+        ? colourHex(was).toUpperCase()
+        : (value.choices?.[Math.round(was)] ?? unitText(value, was));
   return (
     <span className="flex opacity-0 group-hover/value:opacity-100 focus-within:opacity-100">
       <Tooltip>

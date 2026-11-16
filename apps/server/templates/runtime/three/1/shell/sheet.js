@@ -23,7 +23,8 @@ const VIEWS = [
 const layout = (count) =>
   count <= 1 ? [1, 1] : count === 2 ? [2, 1] : count <= 4 ? [2, 2] : [3, Math.ceil(count / 3)];
 
-const person = () => {
+/** A grey 1.8 m figure, feet at the origin: the scale every sheet and the Art tab's viewer stand beside. */
+export const personFigure = () => {
   const grey = new THREE.MeshStandardMaterial({ color: 0x5b6068, roughness: 1 });
   const figure = new THREE.Group();
   const trunk = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.75, 4, 12), grey);
@@ -114,7 +115,7 @@ export function createSheet({ renderer, find, names, hold, light }) {
       object.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
       box.copy(drawnBox(object));
       const size = box.getSize(new THREE.Vector3());
-      const figure = person();
+      const figure = personFigure();
       // Beside it, toward the front: never behind it from one side or in front of it from another.
       figure.position.set(box.min.x - 0.7, 0, box.max.z + 0.5);
       scene.add(figure);

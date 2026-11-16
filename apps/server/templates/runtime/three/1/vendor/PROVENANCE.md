@@ -45,3 +45,7 @@
   `addons/objects/Water.js` (the ocean kit, `shell/water.js`): the same release's
   `examples/jsm` files from the npm tarball three-0.180.0.tgz (sha512 integrity matches the
   registry), added 2026-11-15. They pass through the repository's formatter like the files above.
+- `addons/controls/OrbitControls.js` and `addons/helpers/VertexNormalsHelper.js` (the Art tab's
+  model viewer, `shell/viewer.js`): the same release's `examples/jsm` files from the npm tarball
+  three-0.180.0.tgz (sha512 integrity matches the registry), added 2026-11-16. They pass through
+  the repository's formatter like the files above.

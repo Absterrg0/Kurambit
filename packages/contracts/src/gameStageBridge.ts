@@ -68,6 +68,8 @@ export const GameThingValue = Schema.Struct({
   default: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.Boolean])),
   /** What its number counts ("s", "m/s", "%"), as the game declared it. */
   unit: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(12))),
+  /** The number is a colour, 0xRRGGBB: an ASSETS model's tint. */
+  colour: Schema.optionalKey(Schema.Boolean),
 });
 export type GameThingValue = typeof GameThingValue.Type;
 
