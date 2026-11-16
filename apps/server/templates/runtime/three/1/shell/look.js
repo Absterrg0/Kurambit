@@ -835,8 +835,10 @@ export async function createLook(canvas, options = {}) {
     antialias: !look.post,
     powerPreference: "high-performance",
   });
-  // A 2x screen drawn at 1.5x looks the same at a little over half the pixels.
-  const devicePixels = Math.min(window.devicePixelRatio ?? 1, 1.5);
+  // The screen's own pixels: a game draws at the resolution it is shown at, and only its frame
+  // rate takes it down (createScale). Read again on each resize: a zoom or another screen
+  // changes it.
+  let devicePixels = window.devicePixelRatio || 1;
   renderer.setPixelRatio(devicePixels);
   renderer.setSize(window.innerWidth, window.innerHeight);
   // A frame's draws are counted across all its passes: the shell resets them as a frame begins.
@@ -885,10 +887,15 @@ export async function createLook(canvas, options = {}) {
 
   const chain = post ? await createChain(renderer, look) : null;
   const timer = createTimer(renderer);
-  const scale = createScale(renderer, look, devicePixels, (s) => {
-    chain?.resize(s);
-    renderer.getDrawingBufferSize(shared.lookResolution.value);
-  });
+  const scale = createScale(
+    renderer,
+    look,
+    () => devicePixels,
+    (s) => {
+      chain?.resize(s);
+      renderer.getDrawingBufferSize(shared.lookResolution.value);
+    },
+  );
   const stats = createStats();
   const probes = new WeakMap();
   const prepared = new WeakSet();
@@ -1168,6 +1175,7 @@ export async function createLook(canvas, options = {}) {
       scene.remove(sun, ...models);
     },
     resize(width, height) {
+      devicePixels = window.devicePixelRatio || 1;
       renderer.setSize(width, height);
       scale.apply();
     },
@@ -1430,7 +1438,10 @@ function createTimer(renderer) {
 const GPU_BUDGET_MS = 12.5;
 /** A 60 fps frame comes every 16.7 ms; frames later than this on average are missed ones. */
 const LATE_MS = 18.5;
-/** The fewest screen pixels a rendered pixel may cover per side: past this the game looks blocky. */
+/**
+ * The most screen pixels a rendered pixel may cover per side: past this the game looks blocky. A
+ * HiDPI screen may go to one CSS pixel, the picture a 1x screen shows, never coarser.
+ */
 const MAX_STRETCH = 1.25;
 
 /**
@@ -1438,12 +1449,13 @@ const MAX_STRETCH = 1.25;
  * the GPU is what makes frames late: its own time says so. Frames late for any other reason (a
  * busy page, a chat streaming beside the game) are not the GPU's, and fewer pixels would only
  * blur the game without making it any faster. A browser that cannot time the GPU steps on
- * frame times alone, slowly. It never goes below one rendered pixel per 1.25 screen pixels,
- * steps by 0.05 at most every half second, and climbs back once the GPU has room again.
+ * frame times alone, slowly. A step down needs a full second over budget, so one busy moment
+ * (a load, a hitch) never blurs the game. It never goes coarser than 1.25 screen pixels per
+ * rendered pixel, or one CSS pixel on a HiDPI screen, and climbs back once the GPU has room again.
  */
 function createScale(renderer, look, devicePixels, onChange) {
   const fixed = look.resolution === "adaptive" ? null : Math.min(look.resolution, 1);
-  const floor = Math.min(1, Math.max(0.5, 1 / (MAX_STRETCH * devicePixels)));
+  const floor = () => Math.min(1 / MAX_STRETCH, 1 / devicePixels());
   let value = fixed ?? 1;
   const gpu = [];
   const real = [];
@@ -1451,8 +1463,10 @@ function createScale(renderer, look, devicePixels, onChange) {
   let settle = 0.5;
   let hold = 0;
   let lateFor = 0;
+  let overFor = 0;
   const apply = () => {
-    renderer.setPixelRatio(devicePixels * value);
+    if (fixed === null) value = Math.max(value, floor());
+    renderer.setPixelRatio(devicePixels() * value);
     onChange(value);
   };
   const median = (list) => list.toSorted((a, b) => a - b)[list.length >> 1];
@@ -1482,12 +1496,18 @@ function createScale(renderer, look, devicePixels, onChange) {
       const late = mean(real) > LATE_MS;
       const ms = gpu.length >= 3 ? median(gpu) : null;
       lateFor = late ? lateFor + span : 0;
+      const over = ms !== null && ms > GPU_BUDGET_MS && late;
+      overFor = over ? overFor + span : 0;
       let next = value;
       if (ms !== null) {
-        // The GPU's own time decides: over budget, fewer pixels by what the overrun needs.
-        if (ms > GPU_BUDGET_MS && late) {
-          next = value * Math.max(0.85, Math.sqrt(GPU_BUDGET_MS / ms));
-          hold = 3;
+        // The GPU's own time decides: over budget for a second, fewer pixels by what the
+        // overrun needs.
+        if (over) {
+          if (overFor >= 1) {
+            next = value * Math.max(0.85, Math.sqrt(GPU_BUDGET_MS / ms));
+            overFor = 0;
+            hold = 3;
+          }
         } else if (hold === 0 && ms < GPU_BUDGET_MS * 0.75)
           next = value * Math.min(1.1, Math.sqrt((GPU_BUDGET_MS * 0.85) / ms));
       } else if (lateFor >= 2) {
@@ -1498,7 +1518,7 @@ function createScale(renderer, look, devicePixels, onChange) {
       } else if (hold === 0 && !late) next = value * 1.05;
       gpu.length = 0;
       real.length = 0;
-      next = Math.min(1, Math.max(floor, Math.round(next * 20) / 20));
+      next = Math.min(1, Math.max(floor(), Math.round(next * 20) / 20));
       if (next !== value) {
         value = next;
         settle = 0.5;
