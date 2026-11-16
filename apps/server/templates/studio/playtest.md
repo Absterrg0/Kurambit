@@ -3,11 +3,8 @@
 Adapted from OhMyGame's game-playtest skill (Apache-2.0) and Aura's
 play rules (Apache-2.0, ramenvr/autopilot).
 
-When to play: the game's AGENTS.md says. Where it has an "Every turn"
-section, Kurambit plays and measures each turn's build, so a turn does not
-explore to check its own work: explore when the person asks or a fact names
-something the code cannot show. Without one, play your change before you
-call it done.
+Kurambit plays and measures every turn's build, so play yourself when the
+person asks or when the check's play cannot reach what you changed.
 
 1. The code says what should happen, play shows what does, and play wins.
    Start with game_play op start, play with op act, study each
@@ -23,9 +20,8 @@ call it done.
    held steps per call, keeping each call within its input-seconds limit
    (the start's and each act's result give the numbers; a
    call past them is rejected). Study the frame after each batch so a
-   missed input or overshoot is visible. Every lane's starter shell has
-   Settings > Controls listing every action with its keys; read it there
-   when the controls are unclear.
+   missed input or overshoot is visible. The game's `ACTIONS` and its
+   `ctx.input` reads say which keys do what.
 4. Report separately what was verified and what was not. Name the steps
    you ran, what you saw, and what you never reached. Never claim a pass
    on a screen you did not see.

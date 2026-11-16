@@ -103,9 +103,8 @@ pickup needs, how a run is won), then take everything about where things are
 and how fast they go from what the game reports while it plays: its state
 values, the player's position and body, the HUD. Never copy a position, a
 layout, a speed or a timing from the game's code into the bot. A later step
-that moves a platform or tunes a jump then breaks the bot, the skilled fact
-reads that step as making the game unwinnable, and keep going undoes a step
-a person might have kept. When the game reports nothing the bot needs, play
+that moves a platform or tunes a jump then breaks the bot, and the skilled
+fact reads the game as unwinnable when it is not. When the game reports nothing the bot needs, play
 from what it does report (progress, the player's position and whether it is
 on the ground) rather than a route. Every option gets its own facts. Reflexes (dodge a telegraphed
 hit) go in executor code every tick, never in a policy decision: a decision
@@ -123,28 +122,26 @@ waits for the next tempo beat, too slow for a fast hit.
   state, player position, HUD text and page errors only, and skip id-clicks
   (click at screen points). A missing field reads as unknown, so guard for it.
 
-## The harness's tiers (idle and masher)
+## The harness's random-input play (masher)
 
-`kit/idle.mjs` and `kit/masher.mjs` are the bots the harness plays every
-build with for its facts; you can run them yourself with `game_play` op `bot`
-(`file: ".studio/bot/kit/idle.mjs"`). Both press Enter at the title until a
-run starts, then: idle sends nothing, masher holds each direction for a
-second (its first-response probe) and then presses the shell's keys at
-random with a fixed seed. Both stop when the run ends or after their span of
-play. They read only the shell's run state (`GameState.state` and
-`result`), so a game that keeps those and starts on Enter gets its facts.
-If the masher wins in seconds, the game has no challenge; if idle wins, it
-plays itself.
+`kit/masher.mjs` is the bot the harness plays every build with for its
+facts; `kit/idle.mjs` sends nothing. Run either yourself with `game_play`
+op `bot` (`file: ".studio/bot/kit/masher.mjs"`). Both press Enter at the
+title until a run starts, then: idle sends nothing, masher holds each
+direction for a second (its first-response probe) and then presses the
+shell's keys at random with a fixed seed. Both stop when the run ends or
+after their span of play. They read only the shell's run state
+(`GameState.state` and `result`), so a game that keeps those and starts on
+Enter gets its facts. If the masher wins in seconds, the game has no
+challenge; if idle wins, it plays itself.
 
-## A keep-going bot step
+## Proving the game can be won
 
-The harness's third tier, `skilled`, plays the game's latest play-mode bot
-(the newest `game_play` op `bot` with `mode: "play"`). A game with none gets one
-from a keep-going step, once: write `.studio/bot/play.mjs`, a win bot with a
-`policy` whose goal is to win one run of the core loop with the game's own
-verbs, run it with `game_play` op `bot` and fix it until it
-plays a full run. Change no game files in that step: its build is the game
-as it was, so only `skilled` is measured again. From then on every build is
-played with it, so keep it general to the game's verbs and goal rather than
-one level's layout: it reads the game's state as it plays, never numbers
-copied from the code. Update it when the game's rules change.
+The play bot plays only when asked: the person's Measure in the Inspector,
+or the person asking you to prove the game can be won. Write
+`.studio/bot/play.mjs`, a win bot with a `policy` whose goal is to win one
+run of the core loop with the game's own verbs, run it with `game_play` op
+`bot` and fix it until it plays a full run, then call `game_check` op
+`facts` with `skilled: true`. Keep it general to the game's verbs and goal
+rather than one level's layout: it reads the game's state as it plays,
+never numbers copied from the code. Update it when the game's rules change.

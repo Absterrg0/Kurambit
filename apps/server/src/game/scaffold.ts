@@ -73,15 +73,13 @@ function scaffoldManifest(input: GameCreateInput): GameManifest {
 }
 
 /**
- * Keep going, for the agent of a game whose turns Kurambit plays (engineProfile
- * turnLoop): what a step message is and what the run does with its build.
+ * Keep going, for the agent of a game whose turns Kurambit plays (engineProfile turnLoop). The
+ * step message (decide.ts STEP_TAIL) says how a step ends, `game_keep_going`'s description that
+ * only the person turns it on or off, and the undo line that an undone change stays undone.
  */
 const KEEP_GOING_SECTION = `## Keep going
 
-- The person can turn on **Keep going**. Kurambit then sends this chat its next step as a message that starts "Keep going · step N". Each step runs in a session of its own, so the message carries what you need: the brief, the chat's last reply, the facts and the steps before it. Do that one step, like any turn: the last \`game_check\` op \`final\` clean, then end with your \`Next:\` line, or \`Next: none\` when nothing worth doing for the brief is left.
-- Kurambit measures the step's build, and undoes the step itself only when it breaks the game (it stops booting, or errors or freezes in play); the person can redo it. Do not put an undone change back unless they ask.
-- A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line. Kurambit sets that step aside.
-- The person's own messages always come first. Turn keep going on or off (\`game_keep_going\`) only when they ask.
+- A message that starts "Keep going · step N" comes from **Keep going**, which the person turned on. It runs in a fresh session and carries what you need: do that one step like any turn. A step that asks you to fix a measured fact may be wrong for this game: then change nothing and say why in one line.
 `;
 const PLAYTEST_LINE =
   "- Play it yourself (`game_play` ops `start`, `act`, `close`) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. Read `game_check` op `facts` when the person reports a problem.";

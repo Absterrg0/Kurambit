@@ -31,13 +31,10 @@ ones and whatever you add beyond the family on purpose (a source such as
   `scale.character` (metres; KayKit heroes are about 2.1) and `budget`
   (triangles and texture size). A made character's `rig` is
   `standard-humanoid`.
-- `audio.packs`: one effects family and one music source. Sound is not
-  locked until the list exists.
-- `imports`: outside sources the live Blender may import from (`polyhaven`,
-  `sketchfab`, `polypizza`); none when left out.
+- `audio.packs`: one effects family and one music source.
 
-The art tools refuse what breaks the lock and say what to change. Changing
-direction is a change to STYLE.json made on purpose, never a drift: change
+The art tools fill their defaults from it and search ranks its packs first.
+Changing direction is a change to STYLE.json made on purpose, never a drift: change
 the lock first (`lock` again for another family), then the art. STYLE.json
 is the person's to read and edit too.
 
