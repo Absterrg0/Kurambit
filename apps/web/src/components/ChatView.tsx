@@ -192,6 +192,7 @@ import { isGameStatusFailure, useIsGameThreadStatus } from "../hooks/useIsGameTh
 import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
+  parseRememberCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -363,6 +364,7 @@ import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/
 import { useEnvironmentQuery } from "../state/query";
 import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceStore";
 import { useGameNext } from "./game/GameNextBanner";
+import { useGameDecide } from "./game/GameDecisions";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useGameGenerationCards } from "./game/GameGenerationCard";
 import { useEnvironmentScope } from "~/state/session";
@@ -1679,6 +1681,7 @@ export default function ChatView(props: ChatViewProps) {
     TUNE_OFFERED.add(key);
     showGameTab(activeThreadRef, "tune");
   }, [isGameThread, activeThreadRef, panelHasTune]);
+  const decideForGame = useGameDecide(isGameThread ? activeThreadRef : null);
   const requestGameStage = (request: GameStageRequest): false | void => {
     if (!isGameThread) return false;
     useGameWorkspaceStore.getState().requestStage(request);
@@ -5765,6 +5768,43 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       }
+      return;
+    }
+
+    // A game's `/remember <note>` goes in its decisions, which every session reads; it is no turn.
+    const remember =
+      isGameThread && !directAnnotation && !composerHasNonPromptContent
+        ? parseRememberCommand(promptRef.current)
+        : null;
+    if (remember !== null) {
+      if (remember === "") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Write what to remember",
+            description: "Type the note after /remember, like /remember no music with lyrics.",
+          }),
+        );
+        return;
+      }
+      const kept = await decideForGame({ _tag: "note", text: remember });
+      if (!kept.ok) {
+        toastManager.add(
+          stackedThreadToast({ type: "error", title: "Not remembered", description: kept.error }),
+        );
+        return;
+      }
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: "Remembered",
+          description:
+            "Every agent session on this game reads it. Edit it from the Stage's menu, Decisions.",
+        }),
+      );
       return;
     }
 

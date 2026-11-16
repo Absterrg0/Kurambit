@@ -2419,6 +2419,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
             ] as const)
           : []),
+        ...(gameThread
+          ? ([
+              {
+                id: "slash:remember",
+                type: "slash-command",
+                command: "remember",
+                label: "/remember",
+                description: "Keep a note every session of this game reads",
+              },
+            ] as const)
+          : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const slashMenuSkills = getProviderSkillsForSlashMenu(
         selectedProviderSkills,
@@ -3493,6 +3504,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           setComposerHighlightedItemId(null);
           setIsComposerModelPickerOpen(true);
         }
+        return;
+      }
+      if (item.command === "remember") {
+        // The note is typed after it; sending keeps it in the game's decisions (ChatView).
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/remember ", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        if (applied) setComposerHighlightedItemId(null);
         return;
       }
       if (!planModeUiEnabled) return;

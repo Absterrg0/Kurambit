@@ -21,6 +21,7 @@ import {
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
+  parseRememberCommand,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "./composer-logic";
@@ -698,6 +699,15 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseRememberCommand", () => {
+  it("takes the note after /remember, empty when none follows, and nothing else", () => {
+    expect(parseRememberCommand(" /remember no music\nwith lyrics ")).toBe("no music\nwith lyrics");
+    expect(parseRememberCommand("/remember")).toBe("");
+    expect(parseRememberCommand("/remembering this")).toBeNull();
+    expect(parseRememberCommand("please /remember this")).toBeNull();
   });
 });
 

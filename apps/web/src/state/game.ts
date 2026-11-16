@@ -536,6 +536,16 @@ export const gameEnvironment = {
     label: "game:deletePlay",
     tag: WS_METHODS.gameDeletePlay,
   }),
+  // What the person decided about the game (.studio/decisions.md): read, and changed from the
+  // Stage's Decisions and the composer's /remember.
+  decisions: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:decisions",
+    tag: WS_METHODS.gameDecisions,
+  }),
+  decide: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:decide",
+    tag: WS_METHODS.gameDecide,
+  }),
   // Keep going's status for one chat: reread on run pushes only, so a step's
   // progress re-renders the control and the banner once per change, never on a timer.
   keepGoingStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {

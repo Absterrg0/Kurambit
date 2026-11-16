@@ -24,6 +24,7 @@ import {
   PanelTopOpenIcon,
   PencilIcon,
   PlayIcon,
+  NotebookPenIcon,
   Redo2Icon,
   RefreshCwIcon,
   TriangleAlertIcon,
@@ -62,6 +63,7 @@ import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { GameRunCard, useStageRuns } from "./GameRunCard";
+import { GameDecisionsDialog } from "./GameDecisions";
 import { GameSavedPlaysDialog } from "./GameSavedPlays";
 import { isGameStatusFailure, useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { type GameStageRequest, useGameWorkspaceStore } from "../../gameWorkspaceStore";
@@ -407,6 +409,7 @@ function ThreadGameStage({
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const runs = useStageRuns(threadRef);
   const [playsOpen, setPlaysOpen] = useState(false);
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
   const asked = useAtomValue(stagePlayTarget(threadRef));
@@ -1358,6 +1361,10 @@ function ThreadGameStage({
                     Test plays…
                   </MenuItem>
                 ) : null}
+                <MenuItem onClick={() => setDecisionsOpen(true)}>
+                  <NotebookPenIcon />
+                  Decisions…
+                </MenuItem>
                 {hasSteps ? (
                   <MenuItem onClick={() => setReelOpen(!reelOpen)}>
                     <FilmIcon />
@@ -1733,6 +1740,11 @@ function ThreadGameStage({
         open={playsOpen}
         onOpenChange={setPlaysOpen}
         kept={runs.lastEnded}
+      />
+      <GameDecisionsDialog
+        threadRef={threadRef}
+        open={decisionsOpen}
+        onOpenChange={setDecisionsOpen}
       />
     </section>
   );
