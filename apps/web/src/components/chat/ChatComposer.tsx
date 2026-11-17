@@ -1214,6 +1214,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
   keepGoingSend: "start" | "steer" | null;
+  look: "disc" | "pill";
 }) {
   return (
     <>
@@ -1257,6 +1258,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         keepFullHistory={props.keepFullHistory}
         onToggleKeepFullHistory={props.onToggleKeepFullHistory}
         keepGoingSend={props.keepGoingSend}
+        look={props.look}
       />
     </>
   );
@@ -1948,6 +1950,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     openPullRequest: (event: React.MouseEvent<HTMLElement>, url: string) => {
       openContextLink(event, url);
     },
+    removePreviewAnnotation: (annotationId: string) => {
+      removeComposerDraftPreviewAnnotation(composerDraftTarget, annotationId);
+    },
   };
   const composerContextRecords = composerContextRecordsFromDraft({
     terminalContexts: composerTerminalContexts,
@@ -2595,8 +2600,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPromptChange: setPromptFromTraitsStable,
     planModeEnabled: settings.planModeEnabled,
     isComposerOwned: true,
-    // A game's pickers read in the full text colour: always in reach, never like footnotes.
-    ...(gameThread ? { triggerClassName: "text-foreground" } : {}),
+    // In a game's footer the level folds to its icon before anything wraps.
+    ...(gameThread
+      ? {
+          triggerClassName:
+            "@max-[26rem]/composer-surface:[&_[data-composer-control-label]]:hidden",
+        }
+      : {}),
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
   const [inlineRestingControlsHost, setInlineRestingControlsHost] = useState<HTMLDivElement | null>(
@@ -4536,6 +4546,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // A resting coding composer quiets its pickers; a game's are always in reach and read as
   // available, the same size focused or not, so nothing in the game's composer looks disabled.
   const quietRestingControls = composerControlsCollapsed && !gameThread;
+  // A game's model and thinking sit in its tray's flat footer, as quiet as resting controls.
+  const controlSize = quietRestingControls || gameThread ? "xs" : "sm";
   const showInlineRestingControls = composerControlsCollapsed && restingControlsHost === null;
   const composerControlsVisibleInStrip =
     composerControlsCollapsed && restingControlsHost !== null && restingControlsVisible;
@@ -4757,7 +4769,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : expandedControlsIconOnlyBlockCount;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
-    size: quietRestingControls ? "xs" : "sm",
+    size: controlSize,
     hidden: composerControlsHidden || restingHiddenBlockCount > 1,
   });
   const restingBlockDefs = [
@@ -4767,7 +4779,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             id: "traits",
             content: (
               <>
-                <ComposerControlSeparator size={quietRestingControls ? "xs" : "sm"} />
+                {gameThread ? null : <ComposerControlSeparator size={controlSize} />}
                 {restingProviderTraitsPicker}
               </>
             ),
@@ -4880,7 +4892,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         instanceEntries={providerInstanceEntries}
         keybindings={keybindings}
         modelOptionsByInstance={modelOptionsByInstance}
-        size={quietRestingControls ? "xs" : "sm"}
+        size={controlSize}
         triggerClassName={
           quietRestingControls
             ? cn(
@@ -4893,7 +4905,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               cn(
                 "min-w-13",
                 gameThread
-                  ? "text-foreground @max-[22rem]/composer-surface:[&_[data-chat-provider-model-picker-label]]:hidden"
+                  ? "min-w-0 @max-[30rem]/composer-surface:[&_[data-chat-provider-model-picker-label]]:hidden"
                   : "-ms-2.5",
               )
         }
@@ -4958,7 +4970,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             interactionMode={interactionMode}
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
-            size={quietRestingControls ? "xs" : "sm"}
+            size={controlSize}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
             showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
             showRuntimeMode={!gameThread}
@@ -6057,6 +6069,57 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       </Tooltip>
     </>
   ) : null;
+  // Send, Stop and the rest: at the footer's right end, or inside a game's text row.
+  const footerPrimaryActions = (
+    <ComposerFooterPrimaryActions
+      compact={isComposerResting || isComposerPrimaryActionsCompact}
+      canOperateThread={canOperateThread}
+      // A game's composer carries its pickers and Send, nothing else.
+      activeContextWindow={
+        settings.contextWindowMeterEnabled && !gameThread ? activeContextWindow : null
+      }
+      reserveContextWindowMeter={reserveContextWindowMeter && !gameThread}
+      activeThreadModelDisplayName={activeThreadModelDisplayName}
+      pendingAction={pendingPrimaryAction}
+      isRunning={phase === "running"}
+      canInterrupt={canInterrupt}
+      followUpBehavior={settings.followUpBehavior}
+      canSteer={!isCompacting}
+      alternateShortcutLabel={shortcutLabelForCommand(keybindings, "composer.sendAlternate", {
+        context: {
+          composerFocus: true,
+          draftThreadRoute: routeKind === "draft",
+          turnRunning: true,
+        },
+      })}
+      showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
+      promptHasText={prompt.trim().length > 0}
+      isSendBusy={isSendBusy}
+      sendDisabledReason={sendDisabledReason}
+      isConnecting={isConnecting}
+      isEnvironmentUnavailable={
+        environmentUnavailable !== null || noProviderAvailable || projectSelectionRequired
+      }
+      isPreparingWorktree={isPreparingWorktree}
+      hasSendableContent={composerSendState.hasSendableContent}
+      canResume={showResumeAction}
+      preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
+      isEditingQueuedMessage={isEditingQueuedMessage}
+      onSubmitMessage={handleSubmitMessageStable}
+      onResume={onResume}
+      onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+      onInterrupt={handleInterruptPrimaryActionStable}
+      onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryActionStable}
+      compactBeforeSendTokens={gameThread ? null : props.resumeCompactionTokens}
+      keepFullHistory={props.keepFullHistory}
+      onToggleKeepFullHistory={props.onToggleKeepFullHistory}
+      keepGoingSend={gameThread ? (props.keepGoingSend ?? null) : null}
+      look={gameThread ? "pill" : "disc"}
+      compactDisabled={compactDisabled || noProviderAvailable || isSendBusy || isConnecting}
+      compactDisabledReason={resolvedCompactDisabledReason}
+      {...(compactCommandAvailable ? { onCompactContext: compactThreadContextStable } : {})}
+    />
+  );
   return (
     <form
       ref={composerFormRef}
@@ -6332,6 +6395,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       </ComposerBanner.Dock>
       <div className="relative">
         <ComposerSurface.Main
+          tray={gameThread}
           ref={composerMainSurfaceRef}
           data-inline-resting-controls={restingControlsHost === null ? "true" : undefined}
           data-model-only-strip={
@@ -6344,7 +6408,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             data-chat-composer-surface="true"
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
-              "rounded-3xl transition-[background-color] duration-200",
+              gameThread ? "rounded-[inherit]" : "rounded-3xl",
+              "transition-[background-color] duration-200",
               "in-data-[thread-context-over]:bg-accent/45 in-data-[thread-context-over]:ring-1 in-data-[thread-context-over]:ring-inset in-data-[thread-context-over]:ring-primary/70",
               isDragOverComposer ? "bg-accent/45 ring-1 ring-inset ring-primary/70" : null,
               projectSelectionRequired ? "opacity-75" : null,
@@ -6414,8 +6479,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ref={setComposerMenuAnchor}
               data-chat-composer-body="true"
               className={cn(
-                "relative px-3 pb-2 sm:px-4",
-                "pt-3.5 sm:pt-4",
+                "relative",
+                // A game's text row: the field, then Attach and Send inside it on the right.
+                gameThread ? "py-2 ps-3.5 pe-2" : "px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
                 isComposerResting && "py-2 sm:py-2",
@@ -6828,8 +6894,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 className={cn(
                   "relative",
                   isComposerResting && "flex min-w-0 items-center gap-1",
-                  // A game's field takes its row alone; a suggestion's Tab hint ends it.
-                  gameThread && "flex min-w-0 items-start gap-2",
+                  // A game's row: the field, a suggestion's Tab hint, then Attach and Send, all
+                  // on the last line as the field grows.
+                  gameThread && "flex min-w-0 items-end gap-2",
                 )}
                 style={
                   isComposerResting && restingActionsWidth !== null
@@ -6904,7 +6971,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     skills={selectedProviderSkills}
                     containerClassName={cn((isComposerResting || gameThread) && "min-w-0 flex-1")}
                     className={cn(
-                      gameThread && "min-h-8",
+                      // One line centred on the 32px Send pill.
+                      gameThread && "min-h-8 py-[0.4375rem]",
                       showMobilePendingAnswerActions && "max-sm:pb-12",
                       isComposerResting &&
                         "my-0 max-h-8 min-h-8 overflow-hidden py-0 whitespace-pre! leading-8",
@@ -6965,6 +7033,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </Text>
                   </span>
                 ) : null}
+                {gameThread && !isComposerApprovalState ? (
+                  <div
+                    data-chat-composer-actions="right"
+                    className="flex shrink-0 items-center gap-1.5 self-end"
+                  >
+                    {composerAttachAction}
+                    {footerPrimaryActions}
+                  </div>
+                ) : null}
                 {isComposerResting ? collapsedComposerImagePreviews : null}
                 {showMobilePendingAnswerActions ? (
                   <div
@@ -7003,7 +7080,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
 
-            {isComposerCollapsedMobile || isComposerApprovalState ? null : (
+            {isComposerCollapsedMobile || isComposerApprovalState || gameThread ? null : (
               <div
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
@@ -7016,31 +7093,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "absolute right-px z-10 h-12 w-auto gap-0 py-0 sm:gap-0 sm:py-0",
                   isComposerResting &&
                     (showInlineRestingControls ? "bottom-[calc(2rem+1px)]" : "bottom-px"),
-                  gameThread && "gap-2 sm:gap-2",
                 )}
               >
                 <div
-                  ref={gameThread ? undefined : attachExpandedComposerControls}
+                  ref={attachExpandedComposerControls}
                   data-chat-composer-controls="left"
                   data-chat-composer-footer-controls="true"
                   className={cn(
                     "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                     isComposerResting && "hidden",
-                    // A game's left end is what goes with the message: attachments, then how it runs.
-                    gameThread && "flex-none overflow-visible",
                   )}
                 >
-                  {gameThread ? (
-                    <>
-                      {composerAttachAction}
-                      <GameRunPicker
-                        threadRef={routeKind === "server" ? routeThreadRef : null}
-                        disabled={!canOperateThread}
-                      />
-                    </>
-                  ) : composerControlsCollapsed ? null : (
-                    composerControls
-                  )}
+                  {composerControlsCollapsed ? null : composerControls}
                 </div>
 
                 <div
@@ -7050,82 +7114,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className={cn(
-                    "flex shrink-0 flex-nowrap items-center justify-end gap-2",
-                    gameThread && "min-w-0 flex-1 gap-1",
-                  )}
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {gameThread ? (
-                    // The model and Thinking pickers, folding Thinking into a menu when narrow.
-                    <div
-                      ref={attachExpandedComposerControls}
-                      data-chat-composer-footer-controls="true"
-                      className="flex min-w-0 flex-1 items-center justify-end gap-1"
-                    >
-                      {composerControls}
-                    </div>
-                  ) : (
-                    composerAttachAction
-                  )}
-                  <ComposerFooterPrimaryActions
-                    compact={isComposerResting || isComposerPrimaryActionsCompact}
-                    canOperateThread={canOperateThread}
-                    // A game's composer carries its pickers and Send, nothing else.
-                    activeContextWindow={
-                      settings.contextWindowMeterEnabled && !gameThread ? activeContextWindow : null
-                    }
-                    reserveContextWindowMeter={reserveContextWindowMeter && !gameThread}
-                    activeThreadModelDisplayName={activeThreadModelDisplayName}
-                    pendingAction={pendingPrimaryAction}
-                    isRunning={phase === "running"}
-                    canInterrupt={canInterrupt}
-                    followUpBehavior={settings.followUpBehavior}
-                    canSteer={!isCompacting}
-                    alternateShortcutLabel={shortcutLabelForCommand(
-                      keybindings,
-                      "composer.sendAlternate",
-                      {
-                        context: {
-                          composerFocus: true,
-                          draftThreadRoute: routeKind === "draft",
-                          turnRunning: true,
-                        },
-                      },
-                    )}
-                    showPlanFollowUpPrompt={
-                      pendingUserInputs.length === 0 && showPlanFollowUpPrompt
-                    }
-                    promptHasText={prompt.trim().length > 0}
-                    isSendBusy={isSendBusy}
-                    sendDisabledReason={sendDisabledReason}
-                    isConnecting={isConnecting}
-                    isEnvironmentUnavailable={
-                      environmentUnavailable !== null ||
-                      noProviderAvailable ||
-                      projectSelectionRequired
-                    }
-                    isPreparingWorktree={isPreparingWorktree}
-                    hasSendableContent={composerSendState.hasSendableContent}
-                    canResume={showResumeAction}
-                    preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
-                    isEditingQueuedMessage={isEditingQueuedMessage}
-                    onSubmitMessage={handleSubmitMessageStable}
-                    onResume={onResume}
-                    onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                    onInterrupt={handleInterruptPrimaryActionStable}
-                    onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryActionStable}
-                    compactBeforeSendTokens={props.resumeCompactionTokens}
-                    keepFullHistory={props.keepFullHistory}
-                    onToggleKeepFullHistory={props.onToggleKeepFullHistory}
-                    keepGoingSend={gameThread ? (props.keepGoingSend ?? null) : null}
-                    compactDisabled={
-                      compactDisabled || noProviderAvailable || isSendBusy || isConnecting
-                    }
-                    compactDisabledReason={resolvedCompactDisabledReason}
-                    {...(compactCommandAvailable
-                      ? { onCompactContext: compactThreadContextStable }
-                      : {})}
-                  />
+                  {composerAttachAction}
+                  {footerPrimaryActions}
                 </div>
               </div>
             )}
@@ -7153,6 +7145,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
         </ComposerSurface.Main>
       </div>
+      {gameThread && !isComposerApprovalState ? (
+        // A game's footer, flat under the text box: how the message runs on the left; the model,
+        // its thinking and the context meter on the right. Labels fold to icons before anything wraps.
+        <ComposerSurface.Footer data-chat-composer-footer="true">
+          <GameRunPicker
+            threadRef={routeKind === "server" ? routeThreadRef : null}
+            disabled={!canOperateThread}
+          />
+          <div
+            ref={attachExpandedComposerControls}
+            data-chat-composer-footer-controls="true"
+            // Her footer's right end names its settings without menu chevrons.
+            className="flex min-w-0 flex-1 items-center justify-end gap-0.5 [&_[data-composer-control-chevron]]:hidden"
+          >
+            {composerControls}
+            {/* Always here, whatever the coding chats' meter setting: it is where Compact lives. */}
+            {activeContextWindow ? (
+              <ContextWindowMeter
+                variant="footer"
+                usage={activeContextWindow}
+                modelDisplayName={activeThreadModelDisplayName}
+                onCompact={compactCommandAvailable ? compactThreadContextStable : undefined}
+                compactDisabled={
+                  compactDisabled || noProviderAvailable || isSendBusy || isConnecting
+                }
+                compactDisabledReason={resolvedCompactDisabledReason}
+                compactBeforeSendTokens={props.resumeCompactionTokens}
+                keepFullHistory={props.keepFullHistory}
+                onToggleKeepFullHistory={props.onToggleKeepFullHistory}
+              />
+            ) : null}
+          </div>
+        </ComposerSurface.Footer>
+      ) : null}
     </form>
   );
 });

@@ -6,7 +6,13 @@ import {
   formatContextWindowCost,
 } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
+import { cn } from "~/lib/utils";
+import { Switch } from "../ui/switch";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import { ComposerControl } from "./ComposerControl";
+
+// A game's footer meter turns amber from here: near enough the limit to think about compacting.
+const NEAR_LIMIT_PERCENT = 80;
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -24,8 +30,18 @@ export function ContextWindowMeter(props: {
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
+  /**
+   * `footer`: a quiet footer control, "209k" beside its ring, muted until near the limit and
+   * amber from there; a click opens it, where Compact is. It also holds whether the next send
+   * compacts first, which the default look leaves to Send's own Compact pill.
+   */
+  variant?: "default" | "footer";
+  compactBeforeSendTokens?: number | null | undefined;
+  keepFullHistory?: boolean | undefined;
+  onToggleKeepFullHistory?: (() => void) | undefined;
 }) {
   const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
+  const footer = props.variant === "footer";
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -34,58 +50,78 @@ export function ContextWindowMeter(props: {
   const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
   const isOverloaded = normalizedPercentage > 90;
-  const usageColor = isOverloaded
-    ? "var(--color-error)"
-    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+  const nearLimit = usage.maxTokens !== null && normalizedPercentage >= NEAR_LIMIT_PERCENT;
+  const usageColor = footer
+    ? nearLimit
+      ? "var(--color-warning)"
+      : "currentColor"
+    : isOverloaded
+      ? "var(--color-error)"
+      : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+  const label =
+    usage.maxTokens !== null && usedPercentage
+      ? `Context window ${usedPercentage} used`
+      : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`;
+  const ring = (
+    <svg
+      viewBox="0 0 24 24"
+      className={cn(
+        "-rotate-90 transform-gpu mx-0!",
+        footer ? "size-3.5" : "absolute inset-0 size-full",
+      )}
+      aria-hidden="true"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r={radius}
+        fill="none"
+        className={footer ? "stroke-current opacity-25" : "stroke-muted-foreground/24"}
+        strokeWidth="3"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r={radius}
+        fill="none"
+        stroke={usageColor}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
+      />
+    </svg>
+  );
 
   return (
     <Popover>
-      <PopoverTrigger
-        openOnHover
-        delay={150}
-        closeDelay={onCompact ? 150 : 0}
-        render={
-          <Button
-            size="icon-sm"
-            variant="ghost-muted"
-            className="size-7"
-            aria-label={
-              usage.maxTokens !== null && usedPercentage
-                ? `Context window ${usedPercentage} used`
-                : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`
-            }
-          >
-            <span className="relative flex size-5 items-center justify-center">
-              <svg
-                viewBox="0 0 24 24"
-                className="-rotate-90 absolute inset-0 size-full transform-gpu mx-0!"
-                aria-hidden="true"
-              >
-                <circle
-                  cx="12"
-                  cy="12"
-                  r={radius}
-                  fill="none"
-                  className="stroke-muted-foreground/24"
-                  strokeWidth="3"
-                />
-                <circle
-                  cx="12"
-                  cy="12"
-                  r={radius}
-                  fill="none"
-                  stroke={usageColor}
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeDasharray={circumference}
-                  strokeDashoffset={dashOffset}
-                  className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
-                />
-              </svg>
-            </span>
-          </Button>
-        }
-      />
+      {footer ? (
+        <PopoverTrigger
+          render={
+            <ComposerControl
+              size="xs"
+              aria-label={label}
+              data-context-window-meter="footer"
+              className={cn("tabular-nums", nearLimit && "text-warning hover:text-warning")}
+            />
+          }
+        >
+          {ring}
+          <span data-composer-control-label>{formatContextWindowTokens(usage.usedTokens)}</span>
+        </PopoverTrigger>
+      ) : (
+        <PopoverTrigger
+          openOnHover
+          delay={150}
+          closeDelay={onCompact ? 150 : 0}
+          render={
+            <Button size="icon-sm" variant="ghost-muted" className="size-7" aria-label={label}>
+              <span className="relative flex size-5 items-center justify-center">{ring}</span>
+            </Button>
+          }
+        />
+      )}
       <PopoverPopup
         {...composerFloatingLayerProps}
         tooltipStyle
@@ -148,6 +184,18 @@ export function ContextWindowMeter(props: {
             <div className="mt-1 text-pretty text-secondary-label text-2xs font-medium">
               {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}
             </div>
+          ) : null}
+          {footer &&
+          props.compactBeforeSendTokens != null &&
+          props.onToggleKeepFullHistory !== undefined ? (
+            <label className="mt-1 flex cursor-pointer items-center justify-between gap-3 text-2xs text-secondary-label">
+              Compact before the next send
+              <Switch
+                size="sm"
+                checked={!props.keepFullHistory}
+                onCheckedChange={props.onToggleKeepFullHistory}
+              />
+            </label>
           ) : null}
           {onCompact ? (
             <>

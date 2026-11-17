@@ -1,4 +1,4 @@
-import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
+import { memo, type MouseEventHandler, type PointerEventHandler, type ReactNode } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -64,7 +64,18 @@ interface ComposerPrimaryActionsProps {
    * ("steer"), and an empty message is fine, since the words are only its direction.
    */
   keepGoingSend?: "start" | "steer" | null;
+  /**
+   * `pill`: a small square pill a step darker than the text box, holding Send, or Stop in the same
+   * place while a turn runs. A game's composer.
+   */
+  look?: "disc" | "pill";
 }
+
+// The pill and its one 32px slot, concentric inside it.
+const SEND_PILL_CLASS_NAME =
+  "relative isolate inline-flex size-8 shrink-0 items-center justify-center rounded-lg surface-pill";
+const SEND_PILL_SLOT_CLASS_NAME =
+  "flex size-full cursor-pointer items-center justify-center rounded-lg text-foreground outline-none transition-colors duration-150 enabled:hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-48 [&_svg]:pointer-events-none";
 
 const formatPendingPrimaryActionLabel = (input: {
   compact: boolean;
@@ -120,7 +131,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   keepFullHistory = false,
   onToggleKeepFullHistory,
   keepGoingSend = null,
+  look = "disc",
 }: ComposerPrimaryActionsProps) {
+  const pill = look === "pill";
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
@@ -146,10 +159,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         render={
           <button
             type="button"
-            className={cn(
-              "flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
-              insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
-            )}
+            className={
+              pill
+                ? SEND_PILL_SLOT_CLASS_NAME
+                : cn(
+                    "flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
+                    insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
+                  )
+            }
             {...pointerFocusProps}
             disabled={!canOperateThread}
             onClick={() => {
@@ -159,13 +176,25 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           />
         }
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <rect x="2" y="2" width="8" height="8" rx="1.5" />
-        </svg>
+        {pill ? (
+          <span aria-hidden className="size-2.5 rounded-xs bg-destructive" />
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+            <rect x="2" y="2" width="8" height="8" rx="1.5" />
+          </svg>
+        )}
       </TooltipTrigger>
       <TooltipPopup>Stop this turn</TooltipPopup>
     </Tooltip>
   );
+  const inPill = (child: ReactNode) =>
+    pill ? (
+      <span data-composer-send-pill="" className={SEND_PILL_CLASS_NAME}>
+        {child}
+      </span>
+    ) : (
+      child
+    );
 
   if (pendingAction) {
     return (
@@ -274,7 +303,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   if (canInterrupt && !hasSendableContent && !isEditingQueuedMessage) {
-    return renderStopGenerationButton(false);
+    return inPill(renderStopGenerationButton(false));
   }
 
   const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
@@ -328,12 +357,16 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type={showResume ? "button" : "submit"}
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full transition-[scale] duration-150 enabled:cursor-pointer hover:scale-105 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        stageBackdropVariant
-          ? "bg-transparent text-white shadow-xs enabled:shadow-black/24 enabled:hover:brightness-110 disabled:opacity-64"
-          : sendIsLit
-            ? "surface-lit text-primary-foreground hover:surface-lit-hover disabled:opacity-64"
-            : "surface-raised text-muted-foreground",
+        pill && SEND_PILL_SLOT_CLASS_NAME,
+        !pill &&
+          "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full transition-[scale] duration-150 enabled:cursor-pointer hover:scale-105 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+        pill
+          ? null
+          : stageBackdropVariant
+            ? "bg-transparent text-white shadow-xs enabled:shadow-black/24 enabled:hover:brightness-110 disabled:opacity-64"
+            : sendIsLit
+              ? "surface-lit text-primary-foreground hover:surface-lit-hover disabled:opacity-64"
+              : "surface-raised text-muted-foreground",
       )}
       {...pointerFocusProps}
       onClick={showResume ? onResume : onSubmitMessage}
@@ -346,7 +379,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       }
       aria-label={submitStatus ?? submitLabel}
     >
-      {stageBackdropVariant ? (
+      {stageBackdropVariant && !pill ? (
         <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
           <StageBackdropButtonArt variant={stageBackdropVariant} />
         </span>
@@ -356,12 +389,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ) : showResume ? (
         <PlayIcon className="size-4 fill-current" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
-        <CheckIcon className="size-4" aria-hidden="true" />
+        <CheckIcon className={pill ? "size-3.5" : "size-4"} aria-hidden="true" />
       ) : isRunning && !sendsKeepGoing ? (
         isQueuing ? (
-          <ListPlusIcon className="size-4" />
+          <ListPlusIcon className={pill ? "size-3.5" : "size-4"} />
         ) : (
-          <CornerUpRightIcon className="size-4" />
+          <CornerUpRightIcon className={pill ? "size-3.5" : "size-4"} />
         )
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -379,10 +412,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   const submit = (
     <Tooltip key="submit">
-      <TooltipTrigger render={<span className="inline-flex" />}>{sendButton}</TooltipTrigger>
+      <TooltipTrigger render={<span className={pill ? "flex size-full" : "inline-flex"} />}>
+        {sendButton}
+      </TooltipTrigger>
       <TooltipPopup>{submitTooltip}</TooltipPopup>
     </Tooltip>
   );
+  if (pill) return inPill(submit);
   if (compactTokens === null) return submit;
 
   return (

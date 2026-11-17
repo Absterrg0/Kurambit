@@ -2,11 +2,29 @@ import type { ComponentProps } from "react";
 
 import { cn } from "~/lib/utils";
 
+/**
+ * `tray`: one container holding what goes with the next message (tray rows), the raised text box,
+ * and a flat footer of quiet controls under it. A game's composer.
+ */
 function Shell({
   contextStrip = false,
+  tray = false,
   className,
   ...props
-}: ComponentProps<"div"> & { contextStrip?: boolean }) {
+}: ComponentProps<"div"> & { contextStrip?: boolean; tray?: boolean }) {
+  if (tray)
+    return (
+      <div
+        data-slot="composer-shell"
+        data-composer-tray=""
+        className={cn(
+          "@container/composer-surface group/composer-surface relative isolate mx-auto flex w-full max-w-(--chat-content-max-width) flex-col rounded-2xl surface-tray",
+          "[--chat-composer-glass-surface:var(--card)]",
+          className,
+        )}
+        {...props}
+      />
+    );
   return (
     <div
       data-slot="composer-shell"
@@ -40,7 +58,11 @@ const outlineClasses =
 const contextSeamClasses =
   "group-data-with-context/composer-surface:after:[clip-path:polygon(0_0,100%_0,100%_100%,calc(100%-22px)_100%,calc(100%-22px)_calc(100%-2px),22px_calc(100%-2px),22px_100%,0_100%)]";
 
-function Host({ className, ...props }: ComponentProps<"div">) {
+function Host({ className, tray = false, ...props }: ComponentProps<"div"> & { tray?: boolean }) {
+  if (tray)
+    return (
+      <div data-slot="composer-host" className={cn("relative w-full", className)} {...props} />
+    );
   return (
     <div
       data-slot="composer-host"
@@ -58,7 +80,16 @@ function Host({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-function Main({ className, ...props }: ComponentProps<"div">) {
+function Main({ className, tray = false, ...props }: ComponentProps<"div"> & { tray?: boolean }) {
+  // In the tray, the text box spans it edge to edge with its own rounded, lifted surface.
+  if (tray)
+    return (
+      <div
+        data-chat-composer-main-surface="true"
+        className={cn("group relative z-10 -mx-px rounded-[0.875rem] surface-composer", className)}
+        {...props}
+      />
+    );
   return (
     <div
       data-chat-composer-main-surface="true"
@@ -96,4 +127,18 @@ function ContextStrip({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-export const ComposerSurface = { Shell, Host, Main, ContextStrip };
+/** The tray's footer: flat, inside its bottom edge, small muted controls left and right. */
+function Footer({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="composer-tray-footer"
+      className={cn(
+        "flex h-7.5 min-w-0 items-center justify-between gap-2 ps-1.5 pe-1.5 text-muted-foreground",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export const ComposerSurface = { Shell, Host, Main, ContextStrip, Footer };

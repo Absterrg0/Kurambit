@@ -83,7 +83,7 @@ export function GameRunPicker({
       <MenuTrigger
         render={
           <ComposerControl
-            className="text-foreground"
+            size="xs"
             disabled={disabled}
             aria-label={`Send: ${label}`}
             data-game-run-picker=""
@@ -91,13 +91,14 @@ export function GameRunPicker({
         }
       >
         <ComposerControlIcon
+          size="xs"
           icon={
             pick === "keep-going" ? FastForwardIcon : pick === "ways" ? SplitIcon : ArrowRightIcon
           }
         />
         {/* The narrowest composer keeps the icon; the name is the trigger's label. */}
         <span className="@max-[22rem]/composer-surface:hidden">{label}</span>
-        <ComposerControlChevron />
+        <ComposerControlChevron size="xs" />
       </MenuTrigger>
       <MenuPopup side="top" align="start" className="min-w-48">
         <MenuRadioGroup

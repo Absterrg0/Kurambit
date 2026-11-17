@@ -12,6 +12,9 @@ const contextChipVariants = cva(
     variants: {
       kind: {
         neutral: "border-border/70 bg-accent/40 text-foreground",
+        // Something of the game going with the message (a pick on the Stage, an asset): no
+        // border and no accent, a picture and a name on a faint fill.
+        quiet: "border-transparent bg-foreground/7 text-foreground",
         image: "[--context-chip-accent:oklch(0.62_0.16_16)]",
         video: "[--context-chip-accent:oklch(0.62_0.16_48)]",
         file: "[--context-chip-accent:oklch(0.62_0.136_237)]",

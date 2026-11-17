@@ -7796,8 +7796,15 @@ export default function ChatView(props: ChatViewProps) {
               : undefined
           }
         >
-          <ComposerSurface.Shell contextStrip={showComposerContextStrip || showComposerModelStrip}>
-            <ComposerSurface.Host inert={queuedRunEdit.isSaving} aria-busy={queuedRunEdit.isSaving}>
+          <ComposerSurface.Shell
+            tray={isGameThread}
+            contextStrip={!isGameThread && (showComposerContextStrip || showComposerModelStrip)}
+          >
+            <ComposerSurface.Host
+              tray={isGameThread}
+              inert={queuedRunEdit.isSaving}
+              aria-busy={queuedRunEdit.isSaving}
+            >
               <div className="relative z-10">
                 {showProviderSubagentBar ? (
                   <ProviderSubagentBar

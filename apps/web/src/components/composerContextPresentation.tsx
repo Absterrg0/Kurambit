@@ -3,7 +3,7 @@ import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
 import type { PreviewAnnotationPayload, ThreadContextRecord } from "@kurambit/contracts";
 import { formatAttachmentSize } from "@kurambit/client-runtime/state/attachments";
 import { videoMimeType } from "@kurambit/shared/video";
-import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
+import { MessageCircleIcon, MousePointerClickIcon, XIcon } from "lucide-react";
 import { createContext, type MouseEvent, type ReactElement, type ReactNode, use } from "react";
 import type { EnvironmentId } from "@kurambit/contracts";
 
@@ -36,7 +36,12 @@ import {
   createContextPresentationRegistry,
   type ContextPresentationCapability,
 } from "./contextPresentationRegistry";
-import type { ContextChipKind } from "./ContextChip";
+import {
+  ContextChip as ChipFrame,
+  ContextChipAction,
+  ContextChipLabel,
+  type ContextChipKind,
+} from "./ContextChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   ContextChipPopover,
@@ -68,6 +73,8 @@ export interface ComposerContextActions {
   openFile: (fileId: string) => void;
   openMention: (path: string) => void;
   openPullRequest: (event: MouseEvent<HTMLElement>, url: string) => void;
+  /** Takes a preview annotation out of the draft: only the composer offers it. */
+  removePreviewAnnotation?: ((annotationId: string) => void) | undefined;
 }
 
 export const ComposerContextActionsContext = createContext<ComposerContextActions>({
@@ -323,6 +330,50 @@ function ComposerPreviewAnnotationDetails({
   );
 }
 
+/** What a game attaches from its Stage or its Art (`kurambit://stage`, and Art's own pages). */
+const isGameAnnotation = (annotation: PreviewAnnotationPayload) =>
+  annotation.pageUrl.startsWith("kurambit://");
+
+/**
+ * A thing or asset of the game going with the message: its picture, its name, and × in the
+ * composer. The words the agent gets are in its tooltip.
+ */
+function GameAnnotationChip(props: {
+  annotation: PreviewAnnotationPayload;
+  screenshot: ComposerImageAttachment | undefined;
+}) {
+  const actions = use(ComposerContextActionsContext);
+  const label = previewAnnotationContextLabel(props.annotation);
+  const picture = props.screenshot?.previewUrl || props.annotation.screenshot?.dataUrl || undefined;
+  const remove = actions.removePreviewAnnotation;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<ChipFrame kind="quiet" tabIndex={0} aria-label={label} data-game-attachment="" />}
+      >
+        {picture ? (
+          <img src={picture} alt="" className="size-[1.17em] shrink-0 rounded-sm object-cover" />
+        ) : (
+          <MousePointerClickIcon />
+        )}
+        <ContextChipLabel className="max-w-48">{label}</ContextChipLabel>
+        {remove ? (
+          <ContextChipAction
+            aria-label={`Remove ${label}`}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => remove(props.annotation.id)}
+          >
+            <XIcon />
+          </ContextChipAction>
+        ) : null}
+      </TooltipTrigger>
+      <TooltipPopup side="top" className="max-w-80 whitespace-pre-wrap">
+        {props.annotation.comment.trim() || label}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function UnresolvedContextChip(props: { label: string }) {
   return (
     <UnresolvedChip
@@ -410,19 +461,23 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
       canRender: (entry) => entry.kind === "preview-annotation",
       render: (entry, context, definition) =>
         entry.kind === "preview-annotation" ? (
-          <ContextChip
-            icon={<MousePointerClickIcon />}
-            label={previewAnnotationContextLabel(entry.record)}
-            kindLabel="Preview annotation"
-            details={
-              <ComposerPreviewAnnotationDetails
-                annotation={entry.record}
-                screenshot={entry.screenshot}
-              />
-            }
-            detailsMode={definition.capabilities.details}
-            kind="preview-annotation"
-          />
+          isGameAnnotation(entry.record) ? (
+            <GameAnnotationChip annotation={entry.record} screenshot={entry.screenshot} />
+          ) : (
+            <ContextChip
+              icon={<MousePointerClickIcon />}
+              label={previewAnnotationContextLabel(entry.record)}
+              kindLabel="Preview annotation"
+              details={
+                <ComposerPreviewAnnotationDetails
+                  annotation={entry.record}
+                  screenshot={entry.screenshot}
+                />
+              }
+              detailsMode={definition.capabilities.details}
+              kind="preview-annotation"
+            />
+          )
         ) : (
           <UnresolvedContextChip label={context.label} />
         ),

@@ -786,7 +786,9 @@ export const TraitsPicker = memo(function TraitsPicker({
   const isCodexStyle = provider === "codex";
   // A lone level ("Medium") says what it is a level of; a label that already names several
   // settings ("1M · High Fast") stays as it is.
+  // The quiet footer size shows the level alone, beside its icon.
   const namesThinking =
+    size !== "xs" &&
     !triggerLabel.includes(" · ") &&
     descriptors.some(
       (descriptor) =>
