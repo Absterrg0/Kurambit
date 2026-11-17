@@ -187,6 +187,7 @@ export function GamePlaySurface({
                 title={`${gameName} on the Stage`}
                 gameName={gameName}
                 hidden={hidden}
+                drawsReady={bridge.enabled}
                 onStudioMessage={onStudioMessage}
                 onBridgeMessage={onBridgeMessage}
                 focusRequest={focusRequest}
@@ -282,9 +283,16 @@ export function GameFrame({
   focusRequest = 0,
   onFrame,
   gameName,
+  drawsReady = false,
 }: {
   url: string;
   title: string;
+  /**
+   * The page runs Kurambit's runtime, which says studio-ready once its first frame is drawn: the
+   * wait lasts until then, not just until the page loads, since the game boots after its load
+   * (tuning, assets, shader warm-up) and its frame is black meanwhile. A boot error ends it too.
+   */
+  drawsReady?: boolean;
   /** Said while the game's page loads, so the wait names what it waits for. */
   gameName: string;
   /** The game should pause and mute itself: another tab is open, or another frame has focus. */
@@ -362,14 +370,18 @@ export function GameFrame({
       window.removeEventListener("blur", onBlur);
     };
   }, []);
-  // Until the game's page loads the frame is blank; it says the game is starting instead.
+  // Until the game's page loads, and with the runtime until it draws, the frame is blank; it says
+  // the game is starting instead.
   const [loaded, setLoaded] = useState(false);
+  const [drawn, setDrawn] = useState(false);
   // A reload remounts the iframe in place, for a start that is taking too long.
   const [attempt, setAttempt] = useState(0);
   const reload = () => {
     setLoaded(false);
+    setDrawn(false);
     setAttempt(attempt + 1);
   };
+  const started = loaded && (!drawsReady || drawn);
   // Track the hide request the game never answered: without StudioProbe or when
   // a hidden page is too throttled to pump the engine, the pause/mute request is
   // lost and the game may quietly keep running while another tab is open.
@@ -428,9 +440,14 @@ export function GameFrame({
         setUnacknowledged(false);
         return;
       }
-      if (message.type === "studio-error")
+      if (message.type === "studio-error") {
+        setDrawn(true);
         onStudioMessage?.({ type: "studio-error", message: errorText(message) });
-      if (message.type === "studio-ready") onStudioMessage?.({ type: "studio-ready" });
+      }
+      if (message.type === "studio-ready") {
+        setDrawn(true);
+        onStudioMessage?.({ type: "studio-ready" });
+      }
       if (message.type === "studio-play")
         onStudioMessage?.({
           type: "studio-play",
@@ -512,7 +529,7 @@ export function GameFrame({
         }}
         onBlur={() => setFrameFocused(false)}
       />
-      {loaded ? null : <StartingCard name={gameName} onReload={reload} />}
+      {started ? null : <StartingCard name={gameName} loaded={loaded} onReload={reload} />}
       {keyboardFocused ? (
         <span
           aria-hidden="true"
@@ -542,7 +559,16 @@ export function GameFrame({
  * so the Stage says what is coming. A start that runs long says so and offers a reload; it never
  * claims progress it cannot see, and nothing spins.
  */
-function StartingCard({ name, onReload }: { name: string; onReload: () => void }) {
+function StartingCard({
+  name,
+  loaded,
+  onReload,
+}: {
+  name: string;
+  /** The page has loaded and the game is booting in it. */
+  loaded: boolean;
+  onReload: () => void;
+}) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setSlow(true), SLOW_START_MS);
@@ -558,7 +584,9 @@ function StartingCard({ name, onReload }: { name: string; onReload: () => void }
         </Text>
         <Text variant="meta" tone="inherit" render={<p className="text-stage-muted" />}>
           {slow
-            ? "The game is taking longer than usual to start. Its page has not answered yet."
+            ? loaded
+              ? "The game is taking longer than usual to start."
+              : "The game is taking longer than usual to start. Its page has not answered yet."
             : "Starting the game…"}
         </Text>
         {slow ? (
@@ -654,9 +682,7 @@ function StageStateCard({
           // Stage shows the agent at work: the Stage only says where the game will appear.
           <div className="flex max-w-md flex-col items-center gap-3">
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
-              {phase.saving === true
-                ? "Build 1 is being saved and plays here in a moment."
-                : "The game plays here as soon as the agent's check of it passes."}
+              The game plays here as soon as your agent has it running.
             </Text>
           </div>
         ) : null}

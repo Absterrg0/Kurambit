@@ -108,8 +108,7 @@ export function GameSavedList({ threadRef }: { threadRef: ScopedThreadRef }) {
     return (
       <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
         <BookmarkIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        {query.error ??
-          "No saved recordings yet. Save one from a build's Recordings to keep it past log cleanup."}
+        {query.error ?? "Nothing saved from a play yet."}
       </p>
     );
   return (

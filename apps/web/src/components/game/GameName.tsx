@@ -3,11 +3,11 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@kurambit/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectId } from "@kurambit/contracts";
+import type { EnvironmentId, ProjectId, ScopedThreadRef } from "@kurambit/contracts";
 import { useState } from "react";
 import { create } from "zustand";
 
-import { useProject } from "../../state/entities";
+import { useProject, useQuietThreadShell } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { Input } from "../ui/input";
@@ -25,6 +25,12 @@ export function useGameName(
 ): string {
   const project = useProject(projectId === null ? null : scopeProjectRef(environmentId, projectId));
   return project?.title ?? fallback;
+}
+
+/** The name of the game a chat belongs to; "" until its project is known. */
+export function useThreadGameName(threadRef: ScopedThreadRef): string {
+  const shell = useQuietThreadShell(threadRef);
+  return useGameName(threadRef.environmentId, shell?.projectId ?? null, "");
 }
 
 /** Which game is being renamed in place, so a menu can start it in the row that shows it. */

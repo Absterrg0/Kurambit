@@ -26,6 +26,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useSelectNotice, valueLabel } from "./GameInspector";
 import { GameThingPicture, useStageBuild } from "./GameThingPicture";
 import { GameTuneField, type TuneCommit } from "./GameTuneField";
+import { useThreadGameName } from "./GameName";
 import { Workbench } from "./GameWorkbenchParts";
 import {
   hoverStageThing,
@@ -183,6 +184,15 @@ export const KIND_WORDS: Record<GameThing["kind"], string> = {
 
 const hasValues = (thing: GameThing) => (thing.values?.length ?? 0) > 0;
 
+/** "Hopper and Flag", "Hopper, Flag and 3 more": the things a game named; null with none. */
+export const namesOf = (things: ReadonlyArray<GameThing>): string | null => {
+  const names = [...new Set(things.map((thing) => thing.name.replace(/ \d+$/, "")))];
+  if (names.length === 0) return null;
+  if (names.length === 1) return names[0]!;
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+};
+
 /**
  * Tune, as one scrolling inspector the way Unity lists components and Spline its sections: each
  * thing the game named with values is a section of value rows, grouped by kind under thin labels,
@@ -247,6 +257,10 @@ export function GameTunePanel({
     .map((thing) => ({ thing, values: tunedValues(thing) }))
     .filter((entry) => entry.values.length > 0);
   const changedCount = changed.reduce((sum, entry) => sum + entry.values.length, 0);
+  // With nothing to tune, the one thing to do names what the game already has.
+  const gameName = useThreadGameName(threadRef);
+  const named = namesOf(all);
+  const subject = named ?? (gameName || "the game");
   if (notice !== null || status !== "ready")
     return (
       <Workbench.Empty
@@ -259,18 +273,17 @@ export function GameTunePanel({
     return (
       <Workbench.Empty
         icon={<SlidersHorizontalIcon />}
-        title="Nothing to tune"
         action={
           <Button
             size="sm"
             variant="outline"
             onClick={() =>
               onAsk(
-                "Make this game's key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.",
+                `Make ${subject}'s key numbers tunable from the Stage: the player's speed and jump height, enemy speeds and counts, timers and the win and lose targets.`,
               )
             }
           >
-            Ask your agent to expose values
+            {named === null ? `Make ${subject}'s numbers tunable` : `Make ${named} tunable`}
           </Button>
         }
       />

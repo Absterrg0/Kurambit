@@ -3,6 +3,7 @@
 ## Using Kurambit
 
 - [Making games](./user/making-games.md)
+- [Vocabulary](./user/vocabulary.md)
 - [Install](./user/install.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)

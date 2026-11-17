@@ -151,6 +151,21 @@ export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThr
   );
 }
 
+const ZERO_ATOM = Atom.make(0).pipe(Atom.withLabel("web-empty-count"));
+const sentCountAtomFamily = Atom.family((key: string) =>
+  Atom.make(
+    (get) =>
+      get(environmentThreadDetails.threadAtom(parseThreadKey(key)))?.projection.messages.filter(
+        (message) => message.role === "user",
+      ).length ?? 0,
+  ).pipe(Atom.withLabel(`web-thread-sent-count:${key}`)),
+);
+
+/** How many messages the person has sent in a chat: a number, so a streaming reply re-renders nothing. */
+export function useThreadSentCount(ref: ScopedThreadRef | null): number {
+  return useAtomValue(ref === null ? ZERO_ATOM : sentCountAtomFamily(threadKey(ref)));
+}
+
 export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadStatus {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_STATUS_ATOM : environmentThreadDetails.statusAtom(ref),

@@ -101,9 +101,11 @@ import { readNextLine } from "@kurambit/shared/gameNextLine";
  */
 export function GameWorkbenchChecks({
   threadRef,
+  onAsk,
   onOpenTurnDiff,
 }: {
   threadRef: ScopedThreadRef;
+  onAsk: (text: string) => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
@@ -141,25 +143,17 @@ export function GameWorkbenchChecks({
     data.builds.find((entry) => entry.id === (onStageId ?? data.current)) ??
     data.builds[0] ??
     null;
+  // No build yet: the build being made, or the one thing that makes it.
   if (build === null)
-    return (
+    return working || landing ? (
+      <Workbench.Empty icon={<ClipboardCheckIcon />} title="Making build 1" />
+    ) : (
       <Workbench.Empty
         icon={<ClipboardCheckIcon />}
-        title={
-          working || landing
-            ? "Build 1 is being made"
-            : shell?.latestRun == null
-              ? "Build 1 comes from your first change"
-              : "No build yet"
-        }
-        // A game whose turn has run is never told its first change is still to come: the turn's
-        // build may be a moment from landing, or the turn changed nothing.
-        body={
-          working || landing
-            ? "When the agent's turn ends it plays on the Stage, and a bot plays it to check it."
-            : shell?.latestRun == null
-              ? "Tell your game what to change in the chat. Your agent's change becomes build 1, and its checks show here."
-              : "Build 1 lands here when a turn of your agent changes the game."
+        action={
+          <Button size="sm" variant="outline" onClick={() => onAsk("Make the game's first build.")}>
+            Ask for build 1
+          </Button>
         }
       />
     );
@@ -1271,18 +1265,18 @@ const tuneLine = (change: GameTuneChange, things: ReadonlyArray<GameThing>) => {
   return from === null ? `${name} set to ${to}${unit}` : `${name} ${from} → ${to}${unit}`;
 };
 
-/** A saved play that no longer ends as it was recorded, as a person says it. */
+/** A test play that no longer ends as it was recorded, as a person says it. */
 const savedPlayLine = (play: {
   readonly name: string;
   readonly reading: GameSavedPlayReading;
   readonly differs: { readonly seconds: number } | null;
 }) =>
   play.reading === "plays-differently"
-    ? `Saved play "${play.name}" now plays differently${play.differs === null ? "" : ` at ${Math.round(play.differs.seconds)} s`}`
+    ? `Test play "${play.name}" now plays differently${play.differs === null ? "" : ` at ${Math.round(play.differs.seconds)} s`}`
     : play.reading === "ending-changed"
-      ? `Saved play "${play.name}" now ends differently`
+      ? `Test play "${play.name}" now ends differently`
       : play.reading === "cannot-replay"
-        ? `Saved play "${play.name}" can no longer be replayed`
+        ? `Test play "${play.name}" can no longer be replayed`
         : null;
 
 /** The most change lines said at once; the rest are counted. */

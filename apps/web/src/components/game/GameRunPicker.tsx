@@ -3,6 +3,7 @@ import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { ArrowRightIcon, FastForwardIcon, SplitIcon } from "lucide-react";
 import { useRef } from "react";
 
+import { openGameTool } from "../../gameArrivalStore";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import {
   ComposerControl,
@@ -20,12 +21,14 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
+import { ArrivalDot } from "./ArrivalDot";
 import {
   KEEP_GOING_BUDGETS,
   budgetFromValue,
   budgetValue,
   keepGoingControlView,
 } from "./keepGoing.logic";
+import { useGameArrivals } from "./useGameArrivals";
 import { useKeepGoing } from "./useKeepGoing";
 
 const WAYS = [2, 3, 4] as const;
@@ -49,6 +52,8 @@ function Choice({ children }: { children: string }) {
 /**
  * What a game chat's Send does: one turn, the same message tried several ways at once, or Keep
  * going, whose own steps follow and whose direction the message is. Its label is the choice.
+ * Until Try N ways (the third message) or Keep going (a build that starts, with a `Next:` line)
+ * arrives, Send sends once and there is nothing to pick: the picker is absent.
  */
 export function GameRunPicker({
   threadRef,
@@ -77,11 +82,21 @@ export function GameRunPicker({
     chosenBudget: keepGoing.chosenBudget,
   });
   const pick = keepGoingProfile !== undefined ? "keep-going" : ways !== undefined ? "ways" : "once";
+  const arrivals = useGameArrivals(threadRef);
+  const tryShown = arrivals.tryWays.shown || pick === "ways";
+  const keepGoingShown = arrivals.keepGoing.shown || pick === "keep-going";
+  if (!tryShown && !keepGoingShown) return null;
   const keepGoingBlocked = view.pressed ? null : (view.modesDisabled ?? view.disabled);
   const label =
     pick === "keep-going" ? "Keep going" : pick === "ways" ? `Try ${ways} ways` : "Once";
   return (
-    <Menu>
+    <Menu
+      onOpenChange={(open) => {
+        if (!open) return;
+        if (tryShown) openGameTool("try-ways");
+        if (keepGoingShown) openGameTool("keep-going");
+      }}
+    >
       <MenuTrigger
         render={
           <ComposerControl
@@ -102,6 +117,7 @@ export function GameRunPicker({
         {/* The narrowest composer keeps the icon; the name is the trigger's label. */}
         <span className="@max-[22rem]/composer-surface:hidden">{label}</span>
         <ComposerControlChevron size="xs" />
+        <ArrivalDot on={arrivals.tryWays.dot || arrivals.keepGoing.dot} />
       </MenuTrigger>
       {/* Over the whole composer, not over the text row it sits under. */}
       <MenuPopup
@@ -126,34 +142,42 @@ export function GameRunPicker({
           <MenuRadioItem value="once">
             <Choice>Once</Choice>
           </MenuRadioItem>
-          <MenuRadioItem value="ways" disabled={threadKey === null}>
-            <Choice>{`Try ${ways ?? 3} ways`}</Choice>
-          </MenuRadioItem>
-          <MenuRadioItem
-            value="keep-going"
-            disabled={threadKey === null || keepGoingBlocked !== null}
-            {...(keepGoingBlocked === null ? {} : { title: keepGoingBlocked })}
-          >
-            <Choice>Keep going</Choice>
-          </MenuRadioItem>
+          {tryShown ? (
+            <MenuRadioItem value="ways" disabled={threadKey === null}>
+              <Choice>{`Try ${ways ?? 3} ways`}</Choice>
+            </MenuRadioItem>
+          ) : null}
+          {keepGoingShown ? (
+            <MenuRadioItem
+              value="keep-going"
+              disabled={threadKey === null || keepGoingBlocked !== null}
+              {...(keepGoingBlocked === null ? {} : { title: keepGoingBlocked })}
+            >
+              <Choice>Keep going</Choice>
+            </MenuRadioItem>
+          ) : null}
         </MenuRadioGroup>
         {/* How many ways, always in view: a number picks Try too; checked only while Try is. */}
-        <MenuSeparator />
-        <MenuGroup>
-          <MenuGroupLabel>Ways to try</MenuGroupLabel>
-          <MenuRadioGroup
-            value={pick === "ways" ? String(ways) : ""}
-            onValueChange={(value) => {
-              if (threadKey !== null) pickRun(threadKey, { kind: "ways", ways: Number(value) });
-            }}
-          >
-            {WAYS.map((each) => (
-              <MenuRadioItem key={each} value={String(each)} disabled={threadKey === null}>
-                <Choice>{String(each)}</Choice>
-              </MenuRadioItem>
-            ))}
-          </MenuRadioGroup>
-        </MenuGroup>
+        {tryShown ? (
+          <>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuGroupLabel>Ways to try</MenuGroupLabel>
+              <MenuRadioGroup
+                value={pick === "ways" ? String(ways) : ""}
+                onValueChange={(value) => {
+                  if (threadKey !== null) pickRun(threadKey, { kind: "ways", ways: Number(value) });
+                }}
+              >
+                {WAYS.map((each) => (
+                  <MenuRadioItem key={each} value={String(each)} disabled={threadKey === null}>
+                    <Choice>{String(each)}</Choice>
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuGroup>
+          </>
+        ) : null}
         {pick === "keep-going" && threadKey !== null ? (
           <>
             <MenuSeparator />

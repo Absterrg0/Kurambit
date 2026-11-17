@@ -9,8 +9,8 @@ older demo shell, still open: see [Games from earlier versions](#games-from-earl
 ## Game tools
 
 three.js games play without anything installed, but part of measuring them needs **ffmpeg**:
-Kurambit records each bot play with it, and a build's random-input play (errors, freezes, frame
-rate) is read from that recording. Without ffmpeg that play reads **Not measured**, while booting,
+Kurambit films each bot play with it, and a build's random-input play (errors, freezes, frame
+rate) is read from that video. Without ffmpeg that play reads **Not measured**, while booting,
 the QA play and saved test plays are still measured; once ffmpeg is installed, measure the build
 again. Art tools are programs you install yourself, the same
 way you install your coding agents: Kurambit finds them, checks their versions, and
@@ -103,7 +103,7 @@ send. A game keeps one empty chat, so asking again opens that one.
 
 ## Library
 
-**Library** in the sidebar shows every model, texture, sound and font in all your games (a file
+**Library** in the sidebar, there from your second game on, shows every model, texture, sound and font in all your games (a file
 in several games is listed once), the models you saved, the asset packs Kurambit knows with their
 licences, and each game's look. Filter by kind and between **Yours** and **Packs**, or find an
 asset from **Search**. Open one to see it, where it is used and its licence. **Add to game** copies
@@ -241,13 +241,15 @@ in. It works on games whose engine Kurambit plays after every turn (three.js); o
 control is disabled and says why.
 
 To start, choose **Keep going** in the picker beside the paperclip, under the box where you tell the
-game what to change (it says **Once** until you change it; `mod+Shift+A` opens it), then send. What you write is its
+game what to change (it says **Once** until you change it; `mod+Shift+A` opens it), then send. The
+picker appears once Keep going has something to go on, when a build starts and your agent's reply
+ends in a `Next:` line, or after your third message, for Try N ways. What you write is its
 direction, the first thing it does; you can also send nothing and let it take your agent's latest
 `Next:` line. While it runs, a line above the box says which step it is on, with **Stop**, and what
 you send goes to it as its next step. **Keep going: Guided** and **Keep going: Autopilot** in the
 command palette choose it and start it at once. Its mode is in the same picker:
 
-- **Guided:** each next step is proposed above the composer, "Step 3 · a failing fact: …", and
+- **Guided:** each next step is proposed above the composer, "Step 3 · a failing check: …", and
   starts at the time shown unless you act. **Start now** starts it, **Skip** sets it aside for this
   run, and **Edit** puts its text in the composer and holds it, so you can change it and send it as
   your own message.
@@ -263,14 +265,14 @@ as the one before it is checked to still start cleanly; the rest of its measurin
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
 and why: notes you left for it first, then a crash or freeze, then a step that was undone, then,
 when you asked for the game to match a picture, what your agent's last check found still differs
-most from it, then a failing fact, then the agent's newest `Next:` line. A step runs in a fresh session of your agent,
+most from it, then a failing check, then the agent's newest `Next:` line. A step runs in a fresh session of your agent,
 so it costs what the step is worth rather than re-reading the whole chat; its message carries what
-the agent needs (your brief, the chat's last reply, the current facts and the steps so far). Your
+the agent needs (your brief, the chat's last reply, the current checks and the steps so far). Your
 own messages keep your agent's session, and it is told what the steps did. The step's build is
 played and measured like any turn. Its builds sit under one **Keep going** bracket in the builds
 list, and its line in the chat says what the step did and what happened to it:
 
-- **kept**: the game still boots and plays without errors. Every other fact (controls, Retry, the
+- **kept**: the game still boots and plays without errors. Every other check (controls, Retry, the
   HUD) is shown and, when it is bad, proposed as a later step, but never a reason to undo; an error
   the longer random-input play finds after a step was kept becomes the next step;
 - **undone**: the step broke the game, so Kurambit put back the build the step started from. The
@@ -279,7 +281,7 @@ list, and its line in the chat says what the step did and what happened to it:
   there. A step undone twice is not tried again in this run;
 - **not undone**: it broke the game but was left in place, with why: a later turn had already
   changed the game, or the undo itself failed and the builds list says what failed;
-- **not measured**: the facts could not be compared, so the step is kept.
+- **not measured**: the checks could not be compared, so the step is kept.
 
 Your messages always go first: a message you send is an ordinary turn, never judged or undone, and
 keep going waits for it to end. Stopping a step's turn with the chat's Stop pauses keep going.
@@ -295,7 +297,18 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 ## Play and revise
 
 A game opens as one column: the game on top, its control bar under it, then your chat with the
-agent and the box where you tell the game what to change. The bar's buttons stay put while you play,
+agent and the box where you tell the game what to change. A new game starts with just that, and
+**Undo** on each build in the chat.
+
+Every other tool appears when the game first has something for it, and then stays where it is:
+the Workbench's **Checks** once a build is measured, **Tune** once the game has a value to tune,
+**Art** once it has a model; **Save as test play** once a run ends; **Responsive view** once a
+phone or widescreen check finds a problem; **Try N ways** after your third message and **Keep
+going** once a build starts with a `Next:` line; the **Library** with your second game. A new
+tool carries a dot until you open it, one dot at a time, the Workbench's first. Their keys and the
+command palette reach each one before then.
+
+The bar's buttons stay put while you play,
 pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
 lose**, sound, **Fullscreen**, and a **⋯** menu. **Can't lose** is there only for a game whose code
 can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". Paused, or once a run ends, the run's timeline and
@@ -310,16 +323,16 @@ Full.
 The bar on top has the game's name, which opens its menu (rename, folder, **Export…**, **Art…**),
 then the build on the Stage, such as **Build 4**, which opens **History**: **Undo**, **Redo** and
 **Compare**, then every build as a small picture in time order with the one on the Stage ringed,
-and each "try it N ways" message's versions together under what you asked. Click a picture to
+and each **Try N ways** message's versions together under what you asked. Click a picture to
 play that build and show its checks; while a version plays, **Keep** makes it the game. On the
-right is the Workbench button.
+right is the Workbench button, once its first section has arrived.
 
 If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
 it** and **Undo**. An error while you play shows as one small line in the game's corner.
 
 The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
 which also opens each section directly). The same key or the header's Workbench button closes it.
-Drag its edge to resize it. Its three sections:
+Drag its edge to resize it. Its three sections, each shown once it has arrived:
 
 - **Tune**: one section for each thing the game names with values to tune, grouped by kind, with
   its values, such as its speed, jump height, timers and counts. The filter at the top finds a
@@ -329,9 +342,9 @@ Drag its edge to resize it. Its three sections:
   Values are saved into the game as you let go, and a tuning session is one build Undo takes back;
   **Keep as a build** ends the session, so your next change starts another. Values kept while an
   agent's turn works in the same folder wait and become their build when that turn ends, on top of
-  what the turn left, so none is lost. **Put all back**
-  returns every value to the game's own. If a game has nothing to tune, **Ask your agent to expose
-  values** asks for it.
+  what the turn left, so none is lost. **Put all back** returns every value to the game's own. If a
+  game has nothing to tune, one button asks your agent to make the things it names, or the game's
+  numbers, tunable.
 - **Art** (`mod+Alt+R`): every asset the game has, with search and a filter for models, textures
   and sounds. Models (the ones the game's code builds too) and textures show as pictures, with
   their triangles or size in pixels; sounds show their length and waveform, with a play button;
@@ -405,7 +418,7 @@ Drag its edge to resize it. Its three sections:
 - **Test plays (three.js).** **Save as test play** in the bar's **⋯** menu saves a run under a name,
   such as a win or the run where a bug showed: the run that ended, or the one you are playing, up
   to now or to where you rewound it, so a game with no ending has test plays too. Your first win is
-  offered as one. Every build from then on replays it, and its checks say whether each saved play
+  offered as one. Every build from then on replays it, and its checks say whether each test play
   still ends the same way, or for a run that never ended, whether it plays the same for its length. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
   outside its update. Your agent saves its own winning runs the same way, and both of you can
@@ -428,7 +441,8 @@ Drag its edge to resize it. Its three sections:
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose
   are in the command palette too, with keys that work while you play (Settings → Keybindings).
-- **Responsive view (three.js).** **⋯ → Responsive view**, its key or the palette turns the Stage into
+- **Responsive view (three.js).** **⋯ → Responsive view** (in the menu once a phone or widescreen
+  check finds a problem), its key or the palette turns the Stage into
   a device view like a browser's: pick Phone, Tablet, Laptop, Desktop, Ultrawide or Responsive, type
   a width and height, rotate, or zoom. The game keeps running at that size, so you see how it
   answers a resize; in Responsive, drag the frame's edges. Esc or the same toggle returns to the
@@ -464,7 +478,7 @@ appears when the game folder is not any build (edited since, or another build pl
 until the Stage has shown the game, its picture is the last build's, dimmed.
 **Older** pages back. Clicking a picture plays that build (an older one from a copy; the game folder
 is never touched, and **Back to the current game** or the newest picture returns) and shows it in the right panel's **Build** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines, each something a player would hit (does it start, does it play without errors, does every control work, does Retry start a clean run, does the HUD fit the screen, does it hold its frame rate (with the draw calls and triangles that cost it), does it fit a phone held upright and a widescreen monitor (and how much it downloads to start), and whether the play bot has proven it can be won) with every other measurement, each in a plain sentence, under **Other measurements**, what changed in your agent's words (with the files it changed,
-which open the diff), its recordings, and in the **⋯** beside the build's name:
+which open the diff), its videos, and in the **⋯** beside the build's name:
 
 - **Undo this build** on any build, which takes that build's change out of the game and keeps every
   build after it. The undo is a build of its own; undoing it is **Redo**. When a later build
@@ -479,10 +493,10 @@ When the game folder has changed since its last build, the tab shows **Now on th
 the checks under **Last measured build**, since they belong to that build, not to what plays now.
 Checks not measured for the same reason are said once; the ⓘ beside them says why. **Compare with** the build
 before it, or **Compare** in the builds list (or **Compare builds…** in the command palette) to pick
-two pictures, shows them side by side in the game's place, each playable, with their facts in a
-table: ↑ and ↓ show which way a fact moved, ≠ that it changed without a direction (an ending that
+two pictures, shows them side by side in the game's place, each playable, with their checks in a
+table: ↑ and ↓ show which way a check moved, ≠ that it changed without a direction (an ending that
 became another), and = that it did not change; a change is coloured when it is better or worse. A
-fact that was not measured on one side reads "not comparable" with the reason. Only the side you are
+check that was not measured on one side reads "not comparable" with the reason. Only the side you are
 playing runs; the other is paused and muted. **Close** returns to the live game.
 
 A turn that changed the game ends in the chat with one line for its build: its name, which plays it;
@@ -510,7 +524,7 @@ and **Keep version 2** to bring it into the game: builds another chat landed sin
 Undo takes it back, and the other versions' copies go, while their builds stay in the builds list. It sends text only, and not while Keep going is on.
 A version a restart cut off keeps what it had built.
 
-**Facts** are what Kurambit measured by playing the build, only what you would act on: whether
+**Checks** are what Kurambit measured by playing the build, only what you would act on: whether
 it boots, whether it crashes or stops answering in a minute of random input, and for a three.js
 game a QA pass (it presses every control the game declares on a fresh run, ends a run and presses
 Retry, and reads the HUD at a wide and a narrow window, so a dead key, a Retry that keeps the last
@@ -522,9 +536,9 @@ so instead of guessing.
 **Can it be won** is measured only when you ask: ask your agent to prove the game can be won, and
 it writes a play bot for it and has Kurambit play it; after that, **Measure again** plays it too.
 Opening or playing a build that was never measured measures it, one build at a time, and a
-three.js game measures each turn's build in the background when the turn ends. A fact Kurambit
+three.js game measures each turn's build in the background when the turn ends. A check Kurambit
 could not measure says **Not measured** and why, and never counts as a result: if a tool failed,
-**Measure again** tries once more. Your agent sees the same builds and facts.
+**Measure again** tries once more. Your agent sees the same builds and checks.
 
 ## Working in several chats at once
 

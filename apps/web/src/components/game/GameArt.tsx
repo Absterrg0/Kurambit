@@ -66,7 +66,8 @@ import { GameSaveToLibrary } from "./GameSaveToLibrary";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
 import { colourHex, PropertyReading, PropertyRow, PropertySection } from "../ui/property-field";
 import { GameLookInspector, LabelInput, renameLook, SizeRow } from "./GameLookInspector";
-import { KIND_WORDS, useTuneSaver } from "./GameTune";
+import { useThreadGameName } from "./GameName";
+import { KIND_WORDS, namesOf, useTuneSaver } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
 import {
   artSections,
@@ -172,6 +173,11 @@ export function GameArtPanel({
   const pointed = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
   const code = codeModels(things);
   const use = useAssetUse(threadRef);
+  // Art's first model names what the game already has: its player, else the game.
+  const gameName = useThreadGameName(threadRef);
+  const player = namesOf(things.filter((thing) => thing.kind === "character"));
+  const modelAsk =
+    player === null ? `Give ${gameName || "the game"} its first model` : `Give ${player} a model`;
   const viewerUrl = useViewerUrl(threadRef);
   const build = useStageBuild(threadRef);
   const selected = useGameWorkspaceStore((state) => state.artAsset);
@@ -241,6 +247,15 @@ export function GameArtPanel({
           loading={read.data === null || read.data === undefined}
           more={read.data?.more ?? 0}
           onOpen={(next) => setSelected(entryKey(next))}
+          firstModel={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onAsk(`${modelAsk}, named with ctx.thing so it shows in Art.`)}
+            >
+              {modelAsk}
+            </Button>
+          }
         />
       ) : (
         <ArtDetail
@@ -300,6 +315,7 @@ function ArtList({
   loading,
   more,
   onOpen,
+  firstModel,
 }: {
   threadRef: ScopedThreadRef;
   root: string | null;
@@ -311,6 +327,8 @@ function ArtList({
   loading: boolean;
   more: number;
   onOpen: (entry: GameArtEntry) => void;
+  /** With no art yet: the one thing to do, asking for the game's first model. */
+  firstModel: ReactNode;
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ArtFilter>("all");
@@ -346,7 +364,7 @@ function ArtList({
         </ToggleGroup>
       </div>
       {!loading && assets.length === 0 && code.length === 0 ? (
-        <Workbench.Empty icon={<ImageIcon />} title="No art yet" />
+        <Workbench.Empty icon={<ImageIcon />} action={firstModel} />
       ) : nothing && search !== "" ? (
         <Text variant="body" tone="muted" render={<p className="px-4 py-3" />}>
           Nothing matches “{search}”.
