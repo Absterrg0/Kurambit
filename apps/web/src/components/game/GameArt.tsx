@@ -130,6 +130,18 @@ function useAssetUse(threadRef: ScopedThreadRef): GameAssetUse | null {
   return facts?.use.status === "measured" ? facts.use.value : null;
 }
 
+/** A copy ("Slime 2") picked on the Stage opens the one model its copies share ("Slime"). */
+const copyModel = (
+  code: ReadonlyArray<GameArtCodeModel>,
+  things: ReadonlyArray<GameThing>,
+  id: string,
+): GameArtCodeModel | null => {
+  const thing = things.find((each) => each.id === id);
+  if (thing === undefined || thing.parent !== undefined) return null;
+  const base = thing.name.replace(/ \d+$/, "");
+  return code.find((model) => model.parent === null && model.name === base) ?? null;
+};
+
 /**
  * The Workbench's Art, an asset browser: search and a filter over the game's models (its code's
  * and its files), textures, sounds and fonts. Models and textures are a grid of pictures, sounds
@@ -167,7 +179,8 @@ export function GameArtPanel({
     selected === null
       ? null
       : selected.startsWith(CODE_MODEL_PREFIX)
-        ? (code.find((model) => `${CODE_MODEL_PREFIX}${model.id}` === selected) ?? null)
+        ? (code.find((model) => `${CODE_MODEL_PREFIX}${model.id}` === selected) ??
+          copyModel(code, things, selected.slice(CODE_MODEL_PREFIX.length)))
         : (() => {
             const asset = assets.find((each) => each.path === selected);
             return asset === undefined ? null : { kind: "file" as const, asset };
