@@ -9,8 +9,10 @@ import type {
   ThreadId,
 } from "@kurambit/contracts";
 import { Atom } from "effect/reactivity";
+import { useEffect } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
+import { useGameArrivalStore } from "../../gameArrivalStore";
 import { randomUUID } from "../../lib/utils";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { gameEnvironment, projectHasCopies } from "../../state/game";
@@ -58,6 +60,10 @@ export function useGameCopies(threadRef: ScopedThreadRef | null): {
   readonly place: GameChatPlace;
 } {
   const has = useAtomValue(projectHasCopies(threadRef));
+  const met = useGameArrivalStore((state) => state.met.includes("copies"));
+  useEffect(() => {
+    if (has && !met) useGameArrivalStore.getState().meet("copies");
+  }, [has, met]);
   const query = useEnvironmentQuery(
     has && threadRef !== null
       ? gameEnvironment.copies({

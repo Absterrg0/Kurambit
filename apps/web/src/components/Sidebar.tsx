@@ -91,6 +91,7 @@ import { GameLibraryPicture } from "./game/GameLibraryStatus";
 import { GameNameInput, useGameName, useGameRenameStore, useRenameGame } from "./game/GameName";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
 import { useNewChat } from "./game/useNewGameChat";
+import { useGameArrivalStore } from "../gameArrivalStore";
 import { useCopyPlace } from "./game/useGameCopies";
 import { useSidebarRowSubscriptionLease } from "./Sidebar.logic";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
@@ -275,6 +276,11 @@ export default function Sidebar() {
   const startChat = (game: GameLibraryEntry) => {
     closeMobile();
     void newChat(scopeProjectRef(game.environmentId, game.projectId));
+  };
+  const copiesArrived = useGameArrivalStore((state) => state.met.includes("copies"));
+  const startChatInCopy = (game: GameLibraryEntry) => {
+    closeMobile();
+    void newChat(scopeProjectRef(game.environmentId, game.projectId), { inCopy: true });
   };
   const openGame = (node: Node) => {
     if (node.main === null) return startChat(node.game);
@@ -771,6 +777,11 @@ export default function Sidebar() {
                             onOpen={() => openGame(node)}
                             onToggle={() => setExpanded(expansionKey(node.key), !isExpanded(node))}
                             onNewChat={() => startChat(node.game)}
+                            onNewChatInCopy={
+                              copiesArrived && canOperate(node)
+                                ? () => startChatInCopy(node.game)
+                                : null
+                            }
                             onAction={(action) => void runGameAction(node, action)}
                             onContextMenu={(position) => void showGameMenu(node, position)}
                           />
@@ -873,6 +884,7 @@ function GameRow({
   onOpen,
   onToggle,
   onNewChat,
+  onNewChatInCopy = null,
   onAction,
   onContextMenu,
 }: {
@@ -884,6 +896,7 @@ function GameRow({
   onOpen: () => void;
   onToggle: () => void;
   onNewChat: (() => void) | null;
+  onNewChatInCopy?: (() => void) | null;
   onAction: (action: GameAction) => void;
   onContextMenu: (position: { x: number; y: number }) => void;
 }) {
@@ -948,6 +961,7 @@ function GameRow({
         onOpen={onOpen}
         onToggle={onToggle}
         onNewChat={onNewChat}
+        onNewChatInCopy={onNewChatInCopy}
         onAction={onAction}
         onContextMenu={onContextMenu}
         {...(rowProps === undefined ? {} : { rowProps })}

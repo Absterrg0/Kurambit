@@ -18,6 +18,9 @@ const GAME_TOOLS = [
   "keep-going",
   "library",
   "responsive",
+  // A copy: met when a chat of a game first works in one (Run in a copy). It brings the
+  // new-chat choice "in a copy", with no dot.
+  "copies",
 ] as const;
 export type GameTool = (typeof GAME_TOOLS)[number];
 

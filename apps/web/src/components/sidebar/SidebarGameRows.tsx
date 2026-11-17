@@ -137,6 +137,7 @@ export function SidebarGameRow({
   onOpen,
   onToggle,
   onNewChat,
+  onNewChatInCopy = null,
   onAction,
   onContextMenu,
   rowProps,
@@ -154,6 +155,8 @@ export function SidebarGameRow({
   onOpen: () => void;
   onToggle: () => void;
   onNewChat: (() => void) | null;
+  /** Once copies have arrived, + offers a new chat in the game or in a copy. */
+  onNewChatInCopy?: (() => void) | null;
   onAction: (action: GameAction) => void;
   onContextMenu: (position: { x: number; y: number }) => void;
   rowProps?: Record<string, unknown>;
@@ -206,7 +209,32 @@ export function SidebarGameRow({
         </span>
       </button>
       <span className="invisible absolute inset-y-0 end-1 flex items-center gap-0.5 group-hover/game:visible group-focus-within/game:visible has-[[data-popup-open]]:visible">
-        {onNewChat === null ? null : (
+        {onNewChat === null ? null : onNewChatInCopy !== null ? (
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="New chat"
+                  onClick={(event) => event.stopPropagation()}
+                />
+              }
+            >
+              <PlusIcon aria-hidden="true" />
+            </MenuTrigger>
+            <MenuPopup align="start" side="bottom">
+              <MenuItem onClick={onNewChat}>
+                <SquarePenIcon />
+                New chat in the game
+              </MenuItem>
+              <MenuItem onClick={onNewChatInCopy}>
+                <CopyIcon />
+                New chat in a copy
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        ) : (
           <Tooltip>
             <TooltipTrigger
               render={

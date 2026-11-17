@@ -101,6 +101,9 @@ import {
 } from "@kurambit/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  RefreshCwIcon,
+  CopyIcon,
+  ArrowDownToLineIcon,
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -185,6 +188,8 @@ import { Atom } from "effect/reactivity";
 
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNewChat } from "./game/useNewGameChat";
+import { unresolvedText, useCopyActions, useCopyPlace } from "./game/useGameCopies";
+import { useGameArrivalStore } from "../gameArrivalStore";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import {
   composerPromptLink,
@@ -886,6 +891,9 @@ function OpenCommandPaletteDialog(props: {
   const tryWays = useGameWorkspaceStore((state) => state.tryWays);
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
+  const copyPlace = useCopyPlace(isGameThread ? activeThreadRef : null);
+  const copyActions = useCopyActions(isGameThread ? activeThreadRef : null);
+  const copiesArrived = useGameArrivalStore((state) => state.met.includes("copies"));
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
   const characterRouteBlocker = useCharacterRouteBlockers(
     isGameThread && characterRoute.canSet ? (activeThreadRef?.environmentId ?? null) : null,
@@ -1693,6 +1701,45 @@ function OpenCommandPaletteDialog(props: {
         icon: <CircleStopIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("stop"),
       });
+    if (copiesArrived && activeThread !== null && copyPlace === null) {
+      const projectRef = scopeProjectRef(activeThread.environmentId, activeThread.projectId);
+      actionItems.push({
+        kind: "action",
+        value: "action:game-new-chat-in-copy",
+        title: "New chat in a copy",
+        searchTerms: ["new chat", "copy", "experiment", "game"],
+        icon: <CopyIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          await handleNewThread(projectRef, { inCopy: true });
+        },
+      });
+    }
+    if (copyPlace !== null && copyActions.canAct) {
+      if (copyPlace.noBringIn === null && unresolvedText(copyPlace).length === 0)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-bring-in",
+          title: "Bring in",
+          description: "This copy's work into the game",
+          searchTerms: ["bring in", "copy", "game", "land"],
+          icon: <ArrowDownToLineIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            await copyActions.bringIn(threadRef.threadId);
+          },
+        });
+      if (copyPlace.ahead > 0)
+        actionItems.push({
+          kind: "action",
+          value: "action:game-copy-update",
+          title: "Update",
+          description: `Take the game's ${copyPlace.ahead} newer build${copyPlace.ahead === 1 ? "" : "s"} into this copy`,
+          searchTerms: ["update", "copy", "game", "newer"],
+          icon: <RefreshCwIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            await copyActions.update(threadRef.threadId);
+          },
+        });
+    }
     actionItems.push({
       kind: "action",
       value: "action:game-toggle-workbench",
