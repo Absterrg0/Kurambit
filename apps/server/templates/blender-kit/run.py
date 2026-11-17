@@ -26,6 +26,7 @@ import bpy  # noqa: E402
 from mathutils import Matrix  # noqa: E402
 
 from kurambit import contact, deform, measure, skeleton, stylepass  # noqa: E402
+from kurambit import gates as gates_rules  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
 
@@ -217,6 +218,12 @@ def run_pass(params):
     own = next(iter(creatures.values())) if len(creatures) == 1 and len(arms) == 1 else None
     measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig, own)
     if gates:
+        # The budget is the shipped model's: the style pass snaps materials to the palette's two
+        # and scales textures, so it is read off the candidate, not the scene before the pass.
+        budgets = params["budgets"]
+        gates = [g for g in gates if g["name"] != "budget"] + [gates_rules.budget(
+            measured["triangles"], measured["materials"], measured["textures"],
+            {"triangles": budgets["character"], "materials": budgets.get("materials", deform.MATERIALS_MAX), "texture": budgets["texture"]})]
         measured["gates"] = gates
     if gaps is not None:
         k = styled["scaled"] or 1.0  # in the shipped size
