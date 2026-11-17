@@ -89,9 +89,10 @@ building, keep going's step, a question waiting for you, or its latest build and
 To continue a game, choose its card under **Your games** or its row in the sidebar, or use **Open a
 game** (on the home screen or in the command palette) and pick a folder that contains `game.json`.
 A game opens on its main chat: the first chat it was made in, or the next oldest if you archive that
-one. The **Chats** arrow on the game's sidebar row lists its **Other chats** and starts a **New chat**,
-which opens the game's screen with an empty chat; a game keeps one empty chat, so asking again opens
-that one.
+one. The **Chats** arrow on the game's sidebar row lists all its chats, the open one marked, and
+starts a **New chat**, which opens the game's screen with an empty chat: the box sits right under
+the game, with your agent's latest suggestions under it to pick from. A game keeps one empty chat,
+so asking again opens that one.
 
 ## Style
 
@@ -212,8 +213,12 @@ Keep going lets your agent take the next step itself, turn after turn, in the ch
 in. It works on games whose engine Kurambit plays after every turn (three.js); on other games the
 control is disabled and says why.
 
-To start, open **Keep going** under the box where you tell the game what to change (`mod+Shift+A`, the composer's mode shortcut,
-opens it), and choose:
+To start, choose **Keep going** in the picker beside the paperclip, under the box where you tell the
+game what to change (it says **Once** until you change it; `mod+Shift+A` opens it), then send. What you write is its
+direction, the first thing it does; you can also send nothing and let it take your agent's latest
+`Next:` line. While it runs, a line above the box says which step it is on, with **Stop**, and what
+you send goes to it as its next step. **Keep going: Guided** and **Keep going: Autopilot** in the
+command palette choose it and start it at once. Its mode is in the same picker:
 
 - **Guided:** each next step is proposed above the composer, "Step 3 · a failing fact: …", and
   starts at the time shown unless you act. **Start now** starts it, **Skip** sets it aside for this
@@ -221,11 +226,11 @@ opens it), and choose:
   your own message.
 - **Autopilot:** the agent takes each step at once.
 
-Pick a budget in the same menu (1 hour unless you change it); while keep going runs, the menu shows
-when it ends. Choose **Off**, or press `mod+Alt+X`, to stop it: a step that is running stops and
+Pick a budget in the same picker (1 hour unless you change it); while keep going runs, it shows
+when it ends. **Stop** above the box, or `mod+Alt+X`, stops it: a step that is running stops and
 still becomes a build.
 
-The first step starts at once, from your agent's latest `Next:` line, and each step starts as soon
+The first step starts at once, from what you wrote or your agent's latest `Next:` line, and each step starts as soon
 as the one before it is checked to still start cleanly; the rest of its measuring goes on behind.
 
 Each step is an ordinary turn, posted as a message "Keep going · step 3 (…)" that says what to do
@@ -263,10 +268,13 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 ## Play and revise
 
 A game opens as one column: the game on top, its control bar under it, then your chat with the
-agent and the box where you tell the game what to change. The bar is the same while you play, pause
-or rewind: **Pause** (or **Play**) and **Restart**, the run's timeline with its time, then the speed
-(1×, ½×, ¼×), **Can't lose**, sound, **Fullscreen**, and a **⋯** menu to tell the agent about the
-run, save it as a test play, show the game's controls or hide the game. Hover a control for its key.
+agent and the box where you tell the game what to change. The bar's buttons stay put while you play,
+pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
+lose**, sound, **Fullscreen**, and a **⋯** menu. Paused, or once a run ends, the run's timeline and
+its time fill the middle. The **⋯** menu has the run (tell the agent about it, save it as a test
+play), what you see (the game's controls and the dev views) and the Stage (pause when you click
+away, hide the game, stop it). Hover a control for its key. Hidden, the game folds into the top bar
+with its picture, and **Show the game** brings it back.
 Drag the edge under the bar to give the chat more or less of the column. The column keeps a readable
 width; for a bigger game beside the chat, set **Settings → Appearance → Chat width** to Wide or
 Full.
@@ -276,7 +284,7 @@ then the build on the Stage, such as **Build 4**, which opens **History**: **Und
 **Compare**, then every build as a small picture in time order with the one on the Stage ringed,
 and each "try it N ways" message's versions together under what you asked. Click a picture to
 play that build and show its checks; while a version plays, **Keep** makes it the game. On the
-right are the **⋯** menu, **Keep going** and the Workbench button.
+right is the Workbench button.
 
 If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
 it** and **Undo**. An error while you play shows as one small line in the game's corner.
@@ -352,9 +360,11 @@ which also opens each section directly). Drag its edge to resize it. Its section
   that goes on hears each new one once, so the agent does not bring back what you turned down.
   The Workbench's **Decisions** lists them to edit, delete or add to. An undo never
   rewinds this file.
-- **Test plays (three.js).** After a run ends, **Save as test play** in the bar's **⋯** menu saves it
-  under a name, such as a win or the run where a bug showed. Your first win is offered as one. Every build from then on replays it,
-  and its checks say whether each saved play still ends the same way. A run that does not replay
+- **Test plays (three.js).** **Save as test play** in the bar's **⋯** menu saves a run under a name,
+  such as a win or the run where a bug showed: the run that ended, or the one you are playing, up
+  to now or to where you rewound it, so a game with no ending has test plays too. Your first win is
+  offered as one. Every build from then on replays it, and its checks say whether each saved play
+  still ends the same way, or for a run that never ended, whether it plays the same for its length. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
   outside its update. Your agent saves its own winning runs the same way, and both of you can
   list and delete them.
@@ -365,14 +375,14 @@ which also opens each section directly). Drag its edge to resize it. Its section
   1:40").
   A run on a title screen, an ended run, and runs over 10 minutes start fresh instead, and so does
   one that takes over 20 seconds to get back to.
-- **Rewind and fork (three.js).** The bar's timeline shows the run so far; paused or after a run
-  ends, it marks its losses and its ending. Drag or click it at any moment and let go: the game
+- **Rewind and fork (three.js).** Paused, or after a run ends, the bar's timeline shows the run
+  with its losses and its ending marked. Drag or click it at any moment and let go: the game
   pauses and replays your run to there, frozen. Change a value in **Tune** (or let your agent change the
   code), then **Play on**: the run goes on from that second as a new run, which your agent hears
   about and you can save as a test play, and the timeline marks the second it went on from. After a
   fork with tuned values, **Replay as it was** in the bar's **⋯** menu plays the same three seconds
   of your input without the change.
-- **Dev views (three.js).** The **⋯** menu's **Dev views** step a frozen game one frame at a
+- **Dev views (three.js).** The bar's **⋯** menu, under what you see, steps a frozen game one frame at a
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose
   are in the command palette too, with keys that work while you play (Settings → Keybindings).
@@ -438,9 +448,9 @@ chat. The command palette has each of these, plus **Compare builds…**, **Expor
 a build…**. A game you clicked into owns every key, Tab, Escape and the number keys included; only
 these `mod+Alt` keys reach Kurambit while you play.
 
-**Try several ways.** For a change where taste decides ("make the dash feel better"), the chip
-beside send (`mod+Alt+W`, or **Try the next message 3 ways** in the command palette) sends your next
-message 3, 4 or 2 ways at once. Each version works in its own copy of the game with a session of
+**Try several ways.** For a change where taste decides ("make the dash feel better"), choose **Try 3
+ways** in the picker under the box (2 and 4 are in the same picker; `mod+Alt+W`, or **Try the next
+message 3 ways** in the command palette) to send your next message that many ways at once. Each version works in its own copy of the game with a session of
 its own and takes a different approach, so it costs that many times the tokens. The Stage lists
 them as **Version 1**, **2** and **3** with each one's approach and checks; choose one to play it
 and **Keep version 2** to put it in the game folder. Undo takes it back, and the others stay in the

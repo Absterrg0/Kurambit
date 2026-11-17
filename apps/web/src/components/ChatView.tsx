@@ -5456,10 +5456,10 @@ export default function ChatView(props: ChatViewProps) {
       "composer.host": openComposerControl("composer.host"),
       "composer.effort": openComposerControl("composer.effort"),
       "composer.mode": (context) => {
-        // A game's keep going sits in its top bar, where the mode control would be.
+        // A game's mode is how its next message runs: once, several ways, or Keep going.
         if (isGameThread) {
           if (!context.event.repeat)
-            document.querySelector<HTMLElement>("[data-game-keep-going]")?.click();
+            document.querySelector<HTMLElement>("[data-game-run-picker]")?.click();
           return;
         }
         openComposerControl("composer.mode")(context);
