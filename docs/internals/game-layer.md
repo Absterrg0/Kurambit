@@ -627,7 +627,12 @@ Undo, the decisions line) then holds for them unchanged, and the runtime applies
 game names the thing ([look-edits.js](../../apps/server/templates/runtime/three/1/shell/look-edits.js)).
 A material is keyed by its place among the thing's materials and its name, never by reference:
 the game makes new materials each run. Palette materials are shared across things, so an edited
-one is cloned for that thing's meshes alone. Scale and turn sit on the object only while a frame
+one is cloned for that thing's meshes alone. A thing's look and its parts' looks are put on
+together, the game's own materials first and then from the outside in, so a part's edit of a
+material its thing also edits is the one its meshes show; Art's model viewer applies the same
+looks to a glb with the same functions. Names a person gives a part or material are text in the
+same entry (`name`, `2:roof/name`): labels only, never ids, so paths and the agent's text keep
+the game's names. Scale and turn sit on the object only while a frame
 draws, because games set their things' transforms themselves. A thing's parts (`Island › Cabin`)
 are registry records like any thing, so picking, portraits, chips and looks all key by that path.
 

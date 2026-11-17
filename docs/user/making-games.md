@@ -310,7 +310,9 @@ Drag its edge to resize it. Its three sections:
   its own picture. Open a model to inspect it: it turns as you drag it, and under it are its
   parts, its **Transform** (scale, each axis behind the lock, and its turn), its **Materials**
   (colour, glow, roughness, metalness, opacity, flat shading, its texture), its **Shadows** and its
-  tuned **Values**. Every change shows at once in the view and in the game, and saves as a build
+  tuned **Values**. A model file the game uses shows that thing's changes in its view too.
+  Double-click a part's name or a material's to rename it; an empty name gives back the game's
+  own. Every change shows at once in the view and in the game, and saves as a build
   like Tune's values: **Keep as a build**, **Put all back**, and Undo work the same. **Bake into
   the code** asks your agent to make the changes part of the model's code. An image shows at full
   size with its alpha and a sprite sheet's frames; a sound shows its waveform; a generated asset's
