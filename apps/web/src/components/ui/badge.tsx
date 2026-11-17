@@ -27,6 +27,8 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [button&,a&]:hover:bg-primary/90",
         destructive: "bg-destructive text-white [button&,a&]:hover:bg-destructive/90",
         error: "bg-destructive/8 text-destructive-foreground dark:bg-destructive/16",
+        // A quiet tag, such as a thing's kind beside its name.
+        muted: "bg-foreground/6 text-muted-foreground",
         info: "bg-info/8 text-info-foreground dark:bg-info/16",
         outline: "surface-raised text-foreground [button&,a&]:hover:surface-raised-hover",
         secondary: "bg-secondary text-secondary-foreground [button&,a&]:hover:bg-secondary/90",

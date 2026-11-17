@@ -465,6 +465,8 @@ export const GameLookMaterial = Schema.Struct({
   key: Schema.String.check(Schema.isMaxLength(80)),
   /** Its palette's, its own or its mesh's name, else "Part 3": never a cache key. */
   label: Schema.String.check(Schema.isMaxLength(80)),
+  /** The label is a name the game or the person gave it, not one made up from its colour. */
+  named: Schema.optionalKey(Schema.Boolean),
   /** Its colour texture, small. */
   map: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/))),
 });

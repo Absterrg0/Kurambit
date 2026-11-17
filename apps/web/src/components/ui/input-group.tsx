@@ -25,6 +25,9 @@ const inputGroupVariants = cva(
           "surface-popover rounded-2xl has-[input:focus-visible,textarea:focus-visible]:outline-2 has-[input:focus-visible,textarea:focus-visible]:outline-ring",
         ghost:
           "border-transparent bg-transparent shadow-none hover:surface-ghost-hover has-[input:focus-visible,textarea:focus-visible]:surface-ghost-hover",
+        // An inspector's filter: the flat fill of its value fields.
+        field:
+          "rounded-sm surface-field hover:surface-field-hover has-[input:focus-visible,textarea:focus-visible]:surface-focus",
       },
     },
   },

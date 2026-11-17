@@ -713,7 +713,12 @@ export function createStageBridge({
       .slice(0, 64)
       .map((entry) => {
         const map = mapPicture(entry.own);
-        return { key: entry.key, label: entry.label, ...(map === null ? {} : { map }) };
+        return {
+          key: entry.key,
+          label: entry.label,
+          ...(entry.named ? { named: true } : {}),
+          ...(map === null ? {} : { map }),
+        };
       }),
   });
 

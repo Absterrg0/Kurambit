@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
   CrosshairIcon,
   RotateCcwIcon,
+  SearchIcon,
   SlidersHorizontalIcon,
 } from "lucide-react";
 import { createContext, use, useEffect, useRef, useState } from "react";
@@ -17,11 +18,13 @@ import { cn, randomUUID } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useSelectNotice, valueLabel } from "./GameInspector";
-import { GameThingPicture, KIND_ICON, useStageBuild } from "./GameThingPicture";
+import { GameThingPicture, useStageBuild } from "./GameThingPicture";
 import { GameTuneField, type TuneCommit } from "./GameTuneField";
 import { Workbench } from "./GameWorkbenchParts";
 import {
@@ -181,9 +184,10 @@ export const KIND_WORDS: Record<GameThing["kind"], string> = {
 const hasValues = (thing: GameThing) => (thing.values?.length ?? 0) > 0;
 
 /**
- * Tune, as an engine's inspector: the things the game named with values to tune, by kind, over
- * the picked thing's values. Values change the game as they move and save into it as they are
- * let go. Pointing at a thing on the paused Stage picks it here.
+ * Tune, as one scrolling inspector the way Unity lists components and Spline its sections: each
+ * thing the game named with values is a section of value rows, grouped by kind under thin labels,
+ * with a filter on top. Values change the game as they move and save into it as they are let go.
+ * Pointing at a thing on the paused Stage brings its section into view and marks it.
  */
 export function GameTunePanel({
   threadRef,
@@ -204,13 +208,38 @@ export function GameTunePanel({
   const pointed = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
   const build = useStageBuild(threadRef);
   const saver = useTuneSaver(threadRef);
-  const [picked, setPicked] = useState<string | null>(null);
-  // A thing pointed at on the Stage is the one picked here, until another is.
+  const [filter, setFilter] = useState("");
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  const scroller = useRef<HTMLDivElement>(null);
+  const picked = pointed !== null && hasValues(pointed) ? pointed.id : null;
+  // A thing pointed at on the Stage opens and comes into view, scrolled to the top only when
+  // the panel cannot already show all of it.
   const [followed, setFollowed] = useState<string | null>(null);
-  if ((pointed?.id ?? null) !== followed) {
-    setFollowed(pointed?.id ?? null);
-    if (pointed !== null && hasValues(pointed)) setPicked(pointed.id);
+  if (picked !== followed) {
+    setFollowed(picked);
+    if (picked !== null && folded.has(picked)) {
+      const next = new Set(folded);
+      next.delete(picked);
+      setFolded(next);
+    }
   }
+  useEffect(() => {
+    if (picked === null) return;
+    const frame = requestAnimationFrame(() => {
+      const box = scroller.current;
+      const section = box?.querySelector<HTMLElement>(
+        `[data-thing-section="${CSS.escape(picked)}"]`,
+      );
+      if (box === null || box === undefined || section === null || section === undefined) return;
+      const view = box.getBoundingClientRect();
+      const at = section.getBoundingClientRect();
+      // The filter row stays on top of the scroller: what hides under it is out of view too.
+      const top = view.top + FILTER_PX;
+      if (at.top >= top && at.bottom <= view.bottom) return;
+      box.scrollTop += at.top - top;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [picked]);
   const things = all.filter(hasValues);
   const changed = things
     .map((thing) => ({ thing, values: tunedValues(thing) }))
@@ -244,32 +273,90 @@ export function GameTunePanel({
         }
       />
     );
-  // The pointed thing as the game reports it, else the listed one picked, else the first.
-  const shown =
-    (pointed !== null && pointed.id === picked && hasValues(pointed) ? pointed : null) ??
-    things.find((thing) => thing.id === picked) ??
-    things[0] ??
-    null;
+  const needle = filter.trim().toLowerCase();
+  // A filter keeps a thing whose name matches, or the values of it whose label does.
+  const shown = things.flatMap(
+    (
+      thing,
+    ): ReadonlyArray<{
+      readonly thing: GameThing;
+      readonly only: ReadonlyArray<GameThingValue> | null;
+    }> => {
+      if (needle === "" || thing.name.toLowerCase().includes(needle))
+        return [{ thing, only: null }];
+      const only = (thing.values ?? []).filter((value) =>
+        valueLabel(value).toLowerCase().includes(needle),
+      );
+      return only.length === 0 ? [] : [{ thing, only }];
+    },
+  );
+  const groups = [
+    ...KIND_GROUPS.map((group) => ({
+      key: group.kind,
+      label: group.label as string | null,
+      rows: shown.filter((entry) => entry.thing.kind === group.kind),
+    })),
+    { key: "other", label: null, rows: shown.filter((entry) => entry.thing.kind === "other") },
+  ].filter((group) => group.rows.length > 0);
   return (
     <TuneSave value={saver.save}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border py-2">
-          <ThingList
-            threadRef={threadRef}
-            build={build}
-            things={things}
-            picked={shown?.id ?? null}
-            onPick={(id) => {
-              setPicked(id);
-              // The Stage points at it too: the outline and Tune always name the same thing.
-              selectStageThing(id);
-            }}
-          />
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {shown === null ? null : (
-            <ThingInspector threadRef={threadRef} build={build} thing={shown} disabled={!tunable} />
-          )}
+        <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
+          <div className="sticky top-0 z-10 flex h-11 shrink-0 items-center bg-background px-4">
+            <InputGroup variant="field">
+              <InputGroupAddon>
+                <SearchIcon className="size-3.5" />
+              </InputGroupAddon>
+              <InputGroupInput
+                nativeInput
+                size="compact"
+                type="text"
+                value={filter}
+                placeholder="Filter"
+                aria-label="Filter things and values"
+                onChange={(event) => setFilter(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === "Escape") setFilter("");
+                }}
+              />
+            </InputGroup>
+          </div>
+          {groups.length === 0 ? (
+            <Text variant="meta" tone="muted" render={<p className="px-4 py-3" />}>
+              Nothing matches “{filter.trim()}”.
+            </Text>
+          ) : null}
+          {groups.map((group) => (
+            <div key={group.key} role="group" aria-label={group.label ?? undefined}>
+              {group.label === null ? null : (
+                <div className="flex h-8 items-end gap-1.5 px-4 pb-1.5">
+                  <Text variant="caption" tone="muted">
+                    {group.label}
+                  </Text>
+                  <span aria-hidden="true" className="mb-1.5 h-px flex-1 bg-border" />
+                </div>
+              )}
+              {group.rows.map(({ thing, only }) => (
+                <ThingSection
+                  key={thing.id}
+                  threadRef={threadRef}
+                  build={build}
+                  thing={thing}
+                  only={only}
+                  picked={thing.id === picked}
+                  open={!folded.has(thing.id) || only !== null}
+                  disabled={!tunable}
+                  onOpenChange={(open) => {
+                    const next = new Set(folded);
+                    if (open) next.delete(thing.id);
+                    else next.add(thing.id);
+                    setFolded(next);
+                  }}
+                />
+              ))}
+            </div>
+          ))}
         </div>
         <TuneFooter
           changed={changed}
@@ -284,108 +371,8 @@ export function GameTunePanel({
   );
 }
 
-/**
- * The things with values, by kind, as an outliner lists a scene: each kind a group that folds,
- * with its glyph and count; a row each, with its picture, its value count and a live dot when
- * tuned, the picked one on the selection background. Hovering a row outlines it on a frozen Stage.
- */
-function ThingList({
-  threadRef,
-  build,
-  things,
-  picked,
-  onPick,
-}: {
-  threadRef: ScopedThreadRef;
-  build: string | null;
-  things: ReadonlyArray<GameThing>;
-  picked: string | null;
-  onPick: (id: string) => void;
-}) {
-  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
-  const row = (thing: GameThing) => (
-    <div key={thing.id} className="px-2">
-      <button
-        type="button"
-        role="option"
-        aria-selected={picked === thing.id}
-        onClick={() => onPick(thing.id)}
-        onPointerEnter={() => hoverStageThing(thing.id)}
-        onPointerLeave={() => hoverStageThing(null)}
-        className={cn(
-          "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md ps-6 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-          picked === thing.id && "surface-selected-soft",
-        )}
-      >
-        <GameThingPicture threadRef={threadRef} thing={thing} build={build} className="size-5" />
-        <Text variant="body" tone="default" truncate render={<span className="flex-1" />}>
-          {thing.name}
-        </Text>
-        <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
-          {thing.values?.length ?? 0}
-        </Text>
-        <span className="flex w-1.5 shrink-0 justify-center">
-          {tunedValues(thing).length > 0 ? (
-            <span aria-label="tuned" className="size-1.5 rounded-full bg-live" />
-          ) : null}
-        </span>
-      </button>
-    </div>
-  );
-  return (
-    <div role="listbox" aria-label="Things in the game" className="flex flex-col gap-1">
-      {KIND_GROUPS.map((group) => {
-        const rows = things.filter((thing) => thing.kind === group.kind);
-        if (rows.length === 0) return null;
-        const open = !folded.has(group.kind);
-        const Icon = KIND_ICON[group.kind];
-        return (
-          <div key={group.kind} role="group" aria-label={group.label} className="flex flex-col">
-            <div className="px-2">
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => {
-                  const next = new Set(folded);
-                  if (open) next.add(group.kind);
-                  else next.delete(group.kind);
-                  setFolded(next);
-                }}
-                className="flex h-7 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md ps-1 pe-2 text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              >
-                <ChevronRightIcon
-                  aria-hidden="true"
-                  className={cn(
-                    "size-3.5 shrink-0 motion-popup transition-transform",
-                    open && "rotate-90",
-                  )}
-                />
-                <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-                <Text variant="meta" tone="inherit" truncate render={<span className="flex-1" />}>
-                  {group.label}
-                </Text>
-                {rows.length > 1 ? (
-                  <Text
-                    variant="caption"
-                    tone="muted"
-                    numeric
-                    render={<span className="shrink-0" />}
-                  >
-                    {rows.length}
-                  </Text>
-                ) : null}
-                {/* The rows' tuned-dot column, so the counts line up. */}
-                <span aria-hidden="true" className="w-1.5 shrink-0 ps-0.5" />
-              </button>
-            </div>
-            {open ? rows.map(row) : null}
-          </div>
-        );
-      })}
-      {things.filter((thing) => thing.kind === "other").map(row)}
-    </div>
-  );
-}
+/** The sticky filter row's height, which a section scrolled into view must clear. */
+const FILTER_PX = 44;
 
 /** One value back at the game's own: it plays, and saving it takes it out of the tune file. */
 const putBack = (
@@ -399,57 +386,128 @@ const putBack = (
 };
 
 /**
- * The picked thing: its picture, name and kind, pointing at it on the Stage and putting it all
- * back, then its values as rows of real fields.
+ * A thing's values as inspector rows, the body of its Tune section and of Art's Values: each plays
+ * as it moves (`onEdit` hears it too) and is kept as it is let go.
  */
-function ThingInspector({
+export function GameThingValueRows({
+  id,
+  values,
+  disabled,
+  save,
+  onEdit,
+}: {
+  id: string;
+  values: ReadonlyArray<GameThingValue>;
+  disabled: boolean;
+  save: (id: string, value: GameThingValue, how: TuneCommit) => void;
+  onEdit?: (() => void) | undefined;
+}) {
+  return values.map((value) => {
+    const changed = value.default !== undefined && value.default !== value.value;
+    return (
+      <GameTuneField
+        key={value.key}
+        label={valueLabel(value)}
+        value={value}
+        was={changed ? value.default : undefined}
+        disabled={disabled}
+        onChange={(next) => {
+          tuneStageValue(id, value.key, next);
+          onEdit?.();
+        }}
+        onCommit={(next, how) => save(id, { ...value, value: next }, how)}
+        onReset={
+          changed
+            ? () => {
+                if (value.default === undefined) return;
+                tuneStageValue(id, value.key, value.default);
+                onEdit?.();
+                save(id, { ...value, value: value.default }, "keyboard");
+              }
+            : undefined
+        }
+      />
+    );
+  });
+}
+
+/**
+ * One thing's section: its picture, name and kind as a quiet chip, putting it back when tuned and
+ * pointing at it on the Stage, then its values. A click on the name picks it on the Stage too;
+ * hovering outlines it there while the Stage is frozen. The thing pointed at on the Stage is marked.
+ */
+function ThingSection({
   threadRef,
   build,
   thing,
+  only,
+  picked,
+  open,
   disabled,
+  onOpenChange,
 }: {
   threadRef: ScopedThreadRef;
   build: string | null;
   thing: GameThing;
+  /** A filter's matching values, when the thing's name did not match. */
+  only: ReadonlyArray<GameThingValue> | null;
+  picked: boolean;
+  open: boolean;
   disabled: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const save = use(TuneSave);
-  const values = thing.values ?? [];
   const tuned = tunedValues(thing);
   return (
-    <section aria-label={`${thing.name}'s values`} className="flex flex-col pb-2">
-      <div className="flex h-16 min-w-0 shrink-0 items-center gap-3 ps-4 pe-2">
-        <GameThingPicture threadRef={threadRef} thing={thing} build={build} className="size-10" />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <Text variant="label" tone="strong" truncate render={<h3 />}>
+    <section
+      aria-label={`${thing.name}'s values`}
+      data-thing-section={thing.id}
+      className="flex flex-col border-b border-border last:border-b-0"
+    >
+      <div
+        className={cn(
+          "group/thing flex h-10 min-w-0 shrink-0 items-center gap-1 ps-2 pe-2",
+          picked && "surface-selected-soft",
+        )}
+        onPointerEnter={() => hoverStageThing(thing.id)}
+        onPointerLeave={() => hoverStageThing(null)}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={open ? `Fold ${thing.name}` : `Open ${thing.name}`}
+          onClick={() => onOpenChange(!open)}
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={cn("size-3.5 motion-popup transition-transform", open && "rotate-90")}
+          />
+        </button>
+        <button
+          type="button"
+          aria-current={picked ? "true" : undefined}
+          onClick={() => selectStageThing(thing.id)}
+          className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <GameThingPicture threadRef={threadRef} thing={thing} build={build} className="size-6" />
+          <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
             {thing.name}
           </Text>
-          <Text variant="caption" tone="muted">
+          <Badge variant="muted" size="sm">
             {thing.kindWord ?? KIND_WORDS[thing.kind]}
-          </Text>
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Point at it on the Stage"
-                onClick={() => pointAtStageThing(thing.id)}
-              />
-            }
-          >
-            <CrosshairIcon aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">Point at it on the Stage</TooltipPopup>
-        </Tooltip>
+          </Badge>
+          {tuned.length === 0 ? null : (
+            <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
+          )}
+        </button>
         {tuned.length === 0 ? null : (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
-                  size="icon-sm"
-                  variant="ghost"
+                  size="icon-xs"
+                  variant="ghost-muted"
                   aria-label={`Put ${thing.name}'s values back`}
                   onClick={() => {
                     for (const value of tuned) putBack(thing, value, save);
@@ -462,22 +520,32 @@ function ThingInspector({
             <TooltipPopup side="bottom">Put {thing.name}'s values back</TooltipPopup>
           </Tooltip>
         )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost-muted"
+                aria-label="Point at it on the Stage"
+                onClick={() => pointAtStageThing(thing.id)}
+              />
+            }
+          >
+            <CrosshairIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">Point at it on the Stage</TooltipPopup>
+        </Tooltip>
       </div>
-      {values.map((value) => {
-        const changed = value.default !== undefined && value.default !== value.value;
-        return (
-          <GameTuneField
-            key={value.key}
-            label={valueLabel(value)}
-            value={value}
-            was={changed ? value.default : undefined}
+      {open ? (
+        <div className="flex flex-col pt-0.5 pb-2">
+          <GameThingValueRows
+            id={thing.id}
+            values={only ?? thing.values ?? []}
             disabled={disabled}
-            onChange={(next) => tuneStageValue(thing.id, value.key, next)}
-            onCommit={(next, how) => save(thing.id, { ...value, value: next }, how)}
-            onReset={changed ? () => putBack(thing, value, save) : undefined}
+            save={save}
           />
-        );
-      })}
+        </div>
+      ) : null}
     </section>
   );
 }

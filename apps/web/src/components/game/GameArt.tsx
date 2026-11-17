@@ -15,13 +15,18 @@ import {
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import {
+  BoneIcon,
   ChevronLeftIcon,
+  ChevronRightIcon,
   CrosshairIcon,
+  FilmIcon,
   ImageIcon,
+  LayersIcon,
   MessageSquarePlusIcon,
   PauseIcon,
   PlayIcon,
   ShapesIcon,
+  TriangleIcon,
 } from "lucide-react";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
@@ -55,8 +60,8 @@ import { useGameGenerations } from "./GameGenerationCard";
 import { GameKeyArt } from "./GameKeyArt";
 import { GameSaveToLibrary } from "./GameSaveToLibrary";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
-import { colourHex } from "./GameColourField";
-import { GameLookInspector, LabelInput, renameLook } from "./GameLookInspector";
+import { colourHex, PropertyReading, PropertyRow, PropertySection } from "../ui/property-field";
+import { GameLookInspector, LabelInput, renameLook, SizeRow } from "./GameLookInspector";
 import { KIND_WORDS, useTuneSaver } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
 import {
@@ -808,6 +813,13 @@ const bakeContext = (thing: GameThing, changed: ReadonlyArray<GameThingValue>) =
   ].join("\n");
 };
 
+const ASSET_KIND_WORDS: Record<GameArtAsset["kind"], string> = {
+  model: "model",
+  texture: "texture",
+  audio: "sound",
+  font: "font",
+};
+
 function ArtDetail({
   threadRef,
   root,
@@ -875,6 +887,29 @@ function ArtDetail({
       png,
     );
   };
+  // One meta line under the name, the way Figma and Spline title a selection: its kind, then
+  // what it is made of once the game or the viewer has counted it.
+  const facts = entry.kind === "code-model" ? (orbit?.facts ?? null) : null;
+  const meta = (
+    entry.kind === "code-model"
+      ? [
+          entry.path === null
+            ? (entry.kindWord ?? KIND_WORDS[entry.thingKind])
+            : `part of ${entry.path.slice(0, entry.path.lastIndexOf(" › "))}`,
+          facts === null ? null : `${facts.triangles.toLocaleString("en-US")} tris`,
+          facts === null ? null : countWords(facts.materials, "material", "materials"),
+        ]
+      : [
+          ASSET_KIND_WORDS[entry.asset.kind],
+          entry.asset.kind === "model" && info !== null
+            ? `${info.triangles.toLocaleString("en-US")} tris`
+            : null,
+          entry.asset.kind === "model" && info !== null
+            ? countWords(info.materials.length, "material", "materials")
+            : null,
+          bytesWords(entry.asset.bytes),
+        ]
+  ).filter((word): word is string => word !== null && word !== "");
   // "Bake into the code": the look's edits as a chip asking the agent to make them the code's own.
   const bake = (changed: ReadonlyArray<GameThingValue>) => {
     if (stageThing === null) return;
@@ -890,7 +925,7 @@ function ArtDetail({
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-      <div className="flex h-11 shrink-0 items-center gap-1 ps-2 pe-2">
+      <div className="flex h-14 shrink-0 items-center gap-1 ps-2 pe-2">
         <Tooltip>
           <TooltipTrigger
             render={<Button size="icon-sm" variant="ghost" aria-label="All art" onClick={onBack} />}
@@ -908,18 +943,25 @@ function ArtDetail({
             />
           </span>
         ) : (
-          <Text
-            variant="label"
-            tone="strong"
-            truncate
-            title={renamable ? "Double-click to rename" : undefined}
-            onDoubleClick={() => {
-              if (renamable) setRenaming(true);
-            }}
-            render={<h3 className="min-w-0 flex-1" />}
-          >
-            {name}
-          </Text>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <Text
+              variant="label"
+              tone="strong"
+              truncate
+              title={renamable ? "Double-click to rename" : undefined}
+              onDoubleClick={() => {
+                if (renamable) setRenaming(true);
+              }}
+              render={<h3 />}
+            >
+              {name}
+            </Text>
+            {meta.length === 0 ? null : (
+              <Text variant="caption" tone="muted" numeric truncate>
+                {meta.join(" · ")}
+              </Text>
+            )}
+          </span>
         )}
         {stageThing === null || !stageThing.onScreen ? null : (
           <Tooltip>
@@ -946,10 +988,21 @@ function ArtDetail({
             picture={orbit?.png ?? null}
           />
         ) : null}
-        <Button size="sm" variant="ghost" onClick={() => void ask()}>
-          <MessageSquarePlusIcon aria-hidden="true" />
-          Ask about this
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Ask about this"
+                onClick={() => void ask()}
+              />
+            }
+          >
+            <MessageSquarePlusIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">Ask about this</TooltipPopup>
+        </Tooltip>
       </div>
       {entry.kind === "code-model" ? (
         <CodeModelDetail
@@ -1110,26 +1163,25 @@ function CodeModelDetail({
           </Text>
         ) : null}
       </div>
-      <Workbench.Body className="overflow-visible">
-        <Workbench.Section title="Model">
-          {entry.path === null ? (
-            <ArtFact name="Kind" reading={entry.kindWord ?? KIND_WORDS[entry.thingKind]} />
-          ) : (
-            <ArtFact name="Part of" reading={entry.path.slice(0, entry.path.lastIndexOf(" › "))} />
-          )}
-          {facts === null ? null : (
-            <>
-              <ArtFact name="Triangles" reading={facts.triangles.toLocaleString("en-US")} />
-              <ArtFact name="Size" reading={`${facts.size.join(" × ")} (wide × tall × long)`} />
-              <ArtFact
-                name="Materials"
-                reading={<MaterialSwatches count={facts.materials} colours={facts.colours} />}
-              />
-            </>
-          )}
-        </Workbench.Section>
+      <div className="flex flex-col pb-2">
+        {shownThing === null ? (
+          facts === null ? null : (
+            <PropertySection title="Transform">
+              <SizeRow size={facts.size} />
+            </PropertySection>
+          )
+        ) : (
+          <GameLookInspector
+            threadRef={threadRef}
+            thing={shownThing}
+            saver={saver}
+            size={facts?.size ?? null}
+            onEdit={redrawView}
+            onBake={onBake}
+          />
+        )}
         {parts.length === 0 ? null : (
-          <Workbench.Section title="Parts" detail={parts.length}>
+          <PropertySection title="Parts" count={parts.length} collapsible>
             {parts.map((part) => (
               <div key={part.id} className="px-2">
                 <button
@@ -1145,60 +1197,28 @@ function CodeModelDetail({
                     build={build}
                     className="size-6"
                   />
-                  <Text variant="body" tone="default" truncate render={<span className="flex-1" />}>
+                  <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
                     {modelName(part)}
                   </Text>
+                  <ChevronRightIcon aria-hidden="true" className="size-3.5 text-dim-foreground" />
                 </button>
               </div>
             ))}
-          </Workbench.Section>
+          </PropertySection>
         )}
-        {shownThing === null ? null : (
-          <GameLookInspector
-            threadRef={threadRef}
-            thing={shownThing}
-            saver={saver}
-            onEdit={redrawView}
-            onBake={onBake}
-          />
-        )}
-      </Workbench.Body>
+      </div>
     </>
   );
 }
 
-/** One fact of an asset: its name and its reading at the right, on the panel's 16 px edges. */
-function ArtFact({
-  mark,
-  name,
-  reading,
-}: {
-  mark?: ReactNode;
-  name: ReactNode;
-  reading?: ReactNode;
-}) {
+/** One fact of an asset, as Figma's read-only properties show one: a muted label, then its words. */
+function ArtFact({ name, reading }: { name: string; reading: ReactNode }) {
   return (
-    <div className="flex min-h-7 min-w-0 items-start gap-2 px-4 py-1">
-      {mark === undefined ? null : (
-        <span className="flex h-5 w-3.5 shrink-0 items-center justify-center">{mark}</span>
-      )}
-      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
-        <Text variant="meta" tone="default" render={<span className="min-w-0 leading-5" />}>
-          {name}
-        </Text>
-        <span aria-hidden="true" className="flex-1" />
-        {reading === undefined ? null : (
-          <Text
-            variant="caption"
-            tone="muted"
-            numeric
-            render={<span className="min-w-0 leading-5" />}
-          >
-            {reading}
-          </Text>
-        )}
-      </span>
-    </div>
+    <PropertyRow label={name}>
+      <Text variant="meta" tone="default" numeric render={<span className="min-w-0 py-1" />}>
+        {reading}
+      </Text>
+    </PropertyRow>
   );
 }
 
@@ -1207,7 +1227,7 @@ function AssetPath({ path }: { path: string }) {
   const parts = path.split("/");
   const file = parts.pop() ?? path;
   return (
-    <Text variant="caption" tone="muted" render={<p className="px-4 pb-1" />}>
+    <Text variant="meta" tone="muted" render={<p className="px-4 pb-2" />}>
       {parts.map((part, index) => (
         // oxlint-disable-next-line react/no-array-index-key -- a folder is its place in the path.
         <span key={index}>
@@ -1293,8 +1313,22 @@ function FileDetail({
       ) : (
         <FontViewer environmentId={threadRef.environmentId} root={root} asset={asset} />
       )}
-      <Workbench.Body className="overflow-visible">
-        <Workbench.Section title="File" detail={bytesWords(asset.bytes)}>
+      <div className="flex flex-col pb-2">
+        {asset.kind === "model" && stageThing !== null ? (
+          <GameLookInspector
+            threadRef={threadRef}
+            thing={stageThing}
+            saver={saver}
+            size={info?.size ?? null}
+            onBake={onBake}
+          />
+        ) : asset.kind === "model" && info !== null ? (
+          <PropertySection title="Transform">
+            <SizeRow size={info.size} />
+          </PropertySection>
+        ) : null}
+        {asset.kind === "model" && info !== null ? <ModelFacts info={info} /> : null}
+        <PropertySection title="File" collapsible>
           <AssetPath path={asset.path} />
           {asset.route === "unrecorded" ? null : (
             <ArtFact
@@ -1308,18 +1342,9 @@ function FileDetail({
           )}
           {asset.credit === undefined ? null : <ArtFact name="Licence" reading={asset.credit} />}
           {usedWords === null ? null : <ArtFact name="In play" reading={usedWords} />}
-        </Workbench.Section>
-        {asset.kind === "model" && info !== null ? <ModelFacts info={info} /> : null}
-        {asset.kind === "model" && stageThing !== null ? (
-          <GameLookInspector
-            threadRef={threadRef}
-            thing={stageThing}
-            saver={saver}
-            onBake={onBake}
-          />
-        ) : null}
+        </PropertySection>
         <GenerateAgain threadRef={threadRef} asset={asset} onAsk={onAsk} />
-      </Workbench.Body>
+      </div>
     </>
   );
 }
@@ -1342,73 +1367,80 @@ const SLOT_WORDS: Readonly<Record<string, string>> = {
 const slotWords = (slot: string) =>
   SLOT_WORDS[slot] ?? `${slot.charAt(0).toUpperCase()}${slot.slice(1).replace(/Map$/, "")}`;
 
-/** "2 · ■ ■": how many materials, and each one's base colour. */
-function MaterialSwatches({ count, colours }: { count: number; colours: ReadonlyArray<string> }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {count}
-      {colours.length === 0 ? null : (
-        <>
-          <span aria-hidden="true">·</span>
-          {colours.map((colour, index) => (
-            <span
-              // oxlint-disable-next-line react/no-array-index-key -- two materials may share a colour.
-              key={`${index}:${colour}`}
-              aria-label={colour}
-              className="size-3 rounded-sm ring-1 ring-border ring-inset"
-              style={{ backgroundColor: colour }}
-            />
-          ))}
-        </>
-      )}
-    </span>
-  );
-}
-
+/** A model file's make-up as fields: its counts, its rig, and its materials as read-only fills. */
 function ModelFacts({ info }: { info: ViewerModelInfo }) {
   return (
     <>
-      <Workbench.Section title="Model">
-        <ArtFact name="Triangles" reading={info.triangles.toLocaleString("en-US")} />
-        <ArtFact name="Draw calls" reading={info.drawCalls} />
-        <ArtFact name="Size" reading={`${info.size.join(" × ")} m (wide × tall × long)`} />
-        <ArtFact
-          name="Pivot"
-          reading={`origin; bounds y ${info.bounds[0][1]} to ${info.bounds[1][1]} m`}
-        />
-        <ArtFact
-          name="Skeleton"
-          reading={info.bones === 0 ? "None" : countWords(info.bones, "bone", "bones")}
-        />
-        <ArtFact
-          name="Clips"
-          reading={
-            info.clips.length === 0 ? "None" : countWords(info.clips.length, "clip", "clips")
-          }
-        />
-        <ArtFact
-          name="Materials"
-          reading={
-            <MaterialSwatches
-              count={info.materials.length}
-              colours={info.materials.flatMap((material) =>
-                material.color === undefined ? [] : [material.color],
-              )}
-            />
-          }
-        />
-      </Workbench.Section>
+      <PropertySection title="Mesh">
+        <PropertyRow label="Counts">
+          <PropertyReading
+            prefix={<TriangleIcon />}
+            value={info.triangles.toLocaleString("en-US")}
+            title="Triangles"
+          />
+          <PropertyReading prefix={<LayersIcon />} value={info.drawCalls} title="Draw calls" />
+        </PropertyRow>
+        <PropertyRow label="Rig">
+          <PropertyReading prefix={<BoneIcon />} value={info.bones} title="Bones" />
+          <PropertyReading
+            prefix={<FilmIcon />}
+            value={info.clips.length}
+            title="Animation clips"
+          />
+        </PropertyRow>
+        <PropertyRow label="Above pivot">
+          <PropertyReading
+            prefix="↓"
+            value={(info.bounds[0][1] ?? 0).toFixed(2)}
+            title="Its bounds start this far below its pivot"
+          />
+          <PropertyReading
+            prefix="↑"
+            value={(info.bounds[1][1] ?? 0).toFixed(2)}
+            title="Its bounds end this far above its pivot"
+          />
+        </PropertyRow>
+      </PropertySection>
+      {info.materials.length === 0 ? null : (
+        <PropertySection title="Materials" count={info.materials.length} collapsible>
+          {info.materials.map((material, index) => (
+            <PropertyRow
+              // oxlint-disable-next-line react/no-array-index-key -- two materials may share a name.
+              key={`${index}:${material.name}`}
+              label={material.name}
+            >
+              <PropertyReading
+                prefix={
+                  material.color === undefined ? undefined : (
+                    <span
+                      aria-hidden="true"
+                      className="size-3 rounded-xs ring-1 ring-foreground/12 ring-inset"
+                      style={{ backgroundColor: material.color }}
+                    />
+                  )
+                }
+                value={
+                  material.color === undefined ? "No colour" : material.color.slice(1).toUpperCase()
+                }
+              />
+            </PropertyRow>
+          ))}
+        </PropertySection>
+      )}
       {info.textures.length === 0 ? null : (
-        <Workbench.Section title="Textures" detail={info.textures.length}>
+        <PropertySection title="Textures" count={info.textures.length} collapsible>
           {info.textures.map((texture, index) => (
-            <ArtFact
+            <PropertyRow
               // oxlint-disable-next-line react/no-array-index-key -- two textures may share a name.
               key={`${index}:${texture.name}`}
-              name={texture.name === texture.slot ? slotWords(texture.slot) : texture.name}
-              reading={`${slotWords(texture.slot)} · ${texture.width} × ${texture.height}`}
-            />
+              label={texture.name === texture.slot ? slotWords(texture.slot) : texture.name}
+            >
+              <PropertyReading value={slotWords(texture.slot)} />
+              <PropertyReading prefix="W" value={texture.width} />
+              <PropertyReading prefix="H" value={texture.height} />
+            </PropertyRow>
           ))}
-        </Workbench.Section>
+        </PropertySection>
       )}
     </>
   );
@@ -1436,7 +1468,7 @@ function GenerateAgain({
   if (generation === null) return null;
   const text = prompt ?? generation.prompt;
   return (
-    <Workbench.Section title="Prompt" detail={generation.provider}>
+    <PropertySection title="Prompt" count={generation.provider}>
       <div className="flex flex-col gap-2 px-4 pt-1">
         <Textarea
           size="sm"
@@ -1460,6 +1492,6 @@ function GenerateAgain({
           </Button>
         </div>
       </div>
-    </Workbench.Section>
+    </PropertySection>
   );
 }

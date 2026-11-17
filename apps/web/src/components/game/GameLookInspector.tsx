@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   gameLookId,
   type GameLookMaterial,
@@ -7,21 +7,35 @@ import {
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { ChevronRightIcon, LinkIcon, UnlinkIcon } from "lucide-react";
+import {
+  EllipsisIcon,
+  EyeIcon,
+  EyeOffIcon,
+  LinkIcon,
+  RotateCcwIcon,
+  SearchIcon,
+  UnlinkIcon,
+} from "lucide-react";
 
-import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
+import {
+  PropertyColourField,
+  PropertyLabel,
+  PropertyNumberField,
+  PropertyReading,
+  PropertyRow,
+  PropertySection,
+} from "../ui/property-field";
+import { Switch } from "../ui/switch";
 import { Text } from "../ui/text";
-import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { colourHex } from "./GameColourField";
 import { valueLabel } from "./GameInspector";
-import type { useTuneSaver } from "./GameTune";
+import { GameThingValueRows, type useTuneSaver } from "./GameTune";
+import { GameTuneField } from "./GameTuneField";
 
 type TuneSaver = ReturnType<typeof useTuneSaver>;
-import { GameTuneField } from "./GameTuneField";
-import { Workbench } from "./GameWorkbenchParts";
 import {
   nameStageThing,
   requestStageLook,
@@ -95,18 +109,70 @@ export const renameLook = (saver: TuneSaver, lookId: string, key: string, name: 
   saver.rename(lookId, key, name);
 };
 
+/** A size as three read-only fields, wide, tall and long. */
+export function SizeRow({ size }: { size: readonly [number, number, number] }) {
+  return (
+    <PropertyRow label="Size">
+      {(["W", "H", "D"] as const).map((axis, index) => (
+        <PropertyReading
+          key={axis}
+          prefix={axis}
+          value={size[index]!.toFixed(2)}
+          title={`${["Wide", "Tall", "Long"][index]}: ${size[index]} in the game's units`}
+        />
+      ))}
+    </PropertyRow>
+  );
+}
+
+/** A one-line tip on an icon button. */
+function IconAction({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-micro"
+            variant="ghost-muted"
+            aria-label={label}
+            aria-pressed={pressed}
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** Materials past this many get a filter. */
+const FILTER_FROM = 9;
+
 /**
- * A thing's inspector, the way an engine's inspector shows a selected object: its transform
- * (scale, with x/y/z behind a lock, and its turn about up), each of its materials (colour, glow,
- * roughness, metalness, opacity, flat shading, its texture), its shadows, and its tuned values.
- * Every edit plays at once on the Stage and saves as it is let go, folding into one build like
- * Tune's values; the look is kept in tune.json under `look:<id>`. `onEdit` hears each change, so
- * the viewer above draws it too.
+ * A thing's inspector, the way Figma and Spline lay one out: Transform (scale as X, Y and Z fields
+ * with a lock between the axes, the turn about up as one ° field, and its size as read-only W, H
+ * and D), its materials as fill rows (swatch, hex, opacity and an eye, the rest behind ⋯), its
+ * shadows as two switches on one row, and its tuned values as Tune shows them. Every edit plays at
+ * once on the Stage and saves as it is let go, folding into one build like Tune's values; the look
+ * is kept in tune.json under `look:<id>`. `onEdit` hears each change, so the viewer above draws it.
  */
 export function GameLookInspector({
   threadRef,
   thing,
   saver,
+  size,
   onEdit,
   onBake,
 }: {
@@ -117,6 +183,8 @@ export function GameLookInspector({
    * this inspector's thing is briefly gone, so Keep as a build still keeps the session.
    */
   saver: TuneSaver;
+  /** Its bounds, wide, tall, long, when known. */
+  size?: readonly [number, number, number] | null | undefined;
   onEdit?: (() => void) | undefined;
   /** Asks the agent to move the look into the thing's code: shown while the look has edits. */
   onBake?: ((changed: ReadonlyArray<GameThingValue>) => void) | undefined;
@@ -133,6 +201,7 @@ export function GameLookInspector({
   const [locked, setLocked] = useState(true);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   // Asked as the inspector opens and whenever the game comes up again (a new run, a reload).
   useEffect(() => {
     if (status === "ready") requestStageLook(thing.id);
@@ -144,201 +213,349 @@ export function GameLookInspector({
     tuneStageValue(id, value.key, next);
     onEdit?.();
   };
-  const field = (id: string, value: GameThingValue, label: string) => {
+  const commit = (value: GameThingValue, next: number | boolean, how: "pointer" | "keyboard") =>
+    saver.save(lookId, { ...value, value: next }, how);
+  const putBack = (value: GameThingValue) => {
+    if (value.default === undefined) return;
+    edit(lookId, value, value.default);
+    saver.save(lookId, { ...value, value: value.default }, "keyboard");
+  };
+  const field = (value: GameThingValue, label: string) => {
     const changed = isChanged(value);
-    const putBack = () => {
-      if (value.default === undefined) return;
-      edit(id, value, value.default);
-      saver.save(id, { ...value, value: value.default }, "keyboard");
-    };
     return (
       <GameTuneField
-        key={`${id}\0${value.key}`}
+        key={value.key}
         label={label}
         value={value}
         was={changed ? value.default : undefined}
         disabled={disabled}
-        onChange={(next) => edit(id, value, next)}
-        onCommit={(next, how) => saver.save(id, { ...value, value: next }, how)}
-        onReset={changed ? putBack : undefined}
+        onChange={(next) => edit(lookId, value, next)}
+        onCommit={(next, how) => commit(value, next, how)}
+        onReset={changed ? () => putBack(value) : undefined}
       />
     );
   };
   const byKey = new Map(values.map((value) => [value.key, value]));
   const scale = byKey.get("scale");
-  const axes = (["scaleX", "scaleY", "scaleZ"] as const).flatMap((key) => {
-    const value = byKey.get(key);
-    return value === undefined ? [] : [value];
-  });
+  const axes = (["scaleX", "scaleY", "scaleZ"] as const).map((key) => byKey.get(key));
   const turn = byKey.get("turn");
-  const shadows = (["castShadow", "receiveShadow"] as const).flatMap((key) => {
-    const value = byKey.get(key);
-    return value === undefined ? [] : [value];
-  });
+  const cast = byKey.get("castShadow");
+  const receive = byKey.get("receiveShadow");
   const materials = (look?.materials ?? []).map((material) => ({
     material,
     values: values.filter((value) => materialOf(value.key) === material.key),
   }));
+  const anyNamed = materials.some(({ material }) => material.named === true);
+  const needle = filter.trim().toLowerCase();
+  const listed =
+    materials.length < FILTER_FROM || needle === ""
+      ? materials
+      : materials.filter(({ material }) => material.label.toLowerCase().includes(needle));
   const lookChanged = values.filter(isChanged);
   const ownChanged = own.filter(isChanged);
   const changedCount = lookChanged.length + ownChanged.length;
   const putAllBack = () => {
-    for (const value of lookChanged) {
-      edit(lookId, value, value.default!);
-      saver.save(lookId, { ...value, value: value.default! }, "keyboard");
-    }
+    for (const value of lookChanged) putBack(value);
     for (const value of ownChanged) {
       edit(thing.id, value, value.default!);
       saver.save(thing.id, { ...value, value: value.default! }, "keyboard");
     }
   };
+  const transformChanged = [scale, ...axes, turn].filter(
+    (value): value is GameThingValue => value !== undefined && isChanged(value),
+  );
+  const scaleNumber = typeof scale?.value === "number" ? scale.value : 1;
+  // One scale field per axis: the thing's scale times that axis's own. Locked, any of them scales
+  // all three together; unlocked, each sets its own axis.
+  const axisFields =
+    scale === undefined
+      ? null
+      : (["X", "Y", "Z"] as const).map((letter, index) => {
+          const axis = axes[index];
+          const factor = typeof axis?.value === "number" ? axis.value : 1;
+          const target = locked || axis === undefined ? scale : axis;
+          const toTarget = (shown: number) =>
+            Math.round(
+              (locked || axis === undefined ? shown / factor : shown / scaleNumber) * 1000,
+            ) / 1000;
+          return (
+            <PropertyNumberField
+              key={letter}
+              label={`Scale ${letter}`}
+              prefix={letter}
+              value={Math.round(scaleNumber * factor * 100) / 100}
+              step={0.01}
+              min={0.05}
+              max={100}
+              tuned={isChanged(scale) || (axis !== undefined && isChanged(axis))}
+              disabled={disabled}
+              onChange={(shown) => edit(lookId, target, toTarget(shown))}
+              onCommit={(shown, how) => commit(target, toTarget(shown), how)}
+            />
+          );
+        });
+  const hasTransform = scale !== undefined || turn !== undefined || (size ?? null) !== null;
   return (
     <>
-      {look === null || values.length === 0 ? null : (
-        <>
-          {scale === undefined && turn === undefined ? null : (
-            <Workbench.Section
-              title="Transform"
-              aside={
-                scale === undefined ? undefined : (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Toggle
-                          size="sm"
-                          variant="ghost"
-                          pressed={!locked}
-                          onPressedChange={(pressed) => setLocked(!pressed)}
-                          aria-label="Scale each axis on its own"
-                        />
-                      }
-                    >
-                      {locked ? <LinkIcon aria-hidden="true" /> : <UnlinkIcon aria-hidden="true" />}
-                    </TooltipTrigger>
-                    <TooltipPopup side="left">
-                      {locked ? "Scale each axis on its own" : "Scale all axes together"}
-                    </TooltipPopup>
-                  </Tooltip>
-                )
+      {!hasTransform ? null : (
+        <PropertySection
+          title="Transform"
+          actions={
+            transformChanged.length === 0 ? undefined : (
+              <IconAction
+                label="Put the transform back"
+                onClick={() => {
+                  for (const value of transformChanged) putBack(value);
+                }}
+              >
+                <RotateCcwIcon aria-hidden="true" />
+              </IconAction>
+            )
+          }
+        >
+          {axisFields === null ? null : (
+            <PropertyRow
+              label="Scale"
+              end={
+                axes.some((axis) => axis !== undefined) ? (
+                  <IconAction
+                    label={locked ? "Scale each axis on its own" : "Scale all axes together"}
+                    pressed={locked}
+                    onClick={() => setLocked(!locked)}
+                  >
+                    {locked ? <LinkIcon aria-hidden="true" /> : <UnlinkIcon aria-hidden="true" />}
+                  </IconAction>
+                ) : undefined
               }
             >
-              {scale === undefined ? null : field(lookId, scale, "Scale")}
-              {locked ? null : axes.map((value) => field(lookId, value, valueLabel(value)))}
-              {turn === undefined ? null : field(lookId, turn, "Turn")}
-            </Workbench.Section>
+              {axisFields}
+            </PropertyRow>
           )}
-          {materials.length === 0 ? null : (
-            <Workbench.Section title="Materials" detail={materials.length}>
-              {materials.map(({ material, values: fields }) => {
-                const expanded = open.has(material.key);
-                const colour = fields.find((value) => value.key.endsWith("/color"));
-                const edited = fields.some(isChanged);
-                const swatch = (
-                  <span
-                    aria-hidden="true"
-                    className="size-4 shrink-0 rounded-sm ring-1 ring-border ring-inset"
-                    style={
-                      typeof colour?.value === "number"
-                        ? { backgroundColor: colourHex(colour.value) }
-                        : undefined
-                    }
-                  />
-                );
-                return (
-                  <div key={material.key} className="flex flex-col">
-                    {renaming === material.key ? (
-                      <div className="flex h-8 min-w-0 items-center gap-2 ps-4 pe-2">
-                        <span aria-hidden="true" className="size-3.5 shrink-0" />
-                        {swatch}
-                        <LabelInput
-                          label={material.label}
-                          onRename={(name) =>
-                            renameLook(saver, lookId, `${material.key}/name`, name)
-                          }
-                          onDone={() => setRenaming(null)}
+          {turn === undefined || typeof turn.value !== "number" ? null : (
+            <PropertyRow label="Turn">
+              <PropertyNumberField
+                label="Turn"
+                value={turn.value}
+                min={turn.min}
+                max={turn.max}
+                step={turn.step}
+                unit="°"
+                tuned={isChanged(turn)}
+                disabled={disabled}
+                onChange={(next) => edit(lookId, turn, next)}
+                onCommit={(next, how) => commit(turn, next, how)}
+              />
+              <span aria-hidden="true" className="flex-1" />
+              <span aria-hidden="true" className="flex-1" />
+            </PropertyRow>
+          )}
+          {size === undefined || size === null ? null : <SizeRow size={size} />}
+        </PropertySection>
+      )}
+      {materials.length === 0 ? null : (
+        <PropertySection title="Materials" count={materials.length}>
+          {materials.length < FILTER_FROM ? null : (
+            <div className="px-4 pb-2">
+              <InputGroup variant="field">
+                <InputGroupAddon>
+                  <SearchIcon className="size-3.5" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  nativeInput
+                  size="compact"
+                  type="text"
+                  value={filter}
+                  placeholder="Filter materials"
+                  aria-label="Filter materials"
+                  onChange={(event) => setFilter(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === "Escape") setFilter("");
+                  }}
+                />
+              </InputGroup>
+            </div>
+          )}
+          {listed.map(({ material, values: fields }) => {
+            const expanded = open.has(material.key);
+            const at = (prop: string) => fields.find((value) => value.key.endsWith(`/${prop}`));
+            const colour = at("color");
+            const opacity = at("opacity");
+            const shown = at("visible");
+            const advanced = fields.filter(
+              (value) => value !== colour && value !== opacity && value !== shown,
+            );
+            const edited = fields.filter(isChanged);
+            const label =
+              renaming === material.key ? (
+                <LabelInput
+                  label={material.label}
+                  onRename={(name) => renameLook(saver, lookId, `${material.key}/name`, name)}
+                  onDone={() => setRenaming(null)}
+                />
+              ) : material.named === true ? (
+                <span
+                  className="flex min-w-0"
+                  onDoubleClick={(event) => {
+                    if (!canName || disabled) return;
+                    event.preventDefault();
+                    setRenaming(material.key);
+                  }}
+                >
+                  <PropertyLabel
+                    title={canName && !disabled ? "Double-click to rename" : undefined}
+                  >
+                    {material.label}
+                  </PropertyLabel>
+                </span>
+              ) : anyNamed ? (
+                <span />
+              ) : undefined;
+            return (
+              <div key={material.key} className="group/material flex flex-col">
+                <PropertyRow
+                  label={label}
+                  end={
+                    edited.length === 0 ? undefined : (
+                      <IconAction
+                        label={`Put ${material.label} back`}
+                        onClick={() => {
+                          for (const value of edited) putBack(value);
+                        }}
+                      >
+                        <RotateCcwIcon aria-hidden="true" />
+                      </IconAction>
+                    )
+                  }
+                >
+                  {colour === undefined || typeof colour.value !== "number" ? (
+                    <PropertyReading value={material.label} />
+                  ) : (
+                    <PropertyColourField
+                      label={material.label}
+                      value={colour.value}
+                      tuned={isChanged(colour) || (opacity !== undefined && isChanged(opacity))}
+                      disabled={disabled}
+                      onChange={(next) => edit(lookId, colour, next)}
+                      onCommit={(next) => commit(colour, next, "pointer")}
+                      {...(opacity === undefined || typeof opacity.value !== "number"
+                        ? {}
+                        : {
+                            opacity: {
+                              value: opacity.value,
+                              tuned: isChanged(opacity),
+                              disabled,
+                              onChange: (next: number) => edit(lookId, opacity, next),
+                              onCommit: (next: number, how: "pointer" | "keyboard") =>
+                                commit(opacity, next, how),
+                            },
+                          })}
+                    />
+                  )}
+                  {shown === undefined || typeof shown.value !== "boolean" ? null : (
+                    <IconAction
+                      label={shown.value ? `Hide ${material.label}` : `Show ${material.label}`}
+                      pressed={!shown.value}
+                      onClick={() => {
+                        edit(lookId, shown, !shown.value);
+                        commit(shown, !shown.value, "pointer");
+                      }}
+                    >
+                      {shown.value ? (
+                        <EyeIcon aria-hidden="true" />
+                      ) : (
+                        <EyeOffIcon aria-hidden="true" />
+                      )}
+                    </IconAction>
+                  )}
+                  {advanced.length === 0 && material.map === undefined ? null : (
+                    <span
+                      className={
+                        expanded
+                          ? "flex"
+                          : "flex opacity-0 group-hover/material:opacity-100 has-focus-visible:opacity-100"
+                      }
+                    >
+                      <IconAction
+                        label={
+                          expanded
+                            ? `Hide ${material.label}'s settings`
+                            : `${material.label}'s settings`
+                        }
+                        pressed={expanded}
+                        onClick={() => {
+                          const next = new Set(open);
+                          if (expanded) next.delete(material.key);
+                          else next.add(material.key);
+                          setOpen(next);
+                        }}
+                      >
+                        <EllipsisIcon aria-hidden="true" />
+                      </IconAction>
+                    </span>
+                  )}
+                </PropertyRow>
+                {expanded ? (
+                  <div className="flex flex-col pb-1">
+                    {advanced.map((value) => field(value, fieldLabel(value, material)))}
+                    {material.map === undefined ? null : (
+                      <PropertyRow label="Texture">
+                        <img
+                          src={material.map}
+                          alt={`${material.label} texture`}
+                          className="size-12 rounded-sm ring-1 ring-border [image-rendering:pixelated]"
                         />
-                      </div>
-                    ) : (
-                      <div className="px-2">
-                        <button
-                          type="button"
-                          aria-expanded={expanded}
-                          onClick={() => {
-                            const next = new Set(open);
-                            if (expanded) next.delete(material.key);
-                            else next.add(material.key);
-                            setOpen(next);
-                          }}
-                          className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                        >
-                          <ChevronRightIcon
-                            aria-hidden="true"
-                            className={cn(
-                              "size-3.5 shrink-0 text-dim-foreground motion-popup transition-transform",
-                              expanded && "rotate-90",
-                            )}
-                          />
-                          {swatch}
-                          <Text
-                            variant="body"
-                            tone="default"
-                            truncate
-                            title={canName && !disabled ? "Double-click to rename" : undefined}
-                            render={<span className="flex-1" />}
-                            onDoubleClick={(event) => {
-                              if (!canName || disabled) return;
-                              event.preventDefault();
-                              setRenaming(material.key);
-                            }}
-                          >
-                            {material.label}
-                          </Text>
-                          <span className="flex w-1.5 shrink-0 justify-center">
-                            {edited ? (
-                              <span
-                                aria-label="changed"
-                                className="size-1.5 rounded-full bg-live"
-                              />
-                            ) : null}
-                          </span>
-                        </button>
-                      </div>
+                      </PropertyRow>
                     )}
-                    {expanded ? (
-                      <div className="flex flex-col pb-1">
-                        {fields.map((value) => field(lookId, value, fieldLabel(value, material)))}
-                        {material.map === undefined ? null : (
-                          <div className="grid h-14 grid-cols-[minmax(0,1fr)_8rem_1.5rem] items-center gap-2 px-4">
-                            <Text variant="body" tone="muted">
-                              Texture
-                            </Text>
-                            <img
-                              src={material.map}
-                              alt={`${material.label} texture`}
-                              className="size-12 rounded-sm ring-1 ring-border [image-rendering:pixelated]"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
                   </div>
-                );
-              })}
-            </Workbench.Section>
-          )}
-          {shadows.length === 0 ? null : (
-            <Workbench.Section title="Shadows">
-              {shadows.map((value) =>
-                field(lookId, value, value.key === "castShadow" ? "Cast" : "Receive"),
-              )}
-            </Workbench.Section>
-          )}
-        </>
+                ) : null}
+              </div>
+            );
+          })}
+          {listed.length === 0 ? (
+            <Text variant="meta" tone="muted" render={<p className="px-4 py-1" />}>
+              Nothing matches “{filter.trim()}”.
+            </Text>
+          ) : null}
+        </PropertySection>
+      )}
+      {cast === undefined && receive === undefined ? null : (
+        <PropertySection title="Shadows">
+          <PropertyRow>
+            {[
+              { value: cast, word: "Casts" },
+              { value: receive, word: "Takes" },
+            ].map(({ value, word }) =>
+              value === undefined || typeof value.value !== "boolean" ? null : (
+                <label key={word} className="flex flex-1 cursor-pointer items-center gap-2">
+                  <Switch
+                    size="sm"
+                    checked={value.value}
+                    disabled={disabled}
+                    onCheckedChange={(checked) => {
+                      edit(lookId, value, checked);
+                      commit(value, checked, "pointer");
+                    }}
+                  />
+                  <Text variant="meta" tone={isChanged(value) ? "default" : "muted"}>
+                    {word}
+                  </Text>
+                </label>
+              ),
+            )}
+          </PropertyRow>
+        </PropertySection>
       )}
       {own.length === 0 ? null : (
-        <Workbench.Section title="Values" detail={own.length}>
-          {own.map((value) => field(thing.id, value, valueLabel(value)))}
-        </Workbench.Section>
+        <PropertySection title="Values" count={own.length}>
+          <GameThingValueRows
+            id={thing.id}
+            values={own}
+            disabled={disabled}
+            save={saver.save}
+            onEdit={onEdit}
+          />
+        </PropertySection>
       )}
       {changedCount === 0 && saver.state.kind !== "failed" ? null : (
         <div className="sticky bottom-0 mt-auto flex h-11 shrink-0 items-center border-t border-border bg-background ps-4 pe-1">

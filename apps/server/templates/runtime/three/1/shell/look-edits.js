@@ -116,6 +116,7 @@ const PROPS = [
   ["metalness", (m) => finite(m.metalness), { label: "metalness", min: 0, max: 1, step: 0.01 }],
   ["opacity", (m) => finite(m.opacity), { label: "opacity", min: 0, max: 1, step: 0.01 }],
   ["flatShading", (m) => lit(m) && typeof m.flatShading === "boolean", { label: "flat shaded" }],
+  ["visible", (m) => typeof m.visible === "boolean", { label: "shown" }],
 ];
 const propsOf = (material) =>
   material.isShaderMaterial ? [] : PROPS.filter(([, has]) => has(material));
@@ -193,16 +194,20 @@ const familyOf = (material) => {
 
 /**
  * A material's label for a person, from what the game gave it: the material's own name (a glb's
- * "Wood"), else a mesh's name, else the palette's name for it, else its shape and colour ("Red
- * box", "Teal cone"); null when none says anything, for "Part N". Never a key or a hex.
+ * "Wood"), else a mesh's name, else the palette's name for it (these are the game's own names),
+ * else its shape and colour ("Red box", "Teal cone"); null when none says anything, for "Part N".
+ * Never a key or a hex.
  */
-const labelOf = (entry) => {
+const gameNameOf = (entry) => {
   const own = entry.own;
   const palette = own.userData?.kurambitKey !== undefined;
   if (!palette && human(own.name) !== null) return human(own.name);
   for (const node of entry.nodes) if (human(node.name) !== null) return human(node.name);
   if (palette && human(own.name) !== null) return human(own.name);
-  const family = familyOf(own);
+  return null;
+};
+const labelOf = (entry) => {
+  const family = familyOf(entry.own);
   if (family === null) return null;
   return `${family} ${shapeOf(entry.nodes[0]) ?? "part"}`;
 };
@@ -224,7 +229,7 @@ export function lookMaterials(bodies, names = {}) {
         let entry = seen.get(own);
         if (entry === undefined) {
           const name = String(own.name ?? "").slice(0, 60);
-          entry = { own, key: `${list.length}:${name}`, label: null, nodes: [] };
+          entry = { own, key: `${list.length}:${name}`, label: null, named: false, nodes: [] };
           seen.set(own, entry);
           list.push(entry);
         }
@@ -236,10 +241,13 @@ export function lookMaterials(bodies, names = {}) {
     const given = names[`${entry.key}/name`];
     if (typeof given === "string" && given !== "") {
       entry.label = given;
+      entry.named = true;
       continue;
     }
     if (propsOf(entry.own).length === 0) continue;
-    const label = labelOf(entry) ?? `Part ${++parts}`;
+    const gameName = gameNameOf(entry);
+    entry.named = gameName !== null;
+    const label = gameName ?? labelOf(entry) ?? `Part ${++parts}`;
     const count = (said.get(label) ?? 0) + 1;
     said.set(label, count);
     entry.label = count === 1 ? label : `${label} ${count}`;

@@ -1297,6 +1297,23 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     var(--surface-fill) border-box;
   box-shadow: var(--surface-shadow);
 }
+/* An inspector's value field, the way Figma's and Spline's panels draw one: a flat fill with
+   no rim at rest, a rim on hover, and surface-focus's ring while typing. */
+@utility surface-field {
+  --surface-fill: var(--field-fill);
+  --surface-rim: linear-gradient(transparent, transparent);
+  --surface-base-shadow: none;
+  --surface-shadow: var(--surface-base-shadow);
+  border: 1px solid transparent;
+  background:
+    var(--surface-fill) padding-box,
+    var(--surface-rim) border-box,
+    var(--surface-fill) border-box;
+  box-shadow: var(--surface-shadow);
+}
+@utility surface-field-hover {
+  --surface-rim: linear-gradient(var(--field-hover-rim), var(--field-hover-rim));
+}
 /* The unchecked switch track: set apart from the card in both themes (deeper
    on paper, lifted on near-black), with a rim that keeps its outline. */
 @utility surface-well-switch {
@@ -1713,6 +1730,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   );
   --well-rim: linear-gradient(180deg, rgb(0 0 0 / 24%), rgb(0 0 0 / 9%));
   --well-shadow: 0 1px 0 rgb(255 255 255 / 60%);
+  --field-fill: linear-gradient(rgb(0 0 0 / 4.5%), rgb(0 0 0 / 4.5%));
+  --field-hover-rim: rgb(0 0 0 / 12%);
   --well-switch-fill: linear-gradient(
     180deg,
     color-mix(in srgb, var(--background), black 20%),
@@ -1786,6 +1805,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     );
     --well-rim: linear-gradient(180deg, rgb(0 0 0 / 60%), rgb(255 255 255 / 14%));
     --well-shadow: 0 1px 2px rgb(0 0 0 / 38%);
+    --field-fill: linear-gradient(rgb(255 255 255 / 5.5%), rgb(255 255 255 / 5.5%));
+    --field-hover-rim: rgb(255 255 255 / 12%);
     /* Dark cards sit near black, so a track sunk below them vanishes: the off
        track lifts toward white instead, with a rim that holds its outline. */
     --well-switch-fill: linear-gradient(
