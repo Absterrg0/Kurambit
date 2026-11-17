@@ -216,6 +216,8 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
       out.push({
         name: action.name,
         label: action.label,
+        // Its keys as the player has them: Checks names a control by them ("E fish").
+        keys: action.keys.filter((key) => typeof key === "string" && key.length <= 32).slice(0, 4),
         read: run.input.reads.has(action.name),
         answers: found,
       });

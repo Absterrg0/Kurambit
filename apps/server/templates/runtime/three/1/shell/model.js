@@ -57,6 +57,8 @@
 //     // the joints, one draw per material; done({ skin: "rigid" }) hangs each part on its bone
 //   // body.bones lists the bone names; hero.play("run") plays the library's clips on it.
 //
+// Name every model's root before you merge or scatter it (`cabin.name = "Cabin"`). Named parts
+// are what the person can pick, see in Art and ask about: an island's cabin, dock and trees.
 // Models face +z, like the library's, so face the move with rotation.y = Math.atan2(dir.x, dir.z).
 // Look at each one alone with game_play op model_sheet before building the game around it.
 import * as THREE from "../vendor/three.module.js";
@@ -133,7 +135,8 @@ export function paintOf(value, options = {}) {
             clearcoatRoughness: coatRough,
           })
         : new THREE.MeshStandardMaterial(parameters);
-    material.name = key;
+    // The cache key is no name a person reads: a palette names the material (palette()).
+    material.userData.kurambitKey = key;
     paints.set(key, material);
   }
   return material;
@@ -165,8 +168,11 @@ export function canvasTexture(
 /** The game's palette as named shared materials: { name: colour } or { name: [colour, options] }. */
 export function palette(colours) {
   const named = {};
-  for (const [name, entry] of Object.entries(colours))
+  for (const [name, entry] of Object.entries(colours)) {
     named[name] = Array.isArray(entry) ? paintOf(entry[0], entry[1]) : paintOf(entry);
+    // The name a person reads for it (Art's materials): the first palette's to name it.
+    if (named[name].name === "") named[name].name = name;
+  }
   return named;
 }
 

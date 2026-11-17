@@ -995,6 +995,11 @@ export async function createLook(canvas, options = {}) {
       scene.add(dome);
       domes.set(scene, dome);
     }
+    // A Stage portrait (stage-bridge.js) draws its thing on nothing.
+    if (camera.userData.kurambitPortrait === true) {
+      dome.visible = false;
+      return;
+    }
     const narrow = camera.isPerspectiveCamera === true && camera.fov <= BAND_FOV;
     dome.visible = narrow;
     scene.background = narrow ? null : sky.background;

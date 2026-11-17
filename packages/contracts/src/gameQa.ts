@@ -13,6 +13,8 @@ const Count = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 export const GameQaControl = Schema.Struct({
   name: Text(64),
   label: Text(80),
+  /** Its keys as KeyboardEvent codes ("KeyE"), as the play had them. Absent from older shells. */
+  keys: Schema.optionalKey(Schema.Array(Text(32)).check(Schema.isMaxLength(4))),
   /** The game asked ctx.input about it during the run: an action never read is dead for certain. */
   read: Schema.Boolean,
   /** What two of its presses agreed answered it ("moved", "juice", "changed score"); empty: nothing. */

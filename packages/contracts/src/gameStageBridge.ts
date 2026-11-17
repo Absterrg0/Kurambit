@@ -81,6 +81,21 @@ export const GameThing = Schema.Struct({
   /** "Cat", "Slime 3". */
   name: Schema.String,
   kind: GameThingKind,
+  /** The game's own word for its kind when it is one the Stage reads as `kind` ("player"). */
+  kindWord: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(24))),
+  /**
+   * A part: a piece the game named inside another thing (the cabin built into the island), by
+   * that thing's id. `path` is where it sits, "Island › Cabin".
+   */
+  parent: Schema.optionalKey(Schema.String),
+  path: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(400))),
+  /** Where it sits in the world (a picked thing only), in the game's units. */
+  bounds: Schema.optionalKey(
+    Schema.Struct({
+      centre: Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]),
+      size: Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]),
+    }),
+  ),
   /** Game-relative; the Workbench's Art tab reads the sidecar and its generation. */
   asset: Schema.optionalKey(
     Schema.Struct({ path: Schema.String, sidecar: Schema.optionalKey(Schema.String) }),
@@ -185,6 +200,15 @@ export const StudioHoverThing = Schema.Struct({
 });
 export const StudioThingsRequest = Schema.Struct({
   type: Schema.Literal("studio-things-request"),
+});
+/**
+ * Asks for a thing's look (answered with studio-look): its scale and turn, its shadows and its
+ * materials' colours and finish, as values of the tune id `look:<id>`. Changing one is a
+ * studio-tune of that id; keeping it writes tune.json like any value.
+ */
+export const StudioLookRequest = Schema.Struct({
+  type: Schema.Literal("studio-look-request"),
+  id: Schema.String,
 });
 /**
  * Asks for the canvas as a PNG, drawn with no outline (the Inspector's Ask
@@ -317,6 +341,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioTune,
   StudioHoverThing,
   StudioThingsRequest,
+  StudioLookRequest,
   StudioCapture,
   StudioRunRequest,
   StudioRunTake,
@@ -407,6 +432,32 @@ export const StudioControls = Schema.Struct({
   controls: Schema.Array(GameStageControl).check(Schema.isMaxLength(32)),
   note: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
 });
+
+/** The tune id a thing's look is kept under in tune.json. */
+export const gameLookId = (id: string) => `look:${id}`;
+
+/** One material of a thing's look: its values are keyed `${key}/colour` and so on. */
+export const GameLookMaterial = Schema.Struct({
+  key: Schema.String.check(Schema.isMaxLength(80)),
+  /** Its palette's, its own or its mesh's name, else "Part 3": never a cache key. */
+  label: Schema.String.check(Schema.isMaxLength(80)),
+  /** Its colour texture, small. */
+  map: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/))),
+});
+export type GameLookMaterial = typeof GameLookMaterial.Type;
+
+/** The answer to studio-look-request: null when the thing has no body to look at. */
+export const StudioLook = Schema.Struct({
+  type: Schema.Literal("studio-look"),
+  id: Schema.String,
+  look: Schema.NullOr(
+    Schema.Struct({
+      values: Schema.Array(GameThingValue).check(Schema.isMaxLength(400)),
+      materials: Schema.Array(GameLookMaterial).check(Schema.isMaxLength(64)),
+    }),
+  ),
+});
+export type StudioLook = typeof StudioLook.Type;
 
 /** The answer to studio-capture. */
 export const StudioFrame = Schema.Struct({
@@ -522,6 +573,7 @@ export const GameToStageMessage = Schema.Union([
   StudioShortcut,
   StudioFrame,
   StudioPicture,
+  StudioLook,
   StudioControls,
   StudioPlay,
   StudioRun,
@@ -536,7 +588,8 @@ export const decodeGameToStageMessage = Schema.decodeUnknownOption(GameToStageMe
 // Keep as a build
 
 const GAME_KEEP_VALUES_MAX_THINGS = GAME_STAGE_MAX_THINGS;
-const GAME_KEEP_VALUES_MAX_VALUES = 64;
+// A look (look:<id>) keeps a value per material property: Put all back sends them together.
+const GAME_KEEP_VALUES_MAX_VALUES = 400;
 
 /** One thing's values to keep, with the ranges the game registered (the Stage sends what it got). */
 export const GameKeepValuesThing = Schema.Struct({
@@ -619,8 +672,14 @@ export const gameStageAskContext = (selection: {
   const { thing, rect, trace } = selection;
   const lines = [
     "The person selected this in the running game (the attached frame is the canvas when they asked):",
-    `- Thing: ${thing.name} (${thing.kind}), id \`${thing.id}\`.`,
+    thing.path === undefined
+      ? `- Thing: ${thing.name} (${thing.kindWord ?? thing.kind}), id \`${thing.id}\`.`
+      : `- Part: ${thing.name}, at ${thing.path}: a model the game named "${thing.name}" (its root's \`.name\`) and built into ${thing.path.slice(0, thing.path.lastIndexOf(" › "))}. Change only that model's code, not the rest of what holds it.`,
   ];
+  if (thing.bounds !== undefined)
+    lines.push(
+      `- Where it sits: centre (${thing.bounds.centre.join(", ")}), ${thing.bounds.size.join(" × ")} wide × tall × long, in the game's units.`,
+    );
   if (thing.instance !== undefined)
     lines.push(
       `- Just one of its ${thing.instance.count} instances: instance ${thing.instance.index} of its InstancedMesh, the one the person double-clicked, not the whole group.`,
@@ -638,7 +697,12 @@ export const gameStageAskContext = (selection: {
       `- On the frame at x ${round(rect.x)}, y ${round(rect.y)}, ${round(rect.w)} by ${round(rect.h)} px.`,
     );
   else lines.push(thing.onScreen ? "- On screen." : "- Not on screen.");
-  if (thing.kind !== "rule" && thing.kind !== "sound" && thing.instance === undefined)
+  if (
+    thing.kind !== "rule" &&
+    thing.kind !== "sound" &&
+    thing.instance === undefined &&
+    thing.path === undefined
+  )
     lines.push(`- Its path over the last 10 s: ${gameStageTraceSummary(trace)}`);
   return lines.join("\n");
 };

@@ -760,6 +760,8 @@ function draw(dt) {
   const own = run.ctx.camera;
   const camera = portraitCamera ?? devView.camera() ?? own;
   run.ctx.camera = camera;
+  // The person's look edits from Art (scale, turn) sit on their things only while this draws.
+  bridge.shapeLooks(true);
   try {
     juiceShell.beforeRender(camera, renderer);
     if (game.render !== undefined) {
@@ -772,6 +774,7 @@ function draw(dt) {
     } else look.render(run.ctx.scene, camera, dt);
     juiceShell.afterRender(camera);
   } finally {
+    bridge.shapeLooks(false);
     run.ctx.camera = own;
   }
 }
@@ -934,8 +937,9 @@ const bridge = createStageBridge({
     look.update();
     draw(0);
   },
+  /** False when nothing was drawn: a run whose programs still compile, or none. */
   drawFrom(camera) {
-    if (run?.compiling === true) return;
+    if (run === null || run.compiling === true) return false;
     portraitCamera = camera;
     try {
       look.update();
@@ -943,6 +947,7 @@ const bridge = createStageBridge({
     } finally {
       portraitCamera = null;
     }
+    return true;
   },
 });
 onModelCopy(bridge.assetCopy);
