@@ -17,7 +17,14 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { VertexNormalsHelper } from "three/addons/helpers/VertexNormalsHelper.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { withShadows } from "./assets.js";
-import { applyLook, lookDefaults, lookMaterials, lookShape, partNodes } from "./look-edits.js";
+import {
+  applyLook,
+  lookDefaults,
+  lookMaterials,
+  lookShape,
+  partNodes,
+  resetLook,
+} from "./look-edits.js";
 import { drawnBox, stats } from "./model.js";
 import { personFigure } from "./sheet.js";
 
@@ -194,19 +201,22 @@ const allMaterials = () =>
 /**
  * The thing's look on the model, as the game puts it on a copy: the tint multiplies the model's
  * own colours, then each look (the thing's first, then its parts') sets its values over them.
+ * Its edits are cloned materials, so each time starts from the model's own again.
  * Transforms are set here for good, since nothing else moves the model in the viewer.
  */
 const applyThingLook = () => {
   if (model === null) return;
   for (const undo of unshape.toReversed()) undo();
   unshape = [];
+  resetLook([model]);
   const tint = new THREE.Color(look.tint);
   for (const material of ownMaterials) {
     if (material.color === undefined) continue;
     material.color.copy(material.userData.kurambitColor).multiply(tint);
   }
   model.scale.setScalar(look.scale);
-  for (const each of look.looks) {
+  // From the outside in, as the game puts them on: a part's edit wins over its thing's.
+  for (const each of look.looks.toSorted((a, b) => a.part.length - b.part.length)) {
     const bodies = each.part.length === 0 ? [model] : partNodes(model, look.name, each.part);
     if (bodies.length === 0) continue;
     const materials = lookMaterials(bodies);

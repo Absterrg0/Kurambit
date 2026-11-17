@@ -6,7 +6,9 @@
 // time the game makes the thing.
 //
 // Materials are often shared (shell/model.js's palette hands every thing the same paint), so an
-// edited material is cloned for this thing alone; one put back gets its own material again.
+// edited material is cloned for this thing alone; one put back gets its own material again. A
+// thing and its parts each have a look: they are put on together, the game's own first, then the
+// thing's and each part's in turn, so where both edit one material the part's (nearer) one shows.
 import * as THREE from "../vendor/three.module.js";
 
 export const LOOK = "look:";
@@ -130,8 +132,10 @@ const write = (material, prop, value, own) => {
   } else material[prop] = value;
 };
 
-// An edited material's own (the game's), by its clone; and each node's own shadows.
+// An edited material's own (the game's), by its clone; each look's clones, by the first body it
+// is put on and the material they stand for; and each node's own shadows.
 const owners = new WeakMap();
+const clonesOf = new WeakMap();
 const ownShadows = new WeakMap();
 const ownOf = (material) => owners.get(material) ?? material;
 
@@ -281,56 +285,61 @@ export function lookDefaults(bodies, materials, { scale = true } = {}) {
   return { defaults, ranges };
 }
 
+/** Gives every body the game's own materials and shadows back, before its looks are put on. */
+export function resetLook(bodies) {
+  for (const body of bodies)
+    body.traverse((node) => {
+      if (Array.isArray(node.material)) node.material = node.material.map(ownOf);
+      else if (node.material != null) node.material = ownOf(node.material);
+      const own = ownShadows.get(node);
+      if (own !== undefined) [node.castShadow, node.receiveShadow] = own;
+    });
+}
+
 /**
- * Puts the look's live values on the thing's materials and shadows. Transforms are drawn per
- * frame (lookShape), since the game moves and turns its things itself.
+ * Puts the look's live values over the bodies as they are (resetLook first, then the thing's
+ * look and its parts' in turn): each edited material on its meshes as this look's own clone of
+ * it, and shadows that differ from the game's. Transforms are drawn per frame (lookShape), since
+ * the game moves and turns its things itself.
  */
 export function applyLook(bodies, materials, live, defaults) {
+  let clones = clonesOf.get(bodies[0]);
+  if (clones === undefined) clonesOf.set(bodies[0], (clones = new Map()));
   for (const entry of materials) {
     const props = propsOf(entry.own);
-    const edited = props.filter(([prop]) => {
+    const edited = props.some(([prop]) => {
       const key = `${entry.key}/${prop}`;
       return key in live && live[key] !== read(entry.own, prop);
     });
-    let clone = null;
-    for (const node of entry.nodes)
-      for (const material of [node.material ?? []].flat())
-        if (owners.get(material) === entry.own) clone = material;
-    if (edited.length === 0) {
-      if (clone !== null) swap(entry.nodes, clone, entry.own);
-      continue;
-    }
-    if (clone === null) {
+    if (!edited) continue;
+    let clone = clones.get(entry.own);
+    if (clone === undefined) {
       clone = entry.own.clone();
       // A shader the game or the look patched compiles the same for the clone.
       clone.onBeforeCompile = entry.own.onBeforeCompile;
       clone.customProgramCacheKey = entry.own.customProgramCacheKey;
       owners.set(clone, entry.own);
-      swap(entry.nodes, entry.own, clone);
+      clones.set(entry.own, clone);
     }
     for (const [prop] of props) {
       const key = `${entry.key}/${prop}`;
       write(clone, prop, key in live ? live[key] : read(entry.own, prop), entry.own);
     }
+    const mine = (material) => (ownOf(material) === entry.own ? clone : material);
+    for (const node of entry.nodes)
+      node.material = Array.isArray(node.material) ? node.material.map(mine) : mine(node.material);
   }
-  if ("castShadow" in defaults)
+  const cast = "castShadow" in defaults && live.castShadow !== defaults.castShadow;
+  const receive = "receiveShadow" in defaults && live.receiveShadow !== defaults.receiveShadow;
+  if (cast || receive)
     for (const body of bodies)
       body.traverse((node) => {
         if (!node.isMesh) return;
-        let own = ownShadows.get(node);
-        if (own === undefined) ownShadows.set(node, (own = [node.castShadow, node.receiveShadow]));
-        node.castShadow = live.castShadow === defaults.castShadow ? own[0] : live.castShadow;
-        node.receiveShadow =
-          live.receiveShadow === defaults.receiveShadow ? own[1] : live.receiveShadow;
+        if (!ownShadows.has(node)) ownShadows.set(node, [node.castShadow, node.receiveShadow]);
+        if (cast) node.castShadow = live.castShadow;
+        if (receive) node.receiveShadow = live.receiveShadow;
       });
 }
-
-const swap = (nodes, from, to) => {
-  for (const node of nodes)
-    if (Array.isArray(node.material))
-      node.material = node.material.map((material) => (material === from ? to : material));
-    else if (node.material === from) node.material = to;
-};
 
 const TURN = new THREE.Quaternion();
 const UP = new THREE.Vector3(0, 1, 0);

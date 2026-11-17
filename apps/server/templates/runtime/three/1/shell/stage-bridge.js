@@ -28,6 +28,7 @@ import {
   mapPicture,
   meaningful,
   partName,
+  resetLook,
 } from "./look-edits.js";
 
 const BRIDGE = 1;
@@ -650,8 +651,33 @@ export function createStageBridge({
     const live = tune(`${LOOK}${record.id}`, defaults, ranges);
     const look = { record, bodies, materials, defaults, live };
     looks.set(record.id, look);
-    applyLook(bodies, materials, live, defaults);
+    relook(record);
     return look;
+  };
+  /**
+   * The looks of a thing and its parts, put on it again together: the game's own materials and
+   * shadows first, then the thing's look and its parts' from the outside in, so a part's edit of
+   * a material the thing also edits is the one its meshes show.
+   */
+  const relook = (record) => {
+    const rootId = record.part === true ? record.root : record.id;
+    const depth = (each) => (each.path === undefined ? 0 : each.path.split(" › ").length);
+    const around = [...looks.values()]
+      .filter((look) => look.record.id === rootId || look.record.root === rootId)
+      .sort((a, b) => depth(a.record) - depth(b.record));
+    const root = things.get(rootId);
+    resetLook(root === undefined ? around.flatMap((look) => look.bodies) : bodiesOf(root));
+    for (const look of around) applyLook(look.bodies, look.materials, look.live, look.defaults);
+  };
+  /** Every look put on again, each thing's together. */
+  const relookAll = () => {
+    const done = new Set();
+    for (const look of looks.values()) {
+      const rootId = look.record.part === true ? look.record.root : look.record.id;
+      if (done.has(rootId)) continue;
+      done.add(rootId);
+      relook(look.record);
+    }
   };
   /** A thing made again (a new run, a rename) gets its kept look, when it has one. */
   const lookAgain = (record) => {
@@ -1857,7 +1883,7 @@ export function createStageBridge({
     changed = true;
     for (const copy of lookCopies.get(id) ?? []) applyAssetLook(copy, entry.live);
     const look = id.startsWith(LOOK) ? looks.get(id.slice(LOOK.length)) : undefined;
-    if (look !== undefined) applyLook(look.bodies, look.materials, look.live, look.defaults);
+    if (look !== undefined) relook(look.record);
     if (selected?.id === id) postSelected();
     return true;
   };
@@ -2163,8 +2189,7 @@ export function createStageBridge({
         for (const [key, value] of Object.entries(preset[id] ?? {}))
           if (fits(value, entry.defaults[key]))
             entry.live[key] = typeof value === "number" ? clamp(value, entry.ranges[key]) : value;
-      for (const look of looks.values())
-        applyLook(look.bodies, look.materials, look.live, look.defaults);
+      relookAll();
       changed = true;
     },
     /** Every tuned value now, by thing: what a run started with. */
@@ -2185,8 +2210,7 @@ export function createStageBridge({
           entry.live[key] = typeof start === "number" ? clamp(start, entry.ranges[key]) : start;
         }
       }
-      for (const look of looks.values())
-        applyLook(look.bodies, look.materials, look.live, look.defaults);
+      relookAll();
       changed = true;
       if (selected !== null) postSelected();
     },
