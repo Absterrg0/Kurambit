@@ -25,7 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 from mathutils import Matrix  # noqa: E402
 
-from kurambit import contact, measure, skeleton, stylepass  # noqa: E402
+from kurambit import contact, deform, measure, skeleton, stylepass  # noqa: E402
+from kurambit import gates as gates_rules  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
 
@@ -144,6 +145,18 @@ def _keep_only(objects):
             a.name = a["kurambit_clip"]
 
 
+def hero_gates(objects, params):
+    """The gates of the one character among objects (deform.py), in the size the style pass will
+    ship it at; none for a prop or for several armatures."""
+    arms = [o for o in objects if o.type == "ARMATURE"]
+    if len(arms) != 1:
+        return []
+    meshes = [o for o in objects if o.type == "MESH"]
+    scale = stylepass.character_scale(arms, meshes, params.get("style")) or 1.0
+    budgets = {**params["budgets"], "materials": params["budgets"].get("materials", deform.MATERIALS_MAX)}
+    return deform.hero_gates(arms[0], meshes, budgets, scale)
+
+
 @entry
 def run_pass(params):
     names = list(params["objects"])
@@ -189,6 +202,7 @@ def run_pass(params):
     os.makedirs(out, exist_ok=True)
     # Before the style pass, which joins a character's meshes into one.
     gaps = contact.floating(objects)
+    gates = hero_gates(objects, params)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
     candidate = params.get("glb") or os.path.join(out, "candidate.glb")
@@ -203,15 +217,26 @@ def run_pass(params):
     )
     own = next(iter(creatures.values())) if len(creatures) == 1 and len(arms) == 1 else None
     measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig, own)
+    if gates:
+        # The budget is the shipped model's: the style pass snaps materials to the palette's two
+        # and scales textures, so it is read off the candidate, not the scene before the pass.
+        budgets = params["budgets"]
+        gates = [g for g in gates if g["name"] != "budget"] + [gates_rules.budget(
+            measured["triangles"], measured["materials"], measured["textures"],
+            {"triangles": budgets["character"], "materials": budgets.get("materials", deform.MATERIALS_MAX), "texture": budgets["texture"]})]
+        measured["gates"] = gates
     if gaps is not None:
         k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
     still = ["clips that move no bone: " + ", ".join(info["frozen"])[:300]] if info["frozen"] else []
+    refused = refusals_of(measured, info, params, set(creatures))
     return {
         "kind": styled["kind"],
         "objects": names,
         "measured": measured,
-        "refusals": refusals_of(measured, info, params, set(creatures)),
+        "refusals": refused + [{"code": f"hero-{g['name']}", "text": g["text"][:400]} for g in gates if not g["pass"]
+                               # the budget's triangles and texture refusals already say it
+                               and not (g["name"] == "budget" and {r["code"] for r in refused} & {"triangles", "texture"})],
         "parts": parts,
         "usedPalette": styled["usedPalette"],
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},

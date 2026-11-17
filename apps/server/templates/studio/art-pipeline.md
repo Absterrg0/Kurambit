@@ -85,7 +85,9 @@ A character or creature on any route is done when its sheet is in
 each one that is not. The tools keep the sheet: `game_blender` op `export`
 copies the review it shipped, `game_play` op `model_sheet` a code model's.
 Write `art/sheets/<sheet name>.md` after looking at it: the brief's words
-for the subject (and the reference, if any), then each defect numbered,
+for the subject (and the reference, if any), the review's gate numbers
+(height, deformation, cloth, feet, budget) and what each means for this
+hero, then each defect numbered,
 biggest first (silhouette, proportion and appeal, face and hands,
 materials, deformation in its strips), with what you fixed or why not.
 Fix, take a new sheet, and critique again until nothing blocking is left.
@@ -110,10 +112,11 @@ through the review and the export is not finished.
    stitching, an emblem): they read as made rather than generated.
    `art/concepts/<name>.png`, when it exists, is shown beside every review.
 2. **Body.** `game_blender` op `character`. Pick the body by the concept's
-   proportions, not the subject's age: the scale pass sets the height, the
-   body sets head share and limb length. A small, round or chibi character
-   (a cat, a gnome, a mascot) takes a child body (`age` 0.1 to 0.25); a lean
-   adult body under a big head reads as a person in a costume. Keep spring
+   proportions, not the subject's age: `height` sets the height, the body
+   and its `style` set head share and limb length. A small, round or chibi
+   character (a gnome, a mascot) takes a child body (`age` 0.1 to 0.25) or
+   the chibi `style`; a lean adult body under a big head reads as a person
+   in a costume. Keep spring
    chains short (springs do not collide). The standard clips have no attack:
    name one in `clips` (`Punch_Jab`, `Sword_Attack`, `Spell_Simple_Shoot`)
    when the character fights. Choose `fit` from the review's strips: `arms:
@@ -236,6 +239,65 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
    its sidecar; any change after the review needs a new review. Name it in
    the game by its sidecar (TEMPLATE.md).
 
+### Heroes: body, clothes, rig, motion, gates
+
+A hero (the player, a companion, a named creature) is made here from
+scratch, never a library model reshaped, in this order. Each step is
+`game_blender` op `code` with `from kurambit import hero`, except the
+human body, which is op `character`.
+
+1. **Body.** A human: op `character` with body `{mpfb: {age, gender,
+weight, muscle}}` (MPFB2, CC0 bodies; with no MPFB2 the op says so: use
+   the library base body and tell the person Settings → Game tools adds
+   MPFB2), a `style` (`{preset: "chibi"|"cartoon"|"heroic"|"realistic",
+head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
+   preset) and its `height` in metres from the brief. A creature or spirit:
+   a sketch of chains of points `(x, y, z, radius)`, facing -Y, +X its left,
+   feet on z = 0; `spine` rear to front first, then `neck`, `head`,
+   `leg_front_l` and `leg_hind_l` (a leg's points hip to toe, bent at the
+   knee so it can reach), `tail`, `ear_l` (`_l` mirrors to `_r`), any other
+   name a part of its own (`lantern`):
+   `body = hero.creature_body("cat", sketch)`, then named passes
+   `hero.sculpt(body, "inflate"|"crease"|"smooth"|"grab"|"flatten", at=, to=,
+radius=, amount=)` (a round belly, a mouth line, toes) and
+   `hero.decimate(body, 15000)`.
+2. **Clothes.** Model each garment over the body at rest as its own mesh,
+   then `hero.dress(coat, "fisher", hang=<hip height>, chains=6)`: it is
+   pushed outside the skin, takes the skin's weights, and below `hang` hangs
+   on `spring_` hem chains instead of the legs, so it swings rather than
+   flaring as a cone. A cape: `hang` at the shoulders. A scarf's end, a
+   strap: `hero.dangle(part, "fisher", start, end)`. Hats, rods, bags:
+   separate meshes, `kurambit.skin_rigid(rod, "hand_r")`.
+3. **Rig.** A human's is op `character`'s: the standard skeleton fitted to
+   its joints, so the library's clips play on it unchanged. A creature's:
+   `arm = hero.creature_rig(body, height=(0.3, 0.45))`, bones from the same
+   sketch, automatic weights; look at it (op `look`) and move a joint in the
+   sketch if a bend falls wrong. To pose a move by hand, `hero.controls(arm)`
+   generates a Rigify control rig (IK paws, a torso); key it, then
+   `hero.bake_controls(arm, "Pounce", start, end)` and `hero.controls(arm,
+on=False)`.
+4. **Game rig.** Already one: deform bones only, standard names on a human
+   (pelvis, thigh_l, ...), the sketch's names on a creature (`leg_hind_l_01`,
+   `spring_tail_01`), marked on its own rig.
+5. **Motion.** A human: the library's clips by `clips`, and moves it lacks
+   (cast, reel) with op `animate` from a library pose. A creature:
+   `hero.creature_clips(arm, ["walk", "trot", "run", "idle", "look", "sit"])`
+   (`hop` and `hover` for a body that hops or floats; options per clip:
+   `walk={"seconds": 0.8, "lift": 0.3}`): gaits from leg phases with tail
+   and ear follow-through, keyed in place. After any clip is added,
+   `hero.follow_hem(arm)` keys the hem to step with the legs.
+6. **Springs.** Every `spring_` bone swings in the game on its own (hem
+   chains, tails, ears, scarf ends); the person tunes their stiffness and
+   damping on the Stage, and the game's code can retune one chain with its
+   animator's `spring("tail", {...})` (shell/animate.js).
+7. **Gates.** Op `look` mode `review` measures them and export refuses a
+   failing one: height in its range (a human 1.5-2.0 m unless `height` or
+   `heightRange` says otherwise; a creature's `height=` range), edges
+   stretched or squashed on every clip (named by clip, frame and part),
+   clothing sunk into the body, feet planted and not sliding on walk and
+   run, and the budget. `hero.gates("cat")` reads them between reviews.
+   Quote the numbers in the hero sheet's critique.
+
 ### Made from scratch: own rig, own clips
 
 A model you rig and animate yourself enters on its own rig: a creature, a
@@ -249,6 +311,9 @@ on for a subject the library has no model of; on `generated`, or `code` with
 the library off, say so in your reply. Every step runs headless in
 `game_blender` op `code` (`import kurambit` for its helpers); write the subject's
 `art/CONCEPT.md` section first, as for any character.
+
+A creature, from body to gait, is the hero kit's (Heroes, above); the
+steps below are for what it does not cover (a vehicle, a machine).
 
 1. **Model or sculpt.** Sculpt brushes need a viewport and do not run here:
    sculpt with modifiers and code. An organic body is a skin modifier on a

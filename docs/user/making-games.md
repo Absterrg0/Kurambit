@@ -159,10 +159,14 @@ it from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, nev
 settings, and the bodies it makes are CC0. **Remove** deletes it again; a live Blender view already
 open keeps it until it reopens. Without MPFB2, Blender characters use library bodies.
 
-A character or creature is finished only once its sheet (its turnaround and moves in one image)
-is kept in `art/sheets/` and the agent has written its critique of it beside it; the agent's final
-check reminds it of any that is missing. Open the model in **Art** to see the sheet and the
-critique.
+A character or creature is finished only once its sheet (its turnaround and every move in one
+image) is kept in `art/sheets/`, it passes its measured gates, and the agent has written its
+critique beside the sheet, quoting those numbers; the agent's final check lists each hero's gates
+and anything still open. The gates are numbers, not taste: its height within the range the brief
+means (an adult 1.5 to 2 m unless the brief says a child, a chibi or a cat), no part torn or
+crushed in any move, clothes staying outside the body, feet planted without sliding on its walk
+and run, and its triangles, materials and textures within budget. Open the model in **Art** to see
+the sheet and the critique.
 
 Before a character or prop made in Blender reaches the game, the agent reviews it: one image with a
 turnaround, silhouettes, the model at the size it appears in play, its walk, run and jump, the
@@ -171,7 +175,8 @@ texture size) and anything the export would refuse. An export is refused unless 
 reviewed exactly as it is now, so change anything and the agent reviews again. Each export writes the
 model and a `.asset.json` file beside it that records its measurements and where every part came
 from; three.js games play its animations at the speed the character moves, so its feet stay
-planted, and swing its tail and ears. The turn's build lists the model under **Assets**, and undo
+planted, and swing its tail, ears, coat hems and scarf ends. Select the character on the stage to
+tune how stiff and how damped that swing is while it plays. The turn's build lists the model under **Assets**, and undo
 brings back the model the game had before.
 
 ## Generated art

@@ -187,7 +187,28 @@ check that matters.
   shows as a spin there and nowhere in Blender, so the kit unwraps twists, smooths the prop's
   roll, and reports spins and pops instead of trusting the keyed frames.
   MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
-  person's request and never bundled.
+  person's request and never bundled (`KURAMBIT_MPFB` may name a copy of the same pinned zip).
+- A hero is made, not picked, through one recipe (the art skill's Heroes): a body, clothes, the
+  rig, motion, springs and the gates. A human body is restyled (`proportions.py`: per-region maps
+  that agree at the joints, blended by the skin's own weights) and sized before the conform, so the
+  standard skeleton still lands on its joints. Humans use no Rigify: the conform already is the
+  game rig, deform bones under standard names whose rest frames are the library's, so its clips
+  play with no retarget loss, which a Rigify rig retargeted onto would add. A creature's body and
+  rig come from one sketch of joint chains (`creature.py`), so its joints sit inside its body by
+  construction, and its clips come from a gait generator (`gait.py`) rather than keys by hand. The
+  same rig types its chains for Rigify, which generates a control rig only for posing by hand
+  (`hero.controls`); the game rig copies it and bakes keys from it, so Rigify's bones never ship.
+  Clothes are weighted by the skin under them and, below a hang line, hung on `spring_` hem chains
+  (`cloth.py`): automatic weights split a coat between the legs, which is the stiff flaring cone.
+  Any bone named `spring_` swings in the three.js runtime under the fixed step, so it replays, its
+  cost is part of play's stats, and the Stage tunes it as two values of the model.
+- A hero's gates are measured numbers (`gates.py`, `deform.py`), taken in the one-shot pass before
+  the style pass joins the meshes (clothing and body must still be told apart) and scaled to the
+  shipped size; a failing one is a refusal, and the sidecar and `game_check` op `final` carry them.
+  Every limit is set from what the library's own clips do on its own base body, so a gate fails
+  what is broken rather than what linear blend skinning always does (a T-posed shoulder stretches
+  about 3x). Height leaves out what a hand holds and what dangles (a rod raised overhead, a tail
+  held up), and the style pass's `scale.character` scales by that same height.
 - An engine is two modules, and nothing above them names an engine. Its profile
   (`threeProfile.ts`, read through `engineProfile.ts`) is pure data the services, the client
   tables and the run's pure policy share: directories, its releases (target, artifact, whether it

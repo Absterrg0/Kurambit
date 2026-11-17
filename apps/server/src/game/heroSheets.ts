@@ -85,16 +85,50 @@ export const listHeroSheets = async (root: string): Promise<ReadonlyArray<GameHe
     }),
   );
 
+type SidecarGate = {
+  readonly name: string;
+  readonly pass: boolean;
+  readonly value: number;
+  readonly text: string;
+};
+
+const sidecarGates = (text: string): ReadonlyArray<SidecarGate> => {
+  try {
+    const parsed = JSON.parse(text) as { gates?: unknown };
+    return Array.isArray(parsed.gates)
+      ? parsed.gates.filter(
+          (gate): gate is SidecarGate =>
+            typeof gate === "object" &&
+            gate !== null &&
+            typeof (gate as SidecarGate).name === "string" &&
+            typeof (gate as SidecarGate).pass === "boolean" &&
+            typeof (gate as SidecarGate).value === "number" &&
+            typeof (gate as SidecarGate).text === "string",
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+/** The numbers a critique has to quote: its height and its deformation, as the review printed them. */
+const quoted = (gates: ReadonlyArray<SidecarGate>) =>
+  gates
+    .filter((gate) => gate.name === "height" || gate.name === "deformation")
+    .map((gate) => gate.value.toFixed(2));
+
 /**
- * What the gate still wants, one line each: a character model exported with no sheet kept, and a
- * kept sheet with no critique written after it. `paths` are the game's (gamePaths): exports land
- * under its assets folder, never in the library's.
+ * What the gate still wants, one line each, and every exported hero's measured gates. Wanted: a
+ * character model exported with no sheet kept, a kept sheet with no critique written after it, a
+ * gate the hero fails, and a critique that does not quote the hero's measured numbers. `paths`
+ * are the game's (gamePaths): exports land under its assets folder, never in the library's.
  */
 export const heroSheetProblems = async (
   root: string,
   paths: { readonly assets: string; readonly library: string },
-): Promise<ReadonlyArray<string>> => {
+): Promise<{ readonly problems: ReadonlyArray<string>; readonly gates: ReadonlyArray<string> }> => {
   const problems: Array<string> = [];
+  const gateLines: Array<string> = [];
   const library = NodePath.join(root, paths.library);
   const sidecars = await walkFiles(NodePath.join(root, paths.assets), {
     enter: (full) => full !== library,
@@ -106,9 +140,25 @@ export const heroSheetProblems = async (
     if (!/"kind"\s*:\s*"character"/.test(text)) continue;
     const stem = NodePath.basename(sidecar).slice(0, -GAME_MODEL_SIDECAR_SUFFIX.length);
     const sheet = `${HERO_SHEET_DIR}/${gameHeroSheetName(stem)}.png`;
-    if (!(await isFile(NodePath.join(root, sheet))))
+    const gates = sidecarGates(text);
+    for (const gate of gates) {
+      gateLines.push(`${stem} ${gate.name} ${gate.pass ? "passes" : "FAILS"}: ${gate.text}`);
+      if (!gate.pass)
+        problems.push(
+          `${stem}: fails its ${gate.name} gate: ${gate.text}. Fix it, review and export again.`,
+        );
+    }
+    if (!(await isFile(NodePath.join(root, sheet)))) {
       problems.push(
         `${stem}: no hero sheet at ${sheet}. Review it (game_blender op look mode review) and export it again, which keeps the sheet.`,
+      );
+      continue;
+    }
+    const critique = await heroCritique(root, sheet);
+    const numbers = quoted(gates);
+    if (critique !== null && numbers.some((number) => !critique.includes(number)))
+      problems.push(
+        `${sheet.replace(/\.png$/, ".md")} does not quote ${stem}'s measured gates (height ${numbers[0] ?? "?"}, deformation ${numbers[1] ?? "?"}): put the review's gate numbers in the critique and what each means for the hero.`,
       );
   }
   for (const sheet of await keptSheets(root)) {
@@ -117,5 +167,5 @@ export const heroSheetProblems = async (
         `${sheet}: no critique of it at ${sheet.replace(/\.png$/, ".md")}. Look at the sheet, write the numbered critique against the brief, fix what blocks, and sheet it again (studio-skills/art-pipeline.md, The hero sheet).`,
       );
   }
-  return problems;
+  return { problems, gates: gateLines };
 };

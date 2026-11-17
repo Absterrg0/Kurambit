@@ -9,8 +9,8 @@ agent's materials and modifiers. From STYLE.json:
            materials result, Palette and Glow (shading.glow), on the one atlas. Without a hex list
            the materials are kept, their textures scaled down to budget.texture.
   scale    scale.character: a character is scaled to that standing height on its armature's
-           object, so clip units are unchanged. Props and models on their own rig
-           (kurambit_rig: a creature, a vehicle) keep their modelled metres.
+           object, so clip units are unchanged. Props, models on their own rig (kurambit_rig: a
+           creature, a vehicle) and characters with a declared height keep their modelled metres.
 A character's meshes are joined into one skinned mesh: one mesh, two draw calls."""
 import math
 import os
@@ -349,6 +349,20 @@ def rest_height(meshes):
     return float(max(z.max() for z in zs) - min(z.min() for z in zs))
 
 
+def character_scale(arms, meshes, style):
+    """What the pass scales a character by: STYLE.json's scale.character over its standing height
+    (what it holds overhead or trails does not count, deform.hero_height), or None. A model on its
+    own rig (kurambit_rig) keeps the size it was made at, a wolf is no hero's height, and so does a
+    character that declares its height range (kurambit_height): a chibi is meant small."""
+    from .deform import hero_height
+
+    want = ((style or {}).get("scale") or {}).get("character")
+    if not arms or not want or any(a.get("kurambit_rig") or a.get("kurambit_height") for a in arms):
+        return None
+    h = hero_height(arms[0], meshes)[0] if len(arms) == 1 else rest_height(meshes)
+    return want / h if h > 1e-6 else None
+
+
 def style_pass(objects, style, out_dir, texture_side):
     """Runs the pass on objects (the resolved candidate, in this one-shot copy). Returns
     {kind, meshes, armatures, usedPalette, scaled, notes}."""
@@ -366,16 +380,11 @@ def style_pass(objects, style, out_dir, texture_side):
     else:
         used = []
         notes = fit_textures(meshes, texture_side)
-    scaled = None
-    want = (style.get("scale") or {}).get("character")
-    # A model on its own rig (kurambit_rig) keeps the size it was made at: a wolf is no hero's height.
-    if arms and want and not any(a.get("kurambit_rig") for a in arms):
-        h = rest_height(meshes)
-        if h > 1e-6:
-            scaled = want / h
-            for arm in arms:
-                arm.scale = [s * scaled for s in arm.scale]
-            bpy.context.view_layer.update()
+    scaled = character_scale(arms, meshes, style)
+    if scaled is not None:
+        for arm in arms:
+            arm.scale = [s * scaled for s in arm.scale]
+        bpy.context.view_layer.update()
     for o in meshes:
         o.data.validate()
     return {"kind": "character" if arms else "prop", "meshes": meshes, "armatures": arms, "usedPalette": used,

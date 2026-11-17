@@ -2515,6 +2515,9 @@ const make = Effect.gen(function* () {
                 chains: input.chains ?? [],
                 replace: input.replace ?? false,
                 fit: input.fit ?? null,
+                style: input.style ?? null,
+                height: input.height ?? null,
+                heightRange: input.heightRange ?? null,
               })})`,
             );
             const blend = yield* saveBlend(root);

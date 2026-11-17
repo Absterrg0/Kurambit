@@ -979,10 +979,13 @@ export const GameCheckResult = Schema.Struct({
     ]),
   ),
   /**
-   * A final check's open hero sheets: a character exported with no sheet in art/sheets, or a kept
-   * sheet with no critique beside it. A character is not done until this is empty.
+   * A final check's open hero sheets: a character exported with no sheet in art/sheets, a kept
+   * sheet with no critique beside it, a gate it fails, or a critique that does not quote its
+   * measured gates. A character is not done until this is empty.
    */
   heroSheets: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** A final check's measured hero gates, one line each: every exported character's numbers. */
+  heroGates: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
 export type GameCheckQa = NonNullable<GameCheckResult["qa"]>;
