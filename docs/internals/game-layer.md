@@ -161,7 +161,9 @@ check that matters.
   game rig, deform bones under standard names whose rest frames are the library's, so its clips
   play with no retarget loss, which a Rigify rig retargeted onto would add. A creature's body and
   rig come from one sketch of joint chains (`creature.py`), so its joints sit inside its body by
-  construction, and its clips come from a gait generator (`gait.py`) rather than keys by hand.
+  construction, and its clips come from a gait generator (`gait.py`) rather than keys by hand. The
+  same rig types its chains for Rigify, which generates a control rig only for posing by hand
+  (`hero.controls`); the game rig copies it and bakes keys from it, so Rigify's bones never ship.
   Clothes are weighted by the skin under them and, below a hang line, hung on `spring_` hem chains
   (`cloth.py`): automatic weights split a coat between the legs, which is the stiff flaring cone.
   Any bone named `spring_` swings in the three.js runtime under the fixed step, so it replays, its

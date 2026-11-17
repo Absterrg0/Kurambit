@@ -272,7 +272,10 @@ radius=, amount=)` (a round belly, a mouth line, toes) and
    its joints, so the library's clips play on it unchanged. A creature's:
    `arm = hero.creature_rig(body, height=(0.3, 0.45))`, bones from the same
    sketch, automatic weights; look at it (op `look`) and move a joint in the
-   sketch if a bend falls wrong.
+   sketch if a bend falls wrong. To pose a move by hand, `hero.controls(arm)`
+   generates a Rigify control rig (IK paws, a torso); key it, then
+   `hero.bake_controls(arm, "Pounce", start, end)` and `hero.controls(arm,
+on=False)`.
 4. **Game rig.** Already one: deform bones only, standard names on a human
    (pelvis, thigh_l, ...), the sketch's names on a creature (`leg_hind_l_01`,
    `spring_tail_01`), marked on its own rig.
