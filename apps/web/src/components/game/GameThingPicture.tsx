@@ -31,7 +31,7 @@ import { stageBuildId } from "./gameBuildTimeline.logic";
 import { GameKeyArt } from "./GameKeyArt";
 import { portraitStageThing } from "./gameStageBridge";
 
-export const KIND_ICON: Record<GameThingKind, LucideIcon> = {
+const KIND_ICON: Record<GameThingKind, LucideIcon> = {
   character: PersonStandingIcon,
   creature: PawPrintIcon,
   prop: BoxIcon,

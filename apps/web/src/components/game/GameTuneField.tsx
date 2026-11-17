@@ -127,7 +127,7 @@ export function GameTuneField({
 }
 
 /** Puts one value back, with what it was in its tooltip; nothing at the game's own. */
-export function ResetSlot({
+function ResetSlot({
   was,
   value,
   onReset,
