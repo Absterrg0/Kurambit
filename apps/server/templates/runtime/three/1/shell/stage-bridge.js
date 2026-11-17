@@ -16,6 +16,7 @@
 //   // to tune.json as they are let go; this file loads it at boot.
 import * as THREE from "../vendor/three.module.js";
 import { RoomEnvironment } from "../vendor/addons/environments/RoomEnvironment.js";
+import { SPRING_TUNE, SPRING_TUNE_RANGES, springChains } from "./animate.js";
 import {
   LOOK,
   MAX_LOOK_VALUES,
@@ -429,6 +430,9 @@ export function createStageBridge({
     lookAgain(byObject.get(copy));
     lookIds.add(path);
     const look = tune(path, ASSET_LOOK, ASSET_LOOK_RANGES);
+    // A model that swings (its sidecar's springs, spring_ bones) shows its swing as two values.
+    if ((copy.userData.asset?.springs?.length ?? 0) > 0 || springChains(copy).length > 0)
+      copy.userData.springTune = tune(path, SPRING_TUNE, SPRING_TUNE_RANGES);
     let copies = lookCopies.get(path);
     if (copies === undefined) lookCopies.set(path, (copies = new Set()));
     copies.add(copy);
