@@ -137,7 +137,7 @@ const failureText = (result: AtomCommandResult<unknown, unknown>) =>
  * Pick, Cancel and Change for a game's generations, as the chat card and the Generated art view
  * share them.
  */
-export function useGenerationActions(threadRef: ScopedThreadRef) {
+function useGenerationActions(threadRef: ScopedThreadRef) {
   const choose = useAtomCommand(gameEnvironment.chooseGeneration, { reportFailure: false });
   const cancel = useAtomCommand(gameEnvironment.cancelGeneration, { reportFailure: false });
   // The composer's own send, queued behind a turn still running.
@@ -566,7 +566,7 @@ const chosenByNote = (generation: GameGeneration): string | null =>
       : `Keep going took "${generation.candidates[0].label}"`;
 
 /** One generation, in full: the chat card's body and the Generated art view's open row. */
-export function GameGenerationBody({
+function GameGenerationBody({
   threadRef,
   root,
   generation,
@@ -687,7 +687,7 @@ export function GameGenerationBody({
   );
 }
 
-export function GenerationHeading({ generation }: { generation: GameGeneration }) {
+function GenerationHeading({ generation }: { generation: GameGeneration }) {
   const badge =
     generation.filesUndone === true
       ? ({ label: "Undone", variant: "outline" } as const)
