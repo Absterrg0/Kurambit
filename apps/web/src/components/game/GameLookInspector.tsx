@@ -16,7 +16,9 @@ import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { colourHex } from "./GameColourField";
 import { valueLabel } from "./GameInspector";
-import { useTuneSaver } from "./GameTune";
+import type { useTuneSaver } from "./GameTune";
+
+type TuneSaver = ReturnType<typeof useTuneSaver>;
 import { GameTuneField } from "./GameTuneField";
 import { Workbench } from "./GameWorkbenchParts";
 import { requestStageLook, tuneStageValue, useThreadStageBridge } from "./gameStageBridge";
@@ -50,11 +52,17 @@ const fieldLabel = (value: GameThingValue, material: GameLookMaterial) => {
 export function GameLookInspector({
   threadRef,
   thing,
+  saver,
   onEdit,
   onBake,
 }: {
   threadRef: ScopedThreadRef;
   thing: GameThing;
+  /**
+   * The detail view's saver: it outlives a new run, when the game names its things again and
+   * this inspector's thing is briefly gone, so Keep as a build still keeps the session.
+   */
+  saver: TuneSaver;
   onEdit?: (() => void) | undefined;
   /** Asks the agent to move the look into the thing's code: shown while the look has edits. */
   onBake?: ((changed: ReadonlyArray<GameThingValue>) => void) | undefined;
@@ -63,7 +71,6 @@ export function GameLookInspector({
   const lookId = gameLookId(thing.id);
   const status = useThreadStageBridge(threadKey, (state) => state.status, null);
   const look = useThreadStageBridge(threadKey, (state) => state.looks[thing.id], undefined);
-  const saver = useTuneSaver(threadRef);
   const [locked, setLocked] = useState(true);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   // Asked as the inspector opens and whenever the game comes up again (a new run, a reload).
@@ -248,9 +255,9 @@ export function GameLookInspector({
         </Workbench.Section>
       )}
       {changedCount === 0 && saver.state.kind !== "failed" ? null : (
-        <div className="sticky bottom-0 mt-auto flex h-11 shrink-0 items-center gap-0.5 border-t border-border bg-background ps-4 pe-2">
+        <div className="sticky bottom-0 mt-auto flex h-11 shrink-0 items-center border-t border-border bg-background ps-4 pe-1">
           <Text
-            variant="meta"
+            variant="caption"
             tone={saver.state.kind === "failed" ? "destructive" : "muted"}
             numeric
             role="status"
@@ -265,20 +272,20 @@ export function GameLookInspector({
                   : `${changedCount} changed`}
           </Text>
           {saver.state.kind === "failed" ? (
-            <Button size="sm" variant="ghost" onClick={saver.retry}>
+            <Button size="xs" variant="ghost" onClick={saver.retry}>
               Try again
             </Button>
           ) : null}
-          <Button size="sm" variant="ghost" disabled={disabled} onClick={putAllBack}>
+          <Button size="xs" variant="ghost" disabled={disabled} onClick={putAllBack}>
             Put all back
           </Button>
           {onBake === undefined || lookChanged.length === 0 ? null : (
-            <Button size="sm" variant="ghost" onClick={() => onBake(lookChanged)}>
+            <Button size="xs" variant="ghost" onClick={() => onBake(lookChanged)}>
               Bake into the code
             </Button>
           )}
           <Button
-            size="sm"
+            size="xs"
             variant="secondary"
             disabled={disabled || saver.state.kind !== "saved"}
             onClick={saver.keepAsBuild}

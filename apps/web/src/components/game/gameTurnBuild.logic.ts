@@ -43,7 +43,9 @@ export const turnStripRestore = (
       restore !== null &&
       restore.target === build.base &&
       restore.outcome?.restored === true &&
-      restore.undo !== null
+      restore.undo !== null &&
+      // A build made since (tuning kept after an undo) moved the folder on: its undo is Undo.
+      (view.current === null || view.current === restore.target)
     )
       return { kind: "redo", target: restore.undo, blocked: blocked("redo") };
     return { kind: "undo", target: build.base, blocked: blocked("undo") };

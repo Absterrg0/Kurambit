@@ -88,6 +88,7 @@ import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHi
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
+import { CODE_MODEL_PREFIX } from "./gameArt.logic";
 import {
   clearStageSelection,
   toggleStageFreeze,
@@ -935,14 +936,22 @@ function ThreadGameStage({
     // reload clears it by its frame key.
     if (studio.type === "studio-error") setStudioError({ key, text: studio.message });
   });
-  // Pointing at a thing on the Stage opens its values in the Workbench's Tune tab.
+  // Pointing at a thing on the Stage opens it in the Workbench: in Art (its inspector) when Art
+  // is showing or it has no values to tune (a part, a model), else its values in Tune.
   const selectedThing = useThreadStageBridge(
     threadKey,
     (state) => state.selected?.thing.id ?? null,
     null,
   );
   useEffect(() => {
-    if (selectedThing !== null) showWorkbench("tune");
+    if (selectedThing === null) return;
+    const thing = useStageBridge.getState().selected?.thing;
+    const workspace = useGameWorkspaceStore.getState();
+    const inArt = workspace.workbenchOpen && workspace.workbenchTab === "art";
+    if (thing !== undefined && (inArt || (thing.values?.length ?? 0) === 0)) {
+      workspace.setArtAsset(thing.asset?.path ?? `${CODE_MODEL_PREFIX}${thing.id}`);
+      showWorkbench("art");
+    } else showWorkbench("tune");
   }, [selectedThing]);
   const takesRuns = useThreadStageBridge(
     threadKey,

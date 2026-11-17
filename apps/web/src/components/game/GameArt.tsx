@@ -56,7 +56,7 @@ import { GameKeyArt } from "./GameKeyArt";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
 import { colourHex } from "./GameColourField";
 import { GameLookInspector } from "./GameLookInspector";
-import { KIND_WORDS } from "./GameTune";
+import { KIND_WORDS, useTuneSaver } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
 import {
   artSections,
@@ -150,7 +150,7 @@ export function GameArtPanel({
   // Thumbnails drawn this session, by content, shown before the list reads them back.
   const [drawn, setDrawn] = useState<ReadonlyMap<string, string | null>>(new Map());
   const keepThumbnail = useAtomCommand(gameEnvironment.artThumbnail, { reportFailure: false });
-  const entry: GameArtEntry | null =
+  const found: GameArtEntry | null =
     selected === null
       ? null
       : selected.startsWith(CODE_MODEL_PREFIX)
@@ -159,6 +159,13 @@ export function GameArtPanel({
             const asset = assets.find((each) => each.path === selected);
             return asset === undefined ? null : { kind: "file" as const, asset };
           })();
+  // A new run names the game's things again: for that moment the open one is not listed, and
+  // its detail (with its unsaved session) stays open on it as last seen.
+  const [lastEntry, setLastEntry] = useState<GameArtEntry | null>(null);
+  if (found !== null && (lastEntry === null || entryKey(found) !== entryKey(lastEntry)))
+    setLastEntry(found);
+  const entry =
+    found ?? (lastEntry !== null && selected === entryKey(lastEntry) ? lastEntry : null);
   const root = status?.root ?? null;
   const wanted = assets.filter(
     (asset) => asset.kind === "model" && asset.thumbnail === undefined && !drawn.has(asset.sha256),
@@ -822,6 +829,7 @@ function ArtDetail({
 }) {
   const [info, setInfo] = useState<ViewerModelInfo | null>(null);
   const [handle, setHandle] = useState<ModelViewerHandle | null>(null);
+  const saver = useTuneSaver(threadRef);
   // The code-made thing's view as last drawn: the chip's picture and its facts.
   const [orbit, setOrbit] = useState<{ png: string; facts: GameThingFacts | null } | null>(null);
   const name = entry.kind === "file" ? fileName(entry.asset.path) : modelName(entry);
@@ -867,7 +875,7 @@ function ArtDetail({
     );
   };
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
       <div className="flex h-11 shrink-0 items-center gap-1 ps-2 pe-2">
         <Tooltip>
           <TooltipTrigger
@@ -908,6 +916,7 @@ function ArtDetail({
           build={build}
           entry={entry}
           thing={stageThing}
+          saver={saver}
           parts={code.filter((model) => model.parent === entry.id)}
           onOpen={onOpen}
           onBake={bake}
@@ -926,6 +935,7 @@ function ArtDetail({
           onInfo={setInfo}
           onHandle={setHandle}
           onAsk={onAsk}
+          saver={saver}
           onBake={bake}
         />
       )}
@@ -945,6 +955,7 @@ function CodeModelDetail({
   build,
   entry,
   thing,
+  saver,
   parts,
   facts,
   onOpen,
@@ -956,6 +967,7 @@ function CodeModelDetail({
   entry: GameArtCodeModel;
   /** The thing as the game on the Stage reports it: its values, for the inspector. */
   thing: GameThing | null;
+  saver: ReturnType<typeof useTuneSaver>;
   parts: ReadonlyArray<GameArtCodeModel>;
   facts: GameThingFacts | null;
   onOpen: (entry: GameArtEntry) => void;
@@ -990,6 +1002,10 @@ function CodeModelDetail({
     wanted.current = angle;
     void draw();
   }, [angle, draw]);
+  // A new run names its things again: the inspector stays on the thing as last seen meanwhile.
+  const [lastThing, setLastThing] = useState(thing);
+  if (thing !== null && thing !== lastThing) setLastThing(thing);
+  const shownThing = thing ?? lastThing;
   // An edit in the inspector draws the view again, from where it stands.
   const redrawView = () => {
     wanted.current = { ...wanted.current };
@@ -1089,10 +1105,11 @@ function CodeModelDetail({
             ))}
           </Workbench.Section>
         )}
-        {thing === null ? null : (
+        {shownThing === null ? null : (
           <GameLookInspector
             threadRef={threadRef}
-            thing={thing}
+            thing={shownThing}
+            saver={saver}
             onEdit={redrawView}
             onBake={onBake}
           />
@@ -1165,6 +1182,7 @@ function FileDetail({
   onInfo,
   onHandle,
   onAsk,
+  saver,
   onBake,
 }: {
   threadRef: ScopedThreadRef;
@@ -1177,6 +1195,7 @@ function FileDetail({
   onInfo: (info: ViewerModelInfo | null) => void;
   onHandle: (handle: ModelViewerHandle | null) => void;
   onAsk: (text: string) => void;
+  saver: ReturnType<typeof useTuneSaver>;
   onBake: (changed: ReadonlyArray<GameThingValue>) => void;
 }) {
   // The asset's look values as the game on the Stage holds them: ASSETS models carry them.
@@ -1229,7 +1248,12 @@ function FileDetail({
         </Workbench.Section>
         {asset.kind === "model" && info !== null ? <ModelFacts info={info} /> : null}
         {asset.kind === "model" && stageThing !== null ? (
-          <GameLookInspector threadRef={threadRef} thing={stageThing} onBake={onBake} />
+          <GameLookInspector
+            threadRef={threadRef}
+            thing={stageThing}
+            saver={saver}
+            onBake={onBake}
+          />
         ) : null}
         <GenerateAgain threadRef={threadRef} asset={asset} onAsk={onAsk} />
       </Workbench.Body>
