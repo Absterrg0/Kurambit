@@ -37,6 +37,7 @@ import {
   isAvailableEngine,
   type GameKeepValuesInput,
   type GameKeepValuesResult,
+  gameLookId,
   GameOperationError,
   manifestProject,
   type OrchestrationV2Run,
@@ -422,12 +423,15 @@ interface KeptChange {
   readonly from: string;
   readonly to: string;
 }
-const valueWords = (value: unknown) =>
+const valueWords = (value: unknown, colour = false) =>
   typeof value === "number"
-    ? String(Math.round(value * 1000) / 1000)
+    ? colour
+      ? `#${Math.round(value).toString(16).padStart(6, "0")}`
+      : String(Math.round(value * 1000) / 1000)
     : typeof value === "boolean"
       ? String(value)
       : "default";
+const GAME_LOOK_PREFIX = gameLookId("");
 /** A thing's name in a line: the last part of its id, without an extension. */
 const thingWords = (id: string) =>
   id
@@ -450,10 +454,14 @@ const keptChanges = (
         kept !== null && typeof kept === "object"
           ? (kept as Record<string, unknown>)[value.key]
           : undefined;
+      // A look's keys are a material's place and name ("3:roof/color"): its label says it.
+      const look = thing.id.startsWith(GAME_LOOK_PREFIX) && value.label !== undefined;
       return {
-        label: `${thingWords(thing.id)} ${value.key}`,
-        from: valueWords(was ?? value.default),
-        to: valueWords(value.value),
+        label: look
+          ? `${thingWords(thing.id.slice(GAME_LOOK_PREFIX.length))} ${value.label!.toLowerCase()}`
+          : `${thingWords(thing.id)} ${value.key}`,
+        from: valueWords(was ?? value.default, value.colour === true),
+        to: valueWords(value.value, value.colour === true),
       };
     }),
   );

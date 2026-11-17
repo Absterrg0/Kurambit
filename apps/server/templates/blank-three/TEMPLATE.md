@@ -24,7 +24,12 @@ exists the page runs nothing. This is all the bridge needs from it:
    Runs saved as test plays (`.studio/plays/`) replay on every build, ending as they did.
 5. **Tunable values.** `ctx.tune(id, defaults, ranges)` returns a live object the Stage's Tune
    changes (read it every frame); `ctx.thing(object, { name, kind })` names what a person would
-   select. `web/tune.json` holds the person's tuned values and wins over your defaults.
+   select. `web/tune.json` holds the person's tuned values and wins over your defaults; its
+   `look:<thing>` entries are the person's look edits from Art (scale, turn, shadows, each
+   material's colour and finish, colours as 0xRRGGBB numbers). Keep them, or bake them into
+   the thing's code and remove the entry when asked. Name every model's root before you merge
+   or scatter it (`cabin.name = "Cabin"`): named parts are what the person can pick, see in
+   Art and ask about.
 
 Optional: `export const ASSETS = { name: "assets/…/file.glb" }` loads models and textures before
 the first run (`ctx.assets.model(name)`), and `export function render(ctx, dt)` draws the frame
