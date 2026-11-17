@@ -1463,6 +1463,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --kbd-foreground: var(--kbd-lit-foreground);
   --kbd-box-shadow: none;
 }
+/* A key that did nothing when pressed: the one amber a warning gets. */
+@utility kbd-on-warning {
+  --kbd-background: var(--warning-surface) !important;
+  --kbd-foreground: var(--warning-foreground);
+  --kbd-box-shadow: none;
+}
 @utility kbd-on-destructive {
   --kbd-background: var(--kbd-lit-fill) !important;
   --kbd-foreground: color-mix(in srgb, white 80%, transparent);

@@ -72,7 +72,18 @@ import { replayStageRun, useThreadStageBridge } from "./gameStageBridge";
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
-import { GameChecksBoard, openEvidence } from "./GameChecksBoard";
+import {
+  ControlsEvidence,
+  hasControls,
+  hasLastPlay,
+  hasPerformanceProof,
+  hasScreenFrames,
+  LastPlayEvidence,
+  openEvidence,
+  PerformanceEvidence,
+  ScreensEvidence,
+  useBaseFacts,
+} from "./GameChecksBoard";
 import { colourHex } from "./GameColourField";
 import { GameDecisionsSection, SwatchText } from "./GameDecisions";
 import { clockLabel } from "./gameStageRewind";
@@ -204,10 +215,7 @@ function BuildChecksBody({
         list={list}
         onOpenTurnDiff={onOpenTurnDiff}
       />
-      {facts.shown === null || facts.shown.state === "never" ? null : (
-        <GameChecksBoard threadRef={threadRef} build={build} list={list} facts={facts.shown} />
-      )}
-      <BuildChecks threadRef={threadRef} build={build} facts={facts} />
+      <BuildChecks threadRef={threadRef} build={build} list={list} facts={facts} />
       <ChecksConsole threadKey={scopedThreadKey(threadRef)} />
       <GameDecisionsSection threadRef={threadRef} />
     </Workbench.Body>
@@ -461,10 +469,12 @@ function Headline({ facts, busy }: { facts: GameBuildFacts | null; busy: boolean
 function BuildChecks({
   threadRef,
   build,
+  list,
   facts,
 }: {
   threadRef: ScopedThreadRef;
   build: GameBuild;
+  list: GameBuildsResult;
   facts: ShownFacts;
 }) {
   const { shown, busy, measure } = facts;
@@ -525,7 +535,7 @@ function BuildChecks({
           ) : null}
         </div>
       ) : (
-        <CheckRows threadRef={threadRef} facts={shown} />
+        <CheckRows threadRef={threadRef} build={build} list={list} facts={shown} />
       )}
       {answer !== null && answer.failed ? (
         <Text variant="caption" tone="destructive" render={<p role="alert" className="px-4" />}>
@@ -544,9 +554,33 @@ function Note({ children }: { children: string }) {
   );
 }
 
-function CheckRows({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
+function CheckRows({
+  threadRef,
+  build,
+  list,
+  facts,
+}: {
+  threadRef: ScopedThreadRef;
+  build: GameBuild;
+  list: GameBuildsResult;
+  facts: GameBuildFacts;
+}) {
   const view = gameChecksView(facts);
+  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
+  const base = useBaseFacts(threadRef, build, list);
   const measured = view.checks.filter((check) => check.reading._tag === "measured");
+  const toneOf = (check: GameCheck) =>
+    check.reading._tag === "measured" ? check.reading.tone : null;
+  // Problems first, then each check whose proof is worth a look; a pass with nothing to show
+  // is said in one line with the others like it.
+  const problems = measured.filter((check) => toneOf(check) === "bad");
+  const proven = measured.filter(
+    (check) => toneOf(check) !== "bad" && hasProof(facts, check, root !== null),
+  );
+  const quiet = measured.filter(
+    (check) => toneOf(check) !== "bad" && !hasProof(facts, check, root !== null),
+  );
+  const quietPasses = quiet.filter((check) => toneOf(check) === "good");
   const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
   // Context that changes how to read a row, never a finding of its own: said on hover.
   const noteOf = (fact: GameFactView): string | null =>
@@ -555,11 +589,28 @@ function CheckRows({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: Ga
       : fact.id === "controls"
         ? silentControlsNote(facts)
         : null;
+  const evidence = { threadRef, root, base, facts };
   return (
     <div className="flex flex-col">
-      {measured.map((check) => (
-        <CheckRow key={check.id} threadRef={threadRef} facts={facts} check={check} />
+      {[...problems, ...proven].map((check) => (
+        <CheckBlock key={check.id} check={check} {...evidence} />
       ))}
+      {quiet
+        .filter((check) => toneOf(check) !== "good")
+        .map((check) => (
+          <Workbench.Row
+            key={check.id}
+            mark={<CheckMark check={check} />}
+            name={check.sentence}
+            reading={check.value}
+          />
+        ))}
+      {quietPasses.length === 0 ? null : (
+        <Workbench.Row
+          mark={<CheckIcon className="text-success" aria-hidden="true" />}
+          name={quietPasses.map((check) => check.sentence).join(" · ")}
+        />
+      )}
       {pending > 0 ? (
         <Workbench.Row
           mark={<ClockIcon className="text-dim-foreground" aria-hidden="true" />}
@@ -604,86 +655,66 @@ function CheckMark({ check }: { check: GameCheck }) {
   return <span aria-hidden="true" className="size-2 rounded-full border border-muted-foreground" />;
 }
 
-/**
- * One check: its sentence and reading, opening in place to what proves it. One that found
- * something to fix starts open.
- */
-function CheckRow({
-  threadRef,
-  facts,
-  check,
-}: {
-  threadRef: ScopedThreadRef;
-  facts: GameBuildFacts;
-  check: GameCheck;
-}) {
-  const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
-  const [open, setOpen] = useState(bad);
-  if (!hasEvidence(facts, check))
-    return (
+interface Evidence {
+  readonly threadRef: ScopedThreadRef;
+  /** The game's folder, which frames and recordings are read from; null until it is known. */
+  readonly root: string | null;
+  /** The build this one was made from, whose readings each number is compared with. */
+  readonly base: GameBuildFacts | null;
+  readonly facts: GameBuildFacts;
+}
+
+/** One check: its mark, sentence and reading, with what proves it always right under it. */
+function CheckBlock({ check, ...evidence }: Evidence & { check: GameCheck }) {
+  const shows = hasEvidence(evidence.facts, check, evidence.root !== null);
+  return (
+    <div className="flex flex-col">
       <Workbench.Row
         mark={<CheckMark check={check} />}
         name={check.sentence}
         reading={check.value}
       />
-    );
-  return (
-    <div className="flex flex-col">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="cursor-pointer text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-      >
-        <Workbench.Row
-          mark={<CheckMark check={check} />}
-          name={check.sentence}
-          reading={check.value}
-          end={
-            <ChevronRightIcon
-              className={cn(
-                "size-3.5 text-dim-foreground motion-popup transition-transform",
-                open && "rotate-90",
-              )}
-              aria-hidden="true"
-            />
-          }
-        />
-      </button>
-      {open ? <CheckEvidence threadRef={threadRef} facts={facts} check={check} /> : null}
+      {shows ? <CheckEvidence check={check} {...evidence} /> : null}
     </div>
   );
 }
 
-/** Whether a check has anything to show when opened: a check with nothing does not open. */
-const hasEvidence = (facts: GameBuildFacts, check: GameCheck): boolean => {
+/**
+ * Whether a passing check has proof worth its own block: a chart, keys, frames or plays. A pass
+ * with only a log or a line folds into the one line of passes.
+ */
+const hasProof = (facts: GameBuildFacts, check: GameCheck, rooted: boolean): boolean => {
   switch (check.id) {
-    // Their frames and chart stand above the checks; a row opens to anything beyond them.
-    case "screens":
-      return qaLines(facts, "screens").length > 0;
     case "performance":
-      return check.evidence.length > 0;
+      return hasPerformanceProof(facts);
     case "controls":
+      return hasControls(facts);
+    case "screens":
+      return rooted && hasScreenFrames(facts);
+    case "skilled":
       return (
-        check.evidence.length > 0 ||
-        (facts.qa.status === "measured" && facts.qa.value.controls.length > 0)
+        (rooted && hasLastPlay(facts)) ||
+        (facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "")
       );
     case "saved-plays":
       return facts.savedPlays.status === "measured" && facts.savedPlays.value.plays.length > 0;
-    case "skilled":
-      return (
-        check.evidence.length > 0 ||
-        (facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "") ||
-        (facts.savedPlays.status === "measured" && facts.savedPlays.value.plays.length > 0)
-      );
-    case "boots":
-      return (
-        check.evidence.length > 0 || (facts.boots.status === "measured" && !facts.boots.value.ok)
-      );
-    case "errors":
-      return check.evidence.length > 0 || errorLines(facts).length > 0;
     default:
-      return check.evidence.length > 0 || qaLines(facts, check.id).length > 0;
+      return false;
+  }
+};
+
+/** Whether a check has anything to show under it. */
+const hasEvidence = (facts: GameBuildFacts, check: GameCheck, rooted: boolean): boolean => {
+  if (hasProof(facts, check, rooted) || check.evidence.length > 0) return true;
+  switch (check.id) {
+    case "screens":
+      return qaLines(facts, "screens").length > 0;
+    case "boots":
+      return facts.boots.status === "measured" && !facts.boots.value.ok;
+    case "errors":
+      return errorLines(facts).length > 0;
+    default:
+      return qaLines(facts, check.id).length > 0;
   }
 };
 
@@ -692,12 +723,17 @@ function EvidenceBlock({ children }: { children: ReactNode }) {
   return <div className="flex flex-col gap-2 ps-9.5 pe-4 pt-1 pb-3">{children}</div>;
 }
 
+/** The most problem lines shown before the rest are one click away. */
+const PROBLEM_LINES = 3;
+
 /** Lines a check found, each a message and, quieter, where it happened. */
 function ProblemLines({ lines }: { lines: ReadonlyArray<string> }) {
+  const [all, setAll] = useState(false);
   if (lines.length === 0) return null;
+  const shown = all ? lines : lines.slice(0, PROBLEM_LINES);
   return (
     <ul className="flex flex-col gap-1">
-      {lines.map((line) => {
+      {shown.map((line) => {
         const problem = problemText(line);
         return (
           <li key={line} className="flex flex-col">
@@ -712,35 +748,44 @@ function ProblemLines({ lines }: { lines: ReadonlyArray<string> }) {
           </li>
         );
       })}
+      {lines.length > shown.length ? (
+        <li>
+          <Button size="xs" variant="ghost-muted" className="-ms-2" onClick={() => setAll(true)}>
+            {lines.length - shown.length} more
+          </Button>
+        </li>
+      ) : null}
     </ul>
   );
 }
 
-/** A check's evidence, by what it measured: the pictures, the chart, the list or the messages. */
-function CheckEvidence({
-  threadRef,
-  facts,
-  check,
-}: {
-  threadRef: ScopedThreadRef;
-  facts: GameBuildFacts;
-  check: GameCheck;
-}) {
+/** A check's evidence, by what it measured: the pictures, the chart, the keys, the plays or the messages. */
+function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { check: GameCheck }) {
   const proves = check.value === null ? check.sentence : `${check.sentence} ${check.value}`;
   const recordings = <EvidenceButtons threadRef={threadRef} check={check} proves={proves} />;
   switch (check.id) {
     case "screens":
       return (
         <EvidenceBlock>
+          {root === null ? null : (
+            <ScreensEvidence threadRef={threadRef} root={root} facts={facts} />
+          )}
           <ProblemLines lines={qaLines(facts, "screens")} />
+          {recordings}
         </EvidenceBlock>
       );
     case "performance":
-      return <EvidenceBlock>{recordings}</EvidenceBlock>;
+      return (
+        <EvidenceBlock>
+          <PerformanceEvidence facts={facts} base={base} />
+          {recordings}
+        </EvidenceBlock>
+      );
     case "controls":
       return (
         <EvidenceBlock>
-          <ControlsFound facts={facts} />
+          <ControlsEvidence threadKey={scopedThreadKey(threadRef)} facts={facts} />
+          <ProblemLines lines={qaLines(facts, "controls")} />
           {recordings}
         </EvidenceBlock>
       );
@@ -753,13 +798,15 @@ function CheckEvidence({
     case "skilled":
       return (
         <EvidenceBlock>
+          {root === null ? null : (
+            <LastPlayEvidence threadRef={threadRef} root={root} facts={facts} />
+          )}
           {facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "" ? (
             <Text variant="meta" tone="default" render={<p />}>
               {facts.skilled.value.note}
             </Text>
           ) : null}
           {recordings}
-          <SavedPlays threadRef={threadRef} facts={facts} />
         </EvidenceBlock>
       );
     default: {
@@ -792,37 +839,6 @@ const errorLines = (facts: GameBuildFacts): ReadonlyArray<string> => {
   );
   return [...broke, ...qaLines(facts, "errors")];
 };
-
-/** The game's controls as the QA play pressed them: which answered, and how. */
-function ControlsFound({ facts }: { facts: GameBuildFacts }) {
-  if (facts.qa.status !== "measured" || facts.qa.value.controls.length === 0) return null;
-  return (
-    <ul className="flex flex-col">
-      {facts.qa.value.controls.map((control) => {
-        const proven = control.answers.length > 0;
-        return (
-          <li key={control.name} className="flex h-6 min-w-0 items-center gap-2">
-            {proven ? (
-              <CheckIcon className="size-3.5 shrink-0 text-success" aria-hidden="true" />
-            ) : (
-              <MinusIcon className="size-3.5 shrink-0 text-dim-foreground" aria-hidden="true" />
-            )}
-            <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
-              {control.label}
-            </Text>
-            <Text variant="caption" tone="muted" truncate render={<span className="shrink-0" />}>
-              {proven
-                ? control.answers.join(", ")
-                : control.read
-                  ? "try it yourself"
-                  : "never read"}
-            </Text>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
 
 /**
  * A problem's line as a person reads it: the message itself, and where it happened (the file and
