@@ -133,7 +133,7 @@ describe("the keep-going banner", () => {
       "Keep going · waits for this turn to end · until 15:10",
     );
     expect(title({ ...AUTOPILOT_TURN, phase: "looking", step: null })).toBe(
-      "Keep going · reading the current build's facts",
+      "Keep going · reading the current build's checks",
     );
     expect(title({ ...AUTOPILOT_TURN, phase: "measuring" })).toBe(
       "Keep going · step 3 · measuring the build before keeping it",

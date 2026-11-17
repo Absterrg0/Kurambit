@@ -7,7 +7,7 @@ import { resolveStorage } from "./lib/storage";
  * The game screen's tools beyond the game, the chat and Undo. Each arrives when a game first has
  * something for it (useGameArrivals), and from then on stays where the person met it.
  */
-export const GAME_TOOLS = [
+const GAME_TOOLS = [
   "tune",
   "art",
   "checks",
