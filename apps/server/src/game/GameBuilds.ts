@@ -49,6 +49,7 @@ import {
   RunId,
   ThreadId,
 } from "@kurambit/contracts";
+import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
@@ -124,6 +125,8 @@ const UNDO_SUFFIX = "-undo";
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 const MOVED_ON =
   "The game changed after the build this would undo, so nothing was restored and nothing was lost.";
+/** The local branch the game's builds are written to as plain commits (mirrorHistory). */
+const HISTORY_BRANCH = CheckpointRef.make("refs/heads/kurambit/history");
 /** Where a build with no known time sorts: last. */
 const EPOCH = "1970-01-01T00:00:00.000Z";
 const isoOfSeconds = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
@@ -554,6 +557,7 @@ const make = Effect.gen(function* () {
   const folders = yield* GameFolders.GameFolders;
   // Older turns never change their builds: a page's count below it is read once per ref set.
   const numberedCounts = new Map<string, number>();
+  const mirrorLock = yield* KeyedLock.make<string>();
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -1236,12 +1240,20 @@ const make = Effect.gen(function* () {
       if (id === undefined) return;
       const entry = entries.find((each) => each.id === id && each.source._tag === "turn");
       if (entry === undefined || entry.base === null) return;
-      if (!recorded.has(id))
-        yield* checkpoints.updateCheckpointRef({
-          cwd: g.root,
-          checkpointRef: CheckpointRef.make(`${BASES}${id}`),
-          oid: entry.base,
-        });
+      if (recorded.has(id)) return;
+      yield* checkpoints.updateCheckpointRef({
+        cwd: g.root,
+        checkpointRef: CheckpointRef.make(`${BASES}${id}`),
+        oid: entry.base,
+      });
+      const number = (yield* numbersOf(yield* allEntries(g, 50, undefined), entries)).get(
+        id,
+      )?.number;
+      yield* mirrorHistory(
+        g,
+        id,
+        `${number === undefined ? "Build" : `Build ${number}`}: ${entry.summary}${entry.source._tag === "turn" ? `\n\nChat: ${entry.source.threadTitle}` : ""}`,
+      );
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("A turn build's base could not be recorded.", { threadId, cause }),
@@ -2023,6 +2035,62 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * The game's builds as plain git history, for `git log` and editors: each build that lands in
+   * the game folder is also a commit on the local branch `kurambit/history`, its parent the
+   * branch's last commit and its tree the build's. The harness never reads it. It cannot diverge
+   * from the rail: it is only appended to, from the builds themselves, one game at a time. A
+   * person's own commits on their branch never reach it, and while they have it checked out it
+   * is left alone, so their HEAD and working tree are never moved.
+   */
+  const mirrorHistory = (g: Pick<Game, "root" | "home">, build: string, message: string) =>
+    Effect.gen(function* () {
+      if (g.root !== g.home) return;
+      const head = yield* Effect.promise(async () => {
+        let dir = NodePath.resolve(g.root);
+        for (;;) {
+          const text = await NodeFSP.readFile(NodePath.join(dir, ".git", "HEAD"), "utf8").catch(
+            () => null,
+          );
+          if (text !== null) return text.trim();
+          const up = NodePath.dirname(dir);
+          if (up === dir) return "";
+          dir = up;
+        }
+      });
+      if (head === `ref: ${HISTORY_BRANCH}`) return;
+      const [last] = yield* checkpoints.listCheckpointRefs({ cwd: g.root, prefix: HISTORY_BRANCH });
+      const parent = last?.checkpointRef === HISTORY_BRANCH ? last.oid : undefined;
+      if (parent !== undefined) {
+        const [was, now] = yield* checkpoints.resolveTrees({
+          cwd: g.root,
+          revisions: [parent, build],
+          path: "",
+        });
+        if (was !== null && was === now) return;
+      }
+      const commit = yield* checkpoints.commitTree({
+        cwd: g.root,
+        tree: `${build}^{tree}`,
+        ...(parent === undefined ? {} : { parent }),
+        message,
+      });
+      yield* checkpoints.updateCheckpointRef({
+        cwd: g.root,
+        checkpointRef: HISTORY_BRANCH,
+        oid: commit,
+      });
+    }).pipe(
+      // One game's history is appended to in order.
+      (work) => mirrorLock.withLock(g.root, work),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("A build could not be written to the game's history branch.", {
+          root: g.root,
+          cause,
+        }),
+      ),
+    );
+
   const editRef = (request: string, suffix: string) =>
     checkpointRefForGameRun(NO_RUN, `${EDITS}${request}${suffix}`);
   const oidAt = (root: string, ref: CheckpointRef) =>
@@ -2079,6 +2147,7 @@ const make = Effect.gen(function* () {
         return { build: made, moved: result.moved };
       }
       yield* playRestored(threadId, g);
+      yield* mirrorHistory(g, made, input.label);
       yield* operations.changed(g.root, GAME_BUILDS_EVENT, input.label);
       yield* measureIn(g.root, made, { supersede: true });
       return { build: made, moved: result.moved };
@@ -2529,6 +2598,7 @@ const make = Effect.gen(function* () {
       }
       const result = yield* answer(kept.build, kept.base, kept.summary);
       yield* nextTurnsFrom(g, threadId, kept.build);
+      yield* mirrorHistory(g, kept.build, `Tuned values: ${kept.summary}`);
       yield* decideKept(g, kept.build, kept.held, kept.changes).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("Kept values could not be kept in the game's decisions.", { cause }),
@@ -2723,6 +2793,7 @@ const make = Effect.gen(function* () {
       );
       if (isGameBuildId(kept.build)) {
         yield* nextTurnsFrom(g, threadId, kept.build);
+        yield* mirrorHistory(g, kept.build, input.operation);
         yield* operations.changed(
           g.root,
           GAME_BUILDS_EVENT,
