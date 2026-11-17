@@ -37,6 +37,7 @@ from .character import MADE_BODY
 
 SPRINGS = ("tail", "ear", "antenna", "whisker", "tendril")
 SKIN_ROUND = 0.7
+MAX_CROUCH = 0.25
 
 
 def _chains(chains, mirror=True):
@@ -243,7 +244,10 @@ def _role(cname):
 
 def _bone_names(cname, n, role):
     stem = f"spring_{cname}" if role == "spring" else cname
-    return [f"{stem}_{i + 1:02d}" for i in range(n)]
+    names = [f"{stem}_{i + 1:02d}" for i in range(n)]
+    if role == "head" and cname == "head":
+        names[-1] = "Head"  # as on the standard skeleton, so the kit's face helpers find it
+    return names
 
 
 def creature_rig(body, name=None, *, height=None, springs=SPRINGS, weights=True):
@@ -419,7 +423,9 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
         if clip in ("walk", "trot", "run", "hop") and not legs and clip != "hop":
             raise ValueError(f"{clip}: {arm.name} has no legs; hop or hover move a legless body")
         if clip in ("walk", "trot", "run", "hop") and legs:
-            kw.setdefault("stride", _stride_cap(rig, legs_rec, clip))
+            stride, crouch = _stride_cap(rig, legs_rec, clip)
+            kw.setdefault("stride", stride)
+            kw.setdefault("crouch", crouch)
         if not legs and clip == "hop":
             kw.setdefault("size", size)
         if clip == "hover":
@@ -431,20 +437,24 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
 
 
 def _stride_cap(rig, legs_rec, clip):
-    """A stride every leg reaches: a foot swept S/2 ahead of and behind its hip with the leg at
-    most 95% straight, the body lowered by the gait's crouch. Library-style strides on a
-    straight-legged sketch would ask more than the legs have."""
-    want = gait.GAITS[clip]["stride"]
-    caps = []
+    """(stride, crouch) every leg reaches: a foot swept S/2 ahead of and behind its hip with the
+    leg at most 95% straight. Legs sketched straight cannot reach a stride standing tall, so the
+    body crouches for it, as an animal walks on bent legs, up to MAX_CROUCH of its leg length;
+    past that the stride shortens."""
+    table = gait.GAITS[clip]
+    legs = []
     for leg in legs_rec:
         bones = leg["bones"]
-        reach = sum(rig.length[b] for b in bones[:2])
+        reach = 0.95 * sum(rig.length[b] for b in bones[:2])
         J0 = rig.head(bones[0])
         end = rig.head(bones[2]) if len(bones) >= 3 else rig.L[bones[-1]][:3, 3] + rig.L[bones[-1]][:3, 1] * rig.length[bones[-1]]
-        h = (J0[2] - end[2]) * (1 - gait.GAITS[clip].get("crouch", 0.0))
-        caps.append(2 * math.sqrt(max(0.0, (0.95 * reach) ** 2 - h * h)))
-        caps[-1] = min(caps[-1], want * leg["length"])
-    return max(0.02, min(caps)) if caps else None
+        legs.append((reach, max(1e-4, J0[2] - end[2]), table["stride"] * leg["length"]))
+    if not legs:
+        return None, table.get("crouch", 0.0)
+    crouch = max([table.get("crouch", 0.0)] + [
+        min(MAX_CROUCH, max(0.0, 1 - math.sqrt(max(0.0, r * r - (w / 2) ** 2)) / h0)) for r, h0, w in legs])
+    caps = [min(w, 2 * math.sqrt(max(0.0, r * r - (h0 * (1 - crouch)) ** 2))) for r, h0, w in legs]
+    return max(0.02, min(caps)), crouch
 
 
 def _pose(rig, pose, legs_rec, body_bone, centre, rear, necks, heads, tails, ears):

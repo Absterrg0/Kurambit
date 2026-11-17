@@ -40,16 +40,21 @@ def _world(o):
 
 
 def _bodies(arm):
+    """The body a garment fits: the meshes stamped as the character's body, else <armature>_body,
+    else its largest skinned mesh that is not clothing."""
+    skinned = [o for o in bpy.data.objects
+               if o.type == "MESH" and arm in helpers._deforming(o) and not o.get("kurambit_cloth")]
     out = []
-    for o in bpy.data.objects:
-        if o.type != "MESH" or arm not in helpers._deforming(o) or o.get("kurambit_cloth"):
-            continue
+    for o in skinned:
         try:
             if json.loads(o.get("kurambit_source", "{}")).get("what") == "body":
                 out.append(o)
         except ValueError:
             pass
-    return out
+    if out:
+        return out
+    named = [o for o in skinned if o.name.lower().startswith(f"{arm.name.lower()}_body")]
+    return named or sorted(skinned, key=lambda o: -len(o.data.vertices))[:1]
 
 
 def _nearest_bone(arm, point, skip=()):

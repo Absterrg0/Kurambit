@@ -90,14 +90,15 @@ def foot_track(phase, duty, stride, lift, push=0.5):
     return f, lift * math.sin(math.pi * u) ** 1.2, u
 
 
-def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, bob=None, tail=0, ears=0, size=0.3):
+def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, bob=None, tail=0, ears=0, size=0.3, crouch=None):
     """One loop of the gait as frames (frame 0 and the frame after the last are the same pose):
     {"frames": n, "groundSpeed": m/s, "stride": m, "poses": [pose]}. A pose:
         body   {"at": (x, y, z) offset from rest, "pitch", "roll", "yaw"} degrees; pitch > 0 nose up
         feet   {name: {"at": (x, y, z) the contact point, "roll": toe roll degrees, "planted": bool}}
         tail   [(yaw, pitch)] per tail bone, degrees
         ears   [(yaw, pitch)] per ear bone, degrees
-    A body with no legs (a hopping spirit) takes size, metres, for the leg length its hop scales by.
+    A body with no legs (a hopping spirit) takes size, metres, for the leg length its hop scales by;
+    crouch (a share of leg length) lowers the body so straight legs can reach a stride.
     """
     if gait not in GAITS:
         raise ValueError(f"gait {gait!r}: one of {', '.join(GAITS)}")
@@ -144,7 +145,7 @@ def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, 
             z = air * H * 1.6 - crouch * 0.12 * L
             pitch = -8.0 * air + 6.0 * crouch
         else:
-            z = A * (hz + fz) / 2 - table["crouch"] * L
+            z = A * (hz + fz) / 2 - (table["crouch"] if crouch is None else crouch) * L
             pitch = math.degrees(math.atan2(A * (fz - hz), length)) if length > 1e-6 else 0.0
         stance_side = sum(leg["side"] * (1.0 if feet[leg["name"]]["planted"] else 0.0) for leg in legs)
         roll = 3.0 * stance_side / max(1, len(legs)) * (1.0 if gait == "walk" else 0.5)
