@@ -2,6 +2,7 @@
 
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
 
+import { POINTER_FOCUS_QUIET, pointerFocusHandlers } from "~/lib/pointerFocus";
 import { cn } from "~/lib/utils";
 
 // Base UI places the indicator before its first measure too; the slide is
@@ -55,16 +56,24 @@ function TabsList({
   );
 }
 
-function TabsTab({ className, ...props }: TabsPrimitive.Tab.Props) {
+function TabsTab({
+  className,
+  onPointerDown,
+  onKeyDown,
+  onBlur,
+  ...props
+}: TabsPrimitive.Tab.Props) {
   // Keyboard focus is the ring on the tab's edge with a page-colour ring just inside it, so on
   // the open tab it stands off the raised pill rather than passing for the pill's own edge.
   return (
     <TabsPrimitive.Tab
       className={cn(
         "relative flex min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-meta text-muted-foreground outline-none in-data-[variant=underline]:flex-none in-data-[variant=underline]:rounded-none in-data-[variant=underline]:px-0 in-data-[variant=underline]:text-label in-data-[variant=underline]:data-active:text-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid focus-visible:ring-4 focus-visible:ring-background focus-visible:ring-inset data-active:text-strong-foreground data-disabled:pointer-events-none data-disabled:opacity-64",
+        POINTER_FOCUS_QUIET,
         className,
       )}
       data-slot="tabs-tab"
+      {...pointerFocusHandlers({ onPointerDown, onKeyDown, onBlur })}
       {...props}
     />
   );

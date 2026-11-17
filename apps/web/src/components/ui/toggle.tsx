@@ -3,6 +3,7 @@
 import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
 import { cva, type VariantProps } from "class-variance-authority";
 
+import { POINTER_FOCUS_QUIET, pointerFocusHandlers } from "~/lib/pointerFocus";
 import { cn } from "~/lib/utils";
 
 const toggleVariants = cva(
@@ -45,12 +46,16 @@ function Toggle({
   className,
   variant,
   size,
+  onPointerDown,
+  onKeyDown,
+  onBlur,
   ...props
 }: TogglePrimitive.Props & VariantProps<typeof toggleVariants>) {
   return (
     <TogglePrimitive
-      className={cn(toggleVariants({ className, size, variant }))}
+      className={cn(toggleVariants({ className, size, variant }), POINTER_FOCUS_QUIET)}
       data-slot="toggle"
+      {...pointerFocusHandlers({ onPointerDown, onKeyDown, onBlur })}
       {...props}
     />
   );
