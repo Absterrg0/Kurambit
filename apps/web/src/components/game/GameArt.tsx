@@ -38,6 +38,7 @@ import { gameEnvironment } from "../../state/game";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Text } from "../ui/text";
@@ -152,6 +153,7 @@ export function GameArtPanel({
   );
   const assets = read.data?.assets ?? NO_ASSETS;
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
+  const pointed = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
   const code = codeModels(things);
   const use = useAssetUse(threadRef);
   const viewerUrl = useViewerUrl(threadRef);
@@ -177,12 +179,39 @@ export function GameArtPanel({
     setLastEntry(found);
   const entry =
     found ?? (lastEntry !== null && selected === entryKey(lastEntry) ? lastEntry : null);
+  // A thing picked on the Stage that Art has no model for (an effect, one copy of many) says so
+  // over the list, the way Tune says a pick has no values.
+  const pickedWithout =
+    entry === null &&
+    pointed !== null &&
+    selected === (pointed.asset?.path ?? `${CODE_MODEL_PREFIX}${pointed.id}`)
+      ? pointed
+      : null;
   const root = status?.root ?? null;
   const wanted = assets.filter(
     (asset) => asset.kind === "model" && asset.thumbnail === undefined && !drawn.has(asset.sha256),
   );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {pickedWithout === null ? null : (
+        <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-border ps-4 pe-3 surface-selected-soft">
+          <GameThingPicture
+            threadRef={threadRef}
+            thing={pickedWithout}
+            build={build}
+            className="size-6"
+          />
+          <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
+            {pickedWithout.name}
+          </Text>
+          <Badge variant="muted" size="sm">
+            {pickedWithout.kindWord ?? KIND_WORDS[pickedWithout.kind]}
+          </Badge>
+          <Text variant="meta" tone="muted" render={<span className="ms-auto shrink-0" />}>
+            No model
+          </Text>
+        </div>
+      )}
       {entry === null || root === null ? (
         <ArtList
           threadRef={threadRef}

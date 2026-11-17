@@ -936,8 +936,10 @@ function ThreadGameStage({
     // reload clears it by its frame key.
     if (studio.type === "studio-error") setStudioError({ key, text: studio.message });
   });
-  // Pointing at a thing on the Stage opens it in the Workbench: in Art (its inspector) when Art
-  // is showing or it has no values to tune (a part, a model), else its values in Tune.
+  // Pointing at a thing on the Stage opens it in the Workbench's section as it is: Art opens its
+  // inspector, Tune brings its section into view (saying when it has no values), Checks stays. A
+  // pick never changes the section; a closed Workbench opens on the one it last showed (Tune for
+  // Checks, where a pick has nothing to show).
   const selectedThing = useThreadStageBridge(
     threadKey,
     (state) => state.selected?.thing.id ?? null,
@@ -947,11 +949,10 @@ function ThreadGameStage({
     if (selectedThing === null) return;
     const thing = useStageBridge.getState().selected?.thing;
     const workspace = useGameWorkspaceStore.getState();
-    const inArt = workspace.workbenchOpen && workspace.workbenchTab === "art";
-    if (thing !== undefined && (inArt || (thing.values?.length ?? 0) === 0)) {
+    if (thing !== undefined)
       workspace.setArtAsset(thing.asset?.path ?? `${CODE_MODEL_PREFIX}${thing.id}`);
-      showWorkbench("art");
-    } else showWorkbench("tune");
+    if (!workspace.workbenchOpen)
+      showWorkbench(workspace.workbenchTab === "checks" ? "tune" : undefined);
   }, [selectedThing]);
   const takesRuns = useThreadStageBridge(
     threadKey,

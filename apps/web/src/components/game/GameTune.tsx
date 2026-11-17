@@ -211,7 +211,7 @@ export function GameTunePanel({
   const [filter, setFilter] = useState("");
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const scroller = useRef<HTMLDivElement>(null);
-  const picked = pointed !== null && hasValues(pointed) ? pointed.id : null;
+  const picked = pointed?.id ?? null;
   // A thing pointed at on the Stage opens and comes into view, scrolled to the top only when
   // the panel cannot already show all of it.
   const [followed, setFollowed] = useState<string | null>(null);
@@ -241,6 +241,8 @@ export function GameTunePanel({
     return () => cancelAnimationFrame(frame);
   }, [picked]);
   const things = all.filter(hasValues);
+  // A thing picked on the Stage with no values still gets its section, saying so.
+  const listed = pointed === null || hasValues(pointed) ? things : [...things, pointed];
   const changed = things
     .map((thing) => ({ thing, values: tunedValues(thing) }))
     .filter((entry) => entry.values.length > 0);
@@ -253,7 +255,7 @@ export function GameTunePanel({
         body={notice?.body}
       />
     );
-  if (things.length === 0)
+  if (listed.length === 0)
     return (
       <Workbench.Empty
         icon={<SlidersHorizontalIcon />}
@@ -275,7 +277,7 @@ export function GameTunePanel({
     );
   const needle = filter.trim().toLowerCase();
   // A filter keeps a thing whose name matches, or the values of it whose label does.
-  const shown = things.flatMap(
+  const shown = listed.flatMap(
     (
       thing,
     ): ReadonlyArray<{
@@ -458,6 +460,7 @@ function ThingSection({
 }) {
   const save = use(TuneSave);
   const tuned = tunedValues(thing);
+  const valueless = !hasValues(thing);
   return (
     <section
       aria-label={`${thing.name}'s values`}
@@ -472,18 +475,22 @@ function ThingSection({
         onPointerEnter={() => hoverStageThing(thing.id)}
         onPointerLeave={() => hoverStageThing(null)}
       >
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={open ? `Fold ${thing.name}` : `Open ${thing.name}`}
-          onClick={() => onOpenChange(!open)}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-        >
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={cn("size-3.5 motion-popup transition-transform", open && "rotate-90")}
-          />
-        </button>
+        {valueless ? (
+          <span aria-hidden="true" className="size-6 shrink-0" />
+        ) : (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? `Fold ${thing.name}` : `Open ${thing.name}`}
+            onClick={() => onOpenChange(!open)}
+            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <ChevronRightIcon
+              aria-hidden="true"
+              className={cn("size-3.5 motion-popup transition-transform", open && "rotate-90")}
+            />
+          </button>
+        )}
         <button
           type="button"
           aria-current={picked ? "true" : undefined}
@@ -500,6 +507,11 @@ function ThingSection({
           {tuned.length === 0 ? null : (
             <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
           )}
+          {valueless ? (
+            <Text variant="meta" tone="muted" render={<span className="ms-auto shrink-0 pe-1" />}>
+              No values
+            </Text>
+          ) : null}
         </button>
         {tuned.length === 0 ? null : (
           <Tooltip>
@@ -536,7 +548,7 @@ function ThingSection({
           <TooltipPopup side="bottom">Point at it on the Stage</TooltipPopup>
         </Tooltip>
       </div>
-      {open ? (
+      {open && !valueless ? (
         <div className="flex flex-col pt-0.5 pb-2">
           <GameThingValueRows
             id={thing.id}

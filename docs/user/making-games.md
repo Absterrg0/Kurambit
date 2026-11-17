@@ -315,7 +315,7 @@ Drag its edge to resize it. Its three sections:
 
 - **Tune**: one section for each thing the game names with values to tune, grouped by kind, with
   its values, such as its speed, jump height, timers and counts. The filter at the top finds a
-  thing or a value by name. Pointing at a thing on the paused game brings its section into view.
+  thing or a value by name. Pointing at a thing on the paused game brings its section into view, or says it has no values.
   Click a value's field to type, or drag the field or its label sideways; the game changes at once,
   and the fill inside the field shows where the value sits in its range.
   Values are saved into the game as you let go, and a tuning session is one build Undo takes back;
@@ -338,8 +338,9 @@ Drag its edge to resize it. Its three sections:
   size with its alpha and a sprite sheet's frames; a sound shows its waveform; a generated asset's
   prompt can be edited and generated again. **Ask about this** adds the asset to your message with
   a picture of the view, and **Show on the Stage** points at it in the paused game. Pointing at a
-  thing in the paused game opens it here while Art is showing; click the same spot again to step
-  out from a part to what holds it.
+  thing in the paused game opens it here while Art is showing (or says it has no model); click the
+  same spot again to step out from a part to what holds it. Pointing never changes which section
+  the Workbench shows.
 - **Checks**: how many checks pass, over a bar with one mark per check, then what the build changed
   in words and its files as one line that opens to each file; click a file to open it in the diff.
   Then the build's evidence: its phone and widescreen pictures, its frame rate through the play
@@ -372,9 +373,9 @@ Drag its edge to resize it. Its three sections:
 - The Workbench and the right panel, where diffs and files open, are resizable; drag an edge, or
   close one to give the game more room.
 - **Point at a thing.** Press Ctrl+Alt+F (⌘⌥F on a Mac), even while you play, or the Stage's pause
-  button to freeze the game, then click a character or prop: the Workbench's **Tune** shows it
-  picked, where its values tune the running game live, and it goes into the message box as a chip
-  with the frame. Sending sends the frame, what the thing is and its values with your words. The
+  button to freeze the game, then click a character or prop: the Workbench shows it in the section it has
+  open (its values in **Tune**, its inspector in **Art**), and it goes into the message box as a
+  chip with the frame. A new pick replaces that chip; chips you added with **Ask about this** stay. Sending sends the frame, what the thing is and its values with your words. The
   chip's **×** or Esc stops pointing; Esc again plays on. While frozen, the selected thing's path
   shows its last jumps on the game, so you can see what a tuned value did.
 - **Your agent knows how you played (three.js).** Your next message tells the agent about the

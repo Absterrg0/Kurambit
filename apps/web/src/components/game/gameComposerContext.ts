@@ -75,6 +75,19 @@ const detach = (threadRef: ScopedThreadRef, id: string) => {
   store.removeImage(threadRef, id);
 };
 
+const PICK_CHIP = "stage-thing-";
+
+/**
+ * Takes every Stage pick chip but `keep` out of the composer. The draft is the record, not this
+ * page's memory: a pick chip left from before a reload, or made by another mount, is still the
+ * one pick a new pick replaces. Chips the person asked for (Art's "Ask about this", a run) stay.
+ */
+const detachPicks = (threadRef: ScopedThreadRef, keep: string | null) => {
+  const draft = useComposerDraftStore.getState().getComposerDraft(threadRef);
+  for (const entry of draft?.previewAnnotations ?? [])
+    if (entry.id.startsWith(PICK_CHIP) && entry.id !== keep) detach(threadRef, entry.id);
+};
+
 /** "Tell the agent about this run": the run as a chip in the composer, with its frame. */
 export const attachRunToComposer = async (
   threadRef: ScopedThreadRef,
@@ -183,7 +196,7 @@ export function useStageSelectionChip(threadRef: ScopedThreadRef | null) {
         });
         return;
       }
-      const id = `stage-thing-${randomUUID()}`;
+      const id = `${PICK_CHIP}${randomUUID()}`;
       // The new pick owns the chip before the old one goes, so its going is not the person's ×.
       pointed.set(threadKey, {
         id,
@@ -191,7 +204,7 @@ export function useStageSelectionChip(threadRef: ScopedThreadRef | null) {
         values: valuesKey(selection),
         placed: false,
       });
-      if (current !== undefined) detach(threadRef, current.id);
+      detachPicks(threadRef, null);
       void pickedPicture(selection).then((png) => {
         // A newer pick (or none) since the frame was asked for owns the chip now.
         if (pointed.get(threadKey)?.id !== id) return;
@@ -200,6 +213,8 @@ export function useStageSelectionChip(threadRef: ScopedThreadRef | null) {
         }).then(() => {
           // Cleared or replaced while the chip was being made: it goes with its pick.
           if (pointed.get(threadKey)?.id !== id) detach(threadRef, id);
+          // A pick chip that landed while this one was being made goes too: one pick, one chip.
+          else detachPicks(threadRef, id);
         });
       });
     };

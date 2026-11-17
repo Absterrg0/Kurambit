@@ -223,7 +223,7 @@ export type PropertyNumberProps = {
   unit?: string | undefined;
   /** Inside the field, before the number: a letter or an icon. */
   prefix?: ReactNode;
-  /** Changed from its default: the number takes the live colour. */
+  /** Changed from its default: the number takes the live colour; the range fill stays neutral. */
   tuned?: boolean;
   disabled?: boolean;
   /** Draws where the value sits in its range as a thin fill inside the field. */
@@ -286,10 +286,7 @@ function useNumberField(props: PropertyNumberProps) {
       {props.range === true && share !== null ? (
         <span
           aria-hidden="true"
-          className={cn(
-            "absolute inset-y-0 start-0",
-            props.tuned === true ? "bg-live/16" : "bg-foreground/7",
-          )}
+          className="absolute inset-y-0 start-0 bg-foreground/7"
           style={{ width: `${share * 100}%` }}
         />
       ) : null}
