@@ -560,3 +560,132 @@ def _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads,
     for pb in arm.pose.bones:
         pb.matrix_basis = Matrix()
     return act
+
+
+CONTROLS = "kurambit_controls"
+
+
+def _rig_type(role, n):
+    """A Rigify rig type for one chain of the sketch: an IK paw for a leg of three bones or more, a
+    spine with a torso control, a tail; anything else (a two-bone leg, a neck, ears) FK."""
+    if role == "leg" and n >= 4:
+        return "limbs.paw"
+    if role == "leg" and n == 3:
+        return "limbs.arm"  # upper, lower and the paw at the IK end, as an arm's hand
+    if role == "spine" and n >= 3:
+        return "spines.basic_spine"
+    if role == "spring" and n >= 2:
+        return "spines.basic_tail"
+    return "basic.copy_chain" if n >= 2 else "basic.super_copy"
+
+
+def controls(armature, on=True):
+    """A Rigify control rig for a creature_rig armature, to pose by hand: IK paws, a torso, FK
+    chains. The sketch's rig becomes a Rigify metarig (<name>_metarig, its chains typed), Rigify
+    generates <name>_controls, and the armature copies its ORG bones until bake_controls keys a
+    clip from it. on=False takes the control rig and the copying away. Returns the control rig's
+    name, or None."""
+    import addon_utils
+
+    arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
+    for pb in arm.pose.bones:
+        for c in [c for c in pb.constraints if c.name == CONTROLS]:
+            pb.constraints.remove(c)
+    for stale in (f"{arm.name}_metarig", f"{arm.name}_controls"):
+        o = bpy.data.objects.get(stale)
+        if o is not None:
+            bpy.data.objects.remove(o)
+    if not on:
+        return None
+    roles = json.loads(arm["kurambit_creature"])
+    addon_utils.enable("rigify", default_set=True)
+    meta = bpy.data.objects.new(f"{arm.name}_metarig", bpy.data.armatures.new(f"{arm.name}_metarig"))
+    bpy.context.scene.collection.objects.link(meta)
+    meta.matrix_world = arm.matrix_world.copy()
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    bpy.context.view_layer.objects.active = meta
+    bpy.ops.object.mode_set(mode="EDIT")
+    for b in arm.data.bones:
+        if b.name == "root":
+            continue
+        e = meta.data.edit_bones.new(b.name)
+        e.head, e.tail = b.head_local, b.tail_local
+        e.align_roll(b.z_axis)
+    for b in arm.data.bones:
+        if b.name == "root":
+            continue
+        e = meta.data.edit_bones[b.name]
+        if b.parent is not None and b.parent.name != "root":
+            e.parent = meta.data.edit_bones[b.parent.name]
+            e.use_connect = b.use_connect
+    bpy.ops.object.mode_set(mode="OBJECT")
+    # Rigify lays its control buttons out by the metarig's bone collections: one row for all.
+    coll = meta.data.collections.new("Controls")
+    coll.rigify_ui_row = 1
+    for b in meta.data.bones:
+        coll.assign(b)
+    bpy.ops.object.mode_set(mode="POSE")
+    for cname, bones in roles.items():
+        role = _role(cname)
+        if role == "other" and bones and bones[0].startswith("spring_"):
+            role = "spring"
+        meta.pose.bones[bones[0]].rigify_type = _rig_type(role, len(bones))
+    bpy.ops.object.mode_set(mode="OBJECT")
+    meta.data.rigify_target_rig = None
+    meta.data.rigify_rig_basename = f"{arm.name}_controls"
+    meta.select_set(True)
+    bpy.ops.pose.rigify_generate()
+    rig = bpy.data.objects.get(f"{arm.name}_controls")
+    if rig is None:
+        raise ValueError("Rigify did not generate the control rig")
+    for c in rig.users_collection:
+        c.objects.unlink(rig)
+    bpy.context.scene.collection.objects.link(rig)
+    meta.hide_set(True)
+    for pb in arm.pose.bones:
+        if pb.name == "root" or f"ORG-{pb.name}" not in rig.pose.bones:
+            continue
+        c = pb.constraints.new("COPY_TRANSFORMS")
+        c.name = CONTROLS
+        c.target, c.subtarget = rig, f"ORG-{pb.name}"
+    return rig.name
+
+
+def bake_controls(armature, clip, start, end):
+    """Keys clip on the armature from the control rig's pose over start..end (visual keys), then
+    leaves the control rig driving it. Returns the action."""
+    from .skeleton import assign_action
+
+    arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
+    act = helpers.clip_of(arm, clip)
+    if act is not None:
+        bpy.data.actions.remove(act)
+    act = bpy.data.actions.new(helpers.action_name(arm.name, clip))
+    act.use_fake_user = True
+    act["kurambit_owner"] = arm.name
+    act["kurambit_clip"] = clip
+    assign_action(arm, act)
+    sc = bpy.context.scene
+    for pb in arm.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+    for f in range(int(start), int(end) + 1):
+        sc.frame_set(f)
+        bpy.context.view_layer.update()
+        visual = {pb.name: pb.matrix.copy() for pb in arm.pose.bones}
+        muted = [(c, c.mute) for pb in arm.pose.bones for c in pb.constraints if c.name == CONTROLS]
+        for c, _ in muted:
+            c.mute = True
+        for pb in arm.pose.bones:  # parents first: each bone's basis from its visual matrix
+            if pb.name != "root":
+                pb.matrix = visual[pb.name]
+                bpy.context.view_layer.update()
+        for pb in arm.pose.bones:
+            if pb.name == "root":
+                continue
+            pb.keyframe_insert("rotation_quaternion", frame=f - int(start))
+            pb.keyframe_insert("location", frame=f - int(start))
+        for c, m in muted:
+            c.mute = m
+    assign_action(arm, None)
+    return act

@@ -5,11 +5,13 @@ Body:    hero.creature_body(name, sketch), hero.sculpt(obj, kind, ...), hero.dec
 Clothes: hero.dress(garment, armature, hang=..., chains=6), hero.dangle(part, armature, start, end),
          hero.follow_hem(armature)
 Rig:     hero.creature_rig(body, height=(lo, hi)), hero.bind(mesh, armature)
-Motion:  hero.creature_clips(armature, ["walk", "trot", "run", "idle", "look", "sit"])
+Motion:  hero.creature_clips(armature, ["walk", "trot", "run", "idle", "look", "sit"]); by hand,
+         hero.controls(armature) (a Rigify control rig: IK paws, a torso), pose and key it, then
+         hero.bake_controls(armature, "Pounce", start, end) and hero.controls(armature, on=False)
 Gates:   hero.gates(armature): the review's gate numbers now, in the live scene
 """
 from .cloth import dangle, dress, follow_hem
-from .creature import bind, creature_body, creature_clips, creature_rig, decimate, sculpt
+from .creature import bake_controls, bind, controls, creature_body, creature_clips, creature_rig, decimate, sculpt
 
 
 def gates(armature, budgets=None):
@@ -24,4 +26,4 @@ def gates(armature, budgets=None):
     return deform.hero_gates(arm, meshes, budgets or {"character": 30000, "texture": 2048})
 
 
-__all__ = ["bind", "creature_body", "creature_clips", "creature_rig", "dangle", "decimate", "dress", "follow_hem", "gates", "sculpt"]
+__all__ = ["bake_controls", "bind", "controls", "creature_body", "creature_clips", "creature_rig", "dangle", "decimate", "dress", "follow_hem", "gates", "sculpt"]
