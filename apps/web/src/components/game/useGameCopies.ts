@@ -140,11 +140,7 @@ export function useCopyActions(asking: ScopedThreadRef | null) {
     // Bring in now joins the bring-in already running: only one other send waits.
     if (appAtomRegistry.get(atom) !== null && what !== "bring-in") return null;
     appAtomRegistry.set(atom, what);
-    try {
-      return await run();
-    } finally {
-      appAtomRegistry.set(atom, null);
-    }
+    return run().finally(() => appAtomRegistry.set(atom, null));
   };
 
   /** Brings the copy's work in and closes the copy; `anyway` lands it through a hold or a check. */
