@@ -52,7 +52,6 @@ import { availableEngine, engineProfile } from "./engineProfile.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import { recordDecision } from "./GameDecisions.ts";
 import * as GameFacts from "./GameFacts.ts";
-import * as GameFolders from "./GameFolders.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -76,7 +75,7 @@ const workRef = (threadId: ThreadId) =>
  * thread's checkpoints all carry its current folder, so the rail tells the game's turns from the
  * copy's by these.
  */
-export const copyMoveRef = (threadId: ThreadId, way: "in" | "out") =>
+const copyMoveRef = (threadId: ThreadId, way: "in" | "out") =>
   checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/${way}`);
 /** The game folder as a merge read it, which a landing is moved only onto. */
 const gameRef = (threadId: ThreadId) =>
@@ -157,7 +156,6 @@ const make = Effect.gen(function* () {
   const git = yield* GitWorkflowService.GitWorkflowService;
   const builds = yield* GameBuilds.GameBuilds;
   const facts = yield* GameFacts.GameFacts;
-  const folders = yield* GameFolders.GameFolders;
   const operations = yield* GameOperations.GameOperations;
   const preview = yield* GamePreview.GamePreview;
   const copiesRoot = NodePath.join(config.worktreesDir, GAME_COPIES);

@@ -39,8 +39,7 @@ export interface FolderHolder {
 /** Between a turn's admission and its run committing, its claim stands on its own. */
 const GRACE = Duration.seconds(20);
 
-export const heldReason = (holder: FolderHolder) =>
-  `Waits for ${holder.title} to finish in the game`;
+const heldReason = (holder: FolderHolder) => `Waits for ${holder.title} to finish in the game`;
 
 export class GameFolders extends Context.Service<
   GameFolders,
