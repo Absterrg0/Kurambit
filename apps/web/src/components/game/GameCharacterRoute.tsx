@@ -13,19 +13,7 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { generatedRouteBlocker, generatedRouteNote } from "./gameGeneration.logic";
-import { ChevronDownIcon } from "lucide-react";
-import { Button } from "../ui/button";
-import {
-  Menu,
-  MenuCheckboxItem,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator,
-  MenuTrigger,
-} from "../ui/menu";
+import { MenuCheckboxItem } from "../ui/menu";
 import { Text } from "../ui/text";
 
 /** The ways a game's models are made, in the order the person picks from. */
@@ -156,70 +144,6 @@ export function LibraryChoice({
   );
 }
 
-/** The three choices as menu radio items, with the generated route's note. */
-function CharacterRouteChoices({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const { shown, shownLibrary, choose, setLibrary } = useCharacterRoute(threadRef);
-  const blocker = useCharacterRouteBlockers(threadRef.environmentId);
-  const generatedNote = useGeneratedRouteNote(threadRef.environmentId);
-  return (
-    <>
-      <MenuRadioGroup
-        value={shown}
-        onValueChange={(value: GameCharacterRoute) => void choose(value)}
-      >
-        {CHARACTER_ROUTES.map((option) => {
-          const blocked = blocker(option.route);
-          return (
-            <MenuRadioItem
-              key={option.route}
-              value={option.route}
-              // The current route stays checkable even when its providers went away.
-              disabled={blocked !== null && shown !== option.route}
-            >
-              <span className="flex flex-col">
-                <Text variant="label">{option.label}</Text>
-                <Text variant="meta" tone="muted">
-                  {blocked ?? option.description}
-                </Text>
-              </span>
-            </MenuRadioItem>
-          );
-        })}
-      </MenuRadioGroup>
-      {shown === "generated" && generatedNote !== null ? (
-        <Text variant="meta" tone="muted" render={<p className="max-w-64 px-2 py-1.5" />}>
-          {generatedNote}
-        </Text>
-      ) : null}
-      <MenuSeparator />
-      <LibraryChoice checked={shownLibrary === true} onChange={(next) => void setLibrary(next)} />
-    </>
-  );
-}
-
 /** How a choice reads in one line: "Code", "Code + library". */
 export const modelChoiceLabel = (route: GameCharacterRoute, library: boolean | null) =>
   `${characterRouteLabel(route)}${library === true ? " + library" : ""}`;
-
-/** The Scene tab's Models row: the current route, and a menu to change it. */
-export function GameCharacterRoutePicker({ threadRef }: { threadRef: ScopedThreadRef }) {
-  const { shown, shownLibrary, canSet } = useCharacterRoute(threadRef);
-  return (
-    <Menu>
-      <MenuTrigger
-        render={
-          <Button size="xs" variant="ghost" disabled={!canSet} aria-label="Make models with" />
-        }
-      >
-        {shown === null ? "…" : modelChoiceLabel(shown, shownLibrary)}
-        <ChevronDownIcon aria-hidden="true" />
-      </MenuTrigger>
-      <MenuPopup align="end" className="w-72">
-        <MenuGroup>
-          <MenuGroupLabel>Make models with</MenuGroupLabel>
-          <CharacterRouteChoices threadRef={threadRef} />
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
-  );
-}

@@ -137,7 +137,7 @@ const failureText = (result: AtomCommandResult<unknown, unknown>) =>
  * Pick, Cancel and Change for a game's generations, as the chat card and the Generated art view
  * share them.
  */
-export function useGenerationActions(threadRef: ScopedThreadRef) {
+function useGenerationActions(threadRef: ScopedThreadRef) {
   const choose = useAtomCommand(gameEnvironment.chooseGeneration, { reportFailure: false });
   const cancel = useAtomCommand(gameEnvironment.cancelGeneration, { reportFailure: false });
   // The composer's own send, queued behind a turn still running.
@@ -566,7 +566,7 @@ const chosenByNote = (generation: GameGeneration): string | null =>
       : `Keep going took "${generation.candidates[0].label}"`;
 
 /** One generation, in full: the chat card's body and the Generated art view's open row. */
-export function GameGenerationBody({
+function GameGenerationBody({
   threadRef,
   root,
   generation,
@@ -687,7 +687,7 @@ export function GameGenerationBody({
   );
 }
 
-export function GenerationHeading({ generation }: { generation: GameGeneration }) {
+function GenerationHeading({ generation }: { generation: GameGeneration }) {
   const badge =
     generation.filesUndone === true
       ? ({ label: "Undone", variant: "outline" } as const)
@@ -740,19 +740,3 @@ export function GameGenerationCard({
     </section>
   );
 }
-
-/** Whether any generation of the game waits on the person's pick, for the Stage's menu. */
-const selectChoosingCount = (result: GenerationsResult): number =>
-  AsyncResult.isSuccess(result)
-    ? result.value.generations.filter(
-        (generation) => generation.state === "choosing" && generation.filesUndone !== true,
-      ).length
-    : 0;
-export const useChoosingCount = (threadRef: ScopedThreadRef) =>
-  useEnvironmentQuerySelector(generationsTarget(threadRef), selectChoosingCount);
-
-/** How many pieces of art the game has had generated; null until that is read. */
-const selectGenerationCount = (result: GenerationsResult): number | null =>
-  AsyncResult.isSuccess(result) ? result.value.generations.length : null;
-export const useGenerationCount = (threadRef: ScopedThreadRef) =>
-  useEnvironmentQuerySelector(generationsTarget(threadRef), selectGenerationCount);

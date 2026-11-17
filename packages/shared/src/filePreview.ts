@@ -130,6 +130,14 @@ const AUDIO_MIME_TYPE_BY_EXTENSION = new Map([
   [".aiff", "audio/aiff"],
 ]);
 
+// A game's fonts, so the Workbench's Art can set a line in each.
+const FONT_MIME_TYPE_BY_EXTENSION = new Map([
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
+  [".ttf", "font/ttf"],
+  [".otf", "font/otf"],
+]);
+
 export function audioMimeTypeFromExtension(extension: string): string | null {
   if (!/^\.[a-z0-9]+$/i.test(extension)) return null;
   return AUDIO_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ?? null;
@@ -150,6 +158,7 @@ export function hostPreviewMimeTypeFromExtension(extension: string): string | nu
     mediaMimeTypeFromExtension(extension) ??
     audioMimeTypeFromExtension(extension) ??
     BROWSER_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ??
+    FONT_MIME_TYPE_BY_EXTENSION.get(extension.toLowerCase()) ??
     null
   );
 }
@@ -204,6 +213,13 @@ export function isWorkspaceVideoPreviewPath(path: string): boolean {
 export function isWorkspaceAudioPreviewPath(path: string): boolean {
   const extensionIndex = path.lastIndexOf(".");
   return extensionIndex >= 0 && audioMimeTypeFromExtension(path.slice(extensionIndex)) !== null;
+}
+
+export function isWorkspaceFontPreviewPath(path: string): boolean {
+  const extensionIndex = path.lastIndexOf(".");
+  return (
+    extensionIndex >= 0 && FONT_MIME_TYPE_BY_EXTENSION.has(path.slice(extensionIndex).toLowerCase())
+  );
 }
 
 export function isWorkspacePreviewEntryPath(path: string): boolean {

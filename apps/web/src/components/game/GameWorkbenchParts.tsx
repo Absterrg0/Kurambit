@@ -130,7 +130,7 @@ function Empty({
 }: {
   icon: ReactNode;
   title: string;
-  body: string;
+  body?: string | undefined;
   action?: ReactNode;
 }) {
   return (
@@ -141,9 +141,11 @@ function Empty({
       <Text variant="label" tone="default" render={<p />}>
         {title}
       </Text>
-      <Text variant="body" tone="muted" render={<p className="max-w-72" />}>
-        {body}
-      </Text>
+      {body === undefined ? null : (
+        <Text variant="body" tone="muted" render={<p className="max-w-72" />}>
+          {body}
+        </Text>
+      )}
       {action === undefined ? null : <div className="mt-3">{action}</div>}
     </div>
   );

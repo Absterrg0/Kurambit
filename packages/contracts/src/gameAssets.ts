@@ -158,6 +158,12 @@ export const GameArtAssetsResult = Schema.Struct({
 });
 export type GameArtAssetsResult = typeof GameArtAssetsResult.Type;
 
+/**
+ * Where Art's thumbnails are kept, game-relative: beside the build evidence, out of every build.
+ * A model file's is named by its content; a thing the game's code makes, by its build and name.
+ */
+export const GAME_ART_THUMBNAIL_DIR = "builds/thumbnails";
+
 /** A model's thumbnail as the Art tab's viewer drew it once: a small PNG, cached by content. */
 export const GameArtThumbnailInput = Schema.Struct({
   threadId: ThreadId,

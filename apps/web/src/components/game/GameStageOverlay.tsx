@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-import { Text } from "../ui/text";
 import { orbitStage, pointStage, useStageDevViews, useThreadStageBridge } from "./gameStageBridge";
 
 /**
@@ -17,7 +16,6 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
     (state) => state.status === "ready" && state.capabilities.includes("select"),
     false,
   );
-  const selected = useThreadStageBridge(threadKey, (state) => state.selected, null);
   // One hover message per frame at most: the game raycasts on each.
   const pending = useRef<{ x: number; y: number } | null>(null);
   const scheduled = useRef(false);
@@ -83,21 +81,7 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
         const point = at(event as unknown as ReactPointerEvent<HTMLDivElement>);
         pointStage(point.x, point.y, "select-inner");
       }}
-    >
-      {selected !== null &&
-      selected.thing.instance === undefined &&
-      (selected.thing.instances ?? 0) > 1 ? (
-        <Text
-          variant="caption"
-          tone="inherit"
-          render={
-            <span className="pointer-events-none absolute right-3 bottom-3 rounded-md bg-black/60 px-2 py-1 text-stage-foreground/85" />
-          }
-        >
-          All {selected.thing.instances} · double-click to pick one
-        </Text>
-      ) : null}
-    </div>
+    />
   );
 }
 

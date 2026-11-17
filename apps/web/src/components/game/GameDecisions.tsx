@@ -2,16 +2,19 @@ import { useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import type { GameDecideInput, GameDecision, ScopedThreadRef } from "@kurambit/contracts";
-import { PencilIcon, Trash2Icon } from "lucide-react";
+import { XIcon } from "lucide-react";
+import { create } from "zustand";
+
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import { Text } from "../ui/text";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Workbench } from "./GameWorkbenchParts";
 
-const NOTE_MAX = 300;
+/** Counts changes sent from here (the composer's /remember, a line removed), so a shown list reads again. */
+const useDecisionsChanged = create<number>()(() => 0);
 
 /**
  * Sends one change to the game's decisions: a note to remember, or a line edited or deleted.
@@ -30,191 +33,79 @@ export function useGameDecide(threadRef: ScopedThreadRef | null) {
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId, change },
     });
-    return result._tag === "Success"
-      ? { ok: true, decisions: result.value }
-      : { ok: false, error: String(squashAtomCommandFailure(result)) };
+    if (result._tag !== "Success")
+      return { ok: false, error: String(squashAtomCommandFailure(result)) };
+    useDecisionsChanged.setState((count) => count + 1);
+    return { ok: true, decisions: result.value };
   };
 }
 
 /**
- * The Workbench's Decisions tab: the game's decisions (`.studio/decisions.md`), what the person
- * undid, kept or skipped, and their own notes, which every new agent session reads. Each line can
- * be edited or deleted, and a note added.
+ * Checks' last section: the game's decisions (`.studio/decisions.md`), which every new agent
+ * session reads, one line each, newest first, removed from the row's hover. Added from the
+ * composer's /remember, an undo, kept values or a skipped step. Hidden while there are none.
  */
-export function GameDecisionsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
+export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const environmentId = threadRef.environmentId;
   const listDecisions = useAtomCommand(gameEnvironment.decisions, { reportFailure: false });
   const decide = useGameDecide(threadRef);
   const canDecide = useAtomValue(gameEnvironment.decide.permissionAtom(environmentId));
-  const [decisions, setDecisions] = useState<ReadonlyArray<GameDecision> | null>(null);
-  const [note, setNote] = useState("");
-  const [editing, setEditing] = useState<{ line: number; was: string; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [decisions, setDecisions] = useState<ReadonlyArray<GameDecision>>([]);
   const [error, setError] = useState<string | null>(null);
-
   const refresh = useStableCallback(async () => {
     const result = await listDecisions({ environmentId, input: { threadId: threadRef.threadId } });
     if (result._tag === "Success") setDecisions(result.value);
-    else setError(String(squashAtomCommandFailure(result)));
   });
-  // Read again each time the tab is shown: undos, kept values and skips add lines meanwhile.
+  // Read when shown and again after each change sent from here: undos and skips add lines too.
   useEffect(() => {
     void refresh();
+    return useDecisionsChanged.subscribe(() => void refresh());
   }, [refresh]);
-
-  const send = async (change: GameDecideInput["change"]) => {
-    setBusy(true);
-    setError(null);
-    const result = await decide(change);
-    setBusy(false);
-    if (!result.ok) {
-      setError(result.error);
-      await refresh();
-      return false;
-    }
-    setDecisions(result.decisions);
-    return true;
-  };
-
-  const trimmed = note.trim();
+  if (decisions.length === 0 && error === null) return null;
   return (
-    <Workbench.Body>
-      <Workbench.Section
-        title="Decisions"
-        detail={decisions === null || decisions.length === 0 ? null : String(decisions.length)}
-      >
-        <div className="flex flex-col gap-3 px-4 pt-1">
-          <Text variant="caption" tone="muted" render={<p />}>
-            What you undid, kept or skipped, and what you asked to be remembered. Every new agent
-            session on this game reads it, so it does not bring back what you turned down.
+    <Workbench.Section title="Decisions" detail={String(decisions.length)}>
+      {decisions.toReversed().map((decision) => (
+        <div
+          key={`${decision.line}:${decision.text}`}
+          className="group/decision flex min-h-7 min-w-0 items-start gap-2 py-1 ps-4 pe-2"
+        >
+          <Text variant="meta" tone="default" render={<p className="min-w-0 flex-1 leading-5" />}>
+            {decision.text}
           </Text>
           {canDecide ? (
-            <form
-              className="flex items-center gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void send({ _tag: "note", text: trimmed }).then((ok) => ok && setNote(""));
-              }}
-            >
-              <Input
-                size="sm"
-                value={note}
-                maxLength={NOTE_MAX}
-                disabled={busy}
-                placeholder="No music with lyrics, keep it one-button…"
-                aria-label="Something for every session to remember"
-                onChange={(event) => setNote(event.currentTarget.value)}
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                type="submit"
-                disabled={busy || trimmed.length === 0}
-              >
-                Remember this
-              </Button>
-            </form>
-          ) : null}
-          {error === null ? null : (
-            <Text variant="meta" tone="destructive" render={<p role="alert" />}>
-              {error}
-            </Text>
-          )}
-          {decisions === null ? null : decisions.length === 0 ? (
-            <Text variant="meta" tone="muted" render={<p />}>
-              Nothing decided yet. An undo, values kept from the Stage or a skipped step adds a line
-              here.
-            </Text>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {decisions.toReversed().map((decision) => (
-                <li key={`${decision.line}:${decision.text}`} className="flex items-center gap-2">
-                  {editing?.line === decision.line ? (
-                    <form
-                      className="flex min-w-0 flex-1 items-center gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void send({
-                          _tag: "edit",
-                          line: editing.line,
-                          was: editing.was,
-                          text: editing.text.trim(),
-                        }).then((ok) => ok && setEditing(null));
+            <span className="flex h-5 w-6 shrink-0 items-center justify-end opacity-0 group-hover/decision:opacity-100 focus-within:opacity-100">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      aria-label={`Forget "${decision.text}"`}
+                      onClick={async () => {
+                        setError(null);
+                        const result = await decide({
+                          _tag: "remove",
+                          line: decision.line,
+                          was: decision.text,
+                        });
+                        if (!result.ok) setError(result.error);
                       }}
-                    >
-                      <Input
-                        size="sm"
-                        value={editing.text}
-                        maxLength={NOTE_MAX}
-                        disabled={busy}
-                        autoFocus
-                        aria-label="Edit this decision"
-                        onChange={(event) =>
-                          setEditing({ ...editing, text: event.currentTarget.value })
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") {
-                            event.stopPropagation();
-                            setEditing(null);
-                          }
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        type="submit"
-                        disabled={busy || editing.text.trim().length === 0}
-                      >
-                        Save
-                      </Button>
-                    </form>
-                  ) : (
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <Text variant="body" tone="default" render={<span className="break-words" />}>
-                        {decision.text}
-                      </Text>
-                      {decision.date === "" ? null : (
-                        <Text variant="caption" tone="muted" numeric>
-                          {decision.date}
-                        </Text>
-                      )}
-                    </span>
-                  )}
-                  {canDecide && editing?.line !== decision.line ? (
-                    <>
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={`Edit "${decision.text}"`}
-                        disabled={busy}
-                        onClick={() =>
-                          setEditing({
-                            line: decision.line,
-                            was: decision.text,
-                            text: decision.text,
-                          })
-                        }
-                      >
-                        <PencilIcon aria-hidden="true" />
-                      </Button>
-                      <Button
-                        size="icon-xs"
-                        variant="ghost-destructive"
-                        aria-label={`Delete "${decision.text}"`}
-                        disabled={busy}
-                        onClick={() =>
-                          void send({ _tag: "remove", line: decision.line, was: decision.text })
-                        }
-                      >
-                        <Trash2Icon aria-hidden="true" />
-                      </Button>
-                    </>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
+                    />
+                  }
+                >
+                  <XIcon aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipPopup side="left">Forget this</TooltipPopup>
+              </Tooltip>
+            </span>
+          ) : null}
         </div>
-      </Workbench.Section>
-    </Workbench.Body>
+      ))}
+      {error === null ? null : (
+        <Text variant="caption" tone="destructive" render={<p role="alert" className="px-4" />}>
+          {error}
+        </Text>
+      )}
+    </Workbench.Section>
   );
 }

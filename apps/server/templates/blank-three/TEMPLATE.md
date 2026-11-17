@@ -30,3 +30,6 @@ Optional: `export const ASSETS = { name: "assets/…/file.glb" }` loads models a
 the first run (`ctx.assets.model(name)`), and `export function render(ctx, dt)` draws the frame
 yourself. `index.html?play` boots straight into play while building. Every file loads from
 `web/`, nothing from the network; ES modules, no build step.
+
+When the person asks you to remember something about the game, add it to `.studio/decisions.md`
+as one line, `- YYYY-MM-DD · what to remember`: every agent session on the game reads it.

@@ -639,6 +639,36 @@ async function soundPeaks(url: string) {
   };
 }
 
+type SoundPeaks = Awaited<ReturnType<typeof soundPeaks>>;
+/** Decoded once per sound's content for the session: the list's rows and its viewer share it. */
+const peaksRead = new Map<string, Promise<SoundPeaks>>();
+
+/** A sound's peaks and length, decoded once by its content; null while read, "failed" if not. */
+export function useSoundPeaks(url: string | null, sha256: string) {
+  const [wave, setWave] = useState<{
+    readonly of: string;
+    readonly read: SoundPeaks | "failed";
+  } | null>(null);
+  useEffect(() => {
+    if (url === null) return;
+    let live = true;
+    let read = peaksRead.get(sha256);
+    if (read === undefined) {
+      read = soundPeaks(url);
+      peaksRead.set(sha256, read);
+      read.catch(() => peaksRead.delete(sha256));
+    }
+    read.then(
+      (peaks) => live && setWave({ of: sha256, read: peaks }),
+      () => live && setWave({ of: sha256, read: "failed" }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [url, sha256]);
+  return wave === null || wave.of !== sha256 ? null : wave.read;
+}
+
 /** A sound's waveform with play: the bars drawn once, the played part shaded as it plays. */
 export function AudioViewer({
   environmentId,
@@ -655,21 +685,10 @@ export function AudioViewer({
     path: asset.path,
   });
   const url = state._tag === "Success" ? state.url : null;
-  const [wave, setWave] = useState<Awaited<ReturnType<typeof soundPeaks>> | null | "failed">(null);
+  const wave = useSoundPeaks(url, asset.sha256);
   const [playing, setPlaying] = useState(false);
   const [at, setAt] = useState(0);
   const audio = useRef<HTMLAudioElement>(null);
-  useEffect(() => {
-    if (url === null) return;
-    let live = true;
-    soundPeaks(url).then(
-      (read) => live && setWave(read),
-      () => live && setWave("failed"),
-    );
-    return () => {
-      live = false;
-    };
-  }, [url]);
   const seconds = wave !== null && wave !== "failed" ? wave.seconds : 0;
   const share = seconds > 0 ? Math.min(1, at / seconds) : 0;
   return (
@@ -768,7 +787,45 @@ export function AudioViewer({
 
 // ─── Fonts ─────────────────────────────────────────────────────────────────────
 
-const SAMPLE = "The quick brown fox jumps over the lazy dog 0123456789";
+export const FONT_SAMPLE = "The quick brown fox jumps over the lazy dog 0123456789";
+
+/** A font file loaded as a face while shown: its family name, null while loading, or "failed". */
+export function useFontFamily(environmentId: EnvironmentId, root: string, asset: GameArtAsset) {
+  const state = useAssetUrlState(environmentId, {
+    _tag: "draft-workspace-file",
+    cwd: root,
+    path: asset.path,
+  });
+  const url = state._tag === "Success" ? state.url : null;
+  const [family, setFamily] = useState<{ readonly of: string; readonly name: string } | null>(null);
+  useEffect(() => {
+    if (url === null) return;
+    const name = `kurambit-art-${asset.sha256.slice(0, 12)}`;
+    let face: FontFace | null = null;
+    let live = true;
+    // Its bytes, not its URL: the desktop app's font-src admits only its own origin.
+    fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`${response.status}`);
+        return response.arrayBuffer();
+      })
+      .then((bytes) => (face = new FontFace(name, bytes)).load())
+      .then(
+        (loaded) => {
+          if (!live) return;
+          document.fonts.add(loaded);
+          setFamily({ of: url, name });
+        },
+        () => live && setFamily({ of: url, name: "failed" }),
+      );
+    return () => {
+      live = false;
+      if (face !== null) document.fonts.delete(face);
+    };
+  }, [url, asset.sha256]);
+  if (state._tag === "Failure") return "failed";
+  return family === null || family.of !== url ? null : family.name;
+}
 
 /** A font's letters at a few sizes, loaded only while it is open. */
 export function FontViewer({
@@ -780,31 +837,7 @@ export function FontViewer({
   root: string;
   asset: GameArtAsset;
 }) {
-  const state = useAssetUrlState(environmentId, {
-    _tag: "draft-workspace-file",
-    cwd: root,
-    path: asset.path,
-  });
-  const url = state._tag === "Success" ? state.url : null;
-  const [family, setFamily] = useState<string | null | "failed">(null);
-  useEffect(() => {
-    if (url === null) return;
-    const name = `kurambit-art-${asset.sha256.slice(0, 12)}`;
-    const face = new FontFace(name, `url("${url}")`);
-    let live = true;
-    face.load().then(
-      (loaded) => {
-        if (!live) return;
-        document.fonts.add(loaded);
-        setFamily(name);
-      },
-      () => live && setFamily("failed"),
-    );
-    return () => {
-      live = false;
-      document.fonts.delete(face);
-    };
-  }, [url, asset.sha256]);
+  const family = useFontFamily(environmentId, root, asset);
   return (
     <div className="flex flex-col gap-3 px-4 py-4">
       {family === null ? (
@@ -822,7 +855,7 @@ export function FontViewer({
             className="text-foreground"
             style={{ fontFamily: family, fontSize: px, lineHeight: 1.25 }}
           >
-            {SAMPLE}
+            {FONT_SAMPLE}
           </p>
         ))
       )}

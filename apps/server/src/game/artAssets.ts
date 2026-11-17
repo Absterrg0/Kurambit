@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { LRUCache } from "lru-cache";
 import {
+  GAME_ART_THUMBNAIL_DIR,
   GAME_MODEL_SIDECAR_SUFFIX,
   GameModelSidecar,
   type GameArtAsset,
@@ -29,7 +30,7 @@ const MAX_WALK = 20_000;
 const MAX_RECORDS = 500;
 const MAX_GLTF_JSON = 8 * 1024 * 1024;
 /** Thumbnails the Art tab drew, by content, in the game's ignored builds folder. */
-const ART_THUMBNAIL_DIR = "builds/thumbnails";
+const ART_THUMBNAIL_DIR = GAME_ART_THUMBNAIL_DIR;
 /** The game's one Blender scene, which every Blender-made model is exported from. */
 const BLEND_SOURCE = "art/blender/live.blend";
 

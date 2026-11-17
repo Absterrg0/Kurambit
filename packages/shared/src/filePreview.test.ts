@@ -55,6 +55,7 @@ describe("workspace file previews", () => {
     expect(isWorkspaceAudioPreviewPath("recording.wav.ts")).toBe(false);
     expect(hostPreviewMimeTypeFromExtension(".m4a")).toBe("audio/mp4");
     expect(hostPreviewMimeTypeFromExtension(".mp4")).toBe("video/mp4");
+    expect(hostPreviewMimeTypeFromExtension(".woff2")).toBe("font/woff2");
     expect(hostPreviewMimeTypeFromExtension(".txt")).toBeNull();
   });
 });

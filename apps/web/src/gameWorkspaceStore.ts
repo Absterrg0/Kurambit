@@ -31,8 +31,8 @@ export type GameStageRequest =
   | { readonly kind: "history" }
   | { readonly kind: "generated-art" };
 
-/** The Workbench's sections beside the game: its values, its art, the build's checks, its page's log, decisions. */
-export const WORKBENCH_TABS = ["tune", "art", "checks", "debug", "decisions"] as const;
+/** The Workbench's sections beside the game: its values, its art, and the build's checks. */
+export const WORKBENCH_TABS = ["tune", "art", "checks"] as const;
 export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];
 const isWorkbenchTab = (tab: unknown): tab is WorkbenchTab =>
   (WORKBENCH_TABS as ReadonlyArray<unknown>).includes(tab);

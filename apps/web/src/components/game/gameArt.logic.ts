@@ -11,6 +11,9 @@ export interface GameArtCodeModel {
   readonly kind: "code-model";
   readonly id: string;
   readonly name: string;
+  readonly thingKind: GameThing["kind"];
+  /** It has values to tune (ctx.tune by its name). */
+  readonly tunable: boolean;
 }
 
 /** One row of the Art list: a file of the game, or a model made in code. */
@@ -24,20 +27,16 @@ export const entryKey = (entry: GameArtEntry) =>
 
 export const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-const GROUPS: ReadonlyArray<{ readonly kind: GameArtAssetKind; readonly label: string }> = [
-  { kind: "model", label: "Models" },
-  { kind: "texture", label: "Textures and sprites" },
-  { kind: "audio", label: "Sounds" },
-  { kind: "font", label: "Fonts" },
-];
-
 export const ROUTE_WORDS: Record<GameArtAssetRoute, string> = {
   code: "Code",
   blender: "Blender",
   generated: "Generated",
   library: "Library",
-  unrecorded: "Not recorded",
+  unrecorded: "unrecorded",
 };
+
+/** The segmented filter over the list; fonts show under All only. */
+export type ArtFilter = "all" | "model" | "texture" | "audio";
 
 /** Things a game names that have a body worth looking at alone; rules and interface are not art. */
 const MODEL_KINDS: ReadonlySet<GameThing["kind"]> = new Set([
@@ -62,58 +61,60 @@ export const codeModels = (things: ReadonlyArray<GameThing>): ReadonlyArray<Game
     const base = thing.name.replace(/ \d+$/, "");
     if (seen.has(base)) continue;
     seen.add(base);
-    models.push({ kind: "code-model", id: thing.id, name: base });
+    models.push({
+      kind: "code-model",
+      id: thing.id,
+      name: base,
+      thingKind: thing.kind,
+      tunable: (thing.values?.length ?? 0) > 0,
+    });
   }
   return models;
 };
 
-export type GameArtRow =
-  | {
-      readonly type: "heading";
-      readonly key: string;
-      readonly label: string;
-      readonly count: number;
-    }
-  | { readonly type: "entry"; readonly key: string; readonly entry: GameArtEntry };
-
 const matches = (words: ReadonlyArray<string>, haystack: string) =>
   words.every((word) => haystack.includes(word));
 
-/** The list's rows: each kind's heading, then its entries, filtered by every word searched. */
-export const artRows = (
+/**
+ * What the list shows under a filter and a search (every word must match): the pictures (models,
+ * the code's first, then textures) as a grid, the sounds and the fonts as lists.
+ */
+export const artSections = (
   assets: ReadonlyArray<GameArtAsset>,
   code: ReadonlyArray<GameArtCodeModel>,
   search: string,
-): ReadonlyArray<GameArtRow> => {
+  filter: ArtFilter,
+) => {
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
-  const rows: GameArtRow[] = [];
-  for (const group of GROUPS) {
-    const entries: GameArtEntry[] = [
-      ...(group.kind === "model" ? code : []).filter((model) =>
-        matches(words, `${model.name} code`.toLowerCase()),
-      ),
-      ...assets
-        .filter(
+  const files = (kind: GameArtAssetKind) =>
+    filter !== "all" && filter !== kind
+      ? []
+      : assets.filter(
           (asset) =>
-            asset.kind === group.kind &&
+            asset.kind === kind &&
             matches(
               words,
-              `${asset.path} ${ROUTE_WORDS[asset.route]} ${asset.credit ?? ""} ${asset.pack ?? ""}`.toLowerCase(),
+              `${asset.path} ${asset.route} ${asset.credit ?? ""} ${asset.pack ?? ""}`.toLowerCase(),
             ),
-        )
-        .map((asset) => ({ kind: "file" as const, asset })),
-    ];
-    if (entries.length === 0) continue;
-    rows.push({
-      type: "heading",
-      key: `heading:${group.kind}`,
-      label: group.label,
-      count: entries.length,
-    });
-    for (const entry of entries) rows.push({ type: "entry", key: entryKey(entry), entry });
-  }
-  return rows;
+        );
+  const models: ReadonlyArray<GameArtEntry> = [
+    ...(filter === "all" || filter === "model" ? code : []).filter((model) =>
+      matches(words, model.name.toLowerCase()),
+    ),
+    ...files("model").map((asset) => ({ kind: "file" as const, asset })),
+    ...files("texture").map((asset) => ({ kind: "file" as const, asset })),
+  ];
+  return {
+    pictures: models,
+    sounds: files("audio"),
+    fonts: filter === "all" ? files("font") : [],
+  };
 };
+
+/** The build's plays never loaded it (a sound: never played it); false when they did not say. */
+export const isUnused = (asset: GameArtAsset, use: GameAssetUse | null) =>
+  use !== null &&
+  (use.unused.includes(asset.path) || (asset.kind === "audio" && use.silent.includes(asset.path)));
 
 /** Whether the build's plays used a file, in a few words; null when its plays did not measure it. */
 export const inPlayWords = (
@@ -142,17 +143,6 @@ export const bytesWords = (bytes: number) =>
 
 export const countWords = (count: number, one: string, many: string) =>
   `${count.toLocaleString("en-US")} ${count === 1 ? one : many}`;
-
-/** The row's second line: where it came from, its licence and its cost. */
-export const assetSummary = (asset: GameArtAsset) =>
-  [
-    ROUTE_WORDS[asset.route],
-    asset.credit ?? null,
-    asset.triangles === undefined ? null : countWords(asset.triangles, "triangle", "triangles"),
-    bytesWords(asset.bytes),
-  ]
-    .filter((part) => part !== null)
-    .join(" · ");
 
 /** The Stage thing showing this file, if the game on the Stage has one: the first copy. */
 export const thingOfAsset = (things: ReadonlyArray<GameThing>, asset: GameArtAsset) =>

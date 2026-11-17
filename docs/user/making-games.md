@@ -290,37 +290,36 @@ If a build doesn't start, the game says so in its middle with the error, **Ask t
 it** and **Undo**. An error while you play shows as one small line in the game's corner.
 
 The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
-which also opens each section directly). Drag its edge to resize it. Its sections:
+which also opens each section directly). The same key or the header's Workbench button closes it.
+Drag its edge to resize it. Its three sections:
 
-- **Tune**: everything the game names, by kind, and under it the picked thing's values, such as
-  its speed, jump height, timers and counts. Pointing at a thing on the paused game picks it too.
-  Drag a value sideways to change it, or click it
-  to type; the game changes at once. Values are saved into the game as you let go, and a tuning
-  session is one build Undo takes back; **Keep as a build** ends the session, so your next change
-  starts another. **Put all back** returns every value to the game's own. If a game shows nothing to
-  tune, **Ask your agent to expose them** asks for it.
-- **Art** (`mod+Alt+R`): the game's look (its style, how its models are made and whether the free
-  library may come in, and the art generated for it), then every asset the game has: models,
-  textures and sprites, sounds, fonts, and the models its code builds while it plays. Each shows
-  where it came from, its licence, its size and whether the last measured play used it. Open one to
-  look at it: a model turns in a 3D viewer beside a 1.8 m figure, with wireframe, normals, its
-  skeleton, bounds and its clips to play or scrub; an image shows at full size with its alpha and a
-  sprite sheet's frames; a sound shows its waveform. **Tint** and **Scale** change a model the game
-  loads through `ASSETS`, as a build Undo takes back. The asset's **Change it** asks the agent by the
-  way it was made: generate it again from its prompt, which you can edit first, swap a library
-  entry, or rework it in Blender. The chat bubble button adds the asset to your message with a
-  picture of the view. With the game paused, the asset you open is outlined where it is in the
-  game, and a picked thing's **Open in Art** goes the other way.
-- **Checks**: first what the build changed in words (the turn's headline, the values it tuned, and
-  the saved plays and readings that moved since the build before), then its files as one line that
-  opens to each file's lines; click a file to open it in the diff. Then its checks as one line, such
-  as "6 of 9 pass", which opens to the passing ones, with what is left to look at listed under it,
-  your saved test plays under the check that replays them, and **Measure again**. A build's checks
-  in the chat open here. Opening a diff on a narrow window closes the Workbench to give the game
-  room; open it again to see both.
-- **Debug**: the game's own values (score, health, timers) as it plays, and its console. The
-  section's name counts the errors and warnings logged.
-- **Decisions**: what the game remembers you decided, to edit, delete or add to.
+- **Tune**: the things the game names that have values to tune, by kind, and under them the picked
+  thing's values, such as its speed, jump height, timers and counts. Pointing at a thing on the
+  paused game picks it too. Click a value's field to type, or drag the field or its label sideways;
+  the game changes at once, and the bar under the field shows where the value sits in its range.
+  Values are saved into the game as you let go, and a tuning session is one build Undo takes back;
+  **Keep as a build** ends the session, so your next change starts another. **Put all back**
+  returns every value to the game's own. If a game has nothing to tune, **Ask your agent to expose
+  values** asks for it.
+- **Art** (`mod+Alt+R`): every asset the game has, with search and a filter for models, textures
+  and sounds. Models (the ones the game's code builds too) and textures show as pictures, with
+  their triangles or size in pixels; sounds show their length and waveform, with a play button;
+  fonts show a line set in them. An asset the last measured play never used is dimmed. Open one to
+  look at it: a model file turns in a 3D viewer beside a 1.8 m figure, with wireframe, normals, its
+  skeleton, bounds and its clips; a model the code builds turns as you drag it, drawn by the game
+  alone, with **Tune its values** when it has some; an image shows at full size with its alpha and
+  a sprite sheet's frames; a sound shows its waveform. **Tint** and **Scale** change a model the
+  game loads through `ASSETS`, as a build Undo takes back, and a generated asset's prompt can be
+  edited and generated again. **Ask about this** adds the asset to your message with a picture of
+  the view, and **Show on the Stage** points at it in the paused game.
+- **Checks**: how many checks pass, over a bar with one mark per check, then what the build changed
+  in words and its files as one line that opens to each file; click a file to open it in the diff.
+  Each check opens in place to what proves it: the phone and widescreen pictures, the frame rate
+  through the play, the controls the QA play pressed and how each answered, the errors, and your
+  saved test plays with **Replay**. When the game logged errors or warnings, its **Console** follows,
+  and the Checks button counts the errors. Last come the game's **Decisions**. A build's checks in
+  the chat open here. Opening a diff on a narrow window closes the Workbench to give the game room;
+  open it again to see both.
 
 - **A three.js game is always on.** The stage plays the game folder itself, and **Restart** starts
   it again at its title screen. Click the picture once, or just start pressing keys, so the keyboard reaches it.
@@ -358,8 +357,8 @@ which also opens each section directly). Drag its edge to resize it. Its section
   `/remember no music with lyrics` from the composer. Every new agent session on the game (a new
   chat, a keep-going step, the first turn after a restart) reads the newest lines, and a chat
   that goes on hears each new one once, so the agent does not bring back what you turned down.
-  The Workbench's **Decisions** lists them to edit, delete or add to. An undo never
-  rewinds this file.
+  The Workbench's **Checks** lists them under **Decisions**; hover a line to forget it. An undo
+  never rewinds this file.
 - **Test plays (three.js).** **Save as test play** in the bar's **⋯** menu saves a run under a name,
   such as a win or the run where a bug showed: the run that ended, or the one you are playing, up
   to now or to where you rewound it, so a game with no ending has test plays too. Your first win is

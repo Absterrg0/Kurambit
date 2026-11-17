@@ -35,17 +35,14 @@ const WORKBENCH_PALETTE: ReadonlyArray<{
       "diff",
       "saved plays",
       "test play",
+      "console",
+      "errors",
+      "warnings",
+      "logs",
+      "debug",
+      "decisions",
+      "remember",
     ],
-  },
-  {
-    tab: "debug",
-    title: "Debug",
-    searchTerms: ["debug", "console", "errors", "warnings", "logs", "values", "watch"],
-  },
-  {
-    tab: "decisions",
-    title: "Decisions",
-    searchTerms: ["decisions", "remember", "memory", "notes"],
   },
 ];
 import { useKeepGoing } from "./game/useKeepGoing";

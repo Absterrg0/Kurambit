@@ -37,6 +37,8 @@ export const GameStageCapability = Schema.Literals([
   "runs",
   /** Hands the run so far to the Stage, and replays a run to a moment to go on from there live. */
   "rewind",
+  /** Draws one named thing alone (studio-portrait), for Art's pictures and its orbit view. */
+  "portrait",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -286,6 +288,19 @@ export const StudioOrbit = Schema.Struct({
   zoom: Schema.Finite,
 });
 
+/**
+ * Asks for one named thing drawn alone, framed, from `yaw` and `pitch` (radians around it), as a
+ * square PNG of `size` px: answered with studio-picture, `request` echoed.
+ */
+export const StudioPortrait = Schema.Struct({
+  type: Schema.Literal("studio-portrait"),
+  request: Schema.Finite,
+  id: Schema.String,
+  size: Schema.Int.check(Schema.isBetween({ minimum: 32, maximum: 512 })),
+  yaw: Schema.Finite,
+  pitch: Schema.Finite,
+});
+
 /** The Stage's tab is hidden (or shown): the game holds play and sound, and acknowledges. */
 export const StudioVisibility = Schema.Struct({
   type: Schema.Literal("studio-visibility"),
@@ -314,6 +329,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioDev,
   StudioStep,
   StudioOrbit,
+  StudioPortrait,
 ]);
 export type GameStageToGameMessage = typeof GameStageToGameMessage.Type;
 
@@ -396,6 +412,30 @@ export const StudioControls = Schema.Struct({
 export const StudioFrame = Schema.Struct({
   type: Schema.Literal("studio-frame"),
   png: Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/)),
+});
+
+/** What a thing drawn alone is made of, as the running game counts it. */
+export const GameThingFacts = Schema.Struct({
+  triangles: NonNegativeInt,
+  /** How many materials draw it, and the base colour of each that has one, "#rrggbb". */
+  materials: NonNegativeInt,
+  colours: Schema.Array(Schema.String.check(Schema.isPattern(/^#[0-9a-f]{6}$/))).check(
+    Schema.isMaxLength(12),
+  ),
+  /** Its bounds' size: wide, tall, long, in the game's units. */
+  size: Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]),
+  /** The share of the picture the thing covers, 0 to 1: near 0, the picture shows nothing. */
+  covers: Schema.Finite,
+});
+export type GameThingFacts = typeof GameThingFacts.Type;
+
+/** The answer to studio-portrait: null when the thing has no body on screen to draw. */
+export const StudioPicture = Schema.Struct({
+  type: Schema.Literal("studio-picture"),
+  request: Schema.Finite,
+  id: Schema.String,
+  png: Schema.NullOr(Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/))),
+  facts: Schema.optionalKey(GameThingFacts),
 });
 
 /**
@@ -481,6 +521,7 @@ export const GameToStageMessage = Schema.Union([
   StudioKey,
   StudioShortcut,
   StudioFrame,
+  StudioPicture,
   StudioControls,
   StudioPlay,
   StudioRun,
