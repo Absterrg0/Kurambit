@@ -803,7 +803,8 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
       return (
         <EvidenceBlock>
           <ControlsEvidence threadKey={scopedThreadKey(threadRef)} facts={facts} />
-          <ProblemLines lines={qaLines(facts, "controls")} />
+          {/* The key rows say which control does nothing; the lines only when there are none. */}
+          {hasControls(facts) ? null : <ProblemLines lines={qaLines(facts, "controls")} />}
           {recordings}
         </EvidenceBlock>
       );
