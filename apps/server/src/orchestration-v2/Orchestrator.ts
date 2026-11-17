@@ -6768,6 +6768,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       updatedAt: now,
       type: "system_notice",
       message: command.notice,
+      notice: "game",
     };
     yield* emit(
       events,
@@ -6815,6 +6816,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       updatedAt: now,
       type: "system_notice",
       message: command.notice,
+      notice: "game",
     };
     yield* emit(
       events,

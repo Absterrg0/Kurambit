@@ -512,8 +512,8 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
       return {
         ...common,
         label: item.message,
-        // A try's versions starting is news, not a warning.
-        ...(item.notice === "versions" ? {} : { sourceActivityKind: "runtime.warning" }),
+        // A try's versions starting, or the person's move of the game's work, is news, not a warning.
+        ...(item.notice !== undefined ? {} : { sourceActivityKind: "runtime.warning" }),
       };
     case "error": {
       const presentation = providerErrorPresentation(item);

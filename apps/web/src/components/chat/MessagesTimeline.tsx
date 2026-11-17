@@ -5172,6 +5172,11 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
     workEntry.structuredPayload.notice === "versions"
   )
     return "split";
+  if (
+    workEntry.structuredPayload?.type === "system_notice" &&
+    workEntry.structuredPayload.notice === "game"
+  )
+    return "kurambit";
   if (workEntry.toolSurface) return workEntry.toolSurface;
   if (
     workEntry.structuredPayload?.type === "dynamic_tool" &&
