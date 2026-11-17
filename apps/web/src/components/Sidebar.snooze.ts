@@ -1,13 +1,12 @@
 import type { TimestampFormat } from "@kurambit/contracts/settings";
 import {
   resolveSnoozePresets as resolveSharedSnoozePresets,
-  snoozeWakeLabel,
   type SnoozePreset,
 } from "@kurambit/client-runtime/state/thread-settled";
 
 import { formatShortTimestamp, parseTimestampDate } from "../timestampFormat";
 
-export { snoozeWakeLabel, type SnoozePreset };
+export type { SnoozePreset };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 

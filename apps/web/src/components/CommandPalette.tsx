@@ -107,6 +107,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CodeIcon,
+  LibraryBigIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
@@ -337,6 +338,15 @@ import type { Project } from "../types";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
+
+const LIBRARY_KIND_WORDS = {
+  model: "Model",
+  texture: "Texture",
+  audio: "Sound",
+  font: "Font",
+  pack: "Pack",
+  look: "Look",
+} as const;
 
 function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
   if (os === "windows") {
@@ -1333,6 +1343,42 @@ function OpenCommandPaletteDialog(props: {
       thread !== undefined && gameByProjectKey.has(`${thread.environmentId}:${thread.projectId}`)
     );
   });
+
+  // The Library's assets, read only once something is typed: an empty palette never reads them.
+  const libraryQuery = currentView === null && !isActionsOnly && deferredQuery.trim() !== "";
+  const libraryItems = useEnvironmentQuery(
+    libraryQuery && primaryEnvironmentId !== null
+      ? gameEnvironment.libraryList({ environmentId: primaryEnvironmentId, input: {} })
+      : null,
+  ).data?.items;
+  const librarySearchItems: CommandPaletteActionItem[] = (libraryItems ?? []).map((item) => ({
+    kind: "action",
+    value: `library:${item.id}`,
+    searchTerms: [
+      item.name,
+      LIBRARY_KIND_WORDS[item.kind],
+      "library",
+      ...item.usedIn.map((use) => use.game),
+      ...(item.from === undefined ? [] : [item.from]),
+      ...(item.pack === undefined ? [] : [item.pack.author]),
+    ],
+    title: item.name,
+    description: [
+      LIBRARY_KIND_WORDS[item.kind],
+      item.source === "pack"
+        ? item.pack?.author
+        : item.source === "saved"
+          ? `saved from ${item.from ?? "a game"}`
+          : item.usedIn.map((use) => use.game).join(", "),
+    ]
+      .filter((part) => part !== undefined && part !== "")
+      .join(" · "),
+    secondary: item.source === "pack",
+    icon: <LibraryBigIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/library", search: { item: item.id } });
+    },
+  }));
 
   // Stable so the item builders that capture it during render never see the
   // highlight ref it writes.
@@ -2594,6 +2640,7 @@ function OpenCommandPaletteDialog(props: {
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     gameSearchItems: gameRowItems,
+    librarySearchItems,
     settingsSearchItems,
     threadSearchItems:
       linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query

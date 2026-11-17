@@ -134,7 +134,7 @@ export function buildGameTree<G extends GameTreeGame, C extends GameTreeChat>(in
 }
 
 /** How many chats a game shows before "Show N more". */
-export const GAME_TREE_CHAT_LIMIT = 5;
+const GAME_TREE_CHAT_LIMIT = 5;
 
 /**
  * PURE. The chats an expanded game lists: the first five, or all of them once asked, and the open

@@ -2,8 +2,8 @@ import { LibraryBigIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Kbd } from "../ui/kbd";
-import { SidebarMenuButton } from "../ui/sidebar";
 import { Text } from "../ui/text";
+import { SIDEBAR_TREE_ROW } from "./SidebarGameRows";
 
 export interface SidebarThreadHeaderProps {
   onNewGame: () => void;
@@ -63,23 +63,26 @@ function SidebarHeaderRow({
   onClick: () => void;
 }) {
   return (
-    <SidebarMenuButton
+    <button
       type="button"
-      isActive={active}
+      data-active={active}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
-      className="group/header-row h-7 px-1"
+      className={SIDEBAR_TREE_ROW}
     >
-      {icon}
+      {/* The icon sits where a game's picture does, so the column reads as one list. */}
+      <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">
+        {icon}
+      </span>
       <Text variant="label" tone={active ? "default" : "muted"} truncate>
         {label}
       </Text>
       {/* The shortcut is a reminder for the row in hand; at rest it only crowds the column. */}
       {shortcut === null ? null : (
-        <span className="ms-auto opacity-0 transition-opacity group-hover/header-row:opacity-100 group-focus-visible/header-row:opacity-100">
+        <span className="ms-auto opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100">
           <Kbd>{shortcut}</Kbd>
         </span>
       )}
-    </SidebarMenuButton>
+    </button>
   );
 }

@@ -261,7 +261,7 @@ export const GameLibraryAddResult = Schema.Struct({
 export type GameLibraryAddResult = typeof GameLibraryAddResult.Type;
 
 /** The most a saved model's GLB may weigh, base64 included. */
-export const GAME_LIBRARY_MAX_GLB_CHARS = 48_000_000;
+const GAME_LIBRARY_MAX_GLB_CHARS = 48_000_000;
 
 /** A model the running game exported (GLTFExporter), kept in the home's library folder. */
 export const GameLibrarySaveInput = Schema.Struct({

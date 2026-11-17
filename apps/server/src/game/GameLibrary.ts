@@ -29,7 +29,6 @@ import {
   type GameLibrarySaveResult,
   type GameLibraryUse,
   type ProjectId,
-  type ThreadId,
 } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import { assetLines, listArtAssets } from "./artAssets.ts";
@@ -504,5 +503,5 @@ export const libraryText = (items: ReadonlyArray<GameLibraryItem>) => {
     return `${item.id} — ${item.kind} "${item.name}" (${where})`;
   });
   const more = addable.length - lines.length;
-  return `${lines.join("\n")}${more > 0 ? `\n…and ${more} more.` : ""}\nAdd one with op mine_add and its id.`;
+  return `${lines.join("\n")}${more > 0 ? `\n…and ${more} more.` : ""}\nAdd one to this game with op mine and its id as add.`;
 };

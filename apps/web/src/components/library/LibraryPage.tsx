@@ -4,7 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@kurambit/client-runtime/state/runtime";
 import type { EnvironmentId, GameArtAsset, GameLibraryItem } from "@kurambit/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
   ImageIcon,
@@ -12,7 +12,8 @@ import {
   PackageIcon,
   PlusIcon,
   ShapesIcon,
-  SparklesIcon,
+  PaletteIcon,
+  SquarePenIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -43,7 +44,15 @@ import { useGameLibrary } from "../game/useGameLibrary";
 import { buildGameTree } from "../sidebar/gameTree.logic";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { SidebarInset } from "../ui/sidebar";
 import { Text } from "../ui/text";
 import { toastManager } from "../ui/toast";
@@ -51,6 +60,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useLastGameChat } from "./lastGameChat";
 import {
+  familyWords,
   libraryTiles,
   usedInWords,
   type LibraryKindFilter,
@@ -109,12 +119,27 @@ export function LibraryPage() {
     environmentId === null ? null : gameEnvironment.libraryList({ environmentId, input: {} }),
   );
   const items = read.data?.items ?? NO_ITEMS;
+  const asked = useSearch({ from: "/_chat/library", select: (search) => search.item ?? null });
   const [kind, setKind] = useState<LibraryKindFilter>("all");
-  const [source, setSource] = useState<LibrarySourceFilter>("yours");
+  const [source, setSource] = useState<LibrarySourceFilter>(
+    asked?.startsWith("pack:") === true ? "packs" : "yours",
+  );
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(asked);
+  // Search opening the page on another item while it is open.
+  const [lastAsked, setLastAsked] = useState(asked);
+  if (asked !== lastAsked) {
+    setLastAsked(asked);
+    if (asked !== null) {
+      setSelectedId(asked);
+      setSource(asked.startsWith("pack:") ? "packs" : "yours");
+      setKind("all");
+      setSearch("");
+    }
+  }
   const tiles = libraryTiles(items, { kind, source }, search);
-  const selected = items.find((item) => item.id === selectedId) ?? null;
+  // The detail is the open tile's: a filter that hides it closes it.
+  const selected = tiles.find((item) => item.id === selectedId) ?? null;
   const loading = read.data === null || read.data === undefined;
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -170,6 +195,7 @@ export function LibraryPage() {
               environmentId={environmentId}
               tiles={tiles}
               loading={loading}
+              listKey={`${kind}:${source}:${search}`}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
@@ -198,12 +224,15 @@ function LibraryGrid({
   environmentId,
   tiles,
   loading,
+  listKey,
   selectedId,
   onSelect,
 }: {
   environmentId: EnvironmentId;
   tiles: ReadonlyArray<GameLibraryItem>;
   loading: boolean;
+  /** A new filter is a new list, from its top. */
+  listKey: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -220,7 +249,7 @@ function LibraryGrid({
     rows.push(tiles.slice(index, index + columns));
   return (
     <div ref={measure} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-      {width === 0 ? null : !loading && tiles.length === 0 ? (
+      {width === 0 || loading ? null : tiles.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <Text variant="body" tone="muted">
             Nothing here
@@ -228,6 +257,7 @@ function LibraryGrid({
         </div>
       ) : (
         <LegendList<GameLibraryItem[]>
+          key={listKey}
           data={rows}
           keyExtractor={(row) => row[0]!.id}
           estimatedItemSize={tileWidth + CAPTION_H + GAP}
@@ -280,14 +310,16 @@ function LibraryTile({
       : item.source === "pack"
         ? (item.pack?.author ?? "")
         : item.source === "look"
-          ? (item.look?.family ?? "Look")
+          ? item.look?.family === undefined
+            ? "Look"
+            : familyWords(item.look.family)
           : usedInWords(item, nameOf);
   return (
     <button
       type="button"
       aria-pressed={selected}
       onClick={onSelect}
-      className="group/tile flex min-w-0 cursor-pointer flex-col gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group/tile flex min-w-0 cursor-pointer flex-col gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
       <span
         className={cn(
@@ -385,7 +417,7 @@ function FileImage({
 
 /** A look's palette as even bands. */
 function Palette({ colours }: { colours: ReadonlyArray<string> }) {
-  if (colours.length === 0) return <Glyph>{<SparklesIcon />}</Glyph>;
+  if (colours.length === 0) return <Glyph>{<PaletteIcon />}</Glyph>;
   return (
     <span className="absolute inset-0 flex">
       {colours.slice(0, 8).map((hex, index) => (
@@ -433,7 +465,6 @@ function WaveTile({
         const height = Math.max(2, peak * 40);
         return (
           <rect
-            // oxlint-disable-next-line react/no-array-index-key -- a bar is its place in the wave.
             key={index}
             x={index * 4 + 0.5}
             y={(40 - height) / 2}
@@ -583,7 +614,7 @@ function LibraryDetail({
           item.credit === undefined ? null : `Licence: ${item.credit}.`,
           item.source === "pack"
             ? `game_assets op search with pack "${item.id.slice(5)}" lists its files.`
-            : `game_assets op mine_add with id "${item.id}" adds it to this game.`,
+            : `game_assets op mine with add "${item.id}" adds it to this game.`,
         ]
           .filter((line) => line !== null)
           .join(" "),
@@ -633,10 +664,24 @@ function LibraryDetail({
           <Menu>
             <MenuTrigger render={<Button size="sm" variant="secondary" disabled={busy} />}>
               <PlusIcon aria-hidden="true" />
-              {item.kind === "look" ? "Use in a game" : "Add to game"}
+              {item.kind === "look" ? "Use this look" : "Add to game"}
               <ChevronDownIcon aria-hidden="true" />
             </MenuTrigger>
             <MenuPopup align="start" side="bottom">
+              {item.kind === "look" ? (
+                <>
+                  <MenuItem
+                    onClick={() =>
+                      newGame({
+                        brief: `A new game in the look of ${item.name}${item.look?.family === undefined ? "" : ` (${familyWords(item.look.family)})`}, palette ${(item.look?.palette ?? []).join(" ")}: `,
+                      })
+                    }
+                  >
+                    <SquarePenIcon aria-hidden="true" />A new game
+                  </MenuItem>
+                  <MenuSeparator />
+                </>
+              ) : null}
               <MenuGroup>
                 <MenuGroupLabel>{item.kind === "look" ? "Use in" : "Add to"}</MenuGroupLabel>
                 {ordered.map((target) => (
@@ -648,20 +693,6 @@ function LibraryDetail({
             </MenuPopup>
           </Menu>
         )}
-        {item.kind === "look" ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              newGame({
-                brief: `A new game in the look of ${item.name}${item.look?.family === undefined ? "" : ` (${item.look.family})`}, palette ${(item.look?.palette ?? []).join(" ")}: `,
-              })
-            }
-          >
-            <SparklesIcon aria-hidden="true" />
-            New game in this look
-          </Button>
-        ) : null}
         {lastChat === null ? null : (
           <Button size="sm" variant="ghost" onClick={() => void ask()}>
             <MessageSquarePlusIcon aria-hidden="true" />
@@ -690,9 +721,9 @@ function LibraryDetail({
         {item.look === undefined ? null : (
           <>
             {item.look.family === undefined ? null : (
-              <Fact name="Family" reading={item.look.family} />
+              <Fact name="Family" reading={familyWords(item.look.family)} />
             )}
-            <Fact name="Palette" reading={<Swatches colours={item.look.palette} />} />
+            <Fact name="Mode" reading={item.look.mode === "pixel" ? "Pixel art" : "Smooth"} />
           </>
         )}
         {item.triangles === undefined ? null : (
@@ -730,20 +761,5 @@ function Fact({ name, reading }: { name: string; reading: ReactNode }) {
         {reading}
       </Text>
     </div>
-  );
-}
-
-function Swatches({ colours }: { colours: ReadonlyArray<string> }) {
-  return (
-    <span className="flex gap-1 pt-0.5">
-      {colours.slice(0, 10).map((hex, index) => (
-        <span
-          // oxlint-disable-next-line react/no-array-index-key -- a palette may repeat a colour.
-          key={`${index}:${hex}`}
-          className="size-4 rounded-sm ring-1 ring-border ring-inset"
-          style={{ background: hex }}
-        />
-      ))}
-    </span>
   );
 }

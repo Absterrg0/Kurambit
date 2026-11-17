@@ -81,7 +81,7 @@ export const GamePlayTool = Tool.make("game_play", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_play"));
 
 export const GameAssetsTool = Tool.make("game_assets", {
-  description: `Art and sound from outside the code. ${ONE_OP} search: the pinned open library, with a contact sheet; add: copies its files in, credited. generate: starts art with the person's providers and answers with an id (each start is paid: never start one twice); wait: its files, or that it waits for the person's pick. image_edit: changes a game image from words, for the person to pick. import: the engine's import step. mine: the person's own Library (their other games' art, saved models, looks); mine_add: copies one in by id, credited, as a build. A refusal names what is missing: tell the person.`,
+  description: `Art and sound from outside the code. ${ONE_OP} search: the pinned open library, with a contact sheet; add: copies its files in, credited. generate: starts art with the person's providers and answers with an id (each start is paid: never start one twice); wait: its files, or that it waits for the person's pick. image_edit: changes a game image from words, for the person to pick. import: the engine's import step. mine: the person's Library. A refusal names what is missing: tell the person.`,
   parameters: GameAssetsToolInput,
   ...answers,
   dependencies: [

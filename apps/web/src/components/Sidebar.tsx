@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  parseScopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
@@ -41,6 +42,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { useClientSettings } from "../hooks/useSettings";
+import { useStableCallback } from "../hooks/useStableCallback";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -94,7 +96,6 @@ import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import {
   buildGameTree,
   chatMark,
-  gameKeyOf,
   visibleChats,
   type GameTreeMark,
   type GameTreeNode,
@@ -131,6 +132,7 @@ import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/too
 type Node = GameTreeNode<GameLibraryEntry, SidebarThreadSummary>;
 
 const SORT_KEY = "kurambit:sidebar:games-sort";
+const GameTreeSortSchema = Schema.Literals(["recent", "name"]);
 const SHOW_ARCHIVED_KEY = "kurambit:sidebar:show-archived";
 const ARCHIVED_OPEN_KEY = "kurambit:sidebar:archived-expanded";
 /** A game's own expansion, apart from T3's project rows. */
@@ -198,7 +200,7 @@ export default function Sidebar() {
   const [sort, setSort] = useLocalStorage<GameTreeSort, GameTreeSort>(
     SORT_KEY,
     "recent",
-    Schema.Literals(["recent", "name"]),
+    GameTreeSortSchema,
   );
   const [showArchived, setShowArchived] = useLocalStorage(SHOW_ARCHIVED_KEY, true, Schema.Boolean);
   const [archivedOpen, setArchivedOpen] = useLocalStorage(ARCHIVED_OPEN_KEY, false, Schema.Boolean);
@@ -245,23 +247,19 @@ export default function Sidebar() {
       nodeOfThread.set(scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id)), node);
   const currentNode = routeThreadKey === null ? null : (nodeOfThread.get(routeThreadKey) ?? null);
   const currentGameKey = currentNode?.key ?? null;
+  // The open game is unfolded unless the person folded it; the others keep what they were left.
   const isExpanded = (node: Node) =>
-    !node.archived && node.chats.length > 0 && expandedById[expansionKey(node.key)] === true;
+    !node.archived &&
+    node.chats.length > 0 &&
+    (expandedById[expansionKey(node.key)] ?? node.key === currentGameKey);
 
   // The Library knows the game the person was last on.
   const rememberChat = useLastGameChat((state) => state.set);
+  const currentProjectId = currentNode?.game.projectId ?? null;
   useEffect(() => {
-    if (routeThreadRef === null || currentNode === null) return;
-    rememberChat(routeThreadRef, currentNode.game.projectId);
-  }, [routeThreadKey, currentNode?.game.projectId]);
-
-  // The open game unfolds when it is opened; the person may fold it again.
-  const unfoldedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (currentGameKey === null || unfoldedFor.current === currentGameKey) return;
-    unfoldedFor.current = currentGameKey;
-    setExpanded(expansionKey(currentGameKey), true);
-  }, [currentGameKey, setExpanded]);
+    const ref = routeThreadKey === null ? null : parseScopedThreadKey(routeThreadKey);
+    if (ref !== null && currentProjectId !== null) rememberChat(ref, currentProjectId);
+  }, [routeThreadKey, currentProjectId, rememberChat]);
 
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
@@ -279,7 +277,6 @@ export default function Sidebar() {
   };
   const openGame = (node: Node) => {
     if (node.main === null) return startChat(node.game);
-    if (!node.archived) setExpanded(expansionKey(node.key), true);
     openChat(node.main);
   };
 
@@ -573,49 +570,47 @@ export default function Sidebar() {
     ),
   );
   const jumpTargets = tree.live.flatMap((node) => (node.main === null ? [] : [node.main]));
-  const keysRef = useRef({ visibleChatKeys, chatByKey, jumpTargets, routeThreadKey });
-  keysRef.current = { visibleChatKeys, chatByKey, jumpTargets, routeThreadKey };
+  const onShortcut = useStableCallback((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen())
+      return;
+    const command = resolveShortcutCommand(event, keybindings, {
+      platform: navigator.platform,
+      context: {
+        terminalFocus: isTerminalFocused(),
+        terminalOpen: false,
+        modelPickerOpen: isModelPickerOpen(),
+        isWeb: !isElectron,
+        isDesktop: isElectron,
+      },
+    });
+    const keys = { visibleChatKeys, chatByKey, jumpTargets, routeThreadKey };
+    const direction = threadTraversalDirectionFromCommand(command);
+    const jump = threadJumpIndexFromCommand(command ?? "");
+    let target: Pick<SidebarThreadSummary, "environmentId" | "id"> | undefined;
+    if (direction !== null) {
+      const at =
+        keys.routeThreadKey === null ? -1 : keys.visibleChatKeys.indexOf(keys.routeThreadKey);
+      const next =
+        at < 0
+          ? keys.visibleChatKeys[0]
+          : keys.visibleChatKeys[
+              (at + (direction === "next" ? 1 : -1) + keys.visibleChatKeys.length) %
+                keys.visibleChatKeys.length
+            ];
+      target = next === undefined ? undefined : keys.chatByKey.get(next);
+    } else if (jump !== null) target = keys.jumpTargets[jump];
+    if (target === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(target.environmentId, target.id)),
+    });
+  });
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen())
-        return;
-      const command = resolveShortcutCommand(event, keybindings, {
-        platform: navigator.platform,
-        context: {
-          terminalFocus: isTerminalFocused(),
-          terminalOpen: false,
-          modelPickerOpen: isModelPickerOpen(),
-          isWeb: !isElectron,
-          isDesktop: isElectron,
-        },
-      });
-      const keys = keysRef.current;
-      const direction = threadTraversalDirectionFromCommand(command);
-      const jump = threadJumpIndexFromCommand(command ?? "");
-      let target: Pick<SidebarThreadSummary, "environmentId" | "id"> | undefined;
-      if (direction !== null) {
-        const at =
-          keys.routeThreadKey === null ? -1 : keys.visibleChatKeys.indexOf(keys.routeThreadKey);
-        const next =
-          at < 0
-            ? keys.visibleChatKeys[0]
-            : keys.visibleChatKeys[
-                (at + (direction === "next" ? 1 : -1) + keys.visibleChatKeys.length) %
-                  keys.visibleChatKeys.length
-              ];
-        target = next === undefined ? undefined : keys.chatByKey.get(next);
-      } else if (jump !== null) target = keys.jumpTargets[jump];
-      if (target === undefined) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(target.environmentId, target.id)),
-      });
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, navigate]);
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [onShortcut]);
 
   const loading = gameLibrary.isLoading || !shellsLive;
   const empty = tree.live.length + tree.archived.length === 0;
@@ -672,7 +667,7 @@ export default function Sidebar() {
       <SidebarContent
         className="min-h-full"
         fixedHeader={
-          <SidebarGroup className="z-[1] pb-0">
+          <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
               onNewGame={() => {
                 closeMobile();
@@ -693,9 +688,9 @@ export default function Sidebar() {
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="flex-1 pt-3" role="presentation">
+        <SidebarGroup className="flex-1" role="presentation">
           <TooltipProvider delay={150} closeDelay={0} timeout={400}>
-            <div className="flex h-7 items-center gap-0.5 ps-1 pe-1">
+            <div className="mt-1 flex h-7 items-center gap-0.5 ps-1 pe-1">
               <Text variant="meta" tone="muted" render={<h2 className="min-w-0 flex-1" />}>
                 Games
               </Text>
@@ -902,12 +897,11 @@ function GameRow({
     buildStateOf,
   );
   const picking = new Set((builds?.picking ?? "").split("\n").filter((id) => id !== ""));
-  const marks = node.chats.map((chat) => chatMark(chat, picking.has(chat.id)));
-  const working =
-    marks.includes("working") || game.run !== null || game.operation?.state === "running";
+  const marks = new Set(node.chats.map((chat) => chatMark(chat, picking.has(chat.id))));
+  const working = marks.has("working") || game.run !== null || game.operation?.state === "running";
   const mark: GameTreeMark = node.archived
     ? null
-    : marks.includes("waiting")
+    : marks.has("waiting")
       ? "waiting"
       : working
         ? "working"
@@ -933,8 +927,8 @@ function GameRow({
             main={main}
             chats={null}
             gameName={name}
-            read={leaseLiveStatus && !node.archived}
-            className="size-5 rounded-sm"
+            read={leaseLiveStatus}
+            className="size-5"
           />
         }
         name={name}
@@ -980,7 +974,7 @@ function GameChatRow({
         }),
     buildStateOf,
   );
-  const mark = chatMark(chat, (picking?.picking ?? "").split("\n").includes(chat.id));
+  const mark = chatMark(chat, new Set((picking?.picking ?? "").split("\n")).has(chat.id));
   return (
     <SidebarChatRow
       title={chat.title}

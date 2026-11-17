@@ -44,6 +44,9 @@ export function libraryTiles(
     .toSorted(
       (left, right) =>
         Number(right.source === "saved") - Number(left.source === "saved") ||
+        // Packs on this machine show their own picture: they lead the ones not fetched yet.
+        Number(right.picture !== undefined) - Number(left.picture !== undefined) ||
+        Number(right.pack?.installed === true) - Number(left.pack?.installed === true) ||
         left.name.localeCompare(right.name, undefined, { sensitivity: "base", numeric: true }),
     );
 }
@@ -62,3 +65,18 @@ export const usedInWords = (
   item: GameLibraryItem,
   nameOf: (projectId: string, fallback: string) => string,
 ) => item.usedIn.map((use) => nameOf(use.projectId, use.game)).join(", ");
+
+/**
+ * A style family's slug as a person would say the look, without the pack's vendor:
+ * "kenney-lowpoly" reads "Low-poly", "neon-arcade" reads "Neon arcade".
+ */
+export const familyWords = (family: string) => {
+  const words = family
+    .toLowerCase()
+    .replace(/^(kenney|quaternius|kaykit|polyhaven|synty)[-_ ]?/, "")
+    .replace(/low[-_ ]?poly/, "low-poly")
+    .replaceAll("_", " ");
+  // Hyphens part words, except in the two that are written with one.
+  const spaced = words.replace(/-(?!poly|fi\b)/g, " ");
+  return spaced.length === 0 ? family : `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+};

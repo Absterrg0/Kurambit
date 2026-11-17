@@ -224,7 +224,6 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { settleAndAdvance } from "../settleAndAdvance";
 import { subscribeComposerFocus } from "../lib/desktopSnapShot";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
@@ -5353,7 +5352,6 @@ export default function ChatView(props: ChatViewProps) {
           void handleUnsettleActiveThreadStable();
           return;
         }
-        if (settleAndAdvance(activeThreadRef)) return;
         void settleThread(activeThreadRef).then(toastPinFailure("Failed to settle thread"));
       },
       "thread.pin": () => {

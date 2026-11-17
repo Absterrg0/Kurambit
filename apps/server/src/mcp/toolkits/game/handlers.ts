@@ -8,7 +8,6 @@ import {
   GameActionResult,
   GameAnimateResult,
   GameAssetsAddResult,
-  GameLibraryAddResult,
   GameAssetsSearchResult,
   GameBlenderAssetsImportResult,
   GameBlenderAssetsSearchResult,
@@ -412,16 +411,16 @@ const assetsHandlers = {
             withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)).pipe(
               as(GameActionResult),
             ),
-          mine: () =>
-            withGame(GameLibrary.GameLibrary, (library) =>
-              library.list.pipe(
-                Effect.map((listed) => ({ text: GameLibrary.libraryText(listed.items) })),
-              ),
-            ).pipe(as(LibraryText)),
-          mine_add: ({ id }) =>
+          mine: ({ add }) =>
             withGame(GameLibrary.GameLibrary, (library, threadId) =>
-              library.add({ threadId, id }),
-            ).pipe(as(GameLibraryAddResult)),
+              add === undefined
+                ? library.list.pipe(
+                    Effect.map((listed) => ({ text: GameLibrary.libraryText(listed.items) })),
+                  )
+                : library
+                    .add({ threadId, id: add })
+                    .pipe(Effect.map((added) => ({ text: added.message }))),
+            ).pipe(as(LibraryText)),
         }),
       ),
     ),

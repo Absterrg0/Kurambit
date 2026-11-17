@@ -334,10 +334,6 @@ export default defineConfig({
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 29 }] },
       },
       {
-        files: ["apps/web/src/components/Sidebar.tsx"],
-        rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 34 }] },
-      },
-      {
         files: ["apps/web/src/components/chat/DraftHeroHeadline.tsx"],
         rules: { "kurambit/no-raw-type-classes": ["error", { maxOccurrences: 5 }] },
       },

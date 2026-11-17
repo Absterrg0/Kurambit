@@ -89,10 +89,7 @@ export const GameAssetsToolInput = Schema.Struct({
   wait: op(GameGenerateWaitInput),
   image_edit: op(GameImageEditInput),
   import: op(Nothing),
-  mine: op(Nothing),
-  mine_add: op(
-    Schema.Struct({ id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)) }),
-  ),
+  mine: op(Schema.Struct({ add: Schema.optionalKey(Schema.String) })),
 });
 export type GameAssetsToolInput = typeof GameAssetsToolInput.Type;
 

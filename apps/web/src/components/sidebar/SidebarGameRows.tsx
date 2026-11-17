@@ -65,11 +65,11 @@ export const NATIVE_ACTION_ICONS: Record<GameAction, string> = {
 };
 
 /** One row of the tree: 28 px, 12 px from the sidebar's edge, a ring only for the keyboard. */
-const ROW =
+export const SIDEBAR_TREE_ROW =
   "group/row relative flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:surface-sidebar-row-selected";
 
 /** What a game or chat is doing, in one mark at the row's end; nothing when idle. */
-export function TreeMark({ mark, broken }: { mark: GameTreeMark; broken?: boolean }) {
+function TreeMark({ mark, broken }: { mark: GameTreeMark; broken?: boolean }) {
   if (mark === "waiting")
     return (
       <span className="flex size-4 items-center justify-center" aria-label="Waiting on you">
@@ -87,7 +87,7 @@ export function TreeMark({ mark, broken }: { mark: GameTreeMark; broken?: boolea
   return null;
 }
 
-export function GameMenuItems({
+function GameMenuItems({
   items,
   onAction,
 }: {
@@ -162,9 +162,10 @@ export function SidebarGameRow({
       <button
         type="button"
         data-tree-row="game"
-        data-active={active}
+        // The open chat is the highlighted row; the game carries it only while folded.
+        data-active={active && !expanded}
         aria-expanded={expandable ? expanded : undefined}
-        className={cn(ROW, "pe-1")}
+        className={cn(SIDEBAR_TREE_ROW, "pe-1")}
         onClick={(event) => {
           if (event.detail > 1) return;
           // Opening a game that is not open also unfolds it; a click on the open one folds it.
@@ -261,7 +262,7 @@ export function SidebarChatRow({
       data-tree-row="chat"
       data-active={active}
       aria-current={active ? "page" : undefined}
-      className={cn(ROW, "ps-8 pe-2")}
+      className={cn(SIDEBAR_TREE_ROW, "ps-8 pe-2")}
       onClick={(event) => {
         if (event.detail > 1) return;
         onOpen();
@@ -312,7 +313,7 @@ export function SidebarQuietRow({
       type="button"
       data-tree-row="more"
       aria-expanded={expanded}
-      className={cn(ROW, indent ? "ps-8" : "ps-1")}
+      className={cn(SIDEBAR_TREE_ROW, indent ? "ps-8" : "ps-1")}
       onClick={onClick}
     >
       {expanded === undefined ? null : (
