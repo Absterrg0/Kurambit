@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { ThreadId } from "./baseSchemas.ts";
+import { ProjectId, ThreadId } from "./baseSchemas.ts";
 
 const familyText = (cap: number) =>
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(cap));
@@ -176,3 +176,115 @@ export const GameArtThumbnailInput = Schema.Struct({
 export type GameArtThumbnailInput = typeof GameArtThumbnailInput.Type;
 export const GameArtThumbnailResult = Schema.Struct({ thumbnail: AssetPathText });
 export type GameArtThumbnailResult = typeof GameArtThumbnailResult.Type;
+
+// ─── The Library: every asset the person has, across their games ─────────────
+
+/** A file the client shows or opens: `path` inside the folder `root` (draft-workspace-file). */
+export const GameLibraryFile = Schema.Struct({
+  root: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+  path: AssetPathText,
+});
+export type GameLibraryFile = typeof GameLibraryFile.Type;
+
+/** A game that holds a Library item, and where. */
+export const GameLibraryUse = Schema.Struct({
+  projectId: ProjectId,
+  /** The game's name as game.json gives it; the client shows its project title instead when it has one. */
+  game: Schema.String,
+  /** Game-relative. */
+  path: AssetPathText,
+});
+export type GameLibraryUse = typeof GameLibraryUse.Type;
+
+/**
+ * One tile of the Library. `yours`: a file of the person's games, one item per content (sha256),
+ * with every game it is in. `saved`: a model saved to the library from a game. `pack`: a pack
+ * of the open asset library the harness knows. `look`: a game's STYLE.json.
+ */
+export const GameLibraryItem = Schema.Struct({
+  /** `asset:<sha256>`, `saved:<id>`, `pack:<id>` or `look:<projectId>`. */
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  source: Schema.Literals(["yours", "saved", "pack", "look"]),
+  kind: Schema.Literals(["model", "texture", "audio", "font", "pack", "look"]),
+  name: Schema.String,
+  bytes: Schema.optionalKey(Schema.Number),
+  triangles: Schema.optionalKey(Schema.Number),
+  /** Its licence or credit, in its records' words. */
+  credit: Schema.optionalKey(Schema.String),
+  /** The file itself, for its viewer (absent for a pack and a look). */
+  file: Schema.optionalKey(GameLibraryFile),
+  /** Its picture when it has one: a model's thumbnail, a pack's preview. */
+  picture: Schema.optionalKey(GameLibraryFile),
+  /** The games that hold it now. */
+  usedIn: Schema.Array(GameLibraryUse),
+  /** A saved model's game and part, as the game names it ("Island › Cabin"). */
+  from: Schema.optionalKey(Schema.String),
+  part: Schema.optionalKey(Schema.String),
+  savedAt: Schema.optionalKey(Schema.String),
+  pack: Schema.optionalKey(
+    Schema.Struct({
+      author: Schema.String,
+      licence: Schema.String,
+      source: Schema.String,
+      description: Schema.String,
+      /** Its files are in this machine's library cache already. */
+      installed: Schema.Boolean,
+      kinds: Schema.Array(Schema.String),
+    }),
+  ),
+  look: Schema.optionalKey(
+    Schema.Struct({
+      palette: Schema.Array(Schema.String),
+      family: Schema.optionalKey(Schema.String),
+      mode: Schema.String,
+    }),
+  ),
+});
+export type GameLibraryItem = typeof GameLibraryItem.Type;
+
+export const GameLibraryListResult = Schema.Struct({ items: Schema.Array(GameLibraryItem) });
+export type GameLibraryListResult = typeof GameLibraryListResult.Type;
+
+/** Copies a Library item into the game a chat works on, credited in ASSETS.md, as a build. */
+export const GameLibraryAddInput = Schema.Struct({
+  threadId: ThreadId,
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  /** A repeat with the same id answers as the first did. */
+  commandId: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100))),
+});
+export type GameLibraryAddInput = typeof GameLibraryAddInput.Type;
+export const GameLibraryAddResult = Schema.Struct({
+  /** Game-relative: where it landed. */
+  path: AssetPathText,
+  message: Schema.String,
+});
+export type GameLibraryAddResult = typeof GameLibraryAddResult.Type;
+
+/** The most a saved model's GLB may weigh, base64 included. */
+export const GAME_LIBRARY_MAX_GLB_CHARS = 48_000_000;
+
+/** A model the running game exported (GLTFExporter), kept in the home's library folder. */
+export const GameLibrarySaveInput = Schema.Struct({
+  threadId: ThreadId,
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  /** The thing or part it is, as the game names it. */
+  part: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
+  glb: Schema.String.check(
+    Schema.isPattern(/^data:model\/gltf-binary;base64,[A-Za-z0-9+/=]+$/),
+    Schema.isMaxLength(GAME_LIBRARY_MAX_GLB_CHARS),
+  ),
+  png: Schema.optionalKey(
+    Schema.String.check(
+      Schema.isPattern(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/),
+      Schema.isMaxLength(2_000_000),
+    ),
+  ),
+});
+export type GameLibrarySaveInput = typeof GameLibrarySaveInput.Type;
+export const GameLibrarySaveResult = Schema.Struct({ id: Schema.String, message: Schema.String });
+export type GameLibrarySaveResult = typeof GameLibrarySaveResult.Type;
+
+export const GameLibraryRemoveInput = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+});
+export type GameLibraryRemoveInput = typeof GameLibraryRemoveInput.Type;

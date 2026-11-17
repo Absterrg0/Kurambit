@@ -9,6 +9,7 @@ import * as GameExport from "./game/GameExport.ts";
 import * as GameMemoryGate from "./game/GameMemoryGate.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
 import * as GameArtAssets from "./game/GameArtAssets.ts";
+import * as GameLibrary from "./game/GameLibrary.ts";
 import * as GameStage from "./game/GameStage.ts";
 import * as GameStatusService from "./game/GameStatusService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
@@ -545,6 +546,8 @@ const layerGameOperations = GameStage.layer.pipe(
   Layer.provideMerge(GameOperations.layer),
 );
 const layerGameServices = layerGameRunWork.pipe(
+  // The Library adds through the builds (a Library add is a build) and reads every game.
+  Layer.provideMerge(GameLibrary.layer),
   Layer.provideMerge(GamePlays.layer),
   Layer.provideMerge(GameDecisions.layer),
   // A try's versions: started for the orchestration runtime's GameTries, kept through GameBuilds.

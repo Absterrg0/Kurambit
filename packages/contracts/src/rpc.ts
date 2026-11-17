@@ -18,6 +18,12 @@ import {
   GameArtAssetsResult,
   GameArtThumbnailInput,
   GameArtThumbnailResult,
+  GameLibraryAddInput,
+  GameLibraryAddResult,
+  GameLibraryListResult,
+  GameLibraryRemoveInput,
+  GameLibrarySaveInput,
+  GameLibrarySaveResult,
 } from "./gameAssets.ts";
 import {
   GameActionInput,
@@ -392,6 +398,10 @@ export const WS_METHODS = {
   gameArtProviders: "game.artProviders",
   gameArtAssets: "game.artAssets",
   gameArtThumbnail: "game.artThumbnail",
+  gameLibraryList: "game.libraryList",
+  gameLibraryAdd: "game.libraryAdd",
+  gameLibrarySave: "game.librarySave",
+  gameLibraryRemove: "game.libraryRemove",
   gameKeepGoing: "game.keepGoing",
   gameKeepGoingStatus: "game.keepGoingStatus",
   gameKeepGoingDecide: "game.keepGoingDecide",
@@ -1543,6 +1553,26 @@ const WsGameArtThumbnailRpc = Rpc.make(WS_METHODS.gameArtThumbnail, {
   success: GameArtThumbnailResult,
   error: gameError,
 });
+const WsGameLibraryListRpc = Rpc.make(WS_METHODS.gameLibraryList, {
+  payload: Schema.Struct({}),
+  success: GameLibraryListResult,
+  error: gameError,
+});
+const WsGameLibraryAddRpc = Rpc.make(WS_METHODS.gameLibraryAdd, {
+  payload: GameLibraryAddInput,
+  success: GameLibraryAddResult,
+  error: gameError,
+});
+const WsGameLibrarySaveRpc = Rpc.make(WS_METHODS.gameLibrarySave, {
+  payload: GameLibrarySaveInput,
+  success: GameLibrarySaveResult,
+  error: gameError,
+});
+const WsGameLibraryRemoveRpc = Rpc.make(WS_METHODS.gameLibraryRemove, {
+  payload: GameLibraryRemoveInput,
+  success: Schema.Struct({}),
+  error: gameError,
+});
 const WsGameGenerationsRpc = Rpc.make(WS_METHODS.gameGenerations, {
   payload: GameGenerationsInput,
   success: GameGenerationsResult,
@@ -1714,6 +1744,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameSetCharacterRouteRpc,
   WsGameArtAssetsRpc,
   WsGameArtThumbnailRpc,
+  WsGameLibraryListRpc,
+  WsGameLibraryAddRpc,
+  WsGameLibrarySaveRpc,
+  WsGameLibraryRemoveRpc,
   WsGameGenerationsRpc,
   WsGameChooseGenerationRpc,
   WsGameCancelGenerationRpc,

@@ -105,6 +105,9 @@ const EDITS = "edits/";
  */
 const BOTS = `${gameRunRefsFolder(NO_RUN)}bots/`;
 const VALUES_LABEL = "Tuned";
+/** A Library add kept as a build: `edits/<request>-library`, beside its `-from`. */
+const LIBRARY_SUFFIX = "-library";
+const LIBRARY_LABEL = "Added from the Library";
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 const MOVED_ON =
@@ -315,6 +318,20 @@ export class GameBuilds extends Context.Service<
       threadId: ThreadId,
       input: Omit<GameKeepValuesInput, "threadId">,
     ) => Effect.Effect<GameKeepValuesResult, GameOperationError>;
+    /**
+     * Runs `write` on the game folder as the game's one operation and keeps what it changed as
+     * a build, the folder before it kept too so Undo restores it: a person's change made outside
+     * a turn (a Library add). A repeat with the same `commandId` answers as the first did.
+     */
+    readonly keepEdit: <E>(
+      threadId: ThreadId,
+      input: {
+        readonly operation: string;
+        readonly edit: "library";
+        readonly commandId?: string | undefined;
+        readonly write: (root: string) => Effect.Effect<void, E>;
+      },
+    ) => Effect.Effect<{ readonly build: string; readonly base: string }, E | GameOperationError>;
     /**
      * A chat turn's build once its checkpoint is kept, the build the folder
      * held when the turn started (its recorded base; null when none was
@@ -869,7 +886,36 @@ const make = Effect.gen(function* () {
           ];
         }),
       ).pipe(Effect.map((each) => each.flat()));
-      const saved = [...beforeRestores, ...edits];
+      const libraryAdds = refs.filter(
+        (ref) =>
+          ref.checkpointRef.startsWith(editsFolder) && ref.checkpointRef.endsWith(LIBRARY_SUFFIX),
+      );
+      const libraryNth = nthOf(libraryAdds);
+      const added = yield* Effect.forEach(libraryAdds, (ref) =>
+        Effect.gen(function* () {
+          if (!isGameBuildId(ref.oid)) return [];
+          const base =
+            byRef.get(ref.checkpointRef.slice(0, -LIBRARY_SUFFIX.length) + "-from") ?? null;
+          const change = yield* changeOf(g.root, g.lane, base, ref.oid);
+          return [
+            {
+              id: ref.oid,
+              at: isoOfSeconds(ref.committedAt),
+              source: {
+                _tag: "saved",
+                label: LIBRARY_LABEL,
+                edit: "library",
+                nth: libraryNth(ref),
+              },
+              summary: "Added from the Library",
+              files: change.files,
+              fileCount: change.count,
+              base,
+            } satisfies Entry,
+          ];
+        }),
+      ).pipe(Effect.map((each) => each.flat()));
+      const saved = [...beforeRestores, ...edits, ...added];
       const setups = refs.flatMap((ref) => {
         const from = byRef.get(`${ref.checkpointRef}-from`);
         return ref.checkpointRef.startsWith(BOTS) && from !== undefined && isGameBuildId(ref.oid)
@@ -2309,6 +2355,70 @@ const make = Effect.gen(function* () {
       yield* copies.stopPlay(g.root, id);
     });
 
+  const keepEdit: GameBuilds["Service"]["keepEdit"] = (threadId, input) =>
+    Effect.gen(function* () {
+      const g = yield* gameOf(threadId);
+      const request =
+        input.commandId === undefined
+          ? NodeCrypto.randomUUID()
+          : NodeCrypto.createHash("sha256")
+              .update(`${g.root}\0keep-edit\0${input.commandId}`)
+              .digest("hex")
+              .slice(0, 32);
+      const fromRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-from`);
+      const keptRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-${input.edit}`);
+      const io = (detail: string) => (cause: unknown) =>
+        failed(input.operation, g.root, "io", detail, cause);
+      const oidOf = (ref: CheckpointRef) =>
+        checkpoints.listCheckpointRefs({ cwd: g.root, prefix: ref }).pipe(
+          Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid ?? null),
+          Effect.mapError(io("the game's builds could not be read")),
+        );
+      const capture = (ref: CheckpointRef) =>
+        checkpoints
+          .withWorkspaceLock(
+            g.root,
+            checkpoints.captureCheckpoint({ cwd: g.root, checkpointRef: ref }),
+          )
+          .pipe(Effect.mapError(io("the game folder could not be kept")));
+      const [doneFrom, doneKept] = yield* Effect.all([oidOf(fromRef), oidOf(keptRef)]);
+      if (doneFrom !== null && doneKept !== null) return { build: doneKept, base: doneFrom };
+      const kept = yield* operations.exclusive(
+        g.root,
+        input.operation,
+        Effect.gen(function* () {
+          // The folder as it stood: still the build it holds, that build by its own id, so Undo
+          // goes back to a build the Stage can name.
+          const base =
+            doneFrom ??
+            (yield* Effect.gen(function* () {
+              const captured = yield* capture(fromRef);
+              const listed = yield* allEntries(g, 1, undefined);
+              const current = yield* currentOf(g, listed);
+              if (current === null || (yield* folderEditedSince(g, current)) !== false)
+                return captured;
+              yield* checkpoints
+                .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: current })
+                .pipe(Effect.mapError(io("the game folder could not be kept")));
+              return current;
+            }));
+          yield* input.write(g.root);
+          return { base, build: yield* capture(keptRef) };
+        }),
+        String(threadId),
+      );
+      if (isGameBuildId(kept.build)) {
+        yield* nextTurnsFrom(g, threadId, kept.build);
+        yield* operations.changed(
+          g.root,
+          GAME_BUILDS_EVENT,
+          `${input.operation}: kept as a build.`,
+        );
+        yield* measureIn(g.root, kept.build, { supersede: true });
+      }
+      return kept;
+    });
+
   return GameBuilds.of({
     stopPlay,
     reconcile,
@@ -2325,6 +2435,7 @@ const make = Effect.gen(function* () {
     holds,
     current,
     keepValues,
+    keepEdit,
     turnBuild,
   });
 });

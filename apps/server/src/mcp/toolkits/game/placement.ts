@@ -28,6 +28,8 @@ export const GAME_TOOL_OPS = {
     wait: ["play"],
     image_edit: ["play"],
     import: ["import"],
+    mine: [],
+    mine_add: [],
   },
   game_blender: {
     code: ["blender"],

@@ -135,6 +135,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.gameCancelGeneration]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameArtProviders]: AuthOrchestrationReadScope,
   [WS_METHODS.gameArtAssets]: AuthOrchestrationReadScope,
+  [WS_METHODS.gameLibraryList]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeGameEvents]: AuthOrchestrationReadScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,
   [WS_METHODS.filesystemBrowse]: AuthFilesystemReadScope,

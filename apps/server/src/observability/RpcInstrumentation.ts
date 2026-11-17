@@ -56,6 +56,10 @@ const RPC_AGGREGATES = {
   [WS_METHODS.gameArtProviders]: "game",
   [WS_METHODS.gameArtAssets]: "game",
   [WS_METHODS.gameArtThumbnail]: "game",
+  [WS_METHODS.gameLibraryList]: "game",
+  [WS_METHODS.gameLibraryAdd]: "game",
+  [WS_METHODS.gameLibrarySave]: "game",
+  [WS_METHODS.gameLibraryRemove]: "game",
   [WS_METHODS.subscribeGameEvents]: "game",
 
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",
