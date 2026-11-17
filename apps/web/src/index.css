@@ -1310,10 +1310,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --surface-base-shadow: none;
   --surface-shadow: var(--surface-base-shadow);
   border: 1px solid transparent;
+  /* The fill is translucent, so the panel's ground goes under it: the rim (hover, focus) must
+     show only in the border, not through the fill. */
   background:
     var(--surface-fill) padding-box,
-    var(--surface-rim) border-box,
-    var(--surface-fill) border-box;
+    linear-gradient(var(--background), var(--background)) padding-box,
+    var(--surface-rim) border-box;
   box-shadow: var(--surface-shadow);
 }
 @utility surface-field-hover {
