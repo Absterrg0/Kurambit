@@ -700,22 +700,19 @@ const make = Effect.gen(function* () {
       for (let attempt = 0; ; attempt += 1) {
         const game = yield* captureGame(g, copyId);
         const restored = isRestored(g.lane);
-        const caughtUp = !(yield* measureChange(checkpoints, g.root, restored, seated, game))
-          .changed;
-        // The game has not moved since the seat: the copy's work is the candidate as it is.
-        const merged = caughtUp
-          ? { tree: null, conflicts: [] }
-          : yield* mergeBuilds(checkpoints, {
-              root: g.root,
-              tuneFile: g.tuneFile,
-              union: g.union,
-              base: seated,
-              ours: game,
-              theirs: work,
-              game: "ours",
-              ...(input.keep === undefined ? {} : { keep: input.keep }),
-              within: restored,
-            }).pipe(Effect.mapError(io(operation, g.root, "the copy's work could not be merged")));
+        // Always merged, never a fast-forward to the copy's tree: what the check plays must hold
+        // the game's saved plays and notes, which live outside what a build is.
+        const merged = yield* mergeBuilds(checkpoints, {
+          root: g.root,
+          tuneFile: g.tuneFile,
+          union: g.union,
+          base: seated,
+          ours: game,
+          theirs: work,
+          game: "ours",
+          ...(input.keep === undefined ? {} : { keep: input.keep }),
+          within: restored,
+        }).pipe(Effect.mapError(io(operation, g.root, "the copy's work could not be merged")));
         if (merged.conflicts.length > 0) {
           // Back to the copy, never the game: it holds both sides now, seated on this game.
           const files =
@@ -730,8 +727,7 @@ const make = Effect.gen(function* () {
             message: `Nothing came in: ${files.map((each) => each.path).join(", ")} changed in the game and in the copy. The copy now holds both sides${files.some((each) => each.binary) ? "; for art, sound and models keep the game's or the copy's" : ""}. Resolve them in the copy, then bring it in again.`,
           } as const;
         }
-        // A fast-forward lands the copy's own tree.
-        const tree = merged.tree ?? `${work}^{tree}`;
+        const tree = merged.tree;
         const candidate = yield* checkpoints
           .commitTree({ cwd: g.root, tree, parent: game, message: `Brought in ${shell.title}` })
           .pipe(Effect.mapError(io(operation, g.root, "the copy's work could not be kept")));
