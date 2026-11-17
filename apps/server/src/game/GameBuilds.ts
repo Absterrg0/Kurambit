@@ -2721,6 +2721,32 @@ const make = Effect.gen(function* () {
             games.find((game) => game.root === row.root)?.projectId ?? null,
           ),
         ),
+        // A landing (a bring-in, an undo) the restart cut short is a build: into the history too.
+        Effect.tap((outcome) =>
+          outcome.moved !== "restored"
+            ? Effect.void
+            : Effect.flatMap(
+                checkpoints.listCheckpointRefs({
+                  cwd: row.root,
+                  prefix: `${gameRunRefsFolder(NO_RUN)}${EDITS}`,
+                }),
+                (refs) => {
+                  const landed = refs.find(
+                    (ref) =>
+                      ref.oid === row.record.target &&
+                      (ref.checkpointRef.endsWith(LANDED_SUFFIX) ||
+                        ref.checkpointRef.endsWith(UNDO_SUFFIX)),
+                  );
+                  return landed === undefined
+                    ? Effect.void
+                    : mirrorHistory(
+                        { root: row.root, home: row.root },
+                        landed.oid,
+                        landed.subject ?? row.record.label,
+                      );
+                },
+              ),
+        ),
         Effect.catchCause((cause) =>
           Effect.logWarning("A cut-short restore could not be settled.", { root: row.root, cause }),
         ),
