@@ -12,8 +12,10 @@ import type {
   VcsCheckpointOps,
   VcsCheckpointRefEntry,
   VcsListCheckpointRefsInput,
+  VcsMergeCheckpointsInput,
   VcsResolveTreesInput,
 } from "../vcs/VcsDriver.ts";
+import type { MergeTreeOutput } from "../vcs/mergeTreeOutput.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export interface CaptureCheckpointInput {
@@ -125,6 +127,20 @@ export class CheckpointStore extends Context.Service<
     readonly resolveTrees: (
       input: VcsResolveTreesInput,
     ) => Effect.Effect<ReadonlyArray<string | null>, CheckpointStoreError>;
+
+    /** Git's three-way merge of two commits from an explicit base (VcsCheckpointOps.mergeCheckpoints). */
+    readonly mergeCheckpoints: (
+      input: VcsMergeCheckpointsInput,
+    ) => Effect.Effect<MergeTreeOutput, CheckpointStoreError>;
+    readonly editTree: (
+      input: Parameters<VcsCheckpointOps["editTree"]>[0],
+    ) => Effect.Effect<string, CheckpointStoreError>;
+    readonly commitTree: (
+      input: Parameters<VcsCheckpointOps["commitTree"]>[0],
+    ) => Effect.Effect<string, CheckpointStoreError>;
+    readonly readFileAt: (
+      input: Parameters<VcsCheckpointOps["readFileAt"]>[0],
+    ) => Effect.Effect<string | null, CheckpointStoreError>;
 
     /** Writes a checkpoint's files into a folder of their own; false when it is gone. */
     readonly materializeCheckpoint: (
@@ -245,7 +261,34 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const mergeCheckpoints: CheckpointStore["Service"]["mergeCheckpoints"] = Effect.fn(
+    "mergeCheckpoints",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.mergeCheckpoints", input.cwd);
+    return yield* checkpoints.mergeCheckpoints(input);
+  });
+  const editTree: CheckpointStore["Service"]["editTree"] = Effect.fn("editTree")(function* (input) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.editTree", input.cwd);
+    return yield* checkpoints.editTree(input);
+  });
+  const commitTree: CheckpointStore["Service"]["commitTree"] = Effect.fn("commitTree")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.commitTree", input.cwd);
+      return yield* checkpoints.commitTree(input);
+    },
+  );
+  const readFileAt: CheckpointStore["Service"]["readFileAt"] = Effect.fn("readFileAt")(
+    function* (input) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.readFileAt", input.cwd);
+      return yield* checkpoints.readFileAt(input);
+    },
+  );
+
   return CheckpointStore.of({
+    mergeCheckpoints,
+    editTree,
+    commitTree,
+    readFileAt,
     isGitRepository,
     captureCheckpoint,
     hasCheckpointRef,

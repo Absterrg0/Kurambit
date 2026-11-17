@@ -12,6 +12,7 @@ import type {
   VcsRepositoryIdentity,
 } from "@kurambit/contracts";
 import { CheckpointRef } from "@kurambit/contracts";
+import type { MergeSide, MergeTreeOutput } from "./mergeTreeOutput.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 export interface VcsCaptureCheckpointInput {
@@ -95,6 +96,26 @@ export interface VcsResolveTreesInput {
   readonly path: string;
 }
 
+export interface VcsMergeCheckpointsInput {
+  readonly cwd: string;
+  /** Commits. The merge is `theirs` onto `ours` from `base`, never from their history. */
+  readonly base: string;
+  readonly ours: string;
+  readonly theirs: string;
+  /**
+   * Paths relative to `cwd` merged as a union of both sides' lines (git's `merge=union`), given
+   * to this one merge through `attr.tree`: nothing is written to the repository's config or files.
+   */
+  readonly unionPaths?: ReadonlyArray<string>;
+}
+
+/** One file of a tree as an edit writes it: text, an existing blob, or null to remove it. */
+export interface VcsTreeEdit {
+  /** Relative to `cwd`. */
+  readonly path: string;
+  readonly content: string | MergeSide | null;
+}
+
 export interface VcsCheckpointOps {
   /** The commit oid of the checkpoint it wrote. */
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<string, VcsError>;
@@ -127,6 +148,33 @@ export interface VcsCheckpointOps {
   readonly resolveTrees: (
     input: VcsResolveTreesInput,
   ) => Effect.Effect<ReadonlyArray<string | null>, VcsError>;
+  /**
+   * Git's own three-way merge of two commits' trees from an explicit base (`merge-tree`), writing
+   * only objects. Conflicts are the paths below `cwd`, relative to it; the tree keeps conflict
+   * markers in text files and `ours` in binary ones.
+   */
+  readonly mergeCheckpoints: (
+    input: VcsMergeCheckpointsInput,
+  ) => Effect.Effect<MergeTreeOutput, VcsError>;
+  /** A tree with some files written, replaced or removed, through a private index. */
+  readonly editTree: (input: {
+    readonly cwd: string;
+    readonly tree: string;
+    readonly edits: ReadonlyArray<VcsTreeEdit>;
+  }) => Effect.Effect<string, VcsError>;
+  /** A commit of a tree with Kurambit's identity, shaped like a capture (its parent HEAD unless given). */
+  readonly commitTree: (input: {
+    readonly cwd: string;
+    readonly tree: string;
+    readonly parent?: string;
+    readonly message: string;
+  }) => Effect.Effect<string, VcsError>;
+  /** A file's text in a commit, relative to `cwd`; null where the commit has no such file. */
+  readonly readFileAt: (input: {
+    readonly cwd: string;
+    readonly revision: string;
+    readonly path: string;
+  }) => Effect.Effect<string | null, VcsError>;
 }
 
 /**

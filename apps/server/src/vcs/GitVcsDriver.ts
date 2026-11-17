@@ -49,6 +49,7 @@ import {
 } from "./GitVcsDriverCore.ts";
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as VcsDriver from "./VcsDriver.ts";
+import { parseMergeTreeOutput } from "./mergeTreeOutput.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 export interface ExecuteGitInput {
@@ -2483,6 +2484,153 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         const [oid = "", type = ""] = (lines[i] ?? "").split(" ");
         return type === "tree" ? oid : null;
       });
+    }),
+    mergeCheckpoints: Effect.fn("GitVcsDriver.checkpoints.mergeCheckpoints")(function* (input) {
+      const operation = "GitVcsDriver.checkpoints.mergeCheckpoints";
+      const { prefix } = yield* resolveTopLevel(input.cwd);
+      // Union attributes live in a tree of our own, named per invocation (attr.tree), so the
+      // person's .gitattributes, config and files are never written.
+      const union = input.unionPaths ?? [];
+      const attributesTree =
+        union.length === 0
+          ? null
+          : yield* Effect.gen(function* () {
+              const blob = (yield* execute({
+                operation,
+                cwd: input.cwd,
+                args: ["hash-object", "-w", "--stdin"],
+                stdin: union.map((each) => `/${prefix}${each} merge=union\n`).join(""),
+              })).stdout.trim();
+              return (yield* execute({
+                operation,
+                cwd: input.cwd,
+                args: ["mktree"],
+                stdin: `100644 blob ${blob}\t.gitattributes\n`,
+              })).stdout.trim();
+            });
+      const merged = yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: [
+          ...(attributesTree === null ? [] : ["-c", `attr.tree=${attributesTree}`]),
+          "merge-tree",
+          "--write-tree",
+          "-z",
+          `--merge-base=${input.base}`,
+          input.ours,
+          input.theirs,
+        ],
+        allowNonZeroExit: true,
+        timeoutMs: TREE_TIMEOUT_MS,
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        outputMode: "error",
+      });
+      // 0 is clean and 1 has conflicts; anything else is git failing to merge at all.
+      if (merged.exitCode !== 0 && merged.exitCode !== 1)
+        return yield* new VcsProcessExitError({
+          operation,
+          command: "git merge-tree",
+          cwd: input.cwd,
+          exitCode: merged.exitCode,
+          detail: merged.stderr.trim() || "git merge-tree failed.",
+        });
+      const read = yield* Effect.try({
+        try: () => parseMergeTreeOutput(merged.stdout),
+        catch: (cause) =>
+          new VcsProcessExitError({
+            operation,
+            command: "git merge-tree",
+            cwd: input.cwd,
+            exitCode: merged.exitCode,
+            detail: cause instanceof Error ? cause.message : String(cause),
+          }),
+      });
+      // Only what is below cwd, relative to it: a conflict elsewhere in the repository is not ours.
+      return {
+        tree: read.tree,
+        conflicts: read.conflicts.flatMap((each) =>
+          each.path.startsWith(prefix) ? [{ ...each, path: each.path.slice(prefix.length) }] : [],
+        ),
+      };
+    }),
+    editTree: Effect.fn("GitVcsDriver.checkpoints.editTree")(function* (input) {
+      const operation = "GitVcsDriver.checkpoints.editTree";
+      const { top, prefix } = yield* resolveTopLevel(input.cwd);
+      return yield* withTempIndex(top, (env) =>
+        Effect.gen(function* () {
+          const run = (args: ReadonlyArray<string>, stdin?: string) =>
+            execute({
+              operation,
+              cwd: top,
+              args: [...checkpointIndexConfig, ...args],
+              env,
+              ...(stdin === undefined ? {} : { stdin }),
+            });
+          yield* run(["read-tree", input.tree]);
+          for (const edit of input.edits) {
+            const path = `${prefix}${edit.path}`;
+            if (edit.content === null) {
+              yield* run(["update-index", "--force-remove", "--", path]);
+              continue;
+            }
+            const side =
+              typeof edit.content === "string"
+                ? {
+                    mode: "100644",
+                    oid: (yield* run(["hash-object", "-w", "--stdin"], edit.content)).stdout.trim(),
+                  }
+                : edit.content;
+            yield* run([
+              "update-index",
+              "--add",
+              "--cacheinfo",
+              `${side.mode},${side.oid},${path}`,
+            ]);
+          }
+          return (yield* run(["write-tree"])).stdout.trim();
+        }),
+      );
+    }),
+    commitTree: Effect.fn("GitVcsDriver.checkpoints.commitTree")(function* (input) {
+      const operation = "GitVcsDriver.checkpoints.commitTree";
+      const parent =
+        input.parent ??
+        ((yield* hasHeadCommit(input.cwd)) ? yield* resolveHeadCommit(input.cwd) : null);
+      const commit = (yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: [
+          ...captureWrite,
+          "-c",
+          "commit.gpgSign=false",
+          "commit-tree",
+          input.tree,
+          ...(parent === null || parent === undefined ? [] : ["-p", parent]),
+          "-m",
+          input.message,
+        ],
+        env: { ...process.env, ...KURAMBIT_COMMIT_IDENTITY },
+      })).stdout.trim();
+      if (commit.length === 0)
+        return yield* new VcsProcessExitError({
+          operation,
+          command: "git commit-tree",
+          cwd: input.cwd,
+          exitCode: 0,
+          detail: "git commit-tree returned an empty commit oid.",
+        });
+      return commit;
+    }),
+    readFileAt: Effect.fn("GitVcsDriver.checkpoints.readFileAt")(function* (input) {
+      const read = yield* execute({
+        operation: "GitVcsDriver.checkpoints.readFileAt",
+        cwd: input.cwd,
+        args: ["cat-file", "blob", `${input.revision}:./${input.path}`],
+        allowNonZeroExit: true,
+        maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
+        outputMode: "error",
+      });
+      return read.exitCode === 0 ? read.stdout : null;
     }),
     listCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.listCheckpointRefs")(function* (input) {
       if (input.prefix.startsWith(KURAMBIT_REFS) && !adopted.has(input.cwd)) {

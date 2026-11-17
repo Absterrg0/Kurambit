@@ -5,6 +5,7 @@
 // sliders could not reach.
 import { gameLookId, type GameKeepValuesThing } from "@kurambit/contracts";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 // A look's entry also holds the names the person gave its part and materials, as text.
 export type TuneFile = Record<string, Record<string, number | boolean | string>>;
@@ -144,4 +145,58 @@ export const tuneChanges = (patch: string) => {
     changes.set(id, change);
   }
   return [...changes.values()].filter((change) => change.from !== change.to);
+};
+
+type TuneValue = number | boolean | string;
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const tuneObject = (text: string | null): TuneFile | null => {
+  if (text === null) return {};
+  const parsed = Option.getOrNull(decodeJson(text));
+  if (!isRecord(parsed)) return null;
+  const file: TuneFile = {};
+  for (const [id, values] of Object.entries(parsed)) {
+    if (!isRecord(values) || UNSAFE.has(id)) return null;
+    file[id] = values as Record<string, TuneValue>;
+  }
+  return file;
+};
+
+/**
+ * Three versions of a tune file merged per value: a value one side changed from the base is
+ * that side's, and only a value both sides changed differently is a conflict (it keeps ours').
+ * Null when a version is not a tune file, which then stays git's conflict. Absent files are `null`.
+ */
+export const mergeTuneFiles = (
+  base: string | null,
+  ours: string | null,
+  theirs: string | null,
+): { readonly text: string | null; readonly conflicts: ReadonlyArray<string> } | null => {
+  const [b, o, t] = [tuneObject(base), tuneObject(ours), tuneObject(theirs)];
+  if (b === null || o === null || t === null) return null;
+  const merged: TuneFile = {};
+  const conflicts: string[] = [];
+  const ids = new Set([...Object.keys(o), ...Object.keys(t), ...Object.keys(b)]);
+  for (const id of ids) {
+    const keys = new Set([
+      ...Object.keys(o[id] ?? {}),
+      ...Object.keys(t[id] ?? {}),
+      ...Object.keys(b[id] ?? {}),
+    ]);
+    const values: Record<string, TuneValue> = {};
+    for (const key of keys) {
+      const [was, mine, other] = [b[id]?.[key], o[id]?.[key], t[id]?.[key]];
+      const value = mine === other || other === was ? mine : mine === was ? other : mine;
+      if (mine !== other && mine !== was && other !== was) conflicts.push(`${id} ${key}`);
+      if (value !== undefined) values[key] = value;
+    }
+    if (Object.keys(values).length > 0) merged[id] = values;
+  }
+  return {
+    // A file neither side kept stays absent.
+    text:
+      Object.keys(merged).length === 0 && ours === null && theirs === null
+        ? null
+        : tuneFileText(merged),
+    conflicts,
+  };
 };
