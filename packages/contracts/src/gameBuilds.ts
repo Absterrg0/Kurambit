@@ -11,7 +11,7 @@ import {
   listedNames,
   loadedWords,
 } from "./gameQa.ts";
-import { GameSavedPlaysReading, savedPlaysWords } from "./gamePlays.ts";
+import { GameSavedPlaysReading, savedPlayWords, savedPlaysWords } from "./gamePlays.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -941,7 +941,7 @@ const CHECK_LABELS: Readonly<
   hud: "HUD fits the screen",
   performance: "Holds its frame rate",
   screens: "Fits phone and widescreen",
-  "saved-plays": "Saved plays end the same",
+  "saved-plays": "Saved plays replay the same",
   skilled: "Can be won by Kurambit's play bot",
 };
 
@@ -1068,7 +1068,16 @@ const checkWords = (
       if (facts.savedPlays.status !== "measured") return null;
       const reading = facts.savedPlays.value;
       const off = reading.plays.filter((play) => play.reading !== "same");
-      if (off.length === 0) return { sentence: "Saved plays end the same", value: null };
+      // A play with no ending says how long it played the same: "evening plays the same for 1:10".
+      if (off.length === 0)
+        return {
+          sentence: !reading.plays.some((play) => play.saved.left === true)
+            ? "Saved plays end the same"
+            : reading.plays.length === 1
+              ? savedPlayWords(reading.plays[0]!)
+              : "Saved plays play the same",
+          value: null,
+        };
       const ended = off.filter((play) => play.reading === "ending-changed").length;
       const cannot = off.filter((play) => play.reading === "cannot-replay").length;
       return {

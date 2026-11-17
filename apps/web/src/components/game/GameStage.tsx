@@ -3,7 +3,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
 import { GameStageBar } from "./GameStageControls";
-import { GameKeepGoingButton } from "./GameKeepGoingButton";
 import {
   CircleStopIcon,
   ChevronDownIcon,
@@ -12,8 +11,8 @@ import {
   FilmIcon,
   StepForwardIcon,
   FolderOpenIcon,
-  MoreHorizontalIcon,
   PanelRightIcon,
+  PanelTopCloseIcon,
   PanelTopOpenIcon,
   PencilIcon,
   PlayIcon,
@@ -73,8 +72,6 @@ import {
 import {
   Menu,
   MenuCheckboxItem,
-  MenuGroup,
-  MenuGroupLabel,
   MenuItem,
   MenuPopup,
   MenuSeparator,
@@ -86,6 +83,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
+import { GameBuildStill } from "./GameBuildStill";
 import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHistory";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -176,6 +174,12 @@ const buildPhraseOf = (id: string | null) => {
 const folderBuildIdOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
   AsyncResult.isSuccess(result) && result.value.folderEdited === false
     ? result.value.current
+    : null;
+
+/** The build the folder holds (its newest when edited since): the hidden game's picture. */
+const currentBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
+  AsyncResult.isSuccess(result)
+    ? (result.value.builds.find((build) => build.id === result.value.current) ?? null)
     : null;
 
 /** The build the folder holds, as a sentence names it ("build 7"), unless edited since. */
@@ -588,6 +592,7 @@ function ThreadGameStage({
   // A frame the folder's game showed is the picture of the build the folder holds, unless a
   // turn is changing the folder under it. Only a new frame is kept, never one from before.
   const folderBuild = useEnvironmentQuerySelector(buildsAtom, folderBuildIdOf) ?? null;
+  const currentBuild = useEnvironmentQuerySelector(buildsAtom, currentBuildOf) ?? null;
   // One pane at a time, the Inspector's way in carries what it would show first.
   const keptStill = useRef(stageStill);
   // The folder settling on a new build (a turn's end, an Undo) takes one frame of it, since the
@@ -1238,6 +1243,16 @@ function ThreadGameStage({
             !panelOpen && "wco:pr-(--workspace-native-controls-inset)",
           )}
         >
+          {/* Hidden, the game folds into this row: its picture beside its name. */}
+          {collapsed && currentBuild !== null ? (
+            <GameBuildStill
+              threadRef={threadRef}
+              gameName={gameName}
+              build={currentBuild}
+              mark="blank"
+              className="me-2 h-6 w-10 shrink-0 rounded-sm"
+            />
+          ) : null}
           {renamingGame && quietShell !== null ? (
             <GameNameInput
               name={gameName}
@@ -1344,115 +1359,12 @@ function ThreadGameStage({
             </PopoverPopup>
           </Popover>
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
-          <Menu>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <MenuTrigger
-                    render={
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label="Stage actions"
-                        data-game-stage-more=""
-                      />
-                    }
-                  />
-                }
-              >
-                <MoreHorizontalIcon className="size-3.5" aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">Stage actions</TooltipPopup>
-            </Tooltip>
-            {/* The game's own things (name, folder, export, tools) live under its name; this
-                menu is only what plays on the Stage, and says so. */}
-            <MenuPopup align="end">
-              <MenuGroup>
-                <MenuGroupLabel>On the Stage</MenuGroupLabel>
-                {stageKind !== "window" ? (
-                  <MenuCheckboxItem
-                    variant="switch"
-                    closeOnClick={false}
-                    checked={pauseWhenAway}
-                    onCheckedChange={setPauseWhenAway}
-                  >
-                    Pause when I click away
-                  </MenuCheckboxItem>
-                ) : null}
-                {stageKind === "export" ? (
-                  <>
-                    <MenuItem disabled={!playEnabled} onClick={() => void perform("preview")}>
-                      <PlayIcon />
-                      {webBuild === undefined ? "Build and play" : "Play"}
-                    </MenuItem>
-                    <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
-                      <RefreshCwIcon />
-                      Rebuild the web export
-                    </MenuItem>
-                  </>
-                ) : null}
-                {hasSteps ? (
-                  <MenuItem onClick={() => setReelOpen(!reelOpen)}>
-                    <FilmIcon />
-                    {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
-                  </MenuItem>
-                ) : null}
-              </MenuGroup>
-              {devCapable && stageKind === "live" ? (
-                <>
-                  <MenuSeparator />
-                  <MenuGroup>
-                    <MenuGroupLabel>Dev views</MenuGroupLabel>
-                    <MenuItem
-                      disabled={!frozen}
-                      closeOnClick={false}
-                      onClick={() => stepStageFrame(threadKey)}
-                    >
-                      <StepForwardIcon />
-                      Step one frame
-                      {stepKey === null ? null : <MenuShortcut>{stepKey}</MenuShortcut>}
-                    </MenuItem>
-                    <MenuCheckboxItem
-                      variant="switch"
-                      closeOnClick={false}
-                      checked={devViews.freeCamera}
-                      onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
-                    >
-                      Free camera while frozen
-                      {freeCameraKey === null ? null : <MenuShortcut>{freeCameraKey}</MenuShortcut>}
-                    </MenuCheckboxItem>
-                    <MenuCheckboxItem
-                      variant="switch"
-                      closeOnClick={false}
-                      checked={devViews.bounds}
-                      onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
-                    >
-                      Bounds
-                      {boundsKey === null ? null : <MenuShortcut>{boundsKey}</MenuShortcut>}
-                    </MenuCheckboxItem>
-                    <MenuCheckboxItem
-                      variant="switch"
-                      closeOnClick={false}
-                      checked={devViews.perf}
-                      onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
-                    >
-                      Frame rate
-                      {frameRateKey === null ? null : <MenuShortcut>{frameRateKey}</MenuShortcut>}
-                    </MenuCheckboxItem>
-                  </MenuGroup>
-                </>
-              ) : null}
-              <MenuSeparator />
-              <MenuItem
-                disabled={!canAct || !runningSomething}
-                onClick={() => void perform("stop")}
-              >
-                <CircleStopIcon />
-                Stop the game
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-          <GameKeepGoingButton threadRef={threadRef} />
+          {collapsed ? (
+            <Button size="sm" variant="ghost" onClick={() => setGameHidden(false)}>
+              <PanelTopOpenIcon aria-hidden="true" />
+              Show the game
+            </Button>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1640,15 +1552,10 @@ function ThreadGameStage({
       </div>
       <div
         data-game-controls=""
-        className="mx-auto flex h-9 w-full shrink-0 items-center"
+        className={cn("mx-auto h-9 w-full shrink-0 items-center", collapsed ? "hidden" : "flex")}
         style={{ maxWidth: column ?? undefined }}
       >
-        {collapsed ? (
-          <Button size="sm" variant="ghost" className="-ms-2" onClick={() => setGameHidden(false)}>
-            <PanelTopOpenIcon aria-hidden="true" />
-            Show the game
-          </Button>
-        ) : (
+        {collapsed ? null : (
           <GameStageBar
             threadRef={threadRef}
             playing={phase.kind === "playing" && compare === null && stageKind !== "window"}
@@ -1664,7 +1571,91 @@ function ThreadGameStage({
             runs={runs}
             onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
             onFullscreen={toggleFullscreen}
-            onHide={() => setGameHidden(true)}
+            viewItems={
+              devCapable && stageKind === "live" ? (
+                <>
+                  <MenuCheckboxItem
+                    variant="switch"
+                    closeOnClick={false}
+                    checked={devViews.bounds}
+                    onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
+                  >
+                    Bounds
+                    {boundsKey === null ? null : <MenuShortcut>{boundsKey}</MenuShortcut>}
+                  </MenuCheckboxItem>
+                  <MenuCheckboxItem
+                    variant="switch"
+                    closeOnClick={false}
+                    checked={devViews.perf}
+                    onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
+                  >
+                    Frame rate
+                    {frameRateKey === null ? null : <MenuShortcut>{frameRateKey}</MenuShortcut>}
+                  </MenuCheckboxItem>
+                  <MenuCheckboxItem
+                    variant="switch"
+                    closeOnClick={false}
+                    checked={devViews.freeCamera}
+                    onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
+                  >
+                    Free camera while frozen
+                    {freeCameraKey === null ? null : <MenuShortcut>{freeCameraKey}</MenuShortcut>}
+                  </MenuCheckboxItem>
+                  <MenuItem
+                    disabled={!frozen}
+                    closeOnClick={false}
+                    onClick={() => stepStageFrame(threadKey)}
+                  >
+                    <StepForwardIcon />
+                    Step one frame
+                    {stepKey === null ? null : <MenuShortcut>{stepKey}</MenuShortcut>}
+                  </MenuItem>
+                </>
+              ) : null
+            }
+            stageItems={
+              <>
+                {stageKind !== "window" ? (
+                  <MenuCheckboxItem
+                    variant="switch"
+                    closeOnClick={false}
+                    checked={pauseWhenAway}
+                    onCheckedChange={setPauseWhenAway}
+                  >
+                    Pause when I click away
+                  </MenuCheckboxItem>
+                ) : null}
+                {stageKind === "export" ? (
+                  <>
+                    <MenuItem disabled={!playEnabled} onClick={() => void perform("preview")}>
+                      <PlayIcon />
+                      {webBuild === undefined ? "Build and play" : "Play"}
+                    </MenuItem>
+                    <MenuItem disabled={!rebuildEnabled} onClick={() => void perform("rebuild")}>
+                      <RefreshCwIcon />
+                      Rebuild the web export
+                    </MenuItem>
+                  </>
+                ) : null}
+                {hasSteps ? (
+                  <MenuItem onClick={() => setReelOpen(!reelOpen)}>
+                    <FilmIcon />
+                    {reelOpen ? "Close keep going's reel" : "Keep going's reel"}
+                  </MenuItem>
+                ) : null}
+                <MenuItem onClick={() => setGameHidden(true)}>
+                  <PanelTopCloseIcon />
+                  Hide the game
+                </MenuItem>
+                <MenuItem
+                  disabled={!canAct || !runningSomething}
+                  onClick={() => void perform("stop")}
+                >
+                  <CircleStopIcon />
+                  Stop the game
+                </MenuItem>
+              </>
+            }
             onFocus={() => handleRequest({ kind: "focus" }, Date.now())}
             onNote={setMessage}
           />

@@ -577,29 +577,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     var(--app-scrollbar-width) 100%;
 }
 
-/* A game's chat under the Stage's control bar: the same fade lane, but fully clear for its first
-   third and then a short ramp, so no half-legible line ever sits against the bar. */
-@utility stage-scroll-fade {
-  -webkit-mask-image:
-    linear-gradient(to bottom, transparent 0%, transparent 33%, black 100%),
-    linear-gradient(black, black), linear-gradient(black, black);
-  -webkit-mask-position: top, bottom, right;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size:
-    100% calc(var(--workspace-titlebar-scroll-fade-height) + 1px),
-    100% calc(100% - var(--workspace-titlebar-scroll-fade-height)),
-    var(--app-scrollbar-width) 100%;
-  mask-image:
-    linear-gradient(to bottom, transparent 0%, transparent 33%, black 100%),
-    linear-gradient(black, black), linear-gradient(black, black);
-  mask-position: top, bottom, right;
-  mask-repeat: no-repeat;
-  mask-size:
-    100% calc(var(--workspace-titlebar-scroll-fade-height) + 1px),
-    100% calc(100% - var(--workspace-titlebar-scroll-fade-height)),
-    var(--app-scrollbar-width) 100%;
-}
-
 /* Virtualizers own their native scroll element, so they cannot use ScrollArea's
    viewport fade. Keep the scrollbar lane opaque while sharing the same fade
    contract across those lists. */

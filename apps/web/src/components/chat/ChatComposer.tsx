@@ -266,6 +266,7 @@ import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { GameRunPicker } from "../game/GameRunPicker";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
@@ -1212,9 +1213,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compactBeforeSendTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
-  /** A game chat's "try it N ways" for its next message: null off, undefined not offered. */
-  tryWays?: number | null | undefined;
-  onCycleTryWays?: () => void;
+  keepGoingSend: "start" | "steer" | null;
 }) {
   return (
     <>
@@ -1257,8 +1256,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compactBeforeSendTokens={props.compactBeforeSendTokens}
         keepFullHistory={props.keepFullHistory}
         onToggleKeepFullHistory={props.onToggleKeepFullHistory}
-        tryWays={props.tryWays}
-        {...(props.onCycleTryWays === undefined ? {} : { onCycleTryWays: props.onCycleTryWays })}
+        keepGoingSend={props.keepGoingSend}
       />
     </>
   );
@@ -1364,9 +1362,8 @@ export interface ChatComposerProps {
   resumeCompactionTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
-  /** A game chat's "try it N ways" for its next message: null off, undefined not offered. */
-  tryWays?: number | null | undefined;
-  onCycleTryWays?: () => void;
+  /** A game chat set to Keep going: what its Send does (see ComposerPrimaryActions). */
+  keepGoingSend?: "start" | "steer" | null;
   onUsageLimitsCommand?: (() => void) | undefined;
   environmentUnavailable: {
     readonly label: string;
@@ -4520,17 +4517,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     hasImageAttachmentAttention;
   // Under a game's Stage there is no timeline to scroll: the composer rests at
   // one line until the prompt wraps or something attaches, giving the Stage the room.
-  const isComposerResting = shouldUseRestingComposerLayout({
-    // A game's composer is its resting row from the first paint, while the thread still loads.
-    isExistingThread: gameThread || (routeKind === "server" && activeThreadId !== null),
-    isMobileViewport,
-    isScrollCollapsed: gameThread || isComposerScrollCollapsed,
-    hasExpandedChrome:
-      composerHasExpandedChrome ||
-      (gameThread && (composerImages.length > 0 || composerFiles.length > 0)),
-    hasMultilinePrompt,
-    timelineOverflows: gameThread || timelineOverflows,
-  });
+  // A game's composer has one layout, the field over its controls, from the first paint: it
+  // never rests to a row with its controls tucked beside the field.
+  const isComposerResting =
+    !gameThread &&
+    shouldUseRestingComposerLayout({
+      isExistingThread: routeKind === "server" && activeThreadId !== null,
+      isMobileViewport,
+      isScrollCollapsed: isComposerScrollCollapsed,
+      hasExpandedChrome: composerHasExpandedChrome,
+      hasMultilinePrompt,
+      timelineOverflows,
+    });
   const expandedComposerImages = isComposerResting
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
     : standaloneComposerImages;
@@ -6014,6 +6012,44 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
 
+  // Attach: at the field's end on a coding chat, first among a game's controls.
+  const composerAttachAction = showComposerAttachAction ? (
+    <>
+      <input
+        ref={attachmentInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          // Inserting a chip refocuses the editor after the draft renders;
+          // focusing synchronously here would report the editor's stale text
+          // over the prompt that was just written.
+          void addComposerAttachments(files).then((inserted) => {
+            if (!inserted) focusComposer();
+          });
+        }}
+      />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => attachmentInputRef.current?.click()}
+              aria-label="Attach files"
+            />
+          }
+        >
+          <PaperclipIcon />
+        </TooltipTrigger>
+        <TooltipPopup>Attach files</TooltipPopup>
+      </Tooltip>
+    </>
+  ) : null;
   return (
     <form
       ref={composerFormRef}
@@ -6782,7 +6818,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 )}
 
               <div
-                className={cn("relative", isComposerResting && "flex min-w-0 items-center gap-1")}
+                className={cn(
+                  "relative",
+                  isComposerResting && "flex min-w-0 items-center gap-1",
+                  // A game's field takes its row alone; a suggestion's Tab hint ends it.
+                  gameThread && "flex min-w-0 items-start gap-2",
+                )}
                 style={
                   isComposerResting && restingActionsWidth !== null
                     ? { paddingRight: `calc(${restingActionsWidth}px + 1rem)` }
@@ -6854,8 +6895,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     buildContextClipboardFragment={buildContextClipboardFragmentStable}
                     importContextFragment={importContextFragmentStable}
                     skills={selectedProviderSkills}
-                    containerClassName={cn(isComposerResting && "min-w-0 flex-1")}
+                    containerClassName={cn((isComposerResting || gameThread) && "min-w-0 flex-1")}
                     className={cn(
+                      gameThread && "min-h-8",
                       showMobilePendingAnswerActions && "max-sm:pb-12",
                       isComposerResting &&
                         "my-0 max-h-8 min-h-8 overflow-hidden py-0 whitespace-pre! leading-8",
@@ -6865,8 +6907,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isComposerResting &&
                         "flex items-center overflow-hidden whitespace-nowrap leading-8",
                       // A game's composer line is words to read (what to do here, or the agent's
-                      // suggestion), not a hint: secondary text, not placeholder grey.
-                      gameThread && "text-muted-foreground",
+                      // suggestion), not a hint: secondary text, not placeholder grey, on one line.
+                      gameThread && "truncate text-muted-foreground",
                     )}
                     onChange={onPromptChangeStable}
                     onVisibleSelectionChange={expandComposerForEditorChangeStable}
@@ -6907,6 +6949,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                   />
                 </ComposerContextActionsContext>
+                {/* A game's suggestion, written as the placeholder: Tab takes it. */}
+                {gameThread && offeredSuggestion !== null && prompt.trim() === "" ? (
+                  <span className="flex h-8 shrink-0 items-center gap-1.5" aria-hidden="true">
+                    <Kbd>Tab</Kbd>
+                    <Text variant="meta" tone="dim">
+                      to use
+                    </Text>
+                  </span>
+                ) : null}
                 {isComposerResting ? collapsedComposerImagePreviews : null}
                 {showMobilePendingAnswerActions ? (
                   <div
@@ -6958,18 +7009,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "absolute right-px z-10 h-12 w-auto gap-0 py-0 sm:gap-0 sm:py-0",
                   isComposerResting &&
                     (showInlineRestingControls ? "bottom-[calc(2rem+1px)]" : "bottom-px"),
+                  gameThread && "gap-2 sm:gap-2",
                 )}
               >
                 <div
-                  ref={attachExpandedComposerControls}
+                  ref={gameThread ? undefined : attachExpandedComposerControls}
                   data-chat-composer-controls="left"
                   data-chat-composer-footer-controls="true"
                   className={cn(
                     "relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                     isComposerResting && "hidden",
+                    // A game's left end is what goes with the message: attachments, then how it runs.
+                    gameThread && "flex-none overflow-visible",
                   )}
                 >
-                  {composerControlsCollapsed ? null : composerControls}
+                  {gameThread ? (
+                    <>
+                      {composerAttachAction}
+                      <GameRunPicker
+                        threadRef={routeKind === "server" ? routeThreadRef : null}
+                        disabled={!canOperateThread}
+                      />
+                    </>
+                  ) : composerControlsCollapsed ? null : (
+                    composerControls
+                  )}
                 </div>
 
                 <div
@@ -6979,61 +7043,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  className={cn(
+                    "flex shrink-0 flex-nowrap items-center justify-end gap-2",
+                    gameThread && "min-w-0 flex-1 gap-1",
+                  )}
                 >
-                  {/* A game's suggestion, written as the placeholder: Tab takes it. */}
-                  {offeredSuggestion !== null && prompt.trim() === "" ? (
-                    <span className="flex shrink-0 items-center gap-1.5" aria-hidden="true">
-                      <Kbd>Tab</Kbd>
-                      <Text variant="meta" tone="dim">
-                        to use
-                      </Text>
-                    </span>
-                  ) : null}
-                  {showComposerAttachAction ? (
-                    <>
-                      <input
-                        ref={attachmentInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files ?? []);
-                          event.currentTarget.value = "";
-                          // Inserting a chip refocuses the editor after the draft renders;
-                          // focusing synchronously here would report the editor's stale text
-                          // over the prompt that was just written.
-                          void addComposerAttachments(files).then((inserted) => {
-                            if (!inserted) focusComposer();
-                          });
-                        }}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onPointerDown={(event) => event.preventDefault()}
-                              onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
-                            />
-                          }
-                        >
-                          <PaperclipIcon />
-                        </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
-                      </Tooltip>
-                    </>
-                  ) : null}
+                  {gameThread ? (
+                    // The model and Thinking pickers, folding Thinking into a menu when narrow.
+                    <div
+                      ref={attachExpandedComposerControls}
+                      data-chat-composer-footer-controls="true"
+                      className="flex min-w-0 flex-1 items-center justify-end gap-1"
+                    >
+                      {composerControls}
+                    </div>
+                  ) : (
+                    composerAttachAction
+                  )}
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
+                    // A game's composer carries its pickers and Send, nothing else.
                     activeContextWindow={
-                      settings.contextWindowMeterEnabled ? activeContextWindow : null
+                      settings.contextWindowMeterEnabled && !gameThread ? activeContextWindow : null
                     }
-                    reserveContextWindowMeter={reserveContextWindowMeter}
+                    reserveContextWindowMeter={reserveContextWindowMeter && !gameThread}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}
@@ -7076,10 +7110,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     compactBeforeSendTokens={props.resumeCompactionTokens}
                     keepFullHistory={props.keepFullHistory}
                     onToggleKeepFullHistory={props.onToggleKeepFullHistory}
-                    tryWays={props.tryWays}
-                    {...(props.onCycleTryWays === undefined
-                      ? {}
-                      : { onCycleTryWays: props.onCycleTryWays })}
+                    keepGoingSend={gameThread ? (props.keepGoingSend ?? null) : null}
                     compactDisabled={
                       compactDisabled || noProviderAvailable || isSendBusy || isConnecting
                     }

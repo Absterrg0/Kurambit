@@ -130,6 +130,9 @@ describe("the keep-going banner", () => {
       return view?.kind === "live" ? view.title : null;
     };
     expect(title(AUTOPILOT_TURN)).toBe("Keep going · step 3 · your agent is working on it");
+    expect(keepGoingBannerView(AUTOPILOT_TURN, MAIN_CHAT, clock)).toMatchObject({
+      line: "Keep going · step 3",
+    });
     expect(title({ ...AUTOPILOT_TURN, phase: "waiting" })).toBe(
       "Keep going · waits for this turn to end · until 15:10",
     );

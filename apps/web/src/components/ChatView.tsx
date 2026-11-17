@@ -359,6 +359,8 @@ import { useGameWorkspaceStore, type GameStageRequest } from "../gameWorkspaceSt
 import { useGameNext } from "./game/GameNextBanner";
 import { useGameDecide } from "./game/GameDecisions";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
+import { useKeepGoing } from "./game/useKeepGoing";
+import { GameChatSuggestions } from "./game/GameChatSuggestions";
 import { useGameGenerationCards } from "./game/GameGenerationCard";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -5098,6 +5100,19 @@ export default function ChatView(props: ChatViewProps) {
   const cycleTryWaysStable = useStableCallback(() =>
     useGameWorkspaceStore.getState().cycleTryWays(routeThreadKey),
   );
+  // Set to Keep going in the run picker, Send starts it, or gives the run live here its next step.
+  const keepGoing = useKeepGoing(isGameThread && isServerThread ? activeThreadRef : null);
+  const keepGoingProfile = useGameWorkspaceStore((state) =>
+    isGameThread ? state.keepGoingPick[routeThreadKey] : undefined,
+  );
+  const keepGoingSend =
+    keepGoingProfile === undefined || !isServerThread
+      ? null
+      : keepGoing.status !== null &&
+          keepGoing.status.mode !== "off" &&
+          keepGoing.status.chat === activeThreadId
+        ? ("steer" as const)
+        : ("start" as const);
   const toggleKeepFullHistoryStable = useStableCallback(toggleKeepFullHistory);
   const handleRestoreThreadBranch = () => {
     if (!canWriteSourceControl) return;
@@ -5854,6 +5869,25 @@ export default function ChatView(props: ChatViewProps) {
             "Every agent session on this game reads it. Edit it from the Stage's menu, Decisions.",
         }),
       );
+      return;
+    }
+
+    // Keep going's message is only its direction: it may be empty, and it is no turn of its own.
+    if (keepGoingSend !== null && keepGoingProfile !== undefined && !directAnnotation) {
+      if (composerHasNonPromptContent) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Keep going takes words only",
+            description: "Remove the attachments, or pick Once in the composer to send them.",
+          }),
+        );
+        return;
+      }
+      if (!(await keepGoing.choose(keepGoingProfile, promptRef.current))) return;
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
       return;
     }
 
@@ -7703,6 +7737,9 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   const gameLayout = isGameThread && activeThreadRef !== null;
+  // A game's empty chat reads like the home page: its composer right under the Stage's bar, the
+  // agent's last suggestions under it. The first message makes it the usual chat.
+  const gameChatEmpty = gameLayout && isServerThread && timelineMessages.length === 0 && !isWorking;
   // What the person asked of the running turn: the caption of the build slot.
   const gameTurnRequestWhole =
     gameLayout && phase === "running"
@@ -7831,8 +7868,7 @@ export default function ChatView(props: ChatViewProps) {
                     bannerItems={composerBannerItems}
                     resumeCompactionTokens={resumeCompactionTokens}
                     keepFullHistory={keepFullHistory}
-                    tryWays={tryWays}
-                    onCycleTryWays={cycleTryWaysStable}
+                    keepGoingSend={keepGoingSend}
                     onToggleKeepFullHistory={toggleKeepFullHistoryStable}
                     onUsageLimitsCommand={
                       usageLimitsOffered && usageLimitsKey !== null && !composerHasNonPromptContent
@@ -8267,10 +8303,20 @@ export default function ChatView(props: ChatViewProps) {
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+                  : gameChatEmpty
+                    ? // 12px here and the Stage's own 12px under its bar: 24px to the composer.
+                      "pointer-events-none absolute inset-x-0 top-0 z-20 pt-3"
+                    : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
               }
             >
               {composerLane}
+              {gameChatEmpty && activeThreadRef !== null ? (
+                <div className="chat-composer-lane mt-3 w-full">
+                  <div className="mx-auto w-full max-w-(--chat-content-max-width)">
+                    <GameChatSuggestions threadRef={activeThreadRef} onPick={askAgentToFixStable} />
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {canOperatePreview && activeThreadRef && activeEnvironmentServerBrowser ? (

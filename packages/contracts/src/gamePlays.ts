@@ -338,7 +338,17 @@ export type GameSavedPlaysReading = typeof GameSavedPlaysReading.Type;
 /** A second either way, or a twentieth of the run: "at about the same time". */
 const sameTime = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, Math.max(a, b) * 0.05);
 
-/** PURE. A saved play's replay on a build, read against how it ended when it was saved. */
+/** PURE. m:ss, the Stage's clock: "1:10". */
+const clockWords = (seconds: number) => {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+
+/**
+ * PURE. A saved play's replay on a build, read against how it went when it was saved. A play with
+ * no ending (left: an open-ended game's) reads by its marks for its length: the same while it
+ * stands where it stood and does not end within it.
+ */
 export const savedPlayReading = (
   name: string,
   saved: GamePlay,
@@ -347,6 +357,20 @@ export const savedPlayReading = (
   const base = { name, saved: saved.outcome, now: run.outcome };
   if (run.missing !== undefined && run.missing.length > 0)
     return { ...base, reading: "cannot-replay", differs: null, missing: run.missing };
+  if (saved.outcome.left === true) {
+    const length = saved.outcome.seconds;
+    // A replay runs on past the play's end; what it does there was never played.
+    const within = (marks: ReadonlyArray<GamePlayMark>) =>
+      marks.filter((mark) => mark.t <= length + 0.05);
+    const endedWithin = run.outcome !== null && run.outcome.seconds <= length + 0.5;
+    const differs = firstPlayDifference(within(saved.marks), within(run.marks));
+    return {
+      ...base,
+      now: endedWithin ? run.outcome : null,
+      reading: endedWithin ? "ending-changed" : differs === null ? "same" : "plays-differently",
+      differs,
+    };
+  }
   const differs = firstPlayDifference(saved.marks, run.marks);
   const reading =
     run.outcome === null || run.outcome.won !== saved.outcome.won
@@ -361,13 +385,18 @@ export const savedPlayReading = (
 export const savedPlayWords = (play: GameSavedPlayReplay): string => {
   const where =
     play.differs === null ? "" : `, ${play.differs.what} at ${Math.round(play.differs.seconds)} s`;
+  const open = play.saved.left === true;
   switch (play.reading) {
     case "same":
-      return `${play.name} ends the same (${playOutcomeWords(play.now)})`;
+      return open
+        ? `${play.name} plays the same for ${clockWords(play.saved.seconds)}`
+        : `${play.name} ends the same (${playOutcomeWords(play.now)})`;
     case "ending-changed":
-      return play.now === null
-        ? `${play.name} no longer ends (it ${playOutcomeWords(play.saved)})${where}`
-        : `${play.name} now ${play.now.won ? "wins" : "loses"} at ${Math.round(play.now.seconds)} s${where}`;
+      return open && play.now !== null
+        ? `${play.name} now ${play.now.won ? "wins" : "loses"} at ${Math.round(play.now.seconds)} s, within the ${clockWords(play.saved.seconds)} it played${where}`
+        : play.now === null
+          ? `${play.name} no longer ends (it ${playOutcomeWords(play.saved)})${where}`
+          : `${play.name} now ${play.now.won ? "wins" : "loses"} at ${Math.round(play.now.seconds)} s${where}`;
     case "plays-differently":
       return play.differs === null
         ? `${play.name} ends the same way, at ${Math.round(play.now?.seconds ?? 0)} s instead of ${Math.round(play.saved.seconds)} s`
@@ -383,7 +412,9 @@ export const savedPlaysWords = (reading: GameSavedPlaysReading): string => {
   const same = reading.plays.filter((play) => play.reading === "same").length;
   const skipped = reading.skipped > 0 ? ` (${reading.skipped} older not replayed)` : "";
   if (same === total)
-    return `${total === 1 ? "The saved play ends" : `All ${total} saved plays end`} the same${skipped}`;
+    return total === 1
+      ? `${savedPlayWords(reading.plays[0]!)}${skipped}`
+      : `All ${total} saved plays ${reading.plays.some((play) => play.saved.left === true) ? "play" : "end"} the same${skipped}`;
   // An ending changed or a play that can't replay first: those are what a person acts on.
   const order: ReadonlyArray<GameSavedPlayReading> = [
     "ending-changed",
@@ -394,5 +425,5 @@ export const savedPlaysWords = (reading: GameSavedPlaysReading): string => {
     .filter((play) => play.reading !== "same")
     .toSorted((a, b) => order.indexOf(a.reading) - order.indexOf(b.reading));
   const more = off.length > 1 ? ` (+${off.length - 1} more)` : "";
-  return `${same} of ${total} end the same; ${savedPlayWords(off[0]!)}${more}${skipped}`;
+  return `${same} of ${total} ${reading.plays.some((play) => play.saved.left === true) ? "play" : "end"} the same; ${savedPlayWords(off[0]!)}${more}${skipped}`;
 };

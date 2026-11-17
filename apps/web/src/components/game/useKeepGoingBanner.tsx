@@ -142,9 +142,9 @@ export function useKeepGoingBanner(
           title: (
             <Tooltip>
               <TooltipTrigger render={<span className="min-w-0 truncate font-normal" />}>
-                {view.title}
+                {view.line}
               </TooltipTrigger>
-              <TooltipPopup side="top">Your message goes before its next step.</TooltipPopup>
+              <TooltipPopup side="top">{view.title}</TooltipPopup>
             </Tooltip>
           ),
           ...(view.note === null ? {} : { description: view.note }),

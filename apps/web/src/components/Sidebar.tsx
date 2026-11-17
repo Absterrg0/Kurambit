@@ -7,6 +7,7 @@ import {
 import { sortGameThreadsByActivity } from "./game/gameLibrary.logic";
 import { openCommandPalette } from "../commandPaletteBus";
 import { isSettingsPage } from "./sidebar/mainAppLocation";
+import { Button } from "./ui/button";
 import { Text } from "./ui/text";
 import { Skeleton } from "./ui/skeleton";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
@@ -1519,6 +1520,8 @@ type SidebarThreadRowProps = {
   variantAction: SidebarSweepAction;
   game: GameLibraryEntry | null;
   gameChats: GameChats<SidebarThreadSummary> | null;
+  /** The chat open now, by its scoped key, which a game's chats list marks. */
+  currentChatKey: string | null;
   onNewChat: (() => void) | null;
   settlementSupported: boolean;
   snoozeSupported: boolean;
@@ -1563,31 +1566,27 @@ type SidebarThreadRowProps = {
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
 };
 
-function GameDisclosureSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <>
-      <Text variant="meta" tone="muted" render={<p className="px-1.5 pb-0.5" />}>
-        {title}
-      </Text>
-      <ul role="list" className="flex flex-col pb-1">
-        {children}
-      </ul>
-    </>
-  );
-}
-
-function GameDisclosureLine(props: { label: string; at: string; onOpen: () => void }) {
+function GameDisclosureLine(props: {
+  label: string;
+  at: string;
+  current: boolean;
+  onOpen: () => void;
+}) {
   return (
     <li className="list-none">
       <button
         type="button"
+        aria-current={props.current ? "page" : undefined}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
           props.onOpen();
         }}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 text-left text-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          props.current && "bg-sidebar-row-hover text-foreground",
+        )}
       >
         <Text variant="meta" tone="inherit" truncate render={<span className="flex-1" />}>
           {props.label}
@@ -1672,6 +1671,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     game,
     gameChats,
     onNewChat,
+    currentChatKey,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
@@ -2126,6 +2126,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   if (game !== null) {
     const otherChats = (gameChats?.others ?? []).filter((chat) => chat.id !== thread.id);
+    // Every chat of the game, the one open marked; the row's own chat first.
+    const allChats = [thread, ...otherChats];
     const openFromDisclosure = (threadId: ThreadId) => {
       onThreadActivate(scopeThreadRef(thread.environmentId, threadId));
       setChatsOpen(false);
@@ -2162,9 +2164,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <button
-                    type="button"
-                    aria-label={`${chatsOpen ? "Hide" : "Show"} the other chats of ${game.name}`}
+                  <Button
+                    size="micro"
+                    variant="ghost-muted"
+                    aria-label={`${chatsOpen ? "Hide" : "Show"} the chats of ${game.name}`}
                     aria-expanded={chatsOpen}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
@@ -2172,7 +2175,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       event.stopPropagation();
                       setChatsOpen((open) => !open);
                     }}
-                    className="group/chats absolute top-3 right-1.5 inline-flex h-5 min-w-5 cursor-pointer items-center justify-center rounded-sm px-1 text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
+                    className="group/chats absolute top-3 right-1.5"
                   />
                 }
               >
@@ -2219,18 +2222,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           ) : null}
           {chatsOpen ? (
             <div className="border-t border-border/60 bg-muted/20 px-2 py-1.5 pl-11">
-              {otherChats.length > 0 ? (
-                <GameDisclosureSection title="Other chats">
-                  {otherChats.map((chat) => (
-                    <GameDisclosureLine
-                      key={chat.id}
-                      label={chat.title === game.name ? "Chat" : chat.title}
-                      at={chat.updatedAt}
-                      onOpen={() => openFromDisclosure(chat.id)}
-                    />
-                  ))}
-                </GameDisclosureSection>
-              ) : null}
+              <ul role="list" className="flex flex-col pb-1">
+                {allChats.map((chat) => (
+                  <GameDisclosureLine
+                    key={chat.id}
+                    label={chat.title === game.name ? "Chat" : chat.title}
+                    at={chat.updatedAt}
+                    current={
+                      currentChatKey ===
+                      scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id))
+                    }
+                    onOpen={() => openFromDisclosure(chat.id)}
+                  />
+                ))}
+              </ul>
               {onNewChat !== null ? (
                 <button
                   type="button"
@@ -4480,6 +4485,7 @@ export default function Sidebar() {
                                 ) ?? null)
                           }
                           onNewChat={game === null ? null : () => startGameSession(game)}
+                          currentChatKey={routeThreadKey}
                           variantAction={
                             section === "snoozed"
                               ? "unsnooze"

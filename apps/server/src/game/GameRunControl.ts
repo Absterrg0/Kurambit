@@ -332,6 +332,14 @@ const make = Effect.gen(function* () {
   ) {
     const { projectId } = yield* resolveGame(threadId);
     yield* gameLock.withLock(projectId, setOnce(threadId, input));
+    // The run is on now, so the note is its next step: a proposal already made gives way to it.
+    const note = input.note?.trim() ?? "";
+    if (input.mode !== "off" && note.length > 0)
+      yield* steer(threadId, {
+        threadId,
+        ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
+        text: note,
+      });
     return yield* status(threadId);
   });
 

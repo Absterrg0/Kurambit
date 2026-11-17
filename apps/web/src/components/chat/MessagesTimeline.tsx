@@ -1285,7 +1285,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   };
   const listHeaderLeadingContent =
     parentThreadLink === null ? (
-      topFadeEnabled ? (
+      topFadeEnabled && !gameThread ? (
         TIMELINE_LIST_FADE_HEADER
       ) : (
         TIMELINE_LIST_HEADER
@@ -1498,7 +1498,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
             onItemSizeChanged={handleItemSizeChanged}
             className={cn(
               "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-              topFadeEnabled && (gameThread ? "stage-scroll-fade" : "topbar-scroll-fade"),
+              // A game's chat is clipped hard 12px under the Stage's bar: a fade there left a
+              // half-legible line against the controls.
+              topFadeEnabled && !gameThread && "topbar-scroll-fade",
             )}
             ListHeaderComponent={listHeader}
             ListFooterComponent={timelineListFooter}

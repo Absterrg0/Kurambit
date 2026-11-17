@@ -63,6 +63,8 @@ export const GameKeepGoingInput = Schema.Struct({
   mode: GameKeepGoingMode,
   /** For a start or resume; null is no limit; omitted keeps the run's own (a new run: 60). */
   budgetMinutes: Schema.optionalKey(Schema.NullOr(PositiveInt)),
+  /** The person's words for the next step, sent with the start: its direction. */
+  note: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
 });
 export type GameKeepGoingInput = typeof GameKeepGoingInput.Type;
 

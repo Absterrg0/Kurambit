@@ -185,6 +185,9 @@ export type KeepGoingBannerView =
   | {
       readonly kind: "live";
       readonly id: string;
+      /** The tray's one slim line: "Keep going · step 3". */
+      readonly line: string;
+      /** What it is doing now, in full, for the line's tooltip. */
       readonly title: string;
       /** Why keep going wrote no play bot, through its first step; else null. */
       readonly note: string | null;
@@ -258,7 +261,13 @@ export const keepGoingBannerView = (
             : status.phase === "undoing"
               ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
               : "Keep going · reading the current build's facts";
-  return { kind: "live", id: `keep-going:${runId}`, title, note };
+  const line =
+    n === null
+      ? "Keep going"
+      : status.phase === "undoing"
+        ? `Keep going · undoing step ${n}`
+        : step;
+  return { kind: "live", id: `keep-going:${runId}`, line, title, note };
 };
 
 /**

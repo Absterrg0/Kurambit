@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Slider } from "@base-ui/react/slider";
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
@@ -10,7 +10,6 @@ import {
   KeyboardIcon,
   MessageSquarePlusIcon,
   MoreHorizontalIcon,
-  PanelTopCloseIcon,
 } from "lucide-react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -19,13 +18,20 @@ import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { Popover, PopoverPopup } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { attachRunToComposer } from "./gameComposerContext";
 import { GameControlsMenu } from "./GameControlsMenu";
-import { useStageMarks } from "./gameStageWatch";
 import type { StudioMessage } from "./GamePlaySurface";
 import {
   replayStageRun,
@@ -271,14 +277,11 @@ const stepsAt = (timeline: Timeline) =>
 
 export type StageRewind = ReturnType<typeof useStageRewind>;
 
-/** The run so far as a playing game reports it, a mark a second: its length. */
-const liveLength = (marks: ReadonlyArray<{ readonly t: number }>) => marks.at(-1)?.t ?? 0;
-
 /**
- * The run's timeline in the control bar, always there: while playing, a quiet line of the run so
- * far; paused or ended, the run with its losses, its ending and a fork marked. Dragging or
- * clicking it at any moment pauses and rewinds to that second. Its one time sits after it.
- * Redraws only on input and on the game's once-a-second mark.
+ * The run's timeline in the control bar, shown only when there is something to scrub: paused or
+ * ended, the run with its losses, its ending and a fork marked, and its one time after it.
+ * Dragging or clicking it rewinds to that second. While the game plays its room stays empty, so
+ * the bar's buttons never move. Redraws only on input and on pausing, rewinding or an ending.
  */
 export function GameRunTimeline({
   threadRef,
@@ -296,17 +299,15 @@ export function GameRunTimeline({
   const threadKey = scopedThreadKey(threadRef);
   const { timeline, busy } = rewind;
   const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
-  const marks = useStageMarks(threadKey);
   const [dragging, setDragging] = useState<number | null>(null);
-  // Paused, ended or rewinding, the timeline is the run taken from the game; playing, the run so far.
-  // Not the folder's game (a copy, a compare, a state card): a quiet empty line.
+  // Paused, ended or rewinding: the run taken from the game. Playing, or not the folder's game (a
+  // copy, a compare, a state card): nothing to scrub, so nothing shows.
   const held = enabled && timeline !== null && (frozen || busy !== null || ended);
-  const runSoFar = enabled ? liveLength(marks) : 0;
-  const length = Math.max(held ? playSeconds(timeline.play) : runSoFar, 0.1);
-  const at = dragging ?? busy ?? (held ? (timeline.at ?? length) : runSoFar);
-  const runMarks = held ? runTimelineMarks(timeline.play) : [];
-  const fork = enabled ? (timeline?.fork ?? null) : null;
-  const started = held || (enabled && marks.length > 0);
+  if (!held) return <div className="min-w-0 flex-1" data-game-run-timeline="" />;
+  const length = Math.max(playSeconds(timeline.play), 0.1);
+  const at = dragging ?? busy ?? timeline.at ?? length;
+  const runMarks = runTimelineMarks(timeline.play);
+  const fork = timeline.fork;
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3" data-game-run-timeline="">
       <Slider.Root
@@ -315,7 +316,7 @@ export function GameRunTimeline({
         min={0}
         max={length}
         step={0.1}
-        disabled={!enabled || !started || busy !== null}
+        disabled={busy !== null}
         onValueChange={(next) => {
           const single = Array.isArray(next) ? next[0] : next;
           if (typeof single === "number") setDragging(single);
@@ -354,13 +355,7 @@ export function GameRunTimeline({
                 )}
               />
             ))}
-            {/* The knob shows where a drag starts: on hover while playing, always while held. */}
-            <Slider.Thumb
-              className={cn(
-                "size-2.5 rounded-full bg-foreground outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-                !held && dragging === null && "opacity-0 group-hover/timeline:opacity-100",
-              )}
-            />
+            <Slider.Thumb className="size-2.5 rounded-full bg-foreground outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" />
           </Slider.Track>
         </Slider.Control>
       </Slider.Root>
@@ -388,16 +383,19 @@ export function GameRunTimeline({
 }
 
 /**
- * The run's menu at the bar's end: tell the agent about the run, save it as a test play (named in
- * a small form beside the menu), replay a fork as it was, the game's controls, and hiding the game.
+ * The bar's `⋯` menu, in three sections. Run: tell the agent about the run, save it as a test play
+ * (named in a small form beside the menu), replay a fork as it was. View: the game's controls and
+ * the dev views. Stage: what the Stage does with the game.
  */
 export function GameRunMenu({
   threadRef,
   rewind,
   runs,
   playing,
+  live,
+  viewItems,
+  stageItems,
   onNote,
-  onHide,
   onFocus,
 }: {
   threadRef: ScopedThreadRef;
@@ -405,8 +403,11 @@ export function GameRunMenu({
   runs: StageRuns;
   /** A game plays on the Stage, so it has controls to show. */
   playing: boolean;
+  /** It is the folder's own game, running, so its run so far can be taken. */
+  live: boolean;
+  viewItems: ReactNode;
+  stageItems: ReactNode;
   onNote: (text: string) => void;
-  onHide: () => void;
   onFocus: () => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
@@ -421,16 +422,25 @@ export function GameRunMenu({
     (state) => state.status === "ready" && state.capabilities.includes("controls"),
     false,
   );
+  const takesRuns = useThreadStageBridge(
+    threadKey,
+    (state) => state.status === "ready" && state.capabilities.includes("rewind"),
+    false,
+  );
+  const keepPlay = useAtomCommand(gameEnvironment.keepPlay, { reportFailure: false });
   const savePlay = useAtomCommand(gameEnvironment.savePlay, { reportFailure: false });
   const canSave = useAtomValue(gameEnvironment.savePlay.permissionAtom(threadRef.environmentId));
   const anchor = useRef<HTMLButtonElement | null>(null);
   const [naming, setNaming] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [name, setName] = useState("");
+  // The run Save as test play took when it was chosen: the run so far, or the one that ended.
+  const [kept, setKept] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const ended = runs.ended;
   const canTell = rewind.busy === null && (ended !== null || (frozen && tellsRuns));
+  const canTake = live && takesRuns && rewind.busy === null;
   const tell = async () => {
     // A paused run is asked of the game first; it answers with the run (useStageRuns).
     if (ended === null) {
@@ -443,14 +453,40 @@ export function GameRunMenu({
       paused: false,
     });
   };
+  /**
+   * Any run can be a test play, an open-ended game's too: the run so far, to now or to the second
+   * the timeline was rewound to (the page holds the run from there), or else the run that ended.
+   */
+  const take = async () => {
+    setFailed(null);
+    setKept(null);
+    // A first win is offered under its own name.
+    if (name === "" && ended?.firstWin === true) setName("first win");
+    setNaming(true);
+    const play = canTake ? await takeStageRun(false) : null;
+    if (play === null) {
+      if (ended !== null) setKept(ended.kept);
+      else setFailed("The game has no run to save yet.");
+      return;
+    }
+    const result = await keepPlay({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        play: { ...play, outcome: { ...play.outcome, text: "" } },
+      },
+    });
+    if (result._tag === "Failure") setFailed(String(squashAtomCommandFailure(result)));
+    else setKept(result.value.kept);
+  };
   const save = async () => {
-    if (ended === null) return;
+    if (kept === null) return;
     setSaving(true);
     setFailed(null);
     // The save replays the run once on its own build first, which takes a moment.
     const result = await savePlay({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, name: name.trim(), kept: ended.kept },
+      input: { threadId: threadRef.threadId, name: name.trim(), kept },
     });
     setSaving(false);
     if (result._tag === "Failure") {
@@ -459,6 +495,7 @@ export function GameRunMenu({
     }
     setNaming(false);
     setName("");
+    setKept(null);
     runs.saved();
     onNote(
       `${result.value.replaced ? "Replaced" : "Saved"} "${result.value.name}" as a test play: every build replays it, in Checks.`,
@@ -474,49 +511,42 @@ export function GameRunMenu({
           <MoreHorizontalIcon aria-hidden="true" />
         </MenuTrigger>
         <MenuPopup side="top" align="end">
-          <MenuItem disabled={!canTell} onClick={() => void tell()}>
-            <MessageSquarePlusIcon />
-            Tell the agent about this run
-          </MenuItem>
-          {canSave ? (
-            <MenuItem
-              disabled={ended === null}
-              onClick={() => {
-                // A first win is offered under its own name.
-                if (name === "" && ended?.firstWin === true) setName("first win");
-                setNaming(true);
-              }}
-            >
-              <FlagIcon className="mt-0.5 self-start" />
-              <span className="flex min-w-0 flex-col">
+          <MenuGroup>
+            <MenuGroupLabel>Run</MenuGroupLabel>
+            <MenuItem disabled={!canTell} onClick={() => void tell()}>
+              <MessageSquarePlusIcon />
+              Tell the agent about this run
+            </MenuItem>
+            {canSave ? (
+              <MenuItem disabled={ended === null && !canTake} onClick={() => void take()}>
+                <FlagIcon />
                 Save as test play…
-                {/* A test play is a whole run: until one ends there is nothing to save. */}
-                {ended === null ? (
-                  <Text variant="caption" tone="muted">
-                    Play a run to its end first
-                  </Text>
-                ) : null}
-              </span>
-            </MenuItem>
-          ) : null}
-          {rewind.comparable ? (
-            <MenuItem
-              disabled={rewind.busy !== null}
-              onClick={() => void rewind.compare(rewind.side === "before" ? "after" : "before")}
-            >
-              <HistoryIcon />
-              {rewind.side === "before" ? "Replay with the change" : "Replay as it was"}
-            </MenuItem>
-          ) : null}
+              </MenuItem>
+            ) : null}
+            {rewind.comparable ? (
+              <MenuItem
+                disabled={rewind.busy !== null}
+                onClick={() => void rewind.compare(rewind.side === "before" ? "after" : "before")}
+              >
+                <HistoryIcon />
+                {rewind.side === "before" ? "Replay with the change" : "Replay as it was"}
+              </MenuItem>
+            ) : null}
+          </MenuGroup>
           <MenuSeparator />
-          <MenuItem disabled={!playing || !hasControls} onClick={() => setControlsOpen(true)}>
-            <KeyboardIcon />
-            Show controls
-          </MenuItem>
-          <MenuItem onClick={onHide}>
-            <PanelTopCloseIcon />
-            Hide the game
-          </MenuItem>
+          <MenuGroup>
+            <MenuGroupLabel>View</MenuGroupLabel>
+            <MenuItem disabled={!playing || !hasControls} onClick={() => setControlsOpen(true)}>
+              <KeyboardIcon />
+              Show controls
+            </MenuItem>
+            {viewItems}
+          </MenuGroup>
+          <MenuSeparator />
+          <MenuGroup>
+            <MenuGroupLabel>Stage</MenuGroupLabel>
+            {stageItems}
+          </MenuGroup>
         </MenuPopup>
       </Menu>
       <GameControlsMenu
@@ -550,7 +580,11 @@ export function GameRunMenu({
                 {failed}
               </Text>
             )}
-            <Button size="sm" type="submit" disabled={saving || name.trim().length === 0}>
+            <Button
+              size="sm"
+              type="submit"
+              disabled={saving || kept === null || name.trim().length === 0}
+            >
               {saving ? "Checking it replays the same…" : "Save as test play"}
             </Button>
           </form>

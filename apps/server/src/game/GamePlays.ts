@@ -5,7 +5,8 @@
 // A replay runs the latest kept run on a build's copy (or the folder, for the agent) and says
 // how it ends there and the first second it plays differently. A saved play (playFiles.ts) is
 // a kept run named as a test: saved only once it replays the same on the build it was played
-// on, then replayed by every build's measure (GameFacts, the Saved plays fact).
+// on, then replayed by every build's measure (GameFacts, the Saved plays fact). A run with no
+// ending (an open-ended game's, saved mid-play) tests how it plays for its length.
 // @effect-diagnostics nodeBuiltinImport:off -- A replayed moment's frame is a file in the game's logs.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
@@ -46,6 +47,13 @@ import {
 import { ensureGameDir } from "./gameKeptSaves.ts";
 
 const isGameOperationError = Schema.is(GameOperationError);
+
+/** Whether anyone played the run: a key, a button or a pad, not only the mouse moving. */
+const playedInput = (play: GamePlay) =>
+  play.inputs.some(
+    ([, input]) =>
+      input.k.length > 0 || input.p.length > 0 || input.b.length > 0 || input.g !== undefined,
+  );
 const isPlayName = Schema.is(GamePlayName);
 
 export class GamePlays extends Context.Service<
@@ -62,8 +70,9 @@ export class GamePlays extends Context.Service<
       target: GameBuildId | "folder",
     ) => Effect.Effect<GameReplayResult, GameOperationError>;
     /**
-     * Saves a kept run (the newest, or `kept`) as a test play, once a replay on the build it
-     * was played on ends the same way; refused, with the first difference, when it does not.
+     * Saves a kept run (the newest ended one, or `kept`, which may have no ending) as a test play,
+     * once a replay on the build it was played on goes the same way; refused, with the first
+     * difference, when it does not, or when nobody pressed anything in it.
      */
     readonly save: (
       threadId: ThreadId,
@@ -190,10 +199,12 @@ const make = Effect.gen(function* () {
             ? "No run is kept yet: play one to its end, on the Stage or with game_play start and act, then save it."
             : "That run is no longer kept (only the newest ten are): play it again and save it.",
         );
-      if (kept.play.outcome.left === true)
+      // A run with no ending (an open-ended game's, or one saved mid-play) is a test of how it
+      // plays for its length; one nobody played tests nothing.
+      if (!playedInput(kept.play))
         return yield* refused(
           root,
-          "That run was left before it ended, so it has no ending to test: save a run played to its end.",
+          "Nobody pressed anything in that run, so it tests nothing: play a little, then save it.",
         );
       // A play that does not repeat itself on its own build is noise, never a test.
       const target = kept.build ?? "folder";

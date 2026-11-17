@@ -46,8 +46,11 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
   const chosenBudget = useAtomValue(threadRef === null ? NO_BUDGET : keepGoingBudget(threadRef));
   const [sending, setSending] = useState(false);
 
-  const set = async (request: Pick<GameKeepGoingInput, "mode" | "budgetMinutes">) => {
-    if (threadRef === null || sending) return;
+  /** Whether the server took it; a refusal is toasted with its reason. */
+  const set = async (
+    request: Pick<GameKeepGoingInput, "mode" | "budgetMinutes" | "note">,
+  ): Promise<boolean> => {
+    if (threadRef === null || sending) return false;
     setSending(true);
     const result = await setCommand({
       environmentId: threadRef.environmentId,
@@ -59,13 +62,19 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
         request.mode === "off" ? "Keep going did not stop" : "Keep going did not start",
         squashAtomCommandFailure(result),
       );
+    return result._tag !== "Failure";
   };
 
-  /** A mode from the control or the palette: the picked budget goes with a start or resume. */
-  const choose = async (mode: GameKeepGoingMode) => {
-    if (threadRef === null) return;
+  /**
+   * A mode from the composer or the palette: the picked budget goes with a start or resume, and
+   * `note`, the person's message, is its next step, also when the run is already on here.
+   */
+  const choose = async (mode: GameKeepGoingMode, note = ""): Promise<boolean> => {
+    if (threadRef === null) return false;
     const request = keepGoingRequest(query.data, threadRef.threadId, mode, chosenBudget);
-    if (request !== null) await set(request);
+    const text = mode === "off" ? "" : note.trim();
+    if (request === null && text.length === 0) return true;
+    return set({ ...(request ?? { mode }), ...(text.length === 0 ? {} : { note: text }) });
   };
 
   const decide = async (stepId: string, answer: "start" | "skip" | "hold") => {

@@ -1964,7 +1964,13 @@ function OpenCommandPaletteDialog(props: {
               ...(paused === undefined ? {} : { description: paused }),
               searchTerms: ["keep going", mode, "resume", "continue", "autonomous", "game"],
               icon: <FastForwardIcon className={ITEM_ICON_CLASS} />,
-              run: () => keepGoing.choose(mode),
+              // The composer's run picker says Keep going from now on, so Send steers it.
+              run: async () => {
+                useGameWorkspaceStore
+                  .getState()
+                  .pickRun(scopedThreadKey(threadRef), { kind: "keep-going", profile: mode });
+                await keepGoing.choose(mode);
+              },
             });
       if (keepGoingStatus.mode !== "off" && keepGoing.canOperate)
         actionItems.push({
@@ -1974,7 +1980,9 @@ function OpenCommandPaletteDialog(props: {
           searchTerms: ["keep going", "stop", "off", "pause", "game"],
           icon: <PauseIcon className={ITEM_ICON_CLASS} />,
           shortcutCommand: "game.keepGoing.stop",
-          run: () => keepGoing.set({ mode: "off" }),
+          run: async () => {
+            await keepGoing.set({ mode: "off" });
+          },
         });
       const proposal = keepGoingStatus.proposal;
       if (proposal !== null && keepGoingStatus.chat === threadRef.threadId && keepGoing.canDecide) {

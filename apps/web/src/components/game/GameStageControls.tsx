@@ -41,9 +41,9 @@ function useGameKey(command: "game.freeze" | "game.fullscreen" | "game.cannotLos
 
 /**
  * The control bar under the Stage, one layout in every state: Play or Pause and Restart, the run's
- * timeline taking the room with its time, then speed, Can't lose, sound, fullscreen and the run's
- * menu. Nothing appears, disappears or moves between playing, paused, ended and forked: only the
- * Play icon and the timeline's knob change. A control the game cannot use is disabled, not gone.
+ * timeline with its time in the middle while there is something to scrub (paused, or a run ended),
+ * then speed, Can't lose, sound, fullscreen and the `⋯` menu. The buttons never move: only the
+ * Play icon and the middle change. A control the game cannot use is disabled, not gone.
  */
 export function GameStageBar({
   threadRef,
@@ -55,7 +55,8 @@ export function GameStageBar({
   runs,
   onRestart,
   onFullscreen,
-  onHide,
+  viewItems,
+  stageItems,
   onFocus,
   onNote,
 }: {
@@ -74,7 +75,10 @@ export function GameStageBar({
   runs: StageRuns;
   onRestart: () => void;
   onFullscreen: () => void;
-  onHide: () => void;
+  /** The `⋯` menu's View section after Show controls: the dev views, each with its key. */
+  viewItems: ReactNode;
+  /** The `⋯` menu's Stage section: pausing when away, hiding and stopping the game. */
+  stageItems: ReactNode;
   /** Gives the game the keyboard back after a control took it. */
   onFocus: () => void;
   onNote: (text: string) => void;
@@ -203,8 +207,10 @@ export function GameStageBar({
         rewind={rewind}
         runs={runs}
         playing={playing}
+        live={live && !stopped}
+        viewItems={viewItems}
+        stageItems={stageItems}
         onNote={onNote}
-        onHide={onHide}
         onFocus={onFocus}
       />
     </div>
