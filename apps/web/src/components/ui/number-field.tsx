@@ -84,8 +84,9 @@ export function NumberFieldInput({
   ...props
 }: NumberFieldPrimitive.Input.Props & {
   /**
-   * `scrub`: an inspector's borderless value, right-aligned in tabular figures; the field around it
-   * draws the hover and focus.
+   * `scrub`: an inspector's value in tabular figures, starting at its field's left edge; the field
+   * around it draws the surface, the hover and the focus. Inside a `data-tuned` field it takes the
+   * live colour: a value changed from the game's own.
    */
   variant?: "default" | "scrub";
 }): React.ReactElement {
@@ -93,7 +94,7 @@ export function NumberFieldInput({
     return (
       <NumberFieldPrimitive.Input
         className={cn(
-          "h-7 w-full min-w-0 bg-transparent text-end text-body tabular-nums text-foreground outline-none",
+          "h-7 w-full min-w-0 cursor-[inherit] bg-transparent text-start text-body tabular-nums text-foreground outline-none in-data-tuned:text-live focus:cursor-text",
           className,
         )}
         data-slot="number-field-input"

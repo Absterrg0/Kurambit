@@ -3,6 +3,7 @@ import { NumberField } from "@base-ui/react/number-field";
 import type { GameThingValue } from "@kurambit/contracts";
 import { RotateCcwIcon } from "lucide-react";
 
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { NumberFieldInput } from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -12,10 +13,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { colourHex, GameColourField } from "./GameColourField";
 
 /**
- * One row's grid, the same in every row: the name, the value right-aligned in a fixed column, and
- * the reset slot (kept so the values line up whether a row has a reset or not).
+ * One row's grid, the same in every row: the label, the 128 px field, and the reset slot (kept so
+ * the fields line up whether a row has a reset or not).
  */
-const ROW = "group/value grid h-8 grid-cols-[minmax(0,1fr)_7rem_1.5rem] items-center gap-2 px-4";
+const ROW = "grid h-8 grid-cols-[minmax(0,1fr)_8rem_1.5rem] items-center gap-2 px-4";
 
 /**
  * How a change ended: a pointer let go (the game takes the keys back), or the keyboard (focus
@@ -27,11 +28,12 @@ const unitText = (value: GameThingValue, number: number) =>
   `${number}${value.unit === undefined ? "" : ` ${value.unit}`}`;
 
 /**
- * One tuned value as an engine's inspector shows it: its name, and its value with its unit in a
- * borderless field to drag sideways to scrub (as Blender and Figma do) or click to type, its range
- * in the tooltip. A choice picks by name, a switch flips. It changes the game as it moves
- * (`onChange`) and saves when let go (`onCommit`). A value tuned away from the game's own carries
- * a small mark before its name and, on hover, a reset to put it back.
+ * One tuned value as an engine's inspector shows it: its label, then a real field holding the
+ * value with its unit, a 2 px bar along its bottom edge for where it sits in its range (as Godot's
+ * spin-slider does). Click the field to type, drag it or the label sideways to scrub. A choice
+ * picks by name, a switch flips, a colour opens a picker. It changes the game as it moves
+ * (`onChange`) and saves when let go (`onCommit`). A value tuned away from the game's own is in
+ * the live colour, with a reset to put it back.
  */
 export function GameTuneField({
   label,
@@ -52,13 +54,17 @@ export function GameTuneField({
 }) {
   // The value a press on the field started from: a press that moved nothing is a click to type.
   const pressedAt = useRef<number | null>(null);
-  const name = <Name label={label} changed={was !== undefined} />;
+  const name = (
+    <Text variant="body" tone="muted" truncate>
+      {label}
+    </Text>
+  );
   const reset = <ResetSlot was={was} value={value} onReset={onReset} />;
   if (typeof value.value === "boolean")
     return (
       <div className={ROW}>
         {name}
-        <span className="flex justify-end">
+        <span className="flex">
           <Switch
             checked={value.value}
             disabled={disabled}
@@ -77,7 +83,7 @@ export function GameTuneField({
     return (
       <div className={ROW}>
         {name}
-        <span className="flex justify-end">
+        <span className="flex">
           <GameColourField
             label={label}
             value={number}
@@ -123,6 +129,7 @@ export function GameTuneField({
   const max = value.max;
   const ranged = min !== undefined && max !== undefined && max > min;
   const step = value.step ?? (ranged ? niceStep((max - min) / 100) : 0.01);
+  const share = ranged ? Math.min(1, Math.max(0, (number - min) / (max - min))) : null;
   return (
     <NumberField.Root
       value={number}
@@ -143,17 +150,26 @@ export function GameTuneField({
         }
         const from = pressedAt.current;
         pressedAt.current = null;
-        // A press that moved nothing leaves the field focused to type in.
+        // A press on the field that moved nothing leaves it focused to type in.
         if (from !== next) onCommit(next, "pointer");
       }}
       className={ROW}
     >
-      {name}
+      {/* Dragging the label scrubs too, as an engine's inspector's labels do. */}
+      <NumberField.ScrubArea
+        className="flex min-w-0 cursor-ew-resize select-none"
+        onPointerDown={() => {
+          pressedAt.current = number;
+        }}
+      >
+        {name}
+      </NumberField.ScrubArea>
       <Tooltip>
         <TooltipTrigger
           render={
             <NumberField.ScrubArea
-              className="flex h-7 min-w-0 cursor-ew-resize items-center rounded-md px-2 select-none hover:bg-accent has-focus:cursor-text has-focus:bg-accent"
+              data-tuned={was === undefined ? undefined : ""}
+              className="relative flex h-7 min-w-0 cursor-ew-resize items-center gap-1 overflow-hidden rounded-md px-2 select-none surface-well has-focus:cursor-text has-focus:surface-focus"
               onPointerDown={() => {
                 pressedAt.current = number;
               }}
@@ -173,14 +189,24 @@ export function GameTuneField({
             <NumberFieldInput variant="scrub" aria-label={label} />
           </NumberField.Group>
           {value.unit === undefined ? null : (
-            <Text variant="body" tone="muted" render={<span className="shrink-0 ps-1" />}>
+            <Text variant="body" tone="muted" render={<span className="shrink-0" />}>
               {value.unit}
             </Text>
           )}
+          {share === null ? null : (
+            <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/8">
+              <span
+                className={cn(
+                  "block h-full",
+                  was === undefined ? "bg-muted-foreground" : "bg-live",
+                )}
+                style={{ width: `${share * 100}%` }}
+              />
+            </span>
+          )}
         </TooltipTrigger>
         <TooltipPopup side="left">
-          {ranged ? `${unitText(value, min)} to ${unitText(value, max)} · ` : ""}
-          Drag to change, click to type
+          {ranged ? `${unitText(value, min)} to ${unitText(value, max)}` : "Drag or type"}
         </TooltipPopup>
       </Tooltip>
       {reset}
@@ -188,24 +214,7 @@ export function GameTuneField({
   );
 }
 
-/** The value's name, with the live mark before it when it is tuned away from the game's own. */
-function Name({ label, changed }: { label: string; changed: boolean }) {
-  return (
-    <span className="relative flex min-w-0 items-center">
-      {changed ? (
-        <span aria-label="tuned" className="absolute -start-2.5 size-1.5 rounded-full bg-live" />
-      ) : null}
-      <Text variant="body" tone="default" truncate>
-        {label}
-      </Text>
-    </span>
-  );
-}
-
-/**
- * Puts one value back, with what it was in its tooltip, shown while the row is hovered or the
- * reset itself has focus; an empty slot when the value is the game's own.
- */
+/** Puts one value back, with what it was in its tooltip; an empty slot at the game's own. */
 function ResetSlot({
   was,
   value,
@@ -225,23 +234,21 @@ function ResetSlot({
         ? colourHex(was).toUpperCase()
         : (value.choices?.[Math.round(was)] ?? unitText(value, was));
   return (
-    <span className="flex opacity-0 group-hover/value:opacity-100 focus-within:opacity-100">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              size="icon-xs"
-              variant="ghost-muted"
-              aria-label={`Put back to ${before}`}
-              onClick={onReset}
-            />
-          }
-        >
-          <RotateCcwIcon aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipPopup side="left">The game's own: {before}</TooltipPopup>
-      </Tooltip>
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={`Put back to ${before}`}
+            onClick={onReset}
+          />
+        }
+      >
+        <RotateCcwIcon aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipPopup side="left">The game's own: {before}</TooltipPopup>
+    </Tooltip>
   );
 }
 

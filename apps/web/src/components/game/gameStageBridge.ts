@@ -329,6 +329,12 @@ export const clearStageSelection = () => {
 export const selectStageThing = (id: string) =>
   useStageBridge.getState().post?.({ type: "studio-select", id });
 
+/** Freezes the game and points at a thing there: its outline and name show on the Stage. */
+export const pointAtStageThing = (id: string) => {
+  setStageFrozen(true);
+  selectStageThing(id);
+};
+
 /** Outlines a thing from the Things list while frozen; null clears. */
 export const hoverStageThing = (id: string | null) =>
   useStageBridge.getState().post?.({ type: "studio-hover-thing", id });
