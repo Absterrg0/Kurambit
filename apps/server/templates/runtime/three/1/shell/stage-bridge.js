@@ -549,7 +549,7 @@ export function createStageBridge({
     node.addEventListener("childremoved", moved);
   };
   const dropParts = (id) => {
-    for (const record of [...things.values()]) {
+    for (const record of things.values()) {
       if (record.part !== true || record.root !== id) continue;
       things.delete(record.id);
       for (const body of bodiesOf(record)) if (byObject.get(body) === record) byObject.delete(body);
