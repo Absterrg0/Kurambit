@@ -343,7 +343,8 @@ Drag its edge to resize it. Its three sections:
   in words and its files as one line that opens to each file; click a file to open it in the diff.
   Then the checks, problems first, each with its proof under it: the frame rate through the play
   with its 1% low, and the draw calls, triangles and download size with how each moved since the
-  build before; the controls as their keys with what each did (one that did nothing is amber); the
+  build before; the controls as their keys with what each did (amber when the check finds one
+  does nothing; "try it yourself" when the game read it but the play saw nothing change); the
   phone and widescreen pictures with **Open in responsive view**; the harness's own play to watch;
   your saved test plays with **Replay**; the errors. Passing checks with nothing to show share one
   line. When the game logged errors or warnings, its **Console** follows, and the Checks button

@@ -478,18 +478,29 @@ const keyWord = (code: string) =>
     .replace(/^Digit/, "")
     .replace(/^Numpad/, "Num ");
 
+/**
+ * A control as the controls check judges it (gameQaFindings): it answered; the game read it but
+ * the play saw nothing change, so it is the person's to try and the check still passes; or the
+ * game never read it, so it does nothing and the check is a problem.
+ */
+type ControlVerdict = "works" | "try" | "dead";
+const verdictOf = (control: GameQaControl): ControlVerdict =>
+  !control.read ? "dead" : control.answers.length === 0 ? "try" : "works";
+
 interface ControlRow {
   readonly keys: ReadonlyArray<string>;
   readonly label: string;
   readonly did: string | null;
-  readonly read: boolean;
+  readonly verdict: ControlVerdict;
 }
 
 const MOVES = ["move_up", "move_left", "move_down", "move_right"] as const;
 /**
- * The controls as a player names them: the four moves as one, each with its first key, and what
- * each did. A play measured by a shell older than its keys names none; the game on the Stage
- * does, by the same action names. A control with no key known has no cap, never a blank one.
+ * The controls as a player names them, each with its first key and what it did. The four moves
+ * are one row when the check judged them alike; one that it did not stays by its own name, as the
+ * check's sentence names it. A play measured by a shell older than its keys names none; the game
+ * on the Stage does, by the same action names. A control with no key known has no cap, never a
+ * blank one.
  */
 const controlRows = (
   controls: ReadonlyArray<GameQaControl>,
@@ -504,24 +515,26 @@ const controlRows = (
   const didOf = (answers: ReadonlyArray<string>) =>
     answers.length === 0 ? null : [...new Set(answers)].join(", ");
   const rows: Array<ControlRow> = [];
-  const moves = MOVES.map((name) => controls.find((control) => control.name === name));
-  const groupMoves = moves.every((control) => control !== undefined);
-  if (groupMoves) {
-    const found = moves.filter((control) => control !== undefined);
+  const moves = MOVES.map((name) => controls.find((control) => control.name === name)).filter(
+    (control) => control !== undefined,
+  );
+  const groupMoves =
+    moves.length === MOVES.length &&
+    moves.every((control) => verdictOf(control) === verdictOf(moves[0]!));
+  if (groupMoves)
     rows.push({
-      keys: found.flatMap(capOf),
+      keys: moves.flatMap(capOf),
       label: "Move",
-      did: didOf(found.flatMap((control) => control.answers)),
-      read: found.some((control) => control.read),
+      did: didOf(moves.flatMap((control) => control.answers)),
+      verdict: verdictOf(moves[0]!),
     });
-  }
   for (const control of controls) {
     if (groupMoves && (MOVES as ReadonlyArray<string>).includes(control.name)) continue;
     rows.push({
       keys: capOf(control),
       label: control.label,
       did: didOf(control.answers),
-      read: control.read,
+      verdict: verdictOf(control),
     });
   }
   return rows;
@@ -532,8 +545,8 @@ export const hasControls = (facts: GameBuildFacts) =>
   (measured(facts.qa)?.controls.length ?? 0) > 0;
 
 /**
- * The controls the check pressed, each as its keys, its name and what it did. One that did
- * nothing is amber, keys and all.
+ * The controls the check pressed, each as its keys, its name and what it did, judged as the check
+ * judges them: one it counts as doing nothing is amber, keys and all.
  */
 export function ControlsEvidence({
   threadKey,
@@ -566,10 +579,11 @@ export function ControlsEvidence({
 }
 
 function ControlLine({ row }: { row: ControlRow }) {
-  const silent = row.did === null;
+  // Amber only where the check itself finds a problem; a control to try is quiet, as its pass is.
+  const dead = row.verdict === "dead";
   return (
     <li className="contents">
-      <span className={cn("flex h-6 items-center gap-1", silent && "kbd-on-warning")}>
+      <span className={cn("flex h-6 items-center gap-1", dead && "kbd-on-warning")}>
         {row.keys.map((key, index) => (
           // oxlint-disable-next-line react/no-array-index-key -- two moves may share a cap.
           <Kbd key={index}>{key}</Kbd>
@@ -577,19 +591,19 @@ function ControlLine({ row }: { row: ControlRow }) {
       </span>
       <Text
         variant="meta"
-        tone={silent ? "inherit" : "default"}
+        tone={dead ? "inherit" : "default"}
         truncate
-        render={<span className={silent ? "text-warning-foreground" : undefined} />}
+        render={<span className={dead ? "text-warning-foreground" : undefined} />}
       >
         {row.label}
       </Text>
       <Text
         variant="caption"
-        tone={silent ? "inherit" : "muted"}
+        tone={dead ? "inherit" : "muted"}
         truncate
-        render={<span className={cn("text-end", silent && "text-warning-foreground")} />}
+        render={<span className={cn("text-end", dead && "text-warning-foreground")} />}
       >
-        {silent ? (row.read ? "did nothing" : "never read") : row.did}
+        {row.verdict === "works" ? row.did : dead ? "does nothing" : "try it yourself"}
       </Text>
     </li>
   );
