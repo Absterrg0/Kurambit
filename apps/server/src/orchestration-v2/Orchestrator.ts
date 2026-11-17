@@ -502,6 +502,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.step.schedule":
     case "game-version.start":
     case "game-version.kept":
+    case "game.notice":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -6781,6 +6782,53 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
+  const dispatchGameNotice = Effect.fn("orchestrationV2.dispatch.gameNotice")(function* (
+    command: Extract<OrchestrationV2InternalCommand, { readonly type: "game.notice" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(command.threadId, ["runs"])
+      .pipe(mapDispatchError(command));
+    // A chat that never ran a turn has no place for a line: the game's builds still say it.
+    const run = projection.runs
+      .filter((each) => each.rootNodeId !== null)
+      .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+    if (run === undefined || run.rootNodeId === null) return;
+    const now = yield* DateTime.now;
+    const notice: OrchestrationV2TurnItem = {
+      id: idAllocator.derive.runSignalTurnItem({
+        runId: run.id,
+        signal: `notice-${command.commandId}`,
+      }),
+      threadId: command.threadId,
+      runId: run.id,
+      nodeId: run.rootNodeId,
+      providerThreadId: run.providerThreadId,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: yield* nextTurnItemOrdinal(projection),
+      status: "completed",
+      title: null,
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+      type: "system_notice",
+      message: command.notice,
+    };
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "turn-item.updated",
+      threadId: command.threadId,
+      runId: run.id,
+      nodeId: run.rootNodeId,
+      occurredAt: now,
+      payload: notice,
+    });
+  });
+
   const recordSubagentFollowup = Effect.fnUntraced(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -10903,6 +10951,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "game-version.kept":
         yield* dispatchGameVersionKept(command, events);
+        break;
+      case "game.notice":
+        yield* dispatchGameNotice(command, events);
         break;
       case "delegated_task.wake-policy":
         yield* dispatchDelegatedTaskWakePolicy(command, events);

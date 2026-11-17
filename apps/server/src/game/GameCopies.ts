@@ -16,6 +16,7 @@ import {
   CheckpointRef,
   CommandId,
   GAME_BUILDS_EVENT,
+  GAME_FACTS_EVENT,
   type GameBringInInput,
   type GameBringInResult,
   type GameBuildFacts,
@@ -29,16 +30,19 @@ import {
   GameOperationError,
   manifestProject,
   type OrchestrationV2ThreadShell,
+  SAVED_PLAYS_PER_BUILD,
   type ThreadId,
 } from "@kurambit/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
@@ -46,6 +50,7 @@ import { threadRefKey, worktreeSeedOf, worktreeSeedRef } from "../checkpointing/
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import { regressions } from "../orchestration-v2/gameRun/decide.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { availableEngine, engineProfile } from "./engineProfile.ts";
@@ -57,7 +62,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { mergeBuilds } from "./mergeBuilds.ts";
 import { isRestored, measureChange } from "./run/builds.ts";
-import { KEPT_DIR, SAVED_DIR } from "./playFiles.ts";
+import { KEPT_DIR, SAVED_DIR, savedPlays } from "./playFiles.ts";
 
 /** Under the worktrees folder, beside the build copies. */
 const GAME_COPIES = "game-copies";
@@ -75,8 +80,10 @@ const workRef = (threadId: ThreadId) =>
  * thread's checkpoints all carry its current folder, so the rail tells the game's turns from the
  * copy's by these.
  */
-const copyMoveRef = (threadId: ThreadId, way: "in" | "out") =>
+const copyMoveRef = (threadId: ThreadId, way: CopyMark) =>
   checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/${way}`);
+/** `brought`: when its work last came in, which its count of builds not in the game starts after. */
+type CopyMark = "in" | "out" | "brought";
 /** The game folder as a merge read it, which a landing is moved only onto. */
 const gameRef = (threadId: ThreadId) =>
   checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/game`);
@@ -155,12 +162,26 @@ const make = Effect.gen(function* () {
   const checkpoints = yield* CheckpointStore.CheckpointStore;
   const git = yield* GitWorkflowService.GitWorkflowService;
   const builds = yield* GameBuilds.GameBuilds;
+  const engine = yield* Orchestrator.OrchestratorV2;
   const facts = yield* GameFacts.GameFacts;
   const operations = yield* GameOperations.GameOperations;
   const preview = yield* GamePreview.GamePreview;
   const scope = yield* Effect.scope;
   const copiesRoot = NodePath.join(config.worktreesDir, GAME_COPIES);
   const outcomesDir = NodePath.join(config.stateDir, GAME_COPIES);
+  /**
+   * Bring-ins in flight, per copy: a second ask joins the first (a double click, the agent and the
+   * person at once), and Bring in now ends its check's wait. The check's progress is the copy's
+   * state while it runs. In memory: a restart ends the bring-in, and its record settles it.
+   */
+  const inFlight = new Map<
+    ThreadId,
+    {
+      readonly fiber: Fiber.Fiber<GameBringInResult, GameOperationError>;
+      readonly skip: Deferred.Deferred<void>;
+      progress: { readonly play: number; readonly plays: number } | null;
+    }
+  >();
 
   const failed = (
     operation: string,
@@ -262,7 +283,7 @@ const make = Effect.gen(function* () {
     );
 
   // A fresh commit's time marks the move; its tree is the seat's, so it holds nothing new.
-  const markMove = (root: string, threadId: ThreadId, way: "in" | "out", at: string) =>
+  const markMove = (root: string, threadId: ThreadId, way: CopyMark, at: string) =>
     checkpoints
       .commitTree({ cwd: root, tree: `${at}^{tree}`, parent: at, message: `copy ${way}` })
       .pipe(
@@ -466,6 +487,8 @@ const make = Effect.gen(function* () {
     seated: string,
   ): Effect.Effect<GameCopyState, GameOperationError> =>
     Effect.gen(function* () {
+      const checking = inFlight.get(shell.id)?.progress ?? null;
+      if (checking !== null) return { _tag: "checking", ...checking } as const;
       if (atWork(shell)) return { _tag: "working" } as const;
       const outcome = yield* readOutcome(shell.id);
       const lastWork = shell.latestRunCompletedAt ?? null;
@@ -493,6 +516,26 @@ const make = Effect.gen(function* () {
       return change.changed ? ({ _tag: "ready" } as const) : ({ _tag: "same" } as const);
     });
 
+  const markedAt = (root: string, threadId: ThreadId, way: CopyMark) =>
+    checkpoints.listCheckpointRefs({ cwd: root, prefix: copyMoveRef(threadId, way) }).pipe(
+      Effect.map(
+        (refs) =>
+          refs.find((each) => each.checkpointRef === copyMoveRef(threadId, way))?.committedAt ?? 0,
+      ),
+      Effect.orElseSucceed(() => 0),
+    );
+  /** The copy's own builds since it was made or its work last came in. */
+  const buildsNotIn = (g: Game, shell: OrchestrationV2ThreadShell) =>
+    Effect.gen(function* () {
+      const since = Math.max(
+        yield* markedAt(g.root, shell.id, "in"),
+        yield* markedAt(g.root, shell.id, "brought"),
+      );
+      const after = DateTime.formatIso(DateTime.makeUnsafe(since * 1000));
+      const listed = yield* builds.list(shell.id, { limit: 50 });
+      return listed.builds.filter((build) => build.at > after).length;
+    }).pipe(Effect.orElseSucceed(() => 0));
+
   const place: GameCopies["Service"]["place"] = (threadId) =>
     Effect.gen(function* () {
       const shell = yield* shellOf(threadId);
@@ -505,18 +548,21 @@ const make = Effect.gen(function* () {
           seat: null,
           seatNumber: null,
           ahead: 0,
+          builds: 0,
           state: { _tag: atWork(shell) ? "working" : "ready" },
           noBringIn: NO_SEAT,
         } satisfies GameChatPlace as GameChatPlace;
       const where = yield* aheadOf(threadId, seated).pipe(
         Effect.orElseSucceed(() => ({ number: null, ahead: 0 })),
       );
+      const state = yield* stateOf(g, shell, seated);
       return {
         _tag: "copy",
         seat: isGameBuildId(seated) ? seated : null,
         seatNumber: where.number,
         ahead: where.ahead,
-        state: yield* stateOf(g, shell, seated),
+        builds: state._tag === "same" ? 0 : yield* buildsNotIn(g, shell),
+        state,
         noBringIn: null,
       } satisfies GameChatPlace as GameChatPlace;
     });
@@ -623,8 +669,34 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const health = (g: Game, from: string, candidate: string) =>
+  const health = (g: Game, from: string, candidate: string, copyId: ThreadId) =>
     Effect.gen(function* () {
+      const flight = inFlight.get(copyId);
+      const plays = yield* Effect.promise(() =>
+        savedPlays(g.root).then(
+          (saved) => Math.min(saved.plays.length, SAVED_PLAYS_PER_BUILD),
+          () => 0,
+        ),
+      );
+      const progress = (play: number) =>
+        Effect.suspend(() => {
+          if (flight === undefined) return Effect.void;
+          flight.progress = { play, plays };
+          return operations.changed(g.root, GAME_BUILDS_EVENT, "A bring-in is being checked.");
+        });
+      yield* progress(0);
+      // The candidate's facts say how far its check is: its boot, then each test play.
+      const said = `Build ${candidate.slice(0, 8)}: test play `;
+      yield* operations.events.pipe(
+        Stream.filter(
+          (event) =>
+            event.root === g.root &&
+            event.name === GAME_FACTS_EVENT &&
+            event.message.startsWith(said),
+        ),
+        Stream.runForEach((event) => progress(Number.parseInt(event.message.slice(said.length)))),
+        Effect.forkScoped,
+      );
       const resolved = (build: string) =>
         checkpoints.resolveTrees({ cwd: g.root, revisions: [build], path: g.lane }).pipe(
           Effect.map(([tree]) => tree ?? null),
@@ -640,7 +712,15 @@ const make = Effect.gen(function* () {
                 { queue: "person", upTo: "boots", waitFor: CHECK_WAIT },
               ),
         );
-      const [before, after] = yield* Effect.all([measure(from), measure(candidate)]);
+      // Bring in now ends the wait: the check goes on in the background, and lands nothing.
+      const measured = yield* Effect.raceFirst(
+        Effect.all([measure(from), measure(candidate)]).pipe(Effect.asSome),
+        flight === undefined
+          ? Effect.never
+          : Deferred.await(flight.skip).pipe(Effect.as(Option.none())),
+      );
+      if (Option.isNone(measured)) return null;
+      const [before, after] = measured.value;
       if (before === null || after === null) return null;
       const broke = regressions(before, after).map((each) => each.why);
       // Each saved play read on its own: one that ended the same on the game and ends otherwise
@@ -659,12 +739,35 @@ const make = Effect.gen(function* () {
         ),
       ];
       return reasons.length === 0 ? null : reasons.join("; ");
-    });
+    }).pipe(Effect.scoped);
 
   // In the service's own fiber, as a restore is: a caller that goes away (an agent's tool call
   // timing out during a long check) stops waiting, never the check and landing.
+  // A second ask while one runs joins it; with `anyway` it is Bring in now, ending the check's wait.
   const bringIn: GameCopies["Service"]["bringIn"] = (input, options = {}) =>
-    Effect.forkIn(bringInNow(input, options), scope).pipe(Effect.flatMap(Fiber.join));
+    Effect.gen(function* () {
+      const copyId = input.chat ?? input.threadId;
+      const running = inFlight.get(copyId);
+      if (running !== undefined) {
+        if (input.anyway === true) yield* Deferred.succeed(running.skip, undefined);
+        return yield* Fiber.join(running.fiber);
+      }
+      const skip = yield* Deferred.make<void>();
+      const fiber = yield* Effect.forkIn(
+        bringInNow(input, options).pipe(
+          Effect.ensuring(
+            Effect.suspend(() => {
+              inFlight.delete(copyId);
+              return Effect.void;
+            }),
+          ),
+        ),
+        scope,
+        { startImmediately: false },
+      );
+      inFlight.set(copyId, { fiber, skip, progress: null });
+      return yield* Fiber.join(fiber);
+    });
   const bringInNow = (input: GameBringInInput, options: { readonly agent?: boolean }) =>
     Effect.gen(function* () {
       const operation = "Bring in";
@@ -694,6 +797,25 @@ const make = Effect.gen(function* () {
           "busy",
           `${shell.title} is still working in its copy: bring it in once its turn ends.`,
         );
+      // Keep the game's: the copy takes the game's file first. After a conflict the copy's seat is
+      // the game, so a merge alone would bring the copy's file in again.
+      const takeGame = Object.entries(input.keep ?? {}).flatMap(([path, side]) =>
+        side === "game" ? [path] : [],
+      );
+      const copyCwd = shell.worktreePath;
+      if (takeGame.length > 0 && copyCwd !== null && (yield* exists(copyCwd))) {
+        const game = yield* captureGame(g, copyId);
+        yield* checkpoints
+          .withWorkspaceLock(
+            copyCwd,
+            checkpoints.restoreCheckpoint({
+              cwd: copyCwd,
+              checkpointRef: CheckpointRef.make(game),
+              filePaths: takeGame,
+            }),
+          )
+          .pipe(Effect.mapError(io(operation, copyCwd, "the game's file could not be kept")));
+      }
       const work = yield* workOf(g, shell);
       if (work === null)
         return yield* failed(operation, g.root, "invalid-input", "This chat works in no copy.");
@@ -744,7 +866,7 @@ const make = Effect.gen(function* () {
           } as const;
         }
         if (input.anyway !== true) {
-          const lost = yield* health(g, game, candidate);
+          const lost = yield* health(g, game, candidate, copyId);
           if (lost !== null) {
             yield* writeOutcome(copyId, { _tag: "held", reason: lost, at: yield* now });
             yield* operations.changed(g.root, GAME_BUILDS_EVENT, "A bring-in is held.");
@@ -787,6 +909,28 @@ const make = Effect.gen(function* () {
           ),
         );
         yield* writeOutcome(copyId, null);
+        yield* markMove(g.root, copyId, "brought", landed.build).pipe(Effect.ignore);
+        // The person's bring-in is a line in the copy's chat; an agent's is its own tool call.
+        if (options.agent !== true) {
+          const number = (yield* builds
+            .list(input.threadId, { home: true, limit: 10 })
+            .pipe(Effect.orElseSucceed(() => ({ builds: [] })))).builds.find(
+            (build) => build.id === landed.build,
+          )?.number;
+          yield* engine
+            .dispatch({
+              type: "game.notice",
+              commandId: CommandId.make(`game-copy:in:${copyId}:${short(landed.build)}`),
+              threadId: copyId,
+              notice:
+                number == null
+                  ? "Brought into the game."
+                  : `Brought into the game as Build ${number}.`,
+              createdBy: "user",
+              creationSource: "web",
+            })
+            .pipe(Effect.ignoreCause({ log: true }));
+        }
         // The copy goes on from the game it came into, or goes.
         if (input.close === true) yield* close(g, shell);
         else if (shell.worktreePath !== null)

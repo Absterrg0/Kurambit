@@ -50,6 +50,7 @@ import {
   manifestProject,
   manifestRuntime,
   noSavedPlays,
+  SAVED_PLAYS_PER_BUILD,
 } from "@kurambit/contracts";
 import {
   bootsFact,
@@ -879,13 +880,18 @@ const make = Effect.gen(function* () {
           const saved = yield* Effect.promise(() =>
             savedPlays(root).catch(() => ({ plays: [], set: "" })),
           );
+          // Each replay is announced as it starts: a bring-in's check counts them for the person.
+          const of = Math.min(saved.plays.length, SAVED_PLAYS_PER_BUILD);
+          let replaying = 0;
           yield* write({
             savedPlays:
               saved.plays.length === 0
                 ? NONE_SAVED
                 : (unstarted ??
                   (yield* replaySavedPlays(saved, (play) =>
-                    step(engines.replayIn(copy, play)),
+                    announce(
+                      `Build ${build.build.slice(0, 8)}: test play ${(replaying += 1)} of ${of}.`,
+                    ).pipe(Effect.andThen(step(engines.replayIn(copy, play)))),
                   ).pipe(
                     Effect.map((value) => ({ status: "measured" as const, value })),
                     Effect.catchTags({

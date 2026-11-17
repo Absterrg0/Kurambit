@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
+  GAME_BUILDS_EVENT,
   isAvailableEngine,
   manifestProject,
   OLD_SHELL_MESSAGE,
@@ -124,10 +125,19 @@ const make = Effect.gen(function* () {
   return GameStatusService.of({
     // A thread whose game cannot be resolved fails the stream with why, so a
     // client shows it instead of an empty stream that never pushes again.
+    // A chat in a copy also hears its game's builds: the game moving ahead, its bring-in's check.
     threadEvents: (threadId) =>
       Stream.unwrap(
-        Effect.map(projects.resolve(threadId), (root) =>
-          operations.events.pipe(Stream.filter((event) => event.root === root)),
+        Effect.map(
+          Effect.all([projects.resolve(threadId), projects.home(threadId)]),
+          ([root, home]) =>
+            operations.events.pipe(
+              Stream.filter(
+                (event) =>
+                  event.root === root ||
+                  (event.root === home.root && event.name === GAME_BUILDS_EVENT),
+              ),
+            ),
         ),
       ),
     libraryEvents: operations.events.pipe(

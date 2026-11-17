@@ -3289,6 +3289,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
     n: PositiveInt,
     notice: TrimmedNonEmptyString,
   }),
+  /** A line in a game chat about what the person did to its work ("Brought into the game as Build 15"), on its newest turn. */
+  Schema.Struct({
+    type: Schema.Literal("game.notice"),
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    threadId: ThreadId,
+    notice: TrimmedNonEmptyString,
+  }),
   ...OrchestrationV2GameRunCommand.members,
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

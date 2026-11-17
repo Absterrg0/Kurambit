@@ -21,10 +21,12 @@ export type GameCopyConflict = typeof GameCopyConflict.Type;
  * Where a copy's work stands. `ready`: work the game does not have yet; `same`: nothing the game
  * does not have; `conflicts`: the last bring-in or update could not merge these files, and the copy
  * holds them with both sides; `held`: its last bring-in did not land because the game would lose
- * health, with why (Bring in anyway lands it).
+ * health, with why (Bring in anyway lands it); `checking`: a bring-in's check is playing the
+ * candidate, its boot first (`play` 0), then each test play of `plays`.
  */
 export const GameCopyState = Schema.Union([
   Schema.TaggedStruct("working", {}),
+  Schema.TaggedStruct("checking", { play: NonNegativeInt, plays: NonNegativeInt }),
   Schema.TaggedStruct("ready", {}),
   Schema.TaggedStruct("same", {}),
   Schema.TaggedStruct("conflicts", { files: Schema.Array(GameCopyConflict) }),
@@ -40,6 +42,8 @@ export const GameCopyPlace = Schema.TaggedStruct("copy", {
   seatNumber: Schema.NullOr(PositiveInt),
   /** Builds the game landed since the seat: Update takes them into the copy. */
   ahead: NonNegativeInt,
+  /** The copy's own builds since it was made or last brought in: what is not in the game yet. */
+  builds: NonNegativeInt,
   state: GameCopyState,
   /** Why it cannot come in at all (a copy from before seats were kept), else null. */
   noBringIn: Schema.NullOr(Schema.String),
