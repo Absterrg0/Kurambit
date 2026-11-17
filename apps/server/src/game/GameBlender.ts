@@ -152,6 +152,7 @@ import {
 } from "./processHost.ts";
 import { OFFSCREEN_POSITION, findWindowHost, type HostedWindow } from "./windowHost.ts";
 import { readImageDimensions } from "@kurambit/shared/imageDimensions";
+import { keepHeroSheet } from "./heroSheets.ts";
 
 const PINNED_PKG = "mcp-for-blender@2.2.6";
 /**
@@ -1874,6 +1875,14 @@ const make = Effect.gen(function* () {
         reviewed(root, realRoot, style, input),
       );
       const imageRel = `${PIPELINE_DIR}/${key}/${NodePath.basename(rendered.image)}`;
+      // A character's review is its hero sheet (heroSheets.ts), kept where Art and the check read it.
+      const heroSheet =
+        candidate.measured.kind === "character"
+          ? yield* Effect.tryPromise({
+              try: () => keepHeroSheet(realRoot, candidate.subject, rendered.image),
+              catch: (cause) => opError("blender-review", root, "io", undefined, cause),
+            })
+          : null;
       const route = modelChoice(yield* projects.read(root));
       const routeRefusal =
         routeRefusalOf(candidate, route) ?? (yield* creatureRefusal(root, candidate));
@@ -1895,6 +1904,11 @@ const make = Effect.gen(function* () {
         refusing.length === 0
           ? "Would refuse: nothing; game_blender op export would write it."
           : `Would refuse:\n${refusing.join("\n")}`,
+        ...(heroSheet === null
+          ? []
+          : [
+              `Kept as the hero sheet ${heroSheet}: write your critique of it at ${heroSheet.replace(/\.png$/, ".md")} (studio-skills/art-pipeline.md, The hero sheet).`,
+            ]),
       ].join("\n\n");
       return {
         text,
@@ -2237,7 +2251,10 @@ const make = Effect.gen(function* () {
             const result = yield* call(root, "look", {
               ...(input.mode === undefined ? {} : { mode: input.mode }),
               ...(input.target === undefined ? {} : { target: input.target }),
-              ...(input.views === undefined ? {} : { views: input.views }),
+              // The model sheet and the review say "side" for the right profile; the addon does not.
+              ...(input.views === undefined
+                ? {}
+                : { views: input.views.map((view) => (view === "side" ? "right" : view)) }),
               ...(input.distance === undefined ? {} : { distance: input.distance }),
               ...(input.shading === undefined ? {} : { shading: input.shading }),
               ...(input.frames === undefined ? {} : { frames: input.frames }),
@@ -2850,6 +2867,16 @@ const make = Effect.gen(function* () {
               }),
               "blender-export",
             );
+            if (candidate.measured.kind === "character")
+              yield* Effect.tryPromise({
+                try: () =>
+                  keepHeroSheet(
+                    realRoot,
+                    NodePath.posix.basename(file, ".glb"),
+                    NodePath.join(out, "review.png"),
+                  ),
+                catch: (cause) => opError("blender-export", file, "io", undefined, cause),
+              });
             const credited = yield* recordProvenance(
               realRoot,
               [{ first: file, line: ledgerLine(file, candidate) }],

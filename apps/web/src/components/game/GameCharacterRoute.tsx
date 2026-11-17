@@ -30,7 +30,7 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
   {
     route: "blender",
     label: "Blender",
-    description: "The agent builds each model in Blender",
+    description: "Characters and creatures in Blender, the rest in code",
   },
   {
     route: "generated",

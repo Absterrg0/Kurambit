@@ -24,6 +24,7 @@ import { fileSha256 } from "./fileHash.ts";
 import { GENERATED_DIR } from "./generatedSource.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import { walkFiles } from "./walkFiles.ts";
+import { listHeroSheets } from "./heroSheets.ts";
 
 const MAX_ASSETS = 1_000;
 const MAX_WALK = 20_000;
@@ -229,10 +230,12 @@ export const listArtAssets = async (
     });
   }
   const blend = (await exists(NodePath.join(root, BLEND_SOURCE))) ? BLEND_SOURCE : null;
+  const heroSheets = await listHeroSheets(root);
   return {
     assets,
     more: Math.max(0, found.length - listed.length),
     ...(blend === null ? {} : { blend }),
+    ...(heroSheets.length === 0 ? {} : { heroSheets }),
   };
 };
 

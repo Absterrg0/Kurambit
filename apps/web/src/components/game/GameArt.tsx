@@ -4,16 +4,19 @@ import * as Schema from "effect/Schema";
 import {
   GAME_STYLE_FILE,
   GameStyle,
+  gameHeroSheetName,
   gameLookId,
   manifestRuntime,
   type GameArtAsset,
   type GameAssetUse,
+  type GameHeroSheet,
   type GameThing,
   type GameThingFacts,
   type GameThingValue,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { GameArtHeroSheet } from "./GameArtHeroSheet";
 import {
   BoneIcon,
   ChevronLeftIcon,
@@ -99,6 +102,7 @@ const NO_THINGS: ReadonlyArray<GameThing> = [];
 const NO_IDS: ReadonlyArray<string> = [];
 const NO_LOOKS: ReturnType<typeof useStageBridge.getState>["looks"] = {};
 const NO_ASSETS: ReadonlyArray<GameArtAsset> = [];
+const NO_SHEETS: ReadonlyArray<GameHeroSheet> = [];
 
 /** The runtime's model viewer page on the game's own server; null when the game has none. */
 function useViewerUrl(threadRef: ScopedThreadRef): string | null {
@@ -249,6 +253,7 @@ export function GameArtPanel({
           code={code}
           use={use}
           viewerUrl={viewerUrl}
+          heroSheets={read.data?.heroSheets ?? NO_SHEETS}
           onAsk={onAsk}
           onOpen={(next) => setSelected(entryKey(next))}
           onBack={() => {
@@ -871,6 +876,7 @@ function ArtDetail({
   code,
   use,
   viewerUrl,
+  heroSheets,
   onAsk,
   onOpen,
   onBack,
@@ -883,6 +889,7 @@ function ArtDetail({
   code: ReadonlyArray<GameArtCodeModel>;
   use: GameAssetUse | null;
   viewerUrl: string | null;
+  heroSheets: ReadonlyArray<GameHeroSheet>;
   onAsk: (text: string) => void;
   onOpen: (entry: GameArtEntry) => void;
   onBack: () => void;
@@ -890,6 +897,11 @@ function ArtDetail({
   const [info, setInfo] = useState<ViewerModelInfo | null>(null);
   const [handle, setHandle] = useState<ModelViewerHandle | null>(null);
   const saver = useTuneSaver(threadRef);
+  // A model file's sheet is named by its stem, a code model's by its name.
+  const sheetName = gameHeroSheetName(
+    entry.kind === "code-model" ? entry.name : fileName(entry.asset.path).replace(/\.[^.]+$/, ""),
+  );
+  const heroSheet = heroSheets.find((sheet) => sheet.name === sheetName);
   // A part is renamed in place, by a double-click on its name; the game's own name stays its id.
   const canName = useThreadStageBridge(
     scopedThreadKey(threadRef),
@@ -1081,6 +1093,9 @@ function ArtDetail({
           saver={saver}
           onBake={bake}
         />
+      )}
+      {heroSheet === undefined ? null : (
+        <GameArtHeroSheet environmentId={threadRef.environmentId} root={root} sheet={heroSheet} />
       )}
     </div>
   );

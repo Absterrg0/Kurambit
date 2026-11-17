@@ -1,8 +1,25 @@
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { GameLibraryPackId } from "./gameLibraryPackId.ts";
 import { GameModelMeasure, GameModelRefusal } from "./gameModel.ts";
 
 /** Live Blender through the pinned mcp-for-blender server, behind GameBlender. */
+
+/**
+ * A scene name (a character's collection and armature, a carved prop): lower case, as the export
+ * stems and sidecars are. Agents name heroes "Bram"; the capital is taken, not refused.
+ */
+const BlenderName = Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,31}$/)).pipe(
+  Schema.decodeTo(
+    Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+    SchemaTransformation.toLowerCase(),
+  ),
+);
+/** A look's view: a named side (front, back, left, right, top, three_quarter) or an [x, y, z] direction. */
+const BlenderLookView = Schema.Union([
+  Schema.String,
+  Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
+]);
 
 export const GameBlenderCodeInput = Schema.Struct({
   code: Schema.NonEmptyString.check(Schema.isMaxLength(20_000)).annotate({
@@ -16,7 +33,7 @@ export type GameBlenderCodeResult = typeof GameBlenderCodeResult.Type;
 export const GameBlenderLookInput = Schema.Struct({
   mode: Schema.optionalKey(Schema.Literals(["viewport", "camera", "angles", "frames", "review"])),
   target: Schema.optionalKey(Schema.Array(Schema.String)),
-  views: Schema.optionalKey(Schema.Array(Schema.String)),
+  views: Schema.optionalKey(Schema.Array(BlenderLookView)),
   distance: Schema.optionalKey(Schema.Number),
   shading: Schema.optionalKey(
     Schema.Literals(["solid", "material", "rendered", "wireframe", "xray"]),
@@ -176,7 +193,7 @@ export const GameBlenderChain = Schema.Struct({
 
 export const GameBlenderCharacterInput = Schema.Struct({
   /** The collection, the armature's name and the export's default stem. */
-  name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+  name: BlenderName,
   body: GameBlenderBody,
   /**
    * "Walk_Loop" or "<pack-id>:Walk_Loop", from the lock's packs on standard-humanoid, or the
@@ -221,7 +238,7 @@ export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
  */
 export const GameAnimateInput = Schema.Struct({
   /** The character's armature in the live scene: game_blender op character's name. */
-  character: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+  character: BlenderName,
   /** The clip's name in the game; animating it again replaces it. */
   clip: Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,47}$/)),
   /** The move: {start?, poses?, craft?, beats: [{at, pose?, ease?, ...pose keys}]}, as studio-skills/art-pipeline.md describes it. */
@@ -295,7 +312,7 @@ export type GameBlenderPaintResult = typeof GameBlenderPaintResult.Type;
 
 export const GameBlenderCarveInput = Schema.Struct({
   /** The object and its collection in the live scene. */
-  name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/)),
+  name: BlenderName,
   sheet: SheetPath,
   /** Its standing height in metres. */
   height: Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 50 })),

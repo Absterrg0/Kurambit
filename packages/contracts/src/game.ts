@@ -978,6 +978,11 @@ export const GameCheckResult = Schema.Struct({
       Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
     ]),
   ),
+  /**
+   * A final check's open hero sheets: a character exported with no sheet in art/sheets, or a kept
+   * sheet with no critique beside it. A character is not done until this is empty.
+   */
+  heroSheets: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type GameCheckResult = typeof GameCheckResult.Type;
 export type GameCheckQa = NonNullable<GameCheckResult["qa"]>;

@@ -41,9 +41,9 @@ is the person's to read and edit too.
 ## Characters
 
 How this game's models are made is the person's choice, kept in game.json
-as `characters`: `code` (the default, no key), `blender` or `generated`, and
-whether the free library is on, `library` (off by default). Read both before
-any model. Change them in game.json only when the person asks you to; a
+as `characters`: `blender` (new games' default), `code` (no key) or
+`generated`, and whether the free library is on, `library` (off by default).
+Read both before any model. Change them in game.json only when the person asks you to; a
 message asking for one made model does not change the route. An unrigged
 model is a prop on every route.
 
@@ -65,15 +65,31 @@ model is a prop on every route.
   (in Blender's imports too); its clips and sounds still come in, and
   `game_blender` op `character` may still start from a library body: a base
   mesh reshaped in Blender, not a library model in the game.
-- `blender`: made characters: on the standard skeleton with the library's
-  clips (Made characters), or on their own rig with their own clips (Made
-  from scratch).
+- `blender`: by kind. The player, characters and creatures are made in
+  Blender: a humanoid on the standard skeleton with the library's clips
+  (Made characters), a creature sculpted on its own rig with its own clips
+  (Made from scratch). Props, buildings, terrain and anything repeated are
+  built in code. With no Blender (`game_check` op `status`), characters are
+  built in code too, and the reply says Settings → Game tools takes one.
 - `generated`: from generators (Generated art, below): a humanoid is
   conformed to `standard-humanoid` and plays the clip library, a creature
   keeps its own rig and clips.
 - 2D sprite packs (a lock with no rig): the characters the packs draw, with
   their own frames, or a 3D family's character rendered into strips (2D
   sprites from 3D).
+
+### The hero sheet
+
+A character or creature on any route is done when its sheet is in
+`art/sheets/` with your critique beside it; `game_check` op `final` lists
+each one that is not. The tools keep the sheet: `game_blender` op `export`
+copies the review it shipped, `game_play` op `model_sheet` a code model's.
+Write `art/sheets/<sheet name>.md` after looking at it: the brief's words
+for the subject (and the reference, if any), then each defect numbered,
+biggest first (silhouette, proportion and appeal, face and hands,
+materials, deformation in its strips), with what you fixed or why not.
+Fix, take a new sheet, and critique again until nothing blocking is left.
+Art shows the sheet and the critique beside the model.
 
 ### Made characters
 
