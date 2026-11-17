@@ -51,7 +51,7 @@ export interface GameTreeNode<G extends GameTreeGame, C extends GameTreeChat> {
 
 export type GameTreeSort = "recent" | "name";
 
-export const gameKeyOf = (game: Pick<GameTreeGame, "environmentId" | "projectId">) =>
+const gameKeyOf = (game: Pick<GameTreeGame, "environmentId" | "projectId">) =>
   `${game.environmentId}:${game.projectId}`;
 
 const activityOf = (chat: GameTreeChat) => chat.latestUserMessageAt ?? chat.updatedAt;
