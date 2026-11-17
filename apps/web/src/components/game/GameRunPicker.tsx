@@ -1,6 +1,7 @@
 import type { GameRunProfile, ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { ArrowRightIcon, FastForwardIcon, SplitIcon } from "lucide-react";
+import { useRef } from "react";
 
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import {
@@ -58,6 +59,7 @@ export function GameRunPicker({
   disabled: boolean;
 }) {
   const threadKey = threadRef === null ? null : scopedThreadKey(threadRef);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const ways = useGameWorkspaceStore((state) =>
     threadKey === null ? undefined : state.tryWays[threadKey],
   );
@@ -83,6 +85,7 @@ export function GameRunPicker({
       <MenuTrigger
         render={
           <ComposerControl
+            ref={triggerRef}
             size="xs"
             disabled={disabled}
             aria-label={`Send: ${label}`}
@@ -100,7 +103,13 @@ export function GameRunPicker({
         <span className="@max-[22rem]/composer-surface:hidden">{label}</span>
         <ComposerControlChevron size="xs" />
       </MenuTrigger>
-      <MenuPopup side="top" align="start" className="min-w-48">
+      {/* Over the whole composer, not over the text row it sits under. */}
+      <MenuPopup
+        side="top"
+        align="start"
+        anchor={() => triggerRef.current?.closest("[data-composer-tray]") ?? null}
+        className="min-w-48"
+      >
         <MenuRadioGroup
           value={pick}
           onValueChange={(value) => {

@@ -48,12 +48,12 @@ export function useKeepGoingBanner(
       ? () => void keepGoing.set({ mode: "off" })
       : null;
   if (view === null || dismissed === view.id) return { item: null, hidesNext, stop: stopRun };
-  // Ending the run is not one more thing to do with a step: it has a button's edge, and stands
-  // apart from the step's own controls.
+  // A quiet action at the line's end, like the queued message's own; set a little apart from
+  // the step's controls.
   const stop = (
     <Button
       size="xs"
-      variant="outline"
+      variant="ghost-muted"
       className="ms-1.5"
       disabled={busy || !keepGoing.canOperate}
       onClick={() => stopRun?.()}

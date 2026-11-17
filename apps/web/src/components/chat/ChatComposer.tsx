@@ -4916,11 +4916,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
             : "var(--contrast-input)"
         }
-        {...(composerProviderState.modelPickerIconClassName || quietRestingControls
+        {...(composerProviderState.modelPickerIconClassName || quietRestingControls || gameThread
           ? {
               activeProviderIconClassName: cn(
                 composerProviderState.modelPickerIconClassName,
-                quietRestingControls &&
+                // The footer is muted throughout: the provider's glyph too, not its brand colour.
+                (quietRestingControls || gameThread) &&
                   "fill-muted-foreground/70! text-muted-foreground/70! [&_path]:fill-muted-foreground/70! [&_rect]:fill-muted-foreground/70! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]]:opacity-70 [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-muted-foreground!",
               ),
             }
@@ -6972,7 +6973,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     containerClassName={cn((isComposerResting || gameThread) && "min-w-0 flex-1")}
                     className={cn(
                       // One line centred on the 32px Send pill.
-                      gameThread && "min-h-8 py-[0.4375rem]",
+                      gameThread && "min-h-8 py-1.75",
                       showMobilePendingAnswerActions && "max-sm:pb-12",
                       isComposerResting &&
                         "my-0 max-h-8 min-h-8 overflow-hidden py-0 whitespace-pre! leading-8",
@@ -7028,7 +7029,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 {gameThread && offeredSuggestion !== null && prompt.trim() === "" ? (
                   <span className="flex h-8 shrink-0 items-center gap-1.5" aria-hidden="true">
                     <Kbd>Tab</Kbd>
-                    <Text variant="meta" tone="dim">
+                    {/* At the narrowest composer the key alone says it. */}
+                    <Text
+                      variant="meta"
+                      tone="dim"
+                      render={<span className="@max-[26rem]/composer-surface:hidden" />}
+                    >
                       to use
                     </Text>
                   </span>

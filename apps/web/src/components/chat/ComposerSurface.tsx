@@ -86,7 +86,7 @@ function Main({ className, tray = false, ...props }: ComponentProps<"div"> & { t
     return (
       <div
         data-chat-composer-main-surface="true"
-        className={cn("group relative z-10 -mx-px rounded-[0.875rem] surface-composer", className)}
+        className={cn("group relative z-10 -mx-px rounded-xl surface-composer", className)}
         {...props}
       />
     );
