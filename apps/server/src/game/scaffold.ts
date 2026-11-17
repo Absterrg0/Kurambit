@@ -138,6 +138,7 @@ const READ_LINE =
   "Read `BRIEF.md` and the bridge contract in `TEMPLATE.md` (what the harness needs from the game, nothing about how it looks), then build the game in `web/`. Write no plan or design document.";
 /** The person's model route and library choice, said once: how the game's models are made. */
 const routeLine = (route: GameCharacterRoute, library: boolean): string => {
+  if (route === "blender" && !library) return BLENDER_ROUTE_LINE;
   const made =
     route === "blender"
       ? "made in Blender (each Blender tool names its recipe), with quick models in code standing in while they are made"
@@ -148,6 +149,13 @@ const routeLine = (route: GameCharacterRoute, library: boolean): string => {
     ? `The person turned the asset library on: use its models where it has what the brief names (\`game_assets\` op \`search\`; the first \`add\` takes \`lock\`), and the rest are ${made}.`
     : `The person chose how the game's models are made: its player, main threat and world are ${made}.`;
 };
+/**
+ * The default route, by kind of model: the AQ bake-off's sculpted and tailored Blender characters
+ * beat code's, while code builds props, buildings and terrain well and cheaply.
+ */
+const BLENDER_ROUTE_LINE =
+  "The person chose how the game's models are made, by kind: the player, its characters and its creatures are made in Blender (each Blender tool names its recipe), with quick models in code standing in while they are made; props, buildings, terrain and anything repeated are built in three.js code. If `game_check` op `status` shows no Blender, build the characters in code too and tell the person that Settings → Game tools takes a Blender.";
+
 /** On the generated route the first turn also starts the key art, so art never blocks the playable. */
 const GENERATED_LINE = `Start the key art first: \`game_assets\` op \`generate\` with lane \`image\`, name \`key_art\`, \`options.aspect\` \`"16:9"\`, a prompt holding the game's world and moment in one image, and three \`directions\`: looks that truly differ, each one this game can reach, each grounded with a \`style\` (a library pack id that ships a picture of its look, or the person's own reference image; \`studio-skills/art-pipeline.md\`, Generated art). It renders while you build; never wait on it, and if it is refused, say so and go on. Before you end the turn, op \`wait\` for it: ask the person to pick one of its candidates in the chat, or say it is still rendering, and say what it cost.`;
 

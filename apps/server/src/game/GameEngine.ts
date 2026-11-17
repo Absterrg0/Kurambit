@@ -42,12 +42,14 @@ import { runtimesDirectory } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import {
+  gamePaths,
   unavailableEngine,
   type GameEngineProfile,
   type GameExportTarget,
 } from "./engineProfile.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./checkIssues.ts";
+import { HERO_KINDS, heroSheetProblems, keepHeroSheet } from "./heroSheets.ts";
 import { hashFile } from "./hashFile.ts";
 import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import { gameReference } from "./gameReference.ts";
@@ -632,6 +634,14 @@ const make = Effect.gen(function* () {
       if (key !== null) replayedSaved.set(root, { key, savedPlays: reading });
       return { savedPlays: reading };
     });
+  /** The hero sheet gate's open items, for a final check (heroSheets.ts). */
+  const heroSheetsOn = (root: string) =>
+    Effect.gen(function* () {
+      const manifest = yield* projects.read(root);
+      if (!isAvailableEngine(manifest.engine.name)) return [];
+      const paths = gamePaths(manifest.engine.name, manifestProject(manifest));
+      return yield* Effect.promise(() => heroSheetProblems(root, paths).catch(() => []));
+    });
   return GameEngine.of({
     backendFor,
     context,
@@ -645,7 +655,13 @@ const make = Effect.gen(function* () {
         const result = yield* projects.exclusive(threadId, label, checkRemembered(final), {
           owner,
         });
-        return final && result.ok ? { ...result, ...(yield* savedPlaysOn(root)) } : result;
+        if (!final) return result;
+        const heroSheets = yield* heroSheetsOn(root);
+        return {
+          ...result,
+          ...(result.ok ? yield* savedPlaysOn(root) : {}),
+          ...(heroSheets.length === 0 ? {} : { heroSheets }),
+        };
       }),
     cleanCheckAt: (root) => Effect.sync(() => cleanCheckTimes.get(root) ?? null),
     checkIn: (root, owner) =>
@@ -683,9 +699,31 @@ const make = Effect.gen(function* () {
             return yield* refused(
               "This game's copy of the shell predates model sheets (an older game that carries its own shell).",
             );
-          return sheets.sheets.length === 0
-            ? sheets
-            : { ...sheets, review: reference === null ? MODEL_REVIEW : REFERENCE_REVIEW };
+          if (sheets.sheets.length === 0) return sheets;
+          // A character's or creature's sheet is its hero sheet (heroSheets.ts).
+          const kept = yield* Effect.forEach(
+            sheets.sheets.filter((sheet) => HERO_KINDS.has(sheet.kind)),
+            (sheet) =>
+              Effect.tryPromise({
+                try: () => keepHeroSheet(root, sheet.name, NodePath.join(root, sheet.image)),
+                catch: (cause) =>
+                  new GameOperationError({
+                    operation: "model-sheet",
+                    path: root,
+                    reason: "io",
+                    detail: "The hero sheet could not be kept in art/sheets.",
+                    cause,
+                  }),
+              }),
+          );
+          const review = reference === null ? MODEL_REVIEW : REFERENCE_REVIEW;
+          return {
+            ...sheets,
+            review:
+              kept.length === 0
+                ? review
+                : `${review} Kept as hero sheets: ${kept.join(", ")}. Write each one's critique beside it (${kept.map((sheet) => sheet.replace(/\.png$/, ".md")).join(", ")}; studio-skills/art-pipeline.md, The hero sheet).`,
+          };
         }),
       ),
     cleanCheckOf: (root) =>

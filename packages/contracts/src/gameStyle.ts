@@ -143,7 +143,12 @@ export type GameStyleLock = typeof GameStyleLock.Type;
 
 export const GAME_STYLE_DEFAULT_MUSIC_LUFS = -23;
 export const GAME_STYLE_DEFAULT_SFX_PEAK_DBTP = -1;
-export const GAME_STYLE_DEFAULT_CHARACTERS: GameCharacterRoute = "code";
+/**
+ * How a new game's models are made unless the person picks otherwise: Blender, where heroes and
+ * creatures are modelled and the rest is built in code (the AQ bake-off: Blender's characters beat
+ * code's and the library's). A game.json with no route stays code (gameModelChoice).
+ */
+export const GAME_STYLE_DEFAULT_CHARACTERS: GameCharacterRoute = "blender";
 /** Whether a new game may take models from the free library; the person turns it on. */
 export const GAME_STYLE_DEFAULT_LIBRARY = false;
 
@@ -155,9 +160,10 @@ export const gameModelChoice = (manifest: {
   readonly characters?: GameStoredCharacterRoute | undefined;
   readonly library?: boolean | undefined;
 }): { readonly route: GameCharacterRoute; readonly library: boolean } => ({
+  // No route at all is how the code route is written (scaffold.ts), whatever new games default to.
   route:
     manifest.characters === undefined || manifest.characters === "library"
-      ? GAME_STYLE_DEFAULT_CHARACTERS
+      ? "code"
       : manifest.characters,
   library: manifest.library ?? true,
 });

@@ -26,6 +26,7 @@ import { publishedInputSchema } from "../mcp/McpHttpServer.ts";
 
 /** The model choices whose first turns differ. */
 const CHOICES = {
+  blender: { characters: "blender", library: false },
   code: { characters: "code", library: false },
   "code with the library": { characters: "code", library: true },
   generated: { characters: "generated", library: false },
@@ -36,9 +37,10 @@ const CHOICES = {
  * (TEMPLATE.md) the message sends it to, the art-pipeline sections they name and the kit comment
  * blocks the message names. Set about 10% over what they were on 2026-11-16, once a new game started
  * from an empty page with no starter or recipe: code reads 10,301, the library 10,386 and generated
- * 15,267.
+ * 15,267. Blender, the default since 2026-11-17 (its route by kind of model), read 10,639 then.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
+  blender: 11_500,
   code: 11_500,
   "code with the library": 11_500,
   generated: 17_000,
@@ -187,11 +189,10 @@ it("keeps a three.js game's first-turn reading within its budget", () => {
 
 it.effect("keeps the game tools a three.js chat reads within its model choice's budget", () =>
   Effect.gen(function* () {
-    const choices = { ...CHOICES, blender: { characters: "blender", library: false } } as const;
     for (const [choice, budget] of Object.entries(LISTED_TOOLS_BUDGET) as Array<
-      [keyof typeof choices, number]
+      [keyof typeof CHOICES, number]
     >) {
-      const { characters, library } = choices[choice];
+      const { characters, library } = CHOICES[choice];
       const tools = yield* listedTools({ route: characters, library });
       const parts = Object.fromEntries(tools.map((tool) => [tool.name, tool.bytes]));
       const total = tools.reduce((sum, tool) => sum + tool.bytes, 0);

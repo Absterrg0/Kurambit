@@ -124,8 +124,8 @@ those defaults.
 
 ## Models
 
-Each game has one setting for how its models are made, **Make models with**: **Code** (the
-default), **Blender** or **Generated**, and a separate **Library models** switch, off by default.
+Each game has one setting for how its models are made, **Make models with**: **Blender** (the
+default), **Code** or **Generated**, and a separate **Library models** switch, off by default.
 Pick them under the home screen box's options button, so the first turn builds your way, and change
 them later in the Scene tab's **Models** row or the command palette's **Make models with…**. You can
 also ask your agent in chat to switch; it never switches on its own.
@@ -137,8 +137,11 @@ also ask your agent in chat to switch; it never switches on its own.
   Give it a picture to aim for and it compares its work against it, the model from the picture's
   angle and the game's frame beside the picture at the same size: the key art you picked, or any
   picture you attach, which it saves as `art/reference.png`.
-- **Blender**: it builds each model in Blender: a character is a body on the shared skeleton, then
-  the head, clothes, tail or ears it models itself, with the library's animations already fitted.
+- **Blender**: it makes the player, characters and creatures in Blender, and builds props,
+  buildings and terrain in code. A person is a body on the shared skeleton, then the head, clothes
+  and props it models itself, with the library's animations already fitted; an animal is sculpted
+  with its own skeleton and moves. Without Blender installed, it builds the characters in code
+  and tells you.
 - **Generated**: an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy
   on your own key makes rigged 3D characters, and with Codex alone they are images, such as
   character sheets and sprites. Generated can be picked once a 3D provider or Codex is ready; until
@@ -155,6 +158,11 @@ Blender, **Human bodies**, **Install**. Its code is GPL-3.0, so Kurambit does no
 it from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender
 settings, and the bodies it makes are CC0. **Remove** deletes it again; a live Blender view already
 open keeps it until it reopens. Without MPFB2, Blender characters use library bodies.
+
+A character or creature is finished only once its sheet (its turnaround and moves in one image)
+is kept in `art/sheets/` and the agent has written its critique of it beside it; the agent's final
+check reminds it of any that is missing. Open the model in **Art** to see the sheet and the
+critique.
 
 Before a character or prop made in Blender reaches the game, the agent reviews it: one image with a
 turnaround, silhouettes, the model at the size it appears in play, its walk, run and jump, the

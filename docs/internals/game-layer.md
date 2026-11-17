@@ -112,7 +112,18 @@ check that matters.
   (`GameRunControl.setModelChoice`), since the step's end would undo it. The code route
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and
   `generated`, still opens the game; a game.json with no `library` key predates the switch and
-  keeps its library on (`gameModelChoice`).
+  keeps its library on (`gameModelChoice`). New games default to `blender`, which routes by kind
+  of model: characters and creatures in Blender, props, buildings and terrain in code. The AQ
+  bake-off (the same hero brief through every route on Opus) chose it: sculpted and tailored
+  Blender characters beat code's capsules and reshaped library bodies, while code builds the
+  world well. A game.json with no key stays code, whatever the default becomes.
+- A character or creature is done when its sheet is kept in `art/sheets/` and the agent's critique
+  of it sits beside it ([heroSheets.ts](../../apps/server/src/game/heroSheets.ts)). The tools keep
+  the sheet (the Blender review and export, the code model sheet), `game_check` op `final` lists
+  what is open, and Art shows both. It is a final check's item rather than a build fact: a fact is
+  something the harness measures, and a critique is the agent's reading, which only its presence
+  can be checked for. Keeping a new sheet moves the old critique aside, so a critique always
+  answers the picture beside it, even after an undo restores both; nothing reads file times.
 - Made characters are conformed, not retargeted: `game_blender` op `character` fits the standard
   armature to the body once, keeping the standard rest frames, so library clips play unchanged
   and a body off those frames is refused at export rather than playing broken. An asset ships
