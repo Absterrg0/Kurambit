@@ -1327,7 +1327,9 @@ function FileDetail({
             <SizeRow size={info.size} />
           </PropertySection>
         ) : null}
-        {asset.kind === "model" && info !== null ? <ModelFacts info={info} /> : null}
+        {asset.kind === "model" && info !== null ? (
+          <ModelFacts info={info} materials={stageThing === null} />
+        ) : null}
         <PropertySection title="File" collapsible>
           <AssetPath path={asset.path} />
           {asset.route === "unrecorded" ? null : (
@@ -1368,7 +1370,14 @@ const slotWords = (slot: string) =>
   SLOT_WORDS[slot] ?? `${slot.charAt(0).toUpperCase()}${slot.slice(1).replace(/Map$/, "")}`;
 
 /** A model file's make-up as fields: its counts, its rig, and its materials as read-only fills. */
-function ModelFacts({ info }: { info: ViewerModelInfo }) {
+function ModelFacts({
+  info,
+  materials,
+}: {
+  info: ViewerModelInfo;
+  /** Lists its materials, when no inspector above already shows them as fills to edit. */
+  materials: boolean;
+}) {
   return (
     <>
       <PropertySection title="Mesh">
@@ -1380,28 +1389,30 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
           />
           <PropertyReading prefix={<LayersIcon />} value={info.drawCalls} title="Draw calls" />
         </PropertyRow>
-        <PropertyRow label="Rig">
-          <PropertyReading prefix={<BoneIcon />} value={info.bones} title="Bones" />
-          <PropertyReading
-            prefix={<FilmIcon />}
-            value={info.clips.length}
-            title="Animation clips"
-          />
-        </PropertyRow>
-        <PropertyRow label="Above pivot">
+        {info.bones === 0 && info.clips.length === 0 ? null : (
+          <PropertyRow label="Rig">
+            <PropertyReading prefix={<BoneIcon />} value={info.bones} title="Bones" />
+            <PropertyReading
+              prefix={<FilmIcon />}
+              value={info.clips.length}
+              title="Animation clips"
+            />
+          </PropertyRow>
+        )}
+        <PropertyRow label="Bounds Y">
           <PropertyReading
             prefix="↓"
             value={(info.bounds[0][1] ?? 0).toFixed(2)}
-            title="Its bounds start this far below its pivot"
+            title="Its lowest point, measured from its pivot"
           />
           <PropertyReading
             prefix="↑"
             value={(info.bounds[1][1] ?? 0).toFixed(2)}
-            title="Its bounds end this far above its pivot"
+            title="Its highest point, measured from its pivot"
           />
         </PropertyRow>
       </PropertySection>
-      {info.materials.length === 0 ? null : (
+      {!materials || info.materials.length === 0 ? null : (
         <PropertySection title="Materials" count={info.materials.length} collapsible>
           {info.materials.map((material, index) => (
             <PropertyRow
