@@ -48,9 +48,11 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
  * schemas as published, by model choice. Code with the library off lists five tools (no Blender);
  * the routes that make models in Blender list game_blender too. Targets set 2026-11-16 at 10,000
  * and 18,000 (code read 18,398 over twelve tools before the tools took ops, Blender 34,611).
+ * Code read exactly 10,000 on 2026-11-17; game_builds' undo, copies, bring_in and update (many
+ * chats in one game) took it to 10,354, so its line is 10,400.
  */
 const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", number>> = {
-  code: 10_000,
+  code: 10_400,
   "code with the library": 18_000,
   generated: 18_000,
   blender: 18_000,

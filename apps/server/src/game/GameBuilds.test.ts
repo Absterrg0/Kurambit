@@ -31,6 +31,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as ServerConfig from "../config.ts";
 import * as GameFolders from "./GameFolders.ts";
 import * as GameStage from "./GameStage.ts";
 
@@ -92,6 +93,7 @@ const world = Effect.gen(function* () {
       Layer.mergeAll(
         Layer.mock(GameProjectService.GameProjectService)({
           resolve: () => Effect.succeed(ROOT),
+          home: () => Effect.succeed({ root: ROOT, projectId: ProjectId.make("arena") }),
           read: () => Effect.succeed(manifest),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
@@ -129,6 +131,9 @@ const world = Effect.gen(function* () {
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameStage.GameStage)({}),
+        ServerConfig.layerTest(process.cwd(), { prefix: "game-builds-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
         // No other chat writes the folder here.
         Layer.mock(GameFolders.GameFolders)({
           holder: () => Effect.succeed(null),

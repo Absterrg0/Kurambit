@@ -417,7 +417,7 @@ const make = Effect.gen(function* () {
       Effect.catchCause((cause) => Effect.logWarning("A version's landing failed.", { cause })),
     );
 
-  yield* tryStarts.attach({ start });
+  yield* tryStarts.attach({ start, copyNote: copies.copyNote });
   return GameVersions.of({ tries, keep, landed });
 });
 

@@ -1121,6 +1121,7 @@ export const layer: Layer.Layer<
       if (!runningWrite.committed) {
         return;
       }
+      const copyNote = yield* gameTries.copyNote(projection.thread.id);
       const triesSince = yield* triesNote(
         projectionStore,
         projection.thread.id,
@@ -1458,6 +1459,7 @@ export const layer: Layer.Layer<
         ...restartContinuationBaseline(projection.runs, run),
         ...lastTurnEnded(projection.runs, run),
         ...(triesSince === null ? {} : { gameTries: triesSince }),
+        ...(copyNote === null ? {} : { gameCopy: copyNote }),
         message: {
           messageId: message.id,
           text: userText,

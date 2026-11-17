@@ -137,7 +137,12 @@ const make = Effect.gen(function* () {
   const gameIdle = (located: GameRunTurnReactor.Located) =>
     Effect.map(
       threads.listProjectThreads({ projectId: located.run.projectId, includeSubagents: true }),
-      (shells) => !shells.some((shell) => shell.activeRunId !== null || BUSY.has(shell.status)),
+      // Only the folder's writers: a chat working in a copy never holds keep going back.
+      (shells) =>
+        !shells.some(
+          (shell) =>
+            shell.worktreePath === null && (shell.activeRunId !== null || BUSY.has(shell.status)),
+        ),
     );
 
   /** The facts of a build once its boot check is in; null when they cannot be read. */

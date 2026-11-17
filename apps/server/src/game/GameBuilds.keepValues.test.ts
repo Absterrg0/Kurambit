@@ -25,6 +25,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as ServerConfig from "../config.ts";
 import * as GameFolders from "./GameFolders.ts";
 import * as GameStage from "./GameStage.ts";
 
@@ -73,6 +74,7 @@ const layerFor = (root: string) =>
         GameOperations.layer,
         Layer.mock(GameProjectService.GameProjectService)({
           resolve: () => Effect.succeed(root),
+          home: () => Effect.succeed({ root: root, projectId: ProjectId.make("rover") }),
           read: () => Effect.succeed(manifest),
           list: () => Effect.succeed([]),
         }),
@@ -98,6 +100,9 @@ const layerFor = (root: string) =>
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameStage.GameStage)({ closeLiveEditors: () => Effect.void }),
+        ServerConfig.layerTest(process.cwd(), { prefix: "game-builds-" }).pipe(
+          Layer.provide(NodeServices.layer),
+        ),
         // No other chat writes the folder here.
         Layer.mock(GameFolders.GameFolders)({
           holder: () => Effect.succeed(null),

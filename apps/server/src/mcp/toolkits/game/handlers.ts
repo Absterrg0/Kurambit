@@ -513,7 +513,7 @@ const handlers = {
           ).pipe(as(GameBuildRestoreResult)),
         undo: (undo) =>
           withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-            builds.undo(threadId, undo.build, undo.commandId),
+            builds.undo(threadId, undo.build, undefined),
           ).pipe(as(GameBuildUndoResult)),
         copies: () =>
           withGame(GameCopies.GameCopies, (copies, threadId) => copies.copies(threadId)).pipe(
@@ -525,10 +525,10 @@ const handlers = {
             copies.bringIn(
               {
                 threadId,
-                ...(bring.chat === undefined ? {} : { chat: bring.chat }),
-                ...(bring.close === undefined ? {} : { close: bring.close }),
-                ...(bring.keep === undefined ? {} : { keep: bring.keep }),
-                ...(bring.commandId === undefined ? {} : { commandId: bring.commandId }),
+                // A child's copy is done once brought in; the agent's own copy goes on.
+                ...(bring.chat === undefined || bring.chat === threadId
+                  ? {}
+                  : { chat: bring.chat, close: true }),
               },
               { agent: true },
             ),

@@ -670,6 +670,11 @@ export const GameKeepValuesResult = Schema.Struct({
   /** The build the folder held before: restoring it undoes this one. */
   base: GameBuildId,
   message: Schema.String,
+  /**
+   * A turn works in the folder: the values are kept and become a build when its turn ends
+   * (`build` and `base` are the folder's build until then). Names the chat whose turn it is.
+   */
+  heldFor: Schema.optionalKey(Schema.String),
 });
 export type GameKeepValuesResult = typeof GameKeepValuesResult.Type;
 

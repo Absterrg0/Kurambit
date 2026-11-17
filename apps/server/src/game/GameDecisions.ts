@@ -415,11 +415,12 @@ const make = Effect.gen(function* () {
     });
 
   const list: GameDecisions["Service"]["list"] = (threadId) =>
-    Effect.flatMap(projects.resolve(threadId), (root) => Effect.map(read(root), listOf));
+    Effect.flatMap(projects.home(threadId), ({ root }) => Effect.map(read(root), listOf));
 
   const decide: GameDecisions["Service"]["decide"] = (threadId, input) =>
     Effect.gen(function* () {
-      const root = yield* projects.resolve(threadId);
+      // One decisions file per game, at its home: a chat in a copy decides for the game.
+      const { root } = yield* projects.home(threadId);
       const text = input._tag === "remove" ? "" : oneLine(input.text);
       if (input._tag !== "remove" && text === "")
         return yield* failed(root, "Write something to keep, or delete the line.");

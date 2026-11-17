@@ -36,6 +36,7 @@ import {
   type GameBuildsResult,
   type GameEngineName,
   isAvailableEngine,
+  GameKeepValuesInput as GameKeepValuesInputSchema,
   type GameKeepValuesInput,
   type GameKeepValuesResult,
   gameLookId,
@@ -49,6 +50,7 @@ import {
   ThreadId,
 } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import * as ServerConfig from "../config.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
 import {
@@ -355,6 +357,11 @@ export class GameBuilds extends Context.Service<
       input: Omit<GameKeepValuesInput, "threadId">,
     ) => Effect.Effect<GameKeepValuesResult, GameOperationError>;
     /**
+     * Values kept while a turn worked in their folder, landed now that it has ended: each as
+     * its own build, merged per value onto what the turn left. A turn still at work keeps them.
+     */
+    readonly landHeldKeeps: (root: string) => Effect.Effect<void>;
+    /**
      * Runs `write` on the game folder as the game's one operation and keeps what it changed as
      * a build, the folder before it kept too so Undo restores it: a person's change made outside
      * a turn (a Library add). A repeat with the same `commandId` answers as the first did.
@@ -531,6 +538,7 @@ const keptSegments = (text: string) =>
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const config = yield* ServerConfig.ServerConfig;
   const projects = yield* GameProjectService.GameProjectService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
@@ -592,6 +600,8 @@ const make = Effect.gen(function* () {
         return yield* failed("Builds", root, "project-not-found", "the thread is gone");
       return {
         root,
+        // The game's own folder, where its one decisions file lives, even for a chat in a copy.
+        home: home ? root : (yield* projects.home(threadId)).root,
         projectId: shell.projectId,
         engine: manifest.engine.name,
         lane: manifestProject(manifest),
@@ -1605,14 +1615,14 @@ const make = Effect.gen(function* () {
         return `build ${id.slice(0, 7)}`;
       };
       const takenBack = yield* dropDecisions(
-        g.root,
+        g.home,
         (each) => (each.kind === "undone" || each.kind === "went-back") && each.build === target,
       );
       if (takenBack > 0) return;
       const brought = held.entries.find((each) => each.id === target);
       if (brought?.source._tag === "turn" && brought.source.step?.verdict === "undone") {
         const what = yield* whatBuildDid(g, brought);
-        return yield* recordDecision(g.root, {
+        return yield* recordDecision(g.home, {
           kind: "redid",
           text: `Brought back ${nameOf(target)} after keep going undid it: ${what.text}`,
           build: target,
@@ -1622,12 +1632,12 @@ const make = Effect.gen(function* () {
       const left =
         held.current === null ? undefined : held.entries.find((each) => each.id === held.current);
       if (left === undefined)
-        return yield* recordDecision(g.root, {
+        return yield* recordDecision(g.home, {
           kind: "went-back",
           text: `Went back to ${nameOf(target)} from a folder edited outside any build`,
         });
       const what = yield* whatBuildDid(g, left);
-      return yield* recordDecision(g.root, {
+      return yield* recordDecision(g.home, {
         kind: left.base === target ? "undone" : "went-back",
         text:
           left.base === target
@@ -1647,7 +1657,7 @@ const make = Effect.gen(function* () {
   const whatBuildDid = (g: Game, entry: Entry) =>
     Effect.gen(function* () {
       if (entry.source._tag === "saved") {
-        const kept = (yield* decisionsOfBuild(g.root, entry.id).pipe(
+        const kept = (yield* decisionsOfBuild(g.home, entry.id).pipe(
           Effect.orElseSucceed(() => []),
         )).find((each) => each.kind === "kept-values");
         return {
@@ -2167,8 +2177,8 @@ const make = Effect.gen(function* () {
       if (landed.moved === "moved-on") return yield* failed("Undo build", g.root, "busy", MOVED_ON);
       yield* (
         undid !== null
-          ? dropDecisions(g.root, (each) => each.kind === "undone" && each.build === undid)
-          : recordDecision(g.root, {
+          ? dropDecisions(g.home, (each) => each.kind === "undone" && each.build === undid)
+          : recordDecision(g.home, {
               kind: "undone",
               text: `Undid ${name(build)}: ${what.text}`,
               build,
@@ -2188,6 +2198,69 @@ const make = Effect.gen(function* () {
             ? `The game already had ${name(build)}'s change undone.`
             : `${label}. Every later build stays; undoing this build brings it back.`,
       } as const;
+    });
+
+  // Held keeps: one file per request under server state, so a restart lands them all.
+  const heldKeepsDir = (root: string) =>
+    NodePath.join(
+      config.stateDir,
+      "game-held-keeps",
+      NodeCrypto.createHash("sha256").update(root).digest("hex").slice(0, 16),
+    );
+  const HeldKeep = Schema.fromJsonString(
+    Schema.Struct({ root: Schema.String, input: GameKeepValuesInputSchema }),
+  );
+  const encodeHeldKeep = Schema.encodeEffect(HeldKeep);
+  const holdKeep = (root: string, request: string, input: GameKeepValuesInput) =>
+    Effect.flatMap(Effect.orDie(encodeHeldKeep({ root, input })), (text) =>
+      Effect.promise(async () => {
+        const dir = heldKeepsDir(root);
+        await NodeFSP.mkdir(dir, { recursive: true });
+        const file = NodePath.join(dir, `${request}.json`);
+        await NodeFSP.writeFile(`${file}.tmp`, text);
+        await NodeFSP.rename(`${file}.tmp`, file);
+      }),
+    );
+  /** The chat whose turn writes this folder now (null: none): a copy's own chat in a copy. */
+  const turnIn = (g: Game, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      if (g.root === g.home) {
+        const holder = yield* folders.holder(g.root, g.projectId, null);
+        return holder?.threadId === null || holder === null ? null : holder.title;
+      }
+      const shell = yield* projections
+        .getThreadShell(threadId)
+        .pipe(Effect.orElseSucceed(() => null));
+      return shell !== null &&
+        (shell.activeRunId !== null || (shell.activityRunStatus ?? null) !== null)
+        ? shell.title
+        : null;
+    });
+  const decodeHeldKeep = Schema.decodeUnknownOption(HeldKeep);
+  const landHeldKeeps: GameBuilds["Service"]["landHeldKeeps"] = (root) =>
+    Effect.gen(function* () {
+      const dir = heldKeepsDir(root);
+      const files = yield* Effect.promise(() => NodeFSP.readdir(dir).catch(() => [] as string[]));
+      for (const name of files.filter((each) => each.endsWith(".json")).toSorted()) {
+        const file = NodePath.join(dir, name);
+        const text = yield* Effect.promise(() => NodeFSP.readFile(file, "utf8").catch(() => null));
+        const held = text === null ? Option.none() : decodeHeldKeep(text);
+        if (Option.isNone(held)) {
+          yield* Effect.promise(() => NodeFSP.rm(file, { force: true }));
+          continue;
+        }
+        const { threadId, ...input } = held.value.input;
+        const kept = yield* keepValues(threadId, input).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Values kept during a turn could not land.", { root, cause }).pipe(
+              Effect.as(null),
+            ),
+          ),
+        );
+        // Still held (a turn at work again) keeps its file; landed or refused for good, it goes.
+        if (kept?.heldFor !== undefined) return;
+        yield* Effect.promise(() => NodeFSP.rm(file, { force: true }));
+      }
     });
 
   /** Each game's tuning session's base, and its tune file's text there (null: no file). */
@@ -2296,6 +2369,26 @@ const make = Effect.gen(function* () {
       const [doneFrom, doneKept] = yield* Effect.all([oidOf(fromRef), oidOf(keptRef)]);
       if (doneFrom !== null && doneKept !== null)
         return yield* answer(doneKept, doneFrom, said(input.things));
+      // A turn at work in this folder (any chat's, this one's too) would write over the values or
+      // be captured half done: they are kept aside and land when its turn ends (landHeldKeeps).
+      const writer = yield* turnIn(g, threadId);
+      if (writer !== null) {
+        // The same request lands it later, so a repeat of this keep is still one build.
+        yield* holdKeep(g.root, request, {
+          ...input,
+          threadId,
+          commandId: input.commandId ?? request,
+        });
+        const folder = yield* currentOf(g, yield* allEntries(g, 1, undefined));
+        if (folder === null)
+          return yield* failed("Keep values", g.root, "busy", `${writer} is working in the game.`);
+        return {
+          build: folder,
+          base: folder,
+          message: `Kept: the values save as a build when ${writer}'s turn ends.`,
+          heldFor: writer,
+        };
+      }
       const owner = String(threadId);
       const path = NodePath.join(g.root, g.lane, profile.tuneFile);
       const kept = yield* operations.exclusive(
@@ -2420,7 +2513,7 @@ const make = Effect.gen(function* () {
         // The session left no build, so it decided nothing.
         if (kept.held !== null)
           yield* dropDecisions(
-            g.root,
+            g.home,
             (each) => each.kind === "kept-values" && each.build === kept.held,
           ).pipe(
             Effect.catchCause((cause) =>
@@ -2462,7 +2555,7 @@ const make = Effect.gen(function* () {
       const before =
         replaces === null
           ? []
-          : (yield* decisionsOfBuild(g.root, replaces)).filter(
+          : (yield* decisionsOfBuild(g.home, replaces)).filter(
               (each) => each.kind === "kept-values",
             );
       const started = new Map(before.flatMap((each) => keptSegments(each.text)));
@@ -2478,7 +2571,7 @@ const make = Effect.gen(function* () {
       if (segments.length === 0) return;
       const listed = yield* allEntries(g, 5, undefined);
       const number = (yield* numbersOf(listed, listed.entries)).get(build)?.number;
-      yield* recordDecision(g.root, {
+      yield* recordDecision(g.home, {
         kind: "kept-values",
         text: `Kept tuned values as ${number === undefined ? `build ${build.slice(0, 7)}` : `Build ${number}`}: ${segments.join("; ")}`,
         build,
@@ -2658,6 +2751,7 @@ const make = Effect.gen(function* () {
     holds,
     current,
     keepValues,
+    landHeldKeeps,
     keepEdit,
     turnBuild,
   });

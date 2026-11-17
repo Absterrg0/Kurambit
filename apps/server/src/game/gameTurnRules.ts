@@ -107,6 +107,31 @@ export const personRunsForWorkspace = (cwd: string | null, lastTurnEndedAt?: str
   });
 
 /**
+ * The game folder a copy's cwd stands for: a linked git worktree names its repository in its
+ * `.git` file, and the game is the same path inside that repository's own checkout. Any other
+ * cwd is the game's own.
+ */
+const gameHome = async (cwd: string) => {
+  let top = NodePath.resolve(cwd);
+  for (;;) {
+    const marker = await NodeFSP.readFile(NodePath.join(top, ".git"), "utf8").catch(
+      (cause: NodeJS.ErrnoException) => (cause.code === "EISDIR" ? "" : null),
+    );
+    if (marker !== null) {
+      const gitDir = /^gitdir:\s*(.+)$/m.exec(marker)?.[1]?.trim();
+      // A linked worktree's gitdir is <checkout>/.git/worktrees/<name>.
+      if (gitDir === undefined || NodePath.basename(NodePath.dirname(gitDir)) !== "worktrees")
+        return cwd;
+      const checkout = NodePath.dirname(NodePath.dirname(NodePath.dirname(gitDir)));
+      return NodePath.join(checkout, NodePath.relative(top, NodePath.resolve(cwd)));
+    }
+    const up = NodePath.dirname(top);
+    if (up === top) return cwd;
+    top = up;
+  }
+};
+
+/**
  * The person's decisions on the game in `cwd` (`.studio/decisions.md`) as a block for the turn's
  * message: all of them for a session that starts fresh, those since `since` (when the session
  * last started a turn) for one that goes on; null when there are none or it is no game. The
@@ -118,7 +143,8 @@ export const personDecisionsForWorkspace = (
 ) =>
   Effect.gen(function* () {
     if (cwd === null || (yield* gameEngine(cwd)) === null) return null;
-    return yield* decisionsForTurn(cwd, input).pipe(
+    // One decisions file per game: a chat in a copy reads the game's.
+    return yield* decisionsForTurn(yield* read(() => gameHome(cwd), cwd), input).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("The game's decisions could not be read.", { cwd, cause }).pipe(
           Effect.as(null),

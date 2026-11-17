@@ -390,6 +390,14 @@ const make = Effect.gen(function* () {
           "chat-unavailable",
           "This chat is archived: keep going runs in an open chat.",
         );
+      // Keep going's steps write the game folder: a copy's chat brings its work in first.
+      if (shell.worktreePath !== null)
+        return yield* runError(
+          "set",
+          threadId,
+          "chat-unavailable",
+          "This chat works in a copy of the game: keep going runs in the game, so bring the copy in first.",
+        );
       const manifest = yield* projects
         .read(root)
         .pipe(
