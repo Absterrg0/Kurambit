@@ -14,7 +14,7 @@ import {
   type StudioReplayed,
 } from "@kurambit/contracts";
 
-import { watchLog, watchMark, watchRunReset } from "./gameStageWatch";
+import { watchLog } from "./gameStageWatch";
 
 /**
  * The Stage end of the bridge (packages/contracts/src/gameStageBridge.ts):
@@ -271,15 +271,12 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
     case "studio-replayed":
       if (replayWaiter?.id === message.id) settleReplay(message);
       return;
-    case "studio-mark":
-      watchMark(owner.slice(0, owner.indexOf("\0")), message.mark);
-      return;
     case "studio-log":
       watchLog(owner.slice(0, owner.indexOf("\0")), message.lines, message.dropped ?? 0);
       return;
+    // The once-a-second marks reach the server with the run; nothing here shows them live.
+    case "studio-mark":
     case "studio-run-reset":
-      watchRunReset(owner.slice(0, owner.indexOf("\0")));
-      return;
     case "studio-error":
     case "studio-visibility-ack":
     case "studio-play":
