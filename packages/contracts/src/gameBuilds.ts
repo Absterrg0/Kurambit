@@ -543,7 +543,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   "first-response": "First response",
   performance: "Performance",
   screens: "Screens",
-  "saved-plays": "Saved plays",
+  "saved-plays": "Test plays",
   assets: "Assets",
   use: "Asset use",
   "player-view": "Player in view",
@@ -947,7 +947,7 @@ const CHECK_LABELS: Readonly<
   hud: "HUD fits the screen",
   performance: "Holds its frame rate",
   screens: "Fits phone and widescreen",
-  "saved-plays": "Saved plays replay the same",
+  "saved-plays": "Test plays replay the same",
   skilled: "Can be won by Kurambit's play bot",
 };
 

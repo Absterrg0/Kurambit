@@ -1265,18 +1265,18 @@ const tuneLine = (change: GameTuneChange, things: ReadonlyArray<GameThing>) => {
   return from === null ? `${name} set to ${to}${unit}` : `${name} ${from} → ${to}${unit}`;
 };
 
-/** A saved play that no longer ends as it was recorded, as a person says it. */
+/** A test play that no longer ends as it was recorded, as a person says it. */
 const savedPlayLine = (play: {
   readonly name: string;
   readonly reading: GameSavedPlayReading;
   readonly differs: { readonly seconds: number } | null;
 }) =>
   play.reading === "plays-differently"
-    ? `Saved play "${play.name}" now plays differently${play.differs === null ? "" : ` at ${Math.round(play.differs.seconds)} s`}`
+    ? `Test play "${play.name}" now plays differently${play.differs === null ? "" : ` at ${Math.round(play.differs.seconds)} s`}`
     : play.reading === "ending-changed"
-      ? `Saved play "${play.name}" now ends differently`
+      ? `Test play "${play.name}" now ends differently`
       : play.reading === "cannot-replay"
-        ? `Saved play "${play.name}" can no longer be replayed`
+        ? `Test play "${play.name}" can no longer be replayed`
         : null;
 
 /** The most change lines said at once; the rest are counted. */

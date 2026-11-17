@@ -246,7 +246,7 @@ export const keepGoingBannerView = (
             ? `${step} · measuring the build before keeping it`
             : status.phase === "undoing"
               ? `${n === null ? "Undoing the last step" : `Undoing step ${n}`}${reason === "" ? "" : `: ${reason}`}`
-              : "Keep going · reading the current build's facts";
+              : "Keep going · reading the current build's checks";
   const line =
     n === null
       ? "Keep going"
@@ -274,7 +274,7 @@ export const stepVerdictText = (step: StepSource): string => {
     case null:
       return step.reason || "measuring before keeping it";
     case "kept":
-      return `kept: ${step.reason || "no fact got worse"}`;
+      return `kept: ${step.reason || "no check got worse"}`;
     case "undone":
       return step.reason === "" ? "undone" : `undone: ${step.reason}`;
     // The server's reason says why the undo left it: the game moved on, or

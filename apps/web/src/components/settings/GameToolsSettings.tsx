@@ -55,7 +55,7 @@ const TOOL_ABOUT = {
   uv: "Kurambit fetches it itself when it is not installed.",
   mpfb: "MPFB2 2.0.18. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
   ffmpeg:
-    "A build's play facts and Keep going are read from these recordings; without ffmpeg a build is only checked for booting.",
+    "A build's play checks and Keep going are read from its videos; without ffmpeg a build is only checked for starting.",
 } as const satisfies Record<GameToolStatus["tool"], string>;
 
 const TOOL_ICONS = {

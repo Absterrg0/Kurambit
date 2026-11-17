@@ -289,7 +289,7 @@ function BriefBox({
       : null,
     ffmpeg !== null && ffmpeg.status !== "ready"
       ? {
-          text: "Without ffmpeg, builds are only checked for starting: no recordings, so no play checks.",
+          text: "Without ffmpeg, builds are only checked for starting: no videos of their plays, so no play checks.",
           action: <GameToolLink tool={ffmpeg} />,
         }
       : null,
