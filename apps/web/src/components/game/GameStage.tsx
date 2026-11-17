@@ -250,10 +250,18 @@ const HERO_GUTTER = 24;
 const HEADER_LINE = 14;
 
 /**
- * The Stage's size and place. A chat with messages shares the column (gameColumnFit). An empty
- * chat makes the game the hero, as Home does: as wide as the centre allows inside the gutters and
- * as tall as all but the composer's real height, with the game and its bar centred above the
- * composer when the width binds it (`pad`, above the game). `column` is the chat's lane either
+ * The hero's shapes, wide to tall. A three.js game draws at whatever size its frame has (the
+ * shell's resize; the Screens check proves it from phone to 21:9 widescreen), so the empty chat's
+ * Stage takes the free rectangle's own shape within these, and only past them leaves bands.
+ */
+const HERO_WIDEST = 21 / 9;
+const HERO_TALLEST = 1;
+
+/**
+ * The Stage's size and place. A chat with messages shares the column (gameColumnFit) at the game's
+ * own shape. An empty chat makes the game the hero, as Home does: the Stage fills the rectangle
+ * inside the margins above the composer exactly, its shape clamped to 1:1 to 21:9, and only a
+ * shape past the clamp is centred there (`pad`, above the game). `column` is the chat's lane either
  * way, so the composer stays where it sits in a chat with messages and never jumps.
  */
 const stageFitOf = (
@@ -269,17 +277,20 @@ const stageFitOf = (
   const overlay = centre.querySelector<HTMLElement>("[data-chat-composer-overlay]");
   const room = overlay?.offsetHeight ?? 0;
   const available = Math.max(0, centre.clientHeight - taken - room);
-  const height = Math.floor(Math.min((centre.clientWidth - 2 * HERO_GUTTER) * ratio, available));
-  // The free height split so the two empty bands look even: above, the top bar's empty lower
-  // half (its one line of text is centred) and `pad`; below, the rest of `available`, the bar's
-  // 12px and the composer's own top padding.
+  const across = Math.max(0, centre.clientWidth - 2 * HERO_GUTTER);
+  const shape = Math.min(HERO_WIDEST, Math.max(HERO_TALLEST, across / Math.max(1, available)));
+  const height = Math.floor(Math.min(available, across / shape));
+  const width = Math.floor(height * shape);
+  // A shape past the clamp leaves free height: split so the two empty bands look even. Above,
+  // the top bar's empty lower half (its one line of text is centred) and `pad`; below, the rest
+  // of `available`, the bar's 12px and the composer's own top padding.
   const topbar = centre.querySelector<HTMLElement>("[data-game-topbar]");
   const above = topbar === null ? 0 : Math.max(0, (topbar.offsetHeight - HEADER_LINE) / 2);
   const below =
     BAR_GAP + (overlay === null ? 0 : Number.parseFloat(getComputedStyle(overlay).paddingTop) || 0);
   const free = available - height;
-  const pad = Math.max(0, Math.min(free, Math.round((free + below - above) / 2)));
-  return { width: Math.floor(height / ratio), height, pad, column: shared.width };
+  const pad = free <= 0 ? 0 : Math.max(0, Math.min(free, Math.round((free + below - above) / 2)));
+  return { width, height, pad, column: shared.width };
 };
 
 /** The folder's own game frame, not a build copy's. */
@@ -761,6 +772,11 @@ function ThreadGameStage({
       measure,
     );
   }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth, hero]);
+  // The empty chat's Stage has its own shape, and the game takes it; else the game's viewport.
+  const frameViewport =
+    hero && stageFit !== null && stageFit.height > 0
+      ? { width: stageFit.width, height: stageFit.height }
+      : data?.viewport;
   const stageFitStyle =
     stageFit === null
       ? undefined
@@ -1484,7 +1500,7 @@ function ThreadGameStage({
             }
             style={compare === null && stageFit !== null ? stageFitStyle : undefined}
           >
-            <GameFrameBox viewport={data.viewport} gameName={gameName} playing>
+            <GameFrameBox viewport={frameViewport ?? data.viewport} gameName={gameName} playing>
               {playTarget.result._tag === "web" ? (
                 <GameFrame
                   key={`${playTarget.build}\0${playTarget.result.url}`}
@@ -1567,7 +1583,7 @@ function ThreadGameStage({
           )}
           <GamePlaySurface
             phase={shownPhase}
-            viewport={data.viewport}
+            viewport={frameViewport ?? data.viewport}
             gameName={gameName}
             // A live remount lands in play, the first load and Reload on the title.
             previewUrl={
