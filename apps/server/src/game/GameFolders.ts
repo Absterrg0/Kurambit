@@ -69,8 +69,11 @@ export class GameFolders extends Context.Service<
       },
       work: Effect.Effect<A, E>,
     ) => Effect.Effect<A, E | GameOperationError>;
-    /** A writer of `root` may have ended: the oldest held turn gets the folder, if it is free. */
-    readonly release: (root: string, projectId: ProjectId) => Effect.Effect<void>;
+    /**
+     * A writer of `root` may have ended (`ended`: the chat whose run did): the oldest held turn
+     * gets the folder, if it is free.
+     */
+    readonly release: (root: string, projectId: ProjectId, ended?: ThreadId) => Effect.Effect<void>;
   }
 >()("kurambit/game/GameFolders") {}
 
@@ -78,6 +81,8 @@ interface TurnClaim {
   readonly family: ThreadId;
   readonly title: string;
   readonly at: number;
+  /** Its chat was seen at work: once it is not, the claim is over. */
+  seen?: boolean;
 }
 
 const make = Effect.gen(function* () {
@@ -151,10 +156,16 @@ const make = Effect.gen(function* () {
       }
       const claim = claims.get(root);
       if (claim === undefined || claim.family === family) return null;
-      const fresh = (yield* Clock.currentTimeMillis) - claim.at < Duration.toMillis(GRACE);
       const claimed = shells.some(
         (shell) => inFolder(shell) && atWork(shell) && familyOf(shells, shell.id) === claim.family,
       );
+      // A claim lives while its chat works there; before its run commits, for a short grace.
+      if (claimed) claim.seen = true;
+      else if (claim.seen) {
+        claims.delete(root);
+        return null;
+      }
+      const fresh = (yield* Clock.currentTimeMillis) - claim.at < Duration.toMillis(GRACE);
       return claimed || fresh
         ? ({ threadId: claim.family, title: claim.title } satisfies FolderHolder)
         : null;
@@ -195,12 +206,30 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const release: GameFolders["Service"]["release"] = (root, projectId) =>
+  const release: GameFolders["Service"]["release"] = (root, projectId, ended) =>
     locks
       .withLock(
         root,
         Effect.gen(function* () {
-          if ((yield* holderIn(root, projectId, null)) !== null) return null;
+          // The claim's own run ended: once its chat works no more, the claim is over.
+          const claim = claims.get(root);
+          if (ended !== undefined && claim !== undefined) {
+            const shells = yield* shellsOf(projectId);
+            if (
+              familyOf(shells, ended) === claim.family &&
+              !shells.some(
+                (shell) =>
+                  inFolder(shell) && atWork(shell) && familyOf(shells, shell.id) === claim.family,
+              )
+            )
+              claims.delete(root);
+          }
+          if ((yield* holderIn(root, projectId, null)) !== null) {
+            // A claim whose turn has not shown up yet: look again once its grace is over.
+            const claim = claims.get(root);
+            if (claim !== undefined && claim.seen !== true) yield* releaseLater(root, projectId);
+            return null;
+          }
           const { shells, held } = yield* heldTurns(projectId);
           const next = held[0];
           if (next === undefined) return null;

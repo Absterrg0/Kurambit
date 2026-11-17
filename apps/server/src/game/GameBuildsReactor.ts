@@ -158,7 +158,7 @@ const make = Effect.gen(function* () {
           const folder = yield* projects.resolve(event.threadId);
           if (folder !== game.root) yield* builds.landHeldKeeps(folder);
           yield* builds.landHeldKeeps(game.root);
-          yield* folders.release(game.root, game.projectId);
+          yield* folders.release(game.root, game.projectId, event.threadId);
         }).pipe(Effect.ignore)
       : Effect.void;
 
