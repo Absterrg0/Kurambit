@@ -106,7 +106,7 @@ export function GameWorkbench({
         <GameArtPanel threadRef={threadRef} onAsk={onAsk} />
       </TabsPanel>
       <TabsPanel value="checks" className="flex min-h-0 flex-1 flex-col">
-        <GameWorkbenchChecks threadRef={threadRef} onOpenTurnDiff={onOpenTurnDiff} />
+        <GameWorkbenchChecks threadRef={threadRef} onAsk={onAsk} onOpenTurnDiff={onOpenTurnDiff} />
       </TabsPanel>
     </Tabs>
   );

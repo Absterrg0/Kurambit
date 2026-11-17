@@ -140,6 +140,23 @@ export function LibraryPage() {
     }
   }
   const tiles = libraryTiles(items, { kind, source }, search);
+  // Nothing under these filters: the one step that shows something, with its count.
+  const allKinds = libraryTiles(items, { kind: "all", source }, "");
+  const packs = libraryTiles(items, { kind: "all", source: "packs" }, "");
+  const empty =
+    search !== "" ? (
+      <Button size="sm" variant="outline" onClick={() => setSearch("")}>
+        {`Clear “${search}”`}
+      </Button>
+    ) : kind !== "all" && allKinds.length > 0 ? (
+      <Button size="sm" variant="outline" onClick={() => setKind("all")}>
+        {`Show all ${allKinds.length}`}
+      </Button>
+    ) : source === "yours" && packs.length > 0 ? (
+      <Button size="sm" variant="outline" onClick={() => setSource("packs")}>
+        {`Browse ${packs.length} ${packs.length === 1 ? "pack" : "packs"}`}
+      </Button>
+    ) : null;
   // The detail is the open tile's: a filter that hides it closes it.
   const selected = tiles.find((item) => item.id === selectedId) ?? null;
   const loading = read.data === null || read.data === undefined;
@@ -198,6 +215,7 @@ export function LibraryPage() {
               tiles={tiles}
               loading={loading}
               listKey={`${kind}:${source}:${search}`}
+              empty={empty}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
@@ -227,6 +245,7 @@ function LibraryGrid({
   tiles,
   loading,
   listKey,
+  empty,
   selectedId,
   onSelect,
 }: {
@@ -235,6 +254,8 @@ function LibraryGrid({
   loading: boolean;
   /** A new filter is a new list, from its top. */
   listKey: string;
+  /** What shows with no tiles: the one step that shows some. */
+  empty: ReactNode;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -252,11 +273,7 @@ function LibraryGrid({
   return (
     <div ref={measure} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {width === 0 || loading ? null : tiles.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center">
-          <Text variant="body" tone="muted">
-            Nothing here
-          </Text>
-        </div>
+        <div className="flex flex-1 items-center justify-center">{empty}</div>
       ) : (
         <LegendList<GameLibraryItem[]>
           key={listKey}

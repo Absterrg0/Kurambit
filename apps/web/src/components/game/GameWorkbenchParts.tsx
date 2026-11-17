@@ -122,6 +122,10 @@ function Row({
  * What a section shows once there is something to show: a small glyph, one title, a line of
  * explanation and at most one way forward, in the section's own place.
  */
+/**
+ * A section with nothing in it yet: its icon and its one most useful action, named with the
+ * game's own words. A title only for a state it is in (waiting, failed), never about itself.
+ */
 function Empty({
   icon,
   title,
@@ -129,7 +133,7 @@ function Empty({
   action,
 }: {
   icon: ReactNode;
-  title: string;
+  title?: string;
   body?: string | undefined;
   action?: ReactNode;
 }) {
@@ -138,9 +142,11 @@ function Empty({
       <span aria-hidden="true" className="mb-2 inline-flex text-dim-foreground [&_svg]:size-4">
         {icon}
       </span>
-      <Text variant="label" tone="default" render={<p />}>
-        {title}
-      </Text>
+      {title === undefined ? null : (
+        <Text variant="label" tone="default" render={<p />}>
+          {title}
+        </Text>
+      )}
       {body === undefined ? null : (
         <Text variant="body" tone="muted" render={<p className="max-w-72" />}>
           {body}
