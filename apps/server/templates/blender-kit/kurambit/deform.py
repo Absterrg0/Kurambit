@@ -100,8 +100,26 @@ def _frames(act, n):
     return sorted({int(round(a + (b - a) * i / max(1, n - 1))) for i in range(n)})
 
 
+def _surface(co, polys):
+    """A BVH of the body with its faces turned consistently outward: a decimate or a join can flip
+    some, and a flipped face reads a garment outside it as inside."""
+    import bmesh
+
+    bm = bmesh.new()
+    verts = [bm.verts.new(p) for p in co.tolist()]
+    for p in polys:
+        try:
+            bm.faces.new([verts[i] for i in p])
+        except ValueError:  # a duplicate face
+            pass
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    tree = BVHTree.FromBMesh(bm)
+    bm.free()
+    return tree
+
+
 def _inside(points, body_co, body_polys):
-    tree = BVHTree.FromPolygons(body_co.tolist(), body_polys)
+    tree = _surface(body_co, body_polys)
     near, nrm = np.empty_like(points), np.empty_like(points)
     for i, p in enumerate(points):
         hit = tree.find_nearest(p)
@@ -123,7 +141,7 @@ def _outer(o, dg, co, body):
     finally:
         ev.to_mesh_clear()
     n = n.reshape(-1, 3) @ np.array(o.matrix_world)[:3, :3].T
-    tree = BVHTree.FromPolygons(body[0].tolist(), body[1])
+    tree = _surface(body[0], body[1])
     keep = np.ones(len(co), bool)
     for i, p in enumerate(co):
         hit = tree.find_nearest(p)
