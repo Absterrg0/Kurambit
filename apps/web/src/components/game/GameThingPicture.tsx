@@ -70,8 +70,15 @@ export const useThingFacts = (threadRef: ScopedThreadRef, build: string | null, 
 // One portrait at a time: each is two frames of the game drawn between two of its own.
 let drawing: Promise<unknown> = Promise.resolve();
 const PICTURE_PX = 256;
-/** The least share of its square a picture must cover to be kept as one. */
-const LEAST_COVER = 0.03;
+/**
+ * How the game draws a picture: part of the key a picture is kept by, so pictures drawn the old
+ * way are drawn again. 3: none while a run compiles (those were solid black), flat things from
+ * above, points on a dark backdrop, the studio's environment light.
+ */
+const PICTURE_RENDERER = 3;
+/** A game that cannot draw yet (its run's programs compile) is asked again this many times. */
+const PICTURE_TRIES = 4;
+const PICTURE_RETRY_MS = 1500;
 const PICTURE_VIEW = { size: PICTURE_PX, yaw: 0.7, pitch: 0.55 } as const;
 
 const sha256Hex = async (text: string) => {
@@ -102,7 +109,7 @@ export function GameThingPicture({
   useEffect(() => {
     if (build === null) return;
     let live = true;
-    void sha256Hex(`${build}\0${thing.id}\0studio`).then((hex) => {
+    void sha256Hex(`${build}\0${thing.id}\0studio-${PICTURE_RENDERER}`).then((hex) => {
       if (live) setHash({ of: key, hex });
     });
     return () => {
@@ -169,15 +176,16 @@ function Draw({
     let live = true;
     drawing = drawing.then(async () => {
       if (!live || useDrawn.getState()[drawnKey] !== undefined) return;
-      const portrait = await portraitStageThing(id, PICTURE_VIEW);
-      // A game that cannot draw it now (no bridge yet, off the scene) is asked again next time.
-      if (portrait === null) return;
-      // A picture of almost nothing (specks, a thin line) reads as nothing: its kind's glyph does.
-      if ((portrait.facts?.covers ?? 1) < LEAST_COVER) {
-        useDrawn.setState({ [drawnKey]: null });
-        if (portrait.facts !== undefined) useFacts.setState({ [drawnKey]: portrait.facts });
-        return;
+      // The game says null when it draws nothing yet (its run compiling, no bridge) or the thing
+      // draws nothing at all; only then does the kind's glyph stand in. Asked again a few times,
+      // then next time the picture is shown.
+      let portrait = await portraitStageThing(id, PICTURE_VIEW);
+      for (let tries = 1; tries < PICTURE_TRIES; tries += 1) {
+        if (portrait !== null || !live) break;
+        await new Promise((resolve) => window.setTimeout(resolve, PICTURE_RETRY_MS));
+        portrait = await portraitStageThing(id, PICTURE_VIEW);
       }
+      if (portrait === null || !live) return;
       useDrawn.setState({ [drawnKey]: portrait.png });
       if (portrait.facts !== undefined) useFacts.setState({ [drawnKey]: portrait.facts });
       if (sha !== null)

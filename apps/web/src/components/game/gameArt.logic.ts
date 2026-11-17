@@ -12,9 +12,20 @@ export interface GameArtCodeModel {
   readonly id: string;
   readonly name: string;
   readonly thingKind: GameThing["kind"];
+  /** The game's own word for its kind ("player"), when it gave one the Stage knows. */
+  readonly kindWord: string | null;
   /** It has values to tune (ctx.tune by its name). */
   readonly tunable: boolean;
+  /** A part: the thing it is built into, by id, and where it sits ("Island › Cabin"). */
+  readonly parent: string | null;
+  readonly path: string | null;
+  /** How many copies of it the game draws (a scattered part: "Trees × 240"). */
+  readonly copies: number | null;
 }
+
+/** A code model's name as a tile and a list say it: a scattered part with its count. */
+export const modelName = (model: GameArtCodeModel) =>
+  model.copies === null ? model.name : `${model.name} × ${model.copies.toLocaleString("en-US")}`;
 
 /** One row of the Art list: a file of the game, or a model made in code. */
 export type GameArtEntry =
@@ -50,27 +61,53 @@ const MODEL_KINDS: ReadonlySet<GameThing["kind"]> = new Set([
 
 /**
  * The models the running game made in code, one per name: a thing with no asset behind it. Its
- * copies ("Slime 2") are one model.
+ * copies ("Slime 2") are one model. A thing's parts follow it, in the game's order.
  */
 export const codeModels = (things: ReadonlyArray<GameThing>): ReadonlyArray<GameArtCodeModel> => {
   const seen = new Set<string>();
   const models: GameArtCodeModel[] = [];
+  const partsOf = new Map<string, GameThing[]>();
+  for (const thing of things)
+    if (thing.parent !== undefined)
+      partsOf.set(thing.parent, [...(partsOf.get(thing.parent) ?? []), thing]);
+  const model = (thing: GameThing, name: string): GameArtCodeModel => ({
+    kind: "code-model",
+    id: thing.id,
+    name,
+    thingKind: thing.kind,
+    kindWord: thing.kindWord ?? null,
+    tunable: (thing.values?.length ?? 0) > 0,
+    parent: thing.parent ?? null,
+    path: thing.path ?? null,
+    copies:
+      thing.parent !== undefined && thing.instances !== undefined && thing.instances > 1
+        ? thing.instances
+        : null,
+  });
+  const withParts = (thing: GameThing) => {
+    for (const part of partsOf.get(thing.id) ?? []) {
+      models.push(model(part, part.name));
+      withParts(part);
+    }
+  };
   for (const thing of things) {
+    if (thing.parent !== undefined) continue;
     if (thing.asset !== undefined || !MODEL_KINDS.has(thing.kind)) continue;
     if (thing.instance !== undefined) continue;
     const base = thing.name.replace(/ \d+$/, "");
     if (seen.has(base)) continue;
     seen.add(base);
-    models.push({
-      kind: "code-model",
-      id: thing.id,
-      name: base,
-      thingKind: thing.kind,
-      tunable: (thing.values?.length ?? 0) > 0,
-    });
+    models.push(model(thing, base));
+    withParts(thing);
   }
   return models;
 };
+
+/** A thing and its parts, as the grid groups them; one group without a title for the rest. */
+export interface ArtPictureGroup {
+  readonly title: string | null;
+  readonly entries: ReadonlyArray<GameArtEntry>;
+}
 
 const matches = (words: ReadonlyArray<string>, haystack: string) =>
   words.every((word) => haystack.includes(word));
@@ -97,15 +134,43 @@ export const artSections = (
               `${asset.path} ${asset.route} ${asset.credit ?? ""} ${asset.pack ?? ""}`.toLowerCase(),
             ),
         );
-  const models: ReadonlyArray<GameArtEntry> = [
-    ...(filter === "all" || filter === "model" ? code : []).filter((model) =>
-      matches(words, model.name.toLowerCase()),
-    ),
-    ...files("model").map((asset) => ({ kind: "file" as const, asset })),
-    ...files("texture").map((asset) => ({ kind: "file" as const, asset })),
-  ];
+  const shownCode = (filter === "all" || filter === "model" ? code : []).filter((model) =>
+    matches(words, `${model.name} ${model.path ?? ""}`.toLowerCase()),
+  );
+  // A thing with parts is a group of its own, its tile first; everything else shares one.
+  const rootOf = (model: GameArtCodeModel): string => {
+    let at = model;
+    while (at.parent !== null) {
+      const parent = code.find((each) => each.id === at.parent);
+      if (parent === undefined) break;
+      at = parent;
+    }
+    return at.id;
+  };
+  const holders = new Set(code.flatMap((model) => (model.parent === null ? [] : [rootOf(model)])));
+  const loose: GameArtEntry[] = [];
+  const grouped = new Map<string, GameArtEntry[]>();
+  for (const model of shownCode) {
+    const root = rootOf(model);
+    if (!holders.has(root)) loose.push(model);
+    else grouped.set(root, [...(grouped.get(root) ?? []), model]);
+  }
+  const pictures: ReadonlyArray<ArtPictureGroup> = [
+    {
+      title: null,
+      entries: [
+        ...loose,
+        ...files("model").map((asset) => ({ kind: "file" as const, asset })),
+        ...files("texture").map((asset) => ({ kind: "file" as const, asset })),
+      ],
+    },
+    ...[...grouped].map(([root, entries]) => ({
+      title: code.find((model) => model.id === root)?.name ?? null,
+      entries,
+    })),
+  ].filter((group) => group.entries.length > 0);
   return {
-    pictures: models,
+    pictures,
     sounds: files("audio"),
     fonts: filter === "all" ? files("font") : [],
   };

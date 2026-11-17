@@ -404,7 +404,7 @@ function ThingInspector({
             {thing.name}
           </Text>
           <Text variant="caption" tone="muted">
-            {KIND_WORDS[thing.kind]}
+            {thing.kindWord ?? KIND_WORDS[thing.kind]}
           </Text>
         </span>
         <Tooltip>

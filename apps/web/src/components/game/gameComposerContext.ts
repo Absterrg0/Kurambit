@@ -15,6 +15,7 @@ import { randomUUID } from "../../lib/utils";
 import {
   captureStageFrame,
   clearStageSelection,
+  portraitStageThing,
   type StageSelection,
   useStageBridge,
 } from "./gameStageBridge";
@@ -115,10 +116,22 @@ export const attachAssetToComposer = async (
   );
 };
 
-const thingLabel = (selection: StageSelection) =>
-  selection.thing.instance === undefined
-    ? selection.thing.name
-    : `${selection.thing.name} #${selection.thing.instance.index + 1}`;
+const thingLabel = (selection: StageSelection) => {
+  const { thing } = selection;
+  const name =
+    thing.instance === undefined ? thing.name : `${thing.name} #${thing.instance.index + 1}`;
+  // A part says what holds it: "Cabin (in Island)".
+  const holder = thing.path?.split(" › ").at(-2);
+  return holder === undefined ? name : `${name} (in ${holder})`;
+};
+
+/** A part's chip shows it alone, as Art does; a thing's shows the frame it was picked in. */
+const pickedPicture = (selection: StageSelection) =>
+  selection.thing.path === undefined || selection.thing.instance !== undefined
+    ? captureStageFrame()
+    : portraitStageThing(selection.thing.id, { size: 384, yaw: 0.7, pitch: 0.55 }).then(
+        (portrait) => portrait?.png ?? captureStageFrame(),
+      );
 
 /** The chip each thread's pointed thing is, so a new pick replaces it and a cleared one goes. */
 const pointed = new Map<
@@ -179,11 +192,14 @@ export function useStageSelectionChip(threadRef: ScopedThreadRef | null) {
         placed: false,
       });
       if (current !== undefined) detach(threadRef, current.id);
-      void captureStageFrame().then((png) => {
+      void pickedPicture(selection).then((png) => {
         // A newer pick (or none) since the frame was asked for owns the chip now.
         if (pointed.get(threadKey)?.id !== id) return;
         void attach(threadRef, { id, ...words, comment: gameStageAskContext(selection) }, png, {
           focus: false,
+        }).then(() => {
+          // Cleared or replaced while the chip was being made: it goes with its pick.
+          if (pointed.get(threadKey)?.id !== id) detach(threadRef, id);
         });
       });
     };

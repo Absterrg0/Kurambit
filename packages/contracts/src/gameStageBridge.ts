@@ -671,7 +671,9 @@ export const gameStageAskContext = (selection: {
 }): string => {
   const { thing, rect, trace } = selection;
   const lines = [
-    "The person selected this in the running game (the attached frame is the canvas when they asked):",
+    thing.path === undefined || thing.instance !== undefined
+      ? "The person selected this in the running game (the attached frame is the canvas when they asked):"
+      : "The person selected this part in the running game (the attached picture is the part alone):",
     thing.path === undefined
       ? `- Thing: ${thing.name} (${thing.kindWord ?? thing.kind}), id \`${thing.id}\`.`
       : `- Part: ${thing.name}, at ${thing.path}: a model the game named "${thing.name}" (its root's \`.name\`) and built into ${thing.path.slice(0, thing.path.lastIndexOf(" › "))}. Change only that model's code, not the rest of what holds it.`,

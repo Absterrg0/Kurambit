@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import {
   GAME_STYLE_FILE,
   GameStyle,
+  gameLookId,
   manifestRuntime,
   type GameArtAsset,
   type GameAssetUse,
@@ -21,7 +22,6 @@ import {
   PauseIcon,
   PlayIcon,
   ShapesIcon,
-  SlidersHorizontalIcon,
 } from "lucide-react";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
@@ -54,8 +54,9 @@ import {
 import { useGameGenerations } from "./GameGenerationCard";
 import { GameKeyArt } from "./GameKeyArt";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
-import { GameTuneField } from "./GameTuneField";
-import { KIND_WORDS, useTuneSaver } from "./GameTune";
+import { colourHex } from "./GameColourField";
+import { GameLookInspector } from "./GameLookInspector";
+import { KIND_WORDS } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
 import {
   artSections,
@@ -68,6 +69,7 @@ import {
   fileName,
   inPlayWords,
   isUnused,
+  modelName,
   ROUTE_WORDS,
   thingOfAsset,
   type ArtFilter,
@@ -76,13 +78,10 @@ import {
 } from "./gameArt.logic";
 import { refOf } from "./gameBuildRef";
 import { attachAssetToComposer } from "./gameComposerContext";
-import { showWorkbench } from "./gameWorkbenchPanel";
 import {
   hoverStageThing,
   pointAtStageThing,
   portraitStageThing,
-  selectStageThing,
-  tuneStageValue,
   useThreadStageBridge,
 } from "./gameStageBridge";
 
@@ -187,9 +186,11 @@ export function GameArtPanel({
           build={build}
           entry={entry}
           things={things}
+          code={code}
           use={use}
           viewerUrl={viewerUrl}
           onAsk={onAsk}
+          onOpen={(next) => setSelected(entryKey(next))}
           onBack={() => {
             hoverStageThing(null);
             setSelected(null);
@@ -287,26 +288,42 @@ function ArtList({
         </Text>
       ) : (
         <div className="flex flex-col gap-4 pt-1 pb-4">
-          {shown.pictures.length === 0 ? null : (
-            <ul
-              aria-label="Models and textures"
-              className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-x-3 gap-y-3 px-4"
+          {shown.pictures.map((group) => (
+            <section
+              key={group.title ?? ""}
+              aria-label={group.title ?? "Models and textures"}
+              className="flex flex-col"
             >
-              {shown.pictures.map((entry) => (
-                <li key={entryKey(entry)} className="min-w-0">
-                  <ArtTile
-                    threadRef={threadRef}
-                    root={root}
-                    build={build}
-                    entry={entry}
-                    use={use}
-                    drawn={drawn}
-                    onOpen={onOpen}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+              {group.title === null ? null : (
+                <div className="flex h-7 items-center gap-2 px-4">
+                  <Text variant="meta" tone="muted">
+                    {group.title}
+                  </Text>
+                  <Text variant="caption" tone="dim" numeric>
+                    {group.entries.length - 1} parts
+                  </Text>
+                </div>
+              )}
+              <ul
+                aria-label={group.title ?? "Models and textures"}
+                className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-x-3 gap-y-3 px-4"
+              >
+                {group.entries.map((entry) => (
+                  <li key={entryKey(entry)} className="min-w-0">
+                    <ArtTile
+                      threadRef={threadRef}
+                      root={root}
+                      build={build}
+                      entry={entry}
+                      use={use}
+                      drawn={drawn}
+                      onOpen={onOpen}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
           {shown.sounds.length === 0 || root === null ? null : (
             <ArtGroup label="Sounds" count={shown.sounds.length}>
               {shown.sounds.map((asset) => (
@@ -459,12 +476,12 @@ function ArtTile({
   const [pixels, setPixels] = useState<string | null>(null);
   const facts = useThingFacts(threadRef, build, entry.kind === "code-model" ? entry.id : "");
   const unused = entry.kind === "file" && isUnused(entry.asset, use);
-  const name = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
+  const name = entry.kind === "file" ? fileName(entry.asset.path) : modelName(entry);
   const fact = unused
     ? "Unused"
     : entry.kind === "code-model"
       ? facts === null || facts.triangles === 0
-        ? KIND_WORDS[entry.thingKind]
+        ? (entry.kindWord ?? KIND_WORDS[entry.thingKind])
         : countWords(facts.triangles, "triangle", "triangles")
       : entry.asset.kind === "model"
         ? entry.asset.triangles === undefined
@@ -733,26 +750,6 @@ function FontRow({
 
 // ─── One asset ──────────────────────────────────────────────────────────────────
 
-const LOOK_TINT: GameThingValue = {
-  key: "tint",
-  value: 0xffffff,
-  default: 0xffffff,
-  min: 0,
-  max: 0xffffff,
-  step: 1,
-  label: "Tint",
-  colour: true,
-};
-const LOOK_SCALE: GameThingValue = {
-  key: "scale",
-  value: 1,
-  default: 1,
-  min: 0.1,
-  max: 10,
-  step: 0.05,
-  unit: "×",
-};
-
 /** What the agent is told about an asset with the chip. */
 const assetContext = (
   entry: GameArtEntry,
@@ -761,7 +758,9 @@ const assetContext = (
 ) => {
   if (entry.kind === "code-model")
     return [
-      `The model "${entry.name}" that the game's code builds (a named thing on the Stage, id \`${entry.id}\`).`,
+      entry.path === null
+        ? `The model "${entry.name}" that the game's code builds (a named thing on the Stage, id \`${entry.id}\`).`
+        : `The part "${entry.name}" of the game's code, at ${entry.path}: the model the game named "${entry.name}" (its root's \`.name\`) and built into ${entry.path.slice(0, entry.path.lastIndexOf(" › "))}. Change only that model's code, not the rest of what holds it.`,
       facts === null
         ? null
         : `As the game draws it: ${facts.triangles} triangles, ${facts.materials} materials (${facts.colours.join(", ") || "no base colours"}), ${facts.size.join(" × ")} units. The picture is it alone, from the Art view's angle.`,
@@ -782,15 +781,31 @@ const assetContext = (
     .join("\n");
 };
 
+/** What "Bake into the code" asks: the look's edits made the code's own, then the entry gone. */
+const bakeContext = (thing: GameThing, changed: ReadonlyArray<GameThingValue>) => {
+  const said = (value: number | boolean | undefined, colour: boolean) =>
+    typeof value === "number" && colour ? colourHex(value) : String(value);
+  return [
+    `Bake the person's look edits for "${thing.name}"${thing.path === undefined ? "" : ` (at ${thing.path})`} into the code that builds it, so it looks this way with no override:`,
+    ...changed.map(
+      (value) =>
+        `- ${value.label ?? value.key}: ${said(value.default, value.colour === true)} → ${said(value.value, value.colour === true)} (key \`${value.key}\`)`,
+    ),
+    `They are kept in web/tune.json under \`${gameLookId(thing.id)}\`. Once the code makes it look this way, remove that entry, so nothing applies twice. Change only this thing's code.`,
+  ].join("\n");
+};
+
 function ArtDetail({
   threadRef,
   root,
   build,
   entry,
   things,
+  code,
   use,
   viewerUrl,
   onAsk,
+  onOpen,
   onBack,
 }: {
   threadRef: ScopedThreadRef;
@@ -798,16 +813,18 @@ function ArtDetail({
   build: string | null;
   entry: GameArtEntry;
   things: ReadonlyArray<GameThing>;
+  code: ReadonlyArray<GameArtCodeModel>;
   use: GameAssetUse | null;
   viewerUrl: string | null;
   onAsk: (text: string) => void;
+  onOpen: (entry: GameArtEntry) => void;
   onBack: () => void;
 }) {
   const [info, setInfo] = useState<ViewerModelInfo | null>(null);
   const [handle, setHandle] = useState<ModelViewerHandle | null>(null);
   // The code-made thing's view as last drawn: the chip's picture and its facts.
   const [orbit, setOrbit] = useState<{ png: string; facts: GameThingFacts | null } | null>(null);
-  const name = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
+  const name = entry.kind === "file" ? fileName(entry.asset.path) : modelName(entry);
   const stageId = stageThingOf(entry, things);
   const stageThing =
     stageId === null ? null : (things.find((thing) => thing.id === stageId) ?? null);
@@ -834,6 +851,19 @@ function ArtDetail({
         context: assetContext(entry, info, orbit?.facts ?? null),
       },
       png,
+    );
+  };
+  // "Bake into the code": the look's edits as a chip asking the agent to make them the code's own.
+  const bake = (changed: ReadonlyArray<GameThingValue>) => {
+    if (stageThing === null) return;
+    void attachAssetToComposer(
+      threadRef,
+      {
+        key: `bake:${stageThing.id}`,
+        label: `Bake ${name}'s look`,
+        context: bakeContext(stageThing, changed),
+      },
+      orbit?.png ?? null,
     );
   };
   return (
@@ -877,6 +907,10 @@ function ArtDetail({
           threadRef={threadRef}
           build={build}
           entry={entry}
+          thing={stageThing}
+          parts={code.filter((model) => model.parent === entry.id)}
+          onOpen={onOpen}
+          onBake={bake}
           onDrawn={setOrbit}
           facts={orbit?.facts ?? null}
         />
@@ -891,8 +925,8 @@ function ArtDetail({
           info={info}
           onInfo={setInfo}
           onHandle={setHandle}
-          handle={handle}
           onAsk={onAsk}
+          onBake={bake}
         />
       )}
     </div>
@@ -910,13 +944,22 @@ function CodeModelDetail({
   threadRef,
   build,
   entry,
+  thing,
+  parts,
   facts,
+  onOpen,
+  onBake,
   onDrawn,
 }: {
   threadRef: ScopedThreadRef;
   build: string | null;
   entry: GameArtCodeModel;
+  /** The thing as the game on the Stage reports it: its values, for the inspector. */
+  thing: GameThing | null;
+  parts: ReadonlyArray<GameArtCodeModel>;
   facts: GameThingFacts | null;
+  onOpen: (entry: GameArtEntry) => void;
+  onBake: (changed: ReadonlyArray<GameThingValue>) => void;
   onDrawn: (view: { png: string; facts: GameThingFacts | null }) => void;
 }) {
   const [angle, setAngle] = useState({ yaw: 0.7, pitch: 0.55 });
@@ -947,6 +990,11 @@ function CodeModelDetail({
     wanted.current = angle;
     void draw();
   }, [angle, draw]);
+  // An edit in the inspector draws the view again, from where it stands.
+  const redrawView = () => {
+    wanted.current = { ...wanted.current };
+    void draw();
+  };
   return (
     <>
       <div
@@ -1000,7 +1048,11 @@ function CodeModelDetail({
       </div>
       <Workbench.Body className="overflow-visible">
         <Workbench.Section title="Model">
-          <ArtFact name="Kind" reading={KIND_WORDS[entry.thingKind]} />
+          {entry.path === null ? (
+            <ArtFact name="Kind" reading={entry.kindWord ?? KIND_WORDS[entry.thingKind]} />
+          ) : (
+            <ArtFact name="Part of" reading={entry.path.slice(0, entry.path.lastIndexOf(" › "))} />
+          )}
           {facts === null ? null : (
             <>
               <ArtFact name="Triangles" reading={facts.triangles.toLocaleString("en-US")} />
@@ -1012,21 +1064,39 @@ function CodeModelDetail({
             </>
           )}
         </Workbench.Section>
-        {entry.tunable ? (
-          <div className="px-4 py-3">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                selectStageThing(entry.id);
-                showWorkbench("tune");
-              }}
-            >
-              <SlidersHorizontalIcon aria-hidden="true" />
-              Tune its values
-            </Button>
-          </div>
-        ) : null}
+        {parts.length === 0 ? null : (
+          <Workbench.Section title="Parts" detail={parts.length}>
+            {parts.map((part) => (
+              <div key={part.id} className="px-2">
+                <button
+                  type="button"
+                  onClick={() => onOpen(part)}
+                  onPointerEnter={() => hoverStageThing(part.id)}
+                  onPointerLeave={() => hoverStageThing(null)}
+                  className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                >
+                  <GameThingPicture
+                    threadRef={threadRef}
+                    thing={{ id: part.id, kind: part.thingKind }}
+                    build={build}
+                    className="size-6"
+                  />
+                  <Text variant="body" tone="default" truncate render={<span className="flex-1" />}>
+                    {modelName(part)}
+                  </Text>
+                </button>
+              </div>
+            ))}
+          </Workbench.Section>
+        )}
+        {thing === null ? null : (
+          <GameLookInspector
+            threadRef={threadRef}
+            thing={thing}
+            onEdit={redrawView}
+            onBake={onBake}
+          />
+        )}
       </Workbench.Body>
     </>
   );
@@ -1093,9 +1163,9 @@ function FileDetail({
   viewerUrl,
   info,
   onInfo,
-  handle,
   onHandle,
   onAsk,
+  onBake,
 }: {
   threadRef: ScopedThreadRef;
   root: string;
@@ -1105,9 +1175,9 @@ function FileDetail({
   viewerUrl: string | null;
   info: ViewerModelInfo | null;
   onInfo: (info: ViewerModelInfo | null) => void;
-  handle: ModelViewerHandle | null;
   onHandle: (handle: ModelViewerHandle | null) => void;
   onAsk: (text: string) => void;
+  onBake: (changed: ReadonlyArray<GameThingValue>) => void;
 }) {
   // The asset's look values as the game on the Stage holds them: ASSETS models carry them.
   const lookValues = (stageThing?.values ?? []).filter(
@@ -1158,8 +1228,8 @@ function FileDetail({
           {usedWords === null ? null : <ArtFact name="In play" reading={usedWords} />}
         </Workbench.Section>
         {asset.kind === "model" && info !== null ? <ModelFacts info={info} /> : null}
-        {asset.kind === "model" && stageThing !== null && lookValues.length > 0 ? (
-          <ModelLook threadRef={threadRef} asset={asset} values={lookValues} handle={handle} />
+        {asset.kind === "model" && stageThing !== null ? (
+          <GameLookInspector threadRef={threadRef} thing={stageThing} onBake={onBake} />
         ) : null}
         <GenerateAgain threadRef={threadRef} asset={asset} onAsk={onAsk} />
       </Workbench.Body>
@@ -1254,53 +1324,6 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
         </Workbench.Section>
       )}
     </>
-  );
-}
-
-/**
- * Tint and scale, written as the model's tune values (tune.json, by its path) through Tune's own
- * saver, so each change is a build Undo takes back. They play on the Stage as they move.
- */
-function ModelLook({
-  threadRef,
-  asset,
-  values,
-  handle,
-}: {
-  threadRef: ScopedThreadRef;
-  asset: GameArtAsset;
-  values: ReadonlyArray<GameThingValue>;
-  handle: ModelViewerHandle | null;
-}) {
-  const saver = useTuneSaver(threadRef);
-  const id = asset.path;
-  const tunes = [LOOK_TINT, LOOK_SCALE].map((base) => {
-    const live = values.find((value) => value.key === base.key);
-    return live === undefined ? base : { ...base, value: live.value };
-  });
-  return (
-    <Workbench.Section title="Tint and scale">
-      {tunes.map((value) => (
-        <GameTuneField
-          key={value.key}
-          label={value.key === "tint" ? "Tint" : "Scale"}
-          value={value}
-          was={value.value === value.default ? undefined : value.default}
-          disabled={!saver.canSave}
-          onChange={(next) => {
-            tuneStageValue(id, value.key, next);
-            handle?.look({ [value.key]: next });
-          }}
-          onCommit={(next) => saver.save(id, { ...value, value: next }, "keyboard")}
-          onReset={() => {
-            if (value.default === undefined) return;
-            tuneStageValue(id, value.key, value.default);
-            handle?.look({ [value.key]: value.default });
-            saver.save(id, { ...value, value: value.default }, "keyboard");
-          }}
-        />
-      ))}
-    </Workbench.Section>
   );
 }
 

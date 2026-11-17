@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import {
+  gameLookId,
   type GamePlay,
   type GameStageCapability,
   type GameStageControl,
@@ -10,11 +11,14 @@ import {
   type GameThing,
   type GameThingFacts,
   type GameToStageMessage,
+  type StudioLook,
   type StudioReplay,
   type StudioReplayed,
 } from "@kurambit/contracts";
 
 import { watchLog } from "./gameStageWatch";
+
+const LOOK_ID_PREFIX = gameLookId("");
 
 /**
  * The Stage end of the bridge (packages/contracts/src/gameStageBridge.ts):
@@ -53,6 +57,8 @@ interface StageBridgeState {
   readonly controls: ReadonlyArray<GameStageControl> | null;
   /** What the last rebind or reset did, in the game's words. */
   readonly controlsNote: string | null;
+  /** Each thing's look as the game last said it, by thing id (null: it has none to edit). */
+  readonly looks: Readonly<Record<string, StudioLook["look"]>>;
   readonly post: ((message: GameStageToGameMessage) => void) | null;
   /** Holds or resumes a game with no bridge through the visibility message every shell knows. */
   readonly hold: ((on: boolean) => void) | null;
@@ -69,6 +75,7 @@ const EMPTY: Omit<StageBridgeState, "owner" | "post" | "hold"> = {
   muted: false,
   controls: null,
   controlsNote: null,
+  looks: {},
 };
 
 export const useStageBridge = create<StageBridgeState>()(() => ({
@@ -265,6 +272,11 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
     case "studio-controls":
       useStageBridge.setState({ controls: message.controls, controlsNote: message.note ?? null });
       return;
+    case "studio-look":
+      useStageBridge.setState({
+        looks: { ...useStageBridge.getState().looks, [message.id]: message.look },
+      });
+      return;
     case "studio-run":
       settleRun(message.play);
       return;
@@ -347,9 +359,27 @@ export const tuneStageValue = (id: string, key: string, value: number | boolean)
   withValue(id, key, value);
 };
 
+/** Asks the game for a thing's look (its scale, shadows and materials): studio-look answers. */
+export const requestStageLook = (id: string) =>
+  useStageBridge.getState().post?.({ type: "studio-look-request", id });
+
 /** The list and the pointed thing show a tuned value at once; the game's next report confirms it. */
 const withValue = (id: string, key: string, value: number | boolean) => {
   const state = useStageBridge.getState();
+  const lookOf = id.startsWith(LOOK_ID_PREFIX) ? id.slice(LOOK_ID_PREFIX.length) : null;
+  const look = lookOf === null ? null : (state.looks[lookOf] ?? null);
+  if (lookOf !== null && look !== null) {
+    useStageBridge.setState({
+      looks: {
+        ...state.looks,
+        [lookOf]: {
+          ...look,
+          values: look.values.map((entry) => (entry.key === key ? { ...entry, value } : entry)),
+        },
+      },
+    });
+    return;
+  }
   const tuned = (thing: GameThing): GameThing =>
     thing.id !== id || thing.values === undefined
       ? thing
