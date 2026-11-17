@@ -241,6 +241,10 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
       settleCapture(message.png);
       keepStill(owner, message.png);
       return;
+    case "studio-exported":
+      exportWaiters.get(message.request)?.(message.glb);
+      exportWaiters.delete(message.request);
+      return;
     case "studio-picture":
       settlePortrait(
         message.request,
@@ -559,6 +563,32 @@ export const portraitStageThing = (
       resolve(portrait);
     });
     post({ type: "studio-portrait", request, id, ...view });
+  });
+};
+
+const exportWaiters = new Map<number, (glb: string | null) => void>();
+let exportCount = 0;
+
+/**
+ * One named thing written as a GLB by the game on the Stage (stage-bridge.js exportThing), as it
+ * stands with its look; null when the game cannot write it.
+ */
+export const exportStageThing = (id: string, timeoutMs = 20_000): Promise<string | null> => {
+  const { post, capabilities, status } = useStageBridge.getState();
+  if (post === null || status !== "ready" || !capabilities.includes("export"))
+    return Promise.resolve(null);
+  exportCount += 1;
+  const request = exportCount;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      exportWaiters.delete(request);
+      resolve(null);
+    }, timeoutMs);
+    exportWaiters.set(request, (glb) => {
+      window.clearTimeout(timeout);
+      resolve(glb);
+    });
+    post({ type: "studio-export", request, id });
   });
 };
 

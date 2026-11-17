@@ -1,4 +1,4 @@
-import { SearchIcon, SquarePenIcon } from "lucide-react";
+import { LibraryBigIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Kbd } from "../ui/kbd";
@@ -8,17 +8,21 @@ import { Text } from "../ui/text";
 export interface SidebarThreadHeaderProps {
   onNewGame: () => void;
   newGameShortcutLabel: string | null;
-  /** Opens the command palette, which finds games, chats and what was said in them. */
+  /** Opens the command palette, which finds games, chats, Library assets and what was said. */
   onSearch: () => void;
   searchShortcutLabel: string | null;
+  libraryOpen: boolean;
+  onLibrary: () => void;
 }
 
-/** The sidebar's two quiet rows: one way to start a game, one way to find anything. */
+/** The sidebar's places: start a game, find anything, and every asset you have. */
 export function SidebarThreadHeader({
   onNewGame,
   newGameShortcutLabel,
   onSearch,
   searchShortcutLabel,
+  libraryOpen,
+  onLibrary,
 }: SidebarThreadHeaderProps) {
   return (
     <div className="flex flex-col gap-px">
@@ -32,12 +36,15 @@ export function SidebarThreadHeader({
         icon={<SearchIcon />}
         label="Search"
         shortcut={searchShortcutLabel}
-        muted
         onClick={onSearch}
       />
-      <Text variant="meta" tone="muted" render={<h2 className="px-2 pt-4 pb-1" />}>
-        Games
-      </Text>
+      <SidebarHeaderRow
+        icon={<LibraryBigIcon />}
+        label="Library"
+        shortcut={null}
+        active={libraryOpen}
+        onClick={onLibrary}
+      />
     </div>
   );
 }
@@ -46,19 +53,25 @@ function SidebarHeaderRow({
   icon,
   label,
   shortcut,
-  muted = false,
+  active = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
   shortcut: string | null;
-  muted?: boolean;
+  active?: boolean;
   onClick: () => void;
 }) {
   return (
-    <SidebarMenuButton type="button" onClick={onClick} className="group/header-row">
+    <SidebarMenuButton
+      type="button"
+      isActive={active}
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      className="group/header-row h-7 px-1"
+    >
       {icon}
-      <Text variant="label" tone={muted ? "muted" : "default"} truncate>
+      <Text variant="label" tone={active ? "default" : "muted"} truncate>
         {label}
       </Text>
       {/* The shortcut is a reminder for the row in hand; at rest it only crowds the column. */}

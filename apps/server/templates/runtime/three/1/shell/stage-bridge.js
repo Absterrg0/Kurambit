@@ -40,6 +40,7 @@ const CAPABILITIES = [
   "runs",
   "rewind",
   "portrait",
+  "export",
 ];
 const KINDS = new Set([
   "character",
@@ -1644,6 +1645,45 @@ export function createStageBridge({
    * never sees it; null when the game is not drawing (its programs still compiling) or the thing
    * draws nothing in either picture.
    */
+  /**
+   * One named thing as a GLB, for Art's Save to library: copies of its bodies as they stand in
+   * the scene, its look's edits and scale included, set so it stands on the origin, written by
+   * three's own GLTFExporter (loaded only when asked). The scene itself is never touched.
+   */
+  const exportThing = async (id) => {
+    const record = things.get(id);
+    const seen = view();
+    if (record === undefined || seen === null) return null;
+    const bodies = bodiesOf(record).filter((body) => attached(body, seen.scene));
+    if (bodies.length === 0) return null;
+    const group = new THREE.Group();
+    group.name = record.name;
+    shapeLooks(true);
+    try {
+      seen.scene.updateMatrixWorld(true);
+      for (const body of bodies) {
+        const copy = body.clone(true);
+        body.matrixWorld.decompose(copy.position, copy.quaternion, copy.scale);
+        group.add(copy);
+      }
+    } finally {
+      shapeLooks(false);
+    }
+    group.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(group, true);
+    if (bounds.isEmpty()) return null;
+    const centre = bounds.getCenter(new THREE.Vector3());
+    const offset = new THREE.Vector3(centre.x, bounds.min.y, centre.z);
+    for (const child of group.children) child.position.sub(offset);
+    const { GLTFExporter } = await import("../vendor/addons/exporters/GLTFExporter.js");
+    const glb = await new GLTFExporter().parseAsync(group, { binary: true, onlyVisible: true });
+    const bytes = new Uint8Array(glb);
+    let binary = "";
+    for (let at = 0; at < bytes.length; at += 0x8000)
+      binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    return `data:model/gltf-binary;base64,${btoa(binary)}`;
+  };
+
   const portrait = ({ id, size, yaw, pitch }) => {
     const record = things.get(id);
     const seen = view();
@@ -1905,6 +1945,8 @@ export function createStageBridge({
         );
       case "studio-orbit":
         return finite(data.dx) && finite(data.dy) && finite(data.zoom) && data.zoom > 0;
+      case "studio-export":
+        return finite(data.request) && text(data.id, 400);
       case "studio-portrait":
         return (
           finite(data.request) &&
@@ -2014,6 +2056,13 @@ export function createStageBridge({
           png: made?.png ?? null,
           ...(made === null ? {} : { facts: made.facts }),
         });
+      }
+      case "studio-export": {
+        exportThing(data.id).then(
+          (glb) => toStage({ type: "studio-exported", request: data.request, id: data.id, glb }),
+          () => toStage({ type: "studio-exported", request: data.request, id: data.id, glb: null }),
+        );
+        return;
       }
       case "studio-run-request": {
         const recorded = runSoFar?.() ?? null;

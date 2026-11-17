@@ -455,6 +455,27 @@ export const gameEnvironment = {
     label: "game:artThumbnail",
     tag: WS_METHODS.gameArtThumbnail,
   }),
+  // The Library: every game's art, saved models, packs and looks. Read only while its page or a
+  // search over it is open; a game's change reaches it when the page reads again.
+  libraryList: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:libraryList",
+    tag: WS_METHODS.gameLibraryList,
+    staleTimeMs: 10_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: ({ environmentId }) => gameListSignal(environmentId),
+  }),
+  libraryAdd: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:libraryAdd",
+    tag: WS_METHODS.gameLibraryAdd,
+  }),
+  librarySave: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:librarySave",
+    tag: WS_METHODS.gameLibrarySave,
+  }),
+  libraryRemove: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:libraryRemove",
+    tag: WS_METHODS.gameLibraryRemove,
+  }),
   // Which art providers are ready; a key saved in Settings refreshes it there.
   artProviders: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:artProviders",

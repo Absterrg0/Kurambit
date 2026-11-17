@@ -49,3 +49,7 @@
   model viewer, `shell/viewer.js`): the same release's `examples/jsm` files from the npm tarball
   three-0.180.0.tgz (sha512 integrity matches the registry), added 2026-11-16. They pass through
   the repository's formatter like the files above.
+- `addons/exporters/GLTFExporter.js` (Art's Save to library, which writes a thing the game's code
+  makes as a GLB, `shell/stage-bridge.js`): the same release's `examples/jsm` file from the npm
+  tarball three-0.180.0.tgz (sha512 integrity matches the registry), added 2026-11-17. It passes
+  through the repository's formatter like the files above.

@@ -18,6 +18,7 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
+import { Route as ChatLibraryRouteImport } from './routes/_chat.library'
 import { Route as ChatSettingsStorageRouteImport } from './routes/_chat.settings.storage'
 import { Route as ChatSettingsSourceControlRouteImport } from './routes/_chat.settings.source-control'
 import { Route as ChatSettingsSnapShotRouteImport } from './routes/_chat.settings.snap-shot'
@@ -80,6 +81,11 @@ const ChatSettingsRoute = ChatSettingsRouteImport.update({
 const ChatNewRoute = ChatNewRouteImport.update({
   id: '/new',
   path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatLibraryRoute = ChatLibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatSettingsStorageRoute = ChatSettingsStorageRouteImport.update({
@@ -189,6 +195,7 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
+  '/library': typeof ChatLibraryRoute
   '/new': typeof ChatNewRoute
   '/settings': typeof ChatSettingsRouteWithChildren
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
@@ -217,6 +224,7 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
+  '/library': typeof ChatLibraryRoute
   '/new': typeof ChatNewRoute
   '/settings': typeof ChatSettingsRouteWithChildren
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
@@ -248,6 +256,7 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/usage': typeof UsageRoute
   '/welcome': typeof WelcomeRoute
+  '/_chat/library': typeof ChatLibraryRoute
   '/_chat/new': typeof ChatNewRoute
   '/_chat/settings': typeof ChatSettingsRouteWithChildren
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
@@ -280,6 +289,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/usage'
     | '/welcome'
+    | '/library'
     | '/new'
     | '/settings'
     | '/projects/$projectKey'
@@ -308,6 +318,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/usage'
     | '/welcome'
+    | '/library'
     | '/new'
     | '/settings'
     | '/projects/$projectKey'
@@ -338,6 +349,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/usage'
     | '/welcome'
+    | '/_chat/library'
     | '/_chat/new'
     | '/_chat/settings'
     | '/projects/$projectKey'
@@ -435,6 +447,13 @@ declare module '@tanstack/react-router' {
       path: '/new'
       fullPath: '/new'
       preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/library': {
+      id: '/_chat/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof ChatLibraryRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/settings/storage': {
@@ -618,6 +637,7 @@ const ChatSettingsRouteWithChildren = ChatSettingsRoute._addFileChildren(
 )
 
 interface ChatRouteChildren {
+  ChatLibraryRoute: typeof ChatLibraryRoute
   ChatNewRoute: typeof ChatNewRoute
   ChatSettingsRoute: typeof ChatSettingsRouteWithChildren
   ChatIndexRoute: typeof ChatIndexRoute
@@ -626,6 +646,7 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatLibraryRoute: ChatLibraryRoute,
   ChatNewRoute: ChatNewRoute,
   ChatSettingsRoute: ChatSettingsRouteWithChildren,
   ChatIndexRoute: ChatIndexRoute,

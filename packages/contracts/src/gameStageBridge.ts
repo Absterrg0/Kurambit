@@ -39,6 +39,8 @@ export const GameStageCapability = Schema.Literals([
   "rewind",
   /** Draws one named thing alone (studio-portrait), for Art's pictures and its orbit view. */
   "portrait",
+  /** Writes one named thing as a GLB (studio-export), for Art's Save to library. */
+  "export",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -316,6 +318,13 @@ export const StudioOrbit = Schema.Struct({
  * Asks for one named thing drawn alone, framed, from `yaw` and `pitch` (radians around it), as a
  * square PNG of `size` px: answered with studio-picture, `request` echoed.
  */
+/** Asks for one named thing as a GLB: answered with studio-exported, `request` echoed. */
+export const StudioExport = Schema.Struct({
+  type: Schema.Literal("studio-export"),
+  request: Schema.Finite,
+  id: Schema.String,
+});
+
 export const StudioPortrait = Schema.Struct({
   type: Schema.Literal("studio-portrait"),
   request: Schema.Finite,
@@ -355,6 +364,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioStep,
   StudioOrbit,
   StudioPortrait,
+  StudioExport,
 ]);
 export type GameStageToGameMessage = typeof GameStageToGameMessage.Type;
 
@@ -481,6 +491,14 @@ export const GameThingFacts = Schema.Struct({
 export type GameThingFacts = typeof GameThingFacts.Type;
 
 /** The answer to studio-portrait: null when the thing has no body on screen to draw. */
+/** The answer to studio-export: null when the thing has no body to write. */
+export const StudioExported = Schema.Struct({
+  type: Schema.Literal("studio-exported"),
+  request: Schema.Finite,
+  id: Schema.String,
+  glb: Schema.NullOr(Schema.String.check(Schema.isPattern(/^data:model\/gltf-binary;base64,/))),
+});
+
 export const StudioPicture = Schema.Struct({
   type: Schema.Literal("studio-picture"),
   request: Schema.Finite,
@@ -573,6 +591,7 @@ export const GameToStageMessage = Schema.Union([
   StudioShortcut,
   StudioFrame,
   StudioPicture,
+  StudioExported,
   StudioLook,
   StudioControls,
   StudioPlay,
