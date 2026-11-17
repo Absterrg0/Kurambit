@@ -177,6 +177,9 @@ export const GameBlenderBody = Schema.Union([
 ]);
 export type GameBlenderBody = typeof GameBlenderBody.Type;
 
+const StyleFactor = Schema.Number.check(Schema.isBetween({ minimum: 0.3, maximum: 3 }));
+const HeroHeight = Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 20 }));
+
 export const GameBlenderChain = Schema.Struct({
   /** Bones are <name>_01..; mirrored chains <name>_l_01.. and <name>_r_01... */
   name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9]{0,15}$/)),
@@ -217,6 +220,26 @@ export const GameBlenderCharacterInput = Schema.Struct({
       calm: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
     }),
   ),
+  /**
+   * The body and its rig restyled before they are conformed: a preset (realistic, heroic, cartoon,
+   * chibi) and any factor beside it (head, legs, arms, hands, feet, girth, limbs; 1 keeps it).
+   */
+  style: Schema.optionalKey(
+    Schema.Struct({
+      preset: Schema.optionalKey(Schema.Literals(["realistic", "heroic", "cartoon", "chibi"])),
+      head: Schema.optionalKey(StyleFactor),
+      legs: Schema.optionalKey(StyleFactor),
+      arms: Schema.optionalKey(StyleFactor),
+      hands: Schema.optionalKey(StyleFactor),
+      feet: Schema.optionalKey(StyleFactor),
+      girth: Schema.optionalKey(StyleFactor),
+      limbs: Schema.optionalKey(StyleFactor),
+    }),
+  ),
+  /** Standing height in metres the body is scaled to; the height gate then holds it within 10%. */
+  height: Schema.optionalKey(HeroHeight),
+  /** The height gate's range in metres, as the brief means it; default a human's 1.5-2.0, or height ±10%. */
+  heightRange: Schema.optionalKey(Schema.Tuple([HeroHeight, HeroHeight])),
 });
 export type GameBlenderCharacterInput = typeof GameBlenderCharacterInput.Type;
 

@@ -524,7 +524,16 @@ const make = Effect.gen(function* () {
     }),
   );
   const mpfbFile = NodePath.join(directory, "blender-extensions", `mpfb-${MPFB.version}.zip`);
-  const mpfbReady = Effect.promise(() => verifiedFile(mpfbFile, MPFB));
+  // KURAMBIT_MPFB names a copy of the same pinned zip placed by hand (a shared tools folder, a
+  // machine with no network), as KURAMBIT_BLENDER names a Blender; only the pin's bytes count.
+  const mpfbFound = Effect.promise(async () => {
+    const override = process.env.KURAMBIT_MPFB?.trim();
+    if (override && (await verifiedFile(override, MPFB)))
+      return { path: override, source: "env" as const };
+    return (await verifiedFile(mpfbFile, MPFB))
+      ? { path: mpfbFile, source: "kurambit" as const }
+      : null;
+  });
   const mpfbStatus = Effect.gen(function* () {
     const base = {
       tool: "mpfb" as const,
@@ -543,7 +552,8 @@ const make = Effect.gen(function* () {
         status: "error",
         message: `${MPFB_ABOUT} It needs Blender 4.2 or later, which Kurambit cannot use yet: see the Blender row.`,
       } satisfies GameToolStatus;
-    if (!(yield* mpfbReady))
+    const found = yield* mpfbFound;
+    if (found === null)
       return {
         ...base,
         installed: false,
@@ -553,9 +563,9 @@ const make = Effect.gen(function* () {
     return {
       ...base,
       installed: true,
-      path: mpfbFile,
+      path: found.path,
       version: MPFB.version,
-      source: "kurambit",
+      source: found.source,
       status: "ready",
       message: `${MPFB_ABOUT} A live Blender already open picks a change up when it reopens.`,
       downloadUrl: null,
@@ -598,7 +608,7 @@ const make = Effect.gen(function* () {
   /** Fetched into a private stage and verified against its pin before it is moved into place. */
   const installMpfb = fetchLock.withPermits(1)(
     Effect.gen(function* () {
-      if (yield* mpfbReady) return;
+      if ((yield* mpfbFound) !== null) return;
       const stage = yield* makeStage("install-mpfb");
       yield* Effect.gen(function* () {
         const staged = NodePath.join(stage, NodePath.basename(mpfbFile));
@@ -669,7 +679,7 @@ const make = Effect.gen(function* () {
         Effect.ensuring(Effect.sync(() => (revision += 1))),
         Effect.andThen(status()),
       ),
-    blenderExtension: (_id) => Effect.map(mpfbReady, (ready) => (ready ? mpfbFile : null)),
+    blenderExtension: (_id) => Effect.map(mpfbFound, (found) => found?.path ?? null),
   });
 });
 const isExecutable = async (file: string) => {

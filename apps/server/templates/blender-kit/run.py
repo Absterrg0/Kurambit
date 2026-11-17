@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 from mathutils import Matrix  # noqa: E402
 
-from kurambit import contact, measure, skeleton, stylepass  # noqa: E402
+from kurambit import contact, deform, measure, skeleton, stylepass  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
 
@@ -144,6 +144,18 @@ def _keep_only(objects):
             a.name = a["kurambit_clip"]
 
 
+def hero_gates(objects, params):
+    """The gates of the one character among objects (deform.py), in the size the style pass will
+    ship it at; none for a prop or for several armatures."""
+    arms = [o for o in objects if o.type == "ARMATURE"]
+    if len(arms) != 1:
+        return []
+    meshes = [o for o in objects if o.type == "MESH"]
+    scale = stylepass.character_scale(arms, meshes, params.get("style")) or 1.0
+    budgets = {**params["budgets"], "materials": params["budgets"].get("materials", deform.MATERIALS_MAX)}
+    return deform.hero_gates(arms[0], meshes, budgets, scale)
+
+
 @entry
 def run_pass(params):
     names = list(params["objects"])
@@ -189,6 +201,7 @@ def run_pass(params):
     os.makedirs(out, exist_ok=True)
     # Before the style pass, which joins a character's meshes into one.
     gaps = contact.floating(objects)
+    gates = hero_gates(objects, params)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
     candidate = params.get("glb") or os.path.join(out, "candidate.glb")
@@ -203,6 +216,8 @@ def run_pass(params):
     )
     own = next(iter(creatures.values())) if len(creatures) == 1 and len(arms) == 1 else None
     measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig, own)
+    if gates:
+        measured["gates"] = gates
     if gaps is not None:
         k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
@@ -211,7 +226,8 @@ def run_pass(params):
         "kind": styled["kind"],
         "objects": names,
         "measured": measured,
-        "refusals": refusals_of(measured, info, params, set(creatures)),
+        "refusals": refusals_of(measured, info, params, set(creatures)) + [
+            {"code": f"hero-{g['name']}", "text": g["text"][:400]} for g in gates if not g["pass"]],
         "parts": parts,
         "usedPalette": styled["usedPalette"],
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},

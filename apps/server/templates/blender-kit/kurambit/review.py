@@ -7,8 +7,8 @@ One PNG shows exactly what the export would write: a turnaround (front, three-qu
 back); the same views in clay (every material light grey, with cavity), where paint no longer hides
 a part off-centre, floating or poking out; the same views as silhouettes; the model at game
 distance (gamePx tall, at 1x and 3x with nearest filtering) and, for a character, a close-up of its
-head (the top 45% of its height, three-quarter view); six side-view frames of each locomotion,
-jump and custom clip, with six front-view frames beside each locomotion's, where hip roll and arms
+head (the top 45% of its height, three-quarter view); six side-view frames of every clip (up to
+14, locomotion and jumps first), with six front-view frames beside each locomotion's, where hip roll and arms
 through the body show; the palette with the swatches the model uses marked; and the concept image
 on the left when there is one. A prop has no close-up: its turnaround already shows all of it at
 one scale, and no rule picks its most detailed region honestly.
@@ -49,8 +49,10 @@ MIN_COVER = 0.01
 GAME_VIEWS = {"perspective": (35, 22), "side": (90, 0), "top-down": (20, 55), "isometric": (45, 35.26)}
 STRIP_WORDS = ("walk", "jog", "run", "sprint", "jump")
 LOCOMOTION = ("walk", "jog", "run", "sprint")
-NOT_STRIPS = ("idle", "hit", "death", "die", "pose")
-MAX_STRIPS = 8
+# A hero's sheet strips every clip it ships (the idle and a hit too): a clip nobody looked at is
+# where deformation hides.
+NOT_STRIPS = ("pose",)
+MAX_STRIPS = 14
 ID_TYPES = ("objects", "meshes", "materials", "images", "actions", "armatures", "cameras", "lights",
             "worlds", "curves", "collections", "node_groups", "textures", "scenes")
 
@@ -383,7 +385,7 @@ def review(params):
 
         strips = []
         if arm is not None:
-            clips = _strip_clips([a for a in actions if a is not idle])
+            clips = _strip_clips(actions)
             sampled = []
             for act, _ in clips:
                 skeleton.assign_action(arm, act)
