@@ -910,22 +910,21 @@ const make = Effect.gen(function* () {
         );
         yield* writeOutcome(copyId, null);
         yield* markMove(g.root, copyId, "brought", landed.build).pipe(Effect.ignore);
+        const number = (yield* builds
+          .list(input.threadId, { home: true, limit: 10 })
+          .pipe(Effect.orElseSucceed(() => ({ builds: [] })))).builds.find(
+          (build) => build.id === landed.build,
+        )?.number;
+        const said =
+          number == null ? "Brought into the game." : `Brought into the game as Build ${number}.`;
         // The person's bring-in is a line in the copy's chat; an agent's is its own tool call.
         if (options.agent !== true) {
-          const number = (yield* builds
-            .list(input.threadId, { home: true, limit: 10 })
-            .pipe(Effect.orElseSucceed(() => ({ builds: [] })))).builds.find(
-            (build) => build.id === landed.build,
-          )?.number;
           yield* engine
             .dispatch({
               type: "game.notice",
               commandId: CommandId.make(`game-copy:in:${copyId}:${short(landed.build)}`),
               threadId: copyId,
-              notice:
-                number == null
-                  ? "Brought into the game."
-                  : `Brought into the game as Build ${number}.`,
+              notice: said,
               createdBy: "user",
               creationSource: "web",
             })
@@ -945,7 +944,7 @@ const make = Effect.gen(function* () {
         return {
           _tag: "landed",
           build: landed.build,
-          message: `${shell.title}'s work is in the game as a build. Undo takes it out again.`,
+          message: `${said} Undo takes it out again.`,
         } as const;
       }
     });

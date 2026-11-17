@@ -192,6 +192,59 @@ export function liveActivityToolStatus(status: string | undefined, presentTense:
   return "completed";
 }
 
+/** The game's moves between a copy and the game, as the agent makes them through game_builds. */
+const GAME_MOVES: Readonly<Record<string, string>> = {
+  bring_in: "Bringing in",
+  update: "Updating from the game",
+  undo: "Undoing a build",
+};
+
+/** A game_builds answer's object: structured, or the JSON text a provider passed on. */
+function gameAnswer(output: unknown): Record<string, unknown> | null {
+  const record = asRecord(output);
+  if (record !== null && typeof record.message === "string") return record;
+  if (record !== null && asRecord(record.structuredContent) !== null)
+    return asRecord(record.structuredContent);
+  const text = commandResultContent(output);
+  if (text === null) return null;
+  try {
+    return asRecord(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An agent's bring_in, update or undo reads as its result in the words the person's own buttons
+ * use ("Brought into the game as Build 15."), not as a tool's name.
+ */
+function gameMovePresentation(
+  entry: Pick<
+    WorkLogPresentationEntry,
+    "label" | "toolTitle" | "toolData" | "toolLifecycleStatus" | "structuredPayload"
+  >,
+  status: string | undefined,
+) {
+  const data = asRecord(entry.toolData);
+  const names = [workEntryToolName(entry), entry.toolTitle, entry.label];
+  if (!names.some((name) => typeof name === "string" && /game_builds\b/.test(name))) return null;
+  const input = asRecord(data?.arguments) ?? asRecord(data?.input) ?? asRecord(data?.rawInput);
+  const op = typeof input?.op === "string" ? input.op : null;
+  const running = op === null ? undefined : GAME_MOVES[op];
+  if (running === undefined) return null;
+  const shown = (displayName: string) => ({
+    displayName,
+    icon: "kurambit" as KurambitMcpToolDefinition["icon"],
+    action: undefined,
+  });
+  if (status === "inProgress") return shown(`${running}…`);
+  const answer = gameAnswer(workEntryToolOutput(entry));
+  const message = typeof answer?.message === "string" ? answer.message : null;
+  // The answer's first sentence; the rest is advice for the agent.
+  const first = message?.split(/(?<=\.)\s/)[0]?.replace(/\.$/, "") ?? null;
+  return first === null ? null : shown(first);
+}
+
 export function resolveWorkEntryToolPresentation(
   entry: Pick<
     WorkLogPresentationEntry,
@@ -199,6 +252,8 @@ export function resolveWorkEntryToolPresentation(
   >,
   fallbackStatus?: "inProgress" | "completed",
 ) {
+  const move = gameMovePresentation(entry, entry.toolLifecycleStatus ?? fallbackStatus);
+  if (move !== null) return move;
   const definition = resolveKurambitMcpToolDefinition(workEntryToolName(entry));
   const status = entry.toolLifecycleStatus ?? fallbackStatus;
   return resolveKurambitMcpToolPresentation(

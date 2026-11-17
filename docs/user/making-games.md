@@ -543,23 +543,29 @@ could not measure says **Not measured** and why, and never counts as a result: i
 ## Working in several chats at once
 
 A game can have many chats, and the game folder takes one chat's turn at a time. When you send a
-message while another chat works in the game, your turn waits in its chat, saying which chat it
-waits for, and starts by itself when that turn ends. **Run in a copy** on the waiting message runs
-it now instead, in a copy of the game's newest build.
+message while another chat works in the game, it waits above the composer ("Waits for _Rain_ to
+finish in the game") and starts by itself when that turn ends. **Run in a copy** beside it (its key
+is in the tooltip) starts it now instead, in a copy of the game's newest build. Once your game has
+had a copy, **+** beside the game in the sidebar and the command palette also offer **New chat in a
+copy**.
 
 A chat in a copy stays there: its later turns work in the copy, its Stage plays the copy, and
-nothing it does reaches the game until you **Bring it in**. Bring in merges the copy's work with
-everything the game gained meanwhile, checks that the result still boots and plays your saved
-plays the same, and lands it as one build that Undo takes out again. When the game and the copy
-changed the same lines, nothing lands: the copy holds both sides for its agent (or you) to settle,
-and for art, sound and models you keep the game's file or the copy's. A result that would stop
-booting or change how a saved play ends waits for **Bring in anyway**. **Update** brings the game's
-newer builds into the copy; **Throw away** removes the copy and keeps its work, so Bring in still
-takes it. Keep going runs only in the game.
+nothing it does reaches the game until you **Bring in** (above the Stage, or the copy's menu at the
+left of the composer). Bring in merges the copy's work with everything the game gained meanwhile,
+checks that the result still boots and plays your test plays the same (**Bring in now** skips the
+wait), and lands it as one build that Undo takes out again; the chat then works in the game. When
+the game and the copy changed the same lines, nothing lands: a card above the composer lists the
+files, **Ask the agent to resolve** sends it a message, and for art, sound and models you keep the
+game's file or the copy's. A result that would stop booting or end a test play differently waits
+for **Bring in anyway**. **Update** brings the game's newer builds into the copy; **Throw away**
+removes the copy and keeps its builds in History. History lists every copy under **Not in the game
+yet**, and Undo on any build there takes out just that build's change, keeping later ones. Keep
+going runs only in the game.
 
 Your agent can do the same: it brings in its own copy or one it delegated work to, and updates
-its copy. A chat's decisions are the game's, wherever the chat works, and every build that lands
-is also a commit on the game's `kurambit/history` branch, for `git log`.
+its copy; the chat shows each as a line with its result. A chat's decisions are the game's,
+wherever the chat works, and every build that lands is also a commit on the game's
+`kurambit/history` branch, for `git log`.
 
 ## Keep a video or image
 

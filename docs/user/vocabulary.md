@@ -7,7 +7,7 @@ guides.
 - **Stage**: where the game plays, at the top of its column, with its control bar under it.
 - **Chat**: your conversation with the agent about a game; a game can have several chats.
 - **Build** (Build 4): the game as one turn left it; every change you or your agent make is a build.
-- **Undo**: puts back the build before the latest one; **Redo** brings it back again, and **Go back** does it for any older build.
+- **Undo**: takes a build's change out of the game, later builds kept; **Redo** brings it back, and **Go back** returns the whole game to an older build.
 - **History**: the game's builds in time order, opened from the build's name above the Stage.
 - **Checks**: what Kurambit measured by playing a build, such as "Starts without errors".
 - **Test play**: a run you saved so every build replays it.
@@ -20,7 +20,11 @@ guides.
 - **Responsive view**: the Stage as a phone, tablet or wide screen, at any size you type.
 - **Try N ways**: one message tried two, three or four ways at once; each result is a version.
 - **Version**: one of a Try N ways message's results, which **Keep** makes the game.
-- **Copy**: a separate copy of the game's folder, where a version or another chat works without touching yours.
+- **Copy**: a separate copy of the game, where a version or a chat works without touching the game until you bring it in.
+- **In the game**: work the game itself holds; a chat works in the game unless it works in a copy.
+- **Not in the game yet**: a copy's builds the game does not hold, listed at the top of History.
+- **Bring in**: puts a copy's work into the game as one build, after checking it still plays; Undo takes it out.
+- **Update**: brings the game's newer builds into a copy.
 - **Keep going**: your agent takes the next step itself, turn after turn, until it runs out of steps or budget.
 - **Library**: every model, texture, sound, font and look across your games, with the asset packs.
 - **Pack**: a set of free assets from the asset library, listed in the Library.
