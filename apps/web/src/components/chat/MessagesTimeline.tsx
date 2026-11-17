@@ -431,6 +431,16 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH = {
   ...TIMELINE_MAINTAIN_SCROLL_AT_END,
   animated: true,
 } as const satisfies MaintainScrollAtEndOptions;
+// A game's composer: a tray row it gains (a waiting message, a copy's conflicts) pushes the chat's
+// end up instead of covering it.
+const followFooter = <T extends MaintainScrollAtEndOptions>(options: T) => ({
+  ...options,
+  on: { ...options.on, footerLayout: true },
+});
+const TIMELINE_MAINTAIN_SCROLL_AT_END_WITH_FOOTER = followFooter(TIMELINE_MAINTAIN_SCROLL_AT_END);
+const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH_WITH_FOOTER = followFooter(
+  TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH,
+);
 
 export interface MessagesTimelineHistoryControls {
   readonly hasMoreHistory: boolean;
@@ -507,6 +517,8 @@ interface MessagesTimelineProps {
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
   contentInsetEndAdjustment: number;
+  /** At the end, the chat follows its composer growing (a game's tray rows). */
+  followComposerHeight?: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /**
    * Off while the user is reading history; LegendList's own maintainScrollAtEnd
@@ -604,6 +616,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onAnchorReady,
   onAnchorSizeChanged,
   contentInsetEndAdjustment,
+  followComposerHeight = false,
   onIsAtEndChange,
   onContentOverflowChange,
   liveFollowEnabled,
@@ -1483,8 +1496,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
               disclosureToggleSettling
                 ? false
                 : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                  ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                  : TIMELINE_MAINTAIN_SCROLL_AT_END
+                  ? followComposerHeight
+                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH_WITH_FOOTER
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                  : followComposerHeight
+                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_WITH_FOOTER
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END
             }
             maintainVisibleContentPosition={
               findActive ||
