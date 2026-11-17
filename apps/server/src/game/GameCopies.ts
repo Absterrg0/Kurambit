@@ -735,7 +735,7 @@ const make = Effect.gen(function* () {
         ...broke,
         ...changed.map(
           (each) =>
-            `the saved play "${each.name}" now ends "${each.now?.text ?? "differently"}" (it ended "${each.saved.text}")`,
+            `the test play "${each.name}" now ends "${each.now?.text ?? "differently"}" (it ended "${each.saved.text}")`,
         ),
       ];
       return reasons.length === 0 ? null : reasons.join("; ");

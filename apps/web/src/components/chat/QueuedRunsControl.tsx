@@ -10,6 +10,7 @@ import type {
 } from "@kurambit/contracts";
 import {
   Clock3Icon,
+  CopyIcon,
   CornerUpRightIcon,
   GripVerticalIcon,
   ListOrderedIcon,
@@ -25,7 +26,7 @@ import { isImageAttachment, type ChatMessage } from "../../types";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import { Button } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface EditQueuedRunRequest {
   readonly runId: RunId;
@@ -45,6 +46,26 @@ const QUEUED_RUN_DRAG_TYPE = "application/x-kurambit-queued-run";
 export interface QueuedRunsControlHandle {
   steerNext: (repeat: boolean) => boolean;
   editLatest: (repeat: boolean) => boolean;
+  /** A message waiting for the game folder runs in a copy instead; false when none waits. */
+  runInCopy: (repeat: boolean) => boolean;
+}
+
+/** "Waits for Rain to finish in the game", with the chat's name in the foreground. */
+function HeldReason({ reason }: { reason: string }) {
+  const named = /^Waits for (.+) to finish in the game$/.exec(reason);
+  return (
+    <span className="shrink-0 text-muted-foreground" data-queue-held-reason="">
+      {named === null ? (
+        reason
+      ) : (
+        <>
+          {"Waits for "}
+          <span className="text-foreground">{named[1]}</span>
+          {" to finish in the game"}
+        </>
+      )}
+    </span>
+  );
 }
 
 type ThreadQueueProjection = Parameters<typeof deriveThreadQueueWorkflowState>[0];
@@ -78,6 +99,9 @@ export function QueuedRunsControl({
   /** One queued message is one row, its "Queued" said in the row: a game keeps the room above
    * its composer to one row. */
   readonly oneRow?: boolean;
+  /** A game's: the chat moves into a copy and its message waiting for the game folder starts. */
+  readonly onRunInCopy?: () => Promise<unknown>;
+  readonly runInCopyShortcutLabel?: string | null;
 }) {
   const projection = useThreadProjection(
     scopeThreadRef(props.environmentId, props.threadId),
@@ -122,6 +146,7 @@ export function QueuedRunsControl({
     ...queued.map(({ run, text, attachments }, serverIndex) => ({
       key: run.id,
       runId: run.id,
+      heldReason: run.queueHeld === true ? (run.queueHeldReason ?? null) : null,
       messageId: run.userMessageId,
       serverIndex,
       text,
@@ -138,6 +163,7 @@ export function QueuedRunsControl({
     ...optimisticQueued.map((message) => ({
       key: message.id,
       runId: null,
+      heldReason: null as string | null,
       messageId: null,
       serverIndex: null,
       text: message.text,
@@ -184,7 +210,21 @@ export function QueuedRunsControl({
     setBusyRunId(null);
   };
 
+  const waitsForGame = items.some((item) => item.heldReason !== null);
+  const [movingToCopy, setMovingToCopy] = useState(false);
+  const runInCopy = async () => {
+    if (props.onRunInCopy === undefined || movingToCopy) return;
+    setMovingToCopy(true);
+    await props.onRunInCopy();
+    setMovingToCopy(false);
+  };
+
   useImperativeHandle(ref, () => ({
+    runInCopy(repeat) {
+      if (!waitsForGame || props.onRunInCopy === undefined) return false;
+      if (!repeat) void runInCopy();
+      return true;
+    },
     steerNext(repeat) {
       const next = queued[0];
       if (!next || !workflow?.canPromoteToSteer) return false;
@@ -346,7 +386,11 @@ export function QueuedRunsControl({
                     ) : null}
                   </ComposerBanner.Icon>
                   <ComposerBanner.Content className="text-foreground/80">
-                    {single ? <span className="shrink-0 text-muted-foreground">Queued</span> : null}
+                    {item.heldReason !== null ? (
+                      <HeldReason reason={item.heldReason} />
+                    ) : single ? (
+                      <span className="shrink-0 text-muted-foreground">Queued</span>
+                    ) : null}
                     {isEditing ? <span className="sr-only">Editing queued message: </span> : null}
                     {item.pending ? (
                       <Clock3Icon
@@ -425,38 +469,63 @@ export function QueuedRunsControl({
                             {`Edit in the composer${item.serverIndex === queued.length - 1 && props.editShortcutLabel ? ` (${props.editShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger render={<span className="flex shrink-0" />}>
-                            <Button
-                              size="xs"
-                              variant="ghost-muted"
-                              disabled={
-                                item.runId === null ||
-                                busyRunId !== null ||
-                                !workflow?.canPromoteToSteer
+                        {item.heldReason !== null && props.onRunInCopy !== undefined ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  size="xs"
+                                  variant="ghost-muted"
+                                  data-run-in-copy=""
+                                  disabled={busyRunId !== null || movingToCopy}
+                                  onClick={() => void runInCopy()}
+                                />
                               }
-                              onClick={() => {
-                                if (item.runId !== null) {
-                                  void steer(item.runId);
-                                }
-                              }}
                             >
-                              <CornerUpRightIcon />
-                              {/* A game says what it does in the game's words: the message
+                              <CopyIcon />
+                              Run in a copy
+                            </TooltipTrigger>
+                            <TooltipPopup>
+                              <TooltipLabel shortcut={props.runInCopyShortcutLabel ?? null}>
+                                Start it now in a copy of the game; bring the copy in when it is
+                                done
+                              </TooltipLabel>
+                            </TooltipPopup>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip>
+                            <TooltipTrigger render={<span className="flex shrink-0" />}>
+                              <Button
+                                size="xs"
+                                variant="ghost-muted"
+                                disabled={
+                                  item.runId === null ||
+                                  busyRunId !== null ||
+                                  !workflow?.canPromoteToSteer
+                                }
+                                onClick={() => {
+                                  if (item.runId !== null) {
+                                    void steer(item.runId);
+                                  }
+                                }}
+                              >
+                                <CornerUpRightIcon />
+                                {/* A game says what it does in the game's words: the message
                                   joins the turn that is running instead of waiting for it. */}
-                              {props.oneRow === true ? "Add to this turn" : "Steer"}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipPopup>
-                            {activeRun === null
-                              ? props.oneRow === true
-                                ? "No turn is running to add it to"
-                                : "There is no active run to steer"
-                              : props.oneRow === true
-                                ? "Give it to the agent now, in the turn it is working on"
-                                : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
-                          </TooltipPopup>
-                        </Tooltip>
+                                {props.oneRow === true ? "Add to this turn" : "Steer"}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipPopup>
+                              {activeRun === null
+                                ? props.oneRow === true
+                                  ? "No turn is running to add it to"
+                                  : "There is no active run to steer"
+                                : props.oneRow === true
+                                  ? "Give it to the agent now, in the turn it is working on"
+                                  : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                            </TooltipPopup>
+                          </Tooltip>
+                        )}
                         <Tooltip>
                           <TooltipTrigger
                             render={

@@ -137,6 +137,47 @@ const projectTurnRunningAtom = Atom.family((key: string) => {
   ).pipe(Atom.withLabel(`game:project-turn-running:${key}`));
 });
 const NO_TURN_RUNNING = Atom.make(false);
+
+/**
+ * Where a game's chats work and whether each is at work, as one string: changes when a chat
+ * starts or ends a turn, or moves into a copy or out of one. Its copies list rereads on it, since
+ * a copy's turns push to the copy's folder, never to the game's.
+ */
+const projectChatsSignalAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  return Atom.make((get) => {
+    const env = EnvironmentId.make(environmentId);
+    const threads = get(environmentThreadShells.environmentThreadsAtom(env));
+    const projectId = threads.find((thread) => thread.id === threadId)?.projectId;
+    return threads
+      .filter((thread) => thread.projectId === projectId && thread.archivedAt === null)
+      .map(
+        (thread) =>
+          `${thread.id}:${thread.worktreePath ?? ""}:${thread.activeRunId ?? ""}:${thread.latestRunCompletedAt ?? ""}`,
+      )
+      .join("|");
+  }).pipe(Atom.withLabel(`game:project-chats-signal:${key}`));
+});
+
+/** Whether any chat of this chat's game works in a copy: until one does, no copy UI shows. */
+const projectHasCopiesAtom = Atom.family((key: string) => {
+  const [environmentId = "", threadId = ""] = key.split("\0");
+  return Atom.make((get) => {
+    const threads = get(
+      environmentThreadShells.environmentThreadsAtom(EnvironmentId.make(environmentId)),
+    );
+    const projectId = threads.find((thread) => thread.id === threadId)?.projectId;
+    return threads.some(
+      (thread) =>
+        thread.projectId === projectId &&
+        thread.archivedAt === null &&
+        thread.worktreePath !== null,
+    );
+  }).pipe(Atom.withLabel(`game:project-has-copies:${key}`));
+});
+const NO_COPIES = Atom.make(false);
+export const projectHasCopies = (ref: ScopedThreadRef | null) =>
+  ref === null ? NO_COPIES : projectHasCopiesAtom(`${ref.environmentId}\0${ref.threadId}`);
 export const projectTurnRunning = (ref: ScopedProjectRef | null) =>
   ref === null ? NO_TURN_RUNNING : projectTurnRunningAtom(`${ref.environmentId}\0${ref.projectId}`);
 
@@ -557,6 +598,39 @@ export const gameEnvironment = {
   keepVersion: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:keepVersion",
     tag: WS_METHODS.gameKeepVersion,
+  }),
+  // The game's copies and the asking chat's place: reread on the game's builds pushes (a landing,
+  // a bring-in's check, an outcome) and when any of its chats starts, ends or moves.
+  copies: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:copies",
+    tag: WS_METHODS.gameCopies,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: (target) =>
+      Atom.make(
+        (get) =>
+          `${get(threadSignal("builds")(target))}\0${get(projectChatsSignalAtom(`${target.environmentId}\0${target.input.threadId}`))}`,
+      ),
+  }),
+  bringIn: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:bringIn",
+    tag: WS_METHODS.gameBringIn,
+  }),
+  copyUpdate: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:copyUpdate",
+    tag: WS_METHODS.gameCopyUpdate,
+  }),
+  copyThrowAway: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:copyThrowAway",
+    tag: WS_METHODS.gameCopyThrowAway,
+  }),
+  runInCopy: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:runInCopy",
+    tag: WS_METHODS.gameRunInCopy,
+  }),
+  buildUndo: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:buildUndo",
+    tag: WS_METHODS.gameBuildUndo,
   }),
   buildStop: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:buildStop",

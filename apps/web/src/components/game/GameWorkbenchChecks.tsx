@@ -1024,9 +1024,33 @@ const READING_WORDS: Record<GameSavedPlayReading, string> = {
  * Each saved play as this build replayed it, under the check that counts them: its name, whether
  * it ended the same, and where it first played differently. Clicking one replays it on the Stage.
  */
+/**
+ * Replays a test play on this chat's Stage from its start, at the shape it was played at, to its
+ * end, where the Stage holds it. Answers what happened in a line, or null when nothing needs saying.
+ */
+export function useReplayTestPlay(threadRef: ScopedThreadRef) {
+  const loadPlay = useAtomCommand(gameEnvironment.savedPlay, { reportFailure: false });
+  return async (name: string): Promise<string | null> => {
+    const result = await loadPlay({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, name },
+    });
+    if (result._tag === "Failure") return String(squashAtomCommandFailure(result));
+    // Mouse aim depends on the shape: the responsive view, when the Stage's frame has another one.
+    await showStageAt(scopedThreadKey(threadRef), result.value.viewport);
+    const replayed = await replayStageRun({
+      play: result.value,
+      step: result.value.steps,
+      pace: 0,
+    });
+    if (replayed === null) return "The game on the Stage could not replay it.";
+    return replayed.ended == null ? null : `On the Stage it ${playOutcomeWords(replayed.ended)}.`;
+  };
+}
+
 function SavedPlays({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: GameBuildFacts }) {
   const reading = facts.savedPlays;
-  const loadPlay = useAtomCommand(gameEnvironment.savedPlay, { reportFailure: false });
+  const replayPlay = useReplayTestPlay(threadRef);
   const deletePlay = useAtomCommand(gameEnvironment.deletePlay, { reportFailure: false });
   const canRead = useAtomValue(gameEnvironment.savedPlay.permissionAtom(threadRef.environmentId));
   const canDelete = useAtomValue(
@@ -1044,28 +1068,9 @@ function SavedPlays({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: G
   const replay = async (name: string) => {
     setBusy(name);
     setNote(null);
-    const result = await loadPlay({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, name },
-    });
-    if (result._tag === "Failure") {
-      setBusy(null);
-      setNote(String(squashAtomCommandFailure(result)));
-      return;
-    }
-    // At the shape it was played at, as mouse aim depends on it: the responsive view, when the
-    // Stage's frame has another shape.
-    await showStageAt(scopedThreadKey(threadRef), result.value.viewport);
-    // From its start at its own pace, to its end, where the Stage holds it.
-    const replayed = await replayStageRun({
-      play: result.value,
-      step: result.value.steps,
-      pace: 0,
-    });
+    const said = await replayPlay(name);
     setBusy(null);
-    if (replayed === null) setNote("The game on the Stage could not replay it.");
-    else if (replayed.ended != null)
-      setNote(`On the Stage it ${playOutcomeWords(replayed.ended)}.`);
+    setNote(said);
   };
   const remove = async (name: string) => {
     const result = await deletePlay({

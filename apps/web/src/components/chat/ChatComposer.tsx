@@ -266,6 +266,7 @@ import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { GameCopyChip } from "../game/GameCopyChip";
 import { GameRunPicker } from "../game/GameRunPicker";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
@@ -7156,6 +7157,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // A game's footer, flat under the text box: how the message runs on the left; the model,
         // its thinking and the context meter on the right. Labels fold to icons before anything wraps.
         <ComposerSurface.Footer data-chat-composer-footer="true">
+          <GameCopyChip threadRef={routeKind === "server" ? routeThreadRef : null} />
           <GameRunPicker
             threadRef={routeKind === "server" ? routeThreadRef : null}
             disabled={!canOperateThread}

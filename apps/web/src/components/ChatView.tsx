@@ -1,3 +1,5 @@
+import { GameCopyCard } from "./game/GameCopyCard";
+import { useCopyActions } from "./game/useGameCopies";
 import { GameStage } from "./game/GameStage";
 import { GameWorkbench } from "./game/GameWorkbench";
 import {
@@ -3222,6 +3224,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   const sendAppMessageStable = useStableCallback(sendAppMessage);
   const queuedRunsControlRef = useRef<QueuedRunsControlHandle>(null);
+  const copyActions = useCopyActions(isGameThread ? activeThreadRef : null);
   const addTerminalContextToDraft = (selection: TerminalContextSelection) => {
     composerRef.current?.addTerminalContext(selection);
   };
@@ -5415,6 +5418,8 @@ export default function ChatView(props: ChatViewProps) {
         if (!isGameThread) return false;
         if (!event.repeat) cycleTryWaysStable();
       },
+      "game.runInCopy": ({ event }) =>
+        isGameThread && queuedRunsControlRef.current?.runInCopy(event.repeat) === true,
       "game.keepGoing.stop": ({ event }) => {
         if (keepGoingBanner.stop === null) return false;
         if (!event.repeat) keepGoingBanner.stop();
@@ -7505,8 +7510,37 @@ export default function ChatView(props: ChatViewProps) {
         onEditQueuedRun={queuedRunEdit.beginEdit}
         onCancelEdit={queuedRunEdit.cancelEdit}
         oneRow={isGameThread}
+        {...(isGameThread && activeThreadRef !== null
+          ? {
+              onRunInCopy: () => copyActions.runInCopy(activeThreadRef),
+              runInCopyShortcutLabel: shortcutLabelForCommand(keybindings, "game.runInCopy", {
+                context: { terminalFocus: false },
+              }),
+            }
+          : {})}
       />
     ) : null;
+  // A copy's chat whose work did not come in: its conflicts or its hold, over the queue.
+  const openCopyDiff = () => {
+    if (!activeThreadRef) return;
+    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "unstaged");
+    useRightPanelStore.getState().open(activeThreadRef, "diff");
+    onDiffPanelOpen?.();
+  };
+  const openCopyDiffStable = useStableCallback(openCopyDiff);
+  const trayAbove =
+    isServerThread && isGameThread && activeThreadRef !== null ? (
+      <>
+        <GameCopyCard
+          threadRef={activeThreadRef}
+          onSend={sendAppMessageStable}
+          onOpenDiff={openCopyDiffStable}
+        />
+        {queuedRunsControl}
+      </>
+    ) : (
+      queuedRunsControl
+    );
   // One-shot: the resend "Work locally" queued fires once, then the marker clears.
   const resendAfterWorkLocally = () => {
     setWorkLocallyResendDraftId(null);
@@ -7882,7 +7916,7 @@ export default function ChatView(props: ChatViewProps) {
                                   : projectCloneSendBlockReason
                     }
                     isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
-                    queuedRunsControl={queuedRunsControl}
+                    queuedRunsControl={trayAbove}
                     bannerItems={composerBannerItems}
                     resumeCompactionTokens={resumeCompactionTokens}
                     keepFullHistory={keepFullHistory}

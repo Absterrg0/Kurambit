@@ -84,6 +84,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "game.playPrevious",
   "game.playNext",
   "game.keepGoing.stop",
+  "game.runInCopy",
   "rightPanel.toggleMaximized",
   "rightPanel.close",
   "view.reopenClosed",

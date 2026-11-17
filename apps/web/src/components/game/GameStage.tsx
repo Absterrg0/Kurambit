@@ -87,6 +87,7 @@ import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/toolt
 import { GameBuildCompare } from "./GameBuildCompare";
 import { GameBuildStill } from "./GameBuildStill";
 import { ArrivalDot } from "./ArrivalDot";
+import { GameCopyActions, GameCopyLabel } from "./GameCopyHeader";
 import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHistory";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -1484,7 +1485,9 @@ function ThreadGameStage({
               </PopoverPopup>
             </Popover>
           </span>
+          <GameCopyLabel threadRef={threadRef} />
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
+          <GameCopyActions threadRef={threadRef} />
           {collapsed ? (
             <Button size="sm" variant="ghost" onClick={() => setGameHidden(false)}>
               <PanelTopOpenIcon aria-hidden="true" />
