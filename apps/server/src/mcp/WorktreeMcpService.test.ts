@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import {
   OrchestratorDispatchError,
@@ -299,6 +300,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
         ServerSettings.layerTest({
           newWorktreesStartFromOrigin: options.newWorktreesStartFromOrigin ?? false,
         }),
+        // Projects here seat worktrees on HEAD: nothing captures a checkout.
+        Layer.mock(CheckpointStore.CheckpointStore)({}),
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           listRefs,
           listLocalBranchNames,

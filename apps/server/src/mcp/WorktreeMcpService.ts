@@ -16,6 +16,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+import { resolveProjectSettings } from "@kurambit/shared/projectSettings";
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import { seedWorktree } from "../checkpointing/worktreeSeed.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -60,6 +63,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+  const checkpoints = yield* CheckpointStore.CheckpointStore;
   const setupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
 
@@ -207,9 +211,21 @@ const make = Effect.gen(function* () {
       baseRef = localStatus.refName;
     }
 
-    const startFromOrigin = input.startFromOrigin ?? (yield* readDefaultStartFromOrigin);
+    // A project seated on the working tree hands off what the checkout holds now, uncommitted
+    // work included (a game's whole work is).
+    const seed =
+      resolveProjectSettings(
+        yield* serverSettings.getSettings.pipe(asOperationFailed("Unable to read server settings")),
+        projection.thread.projectId,
+      ).settings.worktreeSeed === "working-tree"
+        ? yield* seedWorktree(checkpoints, projectCwd, scope.thread.threadId).pipe(
+            asOperationFailed("Unable to capture the checkout for the worktree"),
+          )
+        : null;
+    const startFromOrigin =
+      seed === null && (input.startFromOrigin ?? (yield* readDefaultStartFromOrigin));
 
-    let worktreeBaseRef = baseRef;
+    let worktreeBaseRef = seed ?? baseRef;
     if (startFromOrigin) {
       yield* gitWorkflow
         .fetchRemote({ cwd: projectCwd, remoteName: "origin" })
@@ -458,6 +474,7 @@ export const layer: Layer.Layer<
   | ThreadManagementService.ThreadManagementService
   | ProjectService.ProjectService
   | ServerSettings.ServerSettingsService
+  | CheckpointStore.CheckpointStore
   | GitWorkflowService.GitWorkflowService
   | ProjectSetupScriptRunner.ProjectSetupScriptRunner
   | VcsStatusBroadcaster.VcsStatusBroadcaster

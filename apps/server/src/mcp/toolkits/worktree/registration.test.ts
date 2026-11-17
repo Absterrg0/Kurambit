@@ -24,6 +24,7 @@ import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/http";
 
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
 import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
 import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -108,6 +109,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.empty,
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
+  Layer.mock(CheckpointStore.CheckpointStore)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
   Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
   Layer.mock(GitVcsDriver.GitVcsDriver)({}),

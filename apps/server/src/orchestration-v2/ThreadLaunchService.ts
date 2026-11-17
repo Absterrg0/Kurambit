@@ -36,6 +36,8 @@ import {
   WORKTREE_BRANCH_PREFIX,
 } from "@kurambit/shared/git";
 
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
+import { seedWorktree } from "../checkpointing/worktreeSeed.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
@@ -207,6 +209,7 @@ const make = Effect.gen(function* () {
   const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const checkpoints = yield* CheckpointStore.CheckpointStore;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
@@ -385,8 +388,25 @@ const make = Effect.gen(function* () {
             })
             .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
         }
-        let startRef = input.workspaceStrategy.baseRef;
+        // A project seated on the working tree starts from what its source checkout holds now:
+        // the parent's folder for a delegated child, else the project's.
+        const seed =
+          resolveProjectSettings(yield* serverSettings.getSettings, input.projectId).settings
+            .worktreeSeed === "working-tree"
+            ? yield* Effect.gen(function* () {
+                const shell = yield* threads.getThreadShell(threadId);
+                const parentId = shell?.lineage.parentThreadId ?? null;
+                const parent = parentId === null ? null : yield* threads.getThreadShell(parentId);
+                return yield* seedWorktree(
+                  checkpoints,
+                  parent?.worktreePath ?? project.workspaceRoot,
+                  threadId,
+                );
+              }).pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)))
+            : null;
+        let startRef = seed ?? input.workspaceStrategy.baseRef;
         const startFromOrigin =
+          seed === null &&
           input.workspaceStrategy.startFromOrigin === true &&
           (yield* git
             .remoteExists({ cwd: project.workspaceRoot, remoteName: "origin" })

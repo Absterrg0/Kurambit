@@ -37,6 +37,7 @@ import * as Stream from "effect/Stream";
 
 import * as TestClock from "effect/testing/TestClock";
 
+import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -151,6 +152,8 @@ function makeHarness(options: HarnessOptions = {}) {
   );
   const layerExternalServices = Layer.mergeAll(
     WorktreeSetupTracker.layer,
+    // Projects here seat worktrees on HEAD: nothing captures a checkout.
+    Layer.mock(CheckpointStore.CheckpointStore)({}),
     Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
     Layer.mock(TerminalManager.TerminalManager)({ close: closeTerminal }),
     Layer.succeed(ProjectService.ProjectService, {

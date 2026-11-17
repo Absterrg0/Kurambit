@@ -886,8 +886,16 @@ export const WorktreeCleanup = Schema.NullOr(
 );
 export type WorktreeCleanup = typeof WorktreeCleanup.Type;
 
+/**
+ * What a new worktree's files are: the source checkout's `HEAD` commit, or its working tree as
+ * it is now (captured as a checkpoint), uncommitted work included.
+ */
+export const WorktreeSeed = Schema.Literals(["head", "working-tree"]);
+export type WorktreeSeed = typeof WorktreeSeed.Type;
+
 export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "worktreeCleanup",
+  "worktreeSeed",
   "defaultModelSelection",
   "defaultRuntimeMode",
   "defaultThreadEnvMode",
@@ -931,6 +939,7 @@ export type ProjectProviderInstanceOverride = typeof ProjectProviderInstanceOver
  */
 export const ProjectSettingsOverrides = Schema.Struct({
   worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
+  worktreeSeed: Schema.optionalKey(WorktreeSeed),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
@@ -1195,6 +1204,7 @@ export const ServerSettings = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  worktreeSeed: WorktreeSeed.pipe(Schema.withDecodingDefault(Effect.succeed("head" as const))),
   /**
    * Null defers to the repository's kurambit.json, then to recursive. A value
    * picked on a newer server decodes as null here rather than failing the
@@ -1489,6 +1499,7 @@ export const ServerSettingsPatch = Schema.Struct({
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+  worktreeSeed: Schema.optionalKey(WorktreeSeed),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
