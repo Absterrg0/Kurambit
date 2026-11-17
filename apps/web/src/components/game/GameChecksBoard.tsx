@@ -471,7 +471,7 @@ const KEY_WORDS: Readonly<Record<string, string>> = {
   AltRight: "Alt",
   Backspace: "⌫",
 };
-export const keyWord = (code: string) =>
+const keyWord = (code: string) =>
   KEY_WORDS[code] ??
   code
     .replace(/^Key/, "")
@@ -491,7 +491,7 @@ const MOVES = ["move_up", "move_left", "move_down", "move_right"] as const;
  * each did. A play measured by a shell older than its keys names none; the game on the Stage
  * does, by the same action names. A control with no key known has no cap, never a blank one.
  */
-export const controlRows = (
+const controlRows = (
   controls: ReadonlyArray<GameQaControl>,
   live: ReadonlyArray<GameStageControl> | null,
 ): ReadonlyArray<ControlRow> => {
