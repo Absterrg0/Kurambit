@@ -37,7 +37,9 @@ from .character import MADE_BODY
 
 SPRINGS = ("tail", "ear", "antenna", "whisker", "tendril")
 SKIN_ROUND = 0.7
-MAX_CROUCH = 0.25
+# A round, short-legged body crouched a quarter of its leg drags its belly (the cat re-run's
+# reviewer): past this the stride shortens instead.
+MAX_CROUCH = 0.12
 
 
 def _chains(chains, mirror=True):
