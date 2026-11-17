@@ -42,7 +42,7 @@ import * as Schema from "effect/Schema";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
-import { worktreeSeedOf, worktreeSeedRef } from "../checkpointing/worktreeSeed.ts";
+import { threadRefKey, worktreeSeedOf, worktreeSeedRef } from "../checkpointing/worktreeSeed.ts";
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import { regressions } from "../orchestration-v2/gameRun/decide.ts";
@@ -67,7 +67,7 @@ const CHECK_WAIT = "10 minutes";
 const isGameBuildId = Schema.is(GameBuildId);
 const short = (text: string) =>
   NodeCrypto.createHash("sha256").update(text).digest("hex").slice(0, 12);
-const copyKey = (threadId: ThreadId) => Buffer.from(threadId, "utf8").toString("base64url");
+const copyKey = threadRefKey;
 /** The copy's work as Bring in last read it: what a thrown-away copy still brings in. */
 const workRef = (threadId: ThreadId) =>
   checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/work`);

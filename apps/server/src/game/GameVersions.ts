@@ -193,7 +193,10 @@ const make = Effect.gen(function* () {
         )
         .pipe(
           Effect.catchCause((cause) =>
-            Effect.logWarning("A try's versions could not be set up.", { root, cause }).pipe(
+            Effect.logWarning("A try's versions could not be set up.", {
+              root,
+              cause: Cause.pretty(cause),
+            }).pipe(
               Effect.andThen(
                 refuse("The game folder could not be copied for the versions; nothing was tried."),
               ),

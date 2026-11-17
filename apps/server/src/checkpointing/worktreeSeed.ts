@@ -1,16 +1,21 @@
-// @effect-diagnostics nodeBuiltinImport:off -- A thread id goes into a ref name as base64url.
+// @effect-diagnostics nodeBuiltinImport:off -- A thread id goes into a ref name as a hash.
 // A worktree seated on its source's working tree (the `worktreeSeed` project setting) starts
 // from a capture of that checkout, uncommitted work included, never only from `HEAD`. The capture
 // is kept as the thread's seed ref: what its files were seated on, which a game's copy merges
 // back against (and which only that copy's Update moves).
+import * as NodeCrypto from "node:crypto";
 import { CheckpointRef, type ThreadId } from "@kurambit/contracts";
 import * as Effect from "effect/Effect";
 import type * as CheckpointStore from "./CheckpointStore.ts";
 
 const SEEDS = "refs/kurambit/worktree-seeds/";
 
+/** A thread's key in a ref name: a hash, since a derived thread id can pass git's 255 bytes. */
+export const threadRefKey = (threadId: ThreadId) =>
+  NodeCrypto.createHash("sha256").update(threadId).digest("hex").slice(0, 32);
+
 export const worktreeSeedRef = (threadId: ThreadId) =>
-  CheckpointRef.make(`${SEEDS}${Buffer.from(threadId, "utf8").toString("base64url")}`);
+  CheckpointRef.make(`${SEEDS}${threadRefKey(threadId)}`);
 
 /** Captures `source` as `threadId`'s seed and answers the commit its worktree is created at. */
 export const seedWorktree = (

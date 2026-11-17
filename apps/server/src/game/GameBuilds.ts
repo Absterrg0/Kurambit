@@ -52,6 +52,7 @@ import {
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
+import { threadRefKey } from "../checkpointing/worktreeSeed.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
 import {
@@ -144,10 +145,10 @@ const measurable = (engine: GameEngineName) => engineCapabilities(engine).has("p
 const isGameBuildId = Schema.is(GameBuildId);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
-/** `copies/<chat>/in|out` under the game-builds refs: when a chat moved into its copy and back. */
-const COPY_MOVE = /^copies\/([A-Za-z0-9_-]+)\/(in|out)$/;
-/** Per chat, when it moved into a copy and back (unix seconds). */
-type CopyMoves = Map<ThreadId, { readonly in?: number; readonly out?: number }>;
+/** `copies/<chat key>/in|out` under the game-builds refs: when a chat moved into its copy and back. */
+const COPY_MOVE = /^copies\/([0-9a-f]+)\/(in|out)$/;
+/** Per chat key (threadRefKey), when it moved into a copy and back (unix seconds). */
+type CopyMoves = Map<string, { readonly in?: number; readonly out?: number }>;
 /**
  * Whether a turn's build was made in the folder `g` is: a thread's checkpoints all carry its
  * current folder, so a chat that moved into a copy or back is told apart by when it moved.
@@ -161,7 +162,7 @@ const madeHere = (
     readonly checkpoint: { readonly capturedAt: DateTime.Utc };
   },
 ) => {
-  const move = moves.get(row.threadId);
+  const move = moves.size === 0 ? undefined : moves.get(threadRefKey(row.threadId));
   if (move?.in === undefined) return row.cwd === g.root;
   const at = DateTime.toEpochMillis(row.checkpoint.capturedAt) / 1000;
   const inCopy = at >= move.in && (move.out === undefined || move.out < move.in || at < move.out);
@@ -1028,8 +1029,7 @@ const make = Effect.gen(function* () {
       for (const ref of refs) {
         const move = COPY_MOVE.exec(ref.checkpointRef.slice(noRunFolder.length));
         if (move === null) continue;
-        const thread = ThreadId.make(Buffer.from(move[1]!, "base64url").toString("utf8"));
-        moves.set(thread, { ...moves.get(thread), [move[2]!]: ref.committedAt });
+        moves.set(move[1]!, { ...moves.get(move[1]!), [move[2]!]: ref.committedAt });
       }
       const recorded = new Map(
         refs.flatMap((ref) =>
