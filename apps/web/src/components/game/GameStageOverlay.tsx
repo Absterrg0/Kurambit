@@ -25,7 +25,9 @@ export function GameStageOverlay({ threadKey }: { threadKey: string }) {
   if (!frozen) return null;
   const at = (event: ReactPointerEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - box.left, y: event.clientY - box.top };
+    // In the responsive view the frame is scaled: the game reads its own CSS pixels.
+    const scale = box.width / (event.currentTarget.offsetWidth || box.width);
+    return { x: (event.clientX - box.left) / scale, y: (event.clientY - box.top) / scale };
   };
   const onMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (flying && (event.buttons & 1) === 1) {

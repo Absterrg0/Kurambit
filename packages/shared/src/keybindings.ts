@@ -146,6 +146,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+alt+shift+b", command: "game.bounds.toggle", when: "gameThread && !terminalFocus" },
   { key: "mod+alt+p", command: "game.frameRate.toggle", when: "gameThread && !terminalFocus" },
   { key: "mod+alt+l", command: "game.cannotLose.toggle", when: "gameThread && !terminalFocus" },
+  { key: "mod+alt+m", command: "game.responsive.toggle", when: "gameThread && !terminalFocus" },
   {
     key: "mod+alt+shift+f",
     command: "game.fullscreen",

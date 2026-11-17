@@ -5404,6 +5404,10 @@ export default function ChatView(props: ChatViewProps) {
       "game.cannotLose.toggle": () =>
         activeThreadKey !== null &&
         flipStageCannotLose(activeThreadKey, gameStatus.data?.canLose !== false),
+      "game.responsive.toggle": () => {
+        if (!isGameThread || activeThreadKey === null) return false;
+        useGameWorkspaceStore.getState().toggleStageDevice(activeThreadKey);
+      },
       "game.fullscreen": () => requestGameStage({ kind: "fullscreen" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),

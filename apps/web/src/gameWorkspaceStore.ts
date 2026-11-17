@@ -2,6 +2,7 @@ import type { GameBuild, GameBuildId, GameBuildRef, GameRunProfile } from "@kura
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import { DEFAULT_STAGE_DEVICE, type GameStageDevice } from "./components/game/gameStageDevice";
 import { resolveStorage } from "./lib/storage";
 
 /**
@@ -97,7 +98,16 @@ interface GameWorkspaceStoreState {
   setArtAsset: (asset: string | null) => void;
   /** Opens the Workbench on Art at one asset: the Stage's way to its art. */
   openArtAsset: (asset: string) => void;
+  /** The Stage's responsive view, by thread key; absent: the normal Stage. Not persisted. */
+  stageDevice: Readonly<Record<string, GameStageDevice>>;
+  /** Sets the view's device and size, or (null) leaves the view. */
+  setStageDevice: (threadKey: string, device: GameStageDevice | null) => void;
+  /** The bar's menu, its key and the palette: into the view as it was last left, or out. */
+  toggleStageDevice: (threadKey: string) => void;
 }
+
+/** The view as it was last left, so toggling it back on returns to the same device. */
+let lastStageDevice = DEFAULT_STAGE_DEVICE;
 
 const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
 
@@ -130,6 +140,20 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       artAsset: null,
       setArtAsset: (asset) => set({ artAsset: asset }),
       openArtAsset: (asset) => set({ workbenchOpen: true, workbenchTab: "art", artAsset: asset }),
+      stageDevice: {},
+      setStageDevice: (threadKey, device) =>
+        set((state) => {
+          if (device === null) return { stageDevice: without(state.stageDevice, threadKey) };
+          lastStageDevice = device;
+          return { stageDevice: { ...state.stageDevice, [threadKey]: device } };
+        }),
+      toggleStageDevice: (threadKey) =>
+        set((state) => ({
+          stageDevice:
+            state.stageDevice[threadKey] === undefined
+              ? { ...state.stageDevice, [threadKey]: lastStageDevice }
+              : without(state.stageDevice, threadKey),
+        })),
 
       tryWays: {},
       cycleTryWays: (threadKey) =>
