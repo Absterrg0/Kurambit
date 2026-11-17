@@ -7,16 +7,21 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { useEffect } from "react";
+
 import { isElectron } from "../../env";
+import { openGameTool } from "../../gameArrivalStore";
 import { useGameWorkspaceStore, type WorkbenchTab, WORKBENCH_TABS } from "../../gameWorkspaceStore";
 import { cn } from "../../lib/utils";
 
 import { Tabs, TabsList, TabsPanel, TabsTab } from "../ui/tabs";
 import { Text } from "../ui/text";
+import { ArrivalDot } from "./ArrivalDot";
 import { GameArtPanel } from "./GameArt";
 import { GameTunePanel } from "./GameTune";
 import { GameWorkbenchChecks } from "./GameWorkbenchChecks";
 import { useStageConsoleCount } from "./gameStageWatch";
+import { useGameArrivals } from "./useGameArrivals";
 
 const SECTION: Record<WorkbenchTab, { readonly label: string; readonly icon: LucideIcon }> = {
   tune: { label: "Tune", icon: SlidersHorizontalIcon },
@@ -29,9 +34,10 @@ const isTab = (value: unknown): value is WorkbenchTab =>
 
 /**
  * The game's Workbench, a side panel of its own beside the game's column: Tune, Art and Checks as
- * one segmented control. The header's Workbench toggle and its key close it. Only the open
- * section is mounted, so one out of sight costs nothing. `ownsTitleBarEnd`: nothing sits to its
- * right, so on the desktop its top row runs under the window's own controls.
+ * one segmented control. A section shows once it has arrived (useGameArrivals), always in this
+ * order, with a dot until it is first opened. The header's Workbench toggle and its key close it.
+ * Only the open section is mounted, so one out of sight costs nothing. `ownsTitleBarEnd`: nothing
+ * sits to its right, so on the desktop its top row runs under the window's own controls.
  */
 export function GameWorkbench({
   threadRef,
@@ -47,9 +53,24 @@ export function GameWorkbench({
 }) {
   const tab = useGameWorkspaceStore((state) => state.workbenchTab);
   const setTab = useGameWorkspaceStore((state) => state.setWorkbenchTab);
+  const open = useGameWorkspaceStore((state) => state.workbenchOpen);
+  const arrivals = useGameArrivals(threadRef);
+  const arrived = { tune: arrivals.tune, art: arrivals.art, checks: arrivals.checks };
+  // Opened on a section that has not arrived (the toggle remembers the last one), it shows the
+  // newest that has. A key for a section opens that section, which meets it.
+  const fallback =
+    WORKBENCH_TABS.find((each) => arrived[each].dot) ??
+    WORKBENCH_TABS.find((each) => arrived[each].shown) ??
+    tab;
+  const shown = arrived[tab].shown ? tab : fallback;
+  useEffect(() => {
+    if (!open) return;
+    if (shown !== tab) setTab(shown);
+    openGameTool(shown);
+  }, [open, shown, tab, setTab]);
   return (
     <Tabs
-      value={tab}
+      value={shown}
       onValueChange={(next) => {
         if (isTab(next)) setTab(next);
       }}
@@ -63,16 +84,19 @@ export function GameWorkbench({
         )}
       >
         <TabsList aria-label="Workbench" className="w-full [-webkit-app-region:no-drag]">
-          {WORKBENCH_TABS.map((value) => {
-            const Icon = SECTION[value].icon;
-            return (
-              <TabsTab key={value} value={value}>
-                <Icon aria-hidden="true" className="size-4 shrink-0" />
-                {SECTION[value].label}
-                {value === "checks" ? <ErrorCount threadRef={threadRef} /> : null}
-              </TabsTab>
-            );
-          })}
+          {WORKBENCH_TABS.filter((value) => value === shown || arrived[value].shown).map(
+            (value) => {
+              const Icon = SECTION[value].icon;
+              return (
+                <TabsTab key={value} value={value}>
+                  <Icon aria-hidden="true" className="size-4 shrink-0" />
+                  {SECTION[value].label}
+                  {value === "checks" ? <ErrorCount threadRef={threadRef} /> : null}
+                  <ArrivalDot on={arrived[value].dot && value !== shown} />
+                </TabsTab>
+              );
+            },
+          )}
         </TabsList>
       </div>
       <TabsPanel value="tune" className="flex min-h-0 flex-1 flex-col">

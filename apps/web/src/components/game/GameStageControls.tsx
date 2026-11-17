@@ -21,6 +21,7 @@ import { Text } from "../ui/text";
 import { toastManager } from "../ui/toast";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import type { GameArrival } from "./useGameArrivals";
 import { GameRunMenu, GameRunTimeline, type StageRewind } from "./GameRunTimeline";
 import {
   setStageMuted,
@@ -81,6 +82,7 @@ export function GameStageBar({
   onRestart,
   onFullscreen,
   viewItems,
+  responsive,
   stageItems,
   onFocus,
   onNote,
@@ -104,6 +106,8 @@ export function GameStageBar({
   onFullscreen: () => void;
   /** The `⋯` menu's View section after Show controls: the dev views, each with its key. */
   viewItems: ReactNode;
+  /** Responsive view's arrival: the menu says it once with a dot. */
+  responsive: GameArrival;
   /** The `⋯` menu's Stage section: pausing when away, hiding and stopping the game. */
   stageItems: ReactNode;
   /** Gives the game the keyboard back after a control took it. */
@@ -258,6 +262,7 @@ export function GameStageBar({
         playing={playing}
         live={live && !stopped}
         viewItems={viewItems}
+        responsive={responsive}
         stageItems={stageItems}
         onNote={onNote}
         onFocus={onFocus}

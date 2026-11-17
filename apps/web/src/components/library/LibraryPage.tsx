@@ -17,10 +17,11 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { isElectron } from "../../env";
+import { openGameTool } from "../../gameArrivalStore";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn, randomUUID } from "../../lib/utils";
 import { observeResize } from "../../lib/observeResize";
@@ -115,6 +116,7 @@ const viewerAsset = (item: GameLibraryItem): GameArtAsset | null => {
  */
 export function LibraryPage() {
   const environmentId = usePrimaryEnvironmentId();
+  useEffect(() => openGameTool("library"), []);
   const read = useEnvironmentQuery(
     environmentId === null ? null : gameEnvironment.libraryList({ environmentId, input: {} }),
   );

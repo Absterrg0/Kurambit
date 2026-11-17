@@ -12,6 +12,7 @@ import {
   MoreHorizontalIcon,
 } from "lucide-react";
 
+import { openGameTool } from "../../gameArrivalStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { cn } from "../../lib/utils";
 import { gameEnvironment } from "../../state/game";
@@ -30,6 +31,7 @@ import {
 import { Popover, PopoverPopup } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ArrivalDot } from "./ArrivalDot";
 import { attachRunToComposer } from "./gameComposerContext";
 import { GameControlsMenu } from "./GameControlsMenu";
 import type { StudioMessage } from "./GamePlaySurface";
@@ -42,6 +44,7 @@ import {
   useStageBridge,
   useThreadStageBridge,
 } from "./gameStageBridge";
+import { type GameArrival, useArrival } from "./useGameArrivals";
 import type { StageRuns } from "./useStageRuns";
 import {
   canCompare,
@@ -408,6 +411,7 @@ export function GameRunMenu({
   playing,
   live,
   viewItems,
+  responsive,
   stageItems,
   onNote,
   onFocus,
@@ -420,11 +424,14 @@ export function GameRunMenu({
   /** It is the folder's own game, running, so its run so far can be taken. */
   live: boolean;
   viewItems: ReactNode;
+  responsive: GameArrival;
   stageItems: ReactNode;
   onNote: (text: string) => void;
   onFocus: () => void;
 }) {
   const threadKey = scopedThreadKey(threadRef);
+  // Test plays arrive when a run first ends: there is a run worth keeping.
+  const testPlays = useArrival("test-plays", runs.ended !== null);
   const frozen = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const tellsRuns = useThreadStageBridge(
     threadKey,
@@ -517,12 +524,19 @@ export function GameRunMenu({
   };
   return (
     <>
-      <Menu>
+      <Menu
+        onOpenChange={(open) => {
+          if (!open) return;
+          if (testPlays.shown) openGameTool("test-plays");
+          if (responsive.shown) openGameTool("responsive");
+        }}
+      >
         <MenuTrigger
           ref={anchor}
           render={<Button size="icon-sm" variant="ghost" aria-label="Run actions" />}
         >
           <MoreHorizontalIcon aria-hidden="true" />
+          <ArrivalDot on={testPlays.dot || responsive.dot} corner />
         </MenuTrigger>
         <MenuPopup side="top" align="end">
           <MenuGroup>
@@ -531,7 +545,7 @@ export function GameRunMenu({
               <MessageSquarePlusIcon />
               Tell the agent about this run
             </MenuItem>
-            {canSave ? (
+            {canSave && testPlays.shown ? (
               <MenuItem disabled={ended === null && !canTake} onClick={() => void take()}>
                 <FlagIcon />
                 Save as test play…

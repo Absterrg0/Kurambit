@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
+import { useGameArrivals } from "./useGameArrivals";
 import { GameStageBar } from "./GameStageControls";
 import {
   CircleStopIcon,
@@ -84,6 +85,7 @@ import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameBuildCompare } from "./GameBuildCompare";
 import { GameBuildStill } from "./GameBuildStill";
+import { ArrivalDot } from "./ArrivalDot";
 import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHistory";
 import { GameExports } from "./GameExports";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
@@ -482,6 +484,10 @@ function ThreadGameStage({
   const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
   const setPauseWhenAway = useGameWorkspaceStore((state) => state.setPauseWhenAway);
   const workbenchShown = useWorkbenchShown();
+  const arrivals = useGameArrivals(threadRef);
+  // The Workbench's toggle arrives with its first section, and says so once.
+  const workbenchArrived = arrivals.tune.shown || arrivals.art.shown || arrivals.checks.shown;
+  const workbenchNews = arrivals.tune.dot || arrivals.art.dot || arrivals.checks.dot;
   // A panel to the column's right takes the title bar's end, under the desktop window controls.
   const panelOpen =
     useRightPanelStore((state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true) ||
@@ -1274,7 +1280,7 @@ function ThreadGameStage({
       ? clockTime(keepGoingStatus.proposal.deadline)
       : null;
   // The header names what plays: a copy by its own name, else the folder's build.
-  const historyLabel = playTarget?.label ?? folderShort ?? (hasBuild ? "History" : "No builds yet");
+  const historyLabel = playTarget?.label ?? folderShort ?? (hasBuild ? "History" : null);
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking
@@ -1404,64 +1410,69 @@ function ThreadGameStage({
               </MenuPopup>
             </Menu>
           )}
-          {/* What plays on the Stage, as a button that opens the game's History. */}
-          <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
-            <PopoverTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="ghost-muted"
-                  className="min-w-0 shrink"
-                  aria-label={`${historyLabel}: History`}
-                />
-              }
-            >
-              <Text variant="label" tone="inherit" truncate>
-                {historyLabel}
-              </Text>
-              <ChevronDownIcon aria-hidden="true" />
-            </PopoverTrigger>
-            {/* Kept mounted: the chat's cards, the palette and the keys reach History's requests
+          {/* What plays on the Stage, as a button that opens the game's History. Nothing names
+              builds before the first one exists: the Stage says what is being made. */}
+          <span className={historyLabel === null ? "hidden" : "contents"}>
+            <Popover open={historyOpen} onOpenChange={setHistoryOpen}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="ghost-muted"
+                    className="min-w-0 shrink"
+                    aria-label={`${historyLabel ?? "Builds"}: History`}
+                  />
+                }
+              >
+                <Text variant="label" tone="inherit" truncate>
+                  {historyLabel}
+                </Text>
+                <ChevronDownIcon aria-hidden="true" />
+              </PopoverTrigger>
+              {/* Kept mounted: the chat's cards, the palette and the keys reach History's requests
                 while it is closed. */}
-            <PopoverPopup
-              side="bottom"
-              align="start"
-              padding="compact"
-              keepMounted
-              className="w-[34rem]"
-            >
-              <GameHistory
-                threadRef={threadRef}
-                gameName={gameName}
-                playing={playTarget?.build ?? null}
-                slot={buildSlot}
-                request={timelineRequest}
-                reelOpen={reelOpen}
-                open={historyOpen}
-                onOpen={() => setHistoryOpen(true)}
-                undo={{
-                  canUndo: turnUndoAllowed("undo"),
-                  canRedo: turnUndoAllowed("redo"),
-                  undoLabel,
-                  redoLabel,
-                  undoDetail,
-                  undoKey,
-                  redoKey,
-                  onUndo: () => handleRequest({ kind: "undo" }, 0),
-                  onRedo: () => handleRequest({ kind: "redo" }, 0),
-                }}
-                onPlay={(build) => void playBuild(build)}
-                onPlayUnlisted={(ref) => void playBuild(ref)}
-                onLive={backToLive}
-                onCompare={(pair) => {
-                  setHistoryOpen(false);
-                  setCompare(pair);
-                }}
-                // Checks follows the build picked here.
-                onInspect={(build) => inspectBuild({ threadKey, build: build.id, snapshot: build })}
-              />
-            </PopoverPopup>
-          </Popover>
+              <PopoverPopup
+                side="bottom"
+                align="start"
+                padding="compact"
+                keepMounted
+                className="w-[34rem]"
+              >
+                <GameHistory
+                  threadRef={threadRef}
+                  gameName={gameName}
+                  playing={playTarget?.build ?? null}
+                  slot={buildSlot}
+                  request={timelineRequest}
+                  reelOpen={reelOpen}
+                  open={historyOpen}
+                  onOpen={() => setHistoryOpen(true)}
+                  undo={{
+                    canUndo: turnUndoAllowed("undo"),
+                    canRedo: turnUndoAllowed("redo"),
+                    undoLabel,
+                    redoLabel,
+                    undoDetail,
+                    undoKey,
+                    redoKey,
+                    onUndo: () => handleRequest({ kind: "undo" }, 0),
+                    onRedo: () => handleRequest({ kind: "redo" }, 0),
+                  }}
+                  onPlay={(build) => void playBuild(build)}
+                  onPlayUnlisted={(ref) => void playBuild(ref)}
+                  onLive={backToLive}
+                  onCompare={(pair) => {
+                    setHistoryOpen(false);
+                    setCompare(pair);
+                  }}
+                  // Checks follows the build picked here.
+                  onInspect={(build) =>
+                    inspectBuild({ threadKey, build: build.id, snapshot: build })
+                  }
+                />
+              </PopoverPopup>
+            </Popover>
+          </span>
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
           {collapsed ? (
             <Button size="sm" variant="ghost" onClick={() => setGameHidden(false)}>
@@ -1469,24 +1480,27 @@ function ThreadGameStage({
               Show the game
             </Button>
           ) : null}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
-                  aria-pressed={workbenchShown}
-                  onClick={() => toggleWorkbench()}
-                />
-              }
-            >
-              <PanelRightIcon aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">
-              <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
-            </TooltipPopup>
-          </Tooltip>
+          {workbenchArrived || workbenchShown ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
+                    aria-pressed={workbenchShown}
+                    onClick={() => toggleWorkbench()}
+                  />
+                }
+              >
+                <PanelRightIcon aria-hidden="true" />
+                <ArrivalDot on={workbenchNews && !workbenchShown} corner />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
         </div>
       </header>
       {/* Hidden, the game stays mounted out of sight, so showing it again keeps its progress. */}
@@ -1684,17 +1698,22 @@ function ThreadGameStage({
             runs={runs}
             onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
             onFullscreen={toggleFullscreen}
+            responsive={arrivals.responsive}
             viewItems={
               stageKind === "live" ? (
                 <>
-                  <MenuCheckboxItem
-                    variant="switch"
-                    checked={deviceOn}
-                    onCheckedChange={() => toggleStageDevice(threadKey)}
-                  >
-                    Responsive view
-                    {responsiveKey === null ? null : <MenuShortcut>{responsiveKey}</MenuShortcut>}
-                  </MenuCheckboxItem>
+                  {/* Arrives when the phone or widescreen check finds a problem; its key and the
+                      palette reach it before then. */}
+                  {arrivals.responsive.shown || deviceOn ? (
+                    <MenuCheckboxItem
+                      variant="switch"
+                      checked={deviceOn}
+                      onCheckedChange={() => toggleStageDevice(threadKey)}
+                    >
+                      Responsive view
+                      {responsiveKey === null ? null : <MenuShortcut>{responsiveKey}</MenuShortcut>}
+                    </MenuCheckboxItem>
+                  ) : null}
                   {devCapable ? (
                     <>
                       <MenuCheckboxItem

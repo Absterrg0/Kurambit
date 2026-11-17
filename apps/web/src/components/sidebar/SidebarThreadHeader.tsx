@@ -1,6 +1,8 @@
 import { LibraryBigIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ArrivalDot } from "../game/ArrivalDot";
+import { useLibraryArrival } from "../game/useGameArrivals";
 import { Kbd } from "../ui/kbd";
 import { Text } from "../ui/text";
 import { SIDEBAR_TREE_ROW } from "./SidebarGameRows";
@@ -15,7 +17,10 @@ export interface SidebarThreadHeaderProps {
   onLibrary: () => void;
 }
 
-/** The sidebar's places: start a game, find anything, and every asset you have. */
+/**
+ * The sidebar's places: start a game, find anything, and every asset you have. The Library
+ * arrives with a second game, when there is something to share between games.
+ */
 export function SidebarThreadHeader({
   onNewGame,
   newGameShortcutLabel,
@@ -24,6 +29,7 @@ export function SidebarThreadHeader({
   libraryOpen,
   onLibrary,
 }: SidebarThreadHeaderProps) {
+  const library = useLibraryArrival();
   return (
     <div className="flex flex-col gap-px">
       <SidebarHeaderRow
@@ -38,13 +44,16 @@ export function SidebarThreadHeader({
         shortcut={searchShortcutLabel}
         onClick={onSearch}
       />
-      <SidebarHeaderRow
-        icon={<LibraryBigIcon />}
-        label="Library"
-        shortcut={null}
-        active={libraryOpen}
-        onClick={onLibrary}
-      />
+      {library.shown || libraryOpen ? (
+        <SidebarHeaderRow
+          icon={<LibraryBigIcon />}
+          label="Library"
+          shortcut={null}
+          active={libraryOpen}
+          news={library.dot}
+          onClick={onLibrary}
+        />
+      ) : null}
     </div>
   );
 }
@@ -54,12 +63,15 @@ function SidebarHeaderRow({
   label,
   shortcut,
   active = false,
+  news = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
   shortcut: string | null;
   active?: boolean;
+  /** Just arrived and not opened yet. */
+  news?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -77,6 +89,7 @@ function SidebarHeaderRow({
       <Text variant="label" tone={active ? "default" : "muted"} truncate>
         {label}
       </Text>
+      <ArrivalDot on={news} />
       {/* The shortcut is a reminder for the row in hand; at rest it only crowds the column. */}
       {shortcut === null ? null : (
         <span className="ms-auto opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-visible/row:opacity-100">

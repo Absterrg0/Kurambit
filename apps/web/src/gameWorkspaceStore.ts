@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { DEFAULT_STAGE_DEVICE, type GameStageDevice } from "./components/game/gameStageDevice";
+import { openGameTool } from "./gameArrivalStore";
 import { resolveStorage } from "./lib/storage";
 
 /**
@@ -144,19 +145,23 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
       setStageDevice: (threadKey, device) =>
         set((state) => {
           if (device === null) return { stageDevice: without(state.stageDevice, threadKey) };
+          openGameTool("responsive");
           lastStageDevice = device;
           return { stageDevice: { ...state.stageDevice, [threadKey]: device } };
         }),
-      toggleStageDevice: (threadKey) =>
+      toggleStageDevice: (threadKey) => {
+        openGameTool("responsive");
         set((state) => ({
           stageDevice:
             state.stageDevice[threadKey] === undefined
               ? { ...state.stageDevice, [threadKey]: lastStageDevice }
               : without(state.stageDevice, threadKey),
-        })),
+        }));
+      },
 
       tryWays: {},
-      cycleTryWays: (threadKey) =>
+      cycleTryWays: (threadKey) => {
+        openGameTool("try-ways");
         set((state) => {
           const current = state.tryWays[threadKey];
           const next = current === undefined ? 3 : TRY_WAYS_NEXT[current];
@@ -165,14 +170,16 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
             tryWays: next === undefined ? rest : { ...rest, [threadKey]: next },
             keepGoingPick: without(state.keepGoingPick, threadKey),
           };
-        }),
+        });
+      },
       clearTryWays: (threadKey) =>
         set((state) => {
           if (state.tryWays[threadKey] === undefined) return state;
           return { tryWays: without(state.tryWays, threadKey) };
         }),
       keepGoingPick: {},
-      pickRun: (threadKey, pick) =>
+      pickRun: (threadKey, pick) => {
+        if (pick.kind !== "once") openGameTool(pick.kind === "ways" ? "try-ways" : "keep-going");
         set((state) => ({
           tryWays:
             pick.kind === "ways"
@@ -182,7 +189,8 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
             pick.kind === "keep-going"
               ? { ...state.keepGoingPick, [threadKey]: pick.profile }
               : without(state.keepGoingPick, threadKey),
-        })),
+        }));
+      },
     }),
     {
       name: "kurambit:game-workspace:v7",
