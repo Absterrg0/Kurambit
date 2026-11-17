@@ -66,6 +66,7 @@ export function GameWorkbench({
   useEffect(() => {
     if (!open) return;
     if (shown !== tab) setTab(shown);
+    openGameTool("workbench");
     openGameTool(shown);
   }, [open, shown, tab, setTab]);
   return (

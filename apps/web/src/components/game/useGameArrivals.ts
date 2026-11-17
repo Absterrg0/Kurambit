@@ -3,7 +3,7 @@ import type { GameBuildsResult, GameThing, ScopedThreadRef } from "@kurambit/con
 import { AsyncResult } from "effect/reactivity";
 import { useEffect } from "react";
 
-import { type GameTool, useGameArrivalStore } from "../../gameArrivalStore";
+import { type GameTool, useArrivalDot, useGameArrivalStore } from "../../gameArrivalStore";
 import { useProjects, useThreadSentCount } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuerySelector } from "../../state/query";
@@ -11,7 +11,10 @@ import { codeModels } from "./gameArt.logic";
 import { useThreadStageBridge } from "./gameStageBridge";
 import { useGameLatestNext } from "./useGameLatestNext";
 
-/** A tool's place on screen: shown once it has arrived, with a dot until it is first opened. */
+/**
+ * A tool's place on screen: shown once it has arrived, with a dot until it is first opened, when
+ * it is the one tool whose turn it is to say so (useArrivalDot).
+ */
 export interface GameArrival {
   readonly shown: boolean;
   readonly dot: boolean;
@@ -24,12 +27,11 @@ export interface GameArrival {
  */
 export function useArrival(tool: GameTool, fact: boolean): GameArrival {
   const met = useGameArrivalStore((state) => state.met.includes(tool));
-  const opened = useGameArrivalStore((state) => state.opened.includes(tool));
+  const dot = useArrivalDot() === tool;
   useEffect(() => {
     if (fact && !met) useGameArrivalStore.getState().meet(tool);
   }, [fact, met, tool]);
-  const shown = met || fact;
-  return { shown, dot: shown && !opened };
+  return { shown: met || fact, dot };
 }
 
 type BuildsRead = AsyncResult.AsyncResult<GameBuildsResult, unknown>;

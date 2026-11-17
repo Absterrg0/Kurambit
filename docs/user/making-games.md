@@ -290,13 +290,17 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 
 A game opens as one column: the game on top, its control bar under it, then your chat with the
 agent and the box where you tell the game what to change. A new game starts with just that, and
-**Undo** on each build in the chat. Every other tool appears when the game first has something for
-it, with a dot until you open it, and then stays where it is: the Workbench's **Checks** once a
-build is measured, **Tune** once the game has a value to tune, **Art** once it has a model; **Save
-as test play** once a run ends; **Responsive view** once a phone or widescreen check finds a
-problem; **Try N ways** after your third message and **Keep going** once a build starts with a
-`Next:` line; the **Library** with your second game. Their keys and the command palette reach
-each one before then. The bar's buttons stay put while you play,
+**Undo** on each build in the chat.
+
+Every other tool appears when the game first has something for it, and then stays where it is:
+the Workbench's **Checks** once a build is measured, **Tune** once the game has a value to tune,
+**Art** once it has a model; **Save as test play** once a run ends; **Responsive view** once a
+phone or widescreen check finds a problem; **Try N ways** after your third message and **Keep
+going** once a build starts with a `Next:` line; the **Library** with your second game. A new
+tool carries a dot until you open it, one dot at a time, the Workbench's first. Their keys and the
+command palette reach each one before then.
+
+The bar's buttons stay put while you play,
 pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
 lose**, sound, **Fullscreen**, and a **⋯** menu. **Can't lose** is there only for a game whose code
 can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". Paused, or once a run ends, the run's timeline and

@@ -49,20 +49,17 @@ export function GameTurnBuild({
     );
   const undo = useTurnUndo(threadRef, runId);
   const view = undo.view;
-  const open = () =>
-    useGameWorkspaceStore
-      .getState()
-      .requestStage(
-        view === null
-          ? { kind: "detail", build: { _tag: "turn", threadId: threadRef.threadId, runId } }
-          : { kind: "play", build: { _tag: "build", build: view.build.id } },
-      );
+  const open = () => {
+    if (view !== null)
+      useGameWorkspaceStore
+        .getState()
+        .requestStage({ kind: "play", build: { _tag: "build", build: view.build.id } });
+  };
+  // The build is still being saved (or sits on an older page of the list): the row names no
+  // build until it can say which, with its checks and Undo.
   if (view === null)
     return (
       <div data-game-turn-build="" className="mt-1.5 flex items-center gap-x-1.5">
-        <Button size="xs" variant="ghost" onClick={open}>
-          Open this turn's build
-        </Button>
         <span className="flex-1" />
         {filesButton}
       </div>

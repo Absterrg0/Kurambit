@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
+import { useArrivalDot } from "../../gameArrivalStore";
 import { useGameArrivals } from "./useGameArrivals";
 import { GameStageBar } from "./GameStageControls";
 import {
@@ -487,7 +488,9 @@ function ThreadGameStage({
   const arrivals = useGameArrivals(threadRef);
   // The Workbench's toggle arrives with its first section, and says so once.
   const workbenchArrived = arrivals.tune.shown || arrivals.art.shown || arrivals.checks.shown;
-  const workbenchNews = arrivals.tune.dot || arrivals.art.dot || arrivals.checks.dot;
+  const dotNow = useArrivalDot();
+  const workbenchNews =
+    dotNow === "workbench" || dotNow === "checks" || dotNow === "tune" || dotNow === "art";
   // A panel to the column's right takes the title bar's end, under the desktop window controls.
   const panelOpen =
     useRightPanelStore((state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true) ||
@@ -1564,6 +1567,7 @@ function ThreadGameStage({
                   title={`${gameName}, ${playTarget.label}`}
                   gameName={gameName}
                   hidden={hidden || collapsed || compare !== null}
+                  drawsReady={engine?.stageBridge === true}
                   focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
                   onFrame={setCopyFrame}
                   onStudioMessage={onCopyStudioMessage}

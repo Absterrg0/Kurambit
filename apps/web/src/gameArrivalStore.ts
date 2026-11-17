@@ -8,6 +8,8 @@ import { resolveStorage } from "./lib/storage";
  * something for it (useGameArrivals), and from then on stays where the person met it.
  */
 const GAME_TOOLS = [
+  // The Workbench itself: opened once its panel has been, whichever section it showed.
+  "workbench",
   "tune",
   "art",
   "checks",
@@ -88,6 +90,33 @@ export const useGameArrivalStore = create<GameArrivalState>()(
     },
   ),
 );
+
+const SECTIONS: ReadonlyArray<GameTool> = ["checks", "tune", "art"];
+
+/**
+ * One dot at a time, in this order: the Workbench (whose toggle stands for its sections until it
+ * has been opened), its sections, then the composer's ways to send, the bar's menu and the Library.
+ * A tool waits for every one before it to be opened, so arrivals never pile up as dots.
+ */
+const DOT_ORDER: ReadonlyArray<GameTool> = [
+  "workbench",
+  ...SECTIONS,
+  "keep-going",
+  "try-ways",
+  "test-plays",
+  "responsive",
+  "library",
+];
+
+const pending = (state: Pick<GameArrivalState, "met" | "opened">, tool: GameTool) =>
+  !state.opened.includes(tool) &&
+  (tool === "workbench"
+    ? SECTIONS.some((section) => state.met.includes(section))
+    : state.met.includes(tool));
+
+/** The one tool showing its dot now, or null. */
+export const useArrivalDot = (): GameTool | null =>
+  useGameArrivalStore((state) => DOT_ORDER.find((tool) => pending(state, tool)) ?? null);
 
 /** Marks a tool opened: its dot clears for good. Any way in counts: a click, a key, the palette. */
 export const openGameTool = (tool: GameTool) => useGameArrivalStore.getState().open(tool);
