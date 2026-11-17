@@ -372,7 +372,7 @@ export const useStageCannotLose = (threadKey: string) =>
 export const stageCannotLose = (threadKey: string) => useCannotLose.getState()[threadKey] ?? false;
 
 /** Can't lose, for tuning a fight without the round ending; the measures never see it. */
-export const setStageCannotLose = (threadKey: string, on: boolean) => {
+const setStageCannotLose = (threadKey: string, on: boolean) => {
   if (on) cannotLose.add(threadKey);
   else cannotLose.delete(threadKey);
   useCannotLose.setState({ [threadKey]: on });

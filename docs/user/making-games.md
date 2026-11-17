@@ -270,7 +270,8 @@ done, ask it for more and turn keep going on again. The command palette has **Ke
 A game opens as one column: the game on top, its control bar under it, then your chat with the
 agent and the box where you tell the game what to change. The bar's buttons stay put while you play,
 pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
-lose**, sound, **Fullscreen**, and a **⋯** menu. Paused, or once a run ends, the run's timeline and
+lose**, sound, **Fullscreen**, and a **⋯** menu. **Can't lose** is there only for a game whose code
+can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". Paused, or once a run ends, the run's timeline and
 its time fill the middle. The **⋯** menu has the run (tell the agent about it, save it as a test
 play), what you see (the game's controls and the dev views) and the Stage (pause when you click
 away, hide the game, stop it). Hover a control for its key. Hidden, the game folds into the top bar
@@ -394,6 +395,10 @@ the trees out". The agent edits the same Blender sources and re-exports to the s
 keep their references. A game's agent ends its reply with the one change it would make next; when
 it does, the empty composer shows it as **Next:**. Press Tab to put that change in the composer, then
 edit or send it.
+
+Under the box, the composer's footer holds how your message runs (**Once**, **Try N ways**,
+**Keep going**) and, on the right, the model, how hard it thinks, and how much of its context the
+chat uses, such as **121k**. That number turns amber near the limit; click it to compact the chat.
 
 Stopping the agent's turn stops its Blender commands, but a game that is already running
 keeps running; use **Stop game** to close it.
