@@ -235,9 +235,11 @@ def sit(legs, fps=30, seconds=1.0, tail=0, ears=0):
         # A little overshoot at the bottom, then it settles.
         settle = u + 0.06 * math.sin(math.pi * min(1.0, k / frames * 1.25)) * (1 - u)
         if front:
-            drop = 0.45 * Lh * settle
-            pitch = math.degrees(math.atan2(drop, length or Lh)) * settle
-            at = (0.0, 0.12 * Lh * settle, -drop / 2)
+            # The haunches come down most of the hind leg's height; the chest pitches up just
+            # enough that the front legs stay straight under it.
+            drop = 0.7 * Lh * settle
+            pitch = math.degrees(math.asin(min(1.0, drop / (length or Lh))))
+            at = (0.0, 0.1 * Lh * settle, -drop)
         else:
             drop = 0.35 * Lh * settle
             pitch, at = 8.0 * settle, (0.0, 0.05 * Lh * settle, -drop)

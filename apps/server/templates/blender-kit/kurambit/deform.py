@@ -174,7 +174,12 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
     sc = bpy.context.scene
     fps = sc.render.fps / sc.render.fps_base
     out = []
+    # A body that lost its Armature modifier would pass every gate hollow: nothing of it bends.
+    loose = [o.name for o in meshes if o.type == "MESH" and arm not in helpers._deforming(o)
+             and (helpers_stamp(o) or {}).get("what") == "body"]
     meshes = [o for o in meshes if o.type == "MESH" and (arm in helpers._deforming(o) or o.parent == arm)]
+    rigid = any(o.parent == arm and o.parent_type == "BONE" for o in meshes)
+    skinned = not loose and (rigid or any(arm in helpers._deforming(o) for o in meshes))
     height, ground = hero_height(arm, meshes)
     height *= scale
     declared = arm.get("kurambit_height")
@@ -285,10 +290,17 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
         clip, frame, part, bone = w
         return f" ({clip} frame {frame}, {part}{' at ' + bone if bone else ''})"
 
-    ok = gates.deformation(worst_spread[0], worst_stretch[0], worst_squash[0])
-    out.append(gates.gate("deformation", ok, round(worst_spread[0], 2), [gates.SQUASH_SPREAD_MIN, gates.STRETCH_SPREAD_MAX, gates.STRETCH_WORST_MAX],
-                          f"edges stretch {worst_spread[0]:.2f}x at the 99.9th percentile{where(worst_spread[1])}, {worst_stretch[0]:.2f}x at worst{where(worst_stretch[1])}, and squash to {worst_squash[0]:.2f}x at the 0.1st{where(worst_squash[1])}"
-                          + ("" if ok else f" (limits {gates.STRETCH_SPREAD_MAX}x, {gates.STRETCH_WORST_MAX}x and {gates.SQUASH_SPREAD_MIN}x): a spread past its limit is a joint whose weights tear or a garment split by the legs (hang it on chains); a single worst edge is a vertex weighted to the wrong bone")))
+    ok = gates.deformation(worst_spread[0], worst_stretch[0], worst_squash[0]) and bool(skinned)
+    if not skinned:
+        # Nothing bends with the armature (a body that lost its Armature modifier): a pass here
+        # would be hollow.
+        out.append(gates.gate("deformation", False, 0.0, None,
+                              f"the body does not deform with {arm.name} ({', '.join(loose[:4]) or 'no mesh is bound'}): bind it (an Armature modifier on {arm.name}) and review again"))
+        ok = None
+    if ok is not None:
+        out.append(gates.gate("deformation", ok, round(worst_spread[0], 2), [gates.SQUASH_SPREAD_MIN, gates.STRETCH_SPREAD_MAX, gates.STRETCH_WORST_MAX],
+                              f"edges stretch {worst_spread[0]:.2f}x at the 99.9th percentile{where(worst_spread[1])}, {worst_stretch[0]:.2f}x at worst{where(worst_stretch[1])}, and squash to {worst_squash[0]:.2f}x at the 0.1st{where(worst_squash[1])}"
+                              + ("" if ok else f" (limits {gates.STRETCH_SPREAD_MAX}x, {gates.STRETCH_WORST_MAX}x and {gates.SQUASH_SPREAD_MIN}x): a spread past its limit is a joint whose weights tear or a garment split by the legs (hang it on chains); a single worst edge is a vertex weighted to the wrong bone")))
     if cloth:
         depth = worst_cloth[0] * scale
         ok = not (worst_cloth[0] > gates.CLOTH_DEPTH_MAX and worst_cloth[2] > gates.CLOTH_SHARE_MAX)
