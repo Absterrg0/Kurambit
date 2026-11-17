@@ -5,8 +5,9 @@
 
 A new game is a chat: its first message is the brief, and every turn that changes the game is a
 build (the turn's T3 checkpoint). On engines whose profile has `turnLoop`, the harness plays that
-build on the Stage and measures its facts in the background. Undo restores the build it was made
-from (`base`). Keep going is a run on top of the same turns. The harness, not the model, owns every
+build on the Stage and measures its facts in the background. Undo reverses one build's change
+against the build it was made from (`base`), keeping later builds. Keep going is a run on top of
+the same turns. The harness, not the model, owns every
 check that matters.
 
 ## Decisions that span the services
@@ -16,6 +17,39 @@ check that matters.
   refuses as busy rather than racing the first. A restore's folder moves (captures, restores,
   kept names) run as operations of the game, taking the operation lock and then the checkpoint
   workspace lock; T3's turn captures take only the latter, so the two never wait in a cycle.
+- **One writer per game folder; a second writer waits or works in a copy.** A chat's turn writes
+  the game folder only while no other chat's turn is at work there; a chat and the subagent
+  threads it delegated to share one slot ([GameFolders](../../apps/server/src/game/GameFolders.ts)).
+  The claim is made at T3's turn admission (`TurnAdmission`), which every message surface passes
+  before its turn commits, under one lock per folder, so two chats sending at once are decided in
+  order; the claim stays live while its chat has a run at work and for a short grace before its
+  run commits, and after a restart the projection's runs are the truth. A turn that would be a
+  second writer commits as T3's own held queued run with a reason (`queueHeldReason`) and starts
+  through `queue.resume` when the folder frees; a folder move (a bring-in, an undo, a restore, a
+  held kept edit) holds the folder too. Nothing copies on its own: **Run in a copy** is the
+  person's choice, and an agent's `delegate_task` with a worktree, `thread_launch` with one and
+  the worktree handoff make copies because someone asked. A child delegated without a worktree
+  shares its parent's slot, so a parent's turn ending while its child works keeps the folder
+  claimed until the child's run ends.
+- **A copy is a chat in a T3 worktree, seated on a recorded build, and comes in only by Bring in**
+  ([GameCopies](../../apps/server/src/game/GameCopies.ts)). Game projects set T3's `worktreeSeed`
+  to `working-tree`, so every worktree path seats on a capture of its source folder's files (in a
+  game all work is uncommitted, and `HEAD` is the empty scaffold), and the capture is the thread's
+  seed ref, its seat. The seat is never inferred: a three-way merge from any other base silently
+  drops the game's newer work without a conflict. It moves only by Update. A copy is sticky, so a
+  provider session keeps its directory; a thread's checkpoints all carry its current folder, so
+  the move in and out is kept (`copies/<chat>/in|out`) and the rail places each turn by when it
+  was captured. Bring in is `merge-tree` from the seat (`mergeBuilds`: union for `ASSETS.md` and
+  the credits file through `attr.tree`, `tune.json` per value, a binary kept whole from the side
+  the person chose), checked in a build copy (boots, saved plays), and landed by
+  `GameBuilds.land`: the same record and moves as a restore, so a restart settles it, with
+  `expect` on the folder the merge read. Conflicts go back to the copy, never the game. Decisions
+  stay the game's: read and written at the project's root whatever folder a chat works in.
+- **Every landed build is also plain git history.** Turn builds, kept edits, bring-ins and undos
+  in the game folder are appended as commits to the local branch `kurambit/history` (tree = the
+  build's, parent = the branch's last commit). The harness never reads it; it is only appended
+  to, from the builds, under one lock per game, so it cannot diverge from the rail, and it is left
+  alone while the person has it checked out. Their own branch and `HEAD` are never touched.
 - Keep going never launches a thread of its own: its steps are turns of the chat that turned it
   on, so no game thread is owned by anything but its chat. Event logs still hold the role threads
   (`role` lineage) and run records an earlier Kurambit's production runs wrote; their shapes keep
@@ -347,8 +381,11 @@ hand has no stamp, so only fresh sessions read it.
   ordinal 0), or a newer build that landed in between, such as a restore's target. It is
   recorded as a ref (`game-builds/bases/<build>`) on the turn's checkpoint, the way T3 records
   checkpoints, because reading it later from the game's latest restore goes wrong once a second
-  restore replaces the first. Undo is that restore, never T3's conversation revert, which is
-  refused in a game's shared folder and would make the agent forget the attempt. A restore that
+  restore replaces the first. Undo reverses one build: `merge-tree` from the build to its base,
+  onto the folder, landed as a build of its own (`edits/<request>-undo`); for the newest build it
+  is exactly its base, and Redo is the undo of the undo. Go back is the whole restore. Neither is
+  T3's conversation revert, which is refused in a game's shared folder and would make the agent
+  forget the attempt. A restore that
   moved the folder, and a kept edit, set the next-turn base of the game's chats to the folder they
   left, so a chat card and its Open diff count the next turn from there, as the rail does, and
   never list an undo as the agent's change. A live Stage shows
@@ -360,7 +397,9 @@ hand has no stamp, so only fresh sessions read it.
   the folder, writes the engine's tune file and captures it again, under `game-builds/edits/`:
   `<request>-values` is the build and `<request>-from` its base. It lists as a saved build with
   `edit`, joins `current`, and owns Undo while it is the newest (`ownsUndo`), as a turn does; the
-  turn after it counts its change from it.
+  turn after it counts its change from it. A keep while a turn works in that folder would be
+  written over by an agent that writes the file whole, or capture half a turn: it is kept in a
+  file under server state and landed when the turn ends, merged onto what the turn left.
 - **Copies, never the folder.** A build is played and measured in a plain copy under the
   worktrees folder's `game-builds/`, which is in `GIT_CEILING_DIRECTORIES` like the run's copies
   ([GameBuildCopies](../../apps/server/src/game/GameBuildCopies.ts)). One engine step at a
@@ -422,20 +461,19 @@ hand has no stamp, so only fresh sessions read it.
 - **Going back with no run** makes the run's own moves (`withBuildInFolder`) under the
   `game-builds` run-ref folder. The record is written before the folder moves, and a restart
   settles a restore it cut short by running its moves again.
-- **A try's versions never write the game folder.** "Try N ways" is a chat turn the harness does,
-  never the chat's provider: `ProviderTurnStartService` hands a run with `versions` to the game
-  layer (`GameTries`, attached by [GameVersions](../../apps/server/src/game/GameVersions.ts)),
-  which captures the folder as the try's base and adds a detached git worktree per version, then
+- **A try's versions are copies.** "Try N ways" is a chat turn the harness does, never the
+  chat's provider: `ProviderTurnStartService` hands a run with `versions` to the game layer
+  (`GameTries`, attached by [GameVersions](../../apps/server/src/game/GameVersions.ts)), which
+  captures the folder as the try's base and seats a copy per version on it, then
   `game-version.start` makes the version children (the delegated-task path, wake `never`, so each
-  is read-only once made) and completes the turn in one transaction. A version's `game_*` tools
-  resolve its worktree, with its own operation lock, so only Keep moves the folder: the one
-  restore, then a `system_notice` on the try's run that records which version was kept and when
-  (the rail reads the newest one to give that version Undo) and a `kept-over` decision. A try is
-  no record of its own ([gameTries.ts](../../apps/server/src/game/gameTries.ts)): version n's
-  thread id derives from the try's run, and its refs are keyed by the chat and the run's ordinal,
-  since a run id passes a ref name's 255 bytes. T3's recovery cancels a version's turn without a
-  checkpoint, so a worktree is removed only once its work is a build: its checkpoint, or a capture
-  of what it left (`versions/left/`).
+  is read-only once made) and completes the turn in one transaction. Keep is a Bring in of that
+  version's copy, merged against the try's base so builds that landed since the try stay; the
+  other copies are thrown away and their builds stay on the rail. A notice on the try's run records
+  which version was kept and when, and a `kept-over` decision. A try is no record of its own
+  ([gameTries.ts](../../apps/server/src/game/gameTries.ts)): version n's thread id derives from the
+  try's run, and its refs are keyed by the chat and the run's ordinal (a copy's by a hash of its
+  chat), since a derived id passes a ref name's 255 bytes. A version whose turn ended with no
+  checkpoint (a restart cancels it) keeps a capture of its copy (`versions/left/`) as its build.
 
 ## Keep going
 
@@ -483,7 +521,8 @@ cannot both find none.
   so it is found by walking the turns page by page however far back (`GameBuilds.currentBuild`),
   never in a fixed window. A folder whose game files are no build's (edited outside a turn) pauses
   the run, since a step's undo would take those edits.
-- **Never two writers.** A look waits until no turn runs or is queued on any chat of the game; a
+- **Never two writers.** Keep going runs in the game folder only, never in a copy. A look waits
+  until no turn runs or is queued on any chat working in the game folder; a
   step turn that comes up queued is cancelled and the run looks again; any other turn or folder
   move supersedes a pending proposal. A step acts only on the build its look read: its turn
   reports the folder's build at its start (`startBuild`), the judge and the undo use that build,

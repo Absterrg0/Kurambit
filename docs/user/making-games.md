@@ -319,7 +319,9 @@ Drag its edge to resize it. Its three sections:
   Click a value's field to type, or drag the field or its label sideways; the game changes at once,
   and the fill inside the field shows where the value sits in its range.
   Values are saved into the game as you let go, and a tuning session is one build Undo takes back;
-  **Keep as a build** ends the session, so your next change starts another. **Put all back**
+  **Keep as a build** ends the session, so your next change starts another. Values kept while an
+  agent's turn works in the same folder wait and become their build when that turn ends, on top of
+  what the turn left, so none is lost. **Put all back**
   returns every value to the game's own. If a game has nothing to tune, **Ask your agent to expose
   values** asks for it.
 - **Art** (`mod+Alt+R`): every asset the game has, with search and a filter for models, textures
@@ -456,8 +458,10 @@ until the Stage has shown the game, its picture is the last build's, dimmed.
 is never touched, and **Back to the current game** or the newest picture returns) and shows it in the right panel's **Build** tab, which lists how many checks pass and how many to look at, the few that matter most as plain lines, each something a player would hit (does it start, does it play without errors, does every control work, does Retry start a clean run, does the HUD fit the screen, does it hold its frame rate (with the draw calls and triangles that cost it), does it fit a phone held upright and a widescreen monitor (and how much it downloads to start), and whether the play bot has proven it can be won) with every other measurement, each in a plain sentence, under **Other measurements**, what changed in your agent's words (with the files it changed,
 which open the diff), its recordings, and in the **⋯** beside the build's name:
 
-- **Undo this build** on the latest turn, which puts back the build the turn started from. After an undo,
-  **Redo** puts the turn's change back.
+- **Undo this build** on any build, which takes that build's change out of the game and keeps every
+  build after it. The undo is a build of its own; undoing it is **Redo**. When a later build
+  changed the same lines, nothing moves and Kurambit says which files: go back to the build before
+  it instead, or ask your agent to take the change out.
 - **Go back** on an older build, which puts it in the game folder: the engine project, `art/`,
   `ASSETS.md` and the play bot in `.studio/bot` return to that build, and notes and saved media
   stay as they are. What the folder held is saved as a build first, so going back never discards work, and
@@ -479,7 +483,7 @@ its checks, which open its **Build** tab; the files it changed, which open the d
 
 Undo changes the game's files, not the chat: the conversation stays as it is, so your agent still
 knows what it tried, and it sees from the files that you undid it. Undo, Redo and going back wait
-for the agent's turn to end. The chat's own **Edit from here**
+for another chat's turn in the game to end. The chat's own **Edit from here**
 still rewinds the conversation itself.
 
 **Keys.** `mod+Alt+Z` undoes the latest turn's change and `mod+Alt+Shift+Z` redoes it; `mod+Alt+[`
@@ -494,8 +498,8 @@ ways** in the picker under the box (2 and 4 are in the same picker; `mod+Alt+W`,
 message 3 ways** in the command palette) to send your next message that many ways at once. Each version works in its own copy of the game with a session of
 its own and takes a different approach, so it costs that many times the tokens. The Stage lists
 them as **Version 1**, **2** and **3** with each one's approach and checks; choose one to play it
-and **Keep version 2** to put it in the game folder. Undo takes it back, and the others stay in the
-builds list, where **Go back** brings one back. It sends text only, and not while Keep going is on.
+and **Keep version 2** to bring it into the game: builds another chat landed since the try stay.
+Undo takes it back, and the other versions' copies go, while their builds stay in the builds list. It sends text only, and not while Keep going is on.
 A version a restart cut off keeps what it had built.
 
 **Facts** are what Kurambit measured by playing the build, only what you would act on: whether
@@ -513,6 +517,27 @@ Opening or playing a build that was never measured measures it, one build at a t
 three.js game measures each turn's build in the background when the turn ends. A fact Kurambit
 could not measure says **Not measured** and why, and never counts as a result: if a tool failed,
 **Measure again** tries once more. Your agent sees the same builds and facts.
+
+## Working in several chats at once
+
+A game can have many chats, and the game folder takes one chat's turn at a time. When you send a
+message while another chat works in the game, your turn waits in its chat, saying which chat it
+waits for, and starts by itself when that turn ends. **Run in a copy** on the waiting message runs
+it now instead, in a copy of the game's newest build.
+
+A chat in a copy stays there: its later turns work in the copy, its Stage plays the copy, and
+nothing it does reaches the game until you **Bring it in**. Bring in merges the copy's work with
+everything the game gained meanwhile, checks that the result still boots and plays your saved
+plays the same, and lands it as one build that Undo takes out again. When the game and the copy
+changed the same lines, nothing lands: the copy holds both sides for its agent (or you) to settle,
+and for art, sound and models you keep the game's file or the copy's. A result that would stop
+booting or change how a saved play ends waits for **Bring in anyway**. **Update** brings the game's
+newer builds into the copy; **Throw away** removes the copy and keeps its work, so Bring in still
+takes it. Keep going runs only in the game.
+
+Your agent can do the same: it brings in its own copy or one it delegated work to, and updates
+its copy. A chat's decisions are the game's, wherever the chat works, and every build that lands
+is also a commit on the game's `kurambit/history` branch, for `git log`.
 
 ## Keep a video or image
 
