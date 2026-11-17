@@ -596,7 +596,9 @@ const make = Effect.gen(function* () {
       if (shell.worktreePath !== null) return { message: "This chat already works in a copy." };
       const g = yield* gameOf(threadId);
       // The game's newest build, never a folder another chat is half way through writing.
-      const current = (yield* builds.current(threadId)).build;
+      // Read from the builds list, never under the game's operation lock: a check measuring the
+      // game holds that lock for minutes, and the person asked to start now.
+      const current = (yield* builds.list(threadId, { home: true, limit: 1 })).current;
       const seated =
         current ??
         (yield* checkpoints

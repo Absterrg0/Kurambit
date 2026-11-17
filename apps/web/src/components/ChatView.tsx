@@ -7514,7 +7514,7 @@ export default function ChatView(props: ChatViewProps) {
           ? {
               onRunInCopy: () => copyActions.runInCopy(activeThreadRef),
               runInCopyShortcutLabel: shortcutLabelForCommand(keybindings, "game.runInCopy", {
-                context: { terminalFocus: false },
+                context: { terminalFocus: false, gameThread: true },
               }),
             }
           : {})}

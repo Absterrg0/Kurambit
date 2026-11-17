@@ -713,17 +713,23 @@ function BuildThumb({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button
-              size="icon-xs"
-              variant="overlay"
-              aria-label={`Undo ${buildName(build)}`}
-              disabled={undoing}
-              onClick={onUndo}
-              className="absolute top-1 left-1 z-20 opacity-0 group-hover/undo:opacity-100 focus-visible:opacity-100 disabled:opacity-100"
+            <span
+              className={cn(
+                "absolute top-1 left-1 z-20 flex opacity-0 group-hover/undo:opacity-100 has-focus-visible:opacity-100",
+                undoing && "opacity-100",
+              )}
             />
           }
         >
-          <Undo2Icon aria-hidden="true" />
+          <Button
+            size="icon-xs"
+            variant="overlay"
+            aria-label={`Undo ${buildName(build)}`}
+            disabled={undoing}
+            onClick={onUndo}
+          >
+            <Undo2Icon aria-hidden="true" />
+          </Button>
         </TooltipTrigger>
         <TooltipPopup side="top" className="max-w-xs">
           {`Undo ${buildName(build)}: take its change out, later builds stay`}

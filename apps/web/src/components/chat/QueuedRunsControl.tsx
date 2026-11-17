@@ -483,7 +483,7 @@ export function QueuedRunsControl({
                               }
                             >
                               <CopyIcon />
-                              Run in a copy
+                              {movingToCopy ? "Starting in a copy…" : "Run in a copy"}
                             </TooltipTrigger>
                             <TooltipPopup>
                               <TooltipLabel shortcut={props.runInCopyShortcutLabel ?? null}>
