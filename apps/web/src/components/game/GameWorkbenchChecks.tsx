@@ -673,7 +673,15 @@ function CheckBlock({ check, ...evidence }: Evidence & { check: GameCheck }) {
       <Workbench.Row
         mark={<CheckMark check={check} />}
         name={check.sentence}
-        reading={check.value}
+        // A frame rate not measured reads its draw counts, which are the fields under it.
+        reading={
+          check.id === "performance" &&
+          evidence.facts.performance.status === "measured" &&
+          evidence.facts.performance.value.fps === null &&
+          hasPerformanceProof(evidence.facts)
+            ? null
+            : check.value
+        }
       />
       {shows ? <CheckEvidence check={check} {...evidence} /> : null}
     </div>
@@ -727,8 +735,11 @@ function EvidenceBlock({ children }: { children: ReactNode }) {
 /** The most problem lines shown before the rest are one click away. */
 const PROBLEM_LINES = 3;
 
-/** Lines a check found, each a message and, quieter, where it happened. */
-function ProblemLines({ lines }: { lines: ReadonlyArray<string> }) {
+/**
+ * Lines a check found, each a message and, quieter, where it happened. An error's message is in
+ * the code face; a finding (a HUD off screen) is a sentence.
+ */
+function ProblemLines({ lines, code = false }: { lines: ReadonlyArray<string>; code?: boolean }) {
   const [all, setAll] = useState(false);
   if (lines.length === 0) return null;
   const shown = all ? lines : lines.slice(0, PROBLEM_LINES);
@@ -738,7 +749,12 @@ function ProblemLines({ lines }: { lines: ReadonlyArray<string> }) {
         const problem = problemText(line);
         return (
           <li key={line} className="flex flex-col">
-            <Text variant="caption" tone="default" mono render={<span className="break-words" />}>
+            <Text
+              variant={code ? "caption" : "meta"}
+              tone="default"
+              mono={code}
+              render={<span className="break-words" />}
+            >
               {problem.message}
             </Text>
             {problem.where === null ? null : (
@@ -772,7 +788,8 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
             <ScreensEvidence threadRef={threadRef} root={root} facts={facts} />
           )}
           <ProblemLines lines={qaLines(facts, "screens")} />
-          {recordings}
+          {/* Its frames are the thumbnails above: no second way to open them. */}
+          {root !== null && hasScreenFrames(facts) ? null : recordings}
         </EvidenceBlock>
       );
     case "performance":
@@ -821,7 +838,7 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
             : qaLines(facts, check.id);
       return (
         <EvidenceBlock>
-          <ProblemLines lines={lines} />
+          <ProblemLines lines={lines} code={check.id === "boots" || check.id === "errors"} />
           {recordings}
         </EvidenceBlock>
       );
@@ -905,7 +922,7 @@ function EvidenceButtons({
 /** Why a build's checks could not be read when the build itself does not start. */
 const DID_NOT_START = "the game did not start, so the bots could not play it";
 
-/** Checks not measured, one row per reason, the reason on hover. */
+/** Checks not measured, as one muted line: their names, and each one's reason on hover. */
 function NotMeasured({
   checks,
   note,
@@ -918,49 +935,47 @@ function NotMeasured({
     (check) =>
       check.id === "boots" && check.reading._tag === "measured" && check.reading.tone === "bad",
   );
-  const folded = new Map<string, Array<GameCheck>>();
-  for (const check of checks)
-    if (check.reading._tag === "not-measured") {
-      const why = startFailed ? DID_NOT_START : notMeasuredWhy(check.reading);
-      folded.set(why, [...(folded.get(why) ?? []), check]);
-    }
-  return [...folded].map(([why, group]) => {
-    const names = group.map((check) => check.sentence);
-    const notes = group.map(note).filter((line) => line !== null);
-    const said =
-      why === DID_NOT_START
-        ? `${names.length} not measured: it did not start`
-        : names.length > 2
-          ? `${names.length} not measured`
-          : names.join(" · ");
-    return (
-      <Workbench.Row
-        key={why}
-        mark={<MinusIcon className="text-dim-foreground" aria-hidden="true" />}
-        muted
-        name={
-          <Tooltip>
-            <TooltipTrigger render={<span />}>
-              {said}
-              <span className="sr-only"> (not measured)</span>
-            </TooltipTrigger>
-            <TooltipPopup side="left" className="max-w-sm">
-              <span className="flex flex-col gap-1">
-                {names.length > 2 ? <span>{names.join(", ")}.</span> : null}
-                <span>
-                  Not measured: {why}
-                  {/[.!?]$/.test(why) ? "" : "."}
-                </span>
-                {notes.map((line) => (
-                  <span key={line}>{line}</span>
-                ))}
-              </span>
-            </TooltipPopup>
-          </Tooltip>
-        }
-      />
-    );
-  });
+  const unread = checks.flatMap((check) =>
+    check.reading._tag === "not-measured"
+      ? [{ check, why: startFailed ? DID_NOT_START : notMeasuredWhy(check.reading) }]
+      : [],
+  );
+  if (unread.length === 0) return null;
+  const notes = unread.map(({ check }) => note(check)).filter((line) => line !== null);
+  const said = startFailed
+    ? `${unread.length} not measured: it did not start`
+    : unread.map(({ check }) => check.sentence).join(" · ");
+  const sentence = (text: string) => `${text}${/[.!?]$/.test(text) ? "" : "."}`;
+  return (
+    <Workbench.Row
+      mark={<MinusIcon className="text-dim-foreground" aria-hidden="true" />}
+      muted
+      name={
+        <Tooltip>
+          <TooltipTrigger render={<span />}>
+            {said}
+            <span className="sr-only"> (not measured)</span>
+          </TooltipTrigger>
+          <TooltipPopup side="left" className="max-w-sm">
+            <span className="flex flex-col gap-1">
+              {startFailed ? (
+                <span>Not measured: {sentence(DID_NOT_START)}</span>
+              ) : (
+                unread.map(({ check, why }) => (
+                  <span key={check.id}>
+                    {check.sentence}: {sentence(why)}
+                  </span>
+                ))
+              )}
+              {notes.map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+            </span>
+          </TooltipPopup>
+        </Tooltip>
+      }
+    />
+  );
 }
 
 /** The rows' own shape while they are read, so nothing under them moves when they land. */
