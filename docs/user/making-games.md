@@ -90,9 +90,9 @@ To continue a game, choose its card under **Your games** or its row in the sideb
 game** (on the home screen or in the command palette) and pick a folder that contains `game.json`.
 A game opens on its main chat: the first chat it was made in, or the next oldest if you archive that
 one. The **Chats** arrow on the game's sidebar row lists all its chats, the open one marked, and
-starts a **New chat**, which opens the game's screen with an empty chat: the box sits right under
-the game, with your agent's latest suggestions under it to pick from. A game keeps one empty chat,
-so asking again opens that one.
+starts a **New chat**, which opens the game's screen with an empty chat: the game fills the screen
+above the box, which offers your agent's latest suggestion (Tab takes it), and the game settles into
+the column once you send. A game keeps one empty chat, so asking again opens that one.
 
 ## Style
 

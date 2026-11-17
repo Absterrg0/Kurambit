@@ -242,6 +242,46 @@ const gameColumnFit = (
   return { width: Math.floor(height / ratio), height };
 };
 
+/** The 12px between the Stage's bar and what is under it (its own spacer row). */
+const BAR_GAP = 12;
+/** The hero's side margin: the column's edges are the game's own, not the chat lane's 48px. */
+const HERO_GUTTER = 24;
+/** The top bar's one line of text: what of its height is not empty. */
+const HEADER_LINE = 14;
+
+/**
+ * The Stage's size and place. A chat with messages shares the column (gameColumnFit). An empty
+ * chat makes the game the hero, as Home does: as wide as the centre allows inside the gutters and
+ * as tall as all but the composer's real height, with the game and its bar centred above the
+ * composer when the width binds it (`pad`, above the game). `column` is the chat's lane either
+ * way, so the composer stays where it sits in a chat with messages and never jumps.
+ */
+const stageFitOf = (
+  centre: HTMLElement,
+  taken: number,
+  ratio: number,
+  chatShare: number,
+  chatWidth: ChatWidth,
+  hero: boolean,
+) => {
+  const shared = gameColumnFit(centre, taken, ratio, chatShare, chatWidth);
+  if (!hero) return { ...shared, pad: 0, column: shared.width };
+  const overlay = centre.querySelector<HTMLElement>("[data-chat-composer-overlay]");
+  const room = overlay?.offsetHeight ?? 0;
+  const available = Math.max(0, centre.clientHeight - taken - room);
+  const height = Math.floor(Math.min((centre.clientWidth - 2 * HERO_GUTTER) * ratio, available));
+  // The free height split so the two empty bands look even: above, the top bar's empty lower
+  // half (its one line of text is centred) and `pad`; below, the rest of `available`, the bar's
+  // 12px and the composer's own top padding.
+  const topbar = centre.querySelector<HTMLElement>("[data-game-topbar]");
+  const above = topbar === null ? 0 : Math.max(0, (topbar.offsetHeight - HEADER_LINE) / 2);
+  const below =
+    BAR_GAP + (overlay === null ? 0 : Number.parseFloat(getComputedStyle(overlay).paddingTop) || 0);
+  const free = available - height;
+  const pad = Math.max(0, Math.min(free, Math.round((free + below - above) / 2)));
+  return { width: Math.floor(height / ratio), height, pad, column: shared.width };
+};
+
 /** The folder's own game frame, not a build copy's. */
 const isFolderGameFrame = (target: EventTarget | null) =>
   target instanceof HTMLIFrameElement && target.closest('[data-game-play-surface="true"]') !== null;
@@ -321,11 +361,11 @@ function NoWebGlCard() {
  * The Stage before its game is read: its top bar, a frame that says it is opening and its controls'
  * row, at the size a 16:9 game takes on this column, so nothing moves when the game is read.
  */
-export function GameStageLoading() {
+export function GameStageLoading({ hero = false }: { hero?: boolean } = {}) {
   const chatShare = useGameWorkspaceStore((state) => state.chatShare);
   const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const sectionRef = useRef<HTMLElement>(null);
-  const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
+  const [fit, setFit] = useState<{ width: number; height: number; marginTop: number } | null>(null);
   useLayoutEffect(() => {
     const section = sectionRef.current;
     const centre = section?.closest<HTMLElement>("[data-game-centre]");
@@ -335,10 +375,10 @@ export function GameStageLoading() {
       for (const child of section.children)
         if (child instanceof HTMLElement && child.dataset.stageFit === undefined)
           taken += child.offsetHeight;
-      const next = gameColumnFit(centre, taken, 9 / 16, chatShare, chatWidth);
-      setFit(next);
-      // The composer under it already ends where the game will.
-      centre.style.setProperty("--chat-content-max-width", `${next.width}px`);
+      const next = stageFitOf(centre, taken, 9 / 16, chatShare, chatWidth, hero);
+      setFit({ width: next.width, height: next.height, marginTop: next.pad });
+      // The composer under it already ends where the chat's lane will.
+      centre.style.setProperty("--chat-content-max-width", `${next.column}px`);
     };
     measure();
     const stop = observeResize([centre], measure);
@@ -346,7 +386,7 @@ export function GameStageLoading() {
       stop();
       centre.style.removeProperty("--chat-content-max-width");
     };
-  }, [chatShare, chatWidth]);
+  }, [chatShare, chatWidth, hero]);
   return (
     <section
       ref={sectionRef}
@@ -401,6 +441,8 @@ interface GameStageProps {
   hidden?: boolean;
   /** What the person asked of the turn now running, for the build slot's caption. */
   turnRequest?: string | null;
+  /** The chat has no messages: the game takes the column but for the composer. */
+  hero?: boolean;
 }
 
 function ThreadGameStage({
@@ -409,6 +451,7 @@ function ThreadGameStage({
   onAskAgent,
   hidden = false,
   turnRequest = null,
+  hero = false,
 }: GameStageProps) {
   const navigate = useNavigate();
   // Hidden by the person: the chat takes the column, and the game pauses and mutes.
@@ -640,7 +683,11 @@ function ThreadGameStage({
   // Whatever height is left over collects below the strip, above the composer.
   const viewportWidth = data?.viewport.width ?? 16;
   const viewportHeight = data?.viewport.height ?? 9;
-  const [stageFit, setStageFit] = useState<{ width: number; height: number } | null>(null);
+  const [stageFit, setStageFit] = useState<{
+    width: number;
+    height: number;
+    pad: number;
+  } | null>(null);
   // The column the game shares with its chat and composer: the fitted game's width.
   const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
@@ -678,39 +725,46 @@ function ThreadGameStage({
           child.dataset.stageSpacer === undefined
         )
           taken += child.offsetHeight;
-      const fit = gameColumnFit(
+      const fit = stageFitOf(
         centre,
         taken,
         viewportHeight / viewportWidth,
         chatShare,
         chatWidth,
+        hero,
       );
-      const next = { width: fit.width, height: fit.height };
+      const next = { width: fit.width, height: fit.height, pad: fit.pad };
       setStageFit((previous) =>
         previous !== null &&
         Math.abs(previous.width - next.width) <= 1 &&
-        Math.abs(previous.height - next.height) <= 1
+        Math.abs(previous.height - next.height) <= 1 &&
+        Math.abs(previous.pad - next.pad) <= 1
           ? previous
           : next,
       );
       setColumn((previous) =>
-        previous !== null && Math.abs(previous - next.width) <= 1 ? previous : next.width,
+        previous !== null && Math.abs(previous - fit.column) <= 1 ? previous : fit.column,
       );
     };
     measure();
     if (centre === null) return;
+    // The composer's own height is the hero's room: it is watched too.
+    const overlay = centre.querySelector<HTMLElement>("[data-chat-composer-overlay]");
     return observeResize(
       [
         centre,
+        ...(hero && overlay !== null ? [overlay] : []),
         ...[...section.children].filter(
           (child) => !(child instanceof HTMLElement && child.dataset.stageFit !== undefined),
         ),
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth]);
+  }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth, hero]);
   const stageFitStyle =
-    stageFit === null ? undefined : { height: stageFit.height, width: stageFit.width };
+    stageFit === null
+      ? undefined
+      : { height: stageFit.height, width: stageFit.width, marginTop: stageFit.pad };
   // The game, its controls, the chat and the composer are one column with one pair of edges:
   // the chat's lane takes the game's width.
   useLayoutEffect(() => {
@@ -916,7 +970,7 @@ function ThreadGameStage({
       </section>
     ) : query.error === null ? (
       // Read but not answered yet: the Stage's own shape, so nothing moves when it lands.
-      <GameStageLoading />
+      <GameStageLoading hero={hero} />
     ) : null;
   // Null for a game in an engine this version does not have, or one it no longer plays (made on
   // the older demo shell): it opens and plays nothing.
@@ -1392,7 +1446,9 @@ function ThreadGameStage({
           <div
             className="mx-auto flex w-full flex-col"
             style={
-              stageFit === null ? undefined : { height: stageFit.height, maxWidth: stageFit.width }
+              stageFit === null
+                ? undefined
+                : { height: stageFit.height, maxWidth: stageFit.width, marginTop: stageFit.pad }
             }
           >
             <GameBuildCompare
@@ -1426,11 +1482,7 @@ function ThreadGameStage({
                   )
                 : "hidden"
             }
-            style={
-              compare === null && stageFit !== null
-                ? { height: stageFit.height, width: stageFit.width }
-                : undefined
-            }
+            style={compare === null && stageFit !== null ? stageFitStyle : undefined}
           >
             <GameFrameBox viewport={data.viewport} gameName={gameName} playing>
               {playTarget.result._tag === "web" ? (
@@ -1553,7 +1605,8 @@ function ThreadGameStage({
       <div
         data-game-controls=""
         className={cn("mx-auto h-9 w-full shrink-0 items-center", collapsed ? "hidden" : "flex")}
-        style={{ maxWidth: column ?? undefined }}
+        // The bar spans the game, which is wider than the chat's lane while the chat is empty.
+        style={{ maxWidth: stageFit?.width ?? column ?? undefined }}
       >
         {collapsed ? null : (
           <GameStageBar
