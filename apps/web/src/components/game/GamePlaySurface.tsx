@@ -654,9 +654,7 @@ function StageStateCard({
           // Stage shows the agent at work: the Stage only says where the game will appear.
           <div className="flex max-w-md flex-col items-center gap-3">
             <Text variant="caption" tone="inherit" render={<p className="text-stage-muted" />}>
-              {phase.saving === true
-                ? "Build 1 is being saved and plays here in a moment."
-                : "The game plays here as soon as the agent's check of it passes."}
+              The game plays here as soon as your agent has it running.
             </Text>
           </div>
         ) : null}

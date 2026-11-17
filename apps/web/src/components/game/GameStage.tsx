@@ -628,12 +628,13 @@ function ThreadGameStage({
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
-  // Which live change the frame shows: held while this chat's turn runs and its build is saved,
-  // so the Stage switches games together with its label; the latest otherwise.
+  // Which live change the frame shows: held while this chat's turn runs, the latest once it ends.
+  // The game plays as soon as the turn ends; saving its build is the server's work, and the
+  // header names the build meanwhile (`historyLabel`).
   const liveRevision = liveToShow({
     latest: live.revision,
     shown: liveShown,
-    turnRunning: turnRunning || landing,
+    turnRunning,
   });
   if (liveRevision !== liveShown) setLiveShown(liveRevision);
   // Changes held back through a turn are its build: the remount that applies them is a new one.
@@ -1142,10 +1143,11 @@ function ThreadGameStage({
   } else if (computed !== frameFold) {
     setFrameFold(computed);
     if (computed.key !== frameFold?.key) {
-      setFrameBuild(folderBuild);
+      // A turn's build still being saved is not listed yet: the frame takes it once it is.
+      setFrameBuild(landing ? null : folderBuild);
       setHeldBuild(false);
     }
-  } else if (frameBuild === null && folderBuild !== null) setFrameBuild(folderBuild);
+  } else if (frameBuild === null && folderBuild !== null && !landing) setFrameBuild(folderBuild);
   const frame = leaving && frameFold !== null ? frameFold : computed;
   const frameKey = frame.key;
   // A reload clears what the old page threw; a later error sets it again.
@@ -1253,18 +1255,19 @@ function ThreadGameStage({
         </Button>
       </StageToast>
     ) : null;
-  // A live game's folder plays an empty page until the first build lands;
-  // the Stage says what is being made instead of showing a game that is not yet one.
+  // A live game's folder plays an empty page until the turn making the first build ends; the
+  // Stage says what is being made instead, from the moment the game opens, rather than opening,
+  // stopping and playing nothing on the way. Once the turn ends it plays as soon as it is served.
   const shownPhase: typeof phase =
     stageKind === "live" &&
     buildsRead &&
     !hasBuild &&
     !firstPlayable &&
-    (turnRunning || landing) &&
-    phase.kind === "playing"
+    (turnRunning
+      ? phase.kind === "playing" || phase.kind === "building" || phase.kind === "stopped"
+      : landing && (phase.kind === "building" || phase.kind === "stopped"))
       ? {
           kind: "first-build",
-          saving: !turnRunning,
           startedAt: turnStartedAt === null ? null : Date.parse(turnStartedAt),
         }
       : phase;
@@ -1280,7 +1283,12 @@ function ThreadGameStage({
       ? clockTime(keepGoingStatus.proposal.deadline)
       : null;
   // The header names what plays: a copy by its own name, else the folder's build.
-  const historyLabel = playTarget?.label ?? folderShort ?? (hasBuild ? "History" : null);
+  // While a turn's build is saved it already plays: the header names it by its number.
+  const historyLabel =
+    playTarget?.label ??
+    (landing ? `Build ${nextBuildNumber}` : null) ??
+    folderShort ??
+    (hasBuild ? "History" : null);
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking
