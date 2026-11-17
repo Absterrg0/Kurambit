@@ -6972,8 +6972,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     skills={selectedProviderSkills}
                     containerClassName={cn((isComposerResting || gameThread) && "min-w-0 flex-1")}
                     className={cn(
-                      // One line centred on the 32px Send pill.
-                      gameThread && "min-h-8 py-1.75",
+                      // One line centred on the 32px Send pill at any font size: the padding is
+                      // what the line box leaves of 32px, with no outset margin to offset it.
+                      gameThread && "m-0 min-h-8 px-0 py-line-8",
                       showMobilePendingAnswerActions && "max-sm:pb-12",
                       isComposerResting &&
                         "my-0 max-h-8 min-h-8 overflow-hidden py-0 whitespace-pre! leading-8",
@@ -6984,7 +6985,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         "flex items-center overflow-hidden whitespace-nowrap leading-8",
                       // A game's composer line is words to read (what to do here, or the agent's
                       // suggestion), not a hint: secondary text, not placeholder grey, on one line.
-                      gameThread && "truncate text-muted-foreground",
+                      gameThread && "truncate py-line-8 text-muted-foreground",
                     )}
                     onChange={onPromptChangeStable}
                     onVisibleSelectionChange={expandComposerForEditorChangeStable}

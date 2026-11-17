@@ -1297,6 +1297,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
     var(--surface-fill) border-box;
   box-shadow: var(--surface-shadow);
 }
+/* Pads a box so one line of its text sits centred in 32px at any font size: the composer's line
+   beside its 32px Send button. */
+@utility py-line-8 {
+  padding-block: calc((--spacing(8) - 1lh) / 2);
+}
 /* An inspector's value field, the way Figma's and Spline's panels draw one: a flat fill with
    no rim at rest, a rim on hover, and surface-focus's ring while typing. */
 @utility surface-field {
