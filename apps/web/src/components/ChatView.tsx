@@ -8306,7 +8306,10 @@ export default function ChatView(props: ChatViewProps) {
                   : gameChatEmpty
                     ? // 12px here and the Stage's own 12px under its bar: 24px to the composer.
                       "pointer-events-none absolute inset-x-0 top-0 z-20 pt-3"
-                    : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+                    : gameLayout
+                      ? // A game's chat ends at its composer: never a line showing under it.
+                        "pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-background pt-1.5 sm:pt-2"
+                      : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
               }
             >
               {composerLane}
