@@ -313,10 +313,11 @@ The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in t
 which also opens each section directly). The same key or the header's Workbench button closes it.
 Drag its edge to resize it. Its three sections:
 
-- **Tune**: the things the game names that have values to tune, by kind, and under them the picked
-  thing's values, such as its speed, jump height, timers and counts. Pointing at a thing on the
-  paused game picks it too. Click a value's field to type, or drag the field or its label sideways;
-  the game changes at once, and the bar under the field shows where the value sits in its range.
+- **Tune**: one section for each thing the game names with values to tune, grouped by kind, with
+  its values, such as its speed, jump height, timers and counts. The filter at the top finds a
+  thing or a value by name. Pointing at a thing on the paused game brings its section into view.
+  Click a value's field to type, or drag the field or its label sideways; the game changes at once,
+  and the fill inside the field shows where the value sits in its range.
   Values are saved into the game as you let go, and a tuning session is one build Undo takes back;
   **Keep as a build** ends the session, so your next change starts another. **Put all back**
   returns every value to the game's own. If a game has nothing to tune, **Ask your agent to expose
@@ -327,9 +328,9 @@ Drag its edge to resize it. Its three sections:
   fonts show a line set in them. An asset the last measured play never used is dimmed. A model
   built from named parts (an island's cabin, dock and trees) is followed by its parts, each with
   its own picture. Open a model to inspect it: it turns as you drag it, and under it are its
-  parts, its **Transform** (scale, each axis behind the lock, and its turn), its **Materials**
-  (colour, glow, roughness, metalness, opacity, flat shading, its texture), its **Shadows** and its
-  tuned **Values**. A model file the game uses shows that thing's changes in its view too.
+  parts, its **Transform** (scale on each axis, together while the lock is on, its turn, and its
+  size), its **Materials** (colour and opacity, an eye to hide one, and glow, roughness, metalness,
+  flat shading and its texture behind **⋯**), its **Shadows** and its tuned **Values**. A model file the game uses shows that thing's changes in its view too.
   Double-click a part's name or a material's to rename it; an empty name gives back the game's
   own. Every change shows at once in the view and in the game, and saves as a build
   like Tune's values: **Keep as a build**, **Put all back**, and Undo work the same. **Bake into
