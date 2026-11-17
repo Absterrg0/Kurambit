@@ -616,6 +616,14 @@ function CheckRow({
 }) {
   const bad = check.reading._tag === "measured" && check.reading.tone === "bad";
   const [open, setOpen] = useState(bad);
+  if (!hasEvidence(facts, check))
+    return (
+      <Workbench.Row
+        mark={<CheckMark check={check} />}
+        name={check.sentence}
+        reading={check.value}
+      />
+    );
   return (
     <div className="flex flex-col">
       <button
@@ -643,6 +651,45 @@ function CheckRow({
     </div>
   );
 }
+
+/** Whether a check has anything to show when opened: a check with nothing does not open. */
+const hasEvidence = (facts: GameBuildFacts, check: GameCheck): boolean => {
+  switch (check.id) {
+    case "screens":
+      return (
+        (facts.screens.status === "measured" &&
+          facts.screens.value.sizes.some((size) => size.frame !== null)) ||
+        qaLines(facts, "screens").length > 0
+      );
+    case "performance":
+      return (
+        check.evidence.length > 0 ||
+        (facts.performance.status === "measured" &&
+          (facts.performance.value.series?.length ?? 0) >= 2)
+      );
+    case "controls":
+      return (
+        check.evidence.length > 0 ||
+        (facts.qa.status === "measured" && facts.qa.value.controls.length > 0)
+      );
+    case "saved-plays":
+      return facts.savedPlays.status === "measured" && facts.savedPlays.value.plays.length > 0;
+    case "skilled":
+      return (
+        check.evidence.length > 0 ||
+        (facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "") ||
+        (facts.savedPlays.status === "measured" && facts.savedPlays.value.plays.length > 0)
+      );
+    case "boots":
+      return (
+        check.evidence.length > 0 || (facts.boots.status === "measured" && !facts.boots.value.ok)
+      );
+    case "errors":
+      return check.evidence.length > 0 || errorLines(facts).length > 0;
+    default:
+      return check.evidence.length > 0 || qaLines(facts, check.id).length > 0;
+  }
+};
 
 /** Where a check's evidence sits: under its sentence, in the text column. */
 function EvidenceBlock({ children }: { children: ReactNode }) {
@@ -810,70 +857,56 @@ function ScreenFrames({
 
 const CHART_H = 56;
 
-/**
- * Frames per second through the play as one static line, the 1% low a dashed line across it, and
- * what a frame draws under it.
- */
+/** Frames per second through the play as one static line, the 1% low a dashed line across it. */
 function FrameRate({ facts }: { facts: GameBuildFacts }) {
   if (facts.performance.status !== "measured") return null;
   const perf = facts.performance.value;
   const series = perf.series ?? [];
-  const counts = [
-    perf.drawCalls === undefined ? null : `${perf.drawCalls.toLocaleString("en-US")} draw calls`,
-    perf.triangles === undefined ? null : `${perf.triangles.toLocaleString("en-US")} triangles`,
-    `${perf.width}×${perf.height}`,
-  ].filter((part) => part !== null);
+  if (series.length < 2) return null;
   const top = Math.max(60, ...series);
   const y = (fps: number) => CHART_H - 2 - (fps / top) * (CHART_H - 4);
   return (
-    <div className="flex flex-col gap-1">
-      {series.length < 2 ? null : (
-        <div className="flex flex-col gap-0.5">
-          <svg
-            viewBox={`0 0 ${series.length - 1} ${CHART_H}`}
-            preserveAspectRatio="none"
-            className="h-14 w-full overflow-visible"
-            role="img"
-            aria-label={`Frame rate through the play, ${Math.min(...series)} to ${Math.max(...series)} fps`}
-          >
-            <line
-              x1={0}
-              x2={series.length - 1}
-              y1={y(60)}
-              y2={y(60)}
-              className="stroke-border"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-            {perf.low1 === null ? null : (
-              <line
-                x1={0}
-                x2={series.length - 1}
-                y1={y(perf.low1)}
-                y2={y(perf.low1)}
-                className="stroke-warning"
-                strokeWidth={1}
-                strokeDasharray="3 3"
-                vectorEffect="non-scaling-stroke"
-              />
-            )}
-            <polyline
-              points={series.map((fps, i) => `${i},${y(fps).toFixed(1)}`).join(" ")}
-              fill="none"
-              className="stroke-foreground"
-              strokeWidth={1.5}
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          </svg>
-          <Text variant="caption" tone="muted" numeric>
-            {perf.fps === null ? "" : `${perf.fps} fps`}
-            {perf.low1 === null ? "" : ` · 1% low ${perf.low1}`}
-          </Text>
-        </div>
-      )}
+    <div className="flex flex-col gap-0.5">
+      <svg
+        viewBox={`0 0 ${series.length - 1} ${CHART_H}`}
+        preserveAspectRatio="none"
+        className="h-14 w-full overflow-visible"
+        role="img"
+        aria-label={`Frame rate through the play, ${Math.min(...series)} to ${Math.max(...series)} fps`}
+      >
+        <line
+          x1={0}
+          x2={series.length - 1}
+          y1={y(60)}
+          y2={y(60)}
+          className="stroke-border"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+        {perf.low1 === null ? null : (
+          <line
+            x1={0}
+            x2={series.length - 1}
+            y1={y(perf.low1)}
+            y2={y(perf.low1)}
+            className="stroke-warning"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        <polyline
+          points={series.map((fps, i) => `${i},${y(fps).toFixed(1)}`).join(" ")}
+          fill="none"
+          className="stroke-foreground"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
       <Text variant="caption" tone="muted" numeric>
-        {counts.join(" · ")}
+        {perf.fps === null ? "" : `${perf.fps} fps`}
+        {perf.low1 === null ? "" : ` · 1% low ${perf.low1}`}
       </Text>
     </div>
   );
