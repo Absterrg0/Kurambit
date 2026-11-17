@@ -73,7 +73,7 @@ const dependencies = Layer.mergeAll(
   Layer.mock(Auth.ProviderAuthService)({}),
   Layer.mock(Config.ServerConfig)({ worktreesDir: "/synthetic-worktrees" }),
   Settings.layerTest(),
-  Layer.mock(Tries.GameTries)({}),
+  Layer.mock(Tries.GameTries)({ copyNote: () => Effect.succeed(null) }),
   Layer.mock(Projection.ProjectionStoreV2)({
     getThreadProjection: () =>
       Effect.sync(() => {
