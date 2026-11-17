@@ -15,6 +15,7 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuRadioItemIndicator,
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
@@ -33,6 +34,16 @@ const PROFILES: ReadonlyArray<{ readonly profile: GameRunProfile; readonly label
 ];
 const isProfile = (value: unknown): value is GameRunProfile =>
   PROFILES.some((entry) => entry.profile === value);
+
+/** A choice's row: its name, and the check on the chosen one (its fill alone matches hover). */
+function Choice({ children }: { children: string }) {
+  return (
+    <span className="flex w-full min-w-0 items-center gap-2">
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      <MenuRadioItemIndicator />
+    </span>
+  );
+}
 
 /**
  * What a game chat's Send does: one turn, the same message tried several ways at once, or Keep
@@ -102,36 +113,37 @@ export function GameRunPicker({
               });
           }}
         >
-          <MenuRadioItem value="once">Once</MenuRadioItem>
+          <MenuRadioItem value="once">
+            <Choice>Once</Choice>
+          </MenuRadioItem>
           <MenuRadioItem value="ways" disabled={threadKey === null}>
-            {`Try ${ways ?? 3} ways`}
+            <Choice>{`Try ${ways ?? 3} ways`}</Choice>
           </MenuRadioItem>
           <MenuRadioItem
             value="keep-going"
             disabled={threadKey === null || keepGoingBlocked !== null}
             {...(keepGoingBlocked === null ? {} : { title: keepGoingBlocked })}
           >
-            Keep going
+            <Choice>Keep going</Choice>
           </MenuRadioItem>
         </MenuRadioGroup>
-        {pick === "ways" && threadKey !== null ? (
-          <>
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuGroupLabel>Ways</MenuGroupLabel>
-              <MenuRadioGroup
-                value={String(ways)}
-                onValueChange={(value) => pickRun(threadKey, { kind: "ways", ways: Number(value) })}
-              >
-                {WAYS.map((each) => (
-                  <MenuRadioItem key={each} value={String(each)}>
-                    {each}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </>
-        ) : null}
+        {/* How many ways, always in view: a number picks Try too; checked only while Try is. */}
+        <MenuSeparator />
+        <MenuGroup>
+          <MenuGroupLabel>Ways to try</MenuGroupLabel>
+          <MenuRadioGroup
+            value={pick === "ways" ? String(ways) : ""}
+            onValueChange={(value) => {
+              if (threadKey !== null) pickRun(threadKey, { kind: "ways", ways: Number(value) });
+            }}
+          >
+            {WAYS.map((each) => (
+              <MenuRadioItem key={each} value={String(each)} disabled={threadKey === null}>
+                <Choice>{String(each)}</Choice>
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
         {pick === "keep-going" && threadKey !== null ? (
           <>
             <MenuSeparator />
@@ -148,7 +160,7 @@ export function GameRunPicker({
               >
                 {PROFILES.map((entry) => (
                   <MenuRadioItem key={entry.profile} value={entry.profile}>
-                    {entry.label}
+                    <Choice>{entry.label}</Choice>
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
@@ -168,7 +180,7 @@ export function GameRunPicker({
                     value={budgetValue(option.minutes)}
                     disabled={view.budgetDisabled}
                   >
-                    {option.label}
+                    <Choice>{option.label}</Choice>
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
