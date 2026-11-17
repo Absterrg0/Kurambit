@@ -731,7 +731,8 @@ export const makeThreeBackend = (
                   const session = await openWebPlaySession({
                     browser,
                     url: new URL(input.gameplayScene || "index.html", server.url).href,
-                    ...THREE_VIEWPORT,
+                    // At the shape it was played at: its mouse aim lands where it did.
+                    ...(input.play.viewport ?? THREE_VIEWPORT),
                     bootTimeoutMs: BOOT_TIMEOUT_MS,
                     signal,
                   });

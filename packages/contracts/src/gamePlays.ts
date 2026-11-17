@@ -92,6 +92,16 @@ export const GamePlay = Schema.Struct({
   /** The game's named actions the run pressed: a build without one of them cannot replay it. */
   actions: Schema.optionalKey(Schema.Array(Code).check(Schema.isMaxLength(64))),
   /**
+   * The game's CSS size as the run began: mouse aim and what the camera saw depend on its shape,
+   * so a replay plays at it. Absent on plays kept before it was: the harness's own size.
+   */
+  viewport: Schema.optionalKey(
+    Schema.Struct({
+      width: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 3840 })),
+      height: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 3840 })),
+    }),
+  ),
+  /**
    * The person rewound an earlier run of this seed to this second and went on from there: a new
    * run whose play up to that second is the earlier one's.
    */

@@ -87,6 +87,7 @@ import {
 import { colourHex } from "./GameColourField";
 import { GameDecisionsSection, SwatchText } from "./GameDecisions";
 import { clockLabel } from "./gameStageRewind";
+import { sameShape, stageDeviceAt } from "./gameStageDevice";
 import { clearStageConsole, type StageConsoleLine, useStageConsole } from "./gameStageWatch";
 import { Workbench } from "./GameWorkbenchParts";
 import { valueLabel } from "./GameInspector";
@@ -1037,6 +1038,9 @@ function SavedPlays({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: G
       setNote(String(squashAtomCommandFailure(result)));
       return;
     }
+    // At the shape it was played at, as mouse aim depends on it: the responsive view, when the
+    // Stage's frame has another shape.
+    await showStageAt(scopedThreadKey(threadRef), result.value.viewport);
     // From its start at its own pace, to its end, where the Stage holds it.
     const replayed = await replayStageRun({
       play: result.value,
@@ -1126,6 +1130,25 @@ function SavedPlays({ threadRef, facts }: { threadRef: ScopedThreadRef; facts: G
     </div>
   );
 }
+
+/** The game frame of the Stage on screen, in the folder's surface. */
+const STAGE_FRAME =
+  'section[data-game-stage]:not([aria-hidden="true"]) [data-game-play-surface="true"] iframe[data-game-frame]';
+
+/**
+ * Puts the Stage's game at a play's shape before it replays: the responsive view at its size
+ * when the frame on screen has another shape, then a moment for the game's resize to land.
+ */
+const showStageAt = async (
+  threadKey: string,
+  shape: { readonly width: number; readonly height: number } | undefined,
+) => {
+  const frame = document.querySelector<HTMLIFrameElement>(STAGE_FRAME);
+  if (shape === undefined || frame === null || frame.clientWidth === 0) return;
+  if (sameShape({ width: frame.clientWidth, height: frame.clientHeight }, shape)) return;
+  useGameWorkspaceStore.getState().setStageDevice(threadKey, stageDeviceAt(shape));
+  await new Promise((resolve) => window.setTimeout(resolve, 150));
+};
 
 // ─── What changed ──────────────────────────────────────────────────────────────
 
