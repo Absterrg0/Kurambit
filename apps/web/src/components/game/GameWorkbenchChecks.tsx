@@ -5,6 +5,7 @@ import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
   gameChecksView,
+  gameLookId,
   ownsUndo,
   playOutcomeWords,
   type GameBuild,
@@ -42,7 +43,6 @@ import {
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
-import { useRightPanelStore } from "../../rightPanelStore";
 import {
   useQuietThreadShell,
   useThreadCheckpointSummaries,
@@ -51,7 +51,6 @@ import {
 import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
@@ -73,8 +72,9 @@ import { replayStageRun, useThreadStageBridge } from "./gameStageBridge";
 import { turnStripRestore } from "./gameTurnBuild.logic";
 import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
+import { GameChecksBoard, openEvidence } from "./GameChecksBoard";
+import { colourHex } from "./GameColourField";
 import { GameDecisionsSection } from "./GameDecisions";
-import { GameKeyArt } from "./GameKeyArt";
 import { clockLabel } from "./gameStageRewind";
 import { clearStageConsole, type StageConsoleLine, useStageConsole } from "./gameStageWatch";
 import { Workbench } from "./GameWorkbenchParts";
@@ -204,6 +204,9 @@ function BuildChecksBody({
         list={list}
         onOpenTurnDiff={onOpenTurnDiff}
       />
+      {facts.shown === null || facts.shown.state === "never" ? null : (
+        <GameChecksBoard threadRef={threadRef} build={build} list={list} facts={facts.shown} />
+      )}
       <BuildChecks threadRef={threadRef} build={build} facts={facts} />
       <ChecksConsole threadKey={scopedThreadKey(threadRef)} />
       <GameDecisionsSection threadRef={threadRef} />
@@ -655,18 +658,11 @@ function CheckRow({
 /** Whether a check has anything to show when opened: a check with nothing does not open. */
 const hasEvidence = (facts: GameBuildFacts, check: GameCheck): boolean => {
   switch (check.id) {
+    // Their frames and chart stand above the checks; a row opens to anything beyond them.
     case "screens":
-      return (
-        (facts.screens.status === "measured" &&
-          facts.screens.value.sizes.some((size) => size.frame !== null)) ||
-        qaLines(facts, "screens").length > 0
-      );
+      return qaLines(facts, "screens").length > 0;
     case "performance":
-      return (
-        check.evidence.length > 0 ||
-        (facts.performance.status === "measured" &&
-          (facts.performance.value.series?.length ?? 0) >= 2)
-      );
+      return check.evidence.length > 0;
     case "controls":
       return (
         check.evidence.length > 0 ||
@@ -736,17 +732,11 @@ function CheckEvidence({
     case "screens":
       return (
         <EvidenceBlock>
-          <ScreenFrames threadRef={threadRef} facts={facts} proves={proves} />
           <ProblemLines lines={qaLines(facts, "screens")} />
         </EvidenceBlock>
       );
     case "performance":
-      return (
-        <EvidenceBlock>
-          <FrameRate facts={facts} />
-          {recordings}
-        </EvidenceBlock>
-      );
+      return <EvidenceBlock>{recordings}</EvidenceBlock>;
     case "controls":
       return (
         <EvidenceBlock>
@@ -802,115 +792,6 @@ const errorLines = (facts: GameBuildFacts): ReadonlyArray<string> => {
   );
   return [...broke, ...qaLines(facts, "errors")];
 };
-
-/** The phone and widescreen frames the check kept, side by side; each opens large. */
-function ScreenFrames({
-  threadRef,
-  facts,
-  proves,
-}: {
-  threadRef: ScopedThreadRef;
-  facts: GameBuildFacts;
-  proves: string;
-}) {
-  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
-  if (facts.screens.status !== "measured" || root === null) return null;
-  const sizes = facts.screens.value.sizes.filter((size) => size.frame !== null);
-  if (sizes.length === 0) return null;
-  return (
-    <div className="flex items-end gap-3">
-      {sizes.map((size) => {
-        const frame = size.frame!;
-        const label = `${size.name === "phone" ? "Phone" : "Widescreen"} ${size.width}×${size.height}`;
-        return (
-          <button
-            key={size.name}
-            type="button"
-            aria-label={`Open ${label}`}
-            onClick={() =>
-              openEvidence(threadRef, root, { kind: "frame", label, path: frame }, proves)
-            }
-            className="flex min-w-0 cursor-pointer flex-col gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-          >
-            <span
-              className={cn(
-                "relative block h-24 overflow-hidden rounded-md bg-muted",
-                size.name === "phone" ? "w-11" : "w-56",
-              )}
-            >
-              <GameKeyArt
-                environmentId={threadRef.environmentId}
-                root={root}
-                path={frame}
-                className="object-contain"
-              />
-            </span>
-            <Text variant="caption" tone="muted" numeric truncate>
-              {label}
-            </Text>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-const CHART_H = 56;
-
-/** Frames per second through the play as one static line, the 1% low a dashed line across it. */
-function FrameRate({ facts }: { facts: GameBuildFacts }) {
-  if (facts.performance.status !== "measured") return null;
-  const perf = facts.performance.value;
-  const series = perf.series ?? [];
-  if (series.length < 2) return null;
-  const top = Math.max(60, ...series);
-  const y = (fps: number) => CHART_H - 2 - (fps / top) * (CHART_H - 4);
-  return (
-    <div className="flex flex-col gap-0.5">
-      <svg
-        viewBox={`0 0 ${series.length - 1} ${CHART_H}`}
-        preserveAspectRatio="none"
-        className="h-14 w-full overflow-visible"
-        role="img"
-        aria-label={`Frame rate through the play, ${Math.min(...series)} to ${Math.max(...series)} fps`}
-      >
-        <line
-          x1={0}
-          x2={series.length - 1}
-          y1={y(60)}
-          y2={y(60)}
-          className="stroke-border"
-          strokeWidth={1}
-          vectorEffect="non-scaling-stroke"
-        />
-        {perf.low1 === null ? null : (
-          <line
-            x1={0}
-            x2={series.length - 1}
-            y1={y(perf.low1)}
-            y2={y(perf.low1)}
-            className="stroke-warning"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
-        <polyline
-          points={series.map((fps, i) => `${i},${y(fps).toFixed(1)}`).join(" ")}
-          fill="none"
-          className="stroke-foreground"
-          strokeWidth={1.5}
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      <Text variant="caption" tone="muted" numeric>
-        {perf.fps === null ? "" : `${perf.fps} fps`}
-        {perf.low1 === null ? "" : ` · 1% low ${perf.low1}`}
-      </Text>
-    </div>
-  );
-}
 
 /** The game's controls as the QA play pressed them: which answered, and how. */
 function ControlsFound({ facts }: { facts: GameBuildFacts }) {
@@ -970,48 +851,7 @@ const problemText = (line: string): { message: string; where: string | null } =>
   return { message: rest === "" ? line : rest, where };
 };
 
-type RunEvidence = GameFactView["evidence"][number];
 const EVIDENCE_ICON = { video: FileVideoIcon, frame: ImageIcon, log: ScrollTextIcon } as const;
-
-/**
- * A recording or frame opens in a lightbox sized to it, with the check it proves; its files are
- * one explicit "Show files" away. A log is a file, so it opens as one.
- */
-function openEvidence(
-  threadRef: ScopedThreadRef,
-  root: string | null,
-  item: RunEvidence,
-  detail: string,
-) {
-  const showFiles = () => useRightPanelStore.getState().openFile(threadRef, item.path);
-  if (item.kind === "log" || root === null) {
-    showFiles();
-    return;
-  }
-  const kind = item.kind === "video" ? "video" : "image";
-  openExpandedImagePreview(scopedThreadKey(threadRef), {
-    index: 0,
-    images: [
-      {
-        src: null,
-        name: item.label,
-        ...(kind === "video" ? { type: "video" as const } : {}),
-        detail,
-        fileAction: "Show files",
-        actionsSource: {
-          kind,
-          name: item.label,
-          src: null,
-          asset: {
-            environmentId: threadRef.environmentId,
-            resource: { _tag: "draft-workspace-file", cwd: root, path: item.path },
-          },
-          onOpenFile: showFiles,
-        },
-      },
-    ],
-  });
-}
 
 /** The check's recordings, frames and logs, each a quiet button that opens it. */
 function EvidenceButtons({
@@ -1302,7 +1142,44 @@ const NO_THINGS: ReadonlyArray<GameThing> = [];
  * 7 → 9.5 m/s". A value first set in the tune file changed from the code's own, which the game
  * reports as the value's default.
  */
+const LOOK_PREFIX = gameLookId("");
+const LOOK_WORDS: Readonly<Record<string, string>> = {
+  color: "colour",
+  emissive: "glow colour",
+  emissiveIntensity: "glow",
+  flatShading: "flat shading",
+  scaleX: "scale x",
+  scaleY: "scale y",
+  scaleZ: "scale z",
+  castShadow: "casts shadows",
+  receiveShadow: "takes shadows",
+};
+/** A look edit as a person says it: "Cabin roof colour #3c4a5c → #b8322a". */
+const lookLine = (change: GameTuneChange & { readonly thing: string }) => {
+  const name = change.thing.slice(LOOK_PREFIX.length).split(" › ").at(-1) ?? "";
+  const slash = change.key.lastIndexOf("/");
+  const prop = change.key.slice(slash + 1);
+  const material =
+    slash === -1
+      ? ""
+      : change.key
+          .slice(0, slash)
+          .replace(/^\d+:/, "")
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .toLowerCase();
+  const said = [name, material, LOOK_WORDS[prop] ?? prop].filter((part) => part !== "").join(" ");
+  const shown = (raw: string | null) =>
+    raw !== null && (prop === "color" || prop === "emissive") && Number.isFinite(Number(raw))
+      ? colourHex(Number(raw))
+      : raw;
+  const from = shown(change.from);
+  const to = shown(change.to) ?? "the game's own";
+  return from === null ? `${said} set to ${to}` : `${said} ${from} → ${to}`;
+};
+
 const tuneLine = (change: GameTuneChange, things: ReadonlyArray<GameThing>) => {
+  if (change.thing?.startsWith(LOOK_PREFIX) === true)
+    return lookLine({ ...change, thing: change.thing });
   const thing =
     change.thing === null ? null : (things.find((each) => each.id === change.thing) ?? null);
   const value = thing?.values?.find((each) => each.key === change.key);
