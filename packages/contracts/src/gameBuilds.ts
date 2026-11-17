@@ -239,6 +239,11 @@ export const GameBuild = Schema.Struct({
    * is its `fix`th fix. Absent on a build of its own.
    */
   fix: Schema.optionalKey(PositiveInt),
+  /**
+   * On a chat in a copy's list only: true for the copy's own builds (numbered on from its seat),
+   * false for the game's builds up to the seat. Absent everywhere else.
+   */
+  inCopy: Schema.optionalKey(Schema.Boolean),
   summary: Schema.String,
   /** At most 8, most changed first. */
   files: Schema.Array(GameBuildFile),

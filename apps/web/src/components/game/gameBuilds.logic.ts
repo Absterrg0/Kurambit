@@ -35,6 +35,15 @@ const EDIT_WORDS = {
 } as const;
 
 export const buildName = (
+  build: Pick<GameBuild, "id" | "source" | "number"> & {
+    readonly fix?: number | undefined;
+    readonly inCopy?: boolean | undefined;
+  },
+): string =>
+  // A copy's list: its own builds, numbered on from its seat, after the game's up to the seat.
+  `${ownName(build)}${build.inCopy === true ? " · in this copy" : build.inCopy === false ? " · in the game" : ""}`;
+
+const ownName = (
   build: Pick<GameBuild, "id" | "source" | "number"> & { readonly fix?: number | undefined },
 ): string => {
   const source = build.source;

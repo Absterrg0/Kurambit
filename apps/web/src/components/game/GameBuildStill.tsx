@@ -3,6 +3,7 @@ import type { EnvironmentId, GameBuild, ScopedThreadRef } from "@kurambit/contra
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
+import { useProject, useQuietThreadShell } from "../../state/entities";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameKeyArt } from "./GameKeyArt";
 import { useBuildFrame } from "./gameStageBridge";
@@ -23,7 +24,7 @@ export function GameBuildStill({
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
-  build: Pick<GameBuild, "still"> & { readonly id?: string };
+  build: Pick<GameBuild, "still"> & { readonly id?: string; readonly inCopy?: boolean };
   /** What a picture-less build's title card says, in place of the game's name. */
   title?: string;
   className?: string;
@@ -31,7 +32,13 @@ export function GameBuildStill({
   mark?: GamePictureMark;
   children?: ReactNode;
 }) {
+  const shell = useQuietThreadShell(build.inCopy === false ? threadRef : null);
+  const project = useProject(
+    shell === null ? null : { environmentId: threadRef.environmentId, projectId: shell.projectId },
+  );
+  // A copy's list shows the game's builds too: their pictures are in the game's folder.
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
+  const pictureRoot = build.inCopy === false ? (project?.workspaceRoot ?? null) : root;
   // The Stage's frame, once a build has one, stays its picture this session: a picture never
   // swaps under the person when a measured play's frame arrives later.
   const frame = useBuildFrame(build.id ?? null);
@@ -47,7 +54,7 @@ export function GameBuildStill({
   return (
     <GamePicture
       environmentId={threadRef.environmentId}
-      root={root}
+      root={pictureRoot}
       path={build.still}
       gameName={gameName}
       title={title}

@@ -52,7 +52,7 @@ import {
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
-import { threadRefKey } from "../checkpointing/worktreeSeed.ts";
+import { threadRefKey, worktreeSeedRef } from "../checkpointing/worktreeSeed.ts";
 import { parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import { checkpointRefForGameRun, gameRunRefsFolder } from "../checkpointing/Utils.ts";
 import {
@@ -1301,6 +1301,64 @@ const make = Effect.gen(function* () {
       return run !== undefined && turnPending(run) ? run.id : null;
     }).pipe(Effect.orElseSucceed(() => null));
 
+  /** When a ref under the game's builds was last written (unix seconds), or null. */
+  const refTime = (root: string, ref: string) =>
+    checkpoints.listCheckpointRefs({ cwd: root, prefix: ref }).pipe(
+      Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.committedAt ?? null),
+      Effect.orElseSucceed(() => null),
+    );
+
+  /**
+   * A chat in a copy: the game's builds up to the copy's seat, then the copy's own turns since it
+   * was made or last brought in, numbered on from the seat. One numbering, never the game's later
+   * builds, its kept edits or another chat's versions. Null for a copy with no seat kept.
+   */
+  const copyRail = (threadId: ThreadId, g: Game, limit: number, before: string | undefined) =>
+    Effect.gen(function* () {
+      const seatedAt = yield* refTime(g.home, worktreeSeedRef(threadId));
+      if (seatedAt === null) return null;
+      const home: Game = { ...g, root: g.home };
+      // The seat's own build commits within the second its ref says.
+      const upTo = isoOfSeconds(seatedAt + 1);
+      const game = yield* allEntries(home, limit, before ?? upTo);
+      const gamePage = game.entries.filter((entry) => entry.at < upTo).slice(0, limit);
+      const gameRows = yield* rowsOf(home, gamePage, game.kept, yield* numbersOf(game, gamePage));
+      if (before !== undefined)
+        return {
+          rows: gameRows.builds.map((build) => ({ ...build, inCopy: false })),
+          measured: gameRows.measured,
+          next: game.more && gamePage.length > 0 ? gamePage.at(-1)!.at : null,
+        };
+      const copiesFolder = `${gameRunRefsFolder(NO_RUN)}copies/${threadRefKey(threadId)}`;
+      const since = Math.max(
+        (yield* refTime(g.home, `${copiesFolder}/in`)) ?? 0,
+        (yield* refTime(g.home, `${copiesFolder}/brought`)) ?? 0,
+      );
+      const copy = yield* allEntries(g, 50, undefined);
+      const own = copy.entries.filter(
+        (entry) =>
+          entry.source._tag === "turn" &&
+          entry.source.threadId === threadId &&
+          entry.at > isoOfSeconds(since),
+      );
+      const seatNumber = yield* game.numberedBefore(upTo);
+      const oldestFirst = own.toSorted((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+      const numbers = new Map(
+        oldestFirst.map(
+          (entry, index) => [entry.id, { number: seatNumber + index + 1, fix: null }] as const,
+        ),
+      );
+      const copyRows = yield* rowsOf(g, own, copy.kept, numbers);
+      return {
+        rows: [
+          ...copyRows.builds.map((build) => ({ ...build, inCopy: true })),
+          ...gameRows.builds.map((build) => ({ ...build, inCopy: false })),
+        ],
+        measured: new Map([...gameRows.measured, ...copyRows.measured]),
+        next: game.more && gamePage.length > 0 ? gamePage.at(-1)!.at : null,
+      };
+    });
+
   const list: GameBuilds["Service"]["list"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId, input.home === true);
@@ -1311,7 +1369,11 @@ const make = Effect.gen(function* () {
       const listed = yield* allEntries(g, limit, input.before);
       const { entries, kept, more } = listed;
       const page = entries.slice(0, limit);
-      const { builds, measured } = yield* rowsOf(g, page, kept, yield* numbersOf(listed, page));
+      const rail = g.root === g.home ? null : yield* copyRail(threadId, g, limit, input.before);
+      const { builds, measured } =
+        rail === null
+          ? yield* rowsOf(g, page, kept, yield* numbersOf(listed, page))
+          : { builds: rail.rows, measured: rail.measured };
       // The generation cards read the newest build whose asset use was measured.
       const latestUse =
         input.before === undefined
@@ -1331,7 +1393,7 @@ const make = Effect.gen(function* () {
         : pending;
       return {
         builds,
-        next: more && page.length > 0 ? page.at(-1)!.at : null,
+        next: rail !== null ? rail.next : more && page.length > 0 ? page.at(-1)!.at : null,
         current: shownAs(listed, current),
         folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
         restore,

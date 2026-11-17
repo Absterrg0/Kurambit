@@ -652,7 +652,7 @@ function BuildThumb({
           mark="blank"
           className={cn(
             "h-13.5 w-24 rounded-md",
-            (undone || !build.available) && "opacity-50 saturate-50",
+            (undone || !build.available || build.inCopy === false) && "opacity-50 saturate-50",
           )}
         >
           <ThumbEdge
