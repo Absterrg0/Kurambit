@@ -36,6 +36,7 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -158,6 +159,7 @@ const make = Effect.gen(function* () {
   const facts = yield* GameFacts.GameFacts;
   const operations = yield* GameOperations.GameOperations;
   const preview = yield* GamePreview.GamePreview;
+  const scope = yield* Effect.scope;
   const copiesRoot = NodePath.join(config.worktreesDir, GAME_COPIES);
   const outcomesDir = NodePath.join(config.stateDir, GAME_COPIES);
 
@@ -655,7 +657,11 @@ const make = Effect.gen(function* () {
       return reasons.length === 0 ? null : reasons.join("; ");
     });
 
+  // In the service's own fiber, as a restore is: a caller that goes away (an agent's tool call
+  // timing out during a long check) stops waiting, never the check and landing.
   const bringIn: GameCopies["Service"]["bringIn"] = (input, options = {}) =>
+    Effect.forkIn(bringInNow(input, options), scope).pipe(Effect.flatMap(Fiber.join));
+  const bringInNow = (input: GameBringInInput, options: { readonly agent?: boolean }) =>
     Effect.gen(function* () {
       const operation = "Bring in";
       const copyId = input.chat ?? input.threadId;
