@@ -37,6 +37,7 @@ export function GameTuneField({
   onChange,
   onCommit,
   onReset,
+  nested = false,
 }: {
   label: string;
   value: GameThingValue;
@@ -45,11 +46,13 @@ export function GameTuneField({
   onChange: (next: number | boolean) => void;
   onCommit: (next: number | boolean, how: TuneCommit) => void;
   onReset?: (() => void) | undefined;
+  /** A setting of the row above it: its label starts further in. */
+  nested?: boolean;
 }) {
   const reset = <ResetSlot was={was} value={value} onReset={onReset} />;
   if (typeof value.value === "boolean")
     return (
-      <PropertyRow label={label} end={reset}>
+      <PropertyRow label={label} end={reset} nested={nested}>
         <Switch
           size="sm"
           checked={value.value}
@@ -65,7 +68,7 @@ export function GameTuneField({
   const number = value.value;
   if (value.colour === true)
     return (
-      <PropertyRow label={label} end={reset}>
+      <PropertyRow label={label} end={reset} nested={nested}>
         <PropertyColourField
           label={label}
           value={number}
@@ -79,7 +82,7 @@ export function GameTuneField({
   if (value.choices !== undefined && value.choices.length > 1) {
     const choices = value.choices;
     return (
-      <PropertyRow label={label} end={reset}>
+      <PropertyRow label={label} end={reset} nested={nested}>
         <Select
           value={String(Math.round(number))}
           disabled={disabled}
@@ -118,6 +121,7 @@ export function GameTuneField({
       onChange={onChange}
       onCommit={onCommit}
       end={reset}
+      nested={nested}
     />
   );
 }

@@ -106,24 +106,28 @@ export function PropertySection({
  * fields side by side at equal widths, and a 24 px end slot that keeps fields aligned whether or
  * not a row has a reset or a lock.
  */
+/** The row grid; a nested row's label starts 12 px further in, its fields in the same column. */
+const rowGrid = (nested: boolean) =>
+  nested
+    ? "grid min-h-8 min-w-0 grid-cols-[5.75rem_minmax(0,1fr)_1.5rem] items-center gap-x-2 ps-7 pe-2"
+    : "grid min-h-8 min-w-0 grid-cols-[6.5rem_minmax(0,1fr)_1.5rem] items-center gap-x-2 ps-4 pe-2";
+
 export function PropertyRow({
   label,
   end,
+  nested = false,
   className,
   children,
 }: {
   label?: ReactNode;
   end?: ReactNode;
+  /** A setting of the row above it, such as a material's roughness under its fill. */
+  nested?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "grid min-h-8 min-w-0 grid-cols-[6.5rem_minmax(0,1fr)_1.5rem] items-center gap-x-2 ps-4 pe-2",
-        className,
-      )}
-    >
+    <div className={cn(rowGrid(nested), className)}>
       {label === undefined ? null : typeof label === "string" ? (
         <PropertyLabel>{label}</PropertyLabel>
       ) : (
@@ -333,13 +337,14 @@ export function PropertyNumberField(props: PropertyNumberProps) {
  * A row holding one number: its label, which scrubs it too (an engine inspector's labels do), the
  * field, and the end slot.
  */
-export function PropertyNumberRow({ end, ...props }: PropertyNumberProps & { end?: ReactNode }) {
+export function PropertyNumberRow({
+  end,
+  nested = false,
+  ...props
+}: PropertyNumberProps & { end?: ReactNode; nested?: boolean }) {
   const { rootProps, press, field, tip } = useNumberField(props);
   return (
-    <NumberField.Root
-      {...rootProps}
-      className="grid min-h-8 min-w-0 grid-cols-[6.5rem_minmax(0,1fr)_1.5rem] items-center gap-x-2 ps-4 pe-2"
-    >
+    <NumberField.Root {...rootProps} className={rowGrid(nested)}>
       <NumberField.ScrubArea
         className="flex min-w-0 cursor-ew-resize select-none"
         onPointerDown={press}
@@ -376,6 +381,7 @@ export function PropertyColourField({
   value,
   tuned = false,
   disabled = false,
+  hidden = false,
   opacity,
   onChange,
   onCommit,
@@ -384,6 +390,8 @@ export function PropertyColourField({
   value: number;
   tuned?: boolean;
   disabled?: boolean;
+  /** Hidden (its row's eye is off): the field dims, still editable. */
+  hidden?: boolean;
   /** The opacity, 0 to 1, as a second part of the field. */
   opacity?: Omit<PropertyNumberProps, "label" | "min" | "max" | "unit" | "prefix" | "range">;
   onChange: (next: number) => void;
@@ -405,11 +413,11 @@ export function PropertyColourField({
   const keep = () => onCommit(colourNumber(hsvToHex(hsv.h, hsv.s, hsv.v)));
   return (
     <span
-      data-tuned={tuned ? "" : undefined}
       className={cn(
         FIELD,
         "gap-0 ps-1 pe-0 hover:surface-field-hover has-focus:surface-focus",
         disabled && "pointer-events-none opacity-64",
+        hidden && "*:opacity-48",
       )}
     >
       <Popover>
@@ -459,7 +467,8 @@ export function PropertyColourField({
           if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
         }}
         onBlur={() => setDraft(null)}
-        className="h-5 w-full min-w-0 flex-1 bg-transparent ps-2 text-meta tabular-nums text-foreground uppercase outline-none in-data-tuned:text-live"
+        data-tuned={tuned ? "" : undefined}
+        className="h-5 w-full min-w-0 flex-1 bg-transparent ps-2 text-meta tabular-nums text-foreground uppercase outline-none data-tuned:text-live"
       />
       {opacity === undefined ? null : (
         <>

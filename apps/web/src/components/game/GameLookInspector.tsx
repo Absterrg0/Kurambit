@@ -225,6 +225,7 @@ export function GameLookInspector({
     return (
       <GameTuneField
         key={value.key}
+        nested
         label={label}
         value={value}
         was={changed ? value.default : undefined}
@@ -434,7 +435,8 @@ export function GameLookInspector({
                     <PropertyColourField
                       label={material.label}
                       value={colour.value}
-                      tuned={isChanged(colour) || (opacity !== undefined && isChanged(opacity))}
+                      tuned={isChanged(colour)}
+                      hidden={shown?.value === false}
                       disabled={disabled}
                       onChange={(next) => edit(lookId, colour, next)}
                       onCommit={(next) => commit(colour, next, "pointer")}
@@ -499,7 +501,7 @@ export function GameLookInspector({
                   <div className="flex flex-col pb-1">
                     {advanced.map((value) => field(value, fieldLabel(value, material)))}
                     {material.map === undefined ? null : (
-                      <PropertyRow label="Texture">
+                      <PropertyRow label="Texture" nested>
                         <img
                           src={material.map}
                           alt={`${material.label} texture`}
