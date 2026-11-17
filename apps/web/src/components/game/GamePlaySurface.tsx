@@ -25,6 +25,8 @@ import { GameElapsed } from "./GameElapsed";
 import { gamePigment } from "./gameLibrary.logic";
 import { useStageBridgeFrame } from "./gameStageBridge";
 import type { GameStagePhase } from "./gameStageLogic";
+import type { GameStageDevice } from "./gameStageDevice";
+import { GameDeviceToolbar, useStageDeviceLayout } from "./GameStageDeviceView";
 
 /**
  * The frame always keeps the game's own shape, so a state card sits exactly
@@ -95,6 +97,7 @@ export function GamePlaySurface({
   focusRequest,
   bridge,
   overlay,
+  device = null,
 }: {
   phase: GameStagePhase;
   /** The operation running on the game: its name, and whether it is this thread's own (Stop ends only those). */
@@ -128,6 +131,12 @@ export function GamePlaySurface({
   };
   /** Drawn over the playing game: the frozen game's pointer layer, names and path. */
   overlay?: ReactNode;
+  /** The responsive view: the frame at a device's size under its toolbar; null: the game's shape. */
+  device?: {
+    readonly value: GameStageDevice;
+    readonly onChange: (next: GameStageDevice | null) => void;
+    readonly shortcut: string | null;
+  } | null;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
@@ -136,56 +145,88 @@ export function GamePlaySurface({
     playing ? frame : null,
     bridge.enabled,
   );
+  const { setWell, shown, scale, frameStyle, handles } = useStageDeviceLayout(
+    device?.value ?? null,
+    (next) => device?.onChange(next),
+  );
+  // One tree in either view, so the frame (and the game in it) is never remounted by the switch.
   return (
-    <div
-      data-game-play-surface="true"
-      className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage-well [container-type:size]"
-    >
-      <GameFrameBox viewport={viewport} gameName={gameName} playing={playing}>
-        {playing ? (
-          <GameFrame
-            key={frameKey}
-            url={previewUrl}
-            title={`${gameName} on the Stage`}
+    <>
+      {device === null ? null : (
+        <GameDeviceToolbar
+          device={device.value}
+          shown={shown}
+          scale={scale}
+          shortcut={device.shortcut}
+          onChange={device.onChange}
+        />
+      )}
+      <div
+        ref={setWell}
+        data-game-play-surface="true"
+        className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage-well [container-type:size]"
+      >
+        <div
+          data-game-device-frame={device === null ? undefined : ""}
+          className={
+            frameStyle === null
+              ? "contents"
+              : "absolute origin-top-left overflow-hidden [container-type:size]"
+          }
+          style={frameStyle ?? undefined}
+        >
+          <GameFrameBox
+            viewport={frameStyle === null ? viewport : shown}
             gameName={gameName}
-            hidden={hidden}
-            onStudioMessage={onStudioMessage}
-            onBridgeMessage={onBridgeMessage}
-            focusRequest={focusRequest}
-            onFrame={setFrame}
-          />
-        ) : (
-          <StageStateCard
-            gameName={gameName}
-            phase={phase}
-            canOperate={canOperate}
-            operation={operation}
-            onPlay={onPlay}
-            onRebuild={onRebuild}
-            onStop={onStop}
-            onAskAgent={onAskAgent}
-            onOpenTools={onOpenTools}
-          />
-        )}
-        {playing ? overlay : null}
-        {playing && held !== null ? (
-          <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
-            <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-caption text-stage-foreground ring-1 ring-white/15">
-              <span className="min-w-0 truncate">{held.label}</span>
-              <Button size="xs" variant="secondary" onClick={onTakeHeld}>
-                <RefreshCwIcon aria-hidden="true" />
-                {held.action}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </GameFrameBox>
-      {/* The well's edge drawn above the game, so its rounded corners read the same all round. */}
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 z-30 rounded-xl ring-1 ring-white/6 ring-inset"
-      />
-    </div>
+            playing={playing}
+          >
+            {playing ? (
+              <GameFrame
+                key={frameKey}
+                url={previewUrl}
+                title={`${gameName} on the Stage`}
+                gameName={gameName}
+                hidden={hidden}
+                onStudioMessage={onStudioMessage}
+                onBridgeMessage={onBridgeMessage}
+                focusRequest={focusRequest}
+                onFrame={setFrame}
+              />
+            ) : (
+              <StageStateCard
+                gameName={gameName}
+                phase={phase}
+                canOperate={canOperate}
+                operation={operation}
+                onPlay={onPlay}
+                onRebuild={onRebuild}
+                onStop={onStop}
+                onAskAgent={onAskAgent}
+                onOpenTools={onOpenTools}
+              />
+            )}
+            {playing ? overlay : null}
+            {playing && held !== null ? (
+              <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-2">
+                <div className="flex items-center gap-2 rounded-full bg-black/75 py-1 ps-3 pe-1 text-caption text-stage-foreground ring-1 ring-white/15">
+                  <span className="min-w-0 truncate">{held.label}</span>
+                  <Button size="xs" variant="secondary" onClick={onTakeHeld}>
+                    <RefreshCwIcon aria-hidden="true" />
+                    {held.action}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </GameFrameBox>
+        </div>
+        {handles}
+        {/* The well's edge drawn above the game, so its rounded corners read the same all round. */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-30 rounded-xl ring-1 ring-white/6 ring-inset"
+        />
+      </div>
+    </>
   );
 }
 

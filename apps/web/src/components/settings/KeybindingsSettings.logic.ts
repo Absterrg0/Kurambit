@@ -399,6 +399,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "game.bounds.toggle": "Toggle bounds",
   "game.frameRate.toggle": "Toggle frame rate",
   "game.cannotLose.toggle": "Toggle Can't lose",
+  "game.responsive.toggle": "Toggle responsive view",
   "game.fullscreen": "Play fullscreen",
   "game.playPrevious": "Play previous build",
   "game.playNext": "Play next build",

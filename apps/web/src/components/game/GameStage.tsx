@@ -272,8 +272,18 @@ const stageFitOf = (
   chatShare: number,
   chatWidth: ChatWidth,
   hero: boolean,
+  device: boolean,
 ) => {
   const shared = gameColumnFit(centre, taken, ratio, chatShare, chatWidth);
+  // The responsive view takes the column's width and all the height the chat can give, the same
+  // for every device, so switching one or dragging its size never moves the chat.
+  if (device)
+    return {
+      width: shared.width,
+      height: Math.floor(Math.max(shared.height, centre.clientHeight - taken - CHAT_ROOM_MIN)),
+      pad: 0,
+      column: shared.width,
+    };
   if (!hero) return { ...shared, pad: 0, column: shared.width };
   const overlay = centre.querySelector<HTMLElement>("[data-chat-composer-overlay]");
   const room = overlay?.offsetHeight ?? 0;
@@ -387,7 +397,7 @@ export function GameStageLoading({ hero = false }: { hero?: boolean } = {}) {
       for (const child of section.children)
         if (child instanceof HTMLElement && child.dataset.stageFit === undefined)
           taken += child.offsetHeight;
-      const next = stageFitOf(centre, taken, 9 / 16, chatShare, chatWidth, hero);
+      const next = stageFitOf(centre, taken, 9 / 16, chatShare, chatWidth, hero, false);
       setFit({ width: next.width, height: next.height, marginTop: next.pad });
       // The composer under it already ends where the chat's lane will.
       centre.style.setProperty("--chat-content-max-width", `${next.column}px`);
@@ -703,6 +713,11 @@ function ThreadGameStage({
   // The column the game shares with its chat and composer: the fitted game's width.
   const [column, setColumn] = useState<number | null>(null);
   const comparing = compare !== null;
+  // The responsive view: the game's frame at a device's size, under the device toolbar.
+  const stageDevice = useGameWorkspaceStore((state) => state.stageDevice[threadKey] ?? null);
+  const setStageDevice = useGameWorkspaceStore((state) => state.setStageDevice);
+  const toggleStageDevice = useGameWorkspaceStore((state) => state.toggleStageDevice);
+  const deviceOn = stageDevice !== null;
   const chatShare = useGameWorkspaceStore((state) => state.chatShare);
   const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const [titleUnderControls, setTitleUnderControls] = useState(true);
@@ -744,6 +759,7 @@ function ThreadGameStage({
         chatShare,
         chatWidth,
         hero,
+        deviceOn,
       );
       const next = { width: fit.width, height: fit.height, pad: fit.pad };
       setStageFit((previous) =>
@@ -772,7 +788,7 @@ function ThreadGameStage({
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth, hero]);
+  }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth, hero, deviceOn]);
   // The empty chat's Stage has its own shape, and the game takes it; else the game's viewport.
   const frameViewport =
     hero && stageFit !== null && stageFit.height > 0
@@ -1177,6 +1193,9 @@ function ThreadGameStage({
   const freeCameraKey = devKey("game.freeCamera.toggle");
   const boundsKey = devKey("game.bounds.toggle");
   const frameRateKey = devKey("game.frameRate.toggle");
+  const responsiveKey = shortcutLabelForCommand(keybindings, "game.responsive.toggle", {
+    context: { gameThread: true },
+  });
   const undoKey = shortcutLabelForCommand(keybindings, "game.undoTurn", {
     context: { gameThread: true },
   });
@@ -1291,6 +1310,11 @@ function ThreadGameStage({
         if (event.key === "Escape" && useStageBridge.getState().selected !== null) {
           event.preventDefault();
           clearStageSelection();
+          return;
+        }
+        if (event.key === "Escape" && stageDevice !== null) {
+          event.preventDefault();
+          setStageDevice(threadKey, null);
           return;
         }
         // Any other key on the Stage itself is meant for the game: no app key reads it (a
@@ -1625,6 +1649,15 @@ function ThreadGameStage({
             focusRequest={focusRequest?.frame === "folder" ? focusRequest.n : 0}
             bridge={{ threadKey, enabled: engine?.stageBridge === true }}
             overlay={<GameStageOverlay threadKey={threadKey} />}
+            device={
+              stageDevice === null || stageKind !== "live"
+                ? null
+                : {
+                    value: stageDevice,
+                    onChange: (next) => setStageDevice(threadKey, next),
+                    shortcut: responsiveKey,
+                  }
+            }
           />
         </div>
       </div>
@@ -1652,44 +1685,58 @@ function ThreadGameStage({
             onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
             onFullscreen={toggleFullscreen}
             viewItems={
-              devCapable && stageKind === "live" ? (
+              stageKind === "live" ? (
                 <>
                   <MenuCheckboxItem
                     variant="switch"
-                    closeOnClick={false}
-                    checked={devViews.bounds}
-                    onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
+                    checked={deviceOn}
+                    onCheckedChange={() => toggleStageDevice(threadKey)}
                   >
-                    Bounds
-                    {boundsKey === null ? null : <MenuShortcut>{boundsKey}</MenuShortcut>}
+                    Responsive view
+                    {responsiveKey === null ? null : <MenuShortcut>{responsiveKey}</MenuShortcut>}
                   </MenuCheckboxItem>
-                  <MenuCheckboxItem
-                    variant="switch"
-                    closeOnClick={false}
-                    checked={devViews.perf}
-                    onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
-                  >
-                    Frame rate
-                    {frameRateKey === null ? null : <MenuShortcut>{frameRateKey}</MenuShortcut>}
-                  </MenuCheckboxItem>
-                  <MenuCheckboxItem
-                    variant="switch"
-                    closeOnClick={false}
-                    checked={devViews.freeCamera}
-                    onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
-                  >
-                    Free camera while frozen
-                    {freeCameraKey === null ? null : <MenuShortcut>{freeCameraKey}</MenuShortcut>}
-                  </MenuCheckboxItem>
-                  <MenuItem
-                    disabled={!frozen}
-                    closeOnClick={false}
-                    onClick={() => stepStageFrame(threadKey)}
-                  >
-                    <StepForwardIcon />
-                    Step one frame
-                    {stepKey === null ? null : <MenuShortcut>{stepKey}</MenuShortcut>}
-                  </MenuItem>
+                  {devCapable ? (
+                    <>
+                      <MenuCheckboxItem
+                        variant="switch"
+                        closeOnClick={false}
+                        checked={devViews.bounds}
+                        onCheckedChange={(on) => setStageDevView(threadKey, "bounds", on)}
+                      >
+                        Bounds
+                        {boundsKey === null ? null : <MenuShortcut>{boundsKey}</MenuShortcut>}
+                      </MenuCheckboxItem>
+                      <MenuCheckboxItem
+                        variant="switch"
+                        closeOnClick={false}
+                        checked={devViews.perf}
+                        onCheckedChange={(on) => setStageDevView(threadKey, "perf", on)}
+                      >
+                        Frame rate
+                        {frameRateKey === null ? null : <MenuShortcut>{frameRateKey}</MenuShortcut>}
+                      </MenuCheckboxItem>
+                      <MenuCheckboxItem
+                        variant="switch"
+                        closeOnClick={false}
+                        checked={devViews.freeCamera}
+                        onCheckedChange={(on) => setStageDevView(threadKey, "freeCamera", on)}
+                      >
+                        Free camera while frozen
+                        {freeCameraKey === null ? null : (
+                          <MenuShortcut>{freeCameraKey}</MenuShortcut>
+                        )}
+                      </MenuCheckboxItem>
+                      <MenuItem
+                        disabled={!frozen}
+                        closeOnClick={false}
+                        onClick={() => stepStageFrame(threadKey)}
+                      >
+                        <StepForwardIcon />
+                        Step one frame
+                        {stepKey === null ? null : <MenuShortcut>{stepKey}</MenuShortcut>}
+                      </MenuItem>
+                    </>
+                  ) : null}
                 </>
               ) : null
             }

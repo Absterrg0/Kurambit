@@ -79,6 +79,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "game.bounds.toggle",
   "game.frameRate.toggle",
   "game.cannotLose.toggle",
+  "game.responsive.toggle",
   "game.fullscreen",
   "game.playPrevious",
   "game.playNext",

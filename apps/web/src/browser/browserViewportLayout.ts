@@ -65,16 +65,13 @@ export function resolveFittedBrowserViewport(
   return { _tag: "freeform", width: 1280, height: 800 };
 }
 
-export function resolveBrowserDeviceViewportArea(container: {
-  readonly width: number;
-  readonly height: number;
-}): PreviewViewportSize {
+export function resolveBrowserDeviceViewportArea(
+  container: { readonly width: number; readonly height: number },
+  toolbarHeight = BROWSER_DEVICE_TOOLBAR_HEIGHT,
+): PreviewViewportSize {
   return {
     width: Math.max(1, container.width - BROWSER_VIEWPORT_RESIZE_RAIL_SIZE * 2),
-    height: Math.max(
-      1,
-      container.height - BROWSER_DEVICE_TOOLBAR_HEIGHT - BROWSER_VIEWPORT_RESIZE_RAIL_SIZE,
-    ),
+    height: Math.max(1, container.height - toolbarHeight - BROWSER_VIEWPORT_RESIZE_RAIL_SIZE),
   };
 }
 
@@ -123,9 +120,10 @@ export function resolveBrowserDeviceViewportLayout(
   container: { readonly width: number; readonly height: number },
   setting: Exclude<PreviewViewportSetting, { readonly _tag: "fill" }>,
   zoomFactor = 1,
+  toolbarHeight = BROWSER_DEVICE_TOOLBAR_HEIGHT,
 ): BrowserViewportLayout {
   const layout = resolveBrowserViewportLayout(
-    resolveBrowserDeviceViewportArea(container),
+    resolveBrowserDeviceViewportArea(container, toolbarHeight),
     setting,
     zoomFactor,
   );
@@ -134,7 +132,7 @@ export function resolveBrowserDeviceViewportLayout(
     canvasWidth: Math.max(1, Math.round(container.width)),
     canvasHeight: Math.max(1, Math.round(container.height)),
     viewportX: layout.viewportX + BROWSER_VIEWPORT_RESIZE_RAIL_SIZE,
-    viewportY: layout.viewportY + BROWSER_DEVICE_TOOLBAR_HEIGHT,
+    viewportY: layout.viewportY + toolbarHeight,
   };
 }
 

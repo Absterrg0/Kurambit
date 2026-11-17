@@ -26,6 +26,7 @@ import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./de
 import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
+import { commitBrowserViewportChange } from "./browserViewportActions";
 import {
   INITIAL_WEBVIEW_CRASH_RECOVERY_STATE,
   planWebviewCrashRecovery,
@@ -245,7 +246,7 @@ export function HostedBrowserWebview(props: {
     handleResizePointerDown,
     layout: viewportLayout,
   } = useBrowserViewportResize({
-    tabId: runtimeTabId,
+    commit: (next) => commitBrowserViewportChange(runtimeTabId, next),
     viewport,
     zoomFactor,
     containerSize,

@@ -124,6 +124,12 @@ export function mark(time, player, state) {
   return { t: round(time, 1), at, values };
 }
 
+/** The page's CSS size, within what a kept play may say. */
+const viewportNow = () => {
+  const side = (value) => Math.min(3840, Math.max(64, Math.round(value) || 64));
+  return { width: side(globalThis.innerWidth), height: side(globalThis.innerHeight) };
+};
+
 /**
  * Keeps one run's play as it is played: only the steps whose input changed. `from`: the run
  * goes on from a replay handed over to live play at `from.steps` (shell.js), so its play starts
@@ -141,6 +147,9 @@ export function createRecorder(seed, dt, clock, from = null) {
     marks: from === null ? [] : [...from.marks],
     outcome: null,
     ...(Number.isFinite(from?.fork) ? { fork: from.fork } : {}),
+    // The shape the run is played at (as of its latest input): a replay plays at it, as mouse
+    // aim depends on it.
+    viewport: from?.viewport ?? viewportNow(),
     ...(from?.tunes == null ? {} : { tunes: structuredClone(from.tunes) }),
   };
   let tuned = Object.keys(play.tunes ?? {}).length;
@@ -161,6 +170,9 @@ export function createRecorder(seed, dt, clock, from = null) {
       if (text !== last) {
         last = text;
         play.inputs.push([play.steps, now]);
+        // The shape the person is playing at: a run begun on the Stage and played in its
+        // responsive view replays at the view's size.
+        play.viewport = viewportNow();
       }
       if (play.inputs.length > MAX_CHANGES || play.steps > MAX_STEPS) full = true;
     },
@@ -229,6 +241,7 @@ export function continuation(play, steps, marks, fork) {
     actions: play.actions ?? [],
     fork: Number.isFinite(fork) ? fork : play.fork,
     tunes: play.tunes,
+    viewport: play.viewport,
   };
 }
 

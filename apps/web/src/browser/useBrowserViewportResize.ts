@@ -10,7 +10,6 @@ import {
 } from "react";
 
 import { useStableCallback } from "../hooks/useStableCallback";
-import { commitBrowserViewportChange } from "./browserViewportActions";
 import {
   browserViewportSettingKey,
   resizeBrowserViewportFromRail,
@@ -29,14 +28,25 @@ interface ViewportDrag extends PreviewViewportSize {
 const KEYBOARD_RESIZE_COMMIT_DELAY_MS = 150;
 
 export function useBrowserViewportResize(options: {
-  readonly tabId: string;
+  /** Applies a size the toolbar, a drag or the arrow keys settled on. */
+  readonly commit: (next: PreviewViewportSetting) => Promise<void>;
   readonly viewport: PreviewViewportSetting;
   readonly zoomFactor: number;
   readonly containerSize: PreviewViewportSize;
   readonly deviceToolbarVisible: boolean;
   readonly aspectRatio: number | null;
+  /** The room above the viewport, when the toolbar sits there; the browser's own by default. */
+  readonly deviceToolbarHeight?: number;
 }) {
-  const { tabId, viewport, zoomFactor, containerSize, deviceToolbarVisible, aspectRatio } = options;
+  const {
+    commit,
+    viewport,
+    zoomFactor,
+    containerSize,
+    deviceToolbarVisible,
+    aspectRatio,
+    deviceToolbarHeight,
+  } = options;
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const dragVersionRef = useRef(0);
   const keyboardCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,11 +65,16 @@ export function useBrowserViewportResize(options: {
     : viewport;
   const normalizedZoomFactor = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1;
   const viewportContainerSize = deviceToolbarVisible
-    ? resolveBrowserDeviceViewportArea(containerSize)
+    ? resolveBrowserDeviceViewportArea(containerSize, deviceToolbarHeight)
     : containerSize;
   const layout =
     deviceToolbarVisible && effectiveViewport._tag !== "fill"
-      ? resolveBrowserDeviceViewportLayout(containerSize, effectiveViewport, zoomFactor)
+      ? resolveBrowserDeviceViewportLayout(
+          containerSize,
+          effectiveViewport,
+          zoomFactor,
+          deviceToolbarHeight,
+        )
       : resolveBrowserViewportLayout(containerSize, effectiveViewport, zoomFactor);
 
   useEffect(
@@ -94,7 +109,7 @@ export function useBrowserViewportResize(options: {
     }
     keyboardViewportRef.current = null;
     setDragViewport(null);
-    return commitBrowserViewportChange(tabId, next);
+    return commit(next);
   };
 
   const clearDrag = () => setDragViewport(null);
@@ -103,7 +118,7 @@ export function useBrowserViewportResize(options: {
     const clearIfCurrent = () => {
       if (dragVersionRef.current === version) clearDrag();
     };
-    void commitBrowserViewportChange(tabId, next).then(clearIfCurrent, clearIfCurrent);
+    void commit(next).then(clearIfCurrent, clearIfCurrent);
   };
 
   const handleResizeKeyDown = (

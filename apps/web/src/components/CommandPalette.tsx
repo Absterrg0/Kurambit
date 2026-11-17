@@ -143,6 +143,7 @@ import {
   SquarePlusIcon,
   SplitIcon,
   Rotate3dIcon,
+  MonitorSmartphoneIcon,
   SquareDashedIcon,
   GaugeIcon,
   ShieldIcon,
@@ -879,6 +880,9 @@ function OpenCommandPaletteDialog(props: {
   // The game's latest turn build: the palette offers the Undo or Redo its strip does.
   const gameHidden = useGameWorkspaceStore((state) => state.gameHidden);
   const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
+  const stageDeviceOn = useGameWorkspaceStore(
+    (state) => state.stageDevice[stageThreadKey] !== undefined,
+  );
   const tryWays = useGameWorkspaceStore((state) => state.tryWays);
   const turnUndo = useTurnUndo(isGameThread ? activeThreadRef : null, null);
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
@@ -1751,6 +1755,26 @@ function OpenCommandPaletteDialog(props: {
         icon: <CrosshairIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.freeze",
         run: requestStage({ kind: "freeze" }),
+      });
+    if (gameStageBridge)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-responsive",
+        title: stageDeviceOn ? "Leave responsive view" : "Open responsive view",
+        searchTerms: [
+          "responsive",
+          "device",
+          "phone",
+          "tablet",
+          "mobile",
+          "viewport",
+          "screen size",
+          "stage",
+          "game",
+        ],
+        icon: <MonitorSmartphoneIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "game.responsive.toggle",
+        run: async () => useGameWorkspaceStore.getState().toggleStageDevice(stageThreadKey),
       });
     if (stageCapabilities.includes("dev")) {
       if (stageFrozen)
