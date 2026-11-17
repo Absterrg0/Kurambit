@@ -222,12 +222,14 @@ def run_pass(params):
         k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
     still = ["clips that move no bone: " + ", ".join(info["frozen"])[:300]] if info["frozen"] else []
+    refused = refusals_of(measured, info, params, set(creatures))
     return {
         "kind": styled["kind"],
         "objects": names,
         "measured": measured,
-        "refusals": refusals_of(measured, info, params, set(creatures)) + [
-            {"code": f"hero-{g['name']}", "text": g["text"][:400]} for g in gates if not g["pass"]],
+        "refusals": refused + [{"code": f"hero-{g['name']}", "text": g["text"][:400]} for g in gates if not g["pass"]
+                               # the budget's triangles and texture refusals already say it
+                               and not (g["name"] == "budget" and {r["code"] for r in refused} & {"triangles", "texture"})],
         "parts": parts,
         "usedPalette": styled["usedPalette"],
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},
