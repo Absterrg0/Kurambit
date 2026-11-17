@@ -17,6 +17,7 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { openExpandedImagePreview } from "../chat/ExpandedImageDialog";
 import { Text } from "../ui/text";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import { GameKeyArt } from "./GameKeyArt";
 import { clockLabel } from "./gameStageRewind";
@@ -112,6 +113,10 @@ export function GameChecksBoard({
   );
 }
 
+/** The row height both frames are scaled to, side by side. */
+const SCREEN_ROW_PX = 96;
+const SCREEN_WORDS = { phone: "Phone", widescreen: "Widescreen" } as const;
+
 function Screens({
   threadRef,
   root,
@@ -126,37 +131,49 @@ function Screens({
   if (sizes.length === 0) return null;
   return (
     <Workbench.Section title="Screens">
-      <div className="flex items-end gap-3 px-4 pt-1">
+      <div className="flex min-w-0 items-start gap-3 px-4 pt-1">
         {sizes.map((size) => {
-          const label = `${size.name === "phone" ? "Phone" : "Widescreen"} ${size.width}×${size.height}`;
+          const word = SCREEN_WORDS[size.name];
+          const label = `${word} ${size.width}×${size.height}`;
           return (
-            <button
-              key={size.name}
-              type="button"
-              aria-label={`Open ${label}`}
-              onClick={() =>
-                openEvidence(threadRef, root, { kind: "frame", label, path: size.frame! }, label)
-              }
-              className={cn(
-                "flex min-w-0 cursor-pointer flex-col gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                size.name === "phone" ? "w-20 shrink-0" : "flex-1",
-              )}
-            >
-              <span
-                className="relative block w-full overflow-hidden rounded-md bg-muted"
-                style={{ aspectRatio: `${size.width} / ${size.height}` }}
+            <Tooltip key={size.name}>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`Open ${label}`}
+                    onClick={() =>
+                      openEvidence(
+                        threadRef,
+                        root,
+                        { kind: "frame", label, path: size.frame! },
+                        label,
+                      )
+                    }
+                    className="flex min-w-0 shrink cursor-pointer flex-col gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                  />
+                }
               >
-                <GameKeyArt
-                  environmentId={threadRef.environmentId}
-                  root={root}
-                  path={size.frame!}
-                  className="object-contain"
-                />
-              </span>
-              <Text variant="caption" tone="muted" numeric truncate>
-                {label}
-              </Text>
-            </button>
+                <span
+                  className="relative block max-w-full overflow-hidden rounded-md bg-muted"
+                  style={{
+                    height: SCREEN_ROW_PX,
+                    aspectRatio: `${size.width} / ${size.height}`,
+                  }}
+                >
+                  <GameKeyArt
+                    environmentId={threadRef.environmentId}
+                    root={root}
+                    path={size.frame!}
+                    className="object-cover"
+                  />
+                </span>
+                <Text variant="caption" tone="muted">
+                  {word}
+                </Text>
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">{`${size.width} × ${size.height}`}</TooltipPopup>
+            </Tooltip>
           );
         })}
       </div>

@@ -174,6 +174,22 @@ export const GameDecision = Schema.Struct({
   /** YYYY-MM-DD; empty on a line written by hand without one. */
   date: Schema.String,
   text: Schema.String,
+  /**
+   * What the harness recorded it for, and the build it names: so a list can show a keep that
+   * was later undone as one line. Absent on a line written by hand.
+   */
+  kind: Schema.optionalKey(
+    Schema.Literals([
+      "undone",
+      "went-back",
+      "kept-values",
+      "kept-over",
+      "skipped",
+      "redid",
+      "note",
+    ]),
+  ),
+  build: Schema.optionalKey(Schema.String),
 });
 export type GameDecision = typeof GameDecision.Type;
 export const GameDecisionsResult = Schema.Array(GameDecision);

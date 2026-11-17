@@ -367,7 +367,13 @@ export const decidedKeys = (root: string) =>
   ]);
 
 const listOf = ({ entries }: Parsed): ReadonlyArray<GameDecision> =>
-  entries.map((each) => ({ line: each.line, date: each.date, text: each.text }));
+  entries.map((each) => ({
+    line: each.line,
+    date: each.date,
+    text: each.text,
+    ...(each.kind === null ? {} : { kind: each.kind }),
+    ...(each.build === null ? {} : { build: each.build }),
+  }));
 
 export class GameDecisions extends Context.Service<
   GameDecisions,

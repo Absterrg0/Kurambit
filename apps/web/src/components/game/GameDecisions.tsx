@@ -12,6 +12,10 @@ import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Workbench } from "./GameWorkbenchParts";
+import { decisionRows } from "./gameDecisions.logic";
+
+/** The newest decisions shown before "Show all". */
+const SHOWN = 5;
 
 /** Counts changes sent from here (the composer's /remember, a line removed), so a shown list reads again. */
 const useDecisionsChanged = create<number>()(() => 0);
@@ -61,16 +65,33 @@ export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef
     void refresh();
     return useDecisionsChanged.subscribe(() => void refresh());
   }, [refresh]);
+  const [all, setAll] = useState(false);
   if (decisions.length === 0 && error === null) return null;
+  const rows = decisionRows(decisions);
+  const shown = all ? rows : rows.slice(0, SHOWN);
   return (
-    <Workbench.Section title="Decisions" detail={String(decisions.length)}>
-      {decisions.toReversed().map((decision) => (
+    <Workbench.Section title="Decisions" detail={String(rows.length)}>
+      {shown.map((row) => (
         <div
-          key={`${decision.line}:${decision.text}`}
+          key={row.key}
           className="group/decision flex min-h-7 min-w-0 items-start gap-2 py-1 ps-4 pe-2"
         >
           <Text variant="meta" tone="default" render={<p className="min-w-0 flex-1 leading-5" />}>
-            {decision.text}
+            {row.pieces.map((piece, index) =>
+              piece._tag === "text" ? (
+                // oxlint-disable-next-line react/no-array-index-key -- a piece is its place in the line.
+                <span key={index}>{piece.text}</span>
+              ) : (
+                <span
+                  // oxlint-disable-next-line react/no-array-index-key -- two swatches may share a colour.
+                  key={index}
+                  role="img"
+                  aria-label={piece.hex}
+                  className="inline-block size-3 rounded-sm align-[-1px] ring-1 ring-border ring-inset"
+                  style={{ backgroundColor: piece.hex }}
+                />
+              ),
+            )}
           </Text>
           {canDecide ? (
             <span className="flex h-5 w-6 shrink-0 items-center justify-end opacity-0 group-hover/decision:opacity-100 focus-within:opacity-100">
@@ -80,15 +101,21 @@ export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef
                     <Button
                       size="icon-xs"
                       variant="ghost-muted"
-                      aria-label={`Forget "${decision.text}"`}
+                      aria-label={`Forget "${row.said}"`}
                       onClick={async () => {
                         setError(null);
-                        const result = await decide({
-                          _tag: "remove",
-                          line: decision.line,
-                          was: decision.text,
-                        });
-                        if (!result.ok) setError(result.error);
+                        // The file's later line first, so the earlier one keeps its number.
+                        for (const line of row.lines.toSorted((a, b) => b.line - a.line)) {
+                          const result = await decide({
+                            _tag: "remove",
+                            line: line.line,
+                            was: line.text,
+                          });
+                          if (!result.ok) {
+                            setError(result.error);
+                            break;
+                          }
+                        }
                       }}
                     />
                   }
@@ -101,6 +128,13 @@ export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef
           ) : null}
         </div>
       ))}
+      {rows.length > SHOWN ? (
+        <div className="px-2">
+          <Button size="xs" variant="ghost" onClick={() => setAll(!all)}>
+            {all ? "Show fewer" : `Show all ${rows.length}`}
+          </Button>
+        </div>
+      ) : null}
       {error === null ? null : (
         <Text variant="caption" tone="destructive" render={<p role="alert" className="px-4" />}>
           {error}
