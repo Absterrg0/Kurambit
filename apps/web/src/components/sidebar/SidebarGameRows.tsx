@@ -52,15 +52,15 @@ const ACTION_ICONS: Record<GameAction, ReactNode> = {
   unarchive: <ArchiveRestoreIcon />,
   delete: <Trash2Icon />,
 };
-/** The desktop menu's icon names for the same actions. */
+/** The right-click menu's icon names for the same actions (contextMenuFallback's set). */
 export const NATIVE_ACTION_ICONS: Record<GameAction, string> = {
-  "new-chat": "square-pen",
+  "new-chat": "message-square-plus",
   rename: "pencil",
   "open-folder": "folder",
   pin: "pin",
   unpin: "pin-off",
   archive: "archive",
-  unarchive: "archive-restore",
+  unarchive: "archive",
   delete: "trash",
 };
 
