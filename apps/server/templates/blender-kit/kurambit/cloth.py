@@ -19,6 +19,9 @@ from mathutils import Vector
 from . import helpers
 
 GARMENT_OFFSET = 0.006
+# The most of a thigh's swing a hem chain takes where the leg pushes into it: all of it folds the
+# hem's front panel like a second leg (run 1's fisherman); this keeps it a panel the leg carries.
+PUSHED = 0.8
 
 
 def _obj(x):
@@ -312,7 +315,7 @@ def dangle(part, armature, start, end, *, bones=3, parent=None, name=None):
 def follow_hem(armature, follow=0.5):
     """Keys every hem chain's root, in every clip of the armature, to follow the thigh on its side
     (both thighs for a chain in front or behind, by how far round it is) by follow (0..1) of the
-    thigh's swing, so a coat's hem steps with the legs and the game's springs swing it from there.
+    thigh's swing, and up to PUSHED of it where the leg pushes into that part of the hem, so a coat's hem steps with the legs and the game's springs swing it from there.
     Run it again after adding clips. Returns how many clips it keyed."""
     from .digest import exported_actions
     from .skeleton import assign_action
@@ -360,7 +363,7 @@ def follow_hem(armature, follow=0.5):
                 for s in ("l", "r"):
                     # A leg pushing into this part of the hem carries it all the way; elsewhere part way.
                     into = max(0.0, push[s].dot(out_dir)) if push[s] is not None else 0.0
-                    qs[s] = _toward(swing[s], follow + (1 - follow) * into)
+                    qs[s] = _toward(swing[s], follow + (PUSHED - follow) * into)
                 q = qs["l"].slerp(qs["r"], 1 - wl)
                 # Its turn in armature axes, as the bone's own basis (it hangs from the hips).
                 R = rest[root].inverted() @ q.to_matrix() @ rest[root]
