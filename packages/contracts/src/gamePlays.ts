@@ -92,8 +92,9 @@ export const GamePlay = Schema.Struct({
   /** The game's named actions the run pressed: a build without one of them cannot replay it. */
   actions: Schema.optionalKey(Schema.Array(Code).check(Schema.isMaxLength(64))),
   /**
-   * The game's CSS size as the run began: mouse aim and what the camera saw depend on its shape,
-   * so a replay plays at it. Absent on plays kept before it was: the harness's own size.
+   * The game's CSS size as the run was played (at its latest input): mouse aim and what the
+   * camera saw depend on its shape, so a replay plays at it. Absent on plays kept before it was:
+   * the harness's own size.
    */
   viewport: Schema.optionalKey(
     Schema.Struct({

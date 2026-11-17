@@ -147,7 +147,8 @@ export function createRecorder(seed, dt, clock, from = null) {
     marks: from === null ? [] : [...from.marks],
     outcome: null,
     ...(Number.isFinite(from?.fork) ? { fork: from.fork } : {}),
-    // The shape the run was played at: a replay plays at it, as mouse aim depends on it.
+    // The shape the run is played at (as of its latest input): a replay plays at it, as mouse
+    // aim depends on it.
     viewport: from?.viewport ?? viewportNow(),
     ...(from?.tunes == null ? {} : { tunes: structuredClone(from.tunes) }),
   };
@@ -169,6 +170,9 @@ export function createRecorder(seed, dt, clock, from = null) {
       if (text !== last) {
         last = text;
         play.inputs.push([play.steps, now]);
+        // The shape the person is playing at: a run begun on the Stage and played in its
+        // responsive view replays at the view's size.
+        play.viewport = viewportNow();
       }
       if (play.inputs.length > MAX_CHANGES || play.steps > MAX_STEPS) full = true;
     },
