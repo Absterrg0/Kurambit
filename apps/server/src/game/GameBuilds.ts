@@ -1976,6 +1976,8 @@ const make = Effect.gen(function* () {
     commandId: string | undefined,
     expect: GameBuildId | undefined,
     label?: string,
+    /** What the folder holds as it moves, when the caller read it (a landing's merge did). */
+    holding?: GameBuildId,
   ) =>
     Effect.gen(function* () {
       const requestId = restoreRequestId(g.root, commandId);
@@ -2021,9 +2023,11 @@ const make = Effect.gen(function* () {
       const folderBuild =
         earlier?.requestId === requestId
           ? null
-          : yield* currentOf(g, yield* allEntries(g, 1, undefined)).pipe(
-              Effect.orElseSucceed(() => null),
-            );
+          : holding !== undefined
+            ? holding
+            : yield* currentOf(g, yield* allEntries(g, 1, undefined)).pipe(
+                Effect.orElseSucceed(() => null),
+              );
       const record: NoRunRestore =
         earlier?.requestId === requestId
           ? earlier
@@ -2168,6 +2172,7 @@ const make = Effect.gen(function* () {
         `land\0${input.request}`,
         input.from,
         input.label,
+        input.from,
       );
       if (result.moved === "moved-on") {
         yield* checkpoints
