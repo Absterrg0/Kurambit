@@ -71,6 +71,13 @@ const copyKey = (threadId: ThreadId) => Buffer.from(threadId, "utf8").toString("
 /** The copy's work as Bring in last read it: what a thrown-away copy still brings in. */
 const workRef = (threadId: ThreadId) =>
   checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/work`);
+/**
+ * When the chat moved into its copy (`in`) and back to the game (`out`), as commit times: a
+ * thread's checkpoints all carry its current folder, so the rail tells the game's turns from the
+ * copy's by these.
+ */
+export const copyMoveRef = (threadId: ThreadId, way: "in" | "out") =>
+  checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/${way}`);
 /** The game folder as a merge read it, which a landing is moved only onto. */
 const gameRef = (threadId: ThreadId) =>
   checkpointRefForGameRun("game-builds", `copies/${copyKey(threadId)}/game`);
@@ -255,6 +262,21 @@ const make = Effect.gen(function* () {
       prefix === "" ? cwd : NodePath.resolve(cwd, ...prefix.split("/").map(() => "..")),
     );
 
+  // A fresh commit's time marks the move; its tree is the seat's, so it holds nothing new.
+  const markMove = (root: string, threadId: ThreadId, way: "in" | "out", at: string) =>
+    checkpoints
+      .commitTree({ cwd: root, tree: `${at}^{tree}`, parent: at, message: `copy ${way}` })
+      .pipe(
+        Effect.flatMap((oid) =>
+          checkpoints.updateCheckpointRef({
+            cwd: root,
+            checkpointRef: copyMoveRef(threadId, way),
+            oid,
+          }),
+        ),
+        Effect.mapError(io("Copy", root, "the copy's move could not be kept")),
+      );
+
   const seat: GameCopies["Service"]["seat"] = (input) =>
     Effect.gen(function* () {
       const where = placeOf(input.root, input.threadId, yield* repoPrefix(input.root));
@@ -273,6 +295,7 @@ const make = Effect.gen(function* () {
           .createWorktree({ cwd: input.root, refName: input.seat, path: where.worktree })
           .pipe(Effect.mapError(io(operation, input.root, "the copy could not be made")));
       }
+      if (input.repoint) yield* markMove(input.root, input.threadId, "in", input.seat);
       if (input.repoint)
         yield* threads
           .dispatch({
@@ -292,6 +315,8 @@ const make = Effect.gen(function* () {
       const cwd = shell.worktreePath;
       if (cwd === null) return;
       const worktree = yield* worktreeOf(g.root, cwd);
+      const seated = yield* seatOf(g, shell);
+      if (seated !== null) yield* markMove(g.root, shell.id, "out", seated);
       yield* threads
         .dispatch({
           type: "thread.metadata.update",
@@ -701,13 +726,8 @@ const make = Effect.gen(function* () {
             message: `Nothing came in: ${files.map((each) => each.path).join(", ")} changed in the game and in the copy. The copy now holds both sides${files.some((each) => each.binary) ? "; for art, sound and models keep the game's or the copy's" : ""}. Resolve them in the copy, then bring it in again.`,
           } as const;
         }
-        const tree =
-          merged.tree ??
-          (yield* checkpoints.resolveTrees({ cwd: g.root, revisions: [work], path: "" }).pipe(
-            Effect.map(([each]) => each ?? null),
-            Effect.mapError(io(operation, g.root, "the copy's work could not be read")),
-          ));
-        if (tree === null) return yield* failed(operation, g.root, "io", "the copy's work is gone");
+        // A fast-forward lands the copy's own tree.
+        const tree = merged.tree ?? `${work}^{tree}`;
         const candidate = yield* checkpoints
           .commitTree({ cwd: g.root, tree, parent: game, message: `Brought in ${shell.title}` })
           .pipe(Effect.mapError(io(operation, g.root, "the copy's work could not be kept")));

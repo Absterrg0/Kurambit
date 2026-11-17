@@ -144,6 +144,30 @@ const measurable = (engine: GameEngineName) => engineCapabilities(engine).has("p
 const isGameBuildId = Schema.is(GameBuildId);
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
+/** `copies/<chat>/in|out` under the game-builds refs: when a chat moved into its copy and back. */
+const COPY_MOVE = /^copies\/([A-Za-z0-9_-]+)\/(in|out)$/;
+/** Per chat, when it moved into a copy and back (unix seconds). */
+type CopyMoves = Map<ThreadId, { readonly in?: number; readonly out?: number }>;
+/**
+ * Whether a turn's build was made in the folder `g` is: a thread's checkpoints all carry its
+ * current folder, so a chat that moved into a copy or back is told apart by when it moved.
+ */
+const madeHere = (
+  g: { readonly root: string; readonly home: string },
+  moves: CopyMoves,
+  row: {
+    readonly threadId: ThreadId;
+    readonly cwd: string | null;
+    readonly checkpoint: { readonly capturedAt: DateTime.Utc };
+  },
+) => {
+  const move = moves.get(row.threadId);
+  if (move?.in === undefined) return row.cwd === g.root;
+  const at = DateTime.toEpochMillis(row.checkpoint.capturedAt) / 1000;
+  const inCopy = at >= move.in && (move.out === undefined || move.out < move.in || at < move.out);
+  return g.root === g.home ? !inCopy && row.cwd !== null : inCopy && row.cwd === g.root;
+};
+
 /** One build before its facts are read. */
 interface Entry {
   readonly id: GameBuildId;
@@ -674,6 +698,7 @@ const make = Effect.gen(function* () {
     saved: ReadonlyArray<Entry>,
     recorded: ReadonlyMap<string, string>,
     setups: ReadonlyArray<Placed>,
+    moves: CopyMoves,
   ) =>
     Effect.gen(function* () {
       const rows = yield* projections
@@ -695,7 +720,7 @@ const make = Effect.gen(function* () {
         e.source._tag === "saved" && e.source.label === RESTORE_BEFORE_LABEL;
       const captures = rows.flatMap((row) => {
         const oid = refs.get(row.checkpoint.ref);
-        return row.cwd !== g.root || oid === undefined || !isGameBuildId(oid)
+        return !madeHere(g, moves, row) || oid === undefined || !isGameBuildId(oid)
           ? []
           : [{ row, oid, at: DateTime.formatIso(row.checkpoint.capturedAt) }];
       });
@@ -999,6 +1024,13 @@ const make = Effect.gen(function* () {
           ? [{ id: ref.oid, at: isoOfSeconds(ref.committedAt), from }]
           : [];
       });
+      const moves: CopyMoves = new Map();
+      for (const ref of refs) {
+        const move = COPY_MOVE.exec(ref.checkpointRef.slice(noRunFolder.length));
+        if (move === null) continue;
+        const thread = ThreadId.make(Buffer.from(move[1]!, "base64url").toString("utf8"));
+        moves.set(thread, { ...moves.get(thread), [move[2]!]: ref.committedAt });
+      }
       const recorded = new Map(
         refs.flatMap((ref) =>
           ref.checkpointRef.startsWith(BASES)
@@ -1012,14 +1044,14 @@ const make = Effect.gen(function* () {
         ),
       );
       const turnPage = (rows: number, from: string | undefined) =>
-        turnEntries(g, byRef, rows, from, saved, recorded, setups).pipe(
+        turnEntries(g, byRef, rows, from, saved, recorded, setups, moves).pipe(
           Effect.map((page): TurnPage => ({
             newest: page.entries[0] ?? null,
             oldest: page.oldest,
             more: page.scanned === rows,
           })),
         );
-      const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded, setups);
+      const turns = yield* turnEntries(g, byRef, limit * 3, before, saved, recorded, setups, moves);
       const savedPage = [...saved, ...(yield* versionEntries(g, byRef))].filter(
         (entry) => before === undefined || entry.at < before,
       );
@@ -1041,7 +1073,7 @@ const make = Effect.gen(function* () {
           const key = `${g.root}\0${at}\0${refs.length}`;
           const known = numberedCounts.get(key);
           if (known !== undefined) return Effect.succeed(known);
-          return turnEntries(g, byRef, ALL_TURNS, at, saved, recorded, setups).pipe(
+          return turnEntries(g, byRef, ALL_TURNS, at, saved, recorded, setups, moves).pipe(
             Effect.map(({ entries }) => {
               const ids = new Set(
                 [...entries, ...saved.filter((entry) => entry.at < at)]
