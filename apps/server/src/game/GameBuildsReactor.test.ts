@@ -65,6 +65,7 @@ const run = (
           Layer.mock(Orchestrator.OrchestratorV2)({}),
           Layer.mock(GameBuilds.GameBuilds)({
             recordTurn: () => Effect.void,
+            landHeldKeeps: () => Effect.void,
             measureIn: (_root, build, options) =>
               Effect.sync(() => {
                 measured.push({ build, supersede: options?.supersede === true });

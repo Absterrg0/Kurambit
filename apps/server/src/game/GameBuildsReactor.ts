@@ -144,7 +144,8 @@ const make = Effect.gen(function* () {
     return pushTo(event, pending ? "A turn started." : "A turn settled.").pipe(Effect.ignore);
   };
 
-  // A run that stopped working may have freed its game's folder for a held turn.
+  // A run that stopped working may have freed its folder: values kept during it land first,
+  // as builds of their own on what it left, then a turn held for the game folder starts.
   const folderFreed = (
     event: Extract<OrchestrationV2DomainEvent, { type: "run.created" | "run.updated" }>,
   ) =>
@@ -152,10 +153,13 @@ const make = Effect.gen(function* () {
     ["completed", "failed", "interrupted", "cancelled", "rolled_back"].includes(
       event.payload.status,
     )
-      ? projects.home(event.threadId).pipe(
-          Effect.flatMap((game) => folders.release(game.root, game.projectId)),
-          Effect.ignore,
-        )
+      ? Effect.gen(function* () {
+          const game = yield* projects.home(event.threadId);
+          const folder = yield* projects.resolve(event.threadId);
+          if (folder !== game.root) yield* builds.landHeldKeeps(folder);
+          yield* builds.landHeldKeeps(game.root);
+          yield* folders.release(game.root, game.projectId);
+        }).pipe(Effect.ignore)
       : Effect.void;
 
   const handle: GameBuildsReactor["Service"]["handle"] = (event) => {
@@ -233,7 +237,8 @@ const make = Effect.gen(function* () {
                   projects.refreshGuidance(game.root).pipe(
                     Effect.ignore,
                     Effect.andThen(projects.seatWorktreesOnFiles(game.projectId)),
-                    // A turn held before a restart starts once its game's folder is free.
+                    // Values and turns held before a restart land once the game's folder is free.
+                    Effect.andThen(builds.landHeldKeeps(game.root)),
                     Effect.andThen(folders.release(game.root, game.projectId)),
                   ),
                 {
