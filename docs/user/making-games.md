@@ -341,13 +341,13 @@ Drag its edge to resize it. Its three sections:
   out from a part to what holds it.
 - **Checks**: how many checks pass, over a bar with one mark per check, then what the build changed
   in words and its files as one line that opens to each file; click a file to open it in the diff.
-  Then the build's evidence: its phone and widescreen pictures, its frame rate through the play
-  with its readings (frames per second, 1% low, draw calls, triangles, download size) and how each
-  moved since the build before, the harness's own play to watch, and the controls it found with
-  their keys. A reading the build has no measure for is left out. Each check opens in place to
-  anything more: the controls the QA play pressed and how each answered, the errors, and your
-  saved test plays with **Replay**. When the game logged errors or warnings, its **Console** follows,
-  and the Checks button counts the errors. Last come the game's **Decisions**. A build's checks in
+  Then the checks, problems first, each with its proof under it: the frame rate through the play
+  with its 1% low, and the draw calls, triangles and download size with how each moved since the
+  build before; the controls as their keys with what each did (one that did nothing is amber); the
+  phone and widescreen pictures with **Open in responsive view**; the harness's own play to watch;
+  your saved test plays with **Replay**; the errors. Passing checks with nothing to show share one
+  line. When the game logged errors or warnings, its **Console** follows, and the Checks button
+  counts the errors. Last come the game's **Decisions**. A build's checks in
   the chat open here. Opening a diff on a narrow window closes the Workbench to give the game room;
   open it again to see both.
 
@@ -415,6 +415,11 @@ Drag its edge to resize it. Its three sections:
   time, fly a free camera around the frozen frame (drag to orbit, scroll to zoom), draw the bounds
   of the game's named things, and show the frame rate in the game's corner. They and Can't lose
   are in the command palette too, with keys that work while you play (Settings → Keybindings).
+- **Responsive view (three.js).** **⋯ → Responsive view**, its key or the palette turns the Stage into
+  a device view like a browser's: pick Phone, Tablet, Laptop, Desktop, Ultrawide or Responsive, type
+  a width and height, rotate, or zoom. The game keeps running at that size, so you see how it
+  answers a resize; in Responsive, drag the frame's edges. Esc or the same toggle returns to the
+  normal Stage. A test play saved here replays at the size it was played at.
 - **Check and playtest on three.js.** `game_check` on a three.js game loads the page headless and
   reports console and page errors instead of script errors; `game_play` ops `start`, `act` and `close` play it in real time
   with real keys and clicks (see the `three` studio skill for the bridge contract).
