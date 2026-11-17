@@ -84,7 +84,8 @@ export function GameRunPicker({
             pick === "keep-going" ? FastForwardIcon : pick === "ways" ? SplitIcon : ArrowRightIcon
           }
         />
-        {label}
+        {/* The narrowest composer keeps the icon; the name is the trigger's label. */}
+        <span className="@max-[22rem]/composer-surface:hidden">{label}</span>
         <ComposerControlChevron />
       </MenuTrigger>
       <MenuPopup side="top" align="start" className="min-w-48">

@@ -4888,7 +4888,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 !showInlineRestingControls &&
                   "@max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-0 @max-[640px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:flex-none",
               )
-            : cn("-ms-2.5 min-w-13", gameThread && "text-foreground")
+            : // A game's model picker follows its run picker, not the composer's left edge.
+              // At its narrowest it is the provider's icon: a sliver of a name reads as a glitch.
+              cn(
+                "min-w-13",
+                gameThread
+                  ? "text-foreground @max-[22rem]/composer-surface:[&_[data-chat-provider-model-picker-label]]:hidden"
+                  : "-ms-2.5",
+              )
         }
         terminalOpen={terminalOpen}
         open={isComposerModelPickerOpen}
