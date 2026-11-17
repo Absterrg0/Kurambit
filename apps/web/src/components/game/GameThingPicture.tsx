@@ -3,19 +3,20 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   GAME_ART_THUMBNAIL_DIR,
   type GameThing,
+  type GameThingFacts,
   type GameThingKind,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import {
   BoxIcon,
+  FlameIcon,
   LayoutPanelTopIcon,
   MountainIcon,
   PawPrintIcon,
   PersonStandingIcon,
   ShapesIcon,
   SlidersHorizontalIcon,
-  SparklesIcon,
   Volume2Icon,
   type LucideIcon,
 } from "lucide-react";
@@ -35,7 +36,7 @@ export const KIND_ICON: Record<GameThingKind, LucideIcon> = {
   creature: PawPrintIcon,
   prop: BoxIcon,
   level: MountainIcon,
-  effect: SparklesIcon,
+  effect: FlameIcon,
   ui: LayoutPanelTopIcon,
   rule: SlidersHorizontalIcon,
   sound: Volume2Icon,
@@ -59,6 +60,12 @@ export function useStageBuild(threadRef: ScopedThreadRef) {
 
 /** Pictures drawn this session by `${thread}\0${build}\0${thing}`: a PNG, or null when it has none. */
 const useDrawn = create<Readonly<Record<string, string | null>>>()(() => ({}));
+/** What each drawn thing is made of, by the same key, as the game counted it. */
+const useFacts = create<Readonly<Record<string, GameThingFacts>>>()(() => ({}));
+
+/** A thing's triangles, materials and size, once the game drew its picture this session. */
+export const useThingFacts = (threadRef: ScopedThreadRef, build: string | null, id: string) =>
+  useFacts((state) => state[`${scopedThreadKey(threadRef)}\0${build ?? "now"}\0${id}`] ?? null);
 
 // One portrait at a time: each is two frames of the game drawn between two of its own.
 let drawing: Promise<unknown> = Promise.resolve();
@@ -164,6 +171,7 @@ function Draw({
       // A game that cannot draw it now (no bridge yet, off the scene) is asked again next time.
       if (portrait === null) return;
       useDrawn.setState({ [drawnKey]: portrait.png });
+      if (portrait.facts !== undefined) useFacts.setState({ [drawnKey]: portrait.facts });
       if (sha !== null)
         void keep({
           environmentId: threadRef.environmentId,

@@ -50,17 +50,17 @@ export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef
   const listDecisions = useAtomCommand(gameEnvironment.decisions, { reportFailure: false });
   const decide = useGameDecide(threadRef);
   const canDecide = useAtomValue(gameEnvironment.decide.permissionAtom(environmentId));
-  const changed = useDecisionsChanged();
   const [decisions, setDecisions] = useState<ReadonlyArray<GameDecision>>([]);
   const [error, setError] = useState<string | null>(null);
   const refresh = useStableCallback(async () => {
     const result = await listDecisions({ environmentId, input: { threadId: threadRef.threadId } });
     if (result._tag === "Success") setDecisions(result.value);
   });
-  // Read again when shown and after each change sent from here: undos and skips add lines too.
+  // Read when shown and again after each change sent from here: undos and skips add lines too.
   useEffect(() => {
     void refresh();
-  }, [refresh, changed]);
+    return useDecisionsChanged.subscribe(() => void refresh());
+  }, [refresh]);
   if (decisions.length === 0 && error === null) return null;
   return (
     <Workbench.Section title="Decisions" detail={String(decisions.length)}>

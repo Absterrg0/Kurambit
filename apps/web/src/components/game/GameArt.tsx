@@ -1,6 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { LegendList } from "@legendapp/list/react";
-import { useAtomValue } from "@effect/atom-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
@@ -10,72 +8,79 @@ import {
   type GameArtAsset,
   type GameAssetUse,
   type GameThing,
+  type GameThingFacts,
   type GameThingValue,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
-import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
-  AudioLinesIcon,
-  ChevronDownIcon,
   ChevronLeftIcon,
   CrosshairIcon,
   ImageIcon,
   MessageSquarePlusIcon,
+  PauseIcon,
+  PlayIcon,
   ShapesIcon,
-  TypeIcon,
+  SlidersHorizontalIcon,
 } from "lucide-react";
 
+import { useAssetUrlState } from "../../assets/assetUrls";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
 import { gameEnvironment } from "../../state/game";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
-import { serverEnvironment } from "../../state/server";
-import { shellEnvironment } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Text } from "../ui/text";
 import { Textarea } from "../ui/textarea";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ArtThumbnailPainter,
   AudioViewer,
+  FONT_SAMPLE,
   FontViewer,
   ModelViewer,
   TextureViewer,
+  useFontFamily,
+  useSoundPeaks,
   type ModelViewerHandle,
   type ViewerModelInfo,
 } from "./GameArtViewers";
-import { GameCharacterRoutePicker } from "./GameCharacterRoute";
-import { GameGeneratedArt } from "./GameGeneratedArt";
-import { useChoosingCount, useGameGenerations, useGenerationCount } from "./GameGenerationCard";
+import { useGameGenerations } from "./GameGenerationCard";
 import { GameKeyArt } from "./GameKeyArt";
+import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
 import { GameTuneField } from "./GameTuneField";
-import { useTuneSaver } from "./GameTune";
+import { KIND_WORDS, useTuneSaver } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
 import {
-  artRows,
-  assetSummary,
+  artSections,
   bytesWords,
+  clipTime,
   CODE_MODEL_PREFIX,
   codeModels,
   countWords,
   entryKey,
   fileName,
+  inPlayWords,
+  isUnused,
   ROUTE_WORDS,
   thingOfAsset,
-  inPlayWords,
+  type ArtFilter,
   type GameArtCodeModel,
   type GameArtEntry,
-  type GameArtRow,
 } from "./gameArt.logic";
 import { refOf } from "./gameBuildRef";
 import { attachAssetToComposer } from "./gameComposerContext";
+import { showWorkbench } from "./gameWorkbenchPanel";
 import {
   hoverStageThing,
+  pointAtStageThing,
+  portraitStageThing,
   selectStageThing,
   tuneStageValue,
   useThreadStageBridge,
@@ -83,8 +88,6 @@ import {
 
 const NO_THINGS: ReadonlyArray<GameThing> = [];
 const NO_ASSETS: ReadonlyArray<GameArtAsset> = [];
-const ROW_HEIGHT = 52;
-const HEADING_HEIGHT = 32;
 
 /** The runtime's model viewer page on the game's own server; null when the game has none. */
 function useViewerUrl(threadRef: ScopedThreadRef): string | null {
@@ -117,9 +120,10 @@ function useAssetUse(threadRef: ScopedThreadRef): GameAssetUse | null {
 }
 
 /**
- * The Workbench's Art: the game's look, then every asset it has (models, textures and sprites,
- * sounds, fonts, and the models its code makes), grouped by kind with search. Opening one shows
- * it in a viewer of its kind with what it holds, where it came from, and the ways to change it.
+ * The Workbench's Art, an asset browser: search and a filter over the game's models (its code's
+ * and its files), textures, sounds and fonts. Models and textures are a grid of pictures, sounds
+ * a list with their waveforms, fonts a line set in each. Opening one shows it in a viewer of its
+ * kind with its facts and the changes it really has.
  */
 export function GameArtPanel({
   threadRef,
@@ -141,6 +145,7 @@ export function GameArtPanel({
   const code = codeModels(things);
   const use = useAssetUse(threadRef);
   const viewerUrl = useViewerUrl(threadRef);
+  const build = useStageBuild(threadRef);
   const selected = useGameWorkspaceStore((state) => state.artAsset);
   const setSelected = useGameWorkspaceStore((state) => state.setArtAsset);
   // Thumbnails drawn this session, by content, shown before the list reads them back.
@@ -164,9 +169,10 @@ export function GameArtPanel({
       {entry === null || root === null ? (
         <ArtList
           threadRef={threadRef}
+          root={root}
+          build={build}
           assets={assets}
           code={code}
-          things={things}
           use={use}
           drawn={drawn}
           loading={read.data === null || read.data === undefined}
@@ -178,11 +184,11 @@ export function GameArtPanel({
           key={entryKey(entry)}
           threadRef={threadRef}
           root={root}
+          build={build}
           entry={entry}
           things={things}
           use={use}
           viewerUrl={viewerUrl}
-          blend={read.data?.blend ?? null}
           onAsk={onAsk}
           onBack={() => {
             hoverStageThing(null);
@@ -210,11 +216,19 @@ export function GameArtPanel({
 
 // ─── The list ───────────────────────────────────────────────────────────────────
 
+const FILTERS: ReadonlyArray<{ readonly value: ArtFilter; readonly label: string }> = [
+  { value: "all", label: "All" },
+  { value: "model", label: "Models" },
+  { value: "texture", label: "Textures" },
+  { value: "audio", label: "Sounds" },
+];
+
 function ArtList({
   threadRef,
+  root,
+  build,
   assets,
   code,
-  things,
   use,
   drawn,
   loading,
@@ -222,9 +236,10 @@ function ArtList({
   onOpen,
 }: {
   threadRef: ScopedThreadRef;
+  root: string | null;
+  build: string | null;
   assets: ReadonlyArray<GameArtAsset>;
   code: ReadonlyArray<GameArtCodeModel>;
-  things: ReadonlyArray<GameThing>;
   use: GameAssetUse | null;
   drawn: ReadonlyMap<string, string | null>;
   loading: boolean;
@@ -232,198 +247,135 @@ function ArtList({
   onOpen: (entry: GameArtEntry) => void;
 }) {
   const [search, setSearch] = useState("");
-  const rows = artRows(assets, code, search);
-  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
-  const header = (
-    <div className="flex flex-col">
-      <ArtLook threadRef={threadRef} />
-      <div className="flex items-center border-t border-border px-4 py-3">
+  const [filter, setFilter] = useState<ArtFilter>("all");
+  const shown = artSections(assets, code, search, filter);
+  const nothing =
+    shown.pictures.length === 0 && shown.sounds.length === 0 && shown.fonts.length === 0;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <StyleRow threadRef={threadRef} />
+      <div className="flex flex-col gap-2 px-4 pt-3 pb-2">
         <Input
           size="sm"
           type="search"
           value={search}
-          placeholder="Search the game's art"
+          placeholder="Search"
           aria-label="Search the game's art"
           onChange={(event) => setSearch(event.currentTarget.value)}
         />
+        <ToggleGroup
+          aria-label="Show"
+          variant="segmented"
+          value={[filter]}
+          onValueChange={(next) => {
+            const picked = FILTERS.find((each) => each.value === next[0]);
+            if (picked !== undefined) setFilter(picked.value);
+          }}
+        >
+          {FILTERS.map((each) => (
+            <Toggle key={each.value} value={each.value}>
+              {each.label}
+            </Toggle>
+          ))}
+        </ToggleGroup>
       </div>
-    </div>
-  );
-  if (!loading && assets.length === 0 && code.length === 0)
-    return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <ArtLook threadRef={threadRef} />
-        <Workbench.Empty
-          icon={<ImageIcon />}
-          title="No art yet"
-          body="Models, textures, sounds and fonts the game holds show here, and models its code makes while it plays."
-        />
-      </div>
-    );
-  return (
-    <LegendList<GameArtRow>
-      data={rows}
-      keyExtractor={(row) => row.key}
-      getItemType={(row) => row.type}
-      getFixedItemSize={(row) => (row.type === "heading" ? HEADING_HEIGHT : ROW_HEIGHT)}
-      estimatedItemSize={ROW_HEIGHT}
-      drawDistance={ROW_HEIGHT * 6}
-      ListHeaderComponent={header}
-      ListFooterComponent={
-        more > 0 ? (
-          <Text variant="caption" tone="muted" render={<p className="px-4 py-3" />}>
-            {countWords(more, "more file", "more files")} not listed
-          </Text>
-        ) : rows.length === 0 && search !== "" ? (
-          <Text variant="body" tone="muted" render={<p className="px-4 py-3" />}>
-            Nothing matches “{search}”.
-          </Text>
-        ) : (
-          <div className="h-2" />
-        )
-      }
-      className="min-h-0 flex-1"
-      renderItem={({ item }) =>
-        item.type === "heading" ? (
-          <div className="flex h-8 items-end gap-2 px-4 pb-1">
-            <Text variant="caption" tone="muted">
-              {item.label}
+      {!loading && assets.length === 0 && code.length === 0 ? (
+        <Workbench.Empty icon={<ImageIcon />} title="No art yet" />
+      ) : nothing && search !== "" ? (
+        <Text variant="body" tone="muted" render={<p className="px-4 py-3" />}>
+          Nothing matches “{search}”.
+        </Text>
+      ) : (
+        <div className="flex flex-col gap-4 pt-1 pb-4">
+          {shown.pictures.length === 0 ? null : (
+            <ul
+              aria-label="Models and textures"
+              className="grid grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-x-3 gap-y-3 px-4"
+            >
+              {shown.pictures.map((entry) => (
+                <li key={entryKey(entry)} className="min-w-0">
+                  <ArtTile
+                    threadRef={threadRef}
+                    root={root}
+                    build={build}
+                    entry={entry}
+                    use={use}
+                    drawn={drawn}
+                    onOpen={onOpen}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          {shown.sounds.length === 0 || root === null ? null : (
+            <ArtGroup label="Sounds" count={shown.sounds.length}>
+              {shown.sounds.map((asset) => (
+                <SoundRow
+                  key={asset.path}
+                  threadRef={threadRef}
+                  root={root}
+                  asset={asset}
+                  unused={isUnused(asset, use)}
+                  onOpen={() => onOpen({ kind: "file", asset })}
+                />
+              ))}
+            </ArtGroup>
+          )}
+          {shown.fonts.length === 0 || root === null ? null : (
+            <ArtGroup label="Fonts" count={shown.fonts.length}>
+              {shown.fonts.map((asset) => (
+                <FontRow
+                  key={asset.path}
+                  threadRef={threadRef}
+                  root={root}
+                  asset={asset}
+                  onOpen={() => onOpen({ kind: "file", asset })}
+                />
+              ))}
+            </ArtGroup>
+          )}
+          {more > 0 ? (
+            <Text variant="caption" tone="muted" render={<p className="px-4" />}>
+              {countWords(more, "more file", "more files")} not listed
             </Text>
-            <Text variant="caption" tone="dim" numeric>
-              {item.count}
-            </Text>
-          </div>
-        ) : (
-          <ArtRowButton
-            threadRef={threadRef}
-            root={root}
-            entry={item.entry}
-            things={things}
-            use={use}
-            drawn={drawn}
-            onOpen={onOpen}
-          />
-        )
-      }
-    />
-  );
-}
-
-/** Points the frozen Stage at what an asset is in the game, if it is there: the Tune list's hover. */
-const stageThingOf = (entry: GameArtEntry, things: ReadonlyArray<GameThing>) =>
-  entry.kind === "code-model" ? entry.id : (thingOfAsset(things, entry.asset)?.id ?? null);
-
-function ArtRowButton({
-  threadRef,
-  root,
-  entry,
-  things,
-  use,
-  drawn,
-  onOpen,
-}: {
-  threadRef: ScopedThreadRef;
-  root: string | null;
-  entry: GameArtEntry;
-  things: ReadonlyArray<GameThing>;
-  use: GameAssetUse | null;
-  drawn: ReadonlyMap<string, string | null>;
-  onOpen: (entry: GameArtEntry) => void;
-}) {
-  const name = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
-  const summary =
-    entry.kind === "file" ? assetSummary(entry.asset) : "Code · made while the game plays";
-  const stageId = stageThingOf(entry, things);
-  // Whether the last measured play used it, at the row's end: the one reading a list scans for.
-  const used = entry.kind === "file" ? inPlayWords(entry.asset, use, stageId !== null) : null;
-  return (
-    <div className="px-2">
-      <button
-        type="button"
-        onClick={() => onOpen(entry)}
-        onPointerEnter={() => {
-          if (stageId !== null) hoverStageThing(stageId);
-        }}
-        onPointerLeave={() => hoverStageThing(null)}
-        className="flex h-12 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-      >
-        <ArtThumb threadRef={threadRef} root={root} entry={entry} drawn={drawn} />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <Text variant="body" tone="default" truncate render={<span className="flex-1" />}>
-              {name}
-            </Text>
-            {used === null ? null : (
-              <Text variant="caption" tone="muted" render={<span className="shrink-0" />}>
-                {used}
-              </Text>
-            )}
-          </span>
-          <Text variant="caption" tone="muted" numeric truncate>
-            {summary}
-          </Text>
-        </span>
-      </button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
 
-/**
- * A row's picture: a model's thumbnail drawn once and kept by its content, an image itself, or the
- * kind's glyph on the neutral surface. Nothing here draws live.
- */
-function ArtThumb({
-  threadRef,
-  root,
-  entry,
-  drawn,
+/** A list's heading with its count, then its rows. */
+function ArtGroup({
+  label,
+  count,
+  children,
 }: {
-  threadRef: ScopedThreadRef;
-  root: string | null;
-  entry: GameArtEntry;
-  drawn: ReadonlyMap<string, string | null>;
+  label: string;
+  count: number;
+  children: ReactNode;
 }) {
-  const glyph = (icon: ReactNode) => (
-    <span
-      aria-hidden="true"
-      className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-dim-foreground [&_svg]:size-4"
-    >
-      {icon}
-    </span>
-  );
-  if (entry.kind === "code-model") return glyph(<ShapesIcon />);
-  const asset = entry.asset;
-  if (asset.kind === "audio") return glyph(<AudioLinesIcon />);
-  if (asset.kind === "font") return glyph(<TypeIcon />);
-  const local = asset.kind === "model" ? drawn.get(asset.sha256) : undefined;
-  const path = asset.kind === "texture" ? asset.path : (asset.thumbnail ?? null);
-  if (local !== undefined && local !== null)
-    return (
-      <span className="relative size-9 shrink-0 overflow-hidden rounded-md bg-muted">
-        <img src={local} alt="" className="absolute inset-0 size-full object-contain" />
-      </span>
-    );
-  if (path === null || root === null) return glyph(<ShapesIcon />);
   return (
-    <span className="relative size-9 shrink-0 overflow-hidden rounded-md bg-muted">
-      <GameKeyArt
-        environmentId={threadRef.environmentId}
-        root={root}
-        path={path}
-        className="object-contain [image-rendering:pixelated]"
-        missing={glyph(asset.kind === "model" ? <ShapesIcon /> : <ImageIcon />)}
-      />
-    </span>
+    <section aria-label={label} className="flex flex-col">
+      <div className="flex h-7 items-center gap-2 px-4">
+        <Text variant="meta" tone="muted">
+          {label}
+        </Text>
+        <Text variant="caption" tone="dim" numeric>
+          {count}
+        </Text>
+      </div>
+      {children}
+    </section>
   );
 }
 
-// ─── The look (the old Look panel) ───────────────────────────────────────────────
-
+/** A decoded STYLE.json, the agent's record of the game's look. */
 const decodeStyle = Schema.decodeUnknownOption(Schema.fromJsonString(GameStyle));
 
 /**
- * A style family's slug as a person would say the look, without the asset
- * pack's vendor: "kenney-lowpoly" reads "Low-poly".
+ * A style family's slug as a person would say the look, without the asset pack's vendor:
+ * "kenney-lowpoly" reads "Low-poly".
  */
 const styleFamilyWords = (family: string) => {
   const words = family
@@ -435,8 +387,8 @@ const styleFamilyWords = (family: string) => {
   return spaced.length === 0 ? family : `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
 };
 
-/** STYLE.json's family and palette, how models are made and whether the library may come in, and the generated art. */
-function ArtLook({ threadRef }: { threadRef: ScopedThreadRef }) {
+/** STYLE.json, when the game has one: its palette as swatches and its name, in one quiet row. */
+function StyleRow({ threadRef }: { threadRef: ScopedThreadRef }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   const file = useEnvironmentQuery(
     root === null
@@ -446,98 +398,336 @@ function ArtLook({ threadRef }: { threadRef: ScopedThreadRef }) {
           input: { cwd: root, relativePath: GAME_STYLE_FILE },
         }),
   );
-  const style = file.data === null ? null : Option.getOrNull(decodeStyle(file.data.contents));
-  const swatches = style !== null && Array.isArray(style.palette) ? style.palette : [];
-  const [artOpen, setArtOpen] = useState(false);
-  const choosing = useChoosingCount(threadRef);
-  const generated = useGenerationCount(threadRef);
+  const style = file.data == null ? null : Option.getOrNull(decodeStyle(file.data.contents));
+  if (style === null) return null;
+  const swatches = Array.isArray(style.palette) ? style.palette : [];
+  const name =
+    style.family === undefined || style.family === null
+      ? typeof style.palette === "string"
+        ? style.palette
+        : null
+      : styleFamilyWords(style.family);
+  if (swatches.length === 0 && name === null) return null;
   return (
-    <Workbench.Section title="Look">
-      <div className="flex min-h-8 items-center gap-2 ps-4 pe-4">
-        <Text variant="body" tone="default" render={<span className="flex-1" />}>
-          Style
+    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
+      {swatches.length === 0 ? null : (
+        <span className="flex gap-0.5">
+          {swatches.slice(0, 8).map((hex) => (
+            <span
+              key={hex}
+              aria-label={hex}
+              className="size-3.5 rounded-sm ring-1 ring-border ring-inset"
+              style={{ background: hex }}
+            />
+          ))}
+        </span>
+      )}
+      {name === null ? null : (
+        <Text variant="meta" tone="muted" truncate>
+          {name}
         </Text>
-        {style === null ? (
-          <Text variant="caption" tone="muted">
-            Not chosen yet
+      )}
+    </div>
+  );
+}
+
+/** Points the frozen Stage at what an asset is in the game, if it is there: the Tune list's hover. */
+const stageThingOf = (entry: GameArtEntry, things: ReadonlyArray<GameThing>) =>
+  entry.kind === "code-model" ? entry.id : (thingOfAsset(things, entry.asset)?.id ?? null);
+
+/**
+ * One model or texture: its square picture on the neutral surface, its name, and one fact under
+ * it (a model's triangles, a texture's pixels). One the build's plays never loaded is dimmed.
+ */
+function ArtTile({
+  threadRef,
+  root,
+  build,
+  entry,
+  use,
+  drawn,
+  onOpen,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string | null;
+  build: string | null;
+  entry: GameArtEntry;
+  use: GameAssetUse | null;
+  drawn: ReadonlyMap<string, string | null>;
+  onOpen: (entry: GameArtEntry) => void;
+}) {
+  const [pixels, setPixels] = useState<string | null>(null);
+  const facts = useThingFacts(threadRef, build, entry.kind === "code-model" ? entry.id : "");
+  const unused = entry.kind === "file" && isUnused(entry.asset, use);
+  const name = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
+  const fact = unused
+    ? "Unused"
+    : entry.kind === "code-model"
+      ? facts === null
+        ? KIND_WORDS[entry.thingKind]
+        : countWords(facts.triangles, "triangle", "triangles")
+      : entry.asset.kind === "model"
+        ? entry.asset.triangles === undefined
+          ? bytesWords(entry.asset.bytes)
+          : countWords(entry.asset.triangles, "triangle", "triangles")
+        : (pixels ?? bytesWords(entry.asset.bytes));
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(entry)}
+      onPointerEnter={() => {
+        if (entry.kind === "code-model") hoverStageThing(entry.id);
+      }}
+      onPointerLeave={() => hoverStageThing(null)}
+      className={cn(
+        "group/tile flex w-full min-w-0 cursor-pointer flex-col gap-1.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        unused && "opacity-55",
+      )}
+    >
+      <span className="relative block aspect-square w-full overflow-hidden rounded-md bg-muted ring-border ring-inset group-hover/tile:ring-1">
+        {entry.kind === "code-model" ? (
+          <GameThingPicture
+            threadRef={threadRef}
+            thing={{ id: entry.id, kind: entry.thingKind }}
+            build={build}
+            className="absolute inset-0 rounded-none bg-transparent"
+          />
+        ) : (
+          <FilePicture
+            threadRef={threadRef}
+            root={root}
+            asset={entry.asset}
+            drawn={drawn}
+            onPixels={setPixels}
+          />
+        )}
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <Text variant="meta" tone="default" truncate>
+          {name}
+        </Text>
+        <Text variant="caption" tone="muted" numeric truncate>
+          {fact}
+        </Text>
+      </span>
+    </button>
+  );
+}
+
+/** A file's picture: a model's thumbnail drawn once and kept by its content, or the image itself. */
+function FilePicture({
+  threadRef,
+  root,
+  asset,
+  drawn,
+  onPixels,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string | null;
+  asset: GameArtAsset;
+  drawn: ReadonlyMap<string, string | null>;
+  onPixels: (pixels: string) => void;
+}) {
+  const glyph = (
+    <span
+      aria-hidden="true"
+      className="absolute inset-0 flex items-center justify-center text-dim-foreground [&_svg]:size-5"
+    >
+      {asset.kind === "model" ? <ShapesIcon /> : <ImageIcon />}
+    </span>
+  );
+  if (asset.kind === "texture")
+    return root === null ? (
+      glyph
+    ) : (
+      <TexturePicture threadRef={threadRef} root={root} asset={asset} onPixels={onPixels} />
+    );
+  const local = drawn.get(asset.sha256);
+  if (local !== undefined && local !== null)
+    return <img src={local} alt="" className="absolute inset-0 size-full object-contain" />;
+  if (asset.thumbnail === undefined || root === null) return glyph;
+  return (
+    <GameKeyArt
+      environmentId={threadRef.environmentId}
+      root={root}
+      path={asset.thumbnail}
+      className="object-contain"
+      missing={glyph}
+    />
+  );
+}
+
+/** A texture as its own picture, saying its size in pixels once it loads. */
+function TexturePicture({
+  threadRef,
+  root,
+  asset,
+  onPixels,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string;
+  asset: GameArtAsset;
+  onPixels: (pixels: string) => void;
+}) {
+  const state = useAssetUrlState(threadRef.environmentId, {
+    _tag: "draft-workspace-file",
+    cwd: root,
+    path: asset.path,
+  });
+  if (state._tag !== "Success") return null;
+  return (
+    <img
+      src={state.url}
+      alt=""
+      decoding="async"
+      loading="lazy"
+      onLoad={(event) =>
+        onPixels(`${event.currentTarget.naturalWidth} × ${event.currentTarget.naturalHeight}`)
+      }
+      className="absolute inset-0 size-full object-contain [image-rendering:pixelated]"
+    />
+  );
+}
+
+const WAVE_W = 120;
+const WAVE_H = 20;
+const WAVE_BARS = 40;
+
+/** One sound: play, its name and length, its waveform, and "Unused" when no play used it. */
+function SoundRow({
+  threadRef,
+  root,
+  asset,
+  unused,
+  onOpen,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string;
+  asset: GameArtAsset;
+  unused: boolean;
+  onOpen: () => void;
+}) {
+  const state = useAssetUrlState(threadRef.environmentId, {
+    _tag: "draft-workspace-file",
+    cwd: root,
+    path: asset.path,
+  });
+  const url = state._tag === "Success" ? state.url : null;
+  const wave = useSoundPeaks(url, asset.sha256);
+  const audio = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const peaks =
+    wave === null || wave === "failed"
+      ? []
+      : Array.from({ length: WAVE_BARS }, (_, bar) => {
+          const from = Math.floor((bar / WAVE_BARS) * wave.peaks.length);
+          const to = Math.max(from + 1, Math.floor(((bar + 1) / WAVE_BARS) * wave.peaks.length));
+          return Math.max(...wave.peaks.slice(from, to), 0.02);
+        });
+  return (
+    <div className={cn("flex h-9 min-w-0 items-center gap-2 ps-2 pe-4", unused && "opacity-55")}>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        disabled={url === null}
+        aria-label={playing ? `Pause ${fileName(asset.path)}` : `Play ${fileName(asset.path)}`}
+        onClick={() => {
+          if (audio.current === null) return;
+          if (playing) audio.current.pause();
+          else void audio.current.play();
+        }}
+      >
+        {playing ? <PauseIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
+      </Button>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
+          {fileName(asset.path)}
+        </Text>
+        <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
+          {wave === null || wave === "failed" ? "" : clipTime(wave.seconds)}
+        </Text>
+        <svg
+          viewBox={`0 0 ${WAVE_W} ${WAVE_H}`}
+          width={WAVE_W}
+          height={WAVE_H}
+          aria-hidden="true"
+          className="shrink-0"
+        >
+          {peaks.map((peak, index) => (
+            <rect
+              // oxlint-disable-next-line react/no-array-index-key -- a bar is its slice of the sound.
+              key={index}
+              x={(index * WAVE_W) / WAVE_BARS + 0.5}
+              width={WAVE_W / WAVE_BARS - 1}
+              y={(WAVE_H - peak * WAVE_H) / 2}
+              height={Math.max(1, peak * WAVE_H)}
+              rx={0.5}
+              className="fill-muted-foreground"
+            />
+          ))}
+        </svg>
+        {unused ? (
+          <Text variant="caption" tone="muted" render={<span className="w-11 shrink-0" />}>
+            Unused
           </Text>
         ) : (
-          <>
-            {swatches.length > 0 ? (
-              <span className="flex gap-0.5">
-                {swatches.slice(0, 6).map((hex) => (
-                  <span
-                    key={hex}
-                    aria-label={hex}
-                    className="size-3.5 rounded-sm ring-1 ring-border ring-inset"
-                    style={{ background: hex }}
-                  />
-                ))}
-              </span>
-            ) : null}
-            <Text variant="caption" tone="muted" truncate>
-              {[
-                style.family === undefined || style.family === null
-                  ? null
-                  : styleFamilyWords(style.family),
-                style.mode === "pixel" ? "Pixel art" : "Smooth",
-                typeof style.palette === "string" ? style.palette : null,
-              ]
-                .filter((part) => part !== null)
-                .join(" · ")}
-            </Text>
-          </>
+          <span className="w-11 shrink-0" />
         )}
-      </div>
-      <div className="flex min-h-8 items-center gap-2 ps-4 pe-2">
-        <Text variant="body" tone="default" render={<span className="flex-1" />}>
-          Models
+      </button>
+      {url === null ? null : (
+        <audio
+          ref={audio}
+          src={url}
+          preload="none"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** One font: its name, then a line set in it. */
+function FontRow({
+  threadRef,
+  root,
+  asset,
+  onOpen,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string;
+  asset: GameArtAsset;
+  onOpen: () => void;
+}) {
+  const family = useFontFamily(threadRef.environmentId, root, asset);
+  return (
+    <div className="px-2">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <Text variant="caption" tone="muted" truncate>
+          {fileName(asset.path)}
         </Text>
-        <GameCharacterRoutePicker threadRef={threadRef} />
-      </div>
-      <div className="px-2">
-        <button
-          type="button"
-          aria-expanded={artOpen}
-          onClick={() => setArtOpen(!artOpen)}
-          className="flex min-h-8 w-full items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        <span
+          className="min-w-0 truncate text-foreground"
+          // The font's own face at one sample size: no type role, which would set its own.
+          style={{
+            fontSize: 20,
+            lineHeight: "28px",
+            ...(family === null || family === "failed" ? { opacity: 0 } : { fontFamily: family }),
+          }}
         >
-          <Text variant="body" tone="default" render={<span className="flex-1" />}>
-            Generated art
-          </Text>
-          {choosing > 0 ? (
-            <Text
-              variant="caption"
-              tone="inherit"
-              render={<span className="text-warning-foreground" />}
-            >
-              {choosing} to pick
-            </Text>
-          ) : generated === null ? null : (
-            <Text variant="caption" tone="muted" numeric>
-              {generated === 0 ? "None yet" : generated === 1 ? "1 piece" : `${generated} pieces`}
-            </Text>
-          )}
-          <ChevronDownIcon
-            className={cn(
-              "size-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
-              artOpen && "rotate-180",
-            )}
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-      {style === null ? (
-        <Text variant="caption" tone="muted" render={<p className="px-4" />}>
-          The agent writes {GAME_STYLE_FILE} when it picks a look.
-        </Text>
-      ) : null}
-      {artOpen ? (
-        <div className="px-4 pt-2">
-          <GameGeneratedArt threadRef={threadRef} />
-        </div>
-      ) : null}
-    </Workbench.Section>
+          {FONT_SAMPLE}
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -564,9 +754,20 @@ const LOOK_SCALE: GameThingValue = {
 };
 
 /** What the agent is told about an asset with the chip. */
-const assetContext = (entry: GameArtEntry, info: ViewerModelInfo | null) => {
+const assetContext = (
+  entry: GameArtEntry,
+  info: ViewerModelInfo | null,
+  facts: GameThingFacts | null,
+) => {
   if (entry.kind === "code-model")
-    return `The model "${entry.name}" that the game's code builds (a named thing on the Stage, id \`${entry.id}\`).`;
+    return [
+      `The model "${entry.name}" that the game's code builds (a named thing on the Stage, id \`${entry.id}\`).`,
+      facts === null
+        ? null
+        : `As the game draws it: ${facts.triangles} triangles, materials ${facts.materials.join(", ") || "none"}, ${facts.size.join(" × ")} units. The picture is it alone, from the Art view's angle.`,
+    ]
+      .filter((line) => line !== null)
+      .join("\n");
   const asset = entry.asset;
   return [
     `The asset \`${asset.path}\` (${asset.kind}, ${bytesWords(asset.bytes)}${asset.triangles === undefined ? "" : `, ${asset.triangles} triangles`}).`,
@@ -584,28 +785,29 @@ const assetContext = (entry: GameArtEntry, info: ViewerModelInfo | null) => {
 function ArtDetail({
   threadRef,
   root,
+  build,
   entry,
   things,
   use,
   viewerUrl,
-  blend,
   onAsk,
   onBack,
 }: {
   threadRef: ScopedThreadRef;
   root: string;
+  build: string | null;
   entry: GameArtEntry;
   things: ReadonlyArray<GameThing>;
   use: GameAssetUse | null;
   viewerUrl: string | null;
-  blend: string | null;
   onAsk: (text: string) => void;
   onBack: () => void;
 }) {
   const [info, setInfo] = useState<ViewerModelInfo | null>(null);
   const [handle, setHandle] = useState<ModelViewerHandle | null>(null);
+  // The code-made thing's view as last drawn: the chip's picture and its facts.
+  const [orbit, setOrbit] = useState<{ png: string; facts: GameThingFacts | null } | null>(null);
   const name = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
-  const label = entry.kind === "file" ? fileName(entry.asset.path) : entry.name;
   const stageId = stageThingOf(entry, things);
   const stageThing =
     stageId === null ? null : (things.find((thing) => thing.id === stageId) ?? null);
@@ -618,10 +820,19 @@ function ArtDetail({
     };
   }, [stageId]);
   const ask = async () => {
-    const png = handle === null ? null : await handle.picture();
+    const png =
+      entry.kind === "code-model"
+        ? (orbit?.png ?? null)
+        : handle === null
+          ? null
+          : await handle.picture();
     await attachAssetToComposer(
       threadRef,
-      { key: entryKey(entry), label, context: assetContext(entry, info) },
+      {
+        key: entryKey(entry),
+        label: name,
+        context: assetContext(entry, info, orbit?.facts ?? null),
+      },
       png,
     );
   };
@@ -639,41 +850,36 @@ function ArtDetail({
         <Text variant="label" tone="strong" truncate render={<h3 className="min-w-0 flex-1" />}>
           {name}
         </Text>
-        {stageThing === null ? null : (
+        {stageThing === null || !stageThing.onScreen ? null : (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label="Point at it on the Stage"
-                  onClick={() => selectStageThing(stageThing.id)}
+                  aria-label="Show on the Stage"
+                  onClick={() => pointAtStageThing(stageThing.id)}
                 />
               }
             >
               <CrosshairIcon aria-hidden="true" />
             </TooltipTrigger>
-            <TooltipPopup side="bottom">Point at it on the Stage</TooltipPopup>
+            <TooltipPopup side="bottom">Show on the Stage</TooltipPopup>
           </Tooltip>
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Ask the agent about this"
-                onClick={() => void ask()}
-              />
-            }
-          >
-            <MessageSquarePlusIcon aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">Ask the agent about this: a chip with this view</TooltipPopup>
-        </Tooltip>
+        <Button size="sm" variant="ghost" onClick={() => void ask()}>
+          <MessageSquarePlusIcon aria-hidden="true" />
+          Ask about this
+        </Button>
       </div>
       {entry.kind === "code-model" ? (
-        <CodeModelDetail entry={entry} onAsk={onAsk} />
+        <CodeModelDetail
+          threadRef={threadRef}
+          build={build}
+          entry={entry}
+          onDrawn={setOrbit}
+          facts={orbit?.facts ?? null}
+        />
       ) : (
         <FileDetail
           threadRef={threadRef}
@@ -682,7 +888,6 @@ function ArtDetail({
           stageThing={stageThing}
           use={use}
           viewerUrl={viewerUrl}
-          blend={blend}
           info={info}
           onInfo={setInfo}
           onHandle={setHandle}
@@ -694,41 +899,137 @@ function ArtDetail({
   );
 }
 
+const ORBIT_PX = 384;
+const ORBIT_PER_PX = 0.012;
+
+/**
+ * A thing the game's code makes, seen alone: the game draws it from the angle dragged here, one
+ * picture at a time, then what it is made of and, when it has values, Tune on it.
+ */
 function CodeModelDetail({
+  threadRef,
+  build,
   entry,
-  onAsk,
+  facts,
+  onDrawn,
 }: {
+  threadRef: ScopedThreadRef;
+  build: string | null;
   entry: GameArtCodeModel;
-  onAsk: (text: string) => void;
+  facts: GameThingFacts | null;
+  onDrawn: (view: { png: string; facts: GameThingFacts | null }) => void;
 }) {
+  const [angle, setAngle] = useState({ yaw: 0.7, pitch: 0.35 });
+  const [picture, setPicture] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const drag = useRef<{ x: number; y: number } | null>(null);
+  // One picture in flight; the angle asked for meanwhile is drawn after it.
+  const busy = useRef(false);
+  const wanted = useRef(angle);
+  const draw = useStableCallback(async () => {
+    if (busy.current) return;
+    busy.current = true;
+    let asked = wanted.current;
+    for (;;) {
+      const portrait = await portraitStageThing(entry.id, { size: ORBIT_PX, ...asked });
+      if (portrait === null) setFailed(true);
+      else {
+        setFailed(false);
+        setPicture(portrait.png);
+        onDrawn({ png: portrait.png, facts: portrait.facts ?? null });
+      }
+      if (wanted.current === asked) break;
+      asked = wanted.current;
+    }
+    busy.current = false;
+  });
+  useEffect(() => {
+    wanted.current = angle;
+    void draw();
+  }, [angle, draw]);
   return (
-    <Workbench.Body className="overflow-visible">
-      <Workbench.Section title="Where it comes from">
-        <ArtFact name="Made by the game's code while it plays" reading="Code" />
-        <Text variant="caption" tone="muted" render={<p className="px-4 pt-1" />}>
-          It has no file to open here. Point at it on the frozen Stage to see it, or Tune its
-          values.
-        </Text>
-      </Workbench.Section>
-      <Workbench.Section title="Change it">
-        <ActionRow>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => onAsk(`Change the model "${entry.name}" that the code builds: `)}
+    <>
+      <div
+        role="img"
+        aria-label={`${entry.name}, drag to turn it`}
+        className="relative aspect-square w-full shrink-0 cursor-grab touch-none bg-stage-well active:cursor-grabbing"
+        onPointerDown={(event) => {
+          drag.current = { x: event.clientX, y: event.clientY };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const from = drag.current;
+          if (from === null) return;
+          const dx = event.clientX - from.x;
+          const dy = event.clientY - from.y;
+          if (Math.abs(dx) + Math.abs(dy) < 3) return;
+          drag.current = { x: event.clientX, y: event.clientY };
+          setAngle((before) => ({
+            yaw: before.yaw - dx * ORBIT_PER_PX,
+            pitch: Math.max(-1.3, Math.min(1.3, before.pitch + dy * ORBIT_PER_PX)),
+          }));
+        }}
+        onPointerUp={() => {
+          drag.current = null;
+        }}
+      >
+        {picture === null ? (
+          <GameThingPicture
+            threadRef={threadRef}
+            thing={{ id: entry.id, kind: entry.thingKind }}
+            build={build}
+            className="absolute inset-0 rounded-none bg-transparent"
+          />
+        ) : (
+          <img
+            src={picture}
+            alt=""
+            draggable={false}
+            className="absolute inset-0 size-full object-contain select-none"
+          />
+        )}
+        {failed && picture === null ? (
+          <Text
+            variant="caption"
+            tone="muted"
+            render={<span className="pointer-events-none absolute start-4 bottom-3" />}
           >
-            Ask the agent to change it
-          </Button>
-        </ActionRow>
-      </Workbench.Section>
-    </Workbench.Body>
+            Play the game to see it
+          </Text>
+        ) : null}
+      </div>
+      <Workbench.Body className="overflow-visible">
+        <Workbench.Section title="Model">
+          <ArtFact name="Kind" reading={KIND_WORDS[entry.thingKind]} />
+          {facts === null ? null : (
+            <>
+              <ArtFact name="Triangles" reading={facts.triangles.toLocaleString("en-US")} />
+              <ArtFact name="Size" reading={`${facts.size.join(" × ")} (wide × tall × long)`} />
+              <ArtFact name="Materials" reading={facts.materials.join(", ") || "None"} />
+            </>
+          )}
+        </Workbench.Section>
+        {entry.tunable ? (
+          <div className="px-4 py-3">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                selectStageThing(entry.id);
+                showWorkbench("tune");
+              }}
+            >
+              <SlidersHorizontalIcon aria-hidden="true" />
+              Tune its values
+            </Button>
+          </div>
+        ) : null}
+      </Workbench.Body>
+    </>
   );
 }
 
-/**
- * One fact of an asset: its name and its reading at the right, as a Checks row reads, on the
- * Art tab's own 16 px edges (no evidence column here).
- */
+/** One fact of an asset: its name and its reading at the right, on the panel's 16 px edges. */
 function ArtFact({
   mark,
   name,
@@ -780,10 +1081,6 @@ function AssetPath({ path }: { path: string }) {
   );
 }
 
-function ActionRow({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-2 px-4 py-1">{children}</div>;
-}
-
 function FileDetail({
   threadRef,
   root,
@@ -791,7 +1088,6 @@ function FileDetail({
   stageThing,
   use,
   viewerUrl,
-  blend,
   info,
   onInfo,
   handle,
@@ -804,7 +1100,6 @@ function FileDetail({
   stageThing: GameThing | null;
   use: GameAssetUse | null;
   viewerUrl: string | null;
-  blend: string | null;
   info: ViewerModelInfo | null;
   onInfo: (info: ViewerModelInfo | null) => void;
   handle: ModelViewerHandle | null;
@@ -826,11 +1121,7 @@ function FileDetail({
     <>
       {asset.kind === "model" ? (
         viewerUrl === null ? (
-          <Workbench.Empty
-            icon={<ShapesIcon />}
-            title="Play the game to open its models"
-            body="The viewer opens models from the game's own server, which runs while the game is on the Stage."
-          />
+          <Workbench.Empty icon={<ShapesIcon />} title="Play the game to open its models" />
         ) : (
           <ModelViewer
             viewerUrl={viewerUrl}
@@ -850,33 +1141,24 @@ function FileDetail({
       <Workbench.Body className="overflow-visible">
         <Workbench.Section title="File" detail={bytesWords(asset.bytes)}>
           <AssetPath path={asset.path} />
-          <ArtFact
-            name="From"
-            reading={
-              asset.route === "library" && asset.pack !== undefined
-                ? `Library · ${asset.pack}`
-                : ROUTE_WORDS[asset.route]
-            }
-          />
-          {asset.credit === undefined ? null : <ArtFact name="Licence" reading={asset.credit} />}
-          <ArtFact name="In play" reading={usedWords ?? "Not measured for this build"} />
-          {asset.note === undefined ? null : (
-            <Text variant="caption" tone="muted" render={<p className="px-4 pt-1" />}>
-              {asset.note}
-            </Text>
+          {asset.route === "unrecorded" ? null : (
+            <ArtFact
+              name="From"
+              reading={
+                asset.route === "library" && asset.pack !== undefined
+                  ? `Library · ${asset.pack}`
+                  : ROUTE_WORDS[asset.route]
+              }
+            />
           )}
+          {asset.credit === undefined ? null : <ArtFact name="Licence" reading={asset.credit} />}
+          {usedWords === null ? null : <ArtFact name="In play" reading={usedWords} />}
         </Workbench.Section>
         {asset.kind === "model" && info !== null ? <ModelFacts info={info} /> : null}
-        {asset.kind === "model" ? (
-          <ModelLook
-            threadRef={threadRef}
-            asset={asset}
-            stageThing={stageThing}
-            values={lookValues}
-            handle={handle}
-          />
+        {asset.kind === "model" && stageThing !== null && lookValues.length > 0 ? (
+          <ModelLook threadRef={threadRef} asset={asset} values={lookValues} handle={handle} />
         ) : null}
-        <ChangeIt threadRef={threadRef} root={root} asset={asset} blend={blend} onAsk={onAsk} />
+        <GenerateAgain threadRef={threadRef} asset={asset} onAsk={onAsk} />
       </Workbench.Body>
     </>
   );
@@ -922,22 +1204,18 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
           />
         ))}
       </Workbench.Section>
-      <Workbench.Section title="Textures" detail={info.textures.length}>
-        {info.textures.length === 0 ? (
-          <Text variant="caption" tone="muted" render={<p className="px-4" />}>
-            None: its colours are its materials'.
-          </Text>
-        ) : (
-          info.textures.map((texture, index) => (
+      {info.textures.length === 0 ? null : (
+        <Workbench.Section title="Textures" detail={info.textures.length}>
+          {info.textures.map((texture, index) => (
             <ArtFact
               // oxlint-disable-next-line react/no-array-index-key -- two textures may share a name.
               key={`${index}:${texture.name}`}
               name={texture.name}
               reading={`${texture.slot} · ${texture.width} × ${texture.height}`}
             />
-          ))
-        )}
-      </Workbench.Section>
+          ))}
+        </Workbench.Section>
+      )}
     </>
   );
 }
@@ -949,44 +1227,22 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
 function ModelLook({
   threadRef,
   asset,
-  stageThing,
   values,
   handle,
 }: {
   threadRef: ScopedThreadRef;
   asset: GameArtAsset;
-  stageThing: GameThing | null;
   values: ReadonlyArray<GameThingValue>;
   handle: ModelViewerHandle | null;
 }) {
   const saver = useTuneSaver(threadRef);
-  if (stageThing === null || values.length === 0)
-    return (
-      <Workbench.Section title="Tint and scale">
-        <Text variant="caption" tone="muted" render={<p className="px-4" />}>
-          {stageThing === null
-            ? "Play the game to tint or scale it: the game on the Stage holds its values."
-            : "Its tint and scale show here when the game loads it through ASSETS; ask the agent to change it otherwise."}
-        </Text>
-      </Workbench.Section>
-    );
   const id = asset.path;
   const tunes = [LOOK_TINT, LOOK_SCALE].map((base) => {
     const live = values.find((value) => value.key === base.key);
     return live === undefined ? base : { ...base, value: live.value };
   });
-  const savedWords =
-    saver.state.kind === "saving"
-      ? "Keeping…"
-      : saver.state.kind === "saved"
-        ? "Kept as a build"
-        : saver.state.kind === "waiting"
-          ? "Kept once the agent's turn ends"
-          : saver.state.kind === "failed"
-            ? saver.state.text
-            : null;
   return (
-    <Workbench.Section title="Tint and scale" detail={savedWords ?? undefined}>
+    <Workbench.Section title="Tint and scale">
       {tunes.map((value) => (
         <GameTuneField
           key={value.key}
@@ -1011,18 +1267,14 @@ function ModelLook({
   );
 }
 
-/** The ways to change an asset, by the route it came from; each lands as a build. */
-function ChangeIt({
+/** A generated file's prompt, to edit and generate again; nothing for any other file. */
+function GenerateAgain({
   threadRef,
-  root,
   asset,
-  blend,
   onAsk,
 }: {
   threadRef: ScopedThreadRef;
-  root: string;
   asset: GameArtAsset;
-  blend: string | null;
   onAsk: (text: string) => void;
 }) {
   const generations = useGameGenerations(threadRef).data?.generations ?? [];
@@ -1034,112 +1286,33 @@ function ChangeIt({
         (asset.sidecar !== undefined && each.files.includes(asset.sidecar)),
     ) ?? null;
   const [prompt, setPrompt] = useState<string | null>(null);
-  const config = useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId));
-  const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: false });
-  const [openError, setOpenError] = useState<string | null>(null);
-  const canOpen = config?.availableEditors.includes("file-manager") === true;
-  const route = generation !== null ? "generated" : asset.route;
+  if (generation === null) return null;
+  const text = prompt ?? generation.prompt;
   return (
-    <Workbench.Section title="Change it">
-      {route === "generated" ? (
-        <div className="flex flex-col gap-2 px-4 pt-1">
-          <Text variant="caption" tone="muted">
-            {generation === null
-              ? "Generated; its generation record is not in this game."
-              : `Generated by ${generation.provider}. Its prompt, to edit before generating again:`}
-          </Text>
-          <Textarea
+    <Workbench.Section title="Prompt" detail={generation.provider}>
+      <div className="flex flex-col gap-2 px-4 pt-1">
+        <Textarea
+          size="sm"
+          value={text}
+          onChange={(event) => setPrompt(event.currentTarget.value)}
+          aria-label="Prompt"
+          rows={3}
+        />
+        <div className="flex">
+          <Button
             size="sm"
-            value={prompt ?? generation?.prompt ?? ""}
-            onChange={(event) => setPrompt(event.currentTarget.value)}
-            aria-label="Prompt"
-            rows={3}
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={(prompt ?? generation?.prompt ?? "").trim() === ""}
-              onClick={() =>
-                onAsk(
-                  `Generate ${asset.path} again with game_art (my keys, the same kind${generation === null ? "" : ` and provider, ${generation.provider}`}) from this prompt, then put the new one in the game in its place:\n\n${(prompt ?? generation?.prompt ?? "").trim()}`,
-                )
-              }
-            >
-              Generate again
-            </Button>
-          </div>
+            variant="secondary"
+            disabled={text.trim() === ""}
+            onClick={() =>
+              onAsk(
+                `Generate ${asset.path} again with game_art (my keys, the same kind and provider, ${generation.provider}) from this prompt, then put the new one in the game in its place:\n\n${text.trim()}`,
+              )
+            }
+          >
+            Generate again
+          </Button>
         </div>
-      ) : route === "library" ? (
-        <ActionRow>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() =>
-              onAsk(
-                `Swap ${asset.path}${asset.pack === undefined ? "" : ` (library pack ${asset.pack})`} for another entry of the asset library that fits the game's look: show me the choices from game_assets op search first, then replace it where the game loads it.`,
-              )
-            }
-          >
-            Swap for another library entry
-          </Button>
-        </ActionRow>
-      ) : route === "blender" ? (
-        <ActionRow>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() =>
-              onAsk(
-                `Rework ${asset.path} in Blender with game_blender, review it, and export it again over the same file: `,
-              )
-            }
-          >
-            Rework in Blender
-          </Button>
-          {blend === null || !canOpen ? null : (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={async () => {
-                const result = await openInEditor({
-                  environmentId: threadRef.environmentId,
-                  input: { cwd: `${root}/${blend}`, editor: "file-manager" },
-                });
-                setOpenError(
-                  result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : null,
-                );
-              }}
-            >
-              Open in Blender
-            </Button>
-          )}
-        </ActionRow>
-      ) : (
-        <ActionRow>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() =>
-              onAsk(
-                route === "code"
-                  ? `Change ${asset.path}, which the game's code made: `
-                  : `Record in ASSETS.md where ${asset.path} came from and its licence, or replace it with art whose source is known.`,
-              )
-            }
-          >
-            {route === "code" ? "Ask the agent to change it" : "Ask where it came from"}
-          </Button>
-        </ActionRow>
-      )}
-      {openError === null ? null : (
-        <Text variant="caption" tone="destructive" render={<p role="alert" className="px-4" />}>
-          {openError}
-        </Text>
-      )}
-      <Text variant="caption" tone="muted" render={<p className="px-4 pt-2" />}>
-        The agent's change lands as a build, so Undo takes it back.
-      </Text>
+      </div>
     </Workbench.Section>
   );
 }

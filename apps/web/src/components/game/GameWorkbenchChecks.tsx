@@ -24,7 +24,6 @@ import {
   ClipboardCheckIcon,
   ClockIcon,
   ColumnsIcon,
-  FileSearchIcon,
   FileVideoIcon,
   FlagIcon,
   GitCompareIcon,
@@ -784,7 +783,7 @@ function ScreenFrames({
             onClick={() =>
               openEvidence(threadRef, root, { kind: "frame", label, path: frame }, proves)
             }
-            className="flex min-w-0 cursor-pointer flex-col gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 cursor-pointer flex-col gap-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           >
             <span
               className={cn(

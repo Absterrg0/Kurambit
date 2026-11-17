@@ -740,19 +740,3 @@ export function GameGenerationCard({
     </section>
   );
 }
-
-/** Whether any generation of the game waits on the person's pick, for the Stage's menu. */
-const selectChoosingCount = (result: GenerationsResult): number =>
-  AsyncResult.isSuccess(result)
-    ? result.value.generations.filter(
-        (generation) => generation.state === "choosing" && generation.filesUndone !== true,
-      ).length
-    : 0;
-export const useChoosingCount = (threadRef: ScopedThreadRef) =>
-  useEnvironmentQuerySelector(generationsTarget(threadRef), selectChoosingCount);
-
-/** How many pieces of art the game has had generated; null until that is read. */
-const selectGenerationCount = (result: GenerationsResult): number | null =>
-  AsyncResult.isSuccess(result) ? result.value.generations.length : null;
-export const useGenerationCount = (threadRef: ScopedThreadRef) =>
-  useEnvironmentQuerySelector(generationsTarget(threadRef), selectGenerationCount);
