@@ -33,25 +33,6 @@ type InboxThreadInput = Pick<
   "id" | "environmentId" | "createdAt" | "unsettledAt" | "latestRun"
 >;
 
-export function sortInboxThreadsByReturn<T extends InboxThreadInput>(
-  threads: readonly T[],
-  observedReturnAt?: (thread: T) => number | undefined,
-): T[] {
-  const timestamps = new Map(
-    threads.map((thread) => [
-      thread,
-      Math.max(
-        toSortableTimestamp(thread.createdAt) ?? 0,
-        toSortableTimestamp(thread.unsettledAt ?? undefined) ?? 0,
-        toSortableTimestamp(thread.latestRun?.requestedAt ?? undefined) ?? 0,
-        toSortableTimestamp(thread.latestRun?.completedAt ?? undefined) ?? 0,
-        observedReturnAt?.(thread) ?? 0,
-      ),
-    ]),
-  );
-  return sortNewestFirst(threads, timestamps);
-}
-
 type WorkingSortInput = Pick<
   EnvironmentThreadShell,
   "id" | "environmentId" | "createdAt" | "latestRun" | "latestUserAuthoredMessageAt"

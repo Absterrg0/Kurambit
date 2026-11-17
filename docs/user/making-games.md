@@ -84,15 +84,34 @@ stage names the error: quietly while the turn runs, since the agent may be mid-c
 A game is a static three.js browser game (no install step), played in real time through the same
 tools, with a Web export.
 
-Each game's sidebar row and home card show its latest build's picture and what it is doing now:
-building, keep going's step, a question waiting for you, or its latest build and when it was made.
-To continue a game, choose its card under **Your games** or its row in the sidebar, or use **Open a
-game** (on the home screen or in the command palette) and pick a folder that contains `game.json`.
-A game opens on its main chat: the first chat it was made in, or the next oldest if you archive that
-one. The **Chats** arrow on the game's sidebar row lists all its chats, the open one marked, and
-starts a **New chat**, which opens the game's screen with an empty chat: the game fills the screen
-above the box, which offers your agent's latest suggestion (Tab takes it), and the game settles into
-the column once you send. A game keeps one empty chat, so asking again opens that one.
+Your games are listed in the sidebar under **Games**, pinned ones first, then the most recently
+worked on (or by name, from the **⋯** beside **Games**). Each row shows its latest build's picture
+and, at its end, a spinner while an agent works, an amber dot when a chat waits for your answer or
+for you to keep one of several tries, or a red triangle when its build does not start. The open game
+unfolds to its chats, each with when it last moved; any game unfolds with the right arrow or a click
+on the open one, and keeps how you left it. Hover a game for **+** (a new chat) and **⋯** (rename,
+open its folder, pin, archive, delete). Drag a game onto the pinned ones to pin it. Archived games
+wait under **Archived** at the bottom, and **Unarchive** in their menu brings them back; **Delete…**
+removes a game from Kurambit and leaves its folder on disk. Home's cards show the same games.
+
+To continue a game, choose its row or its card under **Your games**, or use **Open a game** (on the
+home screen or in the command palette) and pick a folder that contains `game.json`. A game opens on
+its main chat: the first chat it was made in, or the next oldest if you archive that one. A **New
+chat** opens the game's screen with an empty chat: the game fills the screen above the box, which
+offers your agent's latest suggestion (Tab takes it), and the game settles into the column once you
+send. A game keeps one empty chat, so asking again opens that one.
+
+## Library
+
+**Library** in the sidebar shows every model, texture, sound and font in all your games (a file
+in several games is listed once), the models you saved, the asset packs Kurambit knows with their
+licences, and each game's look. Filter by kind and between **Yours** and **Packs**, or find an
+asset from **Search**. Open one to see it, where it is used and its licence. **Add to game** copies
+it into a game with its credit in `ASSETS.md`, as a build that Undo takes back; for a look it gives
+the game that look, or starts a new game in it. **Ask about this** puts it in your current chat.
+In a game's Art, **Save to library** on a thing the game's code makes (or one of its parts) keeps
+it as a model you can add to your next game; **Remove from Library** forgets it again, and the games
+it was added to keep their copies.
 
 ## Style
 

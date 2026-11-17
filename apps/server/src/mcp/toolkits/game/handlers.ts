@@ -47,6 +47,7 @@ import {
 } from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
+import * as GameLibrary from "../../../game/GameLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
@@ -379,6 +380,8 @@ const playHandlers = {
 } satisfies McpToolAccess.Handlers<typeof GamePlayToolkit.tools>;
 export const layerPlay = McpToolAccess.toLayer(GamePlayToolkit, playHandlers);
 
+const LibraryText = Schema.Struct({ text: Schema.String });
+
 const assetsHandlers = {
   game_assets: McpToolAccess.actsAsCaller((input) =>
     personsModelChoice.pipe(
@@ -408,6 +411,16 @@ const assetsHandlers = {
             withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)).pipe(
               as(GameActionResult),
             ),
+          mine: ({ add }) =>
+            withGame(GameLibrary.GameLibrary, (library, threadId) =>
+              add === undefined
+                ? library.list.pipe(
+                    Effect.map((listed) => ({ text: GameLibrary.libraryText(listed.items) })),
+                  )
+                : library
+                    .add({ threadId, id: add })
+                    .pipe(Effect.map((added) => ({ text: added.message }))),
+            ).pipe(as(LibraryText)),
         }),
       ),
     ),

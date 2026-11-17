@@ -22,7 +22,7 @@ export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
 
 /**
  * A build named in a sentence, in the game's one sequence: "Build 5", "Build 6 · Keep going",
- * "Build 7 · tuned", "Build 5 · fix 1". The number is the server's, never a turn's: a resumed
+ * "Build 7 · tuned", "Build 8 · added", "Build 5 · fix 1". The number is the server's, never a turn's: a resumed
  * or stopped turn is no extra build. A restore's parked folder goes by its label and its place
  * among the game's with that label, so two never share a name.
  */
@@ -40,7 +40,8 @@ export const buildName = (
     case "version":
       return `Version ${source.n} of ${source.of}${source.kept ? " · kept" : ""}`;
     case "saved":
-      if (source.edit !== undefined && build.number !== null) return `${numbered} · tuned`;
+      if (source.edit !== undefined && build.number !== null)
+        return `${numbered} · ${source.edit === "library" ? "added" : "tuned"}`;
       return source.nth === undefined ? source.label : `${source.label} ${source.nth}`;
   }
 };

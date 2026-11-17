@@ -53,6 +53,7 @@ import {
 } from "./GameArtViewers";
 import { useGameGenerations } from "./GameGenerationCard";
 import { GameKeyArt } from "./GameKeyArt";
+import { GameSaveToLibrary } from "./GameSaveToLibrary";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
 import { colourHex } from "./GameColourField";
 import { GameLookInspector, LabelInput, renameLook } from "./GameLookInspector";
@@ -937,6 +938,14 @@ function ArtDetail({
             <TooltipPopup side="bottom">Show on the Stage</TooltipPopup>
           </Tooltip>
         )}
+        {entry.kind === "code-model" ? (
+          <GameSaveToLibrary
+            threadRef={threadRef}
+            thing={entry.id}
+            name={name}
+            picture={orbit?.png ?? null}
+          />
+        ) : null}
         <Button size="sm" variant="ghost" onClick={() => void ask()}>
           <MessageSquarePlusIcon aria-hidden="true" />
           Ask about this

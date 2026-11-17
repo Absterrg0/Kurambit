@@ -17,6 +17,7 @@ import {
 } from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
+import * as GameLibrary from "../../../game/GameLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
@@ -80,11 +81,12 @@ export const GamePlayTool = Tool.make("game_play", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_play"));
 
 export const GameAssetsTool = Tool.make("game_assets", {
-  description: `Art and sound from outside the code. ${ONE_OP} search: the pinned open library, with a contact sheet; add: copies its files in, credited. generate: starts art with the person's providers and answers with an id (each start is paid: never start one twice); wait: its files, or that it waits for the person's pick. image_edit: changes a game image from words, for the person to pick. import: the engine's import step. A refusal names what is missing: tell the person.`,
+  description: `Art and sound from outside the code. ${ONE_OP} search: the pinned open library, with a contact sheet; add: copies its files in, credited. generate: starts art with the person's providers and answers with an id (each start is paid: never start one twice); wait: its files, or that it waits for the person's pick. image_edit: changes a game image from words, for the person to pick. import: the engine's import step. mine: the person's Library. A refusal names what is missing: tell the person.`,
   parameters: GameAssetsToolInput,
   ...answers,
   dependencies: [
     GameAssetLibrary.GameAssetLibrary,
+    GameLibrary.GameLibrary,
     GameArt.GameArt,
     GameEngine.GameEngine,
     GameRunControl.GameRunControl,
