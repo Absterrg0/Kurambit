@@ -305,18 +305,26 @@ Drag its edge to resize it. Its three sections:
 - **Art** (`mod+Alt+R`): every asset the game has, with search and a filter for models, textures
   and sounds. Models (the ones the game's code builds too) and textures show as pictures, with
   their triangles or size in pixels; sounds show their length and waveform, with a play button;
-  fonts show a line set in them. An asset the last measured play never used is dimmed. Open one to
-  look at it: a model file turns in a 3D viewer beside a 1.8 m figure, with wireframe, normals, its
-  skeleton, bounds and its clips; a model the code builds turns as you drag it, drawn by the game
-  alone, with **Tune its values** when it has some; an image shows at full size with its alpha and
-  a sprite sheet's frames; a sound shows its waveform. **Tint** and **Scale** change a model the
-  game loads through `ASSETS`, as a build Undo takes back, and a generated asset's prompt can be
-  edited and generated again. **Ask about this** adds the asset to your message with a picture of
-  the view, and **Show on the Stage** points at it in the paused game.
+  fonts show a line set in them. An asset the last measured play never used is dimmed. A model
+  built from named parts (an island's cabin, dock and trees) is followed by its parts, each with
+  its own picture. Open a model to inspect it: it turns as you drag it, and under it are its
+  parts, its **Transform** (scale, each axis behind the lock, and its turn), its **Materials**
+  (colour, glow, roughness, metalness, opacity, flat shading, its texture), its **Shadows** and its
+  tuned **Values**. Every change shows at once in the view and in the game, and saves as a build
+  like Tune's values: **Keep as a build**, **Put all back**, and Undo work the same. **Bake into
+  the code** asks your agent to make the changes part of the model's code. An image shows at full
+  size with its alpha and a sprite sheet's frames; a sound shows its waveform; a generated asset's
+  prompt can be edited and generated again. **Ask about this** adds the asset to your message with
+  a picture of the view, and **Show on the Stage** points at it in the paused game. Pointing at a
+  thing in the paused game opens it here while Art is showing; click the same spot again to step
+  out from a part to what holds it.
 - **Checks**: how many checks pass, over a bar with one mark per check, then what the build changed
   in words and its files as one line that opens to each file; click a file to open it in the diff.
-  Each check opens in place to what proves it: the phone and widescreen pictures, the frame rate
-  through the play, the controls the QA play pressed and how each answered, the errors, and your
+  Then the build's evidence: its phone and widescreen pictures, its frame rate through the play
+  with its readings (frames per second, 1% low, draw calls, triangles, download size) and how each
+  moved since the build before, the harness's own play to watch, and the controls it found with
+  their keys. A reading the build has no measure for is left out. Each check opens in place to
+  anything more: the controls the QA play pressed and how each answered, the errors, and your
   saved test plays with **Replay**. When the game logged errors or warnings, its **Console** follows,
   and the Checks button counts the errors. Last come the game's **Decisions**. A build's checks in
   the chat open here. Opening a diff on a narrow window closes the Workbench to give the game room;

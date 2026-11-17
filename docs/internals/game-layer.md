@@ -621,6 +621,16 @@ resolve inside the runtime.
   `runtime` key; nothing in the server converts them. They are old demo-shell games too, so they
   open without playing.
 
+A person's look edits from Art are tuned values of the thing's look id, `look:<thing id>`, in
+`tune.json`, not a file of their own: the Stage's tuning path (fold into one build, put back,
+Undo, the decisions line) then holds for them unchanged, and the runtime applies them when the
+game names the thing ([look-edits.js](../../apps/server/templates/runtime/three/1/shell/look-edits.js)).
+A material is keyed by its place among the thing's materials and its name, never by reference:
+the game makes new materials each run. Palette materials are shared across things, so an edited
+one is cloned for that thing's meshes alone. Scale and turn sit on the object only while a frame
+draws, because games set their things' transforms themselves. A thing's parts (`Island › Cabin`)
+are registry records like any thing, so picking, portraits, chips and looks all key by that path.
+
 Two constraints hold everywhere:
 
 - Nothing opens on the user's desktop. Every game process drops `DISPLAY`, `WAYLAND_DISPLAY` and
