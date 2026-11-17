@@ -507,6 +507,8 @@ function ThreadGameStage({
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
   const runs = useStageRuns(threadRef);
+  const [playedRun, setPlayedRun] = useState<number | null>(null);
+  const stageFrozen = useStageBridge((state) => state.frozen);
   const rewind = useStageRewind(threadRef, runs.receive);
   const inspectBuild = useGameWorkspaceStore((state) => state.inspectBuild);
   // An earlier build the stage plays from a copy instead of the folder's own game.
@@ -1126,6 +1128,10 @@ function ThreadGameStage({
     turnUndo.restoring ||
     heldBuild ||
     (frameBuild !== null && folderBuild !== null && frameBuild !== folderBuild);
+  // The person is mid-run: they played this run and it has not ended, even with the chat focused.
+  // A new build waits for them (decision 12), unless they paused.
+  if (playerIn && runs.inPlay !== null && playedRun !== runs.inPlay) setPlayedRun(runs.inPlay);
+  const midRun = runs.inPlay !== null && playedRun === runs.inPlay && !stageFrozen;
   const computed = remountOrHold(
     frameFold,
     stageKind === "live"
@@ -1137,7 +1143,7 @@ function ThreadGameStage({
         },
     // A frame hidden by another view or pane may keep focus without a blur.
     {
-      focused: playerIn && !frameHidden,
+      focused: (playerIn || midRun) && !frameHidden,
       hidden: frameHidden,
       newBuild,
     },
@@ -1193,8 +1199,8 @@ function ThreadGameStage({
       : stageKind === "live" && !newBuild
         ? { label: "Your agent changed the game while you were playing", action: "Reload" }
         : {
-            label: heldName === null ? "New build" : `New build from ${heldName}`,
-            action: "Play",
+            label: `${(stageKind === "live" ? folderShort : heldName) ?? "A new build"} is ready`,
+            action: "Play it",
           };
   const runningSomething =
     busy !== null ||

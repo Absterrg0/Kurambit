@@ -29,14 +29,18 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
   const [ended, setEnded] = useState<EndedRun | null>(null);
   // Counts runs started: a keep that answers after the next run began shows nothing.
   const runSerial = useRef(0);
+  // The run in play: started and not yet ended or left, by its serial; null with none.
+  const [inPlay, setInPlay] = useState<number | null>(null);
 
   /** `build`: the build whose copy the run played on, when not the folder. */
   const receive = useStableCallback((message: StudioMessage, build?: GameBuildId) => {
     if (message.type === "studio-run-reset") {
       runSerial.current += 1;
+      setInPlay(runSerial.current);
       setEnded(null);
       return;
     }
+    if (message.type === "studio-play" && message.asked !== true) setInPlay(null);
     if (message.type !== "studio-play" || !canKeep) return;
     const serial = runSerial.current;
     const { outcome } = message.play;
@@ -68,6 +72,7 @@ export function useStageRuns(threadRef: ScopedThreadRef) {
   return {
     lastEnded,
     ended,
+    inPlay,
     dismiss: () => setEnded(null),
     /** A run was just saved as a test play: the shown win is no longer the game's first. */
     saved: () => setEnded((current) => (current === null ? null : { ...current, firstWin: false })),
