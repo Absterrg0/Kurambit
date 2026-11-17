@@ -851,7 +851,11 @@ function SortableGame({
       ref={setNodeRef}
       role="treeitem"
       aria-selected={false}
-      className={cn("list-none", dragging && "relative z-10 opacity-90")}
+      // Lifted while dragged: its own surface, so it never reads through the rows it passes.
+      className={cn(
+        "list-none",
+        dragging && "relative z-10 rounded-md bg-sidebar shadow-lg ring-1 ring-border",
+      )}
       style={{ transform: CSS.Translate.toString(transform), transition }}
     >
       {children({ ...listeners })}
