@@ -28,7 +28,7 @@ import * as GamePreview from "./GamePreview.ts";
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
-import { carriesOldShell } from "./gameRuntime.ts";
+import { carriesOldShell, gameCanLose } from "./gameRuntime.ts";
 import { modelChoice } from "./gameStyle.ts";
 import { makeSourceIdentity } from "./sourceTree.ts";
 import { COPY_OF } from "./GameBuildCopies.ts";
@@ -209,10 +209,12 @@ const make = Effect.gen(function* () {
             : (matchesSelected ?? "unknown");
       const cleanCheckAt = live ? yield* engines.cleanCheckAt(root) : null;
       const oldShell = yield* Effect.promise(() => carriesOldShell(root, manifest));
+      const canLose = yield* Effect.promise(() => gameCanLose(root, manifest));
       return {
         root,
         manifest: inventory.manifest,
         viewport: inventory.viewport,
+        canLose,
         ...(oldShell ? { unsupported: OLD_SHELL_MESSAGE } : {}),
         // The releases the engine makes, as their files are now: Play follows
         // the selected record, dated by when it was selected.

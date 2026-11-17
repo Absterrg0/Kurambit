@@ -285,11 +285,14 @@ export type StageRewind = ReturnType<typeof useStageRewind>;
  */
 export function GameRunTimeline({
   threadRef,
+  cannotLose,
   rewind,
   ended,
   enabled,
 }: {
   threadRef: ScopedThreadRef;
+  /** Can't lose is on: said in muted words where the time is, the bar's one place for state. */
+  cannotLose: boolean;
   rewind: StageRewind;
   /** The run reached its end and stands on its end screen. */
   ended: boolean;
@@ -303,7 +306,17 @@ export function GameRunTimeline({
   // Paused, ended or rewinding: the run taken from the game. Playing, or not the folder's game (a
   // copy, a compare, a state card): nothing to scrub, so nothing shows.
   const held = enabled && timeline !== null && (frozen || busy !== null || ended);
-  if (!held) return <div className="min-w-0 flex-1" data-game-run-timeline="" />;
+  const cannotLoseWords = cannotLose ? (
+    <Text variant="caption" tone="muted" render={<span className="shrink-0" />}>
+      Can't lose
+    </Text>
+  ) : null;
+  if (!held)
+    return (
+      <div className="flex min-w-0 flex-1 items-center justify-end" data-game-run-timeline="">
+        {cannotLoseWords}
+      </div>
+    );
   const length = Math.max(playSeconds(timeline.play), 0.1);
   const at = dragging ?? busy ?? timeline.at ?? length;
   const runMarks = runTimelineMarks(timeline.play);
@@ -378,6 +391,7 @@ export function GameRunTimeline({
           {rewind.notice?.text ?? "Drag the timeline to rewind; play on from any second to fork"}
         </TooltipPopup>
       </Tooltip>
+      {cannotLoseWords}
     </div>
   );
 }

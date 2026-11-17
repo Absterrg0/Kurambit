@@ -8,7 +8,8 @@ import {
   useRowWidth,
 } from "./game/gameWorkbenchPanel";
 import { useStageSelectionChip } from "./game/gameComposerContext";
-import { stepStageFrame, toggleStageCannotLose, toggleStageDevView } from "./game/gameStageBridge";
+import { stepStageFrame, toggleStageDevView } from "./game/gameStageBridge";
+import { flipStageCannotLose } from "./game/GameStageControls";
 import { GameSplitResize, useLatestTurnUndone } from "./game/GameDirectionBar";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
@@ -5403,7 +5404,8 @@ export default function ChatView(props: ChatViewProps) {
       "game.frameRate.toggle": () =>
         activeThreadKey !== null && toggleStageDevView(activeThreadKey, "perf"),
       "game.cannotLose.toggle": () =>
-        activeThreadKey !== null && toggleStageCannotLose(activeThreadKey),
+        activeThreadKey !== null &&
+        flipStageCannotLose(activeThreadKey, gameStatus.data?.canLose !== false),
       "game.fullscreen": () => requestGameStage({ kind: "fullscreen" }),
       "game.playPrevious": () => requestGameStage({ kind: "step", by: -1 }),
       "game.playNext": () => requestGameStage({ kind: "step", by: 1 }),

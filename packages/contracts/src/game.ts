@@ -565,6 +565,11 @@ export const GameStatus = Schema.Struct({
   /** The resolution the game boots at, in which the Stage frames it. */
   viewport: GameViewport,
   /**
+   * Whether the game can be lost, from its own code (it calls `lose()` or reads `cannotLose`):
+   * the Stage offers Can't lose only then. Absent from an older server: offered as before.
+   */
+  canLose: Schema.optionalKey(Schema.Boolean),
+  /**
    * Why this version plays nothing of a game in an engine it has (OLD_SHELL_MESSAGE); absent when
    * it plays the game.
    */

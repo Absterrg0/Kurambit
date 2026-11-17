@@ -11,18 +11,22 @@ import {
   VolumeXIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { cn } from "~/lib/utils";
 
 import { shortcutLabelForCommand } from "../../keybindings";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { Text } from "../ui/text";
+import { toastManager } from "../ui/toast";
+import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GameRunMenu, GameRunTimeline, type StageRewind } from "./GameRunTimeline";
 import {
-  setStageCannotLose,
   setStageMuted,
   setStageSpeed,
+  stageCannotLose,
+  toggleStageCannotLose,
   toggleStageFreeze,
   useStageCannotLose,
   useThreadStageBridge,
@@ -32,6 +36,26 @@ import type { StageRuns } from "./useStageRuns";
 const SPEEDS = [1, 0.5, 0.25] as const;
 const SPEED_WORDS: Record<(typeof SPEEDS)[number], string> = { 1: "1×", 0.5: "½×", 0.25: "¼×" };
 const NONE: ReadonlyArray<string> = [];
+
+/**
+ * Can't lose flipped from anywhere (the bar, the palette, its key), saying what it now does.
+ * Nothing for a game that can't be lost, or one not up on the Stage.
+ */
+export const flipStageCannotLose = (threadKey: string, canLose: boolean): boolean => {
+  if (!canLose || !toggleStageCannotLose(threadKey)) return false;
+  const on = stageCannotLose(threadKey);
+  toastManager.add(
+    on
+      ? {
+          type: "info",
+          title: "Can't lose is on",
+          description:
+            "A loss no longer ends the run, so you can tune a fight. Checks never see it.",
+        }
+      : { type: "info", title: "Can't lose is off", description: "A loss ends the run again." },
+  );
+  return true;
+};
 
 /** The key a game command has here, as its tooltip says it. */
 function useGameKey(command: "game.freeze" | "game.fullscreen" | "game.cannotLose.toggle") {
@@ -47,6 +71,7 @@ function useGameKey(command: "game.freeze" | "game.fullscreen" | "game.cannotLos
  */
 export function GameStageBar({
   threadRef,
+  canLose,
   playing,
   live,
   stopped,
@@ -61,6 +86,8 @@ export function GameStageBar({
   onNote,
 }: {
   threadRef: ScopedThreadRef;
+  /** The game's code can lose a run: only then is there a Can't lose to offer. */
+  canLose: boolean;
   /** A game plays on the Stage (not a compare, not a state card). */
   playing: boolean;
   /** It is the folder's own game, so its runs can be rewound. */
@@ -125,6 +152,7 @@ export function GameStageBar({
       <span className="w-2 shrink-0" aria-hidden="true" />
       <GameRunTimeline
         threadRef={threadRef}
+        cannotLose={canLose && cannotLose}
         rewind={rewind}
         ended={runs.ended !== null}
         enabled={live && can("rewind")}
@@ -170,19 +198,40 @@ export function GameStageBar({
           </MenuRadioGroup>
         </MenuPopup>
       </Menu>
-      <Control
-        label={cannotLose ? "Can't lose: on" : "Can't lose"}
-        detail="A loss does not end the run, to tune a fight; the checks never see it"
-        shortcut={cannotLoseKey}
-        pressed={cannotLose}
-        disabled={!can("cannot-lose")}
-        onClick={() => {
-          setStageCannotLose(threadKey, !cannotLose);
-          onFocus();
-        }}
-      >
-        <ShieldIcon aria-hidden="true" />
-      </Control>
+      {canLose ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                size="sm"
+                aria-label="Can't lose"
+                pressed={cannotLose}
+                disabled={!can("cannot-lose")}
+                onPressedChange={() => {
+                  flipStageCannotLose(threadKey, canLose);
+                  onFocus();
+                }}
+              />
+            }
+          >
+            {/* On, the shield is filled in the live colour: the one thing changing play now. */}
+            <ShieldIcon
+              aria-hidden="true"
+              className={cn(cannotLose && "fill-live text-live opacity-100")}
+            />
+          </TooltipTrigger>
+          <TooltipPopup side="top" className="max-w-xs">
+            <span className="flex flex-col gap-1">
+              <TooltipLabel shortcut={cannotLoseKey}>
+                {cannotLose ? "Can't lose: on" : "Can't lose"}
+              </TooltipLabel>
+              <span className="text-muted-foreground">
+                A loss does not end the run, to tune a fight; the checks never see it
+              </span>
+            </span>
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <Control
         label={muted ? "Sound on" : "Mute"}
         pressed={muted}

@@ -369,6 +369,7 @@ const cannotLose = new Set<string>();
 const useCannotLose = create<Readonly<Record<string, boolean>>>()(() => ({}));
 export const useStageCannotLose = (threadKey: string) =>
   useCannotLose((all) => all[threadKey] ?? false);
+export const stageCannotLose = (threadKey: string) => useCannotLose.getState()[threadKey] ?? false;
 
 /** Can't lose, for tuning a fight without the round ending; the measures never see it. */
 export const setStageCannotLose = (threadKey: string, on: boolean) => {
@@ -393,7 +394,7 @@ const stageCan = (threadKey: string, capability: GameStageCapability) => {
 /** Can't lose flipped, for the palette and its key; false when the game on the Stage has none. */
 export const toggleStageCannotLose = (threadKey: string): boolean => {
   if (!stageCan(threadKey, "cannot-lose")) return false;
-  setStageCannotLose(threadKey, !(useCannotLose.getState()[threadKey] ?? false));
+  setStageCannotLose(threadKey, !stageCannotLose(threadKey));
   return true;
 };
 

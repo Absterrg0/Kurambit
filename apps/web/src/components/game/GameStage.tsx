@@ -1627,6 +1627,7 @@ function ThreadGameStage({
         {collapsed ? null : (
           <GameStageBar
             threadRef={threadRef}
+            canLose={data.canLose !== false}
             playing={phase.kind === "playing" && compare === null && stageKind !== "window"}
             live={stageKind === "live" && playTarget === null && compare === null}
             stopped={folderDoesNotStart && failureVisible !== null && playTarget === null}

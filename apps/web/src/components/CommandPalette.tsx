@@ -159,13 +159,13 @@ import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import {
   stepStageFrame,
-  toggleStageCannotLose,
   toggleStageDevView,
   useStageCannotLose,
   useStageDevViews,
   useStageBridge,
   useThreadStageBridge,
 } from "./game/gameStageBridge";
+import { flipStageCannotLose } from "./game/GameStageControls";
 import {
   useDeferredValue,
   useEffect,
@@ -1745,7 +1745,8 @@ function OpenCommandPaletteDialog(props: {
         run: async () => void toggleStageDevView(stageThreadKey, "perf"),
       });
     }
-    if (stageCapabilities.includes("cannot-lose"))
+    // Only a game that can be lost has a Can't lose to turn on.
+    if (stageCapabilities.includes("cannot-lose") && gameStatus?.canLose !== false)
       actionItems.push({
         kind: "action",
         value: "action:game-cannot-lose",
@@ -1761,7 +1762,7 @@ function OpenCommandPaletteDialog(props: {
         ],
         icon: <ShieldIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "game.cannotLose.toggle",
-        run: async () => void toggleStageCannotLose(stageThreadKey),
+        run: async () => void flipStageCannotLose(stageThreadKey, true),
       });
     actionItems.push({
       kind: "action",
