@@ -697,6 +697,7 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // A message turn answers its admission: a hold commits with the command (`queueHold`).
   const assertDispatchTargetEnabled = (command: OrchestrationV2ServerCommand) => {
     switch (command.type) {
       case "message.dispatch":
@@ -753,7 +754,13 @@ const make = Effect.gen(function* () {
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
     ensureCommandTranscripts(command).pipe(
       Effect.andThen(assertDispatchTargetEnabled(command)),
-      Effect.andThen(orchestrator.dispatch(command)),
+      Effect.flatMap((decision: TurnAdmission.TurnAdmissionDecision) =>
+        orchestrator.dispatch(
+          command.type === "message.dispatch" && decision !== undefined
+            ? { ...command, queueHold: decision.hold }
+            : command,
+        ),
+      ),
     );
 
   const getProjectThread: ThreadManagementServiceShape["getProjectThread"] = (input) =>

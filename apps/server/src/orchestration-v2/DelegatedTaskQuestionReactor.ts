@@ -44,9 +44,10 @@ const make = Effect.gen(function* () {
         : `Delegated task ${task.id} is blocked on a question and cannot continue until it is answered.`;
     // The wake starts a turn on the parent, so it takes the same admission
     // as any other message turn before it reaches the orchestrator.
-    yield* turnAdmission.admit(yield* projections.getThread(task.threadId));
+    const admitted = yield* turnAdmission.admit(yield* projections.getThread(task.threadId));
     yield* engine.dispatch({
       type: "message.dispatch",
+      ...(admitted === undefined ? {} : { queueHold: admitted.hold }),
       commandId: CommandId.make(`server:delegated-task-question:${key}`),
       threadId: task.threadId,
       messageId: MessageId.make(`message:delegated-task-question:${key}`),

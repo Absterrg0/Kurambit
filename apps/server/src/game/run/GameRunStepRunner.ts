@@ -308,7 +308,7 @@ const make = Effect.gen(function* () {
             GameRunTurnReactor.supersededTurn(null, "the game changed since keep going looked"),
           );
         // The step starts a turn in the chat, so it takes the admission any message turn does.
-        yield* turnAdmission.admit(yield* projections.getThread(threadId));
+        const admitted = yield* turnAdmission.admit(yield* projections.getThread(threadId));
         const root = yield* projects.resolve(threadId);
         const message = stepMessage(rounds, gameLastStep, step.proposal, {
           brief: yield* Effect.promise(() =>
@@ -333,6 +333,7 @@ const make = Effect.gen(function* () {
             // A step re-reading the whole chat cost millions of tokens; its own
             // session starts from the briefing, and the person's chat keeps theirs.
             freshContext: true,
+            ...(admitted === undefined ? {} : { queueHold: admitted.hold }),
             dispatchMode: { type: "queue_after_active" },
             createdBy: "agent",
             creationSource: "server",

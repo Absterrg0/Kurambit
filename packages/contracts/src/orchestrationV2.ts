@@ -573,6 +573,11 @@ export const OrchestrationV2Run = Schema.Struct({
   status: OrchestrationV2RunStatus,
   queuePosition: Schema.optional(Schema.NullOr(PositiveInt)),
   queueHeld: Schema.optional(Schema.Boolean),
+  /**
+   * Why turn admission holds this run in the queue, in the person's words ("Waits for Rain to
+   * finish in the game"); it starts when the admission releases it. Absent on T3's own holds.
+   */
+  queueHeldReason: Schema.optional(Schema.String),
   requestedAt: Schema.DateTimeUtc,
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
@@ -2841,6 +2846,8 @@ export const OrchestrationV2Command = Schema.Union([
     freshContext: Schema.optional(Schema.Boolean),
     /** Build the message this many ways in parallel (`OrchestrationV2Run.versions`). */
     versions: Schema.optional(OrchestrationV2TryVersions),
+    /** Set by turn admission: the run waits held in the queue for this reason (`queueHeldReason`). */
+    queueHold: Schema.optional(Schema.String),
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
     delegatedCompletion: Schema.optional(
       Schema.Struct({

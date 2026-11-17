@@ -4568,8 +4568,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : undefined;
       const queueBehindRun = activeRun ?? worktreeMissingRun;
       const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
+      // Turn admission holds a run even on an idle thread: it waits for another thread's work.
+      const admissionHold = queueBehindRun === undefined ? command.queueHold : undefined;
       const shouldQueue =
-        queueBehindRun !== undefined &&
+        (queueBehindRun !== undefined || admissionHold !== undefined) &&
         (dispatchMode.type === "defer_start" ||
           dispatchMode.type === "start_immediately" ||
           dispatchMode.type === "queue_after_active");
@@ -4584,9 +4586,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const queueProviderThread =
           activeProviderThread ??
           projection.providerThreads.find(
-            (candidate) => candidate.id === queueBehindRun.providerThreadId,
+            (candidate) => candidate.id === queueBehindRun?.providerThreadId,
           );
-        if (queueProviderThread === undefined) {
+        if (queueProviderThread === undefined && queueBehindRun !== undefined) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
@@ -4597,6 +4599,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const ordinal = nextRunOrdinal(projection);
         const runId = idAllocator.derive.run({ threadId: command.threadId, ordinal });
         const targetProviderThread =
+          queueProviderThread !== undefined &&
           modelSelection.instanceId === queueProviderThread.providerInstanceId
             ? queueProviderThread
             : rootProviderThreadsForProvider(projection, modelSelection.instanceId)[0];
@@ -4643,8 +4646,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         };
         const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 });
         const rootNodeId = idAllocator.derive.rootNode({ runId });
+        // A held run's scope is prepared as it starts, in the folder its thread works in then.
         const checkpointScope =
-          queueBehindRun.status === "preparing" || worktreeMissingRun !== undefined
+          admissionHold !== undefined ||
+          queueBehindRun?.status === "preparing" ||
+          worktreeMissingRun !== undefined
             ? null
             : yield* runtimePolicy.resolve({ thread: projection.thread, modelSelection }).pipe(
                 Effect.flatMap((resolvedRuntimePolicy) =>
@@ -4682,11 +4688,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           activeAttemptId: attemptId,
           status: "queued",
           ...(worktreeMissingRun !== undefined ||
+          admissionHold !== undefined ||
           projection.runs.some(
             (candidate) => candidate.status === "queued" && candidate.queueHeld === true,
           )
             ? { queueHeld: true }
             : {}),
+          ...(admissionHold === undefined ? {} : { queueHeldReason: admissionHold }),
           queuePosition:
             Math.max(
               0,
@@ -10844,7 +10852,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             runId: run.id,
             providerInstanceId: run.providerInstanceId,
             occurredAt: now,
-            payload: { ...run, queueHeld: false },
+            payload: { ...run, queueHeld: false, queueHeldReason: undefined },
           });
         }
         if (queued.length === 0) {
