@@ -73,8 +73,6 @@ const liveHere = (status: GameKeepGoingStatus, threadId: string) =>
   status.mode !== "off" && status.chat === threadId;
 
 export interface KeepGoingControlView {
-  /** "Keep going" while off, paused or live in another chat; the mode while live here. */
-  readonly label: string;
   /** Live in this chat. */
   readonly pressed: boolean;
   readonly value: GameKeepGoingMode;
@@ -86,11 +84,10 @@ export interface KeepGoingControlView {
   readonly budgetDisabled: boolean;
   /** The budget group's label: "Until 15:10" while live here. */
   readonly budgetLabel: string;
-  readonly tooltip: string;
 }
 
 /**
- * PURE. The composer control from the run's status. Stopping is always
+ * PURE. The run picker's Keep going choice from the run's status. Stopping is always
  * allowed, so a run live in another chat leaves Off enabled here; a budget
  * chosen while off is held for the next start or resume.
  */
@@ -127,10 +124,7 @@ export const keepGoingControlView = (
         : status.budgetMinutes
       : input.chosenBudget;
   const endsAt = here ? status.endsAt : null;
-  const mode = KEEP_GOING_MODES.find((entry) => entry.mode === status?.mode);
   return {
-    // Running, it says what it is and how: "Keep going · Guided", never the mode alone.
-    label: here && mode !== undefined ? `Keep going · ${mode.label}` : "Keep going",
     pressed: here,
     value: status?.mode ?? "off",
     disabled,
@@ -138,14 +132,6 @@ export const keepGoingControlView = (
     budget,
     budgetDisabled: live,
     budgetLabel: endsAt !== null ? `Until ${clock(endsAt)}` : here ? "No limit" : "Budget",
-    tooltip:
-      disabled ??
-      modesDisabled ??
-      (here && mode !== undefined
-        ? mode.description
-        : status !== null && status.ending !== null
-          ? status.message
-          : "Your agent takes its own next step, and Kurambit plays each build and undoes one that breaks the game. It stops when your agent says nothing is left, after two steps in a row that kept nothing, or at the budget."),
   };
 };
 

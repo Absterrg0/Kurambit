@@ -41,7 +41,6 @@ describe("the keep-going control", () => {
   it("is off with a one-hour budget on a game that never ran it", () => {
     const view = control(NEVER_RAN);
     expect(view).toMatchObject({
-      label: "Keep going",
       pressed: false,
       value: "off",
       disabled: null,
@@ -54,7 +53,6 @@ describe("the keep-going control", () => {
 
   it("names the live mode, is pressed, and holds the budget at its end time", () => {
     expect(control(AUTOPILOT_TURN)).toMatchObject({
-      label: "Keep going · Autopilot",
       pressed: true,
       value: "autopilot",
       budgetDisabled: true,
@@ -78,7 +76,6 @@ describe("the keep-going control", () => {
     const blocked = { ...AUTOPILOT_TURN, blocked: "Keep going is on in Main chat" };
     const view = control(blocked, { threadId: OTHER_CHAT });
     expect(view).toMatchObject({
-      label: "Keep going",
       pressed: false,
       disabled: null,
       modesDisabled: "Keep going is on in Main chat",
@@ -96,7 +93,6 @@ describe("the keep-going control", () => {
       mode: "autopilot",
       budgetMinutes: 120,
     });
-    expect(control(PAUSED_STALLED).tooltip).toBe(PAUSED_STALLED.message);
   });
 
   it("sends nothing for the mode it already has, or Off with nothing live", () => {
