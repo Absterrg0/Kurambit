@@ -22,6 +22,7 @@ import {
   hostPreviewMimeTypeFromExtension,
   isWorkspaceImagePreviewPath,
   isWorkspaceAudioPreviewPath,
+  isWorkspaceFontPreviewPath,
   isWorkspacePreviewEntryPath,
   isWorkspaceVideoPreviewPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
@@ -453,11 +454,13 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
         ),
       );
     // A workspace video plays in the media viewer, as a game's bot recordings do, and a sound
-    // plays in a game's Art tab: like an image, each is read only from inside the workspace.
+    // plays and a font sets a line in a game's Art tab: like an image, each is read only from
+    // inside the workspace.
     if (
       !isWorkspacePreviewEntryPath(resolved.relativePath) &&
       !isWorkspaceVideoPreviewPath(resolved.relativePath) &&
-      !isWorkspaceAudioPreviewPath(resolved.relativePath)
+      !isWorkspaceAudioPreviewPath(resolved.relativePath) &&
+      !isWorkspaceFontPreviewPath(resolved.relativePath)
     ) {
       return yield* new AssetPreviewTypeValidationError({
         resource: input.resource,
@@ -495,11 +498,13 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
       ? yield* readImageDimensionsFromHeader(canonicalFile)
       : null;
     return {
-      // An image, a video or a sound is one file: its claim reaches that file and nothing beside it.
+      // An image, a video, a sound or a font is one file: its claim reaches that file and nothing
+      // beside it.
       claims:
         isWorkspaceImagePreviewPath(resolved.relativePath) ||
         isWorkspaceVideoPreviewPath(resolved.relativePath) ||
-        isWorkspaceAudioPreviewPath(resolved.relativePath)
+        isWorkspaceAudioPreviewPath(resolved.relativePath) ||
+        isWorkspaceFontPreviewPath(resolved.relativePath)
           ? {
               version: 1 as const,
               kind: "workspace-file-exact" as const,

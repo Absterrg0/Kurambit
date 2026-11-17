@@ -70,7 +70,7 @@ export const useThingFacts = (threadRef: ScopedThreadRef, build: string | null, 
 // One portrait at a time: each is two frames of the game drawn between two of its own.
 let drawing: Promise<unknown> = Promise.resolve();
 const PICTURE_PX = 256;
-const PICTURE_VIEW = { size: PICTURE_PX, yaw: 0.7, pitch: 0.35 } as const;
+const PICTURE_VIEW = { size: PICTURE_PX, yaw: 0.7, pitch: 0.55 } as const;
 
 const sha256Hex = async (text: string) => {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));

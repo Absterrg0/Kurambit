@@ -463,7 +463,7 @@ function ArtTile({
   const fact = unused
     ? "Unused"
     : entry.kind === "code-model"
-      ? facts === null
+      ? facts === null || facts.triangles === 0
         ? KIND_WORDS[entry.thingKind]
         : countWords(facts.triangles, "triangle", "triangles")
       : entry.asset.kind === "model"
@@ -919,7 +919,7 @@ function CodeModelDetail({
   facts: GameThingFacts | null;
   onDrawn: (view: { png: string; facts: GameThingFacts | null }) => void;
 }) {
-  const [angle, setAngle] = useState({ yaw: 0.7, pitch: 0.35 });
+  const [angle, setAngle] = useState({ yaw: 0.7, pitch: 0.55 });
   const [picture, setPicture] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const drag = useRef<{ x: number; y: number } | null>(null);

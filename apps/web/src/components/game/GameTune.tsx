@@ -330,7 +330,7 @@ function ThingList({
                   else next.delete(group.kind);
                   setFolded(next);
                 }}
-                className="flex h-7 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1 text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                className="flex h-7 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md ps-1 pe-2 text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               >
                 <ChevronRightIcon
                   aria-hidden="true"
@@ -343,9 +343,11 @@ function ThingList({
                 <Text variant="meta" tone="inherit" truncate render={<span className="flex-1" />}>
                   {group.label}
                 </Text>
-                <Text variant="caption" tone="muted" numeric render={<span className="pe-1" />}>
+                <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
                   {rows.length}
                 </Text>
+                {/* The rows' tuned-dot column, so the counts line up. */}
+                <span aria-hidden="true" className="w-1.5 shrink-0 ps-0.5" />
               </button>
             </div>
             {open ? rows.map(row) : null}

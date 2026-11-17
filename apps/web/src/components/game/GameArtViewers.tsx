@@ -801,19 +801,26 @@ export function useFontFamily(environmentId: EnvironmentId, root: string, asset:
   useEffect(() => {
     if (url === null) return;
     const name = `kurambit-art-${asset.sha256.slice(0, 12)}`;
-    const face = new FontFace(name, `url("${url}")`);
+    let face: FontFace | null = null;
     let live = true;
-    face.load().then(
-      (loaded) => {
-        if (!live) return;
-        document.fonts.add(loaded);
-        setFamily({ of: url, name });
-      },
-      () => live && setFamily({ of: url, name: "failed" }),
-    );
+    // Its bytes, not its URL: the desktop app's font-src admits only its own origin.
+    fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`${response.status}`);
+        return response.arrayBuffer();
+      })
+      .then((bytes) => (face = new FontFace(name, bytes)).load())
+      .then(
+        (loaded) => {
+          if (!live) return;
+          document.fonts.add(loaded);
+          setFamily({ of: url, name });
+        },
+        () => live && setFamily({ of: url, name: "failed" }),
+      );
     return () => {
       live = false;
-      document.fonts.delete(face);
+      if (face !== null) document.fonts.delete(face);
     };
   }, [url, asset.sha256]);
   if (state._tag === "Failure") return "failed";

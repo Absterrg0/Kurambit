@@ -215,6 +215,13 @@ export function isWorkspaceAudioPreviewPath(path: string): boolean {
   return extensionIndex >= 0 && audioMimeTypeFromExtension(path.slice(extensionIndex)) !== null;
 }
 
+export function isWorkspaceFontPreviewPath(path: string): boolean {
+  const extensionIndex = path.lastIndexOf(".");
+  return (
+    extensionIndex >= 0 && FONT_MIME_TYPE_BY_EXTENSION.has(path.slice(extensionIndex).toLowerCase())
+  );
+}
+
 export function isWorkspacePreviewEntryPath(path: string): boolean {
   return isWorkspaceBrowserPreviewPath(path) || isWorkspaceImagePreviewPath(path);
 }
