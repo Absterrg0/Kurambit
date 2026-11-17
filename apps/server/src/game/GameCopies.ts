@@ -15,7 +15,6 @@ import * as NodePath from "node:path";
 import {
   CheckpointRef,
   CommandId,
-  diffBuildFacts,
   GAME_BUILDS_EVENT,
   type GameBringInInput,
   type GameBringInResult,
@@ -644,15 +643,20 @@ const make = Effect.gen(function* () {
       const [before, after] = yield* Effect.all([measure(from), measure(candidate)]);
       if (before === null || after === null) return null;
       const broke = regressions(before, after).map((each) => each.why);
-      const ending = diffBuildFacts(before, after).find(
-        (delta) =>
-          delta.id === "saved-plays" && (delta.change === "down" || delta.change === "changed"),
+      // Each saved play read on its own: one that ended the same on the game and ends otherwise
+      // with the copy's work. (The two builds' facts may hold different saved sets.)
+      const readings = (facts: GameBuildFacts) =>
+        facts.savedPlays?.status === "measured" ? facts.savedPlays.value.plays : [];
+      const was = new Map(readings(before).map((each) => [each.name, each.reading]));
+      const changed = readings(after).filter(
+        (each) => each.reading === "ending-changed" && was.get(each.name) !== "ending-changed",
       );
       const reasons = [
         ...broke,
-        ...(ending === undefined
-          ? []
-          : [`a saved play ends differently: ${ending.b ?? "changed"}`]),
+        ...changed.map(
+          (each) =>
+            `the saved play "${each.name}" now ends "${each.now?.text ?? "differently"}" (it ended "${each.saved.text}")`,
+        ),
       ];
       return reasons.length === 0 ? null : reasons.join("; ");
     });
