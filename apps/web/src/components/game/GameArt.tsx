@@ -764,7 +764,7 @@ const assetContext = (
       `The model "${entry.name}" that the game's code builds (a named thing on the Stage, id \`${entry.id}\`).`,
       facts === null
         ? null
-        : `As the game draws it: ${facts.triangles} triangles, materials ${facts.materials.join(", ") || "none"}, ${facts.size.join(" × ")} units. The picture is it alone, from the Art view's angle.`,
+        : `As the game draws it: ${facts.triangles} triangles, ${facts.materials} materials (${facts.colours.join(", ") || "no base colours"}), ${facts.size.join(" × ")} units. The picture is it alone, from the Art view's angle.`,
     ]
       .filter((line) => line !== null)
       .join("\n");
@@ -1005,7 +1005,10 @@ function CodeModelDetail({
             <>
               <ArtFact name="Triangles" reading={facts.triangles.toLocaleString("en-US")} />
               <ArtFact name="Size" reading={`${facts.size.join(" × ")} (wide × tall × long)`} />
-              <ArtFact name="Materials" reading={facts.materials.join(", ") || "None"} />
+              <ArtFact
+                name="Materials"
+                reading={<MaterialSwatches count={facts.materials} colours={facts.colours} />}
+              />
             </>
           )}
         </Workbench.Section>
@@ -1164,6 +1167,47 @@ function FileDetail({
   );
 }
 
+/** A texture's place in its material as a person says it, not three.js's property name. */
+const SLOT_WORDS: Readonly<Record<string, string>> = {
+  map: "Colour",
+  normalMap: "Normal",
+  roughnessMap: "Roughness",
+  metalnessMap: "Metalness",
+  emissiveMap: "Glow",
+  aoMap: "Occlusion",
+  alphaMap: "Alpha",
+  bumpMap: "Bump",
+  displacementMap: "Height",
+  lightMap: "Light",
+  envMap: "Reflection",
+  specularMap: "Specular",
+};
+const slotWords = (slot: string) =>
+  SLOT_WORDS[slot] ?? `${slot.charAt(0).toUpperCase()}${slot.slice(1).replace(/Map$/, "")}`;
+
+/** "2 · ■ ■": how many materials, and each one's base colour. */
+function MaterialSwatches({ count, colours }: { count: number; colours: ReadonlyArray<string> }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {count}
+      {colours.length === 0 ? null : (
+        <>
+          <span aria-hidden="true">·</span>
+          {colours.map((colour, index) => (
+            <span
+              // oxlint-disable-next-line react/no-array-index-key -- two materials may share a colour.
+              key={`${index}:${colour}`}
+              aria-label={colour}
+              className="size-3 rounded-sm ring-1 ring-border ring-inset"
+              style={{ backgroundColor: colour }}
+            />
+          ))}
+        </>
+      )}
+    </span>
+  );
+}
+
 function ModelFacts({ info }: { info: ViewerModelInfo }) {
   return (
     <>
@@ -1185,24 +1229,17 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
             info.clips.length === 0 ? "None" : countWords(info.clips.length, "clip", "clips")
           }
         />
-      </Workbench.Section>
-      <Workbench.Section title="Materials" detail={info.materials.length}>
-        {info.materials.map((material, index) => (
-          <ArtFact
-            // oxlint-disable-next-line react/no-array-index-key -- two materials may share a name.
-            key={`${index}:${material.name}`}
-            mark={
-              material.color === undefined ? undefined : (
-                <span
-                  className="size-3 rounded-sm ring-1 ring-border ring-inset"
-                  style={{ backgroundColor: material.color }}
-                />
-              )
-            }
-            name={material.name}
-            reading={material.type.replace(/Material$/, "")}
-          />
-        ))}
+        <ArtFact
+          name="Materials"
+          reading={
+            <MaterialSwatches
+              count={info.materials.length}
+              colours={info.materials.flatMap((material) =>
+                material.color === undefined ? [] : [material.color],
+              )}
+            />
+          }
+        />
       </Workbench.Section>
       {info.textures.length === 0 ? null : (
         <Workbench.Section title="Textures" detail={info.textures.length}>
@@ -1210,8 +1247,8 @@ function ModelFacts({ info }: { info: ViewerModelInfo }) {
             <ArtFact
               // oxlint-disable-next-line react/no-array-index-key -- two textures may share a name.
               key={`${index}:${texture.name}`}
-              name={texture.name}
-              reading={`${texture.slot} · ${texture.width} × ${texture.height}`}
+              name={texture.name === texture.slot ? slotWords(texture.slot) : texture.name}
+              reading={`${slotWords(texture.slot)} · ${texture.width} × ${texture.height}`}
             />
           ))}
         </Workbench.Section>

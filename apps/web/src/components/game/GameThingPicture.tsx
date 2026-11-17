@@ -70,6 +70,8 @@ export const useThingFacts = (threadRef: ScopedThreadRef, build: string | null, 
 // One portrait at a time: each is two frames of the game drawn between two of its own.
 let drawing: Promise<unknown> = Promise.resolve();
 const PICTURE_PX = 256;
+/** The least share of its square a picture must cover to be kept as one. */
+const LEAST_COVER = 0.03;
 const PICTURE_VIEW = { size: PICTURE_PX, yaw: 0.7, pitch: 0.55 } as const;
 
 const sha256Hex = async (text: string) => {
@@ -100,7 +102,7 @@ export function GameThingPicture({
   useEffect(() => {
     if (build === null) return;
     let live = true;
-    void sha256Hex(`${build}\0${thing.id}`).then((hex) => {
+    void sha256Hex(`${build}\0${thing.id}\0studio`).then((hex) => {
       if (live) setHash({ of: key, hex });
     });
     return () => {
@@ -111,7 +113,7 @@ export function GameThingPicture({
   const glyph = (
     <span
       aria-hidden="true"
-      className="absolute inset-0 flex items-center justify-center text-dim-foreground [&_svg]:size-[40%] [&_svg]:max-h-5 [&_svg]:max-w-5"
+      className="absolute inset-0 flex items-center justify-center text-dim-foreground [&_svg]:size-[60%] [&_svg]:max-h-5 [&_svg]:max-w-5"
     >
       <Icon />
     </span>
@@ -170,6 +172,12 @@ function Draw({
       const portrait = await portraitStageThing(id, PICTURE_VIEW);
       // A game that cannot draw it now (no bridge yet, off the scene) is asked again next time.
       if (portrait === null) return;
+      // A picture of almost nothing (specks, a thin line) reads as nothing: its kind's glyph does.
+      if ((portrait.facts?.covers ?? 1) < LEAST_COVER) {
+        useDrawn.setState({ [drawnKey]: null });
+        if (portrait.facts !== undefined) useFacts.setState({ [drawnKey]: portrait.facts });
+        return;
+      }
       useDrawn.setState({ [drawnKey]: portrait.png });
       if (portrait.facts !== undefined) useFacts.setState({ [drawnKey]: portrait.facts });
       if (sha !== null)

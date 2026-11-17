@@ -1221,7 +1221,72 @@ export function createStageBridge({
   };
 
   /**
-   * One named thing alone, as play draws it: everything else hidden, the sky and fog let go, a
+   * A neutral studio for a portrait, whatever the game's mood: the scene's first hemisphere light
+   * becomes a soft white sky, its first directional light a key over the camera's shoulder, and
+   * every other light outside the thing goes dark. The game's lights are reused, so no material
+   * recompiles; a scene without one of the two gets its own for the frame. `restore` puts it all
+   * back exactly.
+   */
+  const studioRig = (scene, keep, sphere, camera) => {
+    const saved = [];
+    const added = [];
+    let sky = null;
+    let key = null;
+    scene.traverse((node) => {
+      if (!node.isLight || keep.has(node) || !node.visible) return;
+      saved.push({
+        light: node,
+        intensity: node.intensity,
+        color: node.color.clone(),
+        ground: node.groundColor?.clone(),
+        position: node.position.clone(),
+        target: node.target?.position.clone(),
+      });
+      if (sky === null && node.isHemisphereLight) sky = node;
+      else if (key === null && node.isDirectionalLight) key = node;
+      else node.intensity = 0;
+    });
+    if (sky === null) added.push((sky = new THREE.HemisphereLight()));
+    if (key === null) added.push((key = new THREE.DirectionalLight()));
+    for (const light of added) scene.add(light);
+    if (key.target.parent === null && added.includes(key)) scene.add(key.target);
+    sky.color.setHex(0xffffff);
+    sky.groundColor.setHex(0x5a5a66);
+    sky.intensity = 2.2;
+    // From above and to the left of where the camera looks from.
+    const offset = camera.position.clone().sub(sphere.center).normalize();
+    offset.add(new THREE.Vector3(-offset.z, 0.9, offset.x).multiplyScalar(0.8));
+    key.color.setHex(0xffffff);
+    key.intensity = 2.6;
+    key.position.copy(sphere.center).addScaledVector(offset.normalize(), sphere.radius * 4);
+    if (key.parent !== scene && key.parent !== null) key.parent.worldToLocal(key.position);
+    key.target.position.copy(sphere.center);
+    if (key.target.parent !== null && key.target.parent !== scene)
+      key.target.parent.worldToLocal(key.target.position);
+    key.updateMatrixWorld();
+    key.target.updateMatrixWorld();
+    return {
+      restore() {
+        for (const light of added) {
+          scene.remove(light);
+          if (light.target !== undefined) scene.remove(light.target);
+          light.dispose();
+        }
+        for (const each of saved) {
+          each.light.intensity = each.intensity;
+          each.light.color.copy(each.color);
+          if (each.ground !== undefined) each.light.groundColor.copy(each.ground);
+          each.light.position.copy(each.position);
+          if (each.target !== undefined) each.light.target.position.copy(each.target);
+          each.light.updateMatrixWorld();
+          each.light.target?.updateMatrixWorld();
+        }
+      },
+    };
+  };
+
+  /**
+   * One named thing alone, in a neutral studio light: everything else hidden, the sky and fog let go, a
    * camera around it at `yaw` and `pitch` that frames its bounds, drawn twice (on black, then on
    * white) so its edges come out transparent, and a square of `size` px cut from the middle.
    * Done between two frames and put back exactly before the next, so play never sees it.
@@ -1278,6 +1343,15 @@ export function createStageBridge({
       layer.height = size;
       return layer.getContext("2d", { willReadFrequently: true });
     });
+    const rig = studioRig(scene, keep, sphere, camera);
+    // Points (fireflies, sparks) are a pixel or two from a framing distance: drawn larger here.
+    const points = [];
+    for (const body of bodies)
+      body.traverse((node) => {
+        if (!node.isPoints || node.material?.size === undefined) return;
+        points.push([node.material, node.material.size]);
+        node.material.size *= node.material.sizeAttenuation === false ? 3 : 4;
+      });
     try {
       scene.background = null;
       if (fog !== null) {
@@ -1291,6 +1365,8 @@ export function createStageBridge({
         paint.drawImage(canvas, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
       }
     } finally {
+      for (const [material, was] of points) material.size = was;
+      rig.restore();
       for (const node of hidden) node.visible = true;
       scene.background = background;
       if (fog !== null && fogWas !== null) Object.assign(fog, fogWas);
@@ -1308,6 +1384,7 @@ export function createStageBridge({
         most,
         light[i] + light[i + 1] + light[i + 2] - pixels[i] - pixels[i + 1] - pixels[i + 2],
       );
+    let solid = 0;
     for (let i = 0; i < pixels.length; i += 4) {
       const through =
         (light[i] + light[i + 1] + light[i + 2] - pixels[i] - pixels[i + 1] - pixels[i + 2]) / most;
@@ -1315,29 +1392,37 @@ export function createStageBridge({
       for (let c = 0; c < 3; c += 1)
         pixels[i + c] = alpha <= 0 ? 0 : Math.min(255, Math.round(pixels[i + c] / alpha));
       pixels[i + 3] = Math.round(alpha * 255);
+      if (alpha > 0.5) solid += 1;
     }
     out[0].putImageData(dark, 0, 0);
-    // What it is, from what the game made: its triangles, its materials and its size.
+    // What it is, from what the game made: its triangles, its materials' base colours, its size.
     let triangles = 0;
     const materials = new Set();
     for (const body of bodies)
       body.traverse((node) => {
-        if (!node.isMesh || node.geometry === undefined) return;
-        const geometry = node.geometry;
-        const count = geometry.index?.count ?? geometry.attributes.position?.count ?? 0;
-        triangles += Math.floor(count / 3) * (node.isInstancedMesh ? node.count : 1);
-        for (const material of [node.material ?? []].flat())
-          materials.add(
-            text(material.name, 60) && !material.name.includes("|") ? material.name : material.type,
-          );
+        if (node.isMesh && node.geometry !== undefined) {
+          const geometry = node.geometry;
+          const count = geometry.index?.count ?? geometry.attributes.position?.count ?? 0;
+          triangles += Math.floor(count / 3) * (node.isInstancedMesh ? node.count : 1);
+        }
+        if (node.isMesh || node.isPoints || node.isSprite || node.isLine)
+          for (const material of [node.material ?? []].flat()) materials.add(material);
       });
     const extent = bounds.getSize(new THREE.Vector3());
     return {
       png: out[0].canvas.toDataURL("image/png"),
       facts: {
         triangles,
-        materials: [...materials].slice(0, 12),
+        materials: materials.size,
+        colours: [...materials]
+          .map((material) =>
+            material.color?.isColor === true ? `#${material.color.getHexString()}` : null,
+          )
+          .filter((colour) => colour !== null)
+          .slice(0, 12),
         size: [extent.x, extent.y, extent.z].map((each) => Math.round(each * 100) / 100),
+        // The share of the square the thing covers: a picture of almost nothing is no picture.
+        covers: Math.round((solid / (size * size)) * 1000) / 1000,
       },
     };
   };

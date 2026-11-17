@@ -417,11 +417,15 @@ export const StudioFrame = Schema.Struct({
 /** What a thing drawn alone is made of, as the running game counts it. */
 export const GameThingFacts = Schema.Struct({
   triangles: NonNegativeInt,
-  materials: Schema.Array(Schema.String.check(Schema.isMaxLength(60))).check(
+  /** How many materials draw it, and the base colour of each that has one, "#rrggbb". */
+  materials: NonNegativeInt,
+  colours: Schema.Array(Schema.String.check(Schema.isPattern(/^#[0-9a-f]{6}$/))).check(
     Schema.isMaxLength(12),
   ),
   /** Its bounds' size: wide, tall, long, in the game's units. */
   size: Schema.Tuple([Schema.Finite, Schema.Finite, Schema.Finite]),
+  /** The share of the picture the thing covers, 0 to 1: near 0, the picture shows nothing. */
+  covers: Schema.Finite,
 });
 export type GameThingFacts = typeof GameThingFacts.Type;
 

@@ -343,9 +343,16 @@ function ThingList({
                 <Text variant="meta" tone="inherit" truncate render={<span className="flex-1" />}>
                   {group.label}
                 </Text>
-                <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
-                  {rows.length}
-                </Text>
+                {rows.length > 1 ? (
+                  <Text
+                    variant="caption"
+                    tone="muted"
+                    numeric
+                    render={<span className="shrink-0" />}
+                  >
+                    {rows.length}
+                  </Text>
+                ) : null}
                 {/* The rows' tuned-dot column, so the counts line up. */}
                 <span aria-hidden="true" className="w-1.5 shrink-0 ps-0.5" />
               </button>
