@@ -16,6 +16,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { forkParked } from "../serverActivation.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as GameBuilds from "./GameBuilds.ts";
+import * as GameFolders from "./GameFolders.ts";
 import * as GameVersions from "./GameVersions.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -53,6 +54,7 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const stage = yield* GameStage.GameStage;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
+  const folders = yield* GameFolders.GameFolders;
   const scope = yield* Effect.scope;
   const perThread = yield* KeyedLock.make<string>();
   const roles = new Map<string, boolean>();
@@ -142,6 +144,20 @@ const make = Effect.gen(function* () {
     return pushTo(event, pending ? "A turn started." : "A turn settled.").pipe(Effect.ignore);
   };
 
+  // A run that stopped working may have freed its game's folder for a held turn.
+  const folderFreed = (
+    event: Extract<OrchestrationV2DomainEvent, { type: "run.created" | "run.updated" }>,
+  ) =>
+    event.type === "run.updated" &&
+    ["completed", "failed", "interrupted", "cancelled", "rolled_back"].includes(
+      event.payload.status,
+    )
+      ? projects.home(event.threadId).pipe(
+          Effect.flatMap((game) => folders.release(game.root, game.projectId)),
+          Effect.ignore,
+        )
+      : Effect.void;
+
   const handle: GameBuildsReactor["Service"]["handle"] = (event) => {
     switch (event.type) {
       case "checkpoint.captured": {
@@ -161,7 +177,7 @@ const make = Effect.gen(function* () {
       case "run.updated":
         return Effect.flatMap(isRole(event.threadId), (role) =>
           role ? versions.landed(event) : turnChanged(event),
-        );
+        ).pipe(Effect.andThen(folderFreed(event)));
       case "game-run-round.recorded": {
         const record = event.payload.round;
         return pushTo(event, `Round ${record.round} landed.`).pipe(
@@ -213,7 +229,13 @@ const make = Effect.gen(function* () {
             Effect.flatMap((games) =>
               Effect.forEach(
                 games,
-                (game) => projects.refreshGuidance(game.root).pipe(Effect.ignore),
+                (game) =>
+                  projects.refreshGuidance(game.root).pipe(
+                    Effect.ignore,
+                    Effect.andThen(projects.seatWorktreesOnFiles(game.projectId)),
+                    // A turn held before a restart starts once its game's folder is free.
+                    Effect.andThen(folders.release(game.root, game.projectId)),
+                  ),
                 {
                   discard: true,
                 },

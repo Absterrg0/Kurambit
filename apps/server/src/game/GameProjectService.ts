@@ -147,6 +147,16 @@ export class GameProjectService extends Context.Service<
       threadId: ThreadId,
       options?: { readonly deleted?: "allowed" },
     ) => Effect.Effect<string, GameOperationError>;
+    /**
+     * The game a thread belongs to, at its own folder: the project's root even when the thread
+     * works in a copy. Decisions, the folder's writer and Bring in are the game's, never a copy's.
+     */
+    readonly home: (
+      threadId: ThreadId,
+    ) => Effect.Effect<
+      { readonly root: string; readonly projectId: ProjectId },
+      GameOperationError
+    >;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
      * `work` on the thread's game folder as the game's one operation
@@ -169,6 +179,11 @@ export class GameProjectService extends Context.Service<
       threadId: ThreadId,
       choice: { readonly route?: GameCharacterRoute; readonly library?: boolean },
     ) => Effect.Effect<GameSetCharacterRouteResult, GameOperationError>;
+    /**
+     * A game's worktrees (a copy, a delegated child's, a handoff's) are seated on its folder's
+     * files, never on HEAD, which in a game is the empty scaffold: T3's `worktreeSeed`.
+     */
+    readonly seatWorktreesOnFiles: (projectId: ProjectId) => Effect.Effect<void>;
     /** Between turns: the game's studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The manifest and the resolution the game plays at. */
@@ -451,6 +466,7 @@ const make = Effect.gen(function* () {
           }),
       ),
     );
+    yield* seatWorktreesOnFiles(project.id);
     // Opening a folder is "continue this game", not "start another chat": the
     // project's newest session already has the history and the context. A new chat reuses an
     // empty one, so New chat pressed twice opens one chat, as T3's draft does.
@@ -676,9 +692,9 @@ const make = Effect.gen(function* () {
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : rollback)),
       );
     });
-  const resolve = Effect.fn("GameProjectService.resolve")(function* (
+  const place = Effect.fn("GameProjectService.place")(function* (
     threadId: ThreadId,
-    options: { readonly deleted?: "allowed" } = {},
+    options: { readonly deleted?: "allowed"; readonly home?: boolean } = {},
   ) {
     const unresolved = (cause: unknown) =>
       new GameOperationError({
@@ -719,15 +735,44 @@ const make = Effect.gen(function* () {
         reason: "project-not-found",
       });
     const root = yield* resolveCanonicalRoot(
-      NodePath.resolve(thread.worktreePath ?? project.value.workspaceRoot),
+      NodePath.resolve(
+        options.home === true
+          ? project.value.workspaceRoot
+          : (thread.worktreePath ?? project.value.workspaceRoot),
+      ),
       "resolve-project",
     );
     yield* read(root);
-    return root;
+    return { root, projectId: project.value.id };
   });
+
+  const seatWorktreesOnFiles = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const settings = yield* serverSettings.getSettings;
+      const overrides = settings.projectSettingsOverrides[projectId];
+      if (overrides?.worktreeSeed === "working-tree") return;
+      yield* serverSettings.updateSettings({
+        projectSettingsOverrides: {
+          [projectId]: { ...overrides, worktreeSeed: "working-tree" },
+        },
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("A game's worktrees could not be seated on its files.", {
+          projectId,
+          cause,
+        }),
+      ),
+    );
+
+  const resolve = (threadId: ThreadId, options: { readonly deleted?: "allowed" } = {}) =>
+    Effect.map(place(threadId, options), (placed) => placed.root);
+  const home = (threadId: ThreadId) => place(threadId, { home: true });
 
   return GameProjectService.of({
     create,
+    home,
+    seatWorktreesOnFiles,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
         [

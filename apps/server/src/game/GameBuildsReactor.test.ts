@@ -17,6 +17,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as GameVersions from "./GameVersions.ts";
 import * as GameBuilds from "./GameBuilds.ts";
+import * as GameFolders from "./GameFolders.ts";
 import * as GameBuildsReactor from "./GameBuildsReactor.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -101,6 +102,7 @@ const run = (
               Effect.succeed([{ checkpointRef: REF, oid: OID, committedAt: 0 }]),
           }),
           Layer.mock(GameVersions.GameVersions)({ landed: () => Effect.void, sweep: Effect.void }),
+          Layer.mock(GameFolders.GameFolders)({ release: () => Effect.void }),
         ),
       ),
     );
