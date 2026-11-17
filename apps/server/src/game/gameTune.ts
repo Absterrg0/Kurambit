@@ -3,10 +3,14 @@
 // values into it after checking them against the ranges the game
 // registered, so a file the game reads at boot never holds a value its own
 // sliders could not reach.
-import type { GameKeepValuesThing } from "@kurambit/contracts";
+import { gameLookId, type GameKeepValuesThing } from "@kurambit/contracts";
 import * as Option from "effect/Option";
 
-export type TuneFile = Record<string, Record<string, number | boolean>>;
+// A look's entry also holds the names the person gave its part and materials, as text.
+export type TuneFile = Record<string, Record<string, number | boolean | string>>;
+const LOOK = gameLookId("");
+/** A name's key in a look: the part's own ("name") or a material's ("2:roof/name"). */
+const isNameKey = (key: string) => key === "name" || key.endsWith("/name");
 
 // Names that would reach an object's prototype once parsed back by a game.
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
@@ -27,7 +31,7 @@ export const tuneFileWith = (
   for (const [id, values] of Object.entries(existing ?? {})) {
     if (!isRecord(values) || UNSAFE.has(id))
       return { refusal: `${file} holds ${JSON.stringify(id)}, which is not an object of values.` };
-    next[id] = { ...(values as Record<string, number | boolean>) };
+    next[id] = { ...(values as Record<string, number | boolean | string>) };
   }
   const seen = new Set<string>();
   const said: string[] = [];
@@ -35,6 +39,9 @@ export const tuneFileWith = (
     if (UNSAFE.has(thing.id)) return { refusal: `${JSON.stringify(thing.id)} is not a thing id.` };
     if (seen.has(thing.id)) return { refusal: `${thing.id} is listed twice.` };
     seen.add(thing.id);
+    const names = thing.names ?? [];
+    if (thing.values.length === 0 && names.length === 0)
+      return { refusal: `${thing.id} has no values or names to keep.` };
     const kept = { ...next[thing.id] };
     const keys = new Set<string>();
     for (const value of thing.values) {
@@ -57,10 +64,23 @@ export const tuneFileWith = (
       if (value.default !== undefined && value.default === value.value) delete kept[value.key];
       else kept[value.key] = value.value;
     }
+    for (const { key, name } of names) {
+      const where = `${thing.id} ${key}`;
+      if (!thing.id.startsWith(LOOK) || !isNameKey(key) || UNSAFE.has(key))
+        return { refusal: `${where} is not a name a look keeps.` };
+      if (keys.has(key)) return { refusal: `${where} is listed twice.` };
+      keys.add(key);
+      const words = name?.replace(/\s+/g, " ").trim() ?? "";
+      if (words === "") delete kept[key];
+      else kept[key] = words;
+    }
     if (Object.keys(kept).length === 0) delete next[thing.id];
     else next[thing.id] = kept;
     said.push(
-      `${thing.id} ${thing.values.map((value) => `${value.key} ${String(value.value)}`).join(", ")}`,
+      `${thing.id} ${[
+        ...thing.values.map((value) => `${value.key} ${String(value.value)}`),
+        ...names.map(({ key, name }) => `${key} ${name === null ? "the game's own" : `"${name}"`}`),
+      ].join(", ")}`,
     );
   }
   const summary = said.join("; ");

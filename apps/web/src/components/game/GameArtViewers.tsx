@@ -23,7 +23,7 @@ import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { bytesWords, clipTime } from "./gameArt.logic";
+import { bytesWords, clipTime, type ViewerLook } from "./gameArt.logic";
 
 // ─── The model viewer page's protocol (runtime shell/viewer.js) ─────────────────
 
@@ -132,7 +132,16 @@ export function ModelViewer({
 }: {
   viewerUrl: string;
   asset: GameArtAsset;
-  look: { readonly tint: number; readonly scale: number };
+  /**
+   * The look of the thing the file is a copy of: its tint and scale, its name (its parts are
+   * found under it by name) and the look edits of it and its parts.
+   */
+  look: {
+    readonly tint: number;
+    readonly scale: number;
+    readonly name: string;
+    readonly looks: ReadonlyArray<ViewerLook>;
+  };
   onInfo: (info: ViewerModelInfo | null) => void;
   handle: (handle: ModelViewerHandle | null) => void;
 }) {
@@ -191,10 +200,19 @@ export function ModelViewer({
     if (ready && opened) post({ type: "view", ...toggles });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `post` reads the frame.
   }, [ready, opened, toggles]);
+  // Sent again only when what it says changed, not on every new array of the same edits.
+  const looks = JSON.stringify(look.looks);
   useEffect(() => {
-    if (ready && opened) post({ type: "look", tint: look.tint, scale: look.scale });
+    if (ready && opened)
+      post({
+        type: "look",
+        tint: look.tint,
+        scale: look.scale,
+        name: look.name,
+        looks: JSON.parse(looks),
+      });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `post` reads the frame.
-  }, [ready, opened, look.tint, look.scale]);
+  }, [ready, opened, look.tint, look.scale, look.name, looks]);
   // One handle for the viewer's life: its calls read the page as it is when they run.
   const picture = useStableCallback(() => pictures.ask(post));
   const lookNow = useStableCallback((next: { readonly tint?: number; readonly scale?: number }) =>

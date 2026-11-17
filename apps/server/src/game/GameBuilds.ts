@@ -2006,7 +2006,10 @@ const make = Effect.gen(function* () {
         things
           .map(
             (thing) =>
-              `${thing.id} ${thing.values.map((v) => `${v.key} ${String(v.value)}`).join(", ")}`,
+              `${thing.id} ${[
+                ...thing.values.map((v) => `${v.key} ${String(v.value)}`),
+                ...(thing.names ?? []).map((n) => `${n.key} ${n.name ?? "the game's own"}`),
+              ].join(", ")}`,
           )
           .join("; ");
       // The folder as the session found it. Still the build it holds (nothing edited since), it

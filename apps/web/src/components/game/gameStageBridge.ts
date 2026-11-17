@@ -359,6 +359,13 @@ export const tuneStageValue = (id: string, key: string, value: number | boolean)
   withValue(id, key, value);
 };
 
+/**
+ * A name the person gave a part (`key` "name") or a look's material ("2:roof/name") of the look
+ * id; null takes it back. The game shows it at once; the saver keeps it in tune.json.
+ */
+export const nameStageThing = (lookId: string, key: string, name: string | null) =>
+  useStageBridge.getState().post?.({ type: "studio-name", id: lookId, key, name });
+
 /** Asks the game for a thing's look (its scale, shadows and materials): studio-look answers. */
 export const requestStageLook = (id: string) =>
   useStageBridge.getState().post?.({ type: "studio-look-request", id });

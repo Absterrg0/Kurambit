@@ -294,7 +294,7 @@ export function createSceneReport({ canvas, gl, renderer, view, player, bridge, 
   const collect = (node, outside, level) => {
     if (!node.visible) return;
     const out = outside || notSolid.has(node);
-    const record = bridge.thingOf(node, true);
+    const record = bridge.thingOf(node);
     const inLevel = level && (record === undefined || record.kind === "level");
     if (!out && isSolid(node)) {
       solids.push(node);
@@ -465,10 +465,12 @@ export function createSceneReport({ canvas, gl, renderer, view, player, bridge, 
     return best;
   };
 
+  // A solid in a part is named by the part's path, so a finding says which piece of a thing it
+  // is about ("Island › Cabin"), not only the thing.
   const nameOf = (object) => {
     if (object === null) return null;
-    const record = bridge.thingOf(object, false);
-    if (record !== undefined) return record.name;
+    const place = bridge.placeOf(object);
+    if (place !== undefined) return place;
     for (let node = object; node !== null; node = node.parent)
       if (typeof node.name === "string" && node.name !== "" && !node.isScene)
         // The shell's level names its pieces "model:mesh"; the model is the name people know.
@@ -672,7 +674,7 @@ export function createSceneReport({ canvas, gl, renderer, view, player, bridge, 
     bridge.eachThing(markNotSolid);
     let playerBody = null;
     if (lookPlayer !== null && attached(lookPlayer, scene) && shown(lookPlayer)) {
-      const record = bridge.thingOf(lookPlayer, true);
+      const record = bridge.thingOf(lookPlayer);
       playerBody = bodyOf(record?.id ?? PLAYER_ID, record?.name ?? "Player", lookPlayer);
     }
     others.length = 0;

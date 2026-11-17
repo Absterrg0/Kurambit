@@ -145,8 +145,8 @@ async function readSidecar(path) {
 }
 
 // Every copy of a model casts and receives the look's shadows (shell/look.js), and its foliage is
-// lit from both faces alike.
-function withShadows(gltf) {
+// lit from both faces alike. The model viewer loads its file the same way, so it shows what plays.
+export function withShadows(gltf) {
   gltf.scene.traverse((object) => {
     if (!object.isMesh) return;
     object.castShadow = object.receiveShadow = true;

@@ -6,12 +6,18 @@
 //
 // With `?thumbnails`, the page draws small pictures for the Art tab's list instead, one model at
 // a time, and keeps nothing between them.
+//
+// A model a thing of the game uses shows that thing's look: the asset's tint and scale, then the
+// person's look edits of the thing and of each of its parts (shell/look-edits.js), applied by the
+// same functions and material keys the running game applies them with.
 import * as THREE from "../vendor/three.module.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { VertexNormalsHelper } from "three/addons/helpers/VertexNormalsHelper.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { withShadows } from "./assets.js";
+import { applyLook, lookDefaults, lookMaterials, lookShape, partNodes } from "./look-edits.js";
 import { drawnBox, stats } from "./model.js";
 import { personFigure } from "./sheet.js";
 
@@ -33,7 +39,19 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.9;
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(3, 6, 4);
-scene.add(key);
+scene.add(key, key.target);
+// Shadows, so a look's "casts" and "takes shadows" show here as they do in the game: the key
+// light's onto the model and onto a catcher under it, fitted to the model as it opens.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.bias = -0.0005;
+const catcher = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+  new THREE.ShadowMaterial({ opacity: 0.28 }),
+);
+catcher.receiveShadow = true;
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 2000);
 const controls = THUMBNAILS ? null : new OrbitControls(camera, canvas);
@@ -43,7 +61,7 @@ const stage = new THREE.Group();
 scene.add(stage);
 const figure = personFigure();
 const grid = new THREE.Group();
-if (!THUMBNAILS) stage.add(figure, grid);
+if (!THUMBNAILS) stage.add(figure, grid, catcher);
 
 /** What is shown now: the model's root, its clips and helpers, and the toggles. */
 let model = null;
@@ -53,7 +71,15 @@ let clips = [];
 let playing = false;
 let helpers = { normals: null, skeleton: null, bounds: null, pivot: null };
 const view = { wireframe: false, normals: false, skeleton: false, bounds: false };
-const look = { tint: 0xffffff, scale: 1 };
+/**
+ * The thing's look: its asset tint and scale, the thing's name (its parts are found under it by
+ * name), and the look edits of the thing (`part` []) and its parts, as values that differ.
+ */
+const look = { tint: 0xffffff, scale: 1, name: "", looks: [] };
+/** The model's materials as it opened: a look's edits clone them, and a tint multiplies these. */
+let ownMaterials = [];
+/** How to put back the transforms the looks set, last first. */
+let unshape = [];
 let token = 0;
 
 const post = (message) => window.parent.postMessage({ source: "kurambit-viewer", ...message }, "*");
@@ -113,15 +139,19 @@ const disposeModel = () => {
   action = null;
   clips = [];
   playing = false;
+  unshape = [];
   if (model === null) return;
   model.removeFromParent();
+  const materials = new Set(ownMaterials);
   model.traverse((node) => {
     node.geometry?.dispose();
-    for (const material of [node.material ?? []].flat()) {
-      for (const value of Object.values(material)) if (value?.isTexture === true) value.dispose();
-      material.dispose();
-    }
+    for (const material of [node.material ?? []].flat()) materials.add(material);
   });
+  for (const material of materials) {
+    for (const value of Object.values(material)) if (value?.isTexture === true) value.dispose();
+    material.dispose();
+  }
+  ownMaterials = [];
   model = null;
 };
 
@@ -157,18 +187,62 @@ const bonesOf = (root) => {
 
 const hex = (color) => `#${color.getHexString()}`;
 
-/** The model's own colours, kept so a tint multiplies them instead of replacing them. */
-const applyLook = () => {
+/** Every material the model draws with or opened with: a toggle reaches both. */
+const allMaterials = () =>
+  model === null ? [] : [...new Set([...ownMaterials, ...materialsOf(model)])];
+
+/**
+ * The thing's look on the model, as the game puts it on a copy: the tint multiplies the model's
+ * own colours, then each look (the thing's first, then its parts') sets its values over them.
+ * Transforms are set here for good, since nothing else moves the model in the viewer.
+ */
+const applyThingLook = () => {
   if (model === null) return;
+  for (const undo of unshape.toReversed()) undo();
+  unshape = [];
   const tint = new THREE.Color(look.tint);
-  for (const material of materialsOf(model)) {
+  for (const material of ownMaterials) {
     if (material.color === undefined) continue;
-    material.userData.kurambitColor ??= material.color.clone();
     material.color.copy(material.userData.kurambitColor).multiply(tint);
   }
   model.scale.setScalar(look.scale);
+  for (const each of look.looks) {
+    const bodies = each.part.length === 0 ? [model] : partNodes(model, look.name, each.part);
+    if (bodies.length === 0) continue;
+    const materials = lookMaterials(bodies);
+    // An ASSETS model's scale is its file's (the tint and scale above); its parts' are their own.
+    const { defaults } = lookDefaults(bodies, materials, { scale: each.part.length > 0 });
+    const live = { ...defaults };
+    for (const [name, value] of Object.entries(each.values))
+      if (name in defaults && typeof value === typeof defaults[name]) live[name] = value;
+    applyLook(bodies, materials, live, defaults);
+    const undo = lookShape(bodies[0], live);
+    if (undo !== null) unshape.push(undo);
+  }
+  for (const material of allMaterials()) material.wireframe = view.wireframe;
   model.updateMatrixWorld(true);
+  fitShadow();
   rebuildHelpers();
+};
+
+/** The key light's shadow and its catcher, fitted around the model as it stands. */
+const fitShadow = () => {
+  if (model === null) return;
+  const box = drawnBox(model);
+  if (box.isEmpty()) return;
+  const centre = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.1);
+  key.target.position.copy(centre);
+  key.position.copy(centre).addScaledVector(new THREE.Vector3(3, 6, 4).normalize(), radius * 3);
+  const camera = key.shadow.camera;
+  camera.left = camera.bottom = -radius * 1.6;
+  camera.right = camera.top = radius * 1.6;
+  camera.near = radius * 0.5;
+  camera.far = radius * 6;
+  camera.updateProjectionMatrix();
+  key.target.updateMatrixWorld();
+  catcher.position.set(centre.x, Math.min(0, box.min.y) + 0.002, centre.z);
+  catcher.scale.setScalar(radius * 4);
 };
 
 const rebuildHelpers = () => {
@@ -248,16 +322,19 @@ const open = async (url) => {
   const mine = ++token;
   const target = new URL(url, location.origin);
   if (target.origin !== location.origin) throw new Error("only the game's own files open here");
-  const gltf = await loader.loadAsync(target.href);
+  const gltf = withShadows(await loader.loadAsync(target.href));
   if (mine !== token) return null;
   disposeModel();
   model = gltf.scene;
   stage.add(model);
   model.updateMatrixWorld(true);
   const materials = materialsOf(model);
+  ownMaterials = materials;
   for (const material of materials) material.userData.kurambitColor = material.color?.clone();
   look.tint = 0xffffff;
   look.scale = 1;
+  look.name = "";
+  look.looks = [];
   clips = gltf.animations;
   if (clips.length > 0) mixer = new THREE.AnimationMixer(model);
   const box = drawnBox(model);
@@ -269,6 +346,7 @@ const open = async (url) => {
   frame(box, size);
   if (view.skeleton) setSkeleton(true);
   for (const material of materials) material.wireframe = view.wireframe;
+  fitShadow();
   rebuildHelpers();
   requestDraw();
   return {
@@ -353,6 +431,18 @@ const thumbnail = async (url) => {
 // ─── Messages ───────────────────────────────────────────────────────────────────
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
+/** One look as the Art tab sends it: its part's path below the thing, and its values by key. */
+const lookOf = (entry) => {
+  if (entry === null || typeof entry !== "object") return [];
+  const part = Array.isArray(entry.part)
+    ? entry.part.filter((name) => typeof name === "string")
+    : [];
+  const values = {};
+  if (entry.values !== null && typeof entry.values === "object")
+    for (const [name, value] of Object.entries(entry.values).slice(0, 400))
+      if (finite(value) || typeof value === "boolean") values[name] = value;
+  return [{ part: part.slice(0, 16), values }];
+};
 // One message at a time, in order: a thumbnail asked for while one draws waits for it.
 let queue = Promise.resolve();
 window.addEventListener("message", (event) => {
@@ -380,8 +470,7 @@ const handle = async (data) => {
     case "view":
       if (typeof data.wireframe === "boolean" && data.wireframe !== view.wireframe) {
         view.wireframe = data.wireframe;
-        if (model !== null)
-          for (const material of materialsOf(model)) material.wireframe = view.wireframe;
+        for (const material of allMaterials()) material.wireframe = view.wireframe;
       }
       if (typeof data.skeleton === "boolean" && data.skeleton !== view.skeleton) {
         view.skeleton = data.skeleton;
@@ -404,7 +493,9 @@ const handle = async (data) => {
     case "look":
       if (finite(data.tint)) look.tint = Math.min(0xffffff, Math.max(0, Math.round(data.tint)));
       if (finite(data.scale)) look.scale = Math.min(10, Math.max(0.05, data.scale));
-      applyLook();
+      if (typeof data.name === "string") look.name = data.name.slice(0, 200);
+      if (Array.isArray(data.looks)) look.looks = data.looks.slice(0, 64).flatMap(lookOf);
+      applyThingLook();
       requestDraw();
       return;
     case "reset-view":

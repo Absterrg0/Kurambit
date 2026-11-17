@@ -1154,6 +1154,16 @@ const LOOK_WORDS: Readonly<Record<string, string>> = {
   castShadow: "casts shadows",
   receiveShadow: "takes shadows",
 };
+/** A JSON string value of the tune file's patch as its text; null for anything else. */
+const textOf = (raw: string | null): string | null => {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+};
 /** A look edit as a person says it: "Cabin roof colour #3c4a5c → #b8322a". */
 const lookLine = (change: GameTuneChange & { readonly thing: string }) => {
   const name = change.thing.slice(LOOK_PREFIX.length).split(" › ").at(-1) ?? "";
@@ -1167,6 +1177,15 @@ const lookLine = (change: GameTuneChange & { readonly thing: string }) => {
           .replace(/^\d+:/, "")
           .replace(/([a-z])([A-Z])/g, "$1 $2")
           .toLowerCase();
+  if (prop === "name") {
+    const whose = [name, slash !== -1 && material === "" ? "material" : material]
+      .filter((part) => part !== "")
+      .join(" ");
+    const given = textOf(change.to);
+    return given === null
+      ? `${whose} has the game's own name again`
+      : `${whose} renamed “${given}”`;
+  }
   const said = [name, material, LOOK_WORDS[prop] ?? prop].filter((part) => part !== "").join(" ");
   const shown = (raw: string | null) =>
     raw !== null && (prop === "color" || prop === "emissive") && Number.isFinite(Number(raw))

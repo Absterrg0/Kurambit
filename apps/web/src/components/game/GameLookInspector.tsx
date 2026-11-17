@@ -11,6 +11,7 @@ import { ChevronRightIcon, LinkIcon, UnlinkIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Text } from "../ui/text";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -21,7 +22,12 @@ import type { useTuneSaver } from "./GameTune";
 type TuneSaver = ReturnType<typeof useTuneSaver>;
 import { GameTuneField } from "./GameTuneField";
 import { Workbench } from "./GameWorkbenchParts";
-import { requestStageLook, tuneStageValue, useThreadStageBridge } from "./gameStageBridge";
+import {
+  nameStageThing,
+  requestStageLook,
+  tuneStageValue,
+  useThreadStageBridge,
+} from "./gameStageBridge";
 
 const NO_VALUES: ReadonlyArray<GameThingValue> = [];
 const isChanged = (value: GameThingValue) =>
@@ -39,6 +45,54 @@ const fieldLabel = (value: GameThingValue, material: GameLookMaterial) => {
     ? label.slice(material.label.length + 1)
     : label;
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+};
+
+/**
+ * A label being renamed in place: Enter or leaving it keeps the name, Escape keeps the old one,
+ * and an empty name gives back the game's own.
+ */
+export function LabelInput({
+  label,
+  onRename,
+  onDone,
+}: {
+  label: string;
+  onRename: (name: string | null) => void;
+  onDone: () => void;
+}) {
+  const [value, setValue] = useState(label);
+  const [settled, setSettled] = useState(false);
+  const finish = (keep: boolean) => {
+    if (settled) return;
+    setSettled(true);
+    const next = value.replace(/\s+/g, " ").trim();
+    if (keep && next !== label) onRename(next === "" ? null : next);
+    onDone();
+  };
+  return (
+    <Input
+      aria-label={`Rename ${label}`}
+      placeholder="The game's own name"
+      value={value}
+      maxLength={40}
+      size="sm"
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") finish(true);
+        if (event.key === "Escape") finish(false);
+      }}
+      onBlur={() => finish(true)}
+    />
+  );
+}
+
+/** Renames a look's part or material: shown at once on the Stage, kept with the look as a build. */
+export const renameLook = (saver: TuneSaver, lookId: string, key: string, name: string | null) => {
+  nameStageThing(lookId, key, name);
+  saver.rename(lookId, key, name);
 };
 
 /**
@@ -71,8 +125,14 @@ export function GameLookInspector({
   const lookId = gameLookId(thing.id);
   const status = useThreadStageBridge(threadKey, (state) => state.status, null);
   const look = useThreadStageBridge(threadKey, (state) => state.looks[thing.id], undefined);
+  const canName = useThreadStageBridge(
+    threadKey,
+    (state) => state.capabilities.includes("names"),
+    false,
+  );
   const [locked, setLocked] = useState(true);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const [renaming, setRenaming] = useState<string | null>(null);
   // Asked as the inspector opens and whenever the game comes up again (a new run, a reload).
   useEffect(() => {
     if (status === "ready") requestStageLook(thing.id);
@@ -173,51 +233,77 @@ export function GameLookInspector({
                 const expanded = open.has(material.key);
                 const colour = fields.find((value) => value.key.endsWith("/color"));
                 const edited = fields.some(isChanged);
+                const swatch = (
+                  <span
+                    aria-hidden="true"
+                    className="size-4 shrink-0 rounded-sm ring-1 ring-border ring-inset"
+                    style={
+                      typeof colour?.value === "number"
+                        ? { backgroundColor: colourHex(colour.value) }
+                        : undefined
+                    }
+                  />
+                );
                 return (
                   <div key={material.key} className="flex flex-col">
-                    <div className="px-2">
-                      <button
-                        type="button"
-                        aria-expanded={expanded}
-                        onClick={() => {
-                          const next = new Set(open);
-                          if (expanded) next.delete(material.key);
-                          else next.add(material.key);
-                          setOpen(next);
-                        }}
-                        className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                      >
-                        <ChevronRightIcon
-                          aria-hidden="true"
-                          className={cn(
-                            "size-3.5 shrink-0 text-dim-foreground motion-popup transition-transform",
-                            expanded && "rotate-90",
-                          )}
-                        />
-                        <span
-                          aria-hidden="true"
-                          className="size-4 shrink-0 rounded-sm ring-1 ring-border ring-inset"
-                          style={
-                            typeof colour?.value === "number"
-                              ? { backgroundColor: colourHex(colour.value) }
-                              : undefined
+                    {renaming === material.key ? (
+                      <div className="flex h-8 min-w-0 items-center gap-2 ps-4 pe-2">
+                        <span aria-hidden="true" className="size-3.5 shrink-0" />
+                        {swatch}
+                        <LabelInput
+                          label={material.label}
+                          onRename={(name) =>
+                            renameLook(saver, lookId, `${material.key}/name`, name)
                           }
+                          onDone={() => setRenaming(null)}
                         />
-                        <Text
-                          variant="body"
-                          tone="default"
-                          truncate
-                          render={<span className="flex-1" />}
+                      </div>
+                    ) : (
+                      <div className="px-2">
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          onClick={() => {
+                            const next = new Set(open);
+                            if (expanded) next.delete(material.key);
+                            else next.add(material.key);
+                            setOpen(next);
+                          }}
+                          className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md ps-2 pe-2 text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                         >
-                          {material.label}
-                        </Text>
-                        <span className="flex w-1.5 shrink-0 justify-center">
-                          {edited ? (
-                            <span aria-label="changed" className="size-1.5 rounded-full bg-live" />
-                          ) : null}
-                        </span>
-                      </button>
-                    </div>
+                          <ChevronRightIcon
+                            aria-hidden="true"
+                            className={cn(
+                              "size-3.5 shrink-0 text-dim-foreground motion-popup transition-transform",
+                              expanded && "rotate-90",
+                            )}
+                          />
+                          {swatch}
+                          <Text
+                            variant="body"
+                            tone="default"
+                            truncate
+                            title={canName && !disabled ? "Double-click to rename" : undefined}
+                            render={<span className="flex-1" />}
+                            onDoubleClick={(event) => {
+                              if (!canName || disabled) return;
+                              event.preventDefault();
+                              setRenaming(material.key);
+                            }}
+                          >
+                            {material.label}
+                          </Text>
+                          <span className="flex w-1.5 shrink-0 justify-center">
+                            {edited ? (
+                              <span
+                                aria-label="changed"
+                                className="size-1.5 rounded-full bg-live"
+                              />
+                            ) : null}
+                          </span>
+                        </button>
+                      </div>
+                    )}
                     {expanded ? (
                       <div className="flex flex-col pb-1">
                         {fields.map((value) => field(lookId, value, fieldLabel(value, material)))}

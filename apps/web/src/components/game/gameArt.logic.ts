@@ -4,6 +4,7 @@ import type {
   GameArtAssetRoute,
   GameAssetUse,
   GameThing,
+  GameThingValue,
 } from "@kurambit/contracts";
 
 /** A model the game builds in its code: a named thing with a body and no file behind it. */
@@ -22,6 +23,37 @@ export interface GameArtCodeModel {
   /** How many copies of it the game draws (a scattered part: "Trees × 240"). */
   readonly copies: number | null;
 }
+
+/** A look the model viewer puts over a file: its part's path below the thing ([] for the thing). */
+export interface ViewerLook {
+  readonly part: ReadonlyArray<string>;
+  readonly values: Readonly<Record<string, number | boolean>>;
+}
+
+/**
+ * The look edits the running game holds for a thing and its parts, as the model viewer applies
+ * them to the file the thing is a copy of: the thing's first, then its parts' in the game's order,
+ * each with only the values that differ from the game's own.
+ */
+export const viewerLooks = (
+  thingId: string,
+  partIds: ReadonlyArray<string>,
+  looks: Readonly<
+    Record<string, { readonly values: ReadonlyArray<GameThingValue> } | null | undefined>
+  >,
+): ReadonlyArray<ViewerLook> =>
+  [thingId, ...partIds].flatMap((id) => {
+    const changed = (looks[id]?.values ?? []).filter(
+      (value) => value.default !== undefined && value.default !== value.value,
+    );
+    if (changed.length === 0) return [];
+    return [
+      {
+        part: id === thingId ? [] : id.slice(`${thingId} › `.length).split(" › "),
+        values: Object.fromEntries(changed.map((value) => [value.key, value.value])),
+      },
+    ];
+  });
 
 /** A code model's name as a tile and a list say it: a scattered part with its count. */
 export const modelName = (model: GameArtCodeModel) =>

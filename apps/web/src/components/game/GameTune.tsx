@@ -61,6 +61,8 @@ export function useTuneSaver(threadRef: ScopedThreadRef) {
   const keep = useAtomCommand(gameEnvironment.keepValues, { reportFailure: false });
   const canSave = useAtomValue(gameEnvironment.keepValues.permissionAtom(threadRef.environmentId));
   const queue = useRef(new Map<string, Map<string, GameThingValue>>());
+  // Names given a look's part or materials, by look id and key (null: back to the game's own).
+  const nameQueue = useRef(new Map<string, Map<string, string | null>>());
   // The last value saved per id and key: letting go where it already is saves nothing.
   const saved = useRef(new Map<string, number | boolean>());
   // The next save starts a build of its own rather than fold into the session's.
@@ -71,17 +73,23 @@ export function useTuneSaver(threadRef: ScopedThreadRef) {
   const flush = useStableCallback(async () => {
     if (busy.current || !canSave) return;
     busy.current = true;
-    while (queue.current.size > 0) {
+    while (queue.current.size > 0 || nameQueue.current.size > 0) {
       if (turnRunning) {
         setState({ kind: "waiting" });
         break;
       }
       setState({ kind: "saving" });
-      const things = [...queue.current].map(([id, values]) => ({
-        id,
-        values: [...values.values()],
-      }));
+      const named = nameQueue.current;
+      const things = [...new Set([...queue.current.keys(), ...named.keys()])].map((id) => {
+        const names = [...(named.get(id) ?? [])].map(([key, name]) => ({ key, name }));
+        return {
+          id,
+          values: [...(queue.current.get(id)?.values() ?? [])],
+          ...(names.length === 0 ? {} : { names }),
+        };
+      });
       queue.current = new Map();
+      nameQueue.current = new Map();
       const fold = !fresh.current;
       fresh.current = false;
       const result = await keep({
@@ -91,10 +99,16 @@ export function useTuneSaver(threadRef: ScopedThreadRef) {
       if (result._tag === "Failure") {
         // Back under anything tuned since, which is newer.
         for (const thing of things) {
-          const values = queue.current.get(thing.id) ?? new Map<string, GameThingValue>();
-          for (const value of thing.values)
-            if (!values.has(value.key)) values.set(value.key, value);
-          queue.current.set(thing.id, values);
+          if (thing.values.length > 0) {
+            const values = queue.current.get(thing.id) ?? new Map<string, GameThingValue>();
+            for (const value of thing.values)
+              if (!values.has(value.key)) values.set(value.key, value);
+            queue.current.set(thing.id, values);
+          }
+          if (thing.names === undefined) continue;
+          const names = nameQueue.current.get(thing.id) ?? new Map<string, string | null>();
+          for (const { key, name } of thing.names) if (!names.has(key)) names.set(key, name);
+          nameQueue.current.set(thing.id, names);
         }
         fresh.current = !fold;
         setState({ kind: "failed", text: String(squashAtomCommandFailure(result)) });
@@ -119,11 +133,18 @@ export function useTuneSaver(threadRef: ScopedThreadRef) {
     queue.current.set(id, values);
     void flush();
   });
+  /** A name given a look's part ("name") or material ("2:roof/name"), kept like a value. */
+  const rename = useStableCallback((id: string, key: string, name: string | null) => {
+    const names = nameQueue.current.get(id) ?? new Map<string, string | null>();
+    names.set(key, name);
+    nameQueue.current.set(id, names);
+    void flush();
+  });
   const keepAsBuild = () => {
     fresh.current = true;
     setState({ kind: "kept" });
   };
-  return { save, state, canSave, keepAsBuild, retry: () => void flush() };
+  return { save, rename, state, canSave, keepAsBuild, retry: () => void flush() };
 }
 
 /** Its values the person has tuned away from the game's own (tune.json holds just these). */

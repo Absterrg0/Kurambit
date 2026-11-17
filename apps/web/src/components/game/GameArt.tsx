@@ -55,7 +55,7 @@ import { useGameGenerations } from "./GameGenerationCard";
 import { GameKeyArt } from "./GameKeyArt";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
 import { colourHex } from "./GameColourField";
-import { GameLookInspector } from "./GameLookInspector";
+import { GameLookInspector, LabelInput, renameLook } from "./GameLookInspector";
 import { KIND_WORDS, useTuneSaver } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
 import {
@@ -72,6 +72,7 @@ import {
   modelName,
   ROUTE_WORDS,
   thingOfAsset,
+  viewerLooks,
   type ArtFilter,
   type GameArtCodeModel,
   type GameArtEntry,
@@ -82,10 +83,14 @@ import {
   hoverStageThing,
   pointAtStageThing,
   portraitStageThing,
+  requestStageLook,
+  useStageBridge,
   useThreadStageBridge,
 } from "./gameStageBridge";
 
 const NO_THINGS: ReadonlyArray<GameThing> = [];
+const NO_IDS: ReadonlyArray<string> = [];
+const NO_LOOKS: ReturnType<typeof useStageBridge.getState>["looks"] = {};
 const NO_ASSETS: ReadonlyArray<GameArtAsset> = [];
 
 /** The runtime's model viewer page on the game's own server; null when the game has none. */
@@ -830,6 +835,14 @@ function ArtDetail({
   const [info, setInfo] = useState<ViewerModelInfo | null>(null);
   const [handle, setHandle] = useState<ModelViewerHandle | null>(null);
   const saver = useTuneSaver(threadRef);
+  // A part is renamed in place, by a double-click on its name; the game's own name stays its id.
+  const canName = useThreadStageBridge(
+    scopedThreadKey(threadRef),
+    (state) => state.capabilities.includes("names"),
+    false,
+  );
+  const [renaming, setRenaming] = useState(false);
+  const renamable = entry.kind === "code-model" && entry.path !== null && canName && saver.canSave;
   // The code-made thing's view as last drawn: the chip's picture and its facts.
   const [orbit, setOrbit] = useState<{ png: string; facts: GameThingFacts | null } | null>(null);
   const name = entry.kind === "file" ? fileName(entry.asset.path) : modelName(entry);
@@ -885,9 +898,28 @@ function ArtDetail({
           </TooltipTrigger>
           <TooltipPopup side="bottom">All art</TooltipPopup>
         </Tooltip>
-        <Text variant="label" tone="strong" truncate render={<h3 className="min-w-0 flex-1" />}>
-          {name}
-        </Text>
+        {renaming && entry.kind === "code-model" ? (
+          <span className="min-w-0 flex-1">
+            <LabelInput
+              label={entry.name}
+              onRename={(given) => renameLook(saver, gameLookId(entry.id), "name", given)}
+              onDone={() => setRenaming(false)}
+            />
+          </span>
+        ) : (
+          <Text
+            variant="label"
+            tone="strong"
+            truncate
+            title={renamable ? "Double-click to rename" : undefined}
+            onDoubleClick={() => {
+              if (renamable) setRenaming(true);
+            }}
+            render={<h3 className="min-w-0 flex-1" />}
+          >
+            {name}
+          </Text>
+        )}
         {stageThing === null || !stageThing.onScreen ? null : (
           <Tooltip>
             <TooltipTrigger
@@ -929,6 +961,13 @@ function ArtDetail({
           root={root}
           asset={entry.asset}
           stageThing={stageThing}
+          partIds={
+            stageThing === null
+              ? NO_IDS
+              : things
+                  .filter((thing) => thing.id.startsWith(`${stageThing.id} › `))
+                  .map((thing) => thing.id)
+          }
           use={use}
           viewerUrl={viewerUrl}
           info={info}
@@ -1176,6 +1215,7 @@ function FileDetail({
   root,
   asset,
   stageThing,
+  partIds,
   use,
   viewerUrl,
   info,
@@ -1189,6 +1229,8 @@ function FileDetail({
   root: string;
   asset: GameArtAsset;
   stageThing: GameThing | null;
+  /** The thing's parts, by id, in the game's order: their look edits show in the viewer too. */
+  partIds: ReadonlyArray<string>;
   use: GameAssetUse | null;
   viewerUrl: string | null;
   info: ViewerModelInfo | null;
@@ -1204,9 +1246,21 @@ function FileDetail({
   );
   const tint = lookValues.find((value) => value.key === "tint")?.value;
   const scale = lookValues.find((value) => value.key === "scale")?.value;
+  // The look edits of the thing and its parts, as the running game holds them; asked for as the
+  // file opens and whenever the game comes up again.
+  const threadKey = scopedThreadKey(threadRef);
+  const status = useThreadStageBridge(threadKey, (state) => state.status, null);
+  const looks = useThreadStageBridge(threadKey, (state) => state.looks, NO_LOOKS);
+  const lookIds = stageThing === null ? "" : [stageThing.id, ...partIds].join("\n");
+  useEffect(() => {
+    if (status !== "ready" || lookIds === "") return;
+    for (const id of lookIds.split("\n")) requestStageLook(id);
+  }, [status, lookIds]);
   const look = {
     tint: typeof tint === "number" ? tint : 0xffffff,
     scale: typeof scale === "number" ? scale : 1,
+    name: stageThing?.name ?? "",
+    looks: stageThing === null ? [] : viewerLooks(stageThing.id, partIds, looks),
   };
   const usedWords = inPlayWords(asset, use, stageThing !== null);
   return (

@@ -39,6 +39,8 @@ export const GameStageCapability = Schema.Literals([
   "rewind",
   /** Draws one named thing alone (studio-portrait), for Art's pictures and its orbit view. */
   "portrait",
+  /** Takes the names a person gives a part or a material (studio-name). */
+  "names",
 ]);
 export type GameStageCapability = typeof GameStageCapability.Type;
 
@@ -211,6 +213,17 @@ export const StudioLookRequest = Schema.Struct({
   id: Schema.String,
 });
 /**
+ * A name the person gave a part (`key` "name") or one of a look's materials (`key` its material's
+ * key, "2:roof/name"), of the look id `look:<id>`; null takes it back to the game's own. The
+ * game shows it at once and answers a material's with studio-look; keeping it writes tune.json.
+ */
+export const StudioName = Schema.Struct({
+  type: Schema.Literal("studio-name"),
+  id: Schema.String,
+  key: Schema.String,
+  name: Schema.NullOr(Schema.String),
+});
+/**
  * Asks for the canvas as a PNG, drawn with no outline (the Inspector's Ask
  * attaches it): a page on another origin is the only one that can read it.
  */
@@ -342,6 +355,7 @@ export const GameStageToGameMessage = Schema.Union([
   StudioHoverThing,
   StudioThingsRequest,
   StudioLookRequest,
+  StudioName,
   StudioCapture,
   StudioRunRequest,
   StudioRunTake,
@@ -591,12 +605,25 @@ const GAME_KEEP_VALUES_MAX_THINGS = GAME_STAGE_MAX_THINGS;
 // A look (look:<id>) keeps a value per material property: Put all back sends them together.
 const GAME_KEEP_VALUES_MAX_VALUES = 400;
 
-/** One thing's values to keep, with the ranges the game registered (the Stage sends what it got). */
+/**
+ * A name the person gave a look's part (`key` "name") or one of its materials ("2:roof/name"),
+ * kept as text beside the look's values; null takes it back to the game's own.
+ */
+export const GameKeptName = Schema.Struct({
+  key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+  name: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40))),
+});
+export type GameKeptName = typeof GameKeptName.Type;
+
+/**
+ * One thing's values to keep, with the ranges the game registered (the Stage sends what it got),
+ * and the names given its look; a thing carries at least one of either.
+ */
 export const GameKeepValuesThing = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(400)),
-  values: Schema.Array(GameThingValue).check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(GAME_KEEP_VALUES_MAX_VALUES),
+  values: Schema.Array(GameThingValue).check(Schema.isMaxLength(GAME_KEEP_VALUES_MAX_VALUES)),
+  names: Schema.optionalKey(
+    Schema.Array(GameKeptName).check(Schema.isMaxLength(GAME_KEEP_VALUES_MAX_VALUES)),
   ),
 });
 export type GameKeepValuesThing = typeof GameKeepValuesThing.Type;
@@ -676,7 +703,7 @@ export const gameStageAskContext = (selection: {
       : "The person selected this part in the running game (the attached picture is the part alone):",
     thing.path === undefined
       ? `- Thing: ${thing.name} (${thing.kindWord ?? thing.kind}), id \`${thing.id}\`.`
-      : `- Part: ${thing.name}, at ${thing.path}: a model the game named "${thing.name}" (its root's \`.name\`) and built into ${thing.path.slice(0, thing.path.lastIndexOf(" › "))}. Change only that model's code, not the rest of what holds it.`,
+      : `- Part: ${thing.name}, at ${thing.path}: a model the game named "${thing.path.slice(thing.path.lastIndexOf(" › ") + 3)}" (its root's \`.name\`) and built into ${thing.path.slice(0, thing.path.lastIndexOf(" › "))}. Change only that model's code, not the rest of what holds it.`,
   ];
   if (thing.bounds !== undefined)
     lines.push(

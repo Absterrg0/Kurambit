@@ -20,10 +20,14 @@ import {
   LOOK,
   MAX_LOOK_VALUES,
   applyLook,
+  drawsAnything,
+  humanName,
   lookDefaults,
   lookMaterials,
   lookShape,
   mapPicture,
+  meaningful,
+  partName,
 } from "./look-edits.js";
 
 const BRIDGE = 1;
@@ -40,6 +44,7 @@ const CAPABILITIES = [
   "runs",
   "rewind",
   "portrait",
+  "names",
 ];
 const KINDS = new Set([
   "character",
@@ -111,13 +116,6 @@ const toStage = (message) => {
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const text = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max;
 const tenth = (value) => Math.round(value * 10) / 10;
-const humanName = (key) => {
-  const words = String(key)
-    .replace(/[_-]+/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-};
 
 // An ASSETS model's own look, by its asset path: a scale and a tint over its colours, tuned on the
 // Stage or in the Workbench's Art tab like any value and kept in tune.json, so a change is a
@@ -511,19 +509,6 @@ export function createStageBridge({
   // built into: picked, pictured and asked about on its own. Unnamed meshes (a merge's) belong to
   // the nearest named one above them; named ones inside a part are its parts. Walked when the
   // thing is named and again (at most twice a second) after its children change: never per frame.
-  const PART_NAME = /^[A-Za-z][A-Za-z0-9 '_-]{0,59}$/;
-  const partName = (node, holder) => {
-    if (!PART_NAME.test(node.name) || !meaningful(node.name)) return null;
-    const name = humanName(node.name);
-    return name.toLowerCase() === holder.name.toLowerCase() ? null : name;
-  };
-  const draws = (node) => {
-    let found = false;
-    node.traverse((each) => {
-      if (each.isMesh || each.isPoints || each.isLine || each.isSprite) found = true;
-    });
-    return found;
-  };
   /** How many copies a scattered part draws: its instances, summed over the models it scatters. */
   const copiesIn = (node) => {
     if (node.isInstancedMesh) return node.count;
@@ -574,7 +559,7 @@ export function createStageBridge({
         const other = byObject.get(child);
         // A thing the game named on its own is no part of this one.
         if (other !== undefined && other.part !== true) continue;
-        const name = draws(child) ? partName(child, holder) : null;
+        const name = drawsAnything(child) ? partName(child, holder.gameName ?? holder.name) : null;
         if (name === null) {
           if (!child.isInstancedMesh) visit(child, holder);
           continue;
@@ -590,7 +575,8 @@ export function createStageBridge({
             : copiesIn(nodes[0]);
         const part = add({
           id,
-          name,
+          name: partNamed(id, name),
+          gameName: name,
           kind: skinned(nodes[0]) ? "character" : "prop",
           object: nodes[0],
           ...(nodes.length > 1 ? { parts: nodes } : {}),
@@ -609,13 +595,43 @@ export function createStageBridge({
     visit(record.object, record);
     if (wasSelected !== null && things.has(wasSelected)) selected = things.get(wasSelected);
   };
-  /** A part's thing, or the thing itself: what the scene report and the QA play count. */
-  const rootOf = (record) => (record?.part === true ? (things.get(record.root) ?? record) : record);
   /** Whether `record` is `holder` or one of its parts, at any depth. */
   const within = (record, holder) => {
     for (let at = record; at !== undefined; at = things.get(at.parent))
       if (at === holder) return true;
     return false;
+  };
+
+  // Names the person gave a look's materials (`<material key>/name`) and a part (`name`), kept in
+  // tune.json beside the look's values as text: the ones given this session (null: taken back)
+  // over the file's. The game's own names stay what ids, paths and the agent's text use.
+  const names = new Map();
+  const namesOf = (lookId) => {
+    const kept = saved[lookId];
+    const all = {};
+    if (kept !== null && typeof kept === "object")
+      for (const [key, value] of Object.entries(kept))
+        if (typeof value === "string") all[key] = value;
+    for (const [key, value] of Object.entries(names.get(lookId) ?? {}))
+      if (value === null) delete all[key];
+      else all[key] = value;
+    return all;
+  };
+  /** The part's name as the person gave it, else the game's. */
+  const partNamed = (id, gameName) => namesOf(`${LOOK}${id}`).name ?? gameName;
+  /** Takes a name the person gave (or took back, null) and shows it where the thing is named. */
+  const rename = (lookId, key, name) => {
+    names.set(lookId, { ...names.get(lookId), [key]: name });
+    const record = things.get(lookId.slice(LOOK.length));
+    if (record === undefined) return null;
+    if (key === "name") {
+      if (record.part === true) {
+        record.name = partNamed(record.id, record.gameName);
+        changed = true;
+      }
+      return null;
+    }
+    return looks.has(record.id) ? lookOf(record) : null;
   };
 
   // The things whose look has a value of its own (kept in tune.json, or edited or opened in Art
@@ -626,7 +642,7 @@ export function createStageBridge({
     if (record == null) return null;
     const bodies = bodiesOf(record);
     if (bodies.length === 0) return null;
-    const materials = lookMaterials(bodies);
+    const materials = lookMaterials(bodies, namesOf(`${LOOK}${record.id}`));
     // An ASSETS model's scale is its file's look, for every copy of it (ASSET_LOOK).
     const { defaults, ranges } = lookDefaults(bodies, materials, {
       scale: record.asset === undefined,
@@ -1100,14 +1116,6 @@ export function createStageBridge({
     });
     return things.get(record.id) ?? null;
   };
-  // Exporters' and loaders' generic names say nothing a person would.
-  const meaningful = (name) =>
-    typeof name === "string" &&
-    name.length > 0 &&
-    name.length <= 80 &&
-    !/^(scene|root|rootnode|group|object|mesh|node|armature|gltf|model|auxscene)[\s._-]*\d*$/i.test(
-      name,
-    );
 
   // The outline: the hovered and selected things drawn flat into a mask, then
   // one full-screen pass draws the mask's edges over the frame. Only while
@@ -1869,6 +1877,13 @@ export function createStageBridge({
         return data.id === null || text(data.id, 400);
       case "studio-look-request":
         return text(data.id, 400);
+      case "studio-name":
+        return (
+          text(data.id, 400) &&
+          data.id.startsWith(LOOK) &&
+          text(data.key, 120) &&
+          (data.name === null || text(data.name, 40))
+        );
       case "studio-tune":
         return (
           text(data.id, 400) &&
@@ -1979,6 +1994,15 @@ export function createStageBridge({
       }
       case "studio-things-request":
         return postThings();
+      case "studio-name": {
+        const look = rename(data.id, data.key, data.name);
+        if (look === null) return;
+        return toStage({
+          type: "studio-look",
+          id: look.record.id,
+          look: describeLook(look),
+        });
+      }
       case "studio-look-request": {
         let look = null;
         try {
@@ -2092,15 +2116,19 @@ export function createStageBridge({
     eachThing(fn) {
       for (const record of things.values()) if (record.part !== true) fn(record);
     },
-    /** The thing an object is (`exact`) or belongs to (its nearest registered parent). */
-    thingOf(object, exact) {
-      if (exact) {
-        const record = byObject.get(object);
-        return record?.part === true ? undefined : record;
-      }
+    /** The thing an object is: never a part, which the scene report and the QA play do not count. */
+    thingOf(object) {
+      const record = byObject.get(object);
+      return record?.part === true ? undefined : record;
+    },
+    /**
+     * Where an object sits among the things, as a finding names it: its part's path ("Island ›
+     * Cabin") when it is in a part, else its thing's name; undefined outside every thing.
+     */
+    placeOf(object) {
       for (let node = object; node != null; node = node.parent) {
         const record = byObject.get(node);
-        if (record !== undefined) return rootOf(record);
+        if (record !== undefined) return record.path ?? record.name;
       }
       return undefined;
     },

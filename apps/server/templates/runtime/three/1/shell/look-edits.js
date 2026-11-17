@@ -14,11 +14,16 @@ export const LOOK = "look:";
 export const MAX_LOOK_VALUES = 400;
 
 const finite = (value) => typeof value === "number" && Number.isFinite(value);
-// A name a person would use: letters first, no `|` or `.` (a cache key, "Material.001").
+// A name a person would use: letters first, no `|` or `.` (a cache key), and not an exporter's
+// stand-in ("Material.001", "lambert2", "Object_12"), whose copy number is dropped first.
 const HUMAN = /^[A-Za-z][A-Za-z0-9 _-]{0,39}$/;
+const STAND_IN =
+  /^(material|mat|mtl|default|lambert|phong|blinn|standard|basic|initialshadinggroup|surface|shader|scene|root|rootnode|group|object|mesh|node|geometry|model|untitled|none|armature|gltf|auxscene)[\s._-]*\d*$/i;
 const human = (name) => {
-  if (typeof name !== "string" || !HUMAN.test(name)) return null;
-  const words = name
+  if (typeof name !== "string") return null;
+  const bare = name.replace(/[._-]\d+$/, "");
+  if (!HUMAN.test(bare) || STAND_IN.test(bare)) return null;
+  const words = bare
     .replace(/[_-]+/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .trim()
@@ -26,6 +31,68 @@ const human = (name) => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 const drawn = (node) => node.isMesh || node.isPoints || node.isLine || node.isSprite;
+
+// Exporters' and loaders' generic names say nothing a person would.
+export const meaningful = (name) =>
+  typeof name === "string" &&
+  name.length > 0 &&
+  name.length <= 80 &&
+  !/^(scene|root|rootnode|group|object|mesh|node|armature|gltf|model|auxscene)[\s._-]*\d*$/i.test(
+    name,
+  );
+/** A key or node name as words: "plankDark" → "Plank dark", "big_tree" → "Big tree". */
+export const humanName = (key) => {
+  const words = String(key)
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+const PART_NAME = /^[A-Za-z][A-Za-z0-9 '_-]{0,59}$/;
+/**
+ * The name a node inside a thing is a part by (letters first, no `|` or `.`, not a loader's
+ * generic name, not its holder's own name), or null when it is no part. The Stage bridge walks a
+ * thing's parts by it, and the model viewer finds a part of a glb again by it.
+ */
+export const partName = (node, holderName) => {
+  if (!PART_NAME.test(node.name) || !meaningful(node.name)) return null;
+  const name = humanName(node.name);
+  return name.toLowerCase() === String(holderName).toLowerCase() ? null : name;
+};
+/** Whether anything under `node`, itself included, draws. */
+export const drawsAnything = (node) => {
+  let found = false;
+  node.traverse((each) => {
+    if (drawn(each)) found = true;
+  });
+  return found;
+};
+
+/**
+ * The nodes of the part `segments` names below `root` (["Cabin", "Roof"] for Island › Cabin ›
+ * Roof), found the way the Stage bridge's walk names them: siblings of one name are one part.
+ * Empty when the model has no such part.
+ */
+export function partNodes(root, rootName, segments) {
+  let holders = [root];
+  let holderName = rootName;
+  for (const segment of segments) {
+    const found = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        const name = drawsAnything(child) ? partName(child, holderName) : null;
+        if (name === null) {
+          if (!child.isInstancedMesh) visit(child);
+        } else if (name === segment) found.push(child);
+      }
+    };
+    for (const holder of holders) visit(holder);
+    if (found.length === 0) return [];
+    holders = found;
+    holderName = segment;
+  }
+  return holders;
+}
 const lit = (m) =>
   m.isMeshStandardMaterial ||
   m.isMeshPhongMaterial ||
@@ -68,11 +135,80 @@ const owners = new WeakMap();
 const ownShadows = new WeakMap();
 const ownOf = (material) => owners.get(material) ?? material;
 
+// A geometry's shape as a person says it ("Red box", "Teal cone").
+const SHAPES = {
+  BoxGeometry: "box",
+  RoundedBoxGeometry: "box",
+  SphereGeometry: "ball",
+  IcosahedronGeometry: "gem",
+  DodecahedronGeometry: "gem",
+  OctahedronGeometry: "gem",
+  TetrahedronGeometry: "pyramid",
+  PolyhedronGeometry: "gem",
+  ConeGeometry: "cone",
+  CylinderGeometry: "cylinder",
+  CapsuleGeometry: "capsule",
+  TorusGeometry: "ring",
+  RingGeometry: "ring",
+  TorusKnotGeometry: "knot",
+  PlaneGeometry: "plane",
+  CircleGeometry: "disc",
+  LatheGeometry: "vase",
+  ExtrudeGeometry: "slab",
+  ShapeGeometry: "shape",
+  TubeGeometry: "tube",
+};
+const shapeOf = (node) =>
+  node.isPoints
+    ? "points"
+    : node.isSprite
+      ? "sprite"
+      : node.isLine
+        ? "line"
+        : (SHAPES[node.geometry?.type] ?? null);
+const HSL = { h: 0, s: 0, l: 0 };
+/** A colour's family as a word ("Red", "Teal", "Grey"); a texture under white is "Textured". */
+const familyOf = (material) => {
+  const color = material.color;
+  if (color?.isColor !== true) return null;
+  color.getHSL(HSL, THREE.SRGBColorSpace);
+  const { s, l } = HSL;
+  const h = HSL.h * 360;
+  if (material.map != null && s < 0.1 && l > 0.85) return "Textured";
+  if (l < 0.1) return "Black";
+  if (s < 0.15) return l > 0.85 ? "White" : "Grey";
+  if (h < 15 || h >= 345) return "Red";
+  if (h < 45) return l < 0.35 ? "Brown" : "Orange";
+  if (h < 70) return "Yellow";
+  if (h < 160) return "Green";
+  if (h < 195) return "Teal";
+  if (h < 255) return "Blue";
+  if (h < 290) return "Purple";
+  return "Pink";
+};
+
+/**
+ * A material's label for a person, from what the game gave it: the material's own name (a glb's
+ * "Wood"), else a mesh's name, else the palette's name for it, else its shape and colour ("Red
+ * box", "Teal cone"); null when none says anything, for "Part N". Never a key or a hex.
+ */
+const labelOf = (entry) => {
+  const own = entry.own;
+  const palette = own.userData?.kurambitKey !== undefined;
+  if (!palette && human(own.name) !== null) return human(own.name);
+  for (const node of entry.nodes) if (human(node.name) !== null) return human(node.name);
+  if (palette && human(own.name) !== null) return human(own.name);
+  const family = familyOf(own);
+  if (family === null) return null;
+  return `${family} ${shapeOf(entry.nodes[0]) ?? "part"}`;
+};
+
 /**
  * The materials one thing draws with, in the order its meshes are met: each once, keyed by that
- * place and its name, named for a person by the palette, the material or its mesh, else "Part N".
+ * place and its name, named for a person (labelOf) or by the name the person gave it (`names`, as
+ * the look keeps them: "2:roof/name"), else "Part N". Two of one label are told apart by a number.
  */
-export function lookMaterials(bodies) {
+export function lookMaterials(bodies, names = {}) {
   const list = [];
   const seen = new Map();
   let parts = 0;
@@ -84,19 +220,26 @@ export function lookMaterials(bodies) {
         let entry = seen.get(own);
         if (entry === undefined) {
           const name = String(own.name ?? "").slice(0, 60);
-          entry = {
-            own,
-            key: `${list.length}:${name}`,
-            label: human(own.name) ?? human(node.name),
-            nodes: [],
-          };
+          entry = { own, key: `${list.length}:${name}`, label: null, nodes: [] };
           seen.set(own, entry);
           list.push(entry);
         }
         if (!entry.nodes.includes(node)) entry.nodes.push(node);
       }
     });
-  for (const entry of list) if (propsOf(entry.own).length > 0) entry.label ??= `Part ${++parts}`;
+  const said = new Map();
+  for (const entry of list) {
+    const given = names[`${entry.key}/name`];
+    if (typeof given === "string" && given !== "") {
+      entry.label = given;
+      continue;
+    }
+    if (propsOf(entry.own).length === 0) continue;
+    const label = labelOf(entry) ?? `Part ${++parts}`;
+    const count = (said.get(label) ?? 0) + 1;
+    said.set(label, count);
+    entry.label = count === 1 ? label : `${label} ${count}`;
+  }
   return list;
 }
 
