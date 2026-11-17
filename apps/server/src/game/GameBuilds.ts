@@ -1978,6 +1978,8 @@ const make = Effect.gen(function* () {
     label?: string,
     /** What the folder holds as it moves, when the caller read it (a landing's merge did). */
     holding?: GameBuildId,
+    /** Written once the record is: a restart then settles a move whose rail already names it. */
+    afterRecord?: Effect.Effect<void, GameOperationError>,
   ) =>
     Effect.gen(function* () {
       const requestId = restoreRequestId(g.root, commandId);
@@ -2055,6 +2057,7 @@ const make = Effect.gen(function* () {
             operation: "Restore build",
           },
           saveNoRunRestore(g.root, record).pipe(
+            Effect.andThen(afterRecord ?? Effect.void),
             Effect.andThen(moveWithoutRun(g.root, g.lane, record, owner, folderBuild, g.projectId)),
           ),
         ),
@@ -2150,21 +2153,27 @@ const make = Effect.gen(function* () {
           .commitTree({ cwd: g.root, tree: input.tree, parent: input.from, message: input.label })
           .pipe(Effect.mapError(io("the build could not be made"))));
       if (!isGameBuildId(made)) return yield* failed("Land build", g.root, "io", "not a build");
-      // Listed before the folder moves, so a restart's settle lands a build the rail names.
-      if (known === null)
-        for (const [suffixOf, oid] of [
-          ["-from", input.from],
+      // Listed once the landing's record is saved, before the folder moves: a restart settles
+      // the move and the rail already names it; a death before the record leaves neither.
+      const listRefs = Effect.forEach(
+        [
+          ["-from", input.from] as const,
           ...(input.undid === undefined ? [] : [["-undid", input.undid] as const]),
-          [suffix, made],
-        ] as const)
-          yield* checkpoints
+          [suffix, made] as const,
+        ],
+        ([suffixOf, oid]) =>
+          checkpoints
             .updateCheckpointRef({
               cwd: g.root,
               checkpointRef: editRef(input.request, suffixOf),
               oid,
             })
-            .pipe(Effect.mapError(io("the build could not be kept")));
-      const resolved = yield* resolve(g, { _tag: "build", build: made });
+            .pipe(Effect.mapError(io("the build could not be kept"))),
+        { discard: true },
+      );
+      const resolved = (yield* resolveOf(g, [made])).get(made);
+      if (resolved === undefined)
+        return yield* failed("Land build", g.root, "io", `the build holds no ${g.lane}/ project`);
       const result = yield* restoreWithoutRun(
         threadId,
         g,
@@ -2173,6 +2182,7 @@ const make = Effect.gen(function* () {
         input.from,
         input.label,
         input.from,
+        known === null ? listRefs : Effect.void,
       );
       if (result.moved === "moved-on") {
         yield* checkpoints
