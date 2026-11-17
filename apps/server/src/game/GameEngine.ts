@@ -638,9 +638,11 @@ const make = Effect.gen(function* () {
   const heroSheetsOn = (root: string) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      if (!isAvailableEngine(manifest.engine.name)) return [];
+      if (!isAvailableEngine(manifest.engine.name)) return { problems: [], gates: [] };
       const paths = gamePaths(manifest.engine.name, manifestProject(manifest));
-      return yield* Effect.promise(() => heroSheetProblems(root, paths).catch(() => []));
+      return yield* Effect.promise(() =>
+        heroSheetProblems(root, paths).catch(() => ({ problems: [], gates: [] })),
+      );
     });
   return GameEngine.of({
     backendFor,
@@ -656,11 +658,12 @@ const make = Effect.gen(function* () {
           owner,
         });
         if (!final) return result;
-        const heroSheets = yield* heroSheetsOn(root);
+        const heroes = yield* heroSheetsOn(root);
         return {
           ...result,
           ...(result.ok ? yield* savedPlaysOn(root) : {}),
-          ...(heroSheets.length === 0 ? {} : { heroSheets }),
+          ...(heroes.problems.length === 0 ? {} : { heroSheets: heroes.problems }),
+          ...(heroes.gates.length === 0 ? {} : { heroGates: heroes.gates }),
         };
       }),
     cleanCheckAt: (root) => Effect.sync(() => cleanCheckTimes.get(root) ?? null),

@@ -999,7 +999,7 @@ const sheet = createSheet({
 
 const studio = installStudio({
   sheet,
-  perf: () => look.stats(),
+  perf: () => ({ ...look.stats(), springs: animateShell.springCost() }),
   player: () => run?.ctx.player ?? null,
   setState: (target, values) => game.setState?.(target, values, run?.ctx ?? null),
   // How the harness starts play on a page opened as a player opens it, whatever its title is.

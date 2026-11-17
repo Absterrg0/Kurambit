@@ -116,6 +116,16 @@ export const GameModelSpring = Schema.Struct({
 export type GameModelSpring = typeof GameModelSpring.Type;
 
 /** What the pipeline measured on a styled model: shared by the review and the sidecar. */
+/** A hero's measured gate: height, deformation, cloth, feet or budget, with its number and why. */
+export const GameModelGate = Schema.Struct({
+  name: Schema.Literals(["height", "deformation", "cloth", "feet", "budget"]),
+  pass: Schema.Boolean,
+  /** Metres (height), the 99.9th percentile edge stretch (deformation), mm (cloth), cm of slide (feet), triangles (budget). */
+  value: Schema.Number,
+  text: Schema.String.check(Schema.isMaxLength(600)),
+});
+export type GameModelGate = typeof GameModelGate.Type;
+
 export const GameModelMeasure = Schema.Struct({
   kind: Schema.Literals(["character", "prop"]),
   /** The rig id whose joints it holds; null for a prop or an unknown rig. */
@@ -137,6 +147,8 @@ export const GameModelMeasure = Schema.Struct({
   /** Share of the skin's area passing through other skin, %: at rest, and on one fixed bent pose (null off the standard skeleton). */
   skinThrough: Schema.optionalKey(Schema.Struct({ rest: Percent, bent: Schema.NullOr(Percent) })),
   face: Schema.optionalKey(GameModelFace),
+  /** A character's gates, measured on its clips before the style pass joins its meshes. */
+  gates: Schema.optionalKey(Schema.Array(GameModelGate).check(Schema.isMaxLength(8))),
 });
 export type GameModelMeasure = typeof GameModelMeasure.Type;
 
@@ -168,6 +180,11 @@ export const GameModelRefusalCode = Schema.Literals([
   "no-idle", // a character with no idle clip
   "unweighted", // character vertices bound to no bone: they never move with it
   "frozen-clips", // a character none of whose clips moves a bone
+  "hero-height", // a character outside its height range
+  "hero-deformation", // edges torn past the deformation gate on a clip
+  "hero-cloth", // clothing sunk into the body on a clip
+  "hero-feet", // planted feet off the ground or skating on a walk or run
+  "hero-budget", // over the triangles, materials or texture size a hero may have
 ]);
 export const GameModelRefusal = Schema.Struct({
   code: GameModelRefusalCode,

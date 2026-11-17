@@ -384,6 +384,10 @@ export const measurementText = (
     lines.push(
       `- Springs: ${m.springs.map((spring) => `${spring.name} (${spring.bones.join(", ")})`).join("; ")}.`,
     );
+  if (m.gates !== undefined && m.gates.length > 0)
+    lines.push(
+      `Gates (quote these numbers in the hero's critique):\n${m.gates.map((gate) => `- ${gate.name} ${gate.pass ? "passes" : "FAILS"}: ${gate.text}`).join("\n")}`,
+    );
   return lines.join("\n");
 };
 

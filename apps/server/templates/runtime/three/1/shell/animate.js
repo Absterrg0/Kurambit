@@ -39,6 +39,7 @@
 //   hero.play("run", { moveSpeed: 5.5 }); // m/s it moves: the clip plays at
 //     // moveSpeed / its measured ground speed, so the feet stay planted
 //   hero.spring("tail", { stiffness: 0.09, damping: 0.14, gravity: 4 }); // retune a chain
+//     // (values given here win; the rest follow the Stage's spring stiffness and damping)
 //   hero.lookAt(target.position, { maxYaw: 1, maxPitch: 0.6 }); // neck and head turn
 //     // toward a point within limits; null: ahead
 //   hero.blink();                         // blink now (a face blinks on its own anyway)
@@ -49,7 +50,8 @@
 //                                         // the game moves hero.root (lean(false): off)
 //   hero.feetOn((x, z) => terrainHeight(x, z)); // feet on stairs and slopes: each foot
 //     // holds the ground through the sidecar's measured stances; null: off
-// The sidecar's spring chains (a tail, ears) swing on their own from the
+// The sidecar's spring chains (a tail, ears) and every chain of bones named
+// spring_<chain>_NN (a coat's hem, a scarf's ends) swing on their own from the
 // start; spring(["bone_a", "bone_b"], opts) adds a chain to any model, root
 // to tip. A sidecar face (eye bones from the kit's eye helpers) blinks every
 // 2-6 s, sometimes twice. A model with no measured ground speed plays at
@@ -134,6 +136,21 @@ export function findClip(clips, state) {
 const live = new Set();
 
 const SPRING = { stiffness: 0.15, damping: 0.2, gravity: 0 };
+/**
+ * A model's spring values on the Stage (the bridge tunes them on its ASSETS copy and leaves the
+ * live values on copy.userData.springTune): every chain the code gave no value of its own swings
+ * by them, so the person tunes the swing while it plays, and a replay replays the tuning.
+ */
+export const SPRING_TUNE = { springStiffness: SPRING.stiffness, springDamping: SPRING.damping };
+export const SPRING_TUNE_RANGES = {
+  springStiffness: [0.01, 1, 0.01, "spring stiffness"],
+  springDamping: [0, 0.95, 0.01, "spring damping"],
+};
+/** Bones named spring_<chain>_NN swing on their own, whatever made the model (hems, tails, ears). */
+const SPRING_PREFIX = "spring_";
+// The spring work per step, on the page's own clock (a step's performance.now is the run's).
+const pageMs = performance.now.bind(performance);
+const springCost = { steps: 0, bones: 0, ms: 0, lastMs: 0, worstMs: 0 };
 /** A frame step this long is a hitch, not motion: springs start again from their pose. */
 const HITCH_SECONDS = 0.1;
 const _v1 = new THREE.Vector3();
@@ -157,7 +174,7 @@ const BLINK_SECONDS = (BLINK.length - 1) / 24;
  * to point at it. Steps scale with dt, so it holds across frame rates; a jump
  * further than a teleport snaps it back.
  */
-function makeSpring(root, names, options) {
+function makeSpring(root, names, options, given = []) {
   const bones = names.map((name) => findBone(root, name)).filter((bone) => bone !== null);
   if (bones.length === 0) {
     console.warn(`animate: no bones ${names.join(", ")} for a spring`);
@@ -195,12 +212,20 @@ function makeSpring(root, names, options) {
   const q = new THREE.Quaternion();
   const pq = new THREE.Quaternion();
   const turn = new THREE.Quaternion();
+  // The values the game's code gave this chain; the rest follow the Stage's tuning.
+  const own = new Set(given);
   return {
     key: bones.map((bone) => bone.name).join(","),
     options,
+    own,
+    bones: bones.length,
     update(dt) {
       if (dt <= 0) return;
-      const { stiffness, damping, gravity } = options;
+      const tuned = options.tuned ?? null;
+      const stiffness =
+        tuned === null || own.has("stiffness") ? options.stiffness : tuned.springStiffness;
+      const damping = tuned === null || own.has("damping") ? options.damping : tuned.springDamping;
+      const { gravity } = options;
       const k = 1 - Math.pow(1 - stiffness, dt * 60);
       const keep = Math.pow(1 - damping, dt * 60);
       for (const link of links) {
@@ -242,6 +267,23 @@ function makeSpring(root, names, options) {
   };
 }
 
+/** Chains of spring_ bones, root to tip: a spring_ bone under a bone that is not one starts a
+ * chain, and so does a second spring_ child (a hem's chains fan out from one bone). */
+export function springChains(root) {
+  const isSpring = (node) => node.isBone === true && node.name.startsWith(SPRING_PREFIX);
+  const chains = [];
+  root.traverse((bone) => {
+    if (!isSpring(bone)) return;
+    const first = bone.parent?.children.find(isSpring);
+    if (isSpring(bone.parent ?? {}) && first === bone) return;
+    const chain = [bone];
+    for (let at = bone, next; (next = at.children.find(isSpring)) !== undefined; at = next)
+      chain.push(next);
+    chains.push(chain);
+  });
+  return chains;
+}
+
 export function animate(gltf, { fade = 0.2 } = {}) {
   const root = gltf.scene ?? gltf;
   const clips = gltf.animations ?? [];
@@ -261,11 +303,18 @@ export function animate(gltf, { fade = 0.2 } = {}) {
   // starts each frame from the clip's pelvis, never from last frame's layered one.
   const pelvisGuard = findBone(root, "pelvis") === null ? null : layered(findBone(root, "pelvis"));
   const springs = [];
+  const tuned = root.userData?.springTune ?? null;
   const addSpring = (names, options, name = null) => {
-    const chain = makeSpring(root, names, { ...SPRING, ...options });
+    const chain = makeSpring(root, names, { ...SPRING, ...options, tuned }, Object.keys(options));
     if (chain !== null) springs.push(Object.assign(chain, { name }));
   };
   for (const chain of asset?.springs ?? []) addSpring(chain.bones, {}, chain.name);
+  const sprung = new Set((asset?.springs ?? []).flatMap((chain) => chain.bones));
+  for (const chain of springChains(root)) {
+    const names = chain.map((bone) => bone.name);
+    if (names.some((name) => sprung.has(name))) continue;
+    addSpring(names, {}, names[0].replace(/_\d+$/, ""));
+  }
   const gaze = {
     target: null,
     name: null,
@@ -510,12 +559,17 @@ export function animate(gltf, { fade = 0.2 } = {}) {
           console.warn(
             `animate: no spring chain "${namesOrChain}"; chains: ${springs.map((chain) => chain.name ?? chain.key).join(", ") || "none"}`,
           );
-        for (const chain of named) Object.assign(chain.options, options);
+        for (const chain of named) {
+          Object.assign(chain.options, options);
+          for (const key of Object.keys(options)) chain.own.add(key);
+        }
         return animator;
       }
       const existing = springs.find((chain) => chain.key === namesOrChain.join(","));
-      if (existing !== undefined) Object.assign(existing.options, options);
-      else addSpring(namesOrChain, options);
+      if (existing !== undefined) {
+        Object.assign(existing.options, options);
+        for (const key of Object.keys(options)) existing.own.add(key);
+      } else addSpring(namesOrChain, options);
       return animator;
     },
     /**
@@ -597,7 +651,12 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     settle(dt) {
       pelvisGuard?.begin();
       travel.update();
-      for (const chain of springs) chain.update(dt);
+      if (springs.length > 0) {
+        const start = pageMs();
+        for (const chain of springs) chain.update(dt);
+        springCost.ms += pageMs() - start;
+        for (const chain of springs) springCost.bones += chain.bones;
+      }
       if (layers.lean !== null) layers.lean.update(dt);
       settleGaze(dt);
       if (layers.feet !== null) layers.feet.update(dt, current?.action ?? null);
@@ -652,15 +711,29 @@ export const animateShell = {
   update(dt) {
     // A model taken out of the scene (a defeated enemy) costs nothing; it
     // resumes if it is added back. dispose() forgets it for good.
+    const before = springCost.ms;
     for (const animator of live)
       if (animator.root.parent !== null) {
         animator.mixer.update(dt);
         animator.settle(dt);
       }
+    springCost.steps += 1;
+    springCost.lastMs = springCost.ms - before;
+    springCost.worstMs = Math.max(springCost.worstMs, springCost.lastMs);
   },
   reset() {
     for (const animator of live) animator.mixer.stopAllAction();
     live.clear();
+    Object.assign(springCost, { steps: 0, bones: 0, ms: 0, lastMs: 0, worstMs: 0 });
+  },
+  /** What the springs cost per step this run: bones swung and milliseconds, mean and worst. */
+  springCost() {
+    const steps = Math.max(1, springCost.steps);
+    return {
+      bonesPerStep: Math.round(springCost.bones / steps),
+      meanMs: Number((springCost.ms / steps).toFixed(3)),
+      worstMs: Number(springCost.worstMs.toFixed(3)),
+    };
   },
   /** The state and clip an object's animator plays ({ state, clip }), or null: the scene report reads it. */
   stateOf(object) {

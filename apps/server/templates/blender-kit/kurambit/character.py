@@ -14,6 +14,10 @@ params (the server resolves every path):
     chains    [{name, parent, bones, direction, length, mirror?}]
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
     fit       {arms?, calm?} | None: fit.fit() on every library clip, after the conform
+    style     {preset?: realistic|heroic|cartoon|chibi, head?, legs?, arms?, hands?, feet?, girth?, limbs?}:
+              the body and its rig restyled before the conform (proportions.py)
+    height    metres: the body and its rig scaled to it before the conform
+    heightRange [lo, hi]: the height gate's range (default: height ±10%, or a human's 1.5-2.0 m)
 """
 import importlib
 import json
@@ -24,7 +28,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import fit, helpers, skeleton
+from . import fit, helpers, proportions, skeleton
 from .protocol import Refused, entry
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
@@ -295,6 +299,95 @@ def _old_parts(old):
     return out
 
 
+def _std_of(body_arm, name_map):
+    """Each body bone's standard name, or its nearest mapped ancestor's region for one that maps to none."""
+    region = {}
+    for b in body_arm.data.bones:
+        r, x = None, b
+        while x is not None and r is None:
+            r = proportions.region_of(name_map.get(x.name, x.name))
+            x = x.parent
+        region[b.name] = r or "torso"
+    return region
+
+
+def _stylise(body_arm, meshes, name_map, style, height):
+    """Restyles the body and its rig in place (proportions.py), then scales both to height metres.
+    Returns a note."""
+    import numpy as np
+
+    region = _std_of(body_arm, name_map)
+    mw_arm = np.array(body_arm.matrix_world)
+    need = ("pelvis", "spine_03", "neck_01", "Head", "thigh_l", "thigh_r", "calf_l", "calf_r", "foot_l", "foot_r",
+            "upperarm_l", "upperarm_r", "hand_l", "hand_r")
+    marks = {}
+    for b in body_arm.data.bones:
+        std = name_map.get(b.name, b.name)
+        if std in need:
+            marks[std] = (mw_arm @ np.append(np.array(b.head_local), 1.0))[:3]
+    factors = proportions.resolve(style) if style else None
+    if factors is not None:
+        missing = [n for n in need if n not in marks]
+        if missing:
+            raise Refused("invalid-input", f"style needs the body's {', '.join(missing)} joints, which its rig does not name")
+        moves = proportions.maps(marks, factors)
+    index = {r: i for i, r in enumerate(proportions.REGIONS)}
+    moved = []
+    for o in meshes:
+        me = o.data
+        mw = np.array(o.matrix_world)
+        co = np.empty(len(me.vertices) * 3)
+        me.vertices.foreach_get("co", co)
+        co = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+        if factors is not None:
+            groups = {g.index: region.get(g.name) for g in o.vertex_groups}
+            w = np.zeros((len(co), len(proportions.REGIONS)))
+            for v in me.vertices:
+                for g in v.groups:
+                    r = groups.get(g.group)
+                    if r is not None:
+                        w[v.index, index[r]] += g.weight
+            w[w.sum(axis=1) < 1e-6, index["torso"]] = 1.0
+            co = proportions.blend(co, w, moves)
+        moved.append((o, mw, co))
+    bones = {}
+    for b in body_arm.data.bones:
+        h = (mw_arm @ np.append(np.array(b.head_local), 1.0))[:3]
+        t = (mw_arm @ np.append(np.array(b.tail_local), 1.0))[:3]
+        if factors is not None:
+            f = moves[region[b.name]]
+            h, t = f(h[None])[0], f(t[None])[0]
+        bones[b.name] = (h, t)
+    zs = np.concatenate([co[:, 2] for _, _, co in moved]) if moved else np.zeros(1)
+    ground, current = float(zs.min()), float(zs.max() - zs.min())
+    k = 1.0
+    if height:
+        k = float(height) / max(1e-9, current)
+        moved = [(o, mw, proportions.to_height(co, ground, current, height)[0]) for o, mw, co in moved]
+        bones = {n: tuple(proportions.to_height(np.array([h, t]), ground, current, height)[0]) for n, (h, t) in bones.items()}
+    for o, mw, co in moved:
+        inv = np.linalg.inv(mw)
+        o.data.vertices.foreach_set("co", (co @ inv[:3, :3].T + inv[:3, 3]).ravel())
+        o.data.update()
+    inv_arm = np.linalg.inv(mw_arm)
+    skeleton.object_mode()
+    bpy.context.view_layer.objects.active = body_arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    for eb in body_arm.data.edit_bones:
+        h, t = bones[eb.name]
+        roll = eb.roll
+        eb.head = Vector((inv_arm @ np.append(h, 1.0))[:3])
+        eb.tail = Vector((inv_arm @ np.append(t, 1.0))[:3])
+        eb.roll = roll
+    bpy.ops.object.mode_set(mode="OBJECT")
+    parts = []
+    if factors is not None:
+        parts.append("restyled " + ", ".join(f"{k_} {v:g}" for k_, v in factors.items() if abs(v - 1) > 1e-6) if any(abs(v - 1) > 1e-6 for v in factors.values()) else "style realistic")
+    if height:
+        parts.append(f"scaled {k:.3f} to {float(height):.2f} m")
+    return "body " + "; ".join(parts)
+
+
 @entry
 def character(params):
     name = params["name"]
@@ -367,6 +460,8 @@ def character(params):
         missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
         if missing:
             raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_blender op asset_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
+        if params.get("style") or params.get("height"):
+            notes.append(_stylise(body_arm, meshes, name_map, params.get("style"), params.get("height")))
         own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
         # Its clips move the pelvis in the body's own units.
         unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z
@@ -443,6 +538,12 @@ def character(params):
     if params.get("fit"):
         notes += fit.fit(arm, meshes, [a for a, _, c, _ in taken if not c.get("own")], params["fit"])
     arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
+    # The height gate's range: as asked, else around the height it was scaled to, else a human's.
+    if params.get("heightRange"):
+        arm["kurambit_height"] = json.dumps([float(x) for x in params["heightRange"]])
+    elif params.get("height"):
+        h = float(params["height"])
+        arm["kurambit_height"] = json.dumps([round(h * 0.9, 3), round(h * 1.1, 3)])
 
     chains = {n: bones for n, bones, _ in extra}
     if extra:
