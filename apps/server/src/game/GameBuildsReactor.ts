@@ -222,7 +222,7 @@ const make = Effect.gen(function* () {
         ),
       ),
       Effect.andThen(
-        forkParked(Effect.andThen(versions.sweep, builds.reconcile)),
+        forkParked(builds.reconcile),
         // Guidance arrives with a new server: every game's skills follow it before its next turn.
         forkParked(
           projects.list().pipe(

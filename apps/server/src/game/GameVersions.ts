@@ -1,9 +1,10 @@
-// @effect-diagnostics nodeBuiltinImport:off -- Versions work in git worktrees on disk, and a version's briefing reads BRIEF.md.
-// "Try it N ways": a message built N ways at once, each version a child thread
-// of the chat working in its own git worktree of the game, so the game folder
-// has one writer only. A version's build is its turn checkpoint; keeping one
-// is the one restore every Undo takes, and a notice on the try's run records
-// which was kept. See gameTries.ts for how a try is read back.
+// @effect-diagnostics nodeBuiltinImport:off -- A version's briefing reads BRIEF.md.
+// "Try it N ways": a message built N ways at once, each version a child thread of the chat
+// working in a copy of the game seated on the try's base (GameCopies), so the game folder has
+// one writer only. A version's build is its turn checkpoint; keeping one is a Bring in of that
+// copy, merged against the try's base so builds that landed since stay, and the other copies
+// are thrown away (their builds stay reachable). A notice on the try's run records which was
+// kept. See gameTries.ts for how a try is read back.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -24,15 +25,13 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
-import * as ServerConfig from "../config.ts";
-import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as GameTries from "../orchestration-v2/gameVersions/GameTries.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as GameBuilds from "./GameBuilds.ts";
+import * as GameCopies from "./GameCopies.ts";
 import { recordDecision } from "./GameDecisions.ts";
 import * as GameOperations from "./GameOperations.ts";
-import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import {
@@ -41,10 +40,10 @@ import {
   tryBaseRef,
   tryStartCommandId,
   versionLeftRef,
+  versionThreadId,
 } from "./gameTries.ts";
+import { worktreeSeedRef as worktreeSeedRefOf } from "../checkpointing/worktreeSeed.ts";
 
-/** Under the worktrees folder, beside the build copies. */
-const GAME_VERSIONS = "game-versions";
 const TRIES_LISTED = 8;
 const BRIEF_MAX = 2500;
 const REPLY_MAX = 2000;
@@ -77,53 +76,31 @@ const versionTask = (input: {
   ].join("\n\n");
 };
 
-/** The game folder's path inside its repository ("" at the top): a version's cwd is the same path in its worktree. */
-const repoPrefix = async (root: string) => {
-  let dir = NodePath.resolve(root);
-  let prefix = "";
-  for (;;) {
-    const git = await NodeFSP.lstat(NodePath.join(dir, ".git")).then(
-      () => true,
-      () => false,
-    );
-    if (git) return prefix;
-    const up = NodePath.dirname(dir);
-    if (up === dir) return "";
-    prefix = prefix === "" ? NodePath.basename(dir) : `${NodePath.basename(dir)}/${prefix}`;
-    dir = up;
-  }
-};
-
 export class GameVersions extends Context.Service<
   GameVersions,
   {
     /** The chat's tries, newest first, with each version's state, build and approach. */
     readonly tries: (threadId: ThreadId) => Effect.Effect<GameTriesResult, GameOperationError>;
-    /** The game folder becomes version n's build, through the one restore; the try records the keep. */
+    /** Version n's copy is brought in, the others thrown away; the try records the keep. */
     readonly keep: (
       threadId: ThreadId,
       input: { readonly runId: string; readonly n: number; readonly commandId: string },
     ) => Effect.Effect<typeof GameBuildRestoreResult.Type, GameOperationError>;
-    /** A version child's turn checkpoint or end: measures its build and frees its worktree. */
+    /** A version child's turn checkpoint or end: its build measured in the game's name, the rail told. */
     readonly landed: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
-    /** Startup: worktrees of settled versions (or of tries that never started) are removed. */
-    readonly sweep: Effect.Effect<void>;
   }
 >()("kurambit/game/GameVersions") {}
 
 const make = Effect.gen(function* () {
-  const config = yield* ServerConfig.ServerConfig;
   const projects = yield* GameProjectService.GameProjectService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const checkpoints = yield* CheckpointStore.CheckpointStore;
-  const git = yield* GitWorkflowService.GitWorkflowService;
   const engine = yield* Orchestrator.OrchestratorV2;
   const builds = yield* GameBuilds.GameBuilds;
   const operations = yield* GameOperations.GameOperations;
-  const preview = yield* GamePreview.GamePreview;
+  const copies = yield* GameCopies.GameCopies;
   const runControl = yield* GameRunControl.GameRunControl;
   const tryStarts = yield* GameTries.GameTries;
-  const versionsRoot = NodePath.join(config.worktreesDir, GAME_VERSIONS);
 
   const failed = (
     operation: string,
@@ -140,39 +117,12 @@ const make = Effect.gen(function* () {
       ...(cause === undefined ? {} : { cause }),
     });
 
-  /** Where version n of a try works: its worktree, and its cwd there (the game's own path in the repo). */
-  const placeOf = (root: string, runId: string, n: number, prefix: string) => {
-    const worktree = NodePath.join(
-      versionsRoot,
-      `${NodePath.basename(root)}-${short(root)}`,
-      `${short(runId)}-${n}`,
-    );
-    return { worktree, cwd: prefix === "" ? worktree : NodePath.join(worktree, prefix) };
-  };
-
   const oidsOf = (root: string) =>
     checkpoints
       .listCheckpointRefs({ cwd: root, prefix: "refs/kurambit/" })
       .pipe(
         Effect.map((refs) => new Map(refs.map((ref) => [ref.checkpointRef as string, ref.oid]))),
       );
-
-  const removeWorktree = (root: string, worktree: string, cwd: string) =>
-    Effect.gen(function* () {
-      yield* preview.forget(cwd);
-      const there = yield* Effect.promise(() =>
-        NodeFSP.lstat(worktree).then(
-          () => true,
-          () => false,
-        ),
-      );
-      if (!there) return;
-      yield* git.removeWorktree({ cwd: root, path: worktree, force: true });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("A version's worktree could not be removed.", { worktree, cause }),
-      ),
-    );
 
   const lastReply = (threadId: ThreadId, before: number) =>
     Effect.gen(function* () {
@@ -215,13 +165,13 @@ const make = Effect.gen(function* () {
         );
       const run = thread.runs.find((each) => each.id === input.runId);
       if (run === undefined) return yield* refuse("The try's turn is gone.");
-      const prefix = yield* Effect.promise(() => repoPrefix(root));
-      const places = Array.from({ length: input.versions }, (_, i) =>
-        placeOf(root, input.runId, i + 1, prefix),
+      const children = Array.from({ length: input.versions }, (_, i) =>
+        versionThreadId(input.runId, i + 1),
       );
-      // The base and the worktrees, as one operation of the game: the folder is read as the
-      // turns before this one left it, and nothing writes it meanwhile.
-      yield* projects
+      // The base and the copies, as one operation of the game: the folder is read as the
+      // turns before this one left it, and nothing writes it meanwhile. Each version is a copy
+      // seated on the base, so Keep merges against it.
+      const places = yield* projects
         .exclusive(
           input.threadId,
           "Try ways",
@@ -235,21 +185,9 @@ const make = Effect.gen(function* () {
                   gameRoot,
                   checkpoints.captureCheckpoint({ cwd: gameRoot, checkpointRef: ref }),
                 ));
-              for (const place of places) {
-                const there = yield* Effect.promise(() =>
-                  NodeFSP.lstat(NodePath.join(place.worktree, ".git")).then(
-                    () => true,
-                    () => false,
-                  ),
-                );
-                if (!there) {
-                  yield* Effect.promise(() =>
-                    NodeFSP.rm(place.worktree, { recursive: true, force: true }),
-                  );
-                  yield* git.pruneWorktrees({ cwd: gameRoot }).pipe(Effect.ignore);
-                  yield* git.createWorktree({ cwd: gameRoot, refName: base, path: place.worktree });
-                }
-              }
+              return yield* Effect.forEach(children, (threadId) =>
+                copies.seat({ root: gameRoot, threadId, seat: base, repoint: false }),
+              );
             }),
           { waitUntil: (yield* Clock.currentTimeMillis) + 60_000 },
         )
@@ -292,7 +230,7 @@ const make = Effect.gen(function* () {
           Effect.catchCause((cause) =>
             Effect.logWarning("A try's versions could not be dispatched.", { root, cause }).pipe(
               Effect.andThen(
-                Effect.forEach(places, (place) => removeWorktree(root, place.worktree, place.cwd)),
+                Effect.forEach(children, (child) => copies.discard(root, child), { discard: true }),
               ),
               Effect.andThen(refuse("The versions could not be started.")),
             ),
@@ -357,23 +295,21 @@ const make = Effect.gen(function* () {
           "invalid-input",
           `Version ${input.n} has no build yet: keep it once it has finished.`,
         );
-      // The chat's own turn writes the folder; a keep waits for it, as Undo does.
-      const shell = yield* projections
-        .getThreadShell(threadId)
-        .pipe(Effect.orElseSucceed(() => null));
-      if (shell !== null && shell.activeRunId !== null)
-        return yield* failed(
-          "Keep version",
+      // A version from before its copy was kept: its seat and work as the try recorded them.
+      if (oids.get(worktreeSeedRefOf(version.childThreadId)) === undefined && read.base !== null)
+        yield* copies.adopt({
           root,
-          "busy",
-          "This chat's agent is at work in the game folder: keep a version once its turn ends.",
-        );
-      const result = yield* builds.restore(
+          threadId: version.childThreadId,
+          seat: read.base,
+          work: version.build,
+        });
+      const brought = yield* copies.bringIn({
         threadId,
-        { _tag: "build", build: version.build },
-        `keep-version\0${input.runId}\0${input.n}\0${input.commandId}`,
-      );
-      if (result.moved === "restored" || result.moved === "current") {
+        chat: version.childThreadId,
+        close: true,
+        commandId: `keep-version\0${input.runId}\0${input.n}\0${input.commandId}`,
+      });
+      if (brought._tag === "landed" || brought._tag === "same") {
         yield* engine
           .dispatch({
             type: "game-version.kept",
@@ -394,17 +330,23 @@ const make = Effect.gen(function* () {
                 "Keep version",
                 root,
                 "io",
-                "the game folder holds the version, but the chat could not record the keep",
+                "the game holds the version, but the chat could not record the keep",
                 cause,
               ),
             ),
           );
-        if (result.moved === "restored") {
-          const others = read.versions.filter((each) => each.n !== input.n).map((each) => each.n);
+        const others = read.versions.filter((each) => each.n !== input.n);
+        // The others' copies go; their builds stay reachable on the rail.
+        yield* Effect.forEach(
+          others,
+          (each) => copies.throwAway(each.childThreadId, threadId).pipe(Effect.ignore),
+          { discard: true },
+        );
+        if (brought._tag === "landed")
           yield* recordDecision(root, {
             kind: "kept-over",
-            text: `Kept version ${input.n} of "${read.request}"${version.approach === "" ? "" : ` (${version.approach})`}${others.length === 0 ? "" : ` over ${others.join(" and ")}`}`,
-            build: version.build,
+            text: `Kept version ${input.n} of "${read.request}"${version.approach === "" ? "" : ` (${version.approach})`}${others.length === 0 ? "" : ` over ${others.map((each) => each.n).join(" and ")}`}`,
+            build: brought.build,
           }).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("A kept version could not be kept in the game's decisions.", {
@@ -412,33 +354,30 @@ const make = Effect.gen(function* () {
               }),
             ),
           );
-        }
         yield* operations.changed(root, GAME_BUILDS_EVENT, `Kept version ${input.n}.`);
       }
       return {
-        requestId: result.requestId,
-        done: result.done,
+        requestId: input.commandId,
+        done: brought._tag === "landed" || brought._tag === "same",
         message:
-          result.moved === "restored"
-            ? `Version ${input.n} is in the game folder now.`
-            : result.message,
+          brought._tag === "landed"
+            ? `Version ${input.n} is in the game now; builds that landed since the try stay.`
+            : brought.message,
       };
     });
 
-  /** The try a version child belongs to, read from its own thread: its chat and place. */
-  const versionOf = (childThreadId: ThreadId) =>
+  /** A child of a game's chat working in a copy (a try's version, a delegated child): its cwd. */
+  const childCopyOf = (childThreadId: ThreadId) =>
     Effect.gen(function* () {
       const shell = yield* projections.getThreadShell(childThreadId);
-      const chat = shell?.lineage.parentThreadId ?? null;
-      if (shell === null || chat === null || shell.lineage.relationshipToParent !== "subagent")
+      if (
+        shell === null ||
+        shell.lineage.parentThreadId === null ||
+        shell.lineage.relationshipToParent !== "subagent" ||
+        shell.worktreePath === null
+      )
         return null;
-      const thread = yield* projections.getThread(childThreadId);
-      const cwd = thread.worktreePath;
-      if (cwd === null || !NodePath.resolve(cwd).startsWith(`${versionsRoot}${NodePath.sep}`))
-        return null;
-      const relative = NodePath.relative(versionsRoot, cwd).split(NodePath.sep);
-      const worktree = NodePath.join(versionsRoot, relative[0] ?? "", relative[1] ?? "");
-      return { chat, cwd, worktree };
+      return { cwd: shell.worktreePath };
     }).pipe(Effect.orElseSucceed(() => null));
 
   const isOver = (status: OrchestrationV2Run["status"]) =>
@@ -447,103 +386,39 @@ const make = Effect.gen(function* () {
     status === "interrupted" ||
     status === "cancelled";
 
-  /**
-   * A version whose turn is over loses its worktree once its work is a build: its turn's
-   * checkpoint, or, when the turn ended with none (a restart cancels it), a capture of the
-   * worktree as it was left. The child is read-only, so nothing writes there again.
-   */
-  const settle = (childThreadId: ThreadId, worktree: string, cwd: string) =>
-    Effect.gen(function* () {
-      const records = yield* projections.getThreadRecords(childThreadId, ["runs", "checkpoints"]);
-      const latest = records.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
-      if (latest === undefined || records.runs.some((run) => !isOver(run.status))) return;
-      const checkpointed = records.checkpoints.some(
-        (each) => each.id === latest.checkpointId && each.status === "ready",
-      );
-      const there = yield* Effect.promise(() =>
-        NodeFSP.lstat(NodePath.join(worktree, ".git")).then(
-          () => true,
-          () => false,
-        ),
-      );
-      if (!checkpointed && there)
-        yield* checkpoints.withWorkspaceLock(
-          cwd,
-          checkpoints.captureCheckpoint({ cwd, checkpointRef: versionLeftRef(childThreadId) }),
-        );
-      yield* preview.forget(cwd);
-      // The worktree's own .git file names its repository.
-      const gitFile = yield* Effect.promise(() =>
-        NodeFSP.readFile(NodePath.join(worktree, ".git"), "utf8").catch(() => null),
-      );
-      const gitDir = gitFile?.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim() ?? null;
-      const repo = gitDir === null ? null : NodePath.resolve(gitDir, "..", "..", "..");
-      if (repo !== null)
-        yield* git.removeWorktree({ cwd: repo, path: worktree, force: true }).pipe(Effect.ignore);
-      yield* Effect.promise(() => NodeFSP.rm(worktree, { recursive: true, force: true }));
-      if (repo !== null) yield* git.pruneWorktrees({ cwd: repo }).pipe(Effect.ignore);
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("A version's worktree could not be settled.", {
-          worktree,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-    );
-
   const landed: GameVersions["Service"]["landed"] = (event) =>
     Effect.gen(function* () {
       if (event.type !== "checkpoint.captured" && event.type !== "run.updated") return;
-      const version = yield* versionOf(event.threadId);
-      if (version === null) return;
-      const root = yield* projects.resolve(version.chat);
+      const child = yield* childCopyOf(event.threadId);
+      if (child === null) return;
+      const { root } = yield* projects.home(event.threadId);
       if (event.type === "checkpoint.captured") {
         if (event.payload.status !== "ready") return;
         const oid = (yield* oidsOf(root)).get(event.payload.ref);
         // Measured in the game's name: facts are keyed by content, so a kept version has them.
         if (oid !== undefined) yield* builds.measureIn(root, oid);
         yield* operations.changed(root, GAME_BUILDS_EVENT, "A version landed.");
-        // A stopped turn's checkpoint follows its end.
-        yield* settle(event.threadId, version.worktree, version.cwd);
         return;
       }
       if (!isOver(event.payload.status)) return;
+      // A turn a restart cut off has no checkpoint: what its copy holds is its build.
+      if (event.payload.checkpointId === null)
+        yield* checkpoints
+          .withWorkspaceLock(
+            child.cwd,
+            checkpoints.captureCheckpoint({
+              cwd: child.cwd,
+              checkpointRef: versionLeftRef(event.threadId),
+            }),
+          )
+          .pipe(Effect.ignore);
       yield* operations.changed(root, GAME_BUILDS_EVENT, "A version ended.");
-      if (event.payload.checkpointId !== null)
-        yield* settle(event.threadId, version.worktree, version.cwd);
     }).pipe(
       Effect.catchCause((cause) => Effect.logWarning("A version's landing failed.", { cause })),
     );
 
-  /** Startup: every version worktree whose turn is over is settled; one no thread owns goes. */
-  const sweep: GameVersions["Service"]["sweep"] = Effect.gen(function* () {
-    const games = yield* Effect.promise(() =>
-      NodeFSP.readdir(versionsRoot, { withFileTypes: true }).catch(() => []),
-    );
-    const worktreePaths = yield* projections.getThreadWorktreePaths();
-    for (const game of games) {
-      if (!game.isDirectory()) continue;
-      const dir = NodePath.join(versionsRoot, game.name);
-      const versions = yield* Effect.promise(() => NodeFSP.readdir(dir).catch(() => []));
-      for (const name of versions) {
-        const worktree = NodePath.join(dir, name);
-        // The cwd may sit below the worktree when the game is a subfolder of its repository.
-        const owner = worktreePaths.find((each) => {
-          const path = NodePath.resolve(each.worktreePath);
-          return path === worktree || path.startsWith(`${worktree}${NodePath.sep}`);
-        });
-        // A worktree no version owns is a try whose start never committed.
-        if (owner === undefined) {
-          yield* Effect.promise(() => NodeFSP.rm(worktree, { recursive: true, force: true }));
-          continue;
-        }
-        yield* settle(owner.threadId, worktree, NodePath.resolve(owner.worktreePath));
-      }
-    }
-  }).pipe(Effect.catchCause((cause) => Effect.logWarning("The versions sweep failed.", { cause })));
-
   yield* tryStarts.attach({ start });
-  return GameVersions.of({ tries, keep, landed, sweep });
+  return GameVersions.of({ tries, keep, landed });
 });
 
 export const layer = Layer.effect(GameVersions, make);

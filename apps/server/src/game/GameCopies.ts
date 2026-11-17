@@ -124,6 +124,18 @@ export class GameCopies extends Context.Service<
       threadId: ThreadId,
       asking: ThreadId,
     ) => Effect.Effect<{ readonly message: string }, GameOperationError>;
+    /** A copy made for a chat that never came to be (a try that could not start) goes. */
+    readonly discard: (root: string, threadId: ThreadId) => Effect.Effect<void>;
+    /**
+     * A copy from before seats were kept (a try's version, whose worktree is gone): its seat and
+     * its work as the try recorded them, so Bring in reads them like any copy's.
+     */
+    readonly adopt: (input: {
+      readonly root: string;
+      readonly threadId: ThreadId;
+      readonly seat: string;
+      readonly work: string;
+    }) => Effect.Effect<void, GameOperationError>;
     /** The line a copy's turn reads beside its message; null for a chat in the game. */
     readonly copyNote: (threadId: ThreadId) => Effect.Effect<string | null>;
   }
@@ -836,7 +848,32 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => null),
     );
 
+  const discard: GameCopies["Service"]["discard"] = (root, threadId) =>
+    Effect.gen(function* () {
+      const where = placeOf(root, threadId, yield* repoPrefix(root));
+      yield* git
+        .removeWorktree({ cwd: root, path: where.worktree, force: true })
+        .pipe(Effect.ignore);
+      yield* Effect.promise(() => NodeFSP.rm(where.worktree, { recursive: true, force: true }));
+      yield* git.pruneWorktrees({ cwd: root }).pipe(Effect.ignore);
+    });
+
+  const adopt: GameCopies["Service"]["adopt"] = (input) =>
+    Effect.forEach(
+      [
+        [worktreeSeedRef(input.threadId), input.seat],
+        [workRef(input.threadId), input.work],
+      ] as const,
+      ([checkpointRef, oid]) =>
+        checkpoints
+          .updateCheckpointRef({ cwd: input.root, checkpointRef, oid })
+          .pipe(Effect.mapError(io("Bring in", input.root, "the copy's record could not be kept"))),
+      { discard: true },
+    );
+
   return GameCopies.of({
+    discard,
+    adopt,
     copies,
     place,
     seat,

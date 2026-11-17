@@ -59,7 +59,7 @@ export const tryStartCommandId = (runId: string) => CommandId.make(`game-version
 const versionCommandId = (runId: string, n: number) =>
   CommandId.make(`${tryStartCommandId(runId)}:version:${n}`);
 /** Version n's child thread, as the orchestrator derives it from its command. */
-const versionThreadId = (runId: string, n: number) =>
+export const versionThreadId = (runId: string, n: number) =>
   IdAllocator.derive.delegatedTaskThread({ commandId: versionCommandId(runId, n) });
 
 /** The notice a keep appends: its id carries the version, newest wins. */

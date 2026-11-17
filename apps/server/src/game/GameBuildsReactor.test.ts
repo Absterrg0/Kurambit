@@ -101,7 +101,7 @@ const run = (
             listCheckpointRefs: () =>
               Effect.succeed([{ checkpointRef: REF, oid: OID, committedAt: 0 }]),
           }),
-          Layer.mock(GameVersions.GameVersions)({ landed: () => Effect.void, sweep: Effect.void }),
+          Layer.mock(GameVersions.GameVersions)({ landed: () => Effect.void }),
           Layer.mock(GameFolders.GameFolders)({ release: () => Effect.void }),
         ),
       ),
