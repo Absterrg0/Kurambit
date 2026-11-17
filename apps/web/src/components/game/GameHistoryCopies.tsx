@@ -93,8 +93,15 @@ function CopyRow({
   const builds = useEnvironmentQuery(
     count === 0
       ? null
-      : gameEnvironment.builds({ environmentId: copyRef.environmentId, input: copyRef }),
-  ).data?.builds.slice(0, Math.min(count, 4));
+      : gameEnvironment.builds({
+          environmentId: copyRef.environmentId,
+          input: { threadId: copy.threadId },
+        }),
+  )
+    .data?.builds.filter(
+      (build) => build.source._tag === "turn" && build.source.threadId === copy.threadId,
+    )
+    .slice(0, Math.min(count, 4));
   const here = copy.threadId === threadRef.threadId;
   return (
     <li>

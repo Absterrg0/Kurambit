@@ -193,10 +193,10 @@ export function liveActivityToolStatus(status: string | undefined, presentTense:
 }
 
 /** The game's moves between a copy and the game, as the agent makes them through game_builds. */
-const GAME_MOVES: Readonly<Record<string, string>> = {
-  bring_in: "Bringing in",
-  update: "Updating from the game",
-  undo: "Undoing a build",
+const GAME_MOVES: Readonly<Record<string, readonly [running: string, done: string]>> = {
+  bring_in: ["Bringing in", "Brought into the game"],
+  update: ["Updating from the game", "Took the game's newer builds"],
+  undo: ["Undoing a build", "Undid a build"],
 };
 
 /** A game_builds answer's object: structured, or the JSON text a provider passed on. */
@@ -228,10 +228,17 @@ function gameMovePresentation(
   const data = asRecord(entry.toolData);
   const names = [workEntryToolName(entry), entry.toolTitle, entry.label];
   if (!names.some((name) => typeof name === "string" && /game_builds\b/.test(name))) return null;
-  const input = asRecord(data?.arguments) ?? asRecord(data?.input) ?? asRecord(data?.rawInput);
-  const op = typeof input?.op === "string" ? input.op : null;
-  const running = op === null ? undefined : GAME_MOVES[op];
-  if (running === undefined) return null;
+  const item = entry.structuredPayload;
+  const input =
+    asRecord(data?.arguments) ??
+    asRecord(data?.input) ??
+    asRecord(data?.rawInput) ??
+    (item?.type === "dynamic_tool" ? asRecord(item.input) : null);
+  // One op per call, as the input's only key: {"bring_in": {}}.
+  const op = Object.keys(input ?? {}).find((key) => Object.hasOwn(GAME_MOVES, key)) ?? null;
+  const words = op === null ? undefined : GAME_MOVES[op];
+  if (words === undefined) return null;
+  const [running, done] = words;
   const shown = (displayName: string) => ({
     displayName,
     icon: "kurambit" as KurambitMcpToolDefinition["icon"],
@@ -242,7 +249,9 @@ function gameMovePresentation(
   const message = typeof answer?.message === "string" ? answer.message : null;
   // The answer's first sentence; the rest is advice for the agent.
   const first = message?.split(/(?<=\.)\s/)[0]?.replace(/\.$/, "") ?? null;
-  return first === null ? null : shown(first);
+  if (status === "failed") return shown(`Failed: ${running.toLowerCase()}`);
+  // A stored row may keep its input and not its answer: then it says what the move did.
+  return shown(first ?? done);
 }
 
 export function resolveWorkEntryToolPresentation(

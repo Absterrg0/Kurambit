@@ -15,7 +15,7 @@ import { copyKeeps, copySending, useCopyActions, useCopyPlace } from "./useGameC
 const ENDING_CHANGED = /the test play "(.+?)" now ends "(.+?)"/;
 
 /** The message "Ask the agent to resolve" sends: the files, in the person's words. */
-export const resolveMessage = (files: ReadonlyArray<GameCopyConflict>) =>
+const resolveMessage = (files: ReadonlyArray<GameCopyConflict>) =>
   `${files.map((file) => file.path).join(", ")} changed in the game and in this copy, and each now holds both sides. Resolve ${files.length === 1 ? "it" : "them"} so both changes work together.`;
 
 /**

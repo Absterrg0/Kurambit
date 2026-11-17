@@ -533,7 +533,11 @@ const make = Effect.gen(function* () {
       );
       const after = DateTime.formatIso(DateTime.makeUnsafe(since * 1000));
       const listed = yield* builds.list(shell.id, { limit: 50 });
-      return listed.builds.filter((build) => build.at > after).length;
+      // Its own turns: the rail of a chat in a copy also lists the game's kept edits and versions.
+      return listed.builds.filter(
+        (build) =>
+          build.at > after && build.source._tag === "turn" && build.source.threadId === shell.id,
+      ).length;
     }).pipe(Effect.orElseSucceed(() => 0));
 
   const place: GameCopies["Service"]["place"] = (threadId) =>
