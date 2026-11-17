@@ -69,6 +69,7 @@ export * from "./gameExplore.ts";
 export * from "./gamePlaySession.ts";
 export * from "./gameBot.ts";
 export * from "./gameBuilds.ts";
+export * from "./gameCopies.ts";
 export * from "./gameQa.ts";
 export * from "./gamePlays.ts";
 export * from "./gameScene.ts";

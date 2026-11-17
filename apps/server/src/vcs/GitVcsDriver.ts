@@ -2642,7 +2642,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         cwd: input.cwd,
         args: [
           "for-each-ref",
-          "--format=%(refname)%00%(objectname)%00%(committerdate:unix)",
+          "--format=%(refname)%00%(objectname)%00%(committerdate:unix)%00%(contents:subject)",
           input.prefix,
         ],
         maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
@@ -2652,11 +2652,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         .split("\n")
         .filter((line) => line.length > 0)
         .map((line) => {
-          const [ref = "", oid = "", at = "0"] = line.split("\0");
+          const [ref = "", oid = "", at = "0", subject = ""] = line.split("\0");
           return {
             checkpointRef: CheckpointRef.make(ref),
             oid,
             committedAt: Number.parseInt(at, 10) || 0,
+            subject,
           };
         });
     }),

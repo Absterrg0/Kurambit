@@ -25,6 +25,7 @@ import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameRunControl from "./GameRunControl.ts";
 import * as GamePreview from "./GamePreview.ts";
+import * as GameFolders from "./GameFolders.ts";
 import * as GameStage from "./GameStage.ts";
 
 type GameBuildFactsShape = Effect.Success<ReturnType<GameFacts.GameFacts["Service"]["measure"]>>;
@@ -97,6 +98,12 @@ const layerFor = (root: string) =>
           steps: () => Effect.succeed(new Map()),
         }),
         Layer.mock(GameStage.GameStage)({ closeLiveEditors: () => Effect.void }),
+        // No other chat writes the folder here.
+        Layer.mock(GameFolders.GameFolders)({
+          holder: () => Effect.succeed(null),
+          withFolder: (_input, work) => work,
+          release: () => Effect.void,
+        }),
         Layer.mock(GamePreview.GamePreview)({
           url: () => null,
           liveUrl: () => null,

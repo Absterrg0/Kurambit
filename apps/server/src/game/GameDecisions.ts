@@ -46,6 +46,7 @@ export type DecisionKind =
   | "went-back"
   | "kept-values"
   | "kept-over"
+  | "brought-in"
   | "skipped"
   | "redid"
   | "note";
@@ -54,6 +55,7 @@ const KINDS: ReadonlySet<string> = new Set<DecisionKind>([
   "went-back",
   "kept-values",
   "kept-over",
+  "brought-in",
   "skipped",
   "redid",
   "note",

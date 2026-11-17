@@ -86,6 +86,8 @@ export interface VcsCheckpointRefEntry {
   readonly oid: string;
   /** The commit's time, in unix seconds. */
   readonly committedAt: number;
+  /** The commit message's first line; absent where a store does not read it. */
+  readonly subject?: string;
 }
 
 export interface VcsResolveTreesInput {

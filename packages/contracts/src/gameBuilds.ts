@@ -103,8 +103,12 @@ export const GameBuildSource = Schema.Union([
   /** The folder before a restore, or a person's kept edit. */
   Schema.TaggedStruct("saved", {
     label: Schema.String,
-    /** A person's edit kept as a build outside a turn: what it kept ("values": the Stage's Keep as a build; "library": a Library add). */
-    edit: Schema.optionalKey(Schema.Literals(["values", "library"])),
+    /**
+     * A build made in the game outside a turn: "values", the Stage's Keep as a build; "library", a
+     * Library add; "bring-in", a copy's work brought in (its label names the chat); "undo", one
+     * earlier build's change reversed with later builds kept (its label names the build).
+     */
+    edit: Schema.optionalKey(Schema.Literals(["values", "library", "bring-in", "undo"])),
     /**
      * Its place among the game's saved builds with the same label, oldest 1: two builds tuned
      * on the Stage are "Tuned 1" and "Tuned 2". Absent on a saved build the server could not place.

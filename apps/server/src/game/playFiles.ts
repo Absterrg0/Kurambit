@@ -22,7 +22,7 @@ import {
 import { ensureGameDir } from "./gameKeptSaves.ts";
 import { insideGame } from "./gamePath.ts";
 
-const KEPT_DIR = "builds/plays";
+export const KEPT_DIR = "builds/plays";
 /** Kept runs per game: the newest, since a save or a replay takes the latest. */
 const KEPT = 10;
 export const SAVED_DIR = ".studio/plays";

@@ -64,6 +64,15 @@ import {
   GameBuildsInput,
   GameBuildsResult,
 } from "./gameBuilds.ts";
+import {
+  GameBringInInput,
+  GameBringInResult,
+  GameBuildUndoInput,
+  GameBuildUndoResult,
+  GameCopiesResult,
+  GameCopyInput,
+  GameCopyUpdateResult,
+} from "./gameCopies.ts";
 import { GameKeepValuesInput, GameKeepValuesResult } from "./gameStageBridge.ts";
 import {
   GameDecideInput,
@@ -417,6 +426,12 @@ export const WS_METHODS = {
   gameBuildMeasure: "game.buildMeasure",
   gameBuildPlay: "game.buildPlay",
   gameBuildRestore: "game.buildRestore",
+  gameBuildUndo: "game.buildUndo",
+  gameCopies: "game.copies",
+  gameBringIn: "game.bringIn",
+  gameCopyUpdate: "game.copyUpdate",
+  gameCopyThrowAway: "game.copyThrowAway",
+  gameRunInCopy: "game.runInCopy",
   gameBuildStop: "game.buildStop",
   gameKeepValues: "game.keepValues",
   gameKeepPlay: "game.keepPlay",
@@ -1669,6 +1684,37 @@ const WsGameBuildRestoreRpc = Rpc.make(WS_METHODS.gameBuildRestore, {
   success: GameBuildRestoreResult,
   error: gameError,
 });
+const WsGameBuildUndoRpc = Rpc.make(WS_METHODS.gameBuildUndo, {
+  payload: GameBuildUndoInput,
+  success: GameBuildUndoResult,
+  error: gameError,
+});
+const WsGameCopiesRpc = Rpc.make(WS_METHODS.gameCopies, {
+  payload: GameThreadInput,
+  success: GameCopiesResult,
+  error: gameError,
+});
+const WsGameBringInRpc = Rpc.make(WS_METHODS.gameBringIn, {
+  payload: GameBringInInput,
+  success: GameBringInResult,
+  error: gameError,
+});
+const WsGameCopyUpdateRpc = Rpc.make(WS_METHODS.gameCopyUpdate, {
+  payload: GameCopyInput,
+  success: GameCopyUpdateResult,
+  error: gameError,
+});
+const WsGameCopyThrowAwayRpc = Rpc.make(WS_METHODS.gameCopyThrowAway, {
+  payload: GameCopyInput,
+  success: Schema.Struct({ message: Schema.String }),
+  error: gameError,
+});
+/** A chat's turn waiting for the game folder runs in a copy of the game instead. */
+const WsGameRunInCopyRpc = Rpc.make(WS_METHODS.gameRunInCopy, {
+  payload: GameCopyInput,
+  success: Schema.Struct({ message: Schema.String }),
+  error: gameError,
+});
 const WsGameKeepValuesRpc = Rpc.make(WS_METHODS.gameKeepValues, {
   payload: GameKeepValuesInput,
   success: GameKeepValuesResult,
@@ -1765,6 +1811,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameBuildMeasureRpc,
   WsGameBuildPlayRpc,
   WsGameBuildRestoreRpc,
+  WsGameBuildUndoRpc,
+  WsGameCopiesRpc,
+  WsGameBringInRpc,
+  WsGameCopyUpdateRpc,
+  WsGameCopyThrowAwayRpc,
+  WsGameRunInCopyRpc,
   WsGameTriesRpc,
   WsGameKeepVersionRpc,
   WsGameBuildStopRpc,

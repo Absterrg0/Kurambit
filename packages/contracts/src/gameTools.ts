@@ -18,7 +18,9 @@ import {
   GameBlenderSceneInput,
 } from "./gameBlender.ts";
 import { GameBotRunInput, GameBotViewInput } from "./gameBot.ts";
+import { ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
+import { GameBringInInput } from "./gameCopies.ts";
 import {
   GameExploreActInput,
   GameExploreCloseInput,
@@ -117,6 +119,17 @@ export const GameBuildsToolInput = Schema.Struct({
   ),
   compare: op(Schema.Struct({ from: GameBuildId, to: GameBuildId })),
   restore: op(Schema.Struct({ build: GameBuildId, commandId })),
+  undo: op(Schema.Struct({ build: GameBuildId, commandId })),
+  copies: op(Nothing),
+  bring_in: op(
+    Schema.Struct({
+      chat: Schema.optionalKey(ThreadId),
+      close: Schema.optionalKey(Schema.Boolean),
+      keep: GameBringInInput.fields.keep,
+      commandId,
+    }),
+  ),
+  update: op(Schema.Struct({ commandId })),
   saved: op(
     Schema.Struct({
       save: Schema.optionalKey(Schema.Struct(GameMediaSaveFields)),
