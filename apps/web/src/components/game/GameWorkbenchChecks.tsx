@@ -74,7 +74,7 @@ import { restoreQuestion, useBuildRestore, useMeasureOnOpen } from "./useBuildAc
 import { useTurnLanding } from "./useTurnLanding";
 import { GameChecksBoard, openEvidence } from "./GameChecksBoard";
 import { colourHex } from "./GameColourField";
-import { GameDecisionsSection } from "./GameDecisions";
+import { GameDecisionsSection, SwatchText } from "./GameDecisions";
 import { clockLabel } from "./gameStageRewind";
 import { clearStageConsole, type StageConsoleLine, useStageConsole } from "./gameStageWatch";
 import { Workbench } from "./GameWorkbenchParts";
@@ -1310,7 +1310,7 @@ function WhatChanged({
                 numeric
                 render={<li className="break-words" />}
               >
-                {line}
+                <SwatchText text={line} />
               </Text>
             ))}
             {said.length > shownLines.length ? (

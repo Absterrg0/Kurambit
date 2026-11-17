@@ -18,7 +18,7 @@ const HEX = /#[0-9a-f]{6}\b/gi;
 const text = (value: string): DecisionPiece => ({ _tag: "text", text: value });
 
 /** Words with each "#rrggbb" in them as a swatch. */
-const withSwatches = (words: string): ReadonlyArray<DecisionPiece> => {
+export const withSwatches = (words: string): ReadonlyArray<DecisionPiece> => {
   const pieces: DecisionPiece[] = [];
   let from = 0;
   for (const match of words.matchAll(HEX)) {

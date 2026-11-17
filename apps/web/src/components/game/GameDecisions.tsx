@@ -12,7 +12,7 @@ import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Workbench } from "./GameWorkbenchParts";
-import { decisionRows } from "./gameDecisions.logic";
+import { decisionRows, type DecisionPiece, withSwatches } from "./gameDecisions.logic";
 
 /** The newest decisions shown before "Show all". */
 const SHOWN = 5;
@@ -77,21 +77,7 @@ export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef
           className="group/decision flex min-h-7 min-w-0 items-start gap-2 py-1 ps-4 pe-2"
         >
           <Text variant="meta" tone="default" render={<p className="min-w-0 flex-1 leading-5" />}>
-            {row.pieces.map((piece, index) =>
-              piece._tag === "text" ? (
-                // oxlint-disable-next-line react/no-array-index-key -- a piece is its place in the line.
-                <span key={index}>{piece.text}</span>
-              ) : (
-                <span
-                  // oxlint-disable-next-line react/no-array-index-key -- two swatches may share a colour.
-                  key={index}
-                  role="img"
-                  aria-label={piece.hex}
-                  className="inline-block size-3 rounded-sm align-[-1px] ring-1 ring-border ring-inset"
-                  style={{ backgroundColor: piece.hex }}
-                />
-              ),
-            )}
+            <SwatchPieces pieces={row.pieces} />
           </Text>
           {canDecide ? (
             <span className="flex h-5 w-6 shrink-0 items-center justify-end opacity-0 group-hover/decision:opacity-100 focus-within:opacity-100">
@@ -142,4 +128,28 @@ export function GameDecisionsSection({ threadRef }: { threadRef: ScopedThreadRef
       )}
     </Workbench.Section>
   );
+}
+
+/** Words with their colours as small swatches, never a hex string. */
+function SwatchPieces({ pieces }: { pieces: ReadonlyArray<DecisionPiece> }) {
+  return pieces.map((piece, index) =>
+    piece._tag === "text" ? (
+      // oxlint-disable-next-line react/no-array-index-key -- a piece is its place in the line.
+      <span key={index}>{piece.text}</span>
+    ) : (
+      <span
+        // oxlint-disable-next-line react/no-array-index-key -- two swatches may share a colour.
+        key={index}
+        role="img"
+        aria-label={piece.hex}
+        className="inline-block size-3 rounded-sm align-[-1px] ring-1 ring-border ring-inset"
+        style={{ backgroundColor: piece.hex }}
+      />
+    ),
+  );
+}
+
+/** A line of text whose "#rrggbb" colours show as swatches. */
+export function SwatchText({ text }: { text: string }) {
+  return <SwatchPieces pieces={withSwatches(text)} />;
 }
