@@ -700,11 +700,11 @@ const hasProof = (facts: GameBuildFacts, check: GameCheck, rooted: boolean): boo
       return hasControls(facts);
     case "screens":
       return rooted && hasScreenFrames(facts);
+    // The harness's play is the one the errors were watched in.
+    case "errors":
+      return rooted && hasLastPlay(facts);
     case "skilled":
-      return (
-        (rooted && hasLastPlay(facts)) ||
-        (facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "")
-      );
+      return facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "";
     case "saved-plays":
       return facts.savedPlays.status === "measured" && facts.savedPlays.value.plays.length > 0;
     default:
@@ -816,14 +816,21 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
     case "skilled":
       return (
         <EvidenceBlock>
-          {root === null ? null : (
-            <LastPlayEvidence threadRef={threadRef} root={root} facts={facts} />
-          )}
           {facts.skilled.status === "measured" && facts.skilled.value.note.trim() !== "" ? (
             <Text variant="meta" tone="default" render={<p />}>
               {facts.skilled.value.note}
             </Text>
           ) : null}
+          {recordings}
+        </EvidenceBlock>
+      );
+    case "errors":
+      return (
+        <EvidenceBlock>
+          {root === null ? null : (
+            <LastPlayEvidence threadRef={threadRef} root={root} facts={facts} />
+          )}
+          <ProblemLines lines={errorLines(facts)} code />
           {recordings}
         </EvidenceBlock>
       );
@@ -833,12 +840,10 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
           ? facts.boots.status === "measured" && !facts.boots.value.ok
             ? [facts.boots.value.detail]
             : []
-          : check.id === "errors"
-            ? errorLines(facts)
-            : qaLines(facts, check.id);
+          : qaLines(facts, check.id);
       return (
         <EvidenceBlock>
-          <ProblemLines lines={lines} code={check.id === "boots" || check.id === "errors"} />
+          <ProblemLines lines={lines} code={check.id === "boots"} />
           {recordings}
         </EvidenceBlock>
       );
