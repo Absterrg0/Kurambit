@@ -1461,6 +1461,8 @@ export const GameKeepVersionInput = Schema.Struct({
   runId: Schema.String,
   n: PositiveInt,
   commandId: Schema.String,
+  /** Keep it although the game would lose health, or without waiting for its check (Keep now). */
+  anyway: Schema.optionalKey(Schema.Boolean),
 });
 
 /** Stops one build's play copy; the folder's own Play is never touched. */

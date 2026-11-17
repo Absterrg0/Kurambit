@@ -1849,8 +1849,7 @@ const layerWsRpc = (
         [WS_METHODS.gameRunInCopy]: ({ threadId, commandId }) =>
           gameCopies.runInCopy(threadId, commandId),
         [WS_METHODS.gameTries]: ({ threadId }) => gameVersions.tries(threadId),
-        [WS_METHODS.gameKeepVersion]: ({ threadId, runId, n, commandId }) =>
-          gameVersions.keep(threadId, { runId, n, commandId }),
+        [WS_METHODS.gameKeepVersion]: ({ threadId, ...keep }) => gameVersions.keep(threadId, keep),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
         [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId, fold }) =>

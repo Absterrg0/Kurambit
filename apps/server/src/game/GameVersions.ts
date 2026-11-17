@@ -84,7 +84,12 @@ export class GameVersions extends Context.Service<
     /** Version n's copy is brought in, the others thrown away; the try records the keep. */
     readonly keep: (
       threadId: ThreadId,
-      input: { readonly runId: string; readonly n: number; readonly commandId: string },
+      input: {
+        readonly runId: string;
+        readonly n: number;
+        readonly commandId: string;
+        readonly anyway?: boolean;
+      },
     ) => Effect.Effect<typeof GameBuildRestoreResult.Type, GameOperationError>;
     /** A version child's turn checkpoint or end: its build measured in the game's name, the rail told. */
     readonly landed: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
@@ -311,6 +316,7 @@ const make = Effect.gen(function* () {
         chat: version.childThreadId,
         close: true,
         commandId: `keep-version\0${input.runId}\0${input.n}\0${input.commandId}`,
+        ...(input.anyway === true ? { anyway: true } : {}),
       });
       if (brought._tag === "landed" || brought._tag === "same") {
         yield* engine
