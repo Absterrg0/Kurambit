@@ -174,7 +174,7 @@ const BLINK_SECONDS = (BLINK.length - 1) / 24;
  * to point at it. Steps scale with dt, so it holds across frame rates; a jump
  * further than a teleport snaps it back.
  */
-function makeSpring(root, names, options) {
+function makeSpring(root, names, options, given = []) {
   const bones = names.map((name) => findBone(root, name)).filter((bone) => bone !== null);
   if (bones.length === 0) {
     console.warn(`animate: no bones ${names.join(", ")} for a spring`);
@@ -212,7 +212,8 @@ function makeSpring(root, names, options) {
   const q = new THREE.Quaternion();
   const pq = new THREE.Quaternion();
   const turn = new THREE.Quaternion();
-  const own = new Set(Object.keys(options).filter((key) => key !== "tuned"));
+  // The values the game's code gave this chain; the rest follow the Stage's tuning.
+  const own = new Set(given);
   return {
     key: bones.map((bone) => bone.name).join(","),
     options,
@@ -304,7 +305,7 @@ export function animate(gltf, { fade = 0.2 } = {}) {
   const springs = [];
   const tuned = root.userData?.springTune ?? null;
   const addSpring = (names, options, name = null) => {
-    const chain = makeSpring(root, names, { ...SPRING, ...options, tuned });
+    const chain = makeSpring(root, names, { ...SPRING, ...options, tuned }, Object.keys(options));
     if (chain !== null) springs.push(Object.assign(chain, { name }));
   };
   for (const chain of asset?.springs ?? []) addSpring(chain.bones, {}, chain.name);
