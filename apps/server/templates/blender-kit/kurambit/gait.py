@@ -90,18 +90,19 @@ def foot_track(phase, duty, stride, lift, push=0.5):
     return f, lift * math.sin(math.pi * u) ** 1.2, u
 
 
-def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, bob=None, tail=0, ears=0):
+def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, bob=None, tail=0, ears=0, size=0.3):
     """One loop of the gait as frames (frame 0 and the frame after the last are the same pose):
     {"frames": n, "groundSpeed": m/s, "stride": m, "poses": [pose]}. A pose:
         body   {"at": (x, y, z) offset from rest, "pitch", "roll", "yaw"} degrees; pitch > 0 nose up
         feet   {name: {"at": (x, y, z) the contact point, "roll": toe roll degrees, "planted": bool}}
         tail   [(yaw, pitch)] per tail bone, degrees
         ears   [(yaw, pitch)] per ear bone, degrees
+    A body with no legs (a hopping spirit) takes size, metres, for the leg length its hop scales by.
     """
     if gait not in GAITS:
         raise ValueError(f"gait {gait!r}: one of {', '.join(GAITS)}")
     table = GAITS[gait]
-    L = float(np.mean([leg["length"] for leg in legs])) if legs else 0.3
+    L = float(np.mean([leg["length"] for leg in legs])) if legs else float(size)
     frames, S, V = timing(L, gait, fps, stride, seconds)
     H = (table["lift"] if lift is None else lift) * L
     A = (table["bob"] if bob is None else bob) * L

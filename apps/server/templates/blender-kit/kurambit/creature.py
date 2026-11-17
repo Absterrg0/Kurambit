@@ -36,7 +36,7 @@ from . import animrig, gait, helpers
 from .character import MADE_BODY
 
 SPRINGS = ("tail", "ear", "antenna", "whisker", "tendril")
-SKIN_ROUND = 1.3
+SKIN_ROUND = 0.7
 
 
 def _chains(chains, mirror=True):
@@ -63,7 +63,7 @@ def _apply(o):
             bpy.ops.object.modifier_apply(modifier=m.name)
 
 
-def creature_body(name, chains, *, mirror=True, voxel=None, smooth=6, subdivide=2, material=None):
+def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None):
     """The body mesh <name>_body from the sketch: skin, subdivision, a voxel remesh (voxel metres;
     default a 90th of its height) and smooth passes. Returns the object."""
     chains = _chains(chains, mirror)
@@ -88,7 +88,7 @@ def creature_body(name, chains, *, mirror=True, voxel=None, smooth=6, subdivide=
     skin.use_smooth_shade = True
     for i, r in enumerate(radii):
         sv = me.skin_vertices[0].data[i]
-        # The subdivision rounds the skin's square sections inside the radius: this brings them out to it.
+        # Inside the balls below, so its square corners do not stick out of them.
         sv.radius = (r * SKIN_ROUND, r * SKIN_ROUND)
         sv.use_root = i == 0
     if subdivide:
@@ -97,10 +97,20 @@ def creature_body(name, chains, *, mirror=True, voxel=None, smooth=6, subdivide=
     _apply(o)
     # A ball at every point: a branch point's hull (a head with ears on it) comes out smaller than
     # its radius, and a lone point (a round head) is only as round as a sphere makes it.
+    # The skin's sections are square: balls along every segment, close enough to overlap, round
+    # them out to the radius before the remesh fuses the lot.
     import bmesh
 
     bm = bmesh.new()
     bm.from_mesh(me)
+    for a, b in edges:
+        pa, pb = np.array(verts[a]), np.array(verts[b])
+        ra, rb = radii[a], radii[b]
+        steps = max(1, int(math.ceil(np.linalg.norm(pb - pa) / (0.5 * max(1e-4, min(ra, rb))))))
+        for k in range(steps + 1):
+            t = k / steps
+            p = pa + (pb - pa) * t
+            bmesh.ops.create_icosphere(bm, subdivisions=2, radius=ra + (rb - ra) * t, matrix=Matrix.Translation(p.tolist()))
     for (x, y, z), r in zip(verts, radii):
         bmesh.ops.create_icosphere(bm, subdivisions=3, radius=r, matrix=Matrix.Translation((x, y, z)))
     bm.to_mesh(me)
@@ -395,6 +405,8 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
     rear = rig.head(spine[0])
     heads = roles.get("head", [])
     necks = roles.get("neck", [])
+    # How big the body is, for what has no legs to measure: the height of its spine.
+    size = max(0.05, float(np.mean([rig.head(b)[2] for b in spine])))
     out = {}
     for clip in clips:
         if clip not in CLIPS:
@@ -408,6 +420,10 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
             raise ValueError(f"{clip}: {arm.name} has no legs; hop or hover move a legless body")
         if clip in ("walk", "trot", "run", "hop") and legs:
             kw.setdefault("stride", _stride_cap(rig, legs_rec, clip))
+        if not legs and clip == "hop":
+            kw.setdefault("size", size)
+        if clip == "hover":
+            kw.setdefault("height", 0.12 * size)
         made = make(legs, fps, kw)
         act = _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads, tails, ears)
         out[label] = {"frames": made["frames"], "groundSpeed": round(made["groundSpeed"], 3)}

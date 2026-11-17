@@ -46,7 +46,7 @@ def height(measured, lo, hi):
     ok = lo <= measured <= hi
     return gate("height", ok, round(float(measured), 3), [lo, hi],
                 f"{measured:.2f} m tall, in its {lo:g}-{hi:g} m range" if ok else
-                f"{measured:.2f} m tall, outside its {lo:g}-{hi:g} m range: scale it (game_blender op character's height) or declare the range the brief means")
+                f"{measured:.2f} m tall, outside its {lo:g}-{hi:g} m range: scale it, or declare the range the brief means (op character's height or heightRange, hero.creature_rig's height)")
 
 
 def edge_lengths(coords, edges):

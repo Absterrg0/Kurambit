@@ -3,9 +3,8 @@ style pass joins its meshes: height in its range, edge stretch and squash on eve
 inside the body, feet on walk and run, and the budget (gates.py holds the numbers' rules).
 
 Clothing is a mesh marked kurambit_cloth (hero.dress marks it); the body is the character's body
-mesh (stamped what: body). A hero's height leaves out what it holds and what dangles: vertices led
-by a hand's bones, a spring_ bone or a spring chain's, so a rod held overhead or a raised tail is
-not its height. Its range is the armature's kurambit_height [lo, hi] (game_blender op character's
+mesh (stamped what: body). A hero's height leaves out what it holds and its tail: vertices led by
+a hand's bones or a tail's, so a rod held overhead or a raised tail is not its height. Its range is the armature's kurambit_height [lo, hi] (game_blender op character's
 height, hero.creature_rig's height); a body on the standard skeleton with none is a human,
 1.5-2.0 m; a body on its own rig must declare one."""
 import json
@@ -29,16 +28,12 @@ def _clip_name(a):
 
 
 def held_or_dangling(arm):
-    """Bones whose vertices are not the hero's height: a hand's and everything under it, spring_
-    bones and spring chains."""
-    chains = set()
-    for bones in json.loads(arm.get("kurambit_chains", "{}") or "{}").values():
-        chains |= set(bones)
+    """Bones whose vertices are not the hero's height: a hand's and everything under it (a rod
+    raised overhead), and a tail's. Ears, a hat and a hood count; a hem hangs below anyway."""
     out = set()
     for b in arm.data.bones:
         n = b.name
-        if n.startswith("spring_") or n in chains or n.startswith(("hand_", "prop")) or any(
-                p.name.startswith(("hand_",)) for p in b.parent_recursive):
+        if "tail" in n or n.startswith(("hand_", "prop")) or any(p.name.startswith("hand_") for p in b.parent_recursive):
             out.add(n)
     return out
 
