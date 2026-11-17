@@ -4,6 +4,7 @@ import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
 import * as GameVersions from "./game/GameVersions.ts";
+import * as GameCopies from "./game/GameCopies.ts";
 import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
@@ -1201,6 +1202,7 @@ const layerWsRpc = (
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
       const gameVersions = yield* GameVersions.GameVersions;
+      const gameCopies = yield* GameCopies.GameCopies;
       const gamePlays = yield* GamePlays.GamePlays;
       const gameDecisions = yield* GameDecisions.GameDecisions;
       const gameToolchain = yield* GameToolchain.GameToolchain;
@@ -1838,6 +1840,14 @@ const layerWsRpc = (
         [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
         [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
           gameBuilds.restore(threadId, build, commandId, { person: true }),
+        [WS_METHODS.gameBuildUndo]: ({ threadId, build, commandId }) =>
+          gameBuilds.undo(threadId, build, commandId),
+        [WS_METHODS.gameCopies]: ({ threadId }) => gameCopies.copies(threadId),
+        [WS_METHODS.gameBringIn]: (input) => gameCopies.bringIn(input),
+        [WS_METHODS.gameCopyUpdate]: ({ threadId }) => gameCopies.update(threadId, threadId),
+        [WS_METHODS.gameCopyThrowAway]: ({ threadId }) => gameCopies.throwAway(threadId, threadId),
+        [WS_METHODS.gameRunInCopy]: ({ threadId, commandId }) =>
+          gameCopies.runInCopy(threadId, commandId),
         [WS_METHODS.gameTries]: ({ threadId }) => gameVersions.tries(threadId),
         [WS_METHODS.gameKeepVersion]: ({ threadId, runId, n, commandId }) =>
           gameVersions.keep(threadId, { runId, n, commandId }),
@@ -3004,6 +3014,7 @@ export const layer = Layer.unwrap(
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const gameBuilds = yield* GameBuilds.GameBuilds;
     const gameVersions = yield* GameVersions.GameVersions;
+    const gameCopies = yield* GameCopies.GameCopies;
     const gamePlays = yield* GamePlays.GamePlays;
     const gameDecisions = yield* GameDecisions.GameDecisions;
     const sql = yield* SqlClient.SqlClient;
@@ -3072,7 +3083,12 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provide(Layer.succeed(GameBuilds.GameBuilds, gameBuilds)),
-              Layer.provide(Layer.succeed(GameVersions.GameVersions, gameVersions)),
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.succeed(GameVersions.GameVersions, gameVersions),
+                  Layer.succeed(GameCopies.GameCopies, gameCopies),
+                ),
+              ),
               Layer.provide(Layer.succeed(GamePlays.GamePlays, gamePlays)),
               Layer.provide(Layer.succeed(GameDecisions.GameDecisions, gameDecisions)),
               Layer.provideMerge(RpcSerialization.layerJson),

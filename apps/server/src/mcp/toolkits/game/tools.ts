@@ -21,6 +21,7 @@ import * as GameLibrary from "../../../game/GameLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GameCopies from "../../../game/GameCopies.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
@@ -114,11 +115,12 @@ export const GameBlenderTool = Tool.make("game_blender", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_blender"));
 
 export const GameBuildsTool = Tool.make("game_builds", {
-  description: `This game's builds and undo. ${ONE_OP} No op: list. list: turns that changed the game, newest first, with facts. compare: two builds' facts. restore: puts a build back when the person asks (a build's base undoes it). saved: kept videos and images; save or delete one. export: a release. package: a release as a ZIP. stop: stops what Kurambit runs for this game.`,
+  description: `This game's builds and undo. ${ONE_OP} No op: list. list: turns that changed the game, newest first, with facts. compare: two builds' facts. undo: takes one build's change out, later builds kept, when the person asks. restore: puts a whole build back when the person asks. copies: chats working in copies, not in the game yet. bring_in: a copy's work into the game (yours, or a child's by chat; close ends the copy). update: the game's newer builds into your copy. saved: kept videos and images; save or delete one. export: a release. package: a release as a ZIP. stop: stops what Kurambit runs for this game.`,
   parameters: GameBuildsToolInput,
   ...answers,
   dependencies: [
     GameBuilds.GameBuilds,
+    GameCopies.GameCopies,
     GameSavedMediaService.GameSavedMediaService,
     GameExport.GameExport,
     GameStage.GameStage,

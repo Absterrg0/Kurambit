@@ -25,6 +25,10 @@ import {
   GameBuildComparison,
   GameBuildFacts,
   GameBuildRestoreResult,
+  GameBuildUndoResult,
+  GameBringInResult,
+  GameCopiesResult,
+  GameCopyUpdateResult,
   GameBuildsResult,
   GameCheckResult,
   GameExploreActResult,
@@ -51,6 +55,7 @@ import * as GameLibrary from "../../../game/GameLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GameCopies from "../../../game/GameCopies.ts";
 import * as GamePlays from "../../../game/GamePlays.ts";
 import { GameCaller } from "../../../game/GameCaller.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
@@ -506,6 +511,32 @@ const handlers = {
           withGame(GameBuilds.GameBuilds, (builds, threadId) =>
             builds.restore(threadId, { _tag: "build", build: restore.build }, restore.commandId),
           ).pipe(as(GameBuildRestoreResult)),
+        undo: (undo) =>
+          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+            builds.undo(threadId, undo.build, undo.commandId),
+          ).pipe(as(GameBuildUndoResult)),
+        copies: () =>
+          withGame(GameCopies.GameCopies, (copies, threadId) => copies.copies(threadId)).pipe(
+            as(GameCopiesResult),
+          ),
+        // An agent brings in its own copy or a child's: what it, or what it delegated, made.
+        bring_in: (bring) =>
+          withGame(GameCopies.GameCopies, (copies, threadId) =>
+            copies.bringIn(
+              {
+                threadId,
+                ...(bring.chat === undefined ? {} : { chat: bring.chat }),
+                ...(bring.close === undefined ? {} : { close: bring.close }),
+                ...(bring.keep === undefined ? {} : { keep: bring.keep }),
+                ...(bring.commandId === undefined ? {} : { commandId: bring.commandId }),
+              },
+              { agent: true },
+            ),
+          ).pipe(as(GameBringInResult)),
+        update: () =>
+          withGame(GameCopies.GameCopies, (copies, threadId) =>
+            copies.update(threadId, threadId),
+          ).pipe(as(GameCopyUpdateResult)),
         saved: (saved) =>
           withGame(GameSavedMediaService.GameSavedMediaService, (media, threadId) =>
             Effect.gen(function* () {

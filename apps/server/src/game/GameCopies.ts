@@ -106,8 +106,13 @@ export class GameCopies extends Context.Service<
       threadId: ThreadId,
       commandId: string | undefined,
     ) => Effect.Effect<{ readonly message: string }, GameOperationError>;
+    /**
+     * The copy's work into the game. An agent (`agent`) brings in its own copy or a child it
+     * delegated; the person any copy of the game.
+     */
     readonly bringIn: (
       input: GameBringInInput,
+      options?: { readonly agent?: boolean },
     ) => Effect.Effect<GameBringInResult, GameOperationError>;
     /** The game's newer work into the copy; the seat moves to the game's build. */
     readonly update: (
@@ -615,7 +620,7 @@ const make = Effect.gen(function* () {
       return reasons.length === 0 ? null : reasons.join("; ");
     });
 
-  const bringIn: GameCopies["Service"]["bringIn"] = (input) =>
+  const bringIn: GameCopies["Service"]["bringIn"] = (input, options = {}) =>
     Effect.gen(function* () {
       const operation = "Bring in";
       const copyId = input.chat ?? input.threadId;
@@ -624,6 +629,17 @@ const make = Effect.gen(function* () {
       if (asker.projectId !== g.projectId)
         return yield* failed(operation, g.root, "invalid-input", "That chat is not of this game.");
       const shell = yield* shellOf(copyId);
+      if (
+        options.agent === true &&
+        copyId !== input.threadId &&
+        shell.lineage.parentThreadId !== input.threadId
+      )
+        return yield* failed(
+          operation,
+          g.root,
+          "invalid-input",
+          "An agent brings in its own copy or a child it delegated; the person brings in other chats.",
+        );
       const seated = yield* seatOf(g, shell);
       if (seated === null) return yield* failed(operation, g.root, "invalid-input", NO_SEAT);
       if (atWork(shell) && copyId !== input.threadId)

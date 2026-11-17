@@ -40,6 +40,7 @@ import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
+import * as GameCopies from "../../../game/GameCopies.ts";
 import * as GamePlays from "../../../game/GamePlays.ts";
 import * as GameToolchain from "../../../game/GameToolchain.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
@@ -92,6 +93,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(GameRunControl.GameRunControl)({}),
   Layer.mock(GameBuilds.GameBuilds)({}),
+  Layer.mock(GameCopies.GameCopies)({}),
   Layer.mock(GamePlays.GamePlays)({}),
   Layer.mock(McpHttpServer.McpClientAuthenticator)({
     authenticate: () => Effect.succeed(undefined),

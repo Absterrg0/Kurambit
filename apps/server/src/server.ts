@@ -16,6 +16,7 @@ import * as GameOperations from "./game/GameOperations.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
 import * as GameTurnCancellationReactor from "./game/GameTurnCancellationReactor.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
+import * as GameCopies from "./game/GameCopies.ts";
 import * as GameFolders from "./game/GameFolders.ts";
 import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
@@ -553,6 +554,8 @@ const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GameDecisions.layer),
   // A try's versions: started for the orchestration runtime's GameTries, kept through GameBuilds.
   Layer.provideMerge(GameVersions.layer),
+  // Chats working in copies of a game, and the way their work comes in.
+  Layer.provideMerge(GameCopies.layer),
   Layer.provideMerge(GameBuilds.layer),
   // One writer per game folder: turn admission, folder moves and the turns held for them.
   Layer.provideMerge(GameFolders.layer),

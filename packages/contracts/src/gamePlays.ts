@@ -195,6 +195,7 @@ export const GameDecision = Schema.Struct({
       "went-back",
       "kept-values",
       "kept-over",
+      "brought-in",
       "skipped",
       "redid",
       "note",
