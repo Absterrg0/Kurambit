@@ -181,7 +181,7 @@ const familyOf = (material) => {
   if (material.map != null && s < 0.1 && l > 0.85) return "Textured";
   if (l < 0.1) return "Black";
   if (s < 0.15) return l > 0.85 ? "White" : "Grey";
-  if (h < 15 || h >= 345) return "Red";
+  if (h < 15 || h >= 345) return l > 0.75 ? "Pink" : "Red";
   if (h < 45) return l < 0.35 ? "Brown" : "Orange";
   if (h < 70) return "Yellow";
   if (h < 160) return "Green";
