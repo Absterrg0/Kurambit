@@ -26,6 +26,14 @@ export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
  * or stopped turn is no extra build. A restore's parked folder goes by its label and its place
  * among the game's with that label, so two never share a name.
  */
+/** A saved edit's word beside its number: what the person (or the agent) did to the game. */
+const EDIT_WORDS = {
+  values: "tuned",
+  library: "added",
+  "bring-in": "brought in",
+  undo: "undo",
+} as const;
+
 export const buildName = (
   build: Pick<GameBuild, "id" | "source" | "number"> & { readonly fix?: number | undefined },
 ): string => {
@@ -41,7 +49,7 @@ export const buildName = (
       return `Version ${source.n} of ${source.of}${source.kept ? " · kept" : ""}`;
     case "saved":
       if (source.edit !== undefined && build.number !== null)
-        return `${numbered} · ${source.edit === "library" ? "added" : "tuned"}`;
+        return `${numbered} · ${EDIT_WORDS[source.edit]}`;
       return source.nth === undefined ? source.label : `${source.label} ${source.nth}`;
   }
 };
@@ -52,7 +60,9 @@ export const buildName = (
  */
 export const buildCaption = (build: Pick<GameBuild, "source" | "summary" | "number">): string => {
   const source = build.source;
-  if (source._tag === "saved") return build.summary;
+  // A bring-in's label names its chat, an undo's the build it undid.
+  if (source._tag === "saved")
+    return source.edit === "bring-in" || source.edit === "undo" ? source.label : build.summary;
   if (source._tag === "version") return source.approach.trim() || source.request.trim();
   if (source.step === null) return source.request.trim() || build.summary;
   const move = source.step.move.trim();

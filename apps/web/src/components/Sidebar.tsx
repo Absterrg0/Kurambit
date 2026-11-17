@@ -91,6 +91,7 @@ import { GameLibraryPicture } from "./game/GameLibraryStatus";
 import { GameNameInput, useGameName, useGameRenameStore, useRenameGame } from "./game/GameName";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
 import { useNewChat } from "./game/useNewGameChat";
+import { useCopyPlace } from "./game/useGameCopies";
 import { useSidebarRowSubscriptionLease } from "./Sidebar.logic";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import {
@@ -978,12 +979,19 @@ function GameChatRow({
         }),
     buildStateOf,
   );
-  const mark = chatMark(chat, new Set((picking?.picking ?? "").split("\n")).has(chat.id));
+  // A chat in a copy whose work did not come in waits on the person, as a question does.
+  const copyPlace = useCopyPlace(
+    chat.worktreePath === null ? null : { environmentId: chat.environmentId, threadId: chat.id },
+  );
+  const copyWaits = copyPlace?.state._tag === "conflicts" || copyPlace?.state._tag === "held";
+  const ownMark = chatMark(chat, new Set((picking?.picking ?? "").split("\n")).has(chat.id));
+  const mark = ownMark === null && copyWaits ? "waiting" : ownMark;
   return (
     <SidebarChatRow
       title={chat.title}
       time={<ChatTime at={chat.latestUserMessageAt ?? chat.updatedAt} />}
       active={active}
+      copy={chat.worktreePath !== null}
       mark={mark}
       onOpen={onOpen}
       onContextMenu={onContextMenu}

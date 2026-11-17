@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ChevronRightIcon,
+  CopyIcon,
   EllipsisIcon,
   FolderOpenIcon,
   PencilIcon,
@@ -243,6 +244,7 @@ export function SidebarChatRow({
   title,
   time,
   active,
+  copy = false,
   mark,
   onOpen,
   onContextMenu,
@@ -251,6 +253,8 @@ export function SidebarChatRow({
   title: ReactNode;
   time: ReactNode;
   active: boolean;
+  /** The chat works in a copy of the game. */
+  copy?: boolean;
   mark: GameTreeMark;
   onOpen: () => void;
   onContextMenu: (position: { x: number; y: number }) => void;
@@ -281,6 +285,13 @@ export function SidebarChatRow({
       >
         {title}
       </Text>
+      {copy ? (
+        <CopyIcon
+          aria-label="Works in a copy"
+          data-copy-glyph=""
+          className="size-3.5 shrink-0 text-muted-foreground"
+        />
+      ) : null}
       {mark === null ? (
         <Text variant="caption" tone="dim" numeric render={<span className="shrink-0" />}>
           {time}

@@ -110,7 +110,13 @@ import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
 import { buildName, buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.logic";
 import { nextBuildOf } from "./GameLibraryStatus";
-import { useBuildPlay, useBuildStop, useTurnUndo } from "./useBuildActions";
+import {
+  restoreQuestion,
+  useBuildPlay,
+  useBuildRestore,
+  useBuildStop,
+  useTurnUndo,
+} from "./useBuildActions";
 import { useTurnLanding } from "./useTurnLanding";
 import { GameFrame, GameFrameBox, GamePlaySurface, type StudioMessage } from "./GamePlaySurface";
 import {
@@ -508,6 +514,8 @@ function ThreadGameStage({
   const stopBuild = useBuildStop(threadRef);
   const plays = useBuildPlay(threadRef);
   const turnUndo = useTurnUndo(threadRef, null);
+  // History's Go back, after an Undo of an older build conflicts: the whole folder back.
+  const goBack = useBuildRestore(threadRef, turnUndo.view?.restore ?? null);
   // Undo and Redo say where they go before they are pressed, in the words the note after uses.
   const undoBase = turnUndo.view?.build.base ?? null;
   const undoBaseName = useEnvironmentQuerySelector(
@@ -1480,6 +1488,13 @@ function ThreadGameStage({
                   // Checks follows the build picked here.
                   onInspect={(build) =>
                     inspectBuild({ threadKey, build: build.id, snapshot: build })
+                  }
+                  onAskAgent={(text) => {
+                    setHistoryOpen(false);
+                    onAskAgent(text);
+                  }}
+                  onGoBack={(build) =>
+                    void goBack.send(build.id, restoreQuestion(buildName(build)))
                   }
                 />
               </PopoverPopup>

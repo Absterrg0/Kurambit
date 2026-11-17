@@ -35,6 +35,8 @@ import {
   formatBuildTime,
 } from "./gameBuilds.logic";
 import { isUndone, stageBuildId, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
+import { GameHistoryCopies } from "./GameHistoryCopies";
+import { useGameCopies } from "./useGameCopies";
 
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
@@ -149,6 +151,8 @@ export function GameHistory({
   onLive,
   onCompare,
   onInspect,
+  onAskAgent,
+  onGoBack,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
@@ -171,7 +175,26 @@ export function GameHistory({
   onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
   /** Shows a build in Checks. */
   onInspect: (build: GameBuild) => void;
+  /** Puts a request for the agent in the composer. */
+  onAskAgent: (text: string) => void;
+  /** The whole folder back to a build: Go back, after it asks. */
+  onGoBack: (build: GameBuild) => void;
 }) {
+  const { place } = useGameCopies(threadRef);
+  const tries = useEnvironmentQuery(
+    gameEnvironment.tries({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  ).data;
+  const versionChats = new Set(
+    (tries?.tries ?? []).flatMap((each) => each.versions.map((version) => version.childThreadId)),
+  );
+  const canUndo = useAtomValue(gameEnvironment.buildUndo.permissionAtom(threadRef.environmentId));
+  const undoCommand = useAtomCommand(gameEnvironment.buildUndo, { reportFailure: false });
+  // One build's change reversed with later builds kept, and what the server answered.
+  const [undoing, setUndoing] = useState<GameBuildId | null>(null);
+  const [undoAnswer, setUndoAnswer] = useState<UndoAnswer | null>(null);
   const still = useStageStill(scopedThreadKey(threadRef));
   const first = useEnvironmentQuery(
     gameEnvironment.builds({
@@ -299,6 +322,38 @@ export function GameHistory({
     return () => window.removeEventListener("keydown", onKey);
   }, [pickingNow]);
 
+  const undoBuild = async (build: GameBuild) => {
+    setUndoing(build.id);
+    setUndoAnswer(null);
+    const result = await undoCommand({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, build: build.id, commandId: randomUUID() },
+    });
+    setUndoing(null);
+    if (result._tag === "Failure") {
+      setUndoAnswer({ _tag: "failed", build, text: String(squashAtomCommandFailure(result)) });
+      return;
+    }
+    const answer = result.value;
+    if (answer._tag === "undone") setUndoAnswer({ _tag: "undone", build });
+    else
+      setUndoAnswer({
+        _tag: "conflicts",
+        build,
+        paths: answer.files.map((file) => file.path),
+        // The first later build that changed one of those files: the change Undo would undo too.
+        later:
+          marks
+            .slice(marks.findIndex((entry) => entry.id === build.id) + 1)
+            .find((entry) =>
+              entry.files.some((file) => answer.files.some((each) => each.path === file.path)),
+            ) ?? null,
+      });
+  };
+  // Undo reaches a build of the game: its own folder's numbered builds, from a chat in the game.
+  const undoable = (build: GameBuild) =>
+    canUndo && place._tag === "game" && build.number !== null && build.available;
+
   // The build on the Stage: the copy it plays, else the build the folder holds.
   const onStage = stageBuildId(list, playing);
   const showNow =
@@ -317,6 +372,9 @@ export function GameHistory({
       picking={pickingNow}
       picked={picking !== null && picking !== "any" && sameRef(picking, build)}
       onClick={() => (pickingNow ? pick(build) : play(build))}
+      {...(undoable(build) && !pickingNow && (list === null || !isUndone(build, list))
+        ? { onUndo: () => void undoBuild(build), undoing: undoing === build.id }
+        : {})}
     />
   );
   const note =
@@ -370,6 +428,22 @@ export function GameHistory({
           </Button>
         )}
       </div>
+      {undoAnswer === null ? null : (
+        <UndoAnswerRow
+          answer={undoAnswer}
+          marks={marks}
+          onGoBack={(build) => {
+            setUndoAnswer(null);
+            onGoBack(build);
+          }}
+          onAskAgent={(text) => {
+            setUndoAnswer(null);
+            onAskAgent(text);
+          }}
+          onDismiss={() => setUndoAnswer(null)}
+        />
+      )}
+      <GameHistoryCopies threadRef={threadRef} gameName={gameName} hide={versionChats} />
       {reelOpen ? (
         <GameReel
           threadRef={threadRef}
@@ -527,6 +601,8 @@ function BuildThumb({
   picking,
   picked,
   onClick,
+  onUndo,
+  undoing = false,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
@@ -540,11 +616,14 @@ function BuildThumb({
   /** The first side of a compare. */
   picked: boolean;
   onClick: () => void;
+  /** Reverses this build's change, later builds kept; absent where Undo does not reach. */
+  onUndo?: (() => void) | undefined;
+  undoing?: boolean;
 }) {
   const step = build.source._tag === "turn" ? build.source.step : null;
   const checks = checksLine(build.facts);
   const state = thumbState(build);
-  return (
+  const thumb = (
     <Tooltip>
       <TooltipTrigger
         render={
@@ -617,6 +696,102 @@ function BuildThumb({
         </span>
       </TooltipPopup>
     </Tooltip>
+  );
+  if (onUndo === undefined) return thumb;
+  // Undo sits on the picture's corner, shown on hover or keyboard focus: a button in a button
+  // is not allowed, so it is the picture's sibling.
+  return (
+    <div className="group/undo relative shrink-0" data-build-undo-host="">
+      {thumb}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="overlay"
+              aria-label={`Undo ${buildName(build)}`}
+              disabled={undoing}
+              onClick={onUndo}
+              className="absolute top-1 left-1 z-20 opacity-0 group-hover/undo:opacity-100 focus-visible:opacity-100 disabled:opacity-100"
+            />
+          }
+        >
+          <Undo2Icon aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipPopup side="top" className="max-w-xs">
+          {`Undo ${buildName(build)}: take its change out, later builds stay`}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
+/** What the server answered an Undo of one build. */
+type UndoAnswer =
+  | { readonly _tag: "undone"; readonly build: GameBuild }
+  | { readonly _tag: "failed"; readonly build: GameBuild; readonly text: string }
+  | {
+      readonly _tag: "conflicts";
+      readonly build: GameBuild;
+      readonly paths: ReadonlyArray<string>;
+      readonly later: GameBuild | null;
+    };
+
+/** The answer under History's top row: done, or the later build it conflicts with and the ways on. */
+function UndoAnswerRow({
+  answer,
+  marks,
+  onGoBack,
+  onAskAgent,
+  onDismiss,
+}: {
+  answer: UndoAnswer;
+  marks: ReadonlyArray<GameBuild>;
+  onGoBack: (build: GameBuild) => void;
+  onAskAgent: (text: string) => void;
+  onDismiss: () => void;
+}) {
+  const name = shortName(answer.build);
+  // Go back is the whole restore to the build before the undone one.
+  const before = marks[marks.findIndex((entry) => entry.id === answer.build.id) - 1] ?? null;
+  return (
+    <div
+      className="flex min-h-7 min-w-0 items-center gap-2"
+      data-undo-answer={answer._tag}
+      role="status"
+    >
+      <Text variant="caption" tone="muted" truncate render={<span className="min-w-0 flex-1" />}>
+        {answer._tag === "undone"
+          ? `Undid ${name}; later builds stay`
+          : answer._tag === "failed"
+            ? answer.text
+            : `Undoing ${name} conflicts with ${answer.later === null ? "later changes" : `${shortName(answer.later)}'s changes`}`}
+      </Text>
+      {answer._tag === "conflicts" ? (
+        <>
+          {before === null ? null : (
+            <Button size="xs" variant="ghost" onClick={() => onGoBack(before)}>
+              {`Go back to ${shortName(before)}`}
+            </Button>
+          )}
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() =>
+              onAskAgent(
+                `Take out what ${name} changed (${buildCaption(answer.build)}), and keep what came after it. ${answer.paths.join(", ")} changed since.`,
+              )
+            }
+          >
+            Ask the agent
+          </Button>
+        </>
+      ) : (
+        <Button size="xs" variant="ghost-muted" onClick={onDismiss}>
+          OK
+        </Button>
+      )}
+    </div>
   );
 }
 
