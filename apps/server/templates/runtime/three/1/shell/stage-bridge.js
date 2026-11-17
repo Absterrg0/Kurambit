@@ -29,6 +29,7 @@ const CAPABILITIES = [
   "dev",
   "runs",
   "rewind",
+  "portrait",
 ];
 const KINDS = new Set([
   "character",
@@ -190,7 +191,8 @@ const isPlay = (play) =>
  * `tuned(id, key, value)` hears each value the Stage changed (a run's play keeps it),
  * `runSoFar()` is the run in play so far as a play (or null),
  * `dev` takes the Stage's dev views (shell/dev-view.js) and a frozen run's one-frame step, and
- * `rewind` takes the run so far, replays a play to a moment and hands it over, or starts afresh.
+ * `rewind` takes the run so far, replays a play to a moment and hands it over, or starts afresh,
+ * and `drawFrom(camera)` draws one frame as play draws it, from another camera (a portrait).
  */
 export function createStageBridge({
   canvas,
@@ -207,6 +209,7 @@ export function createStageBridge({
   runSoFar,
   dev,
   rewind,
+  drawFrom,
 }) {
   let active = false;
   let frozen = false;
@@ -271,10 +274,16 @@ export function createStageBridge({
   const thing = (object, options = {}) => {
     const body = object?.isObject3D === true ? object : null;
     const earlier = body === null ? undefined : byObject.get(body);
+    // A body with no kind is what its ctx.thing call implies: something with a skeleton is a
+    // character, any other body a prop; one with no body is a rule.
     const kind = KINDS.has(options.kind)
       ? options.kind
-      : (earlier?.kind ?? (body === null ? "rule" : "other"));
-    const name = text(options.name, 120) ? options.name : (earlier?.name ?? humanName(kind));
+      : (earlier?.kind ?? (body === null ? "rule" : skinned(body) ? "character" : "prop"));
+    // Only a name the game gave is listed: its own option, or the object's own name.
+    const name = text(options.name, 120)
+      ? options.name
+      : (earlier?.name ?? (meaningful(body?.name) ? humanName(body.name) : null));
+    if (name === null) return object;
     const wanted = text(options.id, 200) ? options.id : name;
     // Named again with nothing new (a game calling it every frame): nothing changes.
     if (earlier !== undefined && !earlier.auto && earlier.id === wanted && earlier.kind === kind)
@@ -701,12 +710,16 @@ export function createStageBridge({
       let inner = null;
       for (let node = hit.object; node !== null; node = node.parent) {
         const record = byObject.get(node);
-        // A level holds everything built into it: a tree in it is a tree, not the level.
+        // A level holds everything built into it: a tree in it is a thing the game named, else
+        // the level.
         if (record !== undefined)
-          return record.kind === "level" && inner !== null ? sceneThing(inner, seen.scene) : record;
-        if (inner === null && (meaningful(node.name) || node.isInstancedMesh)) inner = node;
+          return record.kind === "level" && inner !== null
+            ? (namedThing(inner, seen.scene) ?? record)
+            : record;
+        if (inner === null) inner = node;
       }
-      return sceneThing(hit.object, seen.scene);
+      // Nothing the game named holds it: only a tuned name or an ASSETS copy it was drawn from.
+      return namedThing(hit.object, seen.scene);
     }
     return posed;
   };
@@ -731,58 +744,30 @@ export function createStageBridge({
   };
 
   /**
-   * A thing for an object the game never named: the nearest node up from the hit with a name of
-   * its own (a model's root, a named mesh), else the hit mesh. A tuned placeholder of the same
-   * name (ctx.tune("Fox") with no ctx.thing) becomes this object, values and all.
+   * The thing an object the game never named with ctx.thing is, if it is one at all: a copy of an
+   * ASSETS model the game drew its own way (an InstancedMesh of its geometry), or a tuned name
+   * (ctx.tune("Fox") with no ctx.thing) on the nearest node that carries that name. Anything else
+   * is no thing: the runtime never names an object itself, so nothing reads "Thing 2" or a
+   * material's key.
    */
-  const sceneThing = (object, scene) => {
-    // Up to, never past, a thing already registered: its parts are found, not renamed.
-    let body = object;
-    for (
-      let node = object;
-      node !== null && node !== scene && !byObject.has(node);
-      node = node.parent
-    )
-      if (meaningful(node.name) || node.isInstancedMesh) {
-        body = node;
-        break;
-      }
-    const earlier = byObject.get(body);
-    if (earlier !== undefined) return earlier;
-    // A copy of an ASSETS model the game drew its own way (an InstancedMesh of its geometry):
-    // the copy's thing, named and with its model file, becomes this object.
-    if (body.isMesh)
+  const namedThing = (object, scene) => {
+    for (let node = object; node !== null && node !== scene; node = node.parent) {
+      const earlier = byObject.get(node);
+      if (earlier !== undefined) return earlier;
+      if (node.isMesh)
+        for (const record of things.values())
+          if (record.auto && unplaced(record, scene) && sharesGeometry(record.object, node))
+            return rebind(record, node, drawnFrom(record.object, node, scene));
+      if (!meaningful(node.name)) continue;
+      const label = humanName(node.name.split(":")[0].replace(/[._-]?\d+$/, "")).toLowerCase();
       for (const record of things.values())
-        if (record.auto && unplaced(record, scene) && sharesGeometry(record.object, body))
-          return rebind(record, body, drawnFrom(record.object, body, scene));
-    const own = meaningful(body.name) ? body.name.split(":")[0].replace(/[._-]?\d+$/, "") : "";
-    const label = humanName(
-      meaningful(own)
-        ? own
-        : meaningful(body.geometry?.name)
-          ? body.geometry.name
-          : meaningful(body.material?.name)
-            ? body.material.name
-            : "Thing",
-    );
-    // A thing of that name the game tuned (ctx.tune("Fox") with no ctx.thing), or a copy of its
-    // ASSETS model that never reached the scene (a level instances it): this object is that
-    // thing, so its values and its model file come with it.
-    for (const record of things.values())
-      if (
-        record.name.toLowerCase() === label.toLowerCase() &&
-        (record.placeholder === true || (record.auto && unplaced(record, scene)))
-      )
-        return rebind(record, body);
-    const { id, n } = unique(`scene:${label}`, "#");
-    add({
-      id,
-      name: n === null ? label : `${label} ${n}`,
-      kind: body.isInstancedMesh ? "prop" : "other",
-      object: body,
-      auto: true,
-    });
-    return things.get(id) ?? null;
+        if (
+          record.name.toLowerCase() === label &&
+          (record.placeholder === true || (record.auto && unplaced(record, scene)))
+        )
+          return rebind(record, node);
+    }
+    return null;
   };
   const unplaced = (record, scene) =>
     record.object === null || (record.parts === undefined && !attached(record.object, scene));
@@ -824,7 +809,7 @@ export function createStageBridge({
       ...rest,
       object: body,
       ...(parts === undefined ? {} : { parts }),
-      kind: record.kind === "rule" ? "other" : record.kind,
+      kind: record.kind !== "rule" ? record.kind : skinned(body) ? "character" : "prop",
       placeholder: false,
     });
     return things.get(record.id) ?? null;
@@ -965,8 +950,8 @@ export function createStageBridge({
   const MARK = `#${SELECTED.getHexString()}`;
   const INK = "#13110f";
   const PAPER = "#ecebe7";
-  const tag = (paint, rect, record, chosen, index) => {
-    const name = index === null ? record.name : `${record.name} #${index + 1}`;
+  const tag = (paint, rect, record, chosen) => {
+    const name = record.name;
     const kind = KIND_WORDS[record.kind] ?? "thing";
     paint.font = '500 12px system-ui, -apple-system, "Segoe UI", sans-serif';
     const nameW = paint.measureText(name).width;
@@ -1088,11 +1073,11 @@ export function createStageBridge({
     }
     if (hovered !== null && hovered !== selected) {
       const rect = rectOf(hovered, seen);
-      if (tagged(rect)) tag(paint, rect, hovered, false, null);
+      if (tagged(rect)) tag(paint, rect, hovered, false);
     }
     if (selected !== null) {
       const rect = selectedRect(seen);
-      if (tagged(rect)) tag(paint, rect, selected, true, one.length > 0 ? selectedIndex : null);
+      if (tagged(rect)) tag(paint, rect, selected, true);
     }
   };
 
@@ -1235,6 +1220,128 @@ export function createStageBridge({
     toStage({ type: "studio-frame", png });
   };
 
+  /**
+   * One named thing alone, as play draws it: everything else hidden, the sky and fog let go, a
+   * camera around it at `yaw` and `pitch` that frames its bounds, drawn twice (on black, then on
+   * white) so its edges come out transparent, and a square of `size` px cut from the middle.
+   * Done between two frames and put back exactly before the next, so play never sees it.
+   */
+  const portrait = ({ id, size, yaw, pitch }) => {
+    const record = things.get(id);
+    const seen = view();
+    if (record === undefined || seen === null || drawFrom === undefined) return null;
+    const bodies = bodiesOf(record).filter((body) => attached(body, seen.scene));
+    if (bodies.length === 0) return null;
+    const bounds = new THREE.Box3();
+    for (const body of bodies) bounds.union(partBox.setFromObject(body, true));
+    if (bounds.isEmpty()) return null;
+    const keep = new Set();
+    for (const body of bodies) {
+      body.traverse((node) => keep.add(node));
+      for (let node = body.parent; node !== null; node = node.parent) keep.add(node);
+    }
+    const hidden = [];
+    seen.scene.traverse((node) => {
+      if (keep.has(node) || !node.visible) return;
+      if (node.isMesh || node.isSprite || node.isPoints || node.isLine) {
+        node.visible = false;
+        hidden.push(node);
+      }
+    });
+    const scene = seen.scene;
+    const background = scene.background;
+    const fog = scene.fog;
+    const fogWas = fog === null ? null : { near: fog.near, far: fog.far, density: fog.density };
+    const clear = renderer.getClearColor(new THREE.Color());
+    const clearAlpha = renderer.getClearAlpha();
+    const { width: w, height: h } = canvas;
+    const side = Math.min(w, h);
+    const camera = new THREE.PerspectiveCamera(30, w / h, 0.01, 1000);
+    // 30 degrees across the square cut from the middle, whichever way the canvas is long.
+    if (w < h)
+      camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(Math.PI / 12) * (h / w)));
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const radius = Math.max(sphere.radius, 0.01);
+    const distance = (radius / Math.sin(Math.PI / 12)) * 1.08;
+    camera.near = distance / 100;
+    camera.far = distance * 10;
+    camera.position
+      .set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch))
+      .multiplyScalar(distance)
+      .add(sphere.center);
+    camera.lookAt(sphere.center);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const out = [0, 1].map(() => {
+      const layer = document.createElement("canvas");
+      layer.width = size;
+      layer.height = size;
+      return layer.getContext("2d", { willReadFrequently: true });
+    });
+    try {
+      scene.background = null;
+      if (fog !== null) {
+        fog.near = 1e9;
+        fog.far = 2e9;
+        if (fog.density !== undefined) fog.density = 0;
+      }
+      for (const [n, paint] of out.entries()) {
+        renderer.setClearColor(n === 0 ? 0x000000 : 0xffffff, 1);
+        drawFrom(camera);
+        paint.drawImage(canvas, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
+      }
+    } finally {
+      for (const node of hidden) node.visible = true;
+      scene.background = background;
+      if (fog !== null && fogWas !== null) Object.assign(fog, fogWas);
+      renderer.setClearColor(clear, clearAlpha);
+      redraw();
+    }
+    // A pixel's alpha is how little the white behind it showed through, against the background's
+    // own (tone mapping keeps white under 1).
+    const dark = out[0].getImageData(0, 0, size, size);
+    const light = out[1].getImageData(0, 0, size, size).data;
+    const pixels = dark.data;
+    let most = 1;
+    for (let i = 0; i < pixels.length; i += 4)
+      most = Math.max(
+        most,
+        light[i] + light[i + 1] + light[i + 2] - pixels[i] - pixels[i + 1] - pixels[i + 2],
+      );
+    for (let i = 0; i < pixels.length; i += 4) {
+      const through =
+        (light[i] + light[i + 1] + light[i + 2] - pixels[i] - pixels[i + 1] - pixels[i + 2]) / most;
+      const alpha = Math.min(1, Math.max(0, 1 - through));
+      for (let c = 0; c < 3; c += 1)
+        pixels[i + c] = alpha <= 0 ? 0 : Math.min(255, Math.round(pixels[i + c] / alpha));
+      pixels[i + 3] = Math.round(alpha * 255);
+    }
+    out[0].putImageData(dark, 0, 0);
+    // What it is, from what the game made: its triangles, its materials and its size.
+    let triangles = 0;
+    const materials = new Set();
+    for (const body of bodies)
+      body.traverse((node) => {
+        if (!node.isMesh || node.geometry === undefined) return;
+        const geometry = node.geometry;
+        const count = geometry.index?.count ?? geometry.attributes.position?.count ?? 0;
+        triangles += Math.floor(count / 3) * (node.isInstancedMesh ? node.count : 1);
+        for (const material of [node.material ?? []].flat())
+          materials.add(
+            text(material.name, 60) && !material.name.includes("|") ? material.name : material.type,
+          );
+      });
+    const extent = bounds.getSize(new THREE.Vector3());
+    return {
+      png: out[0].canvas.toDataURL("image/png"),
+      facts: {
+        triangles,
+        materials: [...materials].slice(0, 12),
+        size: [extent.x, extent.y, extent.z].map((each) => Math.round(each * 100) / 100),
+      },
+    };
+  };
+
   /** A thing's live value, clamped to the range the game gave it; false when it does not fit. */
   const setTune = (id, key, value) => {
     const entry = tunes.get(id);
@@ -1302,6 +1409,16 @@ export function createStageBridge({
         );
       case "studio-orbit":
         return finite(data.dx) && finite(data.dy) && finite(data.zoom) && data.zoom > 0;
+      case "studio-portrait":
+        return (
+          finite(data.request) &&
+          text(data.id, 400) &&
+          Number.isInteger(data.size) &&
+          data.size >= 32 &&
+          data.size <= 512 &&
+          finite(data.yaw) &&
+          finite(data.pitch)
+        );
       default:
         return false;
     }
@@ -1361,6 +1478,26 @@ export function createStageBridge({
         return postThings();
       case "studio-capture":
         return capture();
+      case "studio-portrait": {
+        let made = null;
+        try {
+          made = portrait({
+            id: data.id,
+            size: data.size,
+            yaw: data.yaw,
+            pitch: Math.max(-1.4, Math.min(1.4, data.pitch)),
+          });
+        } catch {
+          made = null;
+        }
+        return toStage({
+          type: "studio-picture",
+          request: data.request,
+          id: data.id,
+          png: made?.png ?? null,
+          ...(made === null ? {} : { facts: made.facts }),
+        });
+      }
       case "studio-run-request": {
         const recorded = runSoFar?.() ?? null;
         if (recorded !== null) toStage({ type: "studio-play", play: recorded, asked: true });

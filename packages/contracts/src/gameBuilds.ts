@@ -362,6 +362,8 @@ export const GameSkilledTier = Schema.Struct({
   /** The bot's own end word when the game reported no result. */
   botWord: Schema.NullOr(Schema.String),
 });
+/** The most readings a performance fact keeps of its frame rate through play. */
+export const GAME_PERFORMANCE_SERIES_MAX = 120;
 /**
  * How the random-input play ran, as the game's shell measured it while the harness
  * played (three.js): play's frame rate, its 1% low, the GPU's time per frame and the
@@ -388,6 +390,10 @@ export const GamePerformance = Schema.Struct({
    */
   drawCalls: Schema.optionalKey(NonNegativeInt),
   triangles: Schema.optionalKey(NonNegativeInt),
+  /** Frames per second through the play, a reading each half second, oldest first. */
+  series: Schema.optionalKey(
+    Schema.Array(Schema.Finite).check(Schema.isMaxLength(GAME_PERFORMANCE_SERIES_MAX)),
+  ),
 });
 export type GamePerformance = typeof GamePerformance.Type;
 

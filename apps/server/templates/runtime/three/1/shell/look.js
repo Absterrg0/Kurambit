@@ -1559,6 +1559,21 @@ function createStats() {
       triangles.length = 0;
     },
     read(extra) {
+      // Frames per second through play, a reading per half second of real time, oldest first.
+      const series = [];
+      const kept = Math.min(frames, CAP);
+      let spent = 0;
+      let counted = 0;
+      for (let i = 0; i < kept; i += 1) {
+        spent += real[(frames - kept + i) % CAP];
+        counted += 1;
+        if (spent < 500) continue;
+        series.push(Math.round((counted * 1000) / spent));
+        spent = 0;
+        counted = 0;
+      }
+      while (series.length > 120)
+        series.splice(0, series.length, ...series.flatMap((x, i) => (i % 2 === 0 ? [x] : [])));
       const take = (array, n) =>
         Array.from(array.subarray(0, Math.min(n, CAP))).sort((a, b) => a - b);
       const times = take(real, frames);
@@ -1576,6 +1591,7 @@ function createStats() {
         medianMs: round(at(times, 0.5), 2),
         p99Ms: round(at(times, 0.99), 2),
         fps: times.length === 0 ? null : round(1000 / at(times, 0.5)),
+        series,
         low1Fps: worst.length === 0 ? null : round(1000 / mean(worst)),
         gpuMs: round(at(gpus, 0.5), 2),
         gpuP95Ms: round(at(gpus, 0.95), 2),

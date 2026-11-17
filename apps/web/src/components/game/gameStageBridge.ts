@@ -8,6 +8,7 @@ import {
   type GameStageToGameMessage,
   type GameStageTrace,
   type GameThing,
+  type GameThingFacts,
   type GameToStageMessage,
   type StudioReplay,
   type StudioReplayed,
@@ -232,6 +233,12 @@ function receive(owner: string, frame: HTMLIFrameElement, message: GameToStageMe
     case "studio-frame":
       settleCapture(message.png);
       keepStill(owner, message.png);
+      return;
+    case "studio-picture":
+      settlePortrait(
+        message.request,
+        message.png === null ? null : { png: message.png, facts: message.facts },
+      );
       return;
     case "studio-key":
       // Escape on a frozen game: it clears what was pointed at, else plays on. Every other key
@@ -483,6 +490,41 @@ export const captureStageFrame = (timeoutMs = 4000): Promise<string | null> => {
     };
     captureWaiters.push(done);
     if (captureWaiters.length === 1) post({ type: "studio-capture" });
+  });
+};
+
+export interface StagePortrait {
+  readonly png: string;
+  readonly facts?: GameThingFacts | undefined;
+}
+const portraitWaiters = new Map<number, (portrait: StagePortrait | null) => void>();
+let portraitCount = 0;
+const settlePortrait = (request: number, portrait: StagePortrait | null) => {
+  portraitWaiters.get(request)?.(portrait);
+  portraitWaiters.delete(request);
+};
+
+/**
+ * One named thing drawn alone by the game on the Stage, framed and seen from `yaw` and `pitch`
+ * (stage-bridge.js portrait), with what it is made of; null when the game cannot draw it.
+ */
+export const portraitStageThing = (
+  id: string,
+  view: { readonly size: number; readonly yaw: number; readonly pitch: number },
+  timeoutMs = 6000,
+): Promise<StagePortrait | null> => {
+  const { post, capabilities, status } = useStageBridge.getState();
+  if (post === null || status !== "ready" || !capabilities.includes("portrait"))
+    return Promise.resolve(null);
+  portraitCount += 1;
+  const request = portraitCount;
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(() => settlePortrait(request, null), timeoutMs);
+    portraitWaiters.set(request, (portrait) => {
+      window.clearTimeout(timeout);
+      resolve(portrait);
+    });
+    post({ type: "studio-portrait", request, id, ...view });
   });
 };
 

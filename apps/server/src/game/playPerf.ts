@@ -7,7 +7,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type { GameBuildFacts } from "@kurambit/contracts";
+import { GAME_PERFORMANCE_SERIES_MAX, type GameBuildFacts } from "@kurambit/contracts";
 import { busyReading, type MachineLoad, notMeasured } from "./buildFacts.ts";
 
 /** Beside a bot run's trace: how its play ran, as the game's shell measured it. */
@@ -29,6 +29,8 @@ export const PlayPerf = Schema.Struct({
   /** The median sampled frame's draw calls and triangles; absent from shells that predate them. */
   drawCalls: Schema.optionalKey(Schema.NullOr(Finite)),
   triangles: Schema.optionalKey(Schema.NullOr(Finite)),
+  /** Frames per second through play, a reading each half second; absent from older shells. */
+  series: Schema.optionalKey(Schema.Array(Finite)),
 });
 export type PlayPerf = typeof PlayPerf.Type;
 const decodePlayPerf = Schema.decodeUnknownOption(Schema.fromJsonString(PlayPerf));
@@ -120,6 +122,11 @@ export const performanceOf = (
     height: Math.round(record.height),
     frames: Math.round(record.frames),
     ...countsOf(record),
+    ...(record.series === undefined || record.series.length < 2
+      ? {}
+      : {
+          series: record.series.slice(-GAME_PERFORMANCE_SERIES_MAX).map((fps) => Math.round(fps)),
+        }),
   };
   return (
     (record.fps < SMOOTH_FPS ? busyReading("frames ran slow", machine) : null) ?? {

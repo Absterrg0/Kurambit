@@ -5850,8 +5850,7 @@ export default function ChatView(props: ChatViewProps) {
         stackedThreadToast({
           type: "success",
           title: "Remembered",
-          description:
-            "Every agent session on this game reads it. Edit it from the Stage's menu, Decisions.",
+          description: "Every session on this game reads it. It's under Decisions in Checks.",
         }),
       );
       return;

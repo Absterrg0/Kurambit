@@ -748,6 +748,8 @@ function step() {
   return dt;
 }
 
+// A Stage portrait's camera (stage-bridge.js portrait) for the one frame it draws.
+let portraitCamera = null;
 function draw(dt) {
   if (run === null) {
     renderer.clear();
@@ -756,7 +758,7 @@ function draw(dt) {
   // A frozen frame the Stage's free camera flies around is drawn from it, the game's own render
   // included; the game's camera is back before anything else reads ctx.camera.
   const own = run.ctx.camera;
-  const camera = devView.camera() ?? own;
+  const camera = portraitCamera ?? devView.camera() ?? own;
   run.ctx.camera = camera;
   try {
     juiceShell.beforeRender(camera, renderer);
@@ -931,6 +933,16 @@ const bridge = createStageBridge({
     if (run?.compiling === true) return;
     look.update();
     draw(0);
+  },
+  drawFrom(camera) {
+    if (run?.compiling === true) return;
+    portraitCamera = camera;
+    try {
+      look.update();
+      draw(0);
+    } finally {
+      portraitCamera = null;
+    }
   },
 });
 onModelCopy(bridge.assetCopy);
