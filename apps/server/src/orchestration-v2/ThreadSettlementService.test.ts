@@ -28,6 +28,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
+import * as GameProjectService from "../game/GameProjectService.ts";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ServerActivation from "../serverActivation.ts";
@@ -390,6 +391,8 @@ interface HarnessOptions {
   ) => Effect.Effect<void>;
   readonly onCloseIdle?: () => Effect.Effect<void>;
   readonly currentThreads?: ReadonlyArray<OrchestrationV2AppThread>;
+  /** Threads that are a game's own chat. */
+  readonly ownChats?: ReadonlyArray<string>;
 }
 
 const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options: HarnessOptions) {
@@ -475,6 +478,9 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     Layer.mock(Orchestrator.OrchestratorV2)({
       streamDomainEvents: Stream.fromPubSub(domainEvents),
       dispatch,
+    }),
+    Layer.mock(GameProjectService.GameProjectService)({
+      isOwnChat: (threadId) => Effect.succeed(options.ownChats?.includes(threadId) ?? false),
     }),
     Layer.mock(TerminalManager.TerminalManager)({
       closeIdle: (input) =>
@@ -576,6 +582,28 @@ describe("ThreadSettlementServiceV2 worker", () => {
           expect(commands).toHaveLength(1);
           expect(commands[0]?.settledAt).toEqual(thread.latestRunCompletedAt);
           expect(commands[0]?.snapshotAt).toEqual(thread.updatedAt);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("never settles a game's own chat, however long it sits idle", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const idle = { latestRunCompletedAt: DateTime.makeUnsafe("2026-08-25T00:00:00.000Z") };
+        const own = makeThread("game-own-chat", idle);
+        const side = makeThread("game-side-chat", idle);
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([own, side]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: 2 },
+          ownChats: [own.id],
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          const commands = yield* Ref.get(fixture.commands);
+          expect(commands.map((command) => command.threadId)).toEqual([side.id]);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

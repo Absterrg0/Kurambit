@@ -17,6 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as GameProjectService from "../game/GameProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -197,6 +198,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const terminals = yield* TerminalManager.TerminalManager;
   const projectScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+  const games = yield* GameProjectService.GameProjectService;
   // Settling a settled thread re-emits thread.settled with the same settledAt,
   // so this keeps the settle action to one run per settlement.
   const settleActionRunAt = new Map<ThreadId, number>();
@@ -224,6 +226,8 @@ export const make = Effect.gen(function* () {
           autoSettleAfterDays: currentSettings.sidebarAutoSettleAfterDays,
         });
         if (settledAt === null) return thread;
+        // A game's own chat is the game's row: it never settles, however long it sits idle.
+        if (yield* games.isOwnChat(thread.id)) return thread;
         const uuid = yield* crypto.randomUUIDv4();
         yield* orchestrator.dispatch({
           type: "thread.auto-settle",
