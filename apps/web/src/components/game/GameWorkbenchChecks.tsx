@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@kurambit/client-runtime/environment";
 import { threadRuntimeIsActive } from "@kurambit/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import {
@@ -89,6 +89,7 @@ import { clockLabel } from "./gameStageRewind";
 import { sameShape, stageDeviceAt } from "./gameStageDevice";
 import { clearStageConsole, type StageConsoleLine, useStageConsole } from "./gameStageWatch";
 import { Workbench } from "./GameWorkbenchParts";
+import { useGameOwnChat } from "./gameOwnChat";
 import { valueLabel } from "./GameInspector";
 import { useChangedSinceBase } from "./useChangedSinceBase";
 import { readNextLine } from "@kurambit/shared/gameNextLine";
@@ -276,13 +277,38 @@ function BuildHeader({
   const canPlay = build.available && build.id !== onStageNow;
   // Any other build can be its other side: the strip picks it, with this one already first.
   const canPickCompare = build.available && list.builds.some((entry) => entry.id !== build.id);
+  // A build another chat made says whose it is: the top bar, this chat's last line and Checks
+  // can each name a different build, and only this relates them.
+  const madeIn = build.source._tag === "saved" ? null : build.source.threadId;
+  const otherChat = madeIn === null || madeIn === threadRef.threadId ? null : madeIn;
+  const ownChat = useGameOwnChat(threadRef);
+  const otherShell = useQuietThreadShell(
+    otherChat === null ? null : scopeThreadRef(threadRef.environmentId, otherChat),
+  );
+  const from =
+    otherChat === null
+      ? null
+      : ownChat?.id === otherChat
+        ? "the game's own chat"
+        : (otherShell?.title ??
+          (build.source._tag === "turn" ? build.source.threadTitle : "another chat"));
   return (
     <div className="flex flex-col gap-1 pt-2.5 pb-1">
       <div className="flex h-8 items-center gap-2 ps-4 pe-2">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <Text variant="label" tone="strong" truncate render={<h2 />}>
+          <Text
+            variant="label"
+            tone="strong"
+            truncate
+            render={<h2 className={from === null ? undefined : "shrink-0"} />}
+          >
             {buildName(build)}
           </Text>
+          {from === null ? null : (
+            <Text variant="caption" tone="muted" truncate data-build-from="">
+              from {from}
+            </Text>
+          )}
           <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
             {formatBuildTime(build.at)}
           </Text>
