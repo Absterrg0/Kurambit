@@ -25,3 +25,12 @@ export const gameNextLine = (reply: string): string | null => {
   const next = readNextLine(reply);
   return next === null || next === "none" ? null : next.text;
 };
+
+/**
+ * A reply as the person reads it in the chat. `Next: none` is the agent telling Kurambit the
+ * brief is done: nothing for a person to read, so the line is left out. A real proposal stays.
+ */
+export const replyForReading = (reply: string): string =>
+  readNextLine(reply) === "none"
+    ? reply.trimEnd().split("\n").slice(0, -1).join("\n").trimEnd()
+    : reply;

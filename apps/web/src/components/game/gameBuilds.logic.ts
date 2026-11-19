@@ -200,25 +200,28 @@ export const deltaLine = (delta: GameFactDelta): DeltaLine => {
 };
 
 /**
- * PURE. A build's checks in the words every surface uses ("5 of 7 pass · 1 to
- * look at"): the lead checks a build's detail lists, so the chat, a card's
- * tooltip and the Checks heading never disagree. Null before any reading.
+ * PURE. A build's checks in the words every surface uses, as Checks lists them: what is wrong
+ * first ("1 problem · 6 pass"), else how many pass ("All 7 pass"), then what was not measured.
+ * Null before any reading.
  */
 const checksPhrase = (facts: Pick<GameBuild["facts"], "good" | "bad" | "lead">): string | null => {
   if (facts.good + facts.bad === 0) return null;
   const lead = facts.lead;
-  const pass = lead === undefined ? `${facts.good} pass` : `${lead.pass} of ${lead.of} pass`;
   // Every lead check is accounted for: one with no reading is said, never left out of the count.
   const notMeasured = lead?.measured === undefined ? 0 : lead.of - lead.measured.length;
-  // A build that does not start is its outcome, not one check to look at among passes.
+  const unread = notMeasured > 0 ? [`${notMeasured} not measured`] : [];
+  // A build that does not start is its outcome, not one problem among passes.
   if (lead !== undefined && doesNotStart({ lead }))
-    return ["Does not start", ...(notMeasured > 0 ? [`${notMeasured} not measured`] : [])].join(
-      " · ",
-    );
+    return ["Does not start", ...unread].join(" · ");
+  const passes = lead?.pass ?? facts.good;
+  const pass =
+    facts.bad === 0 && lead !== undefined && notMeasured === 0 && passes === lead.of
+      ? `All ${passes} pass`
+      : `${passes} pass`;
   return [
+    ...(facts.bad > 0 ? [`${facts.bad} ${facts.bad === 1 ? "problem" : "problems"}`] : []),
     pass,
-    ...(facts.bad > 0 ? [`${facts.bad} to look at`] : []),
-    ...(notMeasured > 0 ? [`${notMeasured} not measured`] : []),
+    ...unread,
   ].join(" · ");
 };
 
@@ -582,7 +585,7 @@ export const passDelta = (
 
 /**
  * PURE. A build's checks in one line, as every surface says them: the count once they have
- * settled ("5 of 7 pass · 1 to look at"), else the state they are in ("Measuring…").
+ * settled ("1 problem · 6 pass"), else the state they are in ("Measuring…").
  */
 export const checksLine = (facts: GameBuild["facts"]): string =>
   factsSettled(facts)

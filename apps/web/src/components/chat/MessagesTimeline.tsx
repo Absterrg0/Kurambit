@@ -114,6 +114,7 @@ import {
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
+import { replyForReading } from "@kurambit/shared/gameNextLine";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -2633,7 +2634,9 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const settledText =
+    ctx.gameThread && !row.message.streaming ? replyForReading(row.message.text) : row.message.text;
+  const messageText = settledText || (row.message.streaming ? "" : "(empty response)");
 
   return (
     <>

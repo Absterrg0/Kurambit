@@ -508,11 +508,7 @@ function BriefBox({
             </li>
           ))}
         </ul>
-      ) : (
-        <Text variant="meta" tone="dim" render={<p className="text-center" />}>
-          A playable first version in a few minutes. Rename, restyle and change it any time.
-        </Text>
-      )}
+      ) : null}
 
       {firstRun ? (
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
