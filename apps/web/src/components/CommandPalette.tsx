@@ -190,7 +190,7 @@ import { Atom } from "effect/reactivity";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNewChat } from "./game/useNewGameChat";
 import { unresolvedText, useCopyActions, useCopyPlace } from "./game/useGameCopies";
-import { readIsGameOwnChat } from "./game/gameOwnChat";
+import { OWN_CHAT_NEVER_SETTLES, readIsGameOwnChat } from "./game/gameOwnChat";
 import { settleAndAdvance } from "../settleAndAdvance";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useGameArrivalStore } from "../gameArrivalStore";
@@ -1751,13 +1751,24 @@ function OpenCommandPaletteDialog(props: {
         });
     }
     // A chat's work is done: it leaves the game's list for the Settled shelf, and comes back
-    // the same way. The game's own chat is the game's row, which never settles.
-    if (
+    // the same way. The game's own chat is the game's row, which never settles: there the action
+    // is listed disabled with the reason, so a search for it is never answered with nothing.
+    const canSettleHere =
       activeThread !== null &&
       readEnvironmentSupportsSettlement(threadRef.environmentId) &&
-      readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) &&
-      !readIsGameOwnChat(threadRef)
-    ) {
+      readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
+    if (canSettleHere && readIsGameOwnChat(threadRef))
+      actionItems.push({
+        kind: "action",
+        value: "action:game-settle-chat",
+        title: "Settle chat",
+        description: `${OWN_CHAT_NEVER_SETTLES.title}. ${OWN_CHAT_NEVER_SETTLES.description}`,
+        searchTerms: ["settle", "done", "finish", "chat", "shelf"],
+        icon: <CircleCheckIcon className={ITEM_ICON_CLASS} />,
+        disabled: true,
+        run: async () => {},
+      });
+    else if (canSettleHere && activeThread !== null) {
       const settled = activeThread.settledOverride === "settled";
       actionItems.push({
         kind: "action",

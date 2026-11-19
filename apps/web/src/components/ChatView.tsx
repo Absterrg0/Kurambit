@@ -9,7 +9,7 @@ import {
   toggleWorkbenchTab,
   useRowWidth,
 } from "./game/gameWorkbenchPanel";
-import { readIsGameOwnChat } from "./game/gameOwnChat";
+import { OWN_CHAT_NEVER_SETTLES, readIsGameOwnChat } from "./game/gameOwnChat";
 import { useStageSelectionChip } from "./game/gameComposerContext";
 import { stepStageFrame, toggleStageDevView } from "./game/gameStageBridge";
 import { flipStageCannotLose } from "./game/GameStageControls";
@@ -4624,10 +4624,10 @@ export default function ChatView(props: ChatViewProps) {
     latestRunCompletedAt: activeLatestRun?.completedAt ?? null,
   });
   // A game's own chat is the game's row: auto-settle may mark it, and nothing shows it as done.
+  const activeIsGameOwnChat =
+    isGameThread && activeThreadRef !== null && readIsGameOwnChat(activeThreadRef);
   const activeThreadSettled =
-    supportsSettlement &&
-    activeThreadShell?.settledOverride === "settled" &&
-    !(activeThreadRef !== null && readIsGameOwnChat(activeThreadRef));
+    supportsSettlement && activeThreadShell?.settledOverride === "settled" && !activeIsGameOwnChat;
   const unsettleThreadMutation = useOrchestrationCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
@@ -5364,7 +5364,12 @@ export default function ChatView(props: ChatViewProps) {
           void handleUnsettleActiveThreadStable();
           return;
         }
-        // The sidebar settles it and moves on to the game's own chat, which itself never settles.
+        // The key is disabled on a game's own chat, and says so rather than do nothing.
+        if (activeIsGameOwnChat) {
+          toastManager.add({ type: "info", ...OWN_CHAT_NEVER_SETTLES });
+          return;
+        }
+        // The sidebar settles it and moves on to the game's own chat.
         if (settleAndAdvance(activeThreadRef)) return;
         void settleThread(activeThreadRef).then(toastPinFailure("Failed to settle chat"));
       },
@@ -5373,9 +5378,7 @@ export default function ChatView(props: ChatViewProps) {
         if (!isServerThread || !activeThreadRef || !supportsPinning) return;
         void (
           activeThreadPinned ? confirmAndUnpinThread(activeThreadRef) : pinThread(activeThreadRef)
-        ).then(
-          toastPinFailure(activeThreadPinned ? "Failed to unpin thread" : "Failed to pin thread"),
-        );
+        ).then(toastPinFailure(activeThreadPinned ? "Failed to unpin chat" : "Failed to pin chat"));
       },
       "terminal.toggle": () => {
         if (isGameThread) return false;

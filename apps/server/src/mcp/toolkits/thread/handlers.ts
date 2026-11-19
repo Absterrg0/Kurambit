@@ -19,6 +19,7 @@ import {
   unavailable,
 } from "../../threadAccess.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
+import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
 import { ThreadToolkit } from "./tools.ts";
@@ -292,6 +293,13 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       const { threads, projection, caller } = yield* readThread(input.threadId);
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };
       if (input.action === "settle") {
+        const games = yield* GameProjectService.GameProjectService;
+        if (yield* games.isOwnChat(projection.thread.id))
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message:
+              "This is the game's own chat. It is the game's row in the sidebar and never settles; archiving the game puts it away. Settle the game's other chats when their work is done.",
+          });
         return yield* threads
           .settleThread({ ...common, byOwnAgent: caller?.id === projection.thread.id })
           .pipe(Effect.mapError(dispatchFailure));

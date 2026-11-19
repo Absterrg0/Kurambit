@@ -30,6 +30,12 @@ const ownChatOf = (threads: ReadonlyArray<EnvironmentThreadShell>, ref: ScopedTh
   ).main;
 };
 
+/** What a way to settle says on a game's own chat, where it is disabled. */
+export const OWN_CHAT_NEVER_SETTLES = {
+  title: "A game's own chat doesn't settle",
+  description: "Archive the game to put it away.",
+} as const;
+
 /** Whether the chat is its game's own chat, read when a key or a menu asks. */
 export const readIsGameOwnChat = (ref: ScopedThreadRef): boolean =>
   ownChatOf(readThreadShells(), ref)?.id === ref.threadId;

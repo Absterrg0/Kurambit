@@ -159,6 +159,12 @@ export class GameProjectService extends Context.Service<
     >;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
+     * Whether the thread is its game's own chat: the game's oldest live top-level chat, which the
+     * sidebar shows as the game's row. It never settles (settling would also drop the game's
+     * pin); archiving the game puts it away. False for any other chat and outside a game.
+     */
+    readonly isOwnChat: (threadId: ThreadId) => Effect.Effect<boolean>;
+    /**
      * `work` on the thread's game folder as the game's one operation
      * (GameOperations.exclusive), owned by the thread unless `owner` names
      * another; `waitUntil` (epoch ms) queues behind another operation until
@@ -768,10 +774,30 @@ const make = Effect.gen(function* () {
   const resolve = (threadId: ThreadId, options: { readonly deleted?: "allowed" } = {}) =>
     Effect.map(place(threadId, options), (placed) => placed.root);
   const home = (threadId: ThreadId) => place(threadId, { home: true });
+  const isOwnChat = Effect.fn("GameProjectService.isOwnChat")(
+    function* (threadId: ThreadId) {
+      const game = yield* home(threadId);
+      // Only a folder with a game.json is a game; any other project's chats settle as T3's do.
+      yield* read(game.root);
+      const chats = yield* threads.listProjectThreads({
+        projectId: game.projectId,
+        includeSubagents: false,
+      });
+      const own = chats
+        .filter((chat) => chat.deletedAt === null && chat.archivedAt === null)
+        .toSorted(
+          (left, right) =>
+            DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt),
+        )[0];
+      return own?.id === threadId;
+    },
+    Effect.orElseSucceed(() => false),
+  );
 
   return GameProjectService.of({
     create,
     home,
+    isOwnChat,
     seatWorktreesOnFiles,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
