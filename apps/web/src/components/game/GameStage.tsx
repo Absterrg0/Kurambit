@@ -494,11 +494,9 @@ function ThreadGameStage({
   const setPauseWhenAway = useGameWorkspaceStore((state) => state.setPauseWhenAway);
   const workbenchShown = useWorkbenchShown();
   const arrivals = useGameArrivals(threadRef);
-  // The Workbench's toggle arrives with its first section, and says so once.
-  const workbenchArrived = arrivals.tune.shown || arrivals.art.shown || arrivals.checks.shown;
+  // Closed, the Workbench's toggle carries the dot of the section that has news.
   const dotNow = useArrivalDot();
-  const workbenchNews =
-    dotNow === "workbench" || dotNow === "checks" || dotNow === "tune" || dotNow === "art";
+  const workbenchNews = dotNow === "checks" || dotNow === "tune" || dotNow === "art";
   // A panel to the column's right takes the title bar's end, under the desktop window controls.
   const panelOpen =
     useRightPanelStore((state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true) ||
@@ -1517,27 +1515,25 @@ function ThreadGameStage({
               Show the game
             </Button>
           ) : null}
-          {workbenchArrived || workbenchShown ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
-                    aria-pressed={workbenchShown}
-                    onClick={() => toggleWorkbench()}
-                  />
-                }
-              >
-                <PanelRightIcon aria-hidden="true" />
-                <ArrivalDot on={workbenchNews && !workbenchShown} corner />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">
-                <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
-              </TooltipPopup>
-            </Tooltip>
-          ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={workbenchShown ? "Hide the Workbench" : "Show the Workbench"}
+                  aria-pressed={workbenchShown}
+                  onClick={() => toggleWorkbench()}
+                />
+              }
+            >
+              <PanelRightIcon aria-hidden="true" />
+              <ArrivalDot on={workbenchNews && !workbenchShown} corner />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">
+              <TooltipLabel shortcut={inspectorKey}>Workbench</TooltipLabel>
+            </TooltipPopup>
+          </Tooltip>
         </div>
       </header>
       {/* Hidden, the game stays mounted out of sight, so showing it again keeps its progress. */}

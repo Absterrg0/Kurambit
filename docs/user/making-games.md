@@ -315,12 +315,12 @@ A game opens as one column: the game on top, its control bar under it, then your
 agent and the box where you tell the game what to change. A new game starts with just that, and
 **Undo** on each build in the chat.
 
-Every other tool appears when the game first has something for it, and then stays where it is:
-the Workbench's **Checks** once a build is measured, **Tune** once the game has a value to tune,
-**Art** once it has a model; **Save as test play** once a run ends; **Responsive view** once a
-phone or widescreen check finds a problem; **Try N ways** after your third message and **Keep
-going** once a build starts with a `Next:` line; the **Library** with your second game. A new
-tool carries a dot until you open it, one dot at a time, the Workbench's first. Their keys and the
+The Workbench and its **Tune**, **Art** and **Checks** are always there. Every other tool appears
+when the game first has something for it, and then stays where it is: **Save as test play** once
+a run ends; **Responsive view** once a phone or widescreen check finds a problem; **Try N ways**
+after your third message and **Keep going** once a build starts with a `Next:` line; the
+**Library** with your second game. A new tool, or a Workbench section that has just gained
+something, carries a dot until you open it: one dot at a time, on the newest. Their keys and the
 command palette reach each one before then.
 
 The bar's buttons stay put while you play,
@@ -340,14 +340,15 @@ then the build on the Stage, such as **Build 4**, which opens **History**: **Und
 **Compare**, then every build as a small picture in time order with the one on the Stage ringed,
 and each **Try N ways** message's versions together under what you asked. Click a picture to
 play that build and show its checks; while a version plays, **Keep** makes it the game. On the
-right is the Workbench button, once its first section has arrived.
+right is the Workbench button.
 
 If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
 it** and **Undo**. An error while you play shows as one small line in the game's corner.
 
 The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
 which also opens each section directly). The same key or the header's Workbench button closes it.
-Drag its edge to resize it. Its three sections, each shown once it has arrived:
+Drag its edge to resize it. Its three sections are always there; one with nothing yet says what
+fills it, and one that has just gained something carries a dot until you open it:
 
 - **Tune**: one section for each thing the game names with values to tune, grouped by kind, with
   its values, such as its speed, jump height, timers and counts. The filter at the top finds a

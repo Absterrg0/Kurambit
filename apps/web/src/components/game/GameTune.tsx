@@ -263,16 +263,13 @@ export function GameTunePanel({
   const subject = named ?? (gameName || "the game");
   if (notice !== null || status !== "ready")
     return (
-      <Workbench.Empty
-        icon={<SlidersHorizontalIcon />}
-        title={notice?.title ?? "Waiting for the game"}
-        body={notice?.body}
-      />
+      <Workbench.Empty icon={<SlidersHorizontalIcon />} body={notice ?? "Waiting for the game."} />
     );
   if (listed.length === 0)
     return (
       <Workbench.Empty
         icon={<SlidersHorizontalIcon />}
+        body="Tunable numbers appear here."
         action={
           <Button
             size="sm"

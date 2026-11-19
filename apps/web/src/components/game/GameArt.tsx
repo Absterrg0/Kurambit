@@ -366,7 +366,11 @@ function ArtList({
         </ToggleGroup>
       </div>
       {!loading && assets.length === 0 && code.length === 0 ? (
-        <Workbench.Empty icon={<ImageIcon />} action={firstModel} />
+        <Workbench.Empty
+          icon={<ImageIcon />}
+          body="Models, textures and sounds appear here."
+          action={firstModel}
+        />
       ) : nothing && search !== "" ? (
         <Text variant="body" tone="muted" render={<p className="px-4 py-3" />}>
           Nothing matches “{search}”.

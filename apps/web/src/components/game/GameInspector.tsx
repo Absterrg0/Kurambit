@@ -11,35 +11,18 @@ import { useThreadStageBridge } from "./gameStageBridge";
 // ─── Scene ────────────────────────────────────────────────────────────────────
 
 /**
- * Why there is nothing to select, said as what is true now: this engine or this game's shell
- * cannot point at things, the game is not on the Stage, or it has not answered yet. Null when
- * selecting works, and the list itself says whether it is empty.
+ * Why Tune has nothing to list, in one line that is true now: this engine or this game's shell
+ * cannot tune, the game is not on the Stage, or it has not answered yet. Null when tuning works,
+ * and the list itself says whether it is empty.
  */
-export function useSelectNotice(
-  threadRef: ScopedThreadRef,
-): { readonly title: string; readonly body: string } | null {
+export function useSelectNotice(threadRef: ScopedThreadRef): string | null {
   const engine = useIsGameThreadStatus(threadRef).data?.manifest.engine.name ?? null;
   const status = useThreadStageBridge(scopedThreadKey(threadRef), (state) => state.status, null);
   if (engine !== null && gameEngineEntry(engine)?.stageBridge !== true)
-    return {
-      title: "Not in this engine yet",
-      body: `Pointing at things in the running game is not in ${engineDisplayName(engine)} yet.`,
-    };
-  if (status === "none")
-    return {
-      title: "This game's shell is older",
-      body: "Pointing at things needs the newer game shell, which games made from now on have. Freeze still pauses this one.",
-    };
-  if (status === null)
-    return {
-      title: "Play the game to tune it",
-      body: "Its speeds, jump height, timers and counts show here while it runs on the Stage, to change as you play.",
-    };
-  if (status === "waiting")
-    return {
-      title: "Waiting for the game",
-      body: "The game is starting. Its named things show here once it answers.",
-    };
+    return `Tuning is not in ${engineDisplayName(engine)} yet.`;
+  if (status === "none") return "Tuning needs the newer game shell.";
+  if (status === null) return "Tunable numbers appear here while the game plays.";
+  if (status === "waiting") return "Waiting for the game.";
   return null;
 }
 

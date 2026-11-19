@@ -13,7 +13,8 @@ import { useGameLatestNext } from "./useGameLatestNext";
 
 /**
  * A tool's place on screen: shown once it has arrived, with a dot until it is first opened, when
- * it is the one tool whose turn it is to say so (useArrivalDot).
+ * it is the one tool whose turn it is to say so (useArrivalDot). The Workbench's sections are
+ * always shown; for them `shown` only says the section has something in it.
  */
 export interface GameArrival {
   readonly shown: boolean;
@@ -62,8 +63,8 @@ const hasValues = (thing: GameThing) => (thing.values?.length ?? 0) > 0;
 const NO_THINGS: ReadonlyArray<GameThing> = [];
 
 /**
- * When each Workbench section and the composer's ways to send arrive for one game, from what the
- * game already says: a build measured (Checks), a tuned value exposed (Tune), a model in the
+ * When each Workbench section gets its dot and the composer's ways to send arrive for one game,
+ * from what the game already says: a build measured (Checks), a tuned value exposed (Tune), a model in the
  * scene (Art), a booting build whose reply ends in a `Next:` line (Keep going), the third message
  * (Try N ways), a phone or widescreen problem (Responsive view). Test plays arrive at the Stage's
  * bar, when a run first ends.

@@ -142,17 +142,23 @@ export function GameWorkbenchChecks({
     data.builds.find((entry) => entry.id === (onStageId ?? data.current)) ??
     data.builds[0] ??
     null;
-  // No build yet: the build being made, or the one thing that makes it.
+  // No build yet: what fills the section, and the one thing that makes it unless it is being made
+  // (the top bar says so).
   if (build === null)
-    return working || landing ? (
-      <Workbench.Empty icon={<ClipboardCheckIcon />} title="Making build 1" />
-    ) : (
+    return (
       <Workbench.Empty
         icon={<ClipboardCheckIcon />}
+        body="Checks appear after the first build is measured."
         action={
-          <Button size="sm" variant="outline" onClick={() => onAsk("Make the game's first build.")}>
-            Ask for build 1
-          </Button>
+          working || landing ? undefined : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onAsk("Make the game's first build.")}
+            >
+              Ask for build 1
+            </Button>
+          )
         }
       />
     );

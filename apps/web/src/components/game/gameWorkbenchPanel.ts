@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from "react";
 
-import { openGameTool } from "../../gameArrivalStore";
 import { type WorkbenchTab, useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { observeResize } from "../../lib/observeResize";
 
@@ -10,13 +9,10 @@ import { observeResize } from "../../lib/observeResize";
  * one section for every game, like the game screen's other layout preferences.
  */
 
-/** Opens the Workbench, on `tab` when given (which meets it), else the section it last showed. */
+/** Opens the Workbench, on `tab` when given, else the section it last showed. */
 export const showWorkbench = (tab?: WorkbenchTab) => {
   const store = useGameWorkspaceStore.getState();
-  if (tab !== undefined) {
-    openGameTool(tab);
-    store.setWorkbenchTab(tab);
-  }
+  if (tab !== undefined) store.setWorkbenchTab(tab);
   store.setWorkbenchOpen(true);
 };
 

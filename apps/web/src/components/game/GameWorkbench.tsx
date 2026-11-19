@@ -34,10 +34,11 @@ const isTab = (value: unknown): value is WorkbenchTab =>
 
 /**
  * The game's Workbench, a side panel of its own beside the game's column: Tune, Art and Checks as
- * one segmented control. A section shows once it has arrived (useGameArrivals), always in this
- * order, with a dot until it is first opened. The header's Workbench toggle and its key close it.
- * Only the open section is mounted, so one out of sight costs nothing. `ownsTitleBarEnd`: nothing
- * sits to its right, so on the desktop its top row runs under the window's own controls.
+ * one segmented control, all three in every state of every game. A section with nothing yet says
+ * in a line what fills it; one that has just gained something (useGameArrivals) carries a dot until
+ * it is opened. The header's Workbench toggle and its key close it. Only the open section is
+ * mounted, so one out of sight costs nothing. `ownsTitleBarEnd`: nothing sits to its right, so on
+ * the desktop its top row runs under the window's own controls.
  */
 export function GameWorkbench({
   threadRef,
@@ -56,22 +57,14 @@ export function GameWorkbench({
   const open = useGameWorkspaceStore((state) => state.workbenchOpen);
   const arrivals = useGameArrivals(threadRef);
   const arrived = { tune: arrivals.tune, art: arrivals.art, checks: arrivals.checks };
-  // Opened on a section that has not arrived (the toggle remembers the last one), it shows the
-  // newest that has. A key for a section opens that section, which meets it.
-  const fallback =
-    WORKBENCH_TABS.find((each) => arrived[each].dot) ??
-    WORKBENCH_TABS.find((each) => arrived[each].shown) ??
-    tab;
-  const shown = arrived[tab].shown ? tab : fallback;
+  // A section's dot clears when it is looked at with something in it; an empty one has no news.
+  const hasNews = arrived[tab].shown;
   useEffect(() => {
-    if (!open) return;
-    if (shown !== tab) setTab(shown);
-    openGameTool("workbench");
-    openGameTool(shown);
-  }, [open, shown, tab, setTab]);
+    if (open && hasNews) openGameTool(tab);
+  }, [open, hasNews, tab]);
   return (
     <Tabs
-      value={shown}
+      value={tab}
       onValueChange={(next) => {
         if (isTab(next)) setTab(next);
       }}
@@ -85,19 +78,17 @@ export function GameWorkbench({
         )}
       >
         <TabsList aria-label="Workbench" className="w-full [-webkit-app-region:no-drag]">
-          {WORKBENCH_TABS.filter((value) => value === shown || arrived[value].shown).map(
-            (value) => {
-              const Icon = SECTION[value].icon;
-              return (
-                <TabsTab key={value} value={value}>
-                  <Icon aria-hidden="true" className="size-4 shrink-0" />
-                  {SECTION[value].label}
-                  {value === "checks" ? <ErrorCount threadRef={threadRef} /> : null}
-                  <ArrivalDot on={arrived[value].dot && value !== shown} />
-                </TabsTab>
-              );
-            },
-          )}
+          {WORKBENCH_TABS.map((value) => {
+            const Icon = SECTION[value].icon;
+            return (
+              <TabsTab key={value} value={value}>
+                <Icon aria-hidden="true" className="size-4 shrink-0" />
+                {SECTION[value].label}
+                {value === "checks" ? <ErrorCount threadRef={threadRef} /> : null}
+                <ArrivalDot on={arrived[value].dot && value !== tab} />
+              </TabsTab>
+            );
+          })}
         </TabsList>
       </div>
       <TabsPanel value="tune" className="flex min-h-0 flex-1 flex-col">
