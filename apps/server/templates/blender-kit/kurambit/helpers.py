@@ -633,3 +633,87 @@ def palette_of(path, colours=8):
     share = np.bincount(label, minlength=len(centres))
     order = [k for k in np.argsort(-share) if share[k] > 0]
     return ["#%02x%02x%02x" % tuple(int(round(float(c) * 255)) for c in np.clip(centres[k], 0, 1)) for k in order]
+
+
+# ---- things that are not creatures: moving parts, held props, set pieces ---------------------------
+
+def pivot(obj, at, parent=None):
+    """Puts obj's origin at a world point, its mesh staying where it is, optionally under parent: a
+    wheel's hub, a door's hinge line, a turret's ring. The export keeps each object as a named node
+    turning about its origin, so the game spins a wheel or swings a door by that name; a part that
+    plays clips of its own goes on hero.hinge_rig instead. Returns obj."""
+    obj = bpy.data.objects[obj] if isinstance(obj, str) else obj
+    skeleton.object_mode()
+    if obj.data.users > 1:
+        obj.data = obj.data.copy()
+    world = obj.matrix_world.copy()
+    moved = Matrix.Translation(Vector(at)) @ world.to_3x3().to_4x4()
+    obj.data.transform(moved.inverted() @ world)
+    if parent is not None:
+        obj.parent = bpy.data.objects[parent] if isinstance(parent, str) else parent
+        obj.matrix_parent_inverse = Matrix()
+    obj.matrix_world = moved
+    bpy.context.view_layer.update()
+    return obj
+
+
+def hold(prop, hand="r", *, armature=None, grip=None, tip=None):
+    """Puts a prop in a hand at rest and binds it there: its grip (a world point on it, default its
+    origin) into the palm, its grip-to-tip line (tip: a world point, default its longest side)
+    turned forward, the way the library's sword, torch and tool clips carry one. Works on
+    several objects at once (a blade, a guard, a gem). Returns {"length", "share"}: the prop's
+    length in metres and as a share of the body's height, to check its scale against the brief."""
+    arm = _armature(armature) if armature is not None else armature_of(f"hand_{hand}")
+    parts = [bpy.data.objects[p] if isinstance(p, str) else p for p in (prop if isinstance(prop, (list, tuple)) else [prop])]
+    bpy.context.view_layer.update()
+    pts = np.concatenate([np.array([o.matrix_world @ v.co for v in o.data.vertices]) for o in parts])
+    g = Vector(grip) if grip is not None else parts[0].matrix_world.translation.copy()
+    if tip is None:
+        far = pts[int(np.argmax(np.linalg.norm(pts - np.array(g), axis=1)))]
+        tip = Vector(far.tolist())
+    axis = (Vector(tip) - g).normalized()
+    wrist = arm.matrix_world @ arm.data.bones[f"hand_{hand}"].head_local
+    knuckle_bone = arm.data.bones.get(f"middle_01_{hand}")
+    knuckle = arm.matrix_world @ (knuckle_bone.head_local if knuckle_bone is not None else arm.data.bones[f"hand_{hand}"].tail_local)
+    # The palm: three quarters of the way to the knuckles, a quarter of the hand's length under them.
+    palm = wrist + (knuckle - wrist) * 0.75 - Vector((0, 0, (knuckle - wrist).length * 0.25))
+    turn = axis.rotation_difference(Vector((0, -1, 0))).to_matrix().to_4x4()
+    move = Matrix.Translation(palm) @ turn @ Matrix.Translation(-g)
+    for o in parts:
+        o.matrix_world = move @ o.matrix_world
+    bpy.context.view_layer.update()
+    for o in parts:
+        skin_rigid(o, f"hand_{hand}", armature=arm)
+    length = float(np.max((pts - np.array(g)) @ np.array(axis)) - np.min((pts - np.array(g)) @ np.array(axis)))
+    zs = [(arm.matrix_world @ b.head_local).z for b in arm.data.bones]
+    height = max(zs) - min(zs)
+    return {"length": round(length, 3), "share": round(length / height, 2) if height > 1e-6 else None}
+
+
+def grid(objects, cell):
+    """Whether set pieces snap: each object's size and where it sits against a grid of cell metres
+    (a number, or (x, y) for the floor's cell), measured from its own origin, which is where the
+    game places it. A piece fits when each side of its floor footprint ends on half-cell lines, or
+    is thin (a wall's thickness, a post) and centred on one, within a centimetre: two pieces placed
+    a cell apart then meet without a gap or an overlap.
+    Returns [{"name", "size", "low", "high", "fits", "why"}]."""
+    cx, cy = (cell, cell) if isinstance(cell, (int, float)) else cell
+    out = []
+    for o in objects:
+        o = bpy.data.objects[o] if isinstance(o, str) else o
+        co, _ = rest_coords(o)
+        local = co - np.array(o.matrix_world.translation)
+        lo, hi = local.min(axis=0), local.max(axis=0)
+        why = []
+        for axis, c in (("x", cx), ("y", cy)):
+            i = "xy".index(axis)
+            on_lines = all(abs(v / (c / 2) - round(v / (c / 2))) * (c / 2) < 0.01 for v in (lo[i], hi[i]))
+            # A wall's thickness or a post sits centred on a line; a run of wall or floor ends on lines.
+            thin = hi[i] - lo[i] <= c / 4 and abs(lo[i] + hi[i]) < 0.01
+            if not on_lines and not thin:
+                why.append(f"its {axis} side runs {lo[i]:.3f} to {hi[i]:.3f} m from its origin: it ends on no {c / 2:g} m line, and is no thin part centred on one")
+        if abs(lo[2]) > 0.01 and abs(hi[2]) > 0.01:
+            why.append(f"neither its bottom ({lo[2]:.3f} m) nor its top sits at its origin's height")
+        out.append({"name": o.name, "size": [round(float(v), 3) for v in hi - lo], "low": [round(float(v), 3) for v in lo],
+                    "high": [round(float(v), 3) for v in hi], "fits": not why, "why": "; ".join(why)})
+    return out

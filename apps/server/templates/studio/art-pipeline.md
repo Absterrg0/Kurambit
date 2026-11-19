@@ -258,8 +258,9 @@ head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
    a sketch of chains of points `(x, y, z, radius)`, facing -Y, +X its left,
    feet on z = 0; `spine` rear to front first, then `neck`, `head`,
    `leg_front_l` and `leg_hind_l` (a leg's points hip to toe, bent at the
-   knee so it can reach), `tail`, `ear_l` (`_l` mirrors to `_r`), any other
-   name a part of its own (`lantern`):
+   knee so it can reach; six legs and more are `leg_1_l`...), `tail`,
+   `ear_l` (`_l` mirrors to `_r`), `wing_l` (shoulder to tip, spread), any
+   other name a part of its own (`lantern`, `fin_top`):
    `body = hero.creature_body("cat", sketch)`, then named passes
    `hero.sculpt(body, "inflate"|"crease"|"smooth"|"grab"|"flatten", at=, to=,
 radius=, amount=)` (a round belly, a mouth line, toes) and
@@ -270,13 +271,16 @@ radius=, amount=)` (a round belly, a mouth line, toes) and
    pushed outside the skin, takes the skin's weights, and below `hang` hangs
    on `spring_` hem chains instead of the legs, so it swings rather than
    flaring as a cone. A cape: `hang` at the shoulders. A scarf's end, a
-   strap: `hero.dangle(part, "fisher", start, end)`. Hats, rods, bags:
-   separate meshes, `kurambit.skin_rigid(rod, "hand_r")`.
+   strap: `hero.dangle(part, "fisher", start, end)`. Hats, bags: separate
+   meshes, `kurambit.skin_rigid(hat, "Head")`. What a hand holds:
+   `kurambit.hold(rod, "r", grip=, tip=)` puts it in the palm and returns its
+   length against the body.
 3. **Rig.** A human's is op `character`'s: the standard skeleton fitted to
    its joints, so the library's clips play on it unchanged. A creature's:
    `arm = hero.creature_rig(body, height=(0.3, 0.45))`, bones from the same
    sketch, automatic weights; look at it (op `look`) and move a joint in the
-   sketch if a bend falls wrong. To pose a move by hand, `hero.controls(arm)`
+   sketch if a bend falls wrong. A wing's or a fin's surface:
+   `hero.membrane(arm, "wing", depth)`. To pose a move by hand, `hero.controls(arm)`
    generates a Rigify control rig (IK paws, a torso); key it, then
    `hero.bake_controls(arm, "Pounce", start, end)` and `hero.controls(arm,
 on=False)`.
@@ -286,7 +290,8 @@ on=False)`.
 5. **Motion.** A human: the library's clips by `clips`, and moves it lacks
    (cast, reel) with op `animate` from a library pose. A creature:
    `hero.creature_clips(arm, ["walk", "trot", "run", "idle", "look", "sit"])`
-   (`hop` and `hover` for a body that hops or floats; options per clip:
+   (`hop` and `hover` for a body that hops or floats, `swim` and `slither`
+   for one with no legs, `flap` and `fly` for wings; options per clip:
    `walk={"seconds": 0.8, "lift": 0.3}`): gaits from leg phases with tail
    and ear follow-through, keyed in place. After any clip is added,
    `hero.follow_hem(arm)` keys the hem to step with the legs.
@@ -316,8 +321,22 @@ the library off, say so in your reply. Every step runs headless in
 `game_blender` op `code` (`import kurambit` for its helpers); write the subject's
 `art/CONCEPT.md` section first, as for any character.
 
-A creature, from body to gait, is the hero kit's (Heroes, above); the
-steps below are for what it does not cover (a vehicle, a machine).
+A creature, from body to gait, is the hero kit's (Heroes, above). So are:
+
+- **A machine** with parts on hinges (a chest, a door, a turret): `arm =
+hero.hinge_rig("chest", {"lid": {"objects": [lid], "at": <a point on the
+hinge>, "axis": <its line>, "parent"?: <part>}}, base=[box], height=(lo,
+hi))`, then `hero.hinge_clips(arm, {"Open": {"lid": [(0, 0), (0.5,
+-100)]}})`: (seconds, degrees) keys per part; `_Loop` clips turn evenly.
+- **A vehicle** needs no skeleton: `kurambit.pivot(wheel, hub, parent=body)`
+  per moving part, exported as a prop. The game turns each by name:
+  `car.getObjectByName("wheel_fl")`, `rotation.order = "YXZ"`, `y` steers,
+  `x` rolls (speed over radius); it leans the body itself.
+- **Set pieces** that snap: each its own export, its origin where the game
+  places it (`kurambit.pivot(piece, point)`), all on the same materials;
+  `kurambit.grid(pieces, 4)` names any that would leave a gap.
+
+The steps below are for what none of these covers.
 
 1. **Model or sculpt.** Sculpt brushes need a viewport and do not run here:
    sculpt with modifiers and code. An organic body is a skin modifier on a

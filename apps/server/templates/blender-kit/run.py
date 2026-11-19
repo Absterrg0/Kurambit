@@ -190,6 +190,13 @@ def run_pass(params):
         clips = [(c.get("kurambit_clip", c.name)[:120], "kurambit_from" in c) for c in exported_actions(a)]
         own_clips[a.name] = {"own": [n for n, lib in clips if not lib][:64], "library": [n for n, lib in clips if lib][:64]}
 
+    # A made creature names the bones it stands on, and its generated gaits their speed.
+    feet, speeds = None, {}
+    if len(arms) == 1:
+        legs = json.loads(arms[0].get("kurambit_legs", "[]") or "[]")
+        feet = [leg["foot"] for leg in legs if leg.get("foot") in arms[0].data.bones] or None
+        speeds = {a.get("kurambit_clip", a.name): float(a["kurambit_speed"]) for a in exported_actions(arms[0]) if a.get("kurambit_speed")}
+
     _keep_only(objects)
     notes = []
     # Rest position is a modelling view: exported in it, every clip samples the rest pose and ships still.
@@ -215,7 +222,12 @@ def run_pass(params):
         export_cameras=False, export_lights=False,
     )
     own = next(iter(creatures.values())) if len(creatures) == 1 and len(arms) == 1 else None
-    measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig, own)
+    measured, info = measure.measure(candidate, styled["kind"], standard_rest, params.get("standardJoints"), chains, rig, own, feet)
+    for clip in measured["clips"]:
+        # A generated gait's speed is the one its feet were planted for (the feet gate holds it to
+        # that); the measure reads bone heads, which on a two-bone leg is a knee.
+        if speeds.get(clip["name"]):
+            clip["groundSpeed"], clip["groundSpeedFrom"] = round(speeds[clip["name"]] * (styled["scaled"] or 1.0), 3), "stride"
     if gates:
         # The budget is the shipped model's: the style pass merges materials and scales textures,
         # so it is read off the candidate, not the scene before the pass.

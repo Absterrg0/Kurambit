@@ -52,6 +52,15 @@ def offsets(legs, gait):
     table = GAITS[gait]
     if len(legs) <= 2:
         return [table["biped"].get(1 if leg["side"] >= 0 else -1, 0.0) for leg in legs]
+    if len(legs) > 4:
+        # Six legs and more (an insect, a spider, a crab): each leg lands half a cycle after the
+        # one ahead of it and the one across from it, so the body always stands on alternate legs.
+        out = [0.0] * len(legs)
+        for side in (1, -1):
+            mine = sorted((i for i, leg in enumerate(legs) if (leg["side"] >= 0) == (side > 0)), key=lambda i: legs[i]["foot"][1])
+            for rank, i in enumerate(mine):
+                out[i] = 0.0 if gait == "hop" else ((rank + (0 if side > 0 else 1)) % 2) * 0.5
+        return out
     out = []
     for leg in legs:
         key = ("front" if leg["front"] else "hind", 1 if leg["side"] >= 0 else -1)
@@ -266,6 +275,54 @@ def float_bob(fps=30, seconds=2.4, height=0.05, tail=0, ears=0):
             "feet": {},
             "tail": follow(zs, k, tail, frames, sway=10.0, lift=14.0, t=t, lag=0.1),
             "ears": follow(zs, k, ears, frames, sway=0.0, lift=10.0, t=t, lag=0.12),
+        })
+    return {"frames": frames, "groundSpeed": 0.0, "stride": 0.0, "poses": poses}
+
+
+def wave(lengths, fps=30, seconds=1.0, sweep=16.0, waves=0.8, grow=0.75, tail=0, steady=0.7):
+    """A loop of a wave running down a legless body, front to rear, for a swim or a slither.
+    lengths: its spine's segments rear to front, metres. Each joint turns up to sweep degrees, the
+    rear grow times more than the front; waves is how many wavelengths the body holds. The body is
+    turned and shifted so its front keeps its heading and steady of its line (a fish's head hardly
+    sways; its tail does the work). A pose's "spine" is each joint's yaw, rear to front, and its
+    tail carries the wave on. groundSpeed: 0.6 body lengths a cycle."""
+    n = len(lengths)
+    frames = max(8, int(round(seconds * fps)))
+    poses = []
+    for k in range(frames):
+        t = k / frames
+        rel = [sweep * (1 + grow * (1 - i / max(1, n - 1))) / (1 + grow) * math.sin(2 * math.pi * (t + waves * i / max(1, n))) for i in range(1, n)]
+        yaw0 = -sum(rel)
+        heading, x = yaw0, 0.0
+        for i, length in enumerate(lengths):
+            if i > 0:
+                heading += rel[i - 1]
+            x += length * math.sin(math.radians(heading))
+        poses.append({
+            "body": {"at": (-steady * x, 0.0, 0.0), "pitch": 0.0, "roll": 0.0, "yaw": yaw0, "pivot": "rear"},
+            "feet": {},
+            "spine": rel,
+            "tail": [(1.3 * sweep * math.sin(2 * math.pi * (t - waves * (j + 1) / max(1, n))), 0.0) for j in range(tail)],
+            "ears": [],
+        })
+    return {"frames": frames, "groundSpeed": 0.6 * float(sum(lengths)) / (frames / fps), "stride": 0.0, "poses": poses}
+
+
+def flap(feet, fps=30, seconds=0.6, lift=45.0, height=0.0, wing=3, tail=0):
+    """A wing-beat loop: each wing bone lifts and falls (lift degrees at the shoulder, the outer
+    bones a beat behind, so the tip whips), the body rising on the downstroke; height lifts it off
+    the ground with its legs hanging. A pose's "wings" is (sweep, lift) per wing bone, degrees."""
+    frames = max(8, int(round(seconds * fps)))
+    poses = []
+    for k in range(frames):
+        t = k / frames
+        z = height + 0.06 * max(height, 0.1) * math.sin(2 * math.pi * (t + 0.25))
+        poses.append({
+            "body": {"at": (0.0, 0.0, z), "pitch": 4.0 * math.sin(2 * math.pi * t), "roll": 0.0, "yaw": 0.0},
+            "feet": {name: {"at": (at[0], at[1], at[2] + z), "roll": 20.0 if height > 0 else 0.0, "planted": False} for name, at in feet.items()} if height > 0 else {},
+            "wings": [(0.0, lift * (1.0 if j == 0 else 0.55) * math.sin(2 * math.pi * (t - 0.12 * j))) for j in range(wing)],
+            "tail": [(0.0, 6.0 * math.sin(2 * math.pi * (t - 0.1 * (j + 1)))) for j in range(tail)],
+            "ears": [],
         })
     return {"frames": frames, "groundSpeed": 0.0, "stride": 0.0, "poses": poses}
 

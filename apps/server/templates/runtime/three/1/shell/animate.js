@@ -467,12 +467,15 @@ export function animate(gltf, { fade = 0.2 } = {}) {
     const duration = action.getClip().duration;
     if (options.from !== undefined) action.time = Math.min(Math.max(options.from, 0), duration);
     else if (options.reverse === true) action.time = duration;
-    // Loop to loop keeps the step phase (walk to run lands on the same foot).
+    // Loop to loop keeps the step phase (walk to run lands on the same foot). A held pose (a
+    // machine's idle, one key long) has no phase to keep, and dividing by its length would leave
+    // the new loop's time NaN: it would never move.
     else if (
       !once &&
       previous !== null &&
       previous.loop === THREE.LoopRepeat &&
-      previous !== action
+      previous !== action &&
+      previous.getClip().duration > 0
     )
       action.time = (previous.time / previous.getClip().duration) * duration;
     action.play();

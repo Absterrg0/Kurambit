@@ -117,11 +117,11 @@ def lowest_chains(arm):
     return sorted(feet) if len(feet) >= 2 else []
 
 
-def _clips(arm, meshes, height, skin=None):
+def _clips(arm, meshes, height, skin=None, named=None):
     sc = bpy.context.scene
     fps = sc.render.fps / sc.render.fps_base
     feet = ([n for n in ("ball_l", "ball_r") if n in arm.pose.bones] or [n for n in ("foot_l", "foot_r") if n in arm.pose.bones]
-            or lowest_chains(arm))
+            or [n for n in (named or []) if n in arm.pose.bones] or lowest_chains(arm))
     hips = next((n for n in ("pelvis", "root") if n in arm.pose.bones), arm.pose.bones[0].name)
     knees = [k for k in KNEES if all(n in arm.pose.bones for n in k)]
     out = []
@@ -140,7 +140,9 @@ def _clips(arm, meshes, height, skin=None):
             for n in track:
                 track[n].append((arm.matrix_world @ arm.pose.bones[n].head).copy())
             if k % SUB == 0:
-                poses.append([arm.matrix_world @ v for b in arm.pose.bones for v in (b.head, b.tail)])
+                # A point off each bone's axis too: a bone turning about its own length (a hinge laid
+                # along its hinge line, a wheel on its axle) moves neither its head nor its tail.
+                poses.append([arm.matrix_world @ v for b in arm.pose.bones for v in (b.head, b.tail, b.head + b.x_axis * b.length)])
                 if body is not None:
                     frames.append({pb.name: np.array(pb.matrix) for pb in arm.pose.bones})
                 for i, (up, lo) in enumerate(knees):
@@ -229,10 +231,10 @@ def _unweighted(meshes):
     return n
 
 
-def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, rig=None, own_rig=None):
+def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, rig=None, own_rig=None, feet=None):
     """GameModelMeasure of a candidate GLB, plus {armatures: {name: [bones]}, worstJoint}. own_rig
     names a model's own skeleton (kurambit_rig: "tripo-quadruped", "clockwork-owl"): its sidecar's
-    skeleton, off the standard."""
+    skeleton, off the standard. feet: the bones it stands on, when its maker named them."""
     doc = skeleton.gltf_json(glb)
     bpy.ops.wm.read_factory_settings(use_empty=True)  # one-shot only: nothing of the source scene remains
     # At the clips' own rate, or a 30 fps clip lands between 24 fps frames and its length and seam read wrong.
@@ -262,7 +264,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
     if kind == "character" and skinned:
         skin = contact.Skin(arm, skinned)
         through = {"rest": skin.pct(skin.rest_hits), "bent": skin.bent() if holds else None}
-    clips, frozen = _clips(arm, meshes, height, skin if skin is not None and skin.has_arms else None) if arm is not None else ([], [])
+    clips, frozen = _clips(arm, meshes, height, skin if skin is not None and skin.has_arms else None, feet) if arm is not None else ([], [])
     springs = []
     for name, bones in (chains or {}).items():
         if bones and all(b in joints for b in bones):

@@ -9,7 +9,7 @@ a part off-centre, floating or poking out; the same views as silhouettes; the mo
 distance (gamePx tall, at 1x and 3x with nearest filtering) and, for a character, a close-up of its
 head (the top 45% of its height, three-quarter view); six side-view frames of every clip (up to
 14, locomotion and jumps first), with six front-view frames beside each locomotion's, where hip roll and arms
-through the body show; the palette with the swatches the model uses marked; and the concept image
+through the body show, and six from above beside a swim's or a slither's; the palette with the swatches the model uses marked; and the concept image
 on the left when there is one. A prop has no close-up: its turnaround already shows all of it at
 one scale, and no rule picks its most detailed region honestly.
 
@@ -49,6 +49,8 @@ MIN_COVER = 0.01
 GAME_VIEWS = {"perspective": (35, 22), "side": (90, 0), "top-down": (20, 55), "isometric": (45, 35.26)}
 STRIP_WORDS = ("walk", "jog", "run", "sprint", "jump")
 LOCOMOTION = ("walk", "jog", "run", "sprint")
+# A body that moves by bending sideways shows nothing of it from the side: these strips are also seen from above.
+WAVES = ("swim", "slither")
 # A hero's sheet strips every clip it ships (the idle and a hit too): a clip nobody looked at is
 # where deformation hides.
 NOT_STRIPS = ("pose",)
@@ -395,12 +397,12 @@ def review(params):
             if sampled:
                 _setup(sc, "BLENDER_WORKBENCH", STRIP)
                 frames = {}
-                for view, az in (("side", 90), ("front", 0)):
-                    se = _extent(np.concatenate(sampled), az, 4)
+                for view, az, el, words in (("side", 90, 4, None), ("front", 0, 4, LOCOMOTION), ("above", 90, 88, WAVES)):
+                    se = _extent(np.concatenate(sampled), az, el)
                     sspan = max((se[1] - se[0]) * STRIP[1] / STRIP[0], se[3] - se[2]) * 1.06
-                    _camera(cam, az, 4, se, sspan)
+                    _camera(cam, az, el, se, sspan)
                     for n, (act, label) in enumerate(clips):
-                        if view == "front" and not any(w in label.lower() for w in LOCOMOTION):
+                        if words is not None and not any(w in label.lower() for w in words):
                             continue
                         skeleton.assign_action(arm, act)
                         cells = []
@@ -413,9 +415,9 @@ def review(params):
                         frames[(n, view)] = cells
                 for n, (act, label) in enumerate(clips):
                     seconds = (act.frame_range[1] - act.frame_range[0]) / (sc.render.fps / sc.render.fps_base)
-                    front = frames.get((n, "front"))
-                    text = f"{label}  {seconds:.2f} s" + ("   side, then front" if front else "")
-                    strips.append((labels(text), frames[(n, "side")] + (front or [])))
+                    second = next((v for v in ("front", "above") if (n, v) in frames), None)
+                    text = f"{label}  {seconds:.2f} s" + (f"   side, then {'front' if second == 'front' else 'from above'}" if second else "")
+                    strips.append((labels(text), frames[(n, "side")] + (frames[(n, second)] if second else [])))
 
         concept = None
         if params.get("concept_png") and os.path.isfile(params["concept_png"]):

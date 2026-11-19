@@ -66,9 +66,10 @@ def _apply(o):
             bpy.ops.object.modifier_apply(modifier=m.name)
 
 
-def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None):
+def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None, triangles=24000):
     """The body mesh <name>_body from the sketch: skin, subdivision, a voxel remesh (voxel metres;
-    default a 90th of its height) and smooth passes. Returns the object."""
+    default a 90th of its longest side, finer for thin parts), smooth passes, then thinned to
+    about triangles (None keeps every one the remesh made). Returns the object."""
     chains = _chains(chains, mirror)
     verts, radii, edges, joins = [], [], [], {}
     for cname, pts in chains.items():
@@ -118,15 +119,20 @@ def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide
         bmesh.ops.create_icosphere(bm, subdivisions=3, radius=r, matrix=Matrix.Translation((x, y, z)))
     bm.to_mesh(me)
     bm.free()
-    zs = np.array([v.co.z for v in me.vertices])
-    height = float(zs.max() - zs.min()) or 0.3
+    co = np.array([v.co for v in me.vertices])
+    size = float((co.max(axis=0) - co.min(axis=0)).max()) or 0.3
+    # By the body's longest side, and fine enough for its thinner parts: by its height alone, a
+    # body long and low (a snake, a fish, a crab) remeshed into hundreds of thousands of triangles.
+    thin = float(np.percentile(radii, 25)) if radii else size
     rm = o.modifiers.new("remesh", "REMESH")
     rm.mode = "VOXEL"
-    rm.voxel_size = float(voxel) if voxel else max(0.002, height / 90)
+    rm.voxel_size = float(voxel) if voxel else max(0.002, min(size / 90, thin / 2.5))
     rm.use_smooth_shade = True
     _apply(o)
     if smooth:
         sculpt(o, "smooth", iterations=int(smooth))
+    if triangles:
+        decimate(o, int(triangles))
     for p in me.polygons:
         p.use_smooth = True
     if material is not None:
@@ -418,7 +424,14 @@ CLIPS = {
     "hover": ("Hover_Loop", lambda legs, fps, kw: gait.float_bob(fps, **kw)),
     "look": ("Look_Around", lambda legs, fps, kw: gait.look_around(legs, fps, **kw)),
     "sit": ("Sit", lambda legs, fps, kw: gait.sit(legs, fps, **kw)),
+    "swim": ("Swim_Loop", lambda legs, fps, kw: gait.wave(fps=fps, **kw)),
+    "slither": ("Slither_Loop", lambda legs, fps, kw: gait.wave(fps=fps, **{"seconds": 1.6, "sweep": 26.0, "waves": 1.5, "grow": 0.0, "steady": 0.0, **kw})),
+    "flap": ("Flap_Loop", lambda legs, fps, kw: gait.flap({leg["name"]: leg["foot"] for leg in legs}, fps, **kw)),
+    "fly": ("Fly_Loop", lambda legs, fps, kw: gait.flap({leg["name"]: leg["foot"] for leg in legs}, fps, **{"height": 0.8 * max([leg["length"] for leg in legs] or [0.2]), **kw})),
 }
+# How a wing rests on the ground, per bone from the shoulder, degrees: swept back, folded forward
+# again, the tip back along the body (a wing is sketched spread, as it is modelled).
+FOLD = ((72.0, -18.0), (-150.0, 0.0), (140.0, 0.0), (0.0, 0.0))
 
 
 def _rx(d):
@@ -431,7 +444,9 @@ def _axis_rot(axis, deg):
 
 def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
     """Keys the clips on a creature_rig armature: walk, trot, run, hop (loops in place), idle and
-    hover (loops), look and sit (one-shots). options per clip: {"walk": {"stride": m, "seconds": s,
+    hover (loops), look and sit (one-shots); swim and slither (a wave down a legless body's spine);
+    flap and fly (wing_ chains beating, standing or off the ground). Wings rest folded in every
+    other clip. options per clip: {"walk": {"stride": m, "seconds": s,
     "lift": share of leg length, "bob": share}}. Returns {clip: {"frames", "groundSpeed"}}."""
     arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
     roles = json.loads(arm["kurambit_creature"])
@@ -442,6 +457,7 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
     legs = [{"name": leg["name"], "foot": leg["point"], "front": leg["front"], "side": leg["side"], "length": leg["length"]}
             for leg in legs_rec]
     tails = [n for c, n in roles.items() if c.startswith("tail")]
+    wings = [n for c, n in roles.items() if c.startswith("wing")]
     ears = [n for c, n in roles.items() if c.startswith("ear")]
     tail_n = max((len(t) for t in tails), default=0)
     ear_n = max((len(e) for e in ears), default=0)
@@ -462,6 +478,14 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
         if clip in ("walk", "trot", "run", "hop", "idle", "look", "sit", "hover"):
             kw.setdefault("tail", tail_n)
             kw.setdefault("ears", ear_n)
+        if clip in ("swim", "slither"):
+            kw.setdefault("lengths", [rig.length[b] for b in spine])
+            kw.setdefault("tail", tail_n)
+        if clip in ("flap", "fly"):
+            if not wings:
+                raise ValueError(f"{clip}: {arm.name} has no wings; sketch wing_l as a chain from the shoulder to the tip, spread")
+            kw.setdefault("wing", max(len(w) for w in wings))
+            kw.setdefault("tail", tail_n)
         if clip in ("walk", "trot", "run", "hop") and not legs and clip != "hop":
             raise ValueError(f"{clip}: {arm.name} has no legs; hop or hover move a legless body")
         if clip in ("walk", "trot", "run", "hop") and legs:
@@ -473,7 +497,19 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
         if clip == "hover":
             kw.setdefault("height", 0.12 * size)
         made = make(legs, fps, kw)
+        for pose in made["poses"]:
+            # Spine joints and wings by bone name: a wave's yaws, a beat's lifts, or the fold.
+            turns = {b: (yaw, 0.0) for b, yaw in zip(spine[1:], pose.get("spine", []))}
+            for w in wings:
+                side = -1.0 if "_r_" in w[0] else 1.0
+                for j, b in enumerate(w):
+                    sweep, lift = pose["wings"][j] if "wings" in pose and j < len(pose["wings"]) else FOLD[min(j, len(FOLD) - 1)]
+                    turns[b] = (side * sweep, lift)
+            pose["turns"] = turns
         act = _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads, tails, ears)
+        # The generator knows the speed its feet were planted for; the export's measure reads it
+        # off the feet, and takes this where it finds none.
+        act["kurambit_speed"] = float(made["groundSpeed"])
         out[label] = {"frames": made["frames"], "groundSpeed": round(made["groundSpeed"], 3)}
     return out
 
@@ -506,6 +542,7 @@ def _pose(rig, pose, legs_rec, body_bone, centre, rear, necks, heads, tails, ear
     pivot = rear if b.get("pivot") == "rear" else centre
     M = animrig.M4(R, pivot + np.asarray(b["at"], float) - R @ pivot)
     head_yaw, head_pitch = pose.get("head", (0.0, 0.0))
+    turns = pose.get("turns", {})
     head_set = set(n for chain in heads for n in chain) if isinstance(heads, list) and heads and isinstance(heads[0], list) else set(heads)
     neck_set = set(necks)
     tail_of = {n: (i, chain) for chain in tails for i, n in enumerate(chain)}
@@ -527,7 +564,13 @@ def _pose(rig, pose, legs_rec, body_bone, centre, rear, necks, heads, tails, ear
             continue
         Pn = rig.local(n, P, np.eye(4))
         Rn = Pn[:3, :3]
-        if n in neck_set or n in head_set:
+        if n in turns:
+            yaw, pitch = turns[n]
+            d = Rn[:, 1]
+            # A wing lifts about the body's length, whichever way it is swept; a spine joint yaws.
+            Rd = (_axis_rot([0, -1.0 if d[0] >= 0 else 1.0, 0], pitch) if abs(pitch) > 1e-6 else np.eye(3)) @ animrig.rz(yaw)
+            P[n] = animrig.M4(Rd @ Rn, Pn[:3, 3])
+        elif n in neck_set or n in head_set:
             share = 0.4 if n in neck_set else 0.6
             k = max(1, len(neck_set) if n in neck_set else len(head_set))
             steady = _rx(0.5 * b.get("pitch", 0.0) / max(1, len(neck_set) + len(head_set)))
@@ -628,6 +671,155 @@ def _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads,
     for pb in arm.pose.bones:
         pb.matrix_basis = Matrix()
     return act
+
+
+def membrane(armature, chain, depth, *, direction=(0, 1, 0), taper=0.3, thick=0.006, material=None):
+    """A thin surface hanging from a chain of the sketch, each part of it following the bone it
+    hangs from: a wing's feathers or skin (chain "wing": both sides; direction back, the default),
+    a fish's back fin or tail fluke (direction up or down), a crest. depth metres at the chain's
+    root, taper times that at its tip. Returns the objects."""
+    arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
+    roles = json.loads(arm["kurambit_creature"])
+    names = [c for c in roles if c == chain or c in (f"{chain}_l", f"{chain}_r")]
+    if not names:
+        raise ValueError(f"{arm.name} has no chain {chain}: its chains are {', '.join(roles)}")
+    d = Vector(direction).normalized()
+    made = []
+    for cname in names:
+        bones = [arm.data.bones[b] for b in roles[cname]]
+        pts = [arm.matrix_world @ b.head_local for b in bones] + [arm.matrix_world @ bones[-1].tail_local]
+        n, rows = len(pts) - 1, 4
+        along = (pts[-1] - pts[0]).normalized()
+        normal = along.cross(d).normalized() * (thick / 2)
+        verts, faces, owner = [], [], []
+        for layer in (1, -1):
+            for i, p in enumerate(pts):
+                reach = depth * (1 - (1 - taper) * (i / n) ** 1.5)
+                for r in range(rows + 1):
+                    verts.append(p + d * reach * r / rows + normal * layer * (1 - 0.8 * r / rows))
+                    owner.append(i)
+        per = (n + 1) * (rows + 1)
+        for layer in (0, 1):
+            for i in range(n):
+                for r in range(rows):
+                    a = layer * per + i * (rows + 1) + r
+                    quad = (a, a + rows + 1, a + rows + 2, a + 1)
+                    faces.append(quad if layer == 0 else quad[::-1])
+        for i in range(n):  # the trailing edge closes the two layers
+            a = i * (rows + 1) + rows
+            faces.append((a, a + per, a + per + rows + 1, a + rows + 1))
+        me = bpy.data.meshes.new(f"{arm.name}_{cname}_membrane")
+        me.from_pydata([tuple(v) for v in verts], [], faces)
+        me.shade_smooth()
+        o = bpy.data.objects.new(me.name, me)
+        for c in arm.users_collection:
+            c.objects.link(o)
+        if material is not None:
+            me.materials.append(material)
+        groups = [o.vertex_groups.new(name=b.name) for b in bones]
+        for v, i in enumerate(owner):
+            # A joint's column bends half with each of its bones.
+            if 0 < i < n:
+                groups[i - 1].add([v], 0.5, "REPLACE")
+                groups[i].add([v], 0.5, "REPLACE")
+            else:
+                groups[min(i, n - 1)].add([v], 1.0, "REPLACE")
+        skeleton.bind(o, arm)
+        made.append(o)
+    return made
+
+
+def hinge_rig(name, parts, *, base=(), height=None):
+    """A machine's rig: one bone per moving part, at its hinge. parts: {part: {"objects": [...],
+    "at": (x, y, z) a point on the hinge line or slide, "axis": (x, y, z) the line it turns about
+    or slides along, "parent"?: another part}}; base: the objects that stay put. Each object is
+    bound to its part's bone and to nothing else, so nothing bends. height (lo, hi) metres is its
+    gate's range. A chest's lid, a door's leaf, a turret's ring and its barrel on that ring.
+    Returns the armature, on its own rig, for hero.hinge_clips."""
+    if bpy.data.objects.get(name) is not None:
+        raise ValueError(f"{name} already exists: remove it or pick another name")
+    get = lambda o: bpy.data.objects[o] if isinstance(o, str) else o
+    ad = bpy.data.armatures.new(name)
+    arm = bpy.data.objects.new(name, ad)
+    bpy.context.scene.collection.objects.link(arm)
+    everything = [get(o) for o in base] + [get(o) for p in parts.values() for o in p["objects"]]
+    size = max((max(o.dimensions) for o in everything), default=1.0)
+    skeleton.object_mode()
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    root = ad.edit_bones.new("root")
+    root.head, root.tail = (0, 0, 0), (0, 0, 0.1 * size)
+    made = {}
+    todo = list(parts)
+    while todo:
+        part = next((p for p in todo if parts[p].get("parent") is None or parts[p]["parent"] in made), None)
+        if part is None:
+            bpy.ops.object.mode_set(mode="OBJECT")
+            raise ValueError(f"parts {', '.join(todo)} name parents that are not parts")
+        todo.remove(part)
+        spec = parts[part]
+        b = ad.edit_bones.new(part)
+        b.head = Vector(spec["at"])
+        b.tail = b.head + Vector(spec["axis"]).normalized() * 0.15 * size
+        b.parent = made[spec["parent"]] if spec.get("parent") else root
+        b.use_connect = False
+        made[part] = b
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for o in base:
+        helpers.skin_rigid(get(o), "root", armature=arm)
+    for part, spec in parts.items():
+        for o in spec["objects"]:
+            helpers.skin_rigid(get(o), part, armature=arm)
+    arm["kurambit_rig"] = name
+    if height is not None:
+        arm["kurambit_height"] = json.dumps([float(height[0]), float(height[1])])
+    return arm
+
+
+def hinge_clips(armature, clips, *, fps=None):
+    """Keys a hinge_rig's clips. clips: {"Open": {"lid": [(0, 0), (0.5, -100)]}, ...}: per part,
+    (seconds, degrees about its axis) keys, or (seconds, degrees, metres slid along it); a part
+    left out holds still. A name ending _Loop is keyed straight through for a seamless turn (a
+    wheel, a fan); any other eases in and out. Idle, the rest pose held, is added when missing: a
+    model with clips stands in one. Returns {clip: seconds}."""
+    arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
+    sc = bpy.context.scene
+    fps = fps or sc.render.fps / sc.render.fps_base
+    from .skeleton import action_fcurves, assign_action
+
+    clips = dict(clips)
+    if not any("idle" in c.lower() for c in clips):
+        clips["Idle"] = {}
+    previous = (arm.animation_data or arm.animation_data_create()).action
+    out = {}
+    for label, tracks in clips.items():
+        old = helpers.clip_of(arm, label)
+        if old is not None:
+            bpy.data.actions.remove(old)
+        act = bpy.data.actions.new(helpers.action_name(arm.name, label))
+        act.use_fake_user = True
+        act["kurambit_owner"], act["kurambit_clip"] = arm.name, label
+        assign_action(arm, act)
+        end = max([k[0] for keys in tracks.values() for k in keys] + [1.0 / fps])
+        for pb in arm.pose.bones:
+            if pb.name == "root":
+                continue
+            pb.rotation_mode = "XYZ"
+            keys = tracks.get(pb.name) or [(0.0, 0.0), (end, 0.0)]
+            for k in keys:
+                pb.rotation_euler = (0.0, math.radians(k[1]), 0.0)  # a bone's y runs along its hinge
+                pb.location = (0.0, k[2] if len(k) > 2 else 0.0, 0.0)
+                pb.keyframe_insert("rotation_euler", frame=round(k[0] * fps))
+                pb.keyframe_insert("location", frame=round(k[0] * fps))
+        if label.lower().endswith("_loop"):
+            for fc in action_fcurves(act):
+                for k in fc.keyframe_points:
+                    k.interpolation = "LINEAR"
+        out[label] = round(end, 3)
+    assign_action(arm, previous)
+    for pb in arm.pose.bones:
+        pb.rotation_euler, pb.location = (0, 0, 0), (0, 0, 0)
+    return out
 
 
 CONTROLS = "kurambit_controls"

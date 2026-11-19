@@ -200,7 +200,11 @@ check that matters.
   out (`fit.py`): scaled by height, a chibi's hips bob further than its legs reach and its feet
   leave the ground. A face is built in the body's style from the body's own landmarks (`face.py`:
   an MPFB2 base mesh's eye helpers and lips ride through the restyle and the conform), so an
-  agent does not model eyes by hand on whatever head the body has. A creature's body and
+  agent does not model eyes by hand on whatever head the body has. A machine's moving parts
+  ride bones laid along their hinge lines (`hero.hinge_rig`), because an export carries only an
+  armature's clips; a vehicle's wheels stay plain nodes with their origins at the hubs
+  (`kurambit.pivot`), since the game turns them by its own speed and a skeleton there would cost
+  a skinned draw for nothing. A creature's body and
   rig come from one sketch of joint chains (`creature.py`), so its joints sit inside its body by
   construction, and its clips come from a gait generator (`gait.py`) rather than keys by hand. The
   same rig types its chains for Rigify, which generates a control rig only for posing by hand
