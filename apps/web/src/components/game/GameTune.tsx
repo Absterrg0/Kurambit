@@ -184,6 +184,19 @@ export const KIND_WORDS: Record<GameThing["kind"], string> = {
 
 const hasValues = (thing: GameThing) => (thing.values?.length ?? 0) > 0;
 
+/**
+ * PURE. The chip beside a thing's name: the game's own word for it, only when that says more than
+ * the group's heading above it ("player" under Characters). A word that repeats the heading
+ * ("rule" under Rules) is left out, and so is the kind when the game gave no word of its own.
+ */
+const kindChip = (thing: Pick<GameThing, "kind" | "kindWord">): string | null => {
+  const word = thing.kindWord?.trim() ?? "";
+  if (word === "") return null;
+  const said = word.toLowerCase();
+  const heading = KIND_GROUPS.find((group) => group.kind === thing.kind)?.label.toLowerCase();
+  return said === KIND_WORDS[thing.kind] || said === heading ? null : word;
+};
+
 /** "Hopper and Flag", "Hopper, Flag and 3 more": the things a game named; null with none. */
 export const namesOf = (things: ReadonlyArray<GameThing>): string | null => {
   const names = [...new Set(things.map((thing) => thing.name.replace(/ \d+$/, "")))];
@@ -444,7 +457,8 @@ export function GameThingValueRows({
 }
 
 /**
- * One thing's section: its picture, name and kind as a quiet chip, putting it back when tuned and
+ * One thing's section: its picture, name and the game's word for it when the heading has not
+ * said it (kindChip), putting it back when tuned and
  * pointing at it on the Stage, then its values. A click on the name picks it on the Stage too;
  * hovering outlines it there while the Stage is frozen. The thing pointed at on the Stage is marked.
  */
@@ -471,6 +485,7 @@ function ThingSection({
   const save = use(TuneSave);
   const tuned = tunedValues(thing);
   const valueless = !hasValues(thing);
+  const chip = kindChip(thing);
   return (
     <section
       aria-label={`${thing.name}'s values`}
@@ -511,9 +526,11 @@ function ThingSection({
           <Text variant="meta" tone="strong" emphasis truncate render={<h3 />}>
             {thing.name}
           </Text>
-          <Badge variant="muted" size="sm">
-            {thing.kindWord ?? KIND_WORDS[thing.kind]}
-          </Badge>
+          {chip === null ? null : (
+            <Badge variant="muted" size="sm">
+              {chip}
+            </Badge>
+          )}
           {tuned.length === 0 ? null : (
             <span aria-label="tuned" className="size-1.5 shrink-0 rounded-full bg-live" />
           )}
