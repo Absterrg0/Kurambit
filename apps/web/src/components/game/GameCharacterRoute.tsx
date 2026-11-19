@@ -137,7 +137,8 @@ export function LibraryChoice({
       <span className="flex flex-col">
         <Text variant="label">Library models</Text>
         <Text variant="meta" tone="muted">
-          Free asset library models first; the route makes what it lacks
+          Its models, textures and sprites first. Off, a game still takes its clips, sounds and
+          fonts
         </Text>
       </span>
     </MenuCheckboxItem>

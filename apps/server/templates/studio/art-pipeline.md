@@ -492,8 +492,8 @@ should not carry (`ob.hide_render = True`), then render with `"objects":
 
 ## Props, set pieces and 3D models
 
-Library pieces from the lock's packs come first; an organic hard prop with a
-three-view sheet is carved. What no pack has, build in the live Blender:
+Made here first; with the library on, the lock's packs first. An organic
+hard prop with a three-view sheet is carved. The rest, in the live Blender:
 `game_blender` op `code` to model, `game_blender` op `scene` to measure,
 `game_blender` op `look` with `mode: "review"` to see exactly what will ship,
 `game_blender` op `export`, then `game_check`. Match the family's look: its

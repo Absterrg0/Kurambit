@@ -2084,7 +2084,8 @@ function OpenCommandPaletteDialog(props: {
                   characterRoute.shownLibrary === true
                     ? "Turn library models off"
                     : "Turn library models on",
-                description: "Free asset library models first; the route makes what it lacks",
+                description:
+                  "Its models, textures and sprites first. Off, a game still takes its clips, sounds and fonts",
                 searchTerms: ["library", "assets", "models"],
                 icon: <PersonStandingIcon className={ITEM_ICON_CLASS} />,
                 run: () => characterRoute.setLibrary(characterRoute.shownLibrary !== true),
