@@ -19,8 +19,10 @@
 // ahead, pulled in when anything in `blockers` (the level meshes or a group
 // of them) is between it and the target: the view's centre and the corners of
 // its near plane are all kept clear, so it never ends inside a wall or a post.
-// Drag with the right mouse button (or under pointer lock) or the right
-// stick to orbit; without input it settles behind the target's facing.
+// Hold "look" (the right mouse button; shell/controls.js lists it, and a player can give it a
+// key) and move the pointer, or use pointer lock or the right stick, to orbit; without input it
+// settles behind the target's facing. Its distance, height, mouse speed and lens are tuned
+// values of "Camera", so the Stage's Tune changes them without the game declaring any.
 //   const cam = followCamera3D(ctx, player, { blockers: [level] });
 //   // framed by the target's own height (measured once): it looks at its chest
 //   // (height: 0.6 of it) from 3 heights away (distance), so any size stays in frame
@@ -30,9 +32,9 @@
 //   const cam = followCamera3D(ctx, hero.root, {
 //     blockers: [level, props],  // anything the camera must not pass through
 //     shoulder: 0.55,            // over the right shoulder (negative: the left)
-//     orbitButton: 1,            // the middle button drags the view, so right-click
+//     orbitButton: 1,            // "look" moves to the middle button, so right-click
 //                                // stays free for a dodge; null: no button, only
-//                                // pointer lock and the right stick
+//                                // pointer lock, a key and the right stick
 //     distance: 4.3, pitch: 0.22,
 //     ground: (x, z) => terrainHeight(x, z), // a heightfield to stay above, cheaper than
 //                                // raycasting a big terrain mesh as a blocker
@@ -153,10 +155,35 @@ export function followCamera3D(ctx, target, options = {}) {
     camera.fov = lens;
     camera.updateProjectionMatrix();
   }
+  // The orbit is the action "look", so Controls lists and rebinds it. A game that names a button
+  // here moves the action to it.
+  const looks = orbit && ctx.input.has("look");
+  if (looks && options.orbitButton !== undefined)
+    ctx.input.bindMouse("look", orbitButton === null ? [] : [orbitButton]);
+  // The person's own settings for this camera: tuned values of "Camera" in tune.json, which the
+  // game never has to declare. A lens is set only when it is tuned, so a game that moves its
+  // own field of view keeps doing so.
+  const ownLens = camera.isPerspectiveCamera ? camera.fov : null;
+  const tuned = ctx.tune(
+    "Camera",
+    {
+      ...(frame === null ? { distance } : {}),
+      height,
+      ...(orbit ? { turnSpeed: 1 } : {}),
+      ...(ownLens === null ? {} : { lens: ownLens }),
+    },
+    {
+      distance: { min: 0.5, max: Math.max(20, distance * 4), step: 0.1, label: "Distance" },
+      height: { min: 0, max: Math.max(4, height * 4), step: 0.05, label: "Height" },
+      turnSpeed: { min: 0.2, max: 3, step: 0.05, unit: "×", label: "Mouse speed" },
+      lens: { min: 15, max: 110, step: 1, unit: "°", label: "Lens" },
+    },
+  );
+  let lensSet = ownLens;
   // Framed by its longest side across the view's width, at this lens.
   const span = frame === null ? null : longestSide(target);
   const framed = () => {
-    if (span === null || !camera.isPerspectiveCamera) return distance;
+    if (span === null || !camera.isPerspectiveCamera) return tuned.distance ?? distance;
     const across =
       2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect);
     return span / frame / (2 * Math.tan(across / 2));
@@ -196,13 +223,21 @@ export function followCamera3D(ctx, target, options = {}) {
     focus: null,
     update(dt) {
       if (dt <= 0) return;
-      // Orbit by mouse (the orbit button held, or pointer lock) or the right stick.
+      if (ownLens !== null && tuned.lens !== lensSet) {
+        lensSet = tuned.lens;
+        camera.fov = tuned.lens;
+        camera.updateProjectionMatrix();
+      }
+      // Orbit by the pointer ("look" held, or pointer lock) or the right stick.
       let dx = 0;
       let dy = 0;
-      const dragging = orbitButton !== null && ctx.mouse.down(orbitButton);
-      if (orbit && (dragging || document.pointerLockElement === ctx.canvas)) {
-        dx = ctx.mouse.movement.x * sensitivity;
-        dy = ctx.mouse.movement.y * sensitivity;
+      if (
+        orbit &&
+        ((looks && ctx.input.down("look")) || document.pointerLockElement === ctx.canvas)
+      ) {
+        const turn = sensitivity * (tuned.turnSpeed ?? 1);
+        dx = ctx.mouse.movement.x * turn;
+        dy = ctx.mouse.movement.y * turn;
       }
       const pad = orbit ? [...(navigator.getGamepads?.() ?? [])].find((p) => p != null) : null;
       const sx = pad?.axes[2] ?? 0;
@@ -235,7 +270,7 @@ export function followCamera3D(ctx, target, options = {}) {
       ahead.lerp(want, ease(2.5, dt));
       pivot.lerp(target.position, ease(lag, dt));
       centre.copy(pivot).add(ahead);
-      centre.y += height;
+      centre.y += tuned.height ?? height;
       back.set(
         Math.sin(rig.yaw) * Math.cos(pitch),
         Math.sin(pitch),

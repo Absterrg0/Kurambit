@@ -198,8 +198,9 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
     let run = null;
     let onRun = 0;
     for (const action of controls.actions.values()) {
-      // A default the game neither names nor reads is not one of its controls.
-      if (action.fixed || !controls.ownedByGame(action.name)) continue;
+      // A default the game neither names nor reads is not one of its controls. One the pointer
+      // drives (look) answers to the pointer's movement, which this play does not make.
+      if (action.fixed || action.pointer || !controls.ownedByGame(action.name)) continue;
       if (run === null || onRun >= ACTIONS_PER_RUN || current() !== run) {
         restart();
         run = await playing();

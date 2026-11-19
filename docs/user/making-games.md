@@ -344,7 +344,9 @@ can lose a run; while it is on, a loss doesn't end the run and the bar says "Can
 game has no sound files, the sound button is dimmed and reads **No sound yet**. Paused, or once a run ends, the run's timeline and
 its time fill the middle. The **⋯** menu has the run (tell the agent about it, save it as a test
 play), what you see (the game's controls and the dev views) and the Stage (pause when you click
-away, hide the game, stop it). Hover a control for its key. Hidden, the game folds into the top bar
+away, hide the game, stop it). The controls list every action with its keys, and a click on one
+changes its key; a game with the built-in follow camera lists **Look around** there: hold the right
+mouse button, or a key you give it, and move the pointer. Hover a control for its key. Hidden, the game folds into the top bar
 with its picture, and **Show the game** brings it back.
 Drag the edge under the bar to give the chat more or less of the column. The column keeps a readable
 width; for a bigger game beside the chat, set **Settings → Appearance → Chat width** to Wide or
@@ -373,7 +375,9 @@ what fills it:
   Values are saved into the game as you let go, and a tuning session is one build Undo takes back;
   **Keep as a build** ends the session, so your next change starts another. Values kept while an
   agent's turn works in the same folder wait and become their build when that turn ends, on top of
-  what the turn left, so none is lost. **Put all back** returns every value to the game's own. If a
+  what the turn left, so none is lost. **Put all back** returns every value to the game's own. A
+  game with the built-in follow camera has a **Camera** section here without the agent adding one:
+  its distance, height, mouse speed and lens. If a
   game has nothing to tune, one button asks your agent to make the things it names, or the game's
   numbers, tunable.
 - **Art** (`mod+Alt+R`): every asset the game has, with search and a filter for models, textures

@@ -21,6 +21,10 @@
 // lstick_left/right/up/down and rstick_left/right/up/down. mouse lists buttons
 // (0 left, 2 right) and counts only presses on the game canvas. label is the
 // Controls' name for it (default: the name, "move_left" -> "Move left").
+//
+// `look` is the runtime's own: held, the pointer turns shell/camera.js's orbiting camera. It is
+// listed once a game uses that camera, and takes a key like any action (hold it and move the
+// pointer); `look: { mouse: [1] }` moves it to another button.
 
 /** Defaults every genre can read; each one has a reason in TEMPLATE.md. */
 export const DEFAULT_ACTIONS = {
@@ -31,6 +35,9 @@ export const DEFAULT_ACTIONS = {
   jump: { keys: ["Space"], pad: ["a"] },
   action: { keys: ["KeyJ", "Enter"], pad: ["x"], mouse: [0] },
   alt: { keys: ["KeyK", "ShiftLeft"], pad: ["b"] },
+  // Read by the orbiting follow camera. The right button: the left is the game's action, and a
+  // trackpad has no middle one. `pointer`: it acts through the pointer's movement while held.
+  look: { keys: [], mouse: [2], pad: ["rstick"], label: "Look around", pointer: true },
   // The shell's own; it stays bound so a player can always reach the game's pause.
   pause: { keys: ["Escape", "KeyP"], pad: ["start"], fixed: true },
 };
@@ -81,6 +88,7 @@ const PAD_NAMES = {
   down: "D-pad down",
   left: "D-pad left",
   right: "D-pad right",
+  rstick: "Right stick",
 };
 const KEY_NAMES = {
   ArrowLeft: "Left",
@@ -176,9 +184,15 @@ export function createControls(gameActions) {
       label: typeof spec.label === "string" ? spec.label : labelOf(name),
       keys: [...keys],
       defaults: keys,
-      pad: strings(spec.pad).filter((p) => BUTTONS[p] !== undefined || STICKS[p] !== undefined),
+      pad: strings(spec.pad).filter(
+        (p) => BUTTONS[p] !== undefined || STICKS[p] !== undefined || p === "rstick",
+      ),
       mouse: Array.isArray(spec.mouse) ? spec.mouse.filter(Number.isInteger) : [],
       fixed: spec.fixed === true,
+      // A game that moves `look` to another button still has an action the pointer drives.
+      pointer:
+        spec.pointer === true ||
+        (DEFAULT_ACTIONS[name]?.pointer === true && spec.pointer !== false),
     });
   }
 
@@ -194,6 +208,11 @@ export function createControls(gameActions) {
     /** Whether an action is one of the game's: named in ACTIONS, or read through ctx.input. */
     ownedByGame: (name) => named.has(name) || used.has(name),
     has: (name) => actions.has(name),
+    /** The mouse buttons an action answers to, when the game's code names them late (the camera's orbitButton). */
+    setMouse(name, buttons) {
+      const action = actions.get(name);
+      if (action !== undefined) action.mouse = buttons.filter(Number.isInteger);
+    },
     label(name) {
       const action = actions.get(name);
       if (action === undefined) return "";
@@ -266,6 +285,11 @@ function padStrength(pad, name) {
     if (each?.pressed !== true) return 0;
     return typeof each.value === "number" && each.value > 0 ? each.value : 1;
   }
+  // The whole right stick, whichever way it leans.
+  if (name === "rstick") {
+    const lean = Math.hypot(pad.axes[2] ?? 0, pad.axes[3] ?? 0);
+    return lean <= DEADZONE ? 0 : Math.min(1, (lean - DEADZONE) / (1 - DEADZONE));
+  }
   const [axis, sign] = STICKS[name];
   const value = (pad.axes[axis] ?? 0) * sign;
   return value <= DEADZONE ? 0 : Math.min(1, (value - DEADZONE) / (1 - DEADZONE));
@@ -311,6 +335,10 @@ export function createInput(controls) {
       read(name);
       return controls.label(name);
     },
+    /** Whether the game's table has the action (one it dropped with null is gone). */
+    has: (name) => controls.has(name),
+    /** Moves an action to these mouse buttons (0 left, 1 middle, 2 right). */
+    bindMouse: (name, buttons) => controls.setMouse(name, buttons),
   };
   return {
     api,
