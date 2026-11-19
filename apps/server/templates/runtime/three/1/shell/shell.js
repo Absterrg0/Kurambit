@@ -748,8 +748,6 @@ function step() {
   return dt;
 }
 
-// A Stage portrait's camera (stage-bridge.js portrait) for the one frame it draws.
-let portraitCamera = null;
 function draw(dt) {
   if (run === null) {
     renderer.clear();
@@ -758,7 +756,7 @@ function draw(dt) {
   // A frozen frame the Stage's free camera flies around is drawn from it, the game's own render
   // included; the game's camera is back before anything else reads ctx.camera.
   const own = run.ctx.camera;
-  const camera = portraitCamera ?? devView.camera() ?? own;
+  const camera = devView.camera() ?? own;
   run.ctx.camera = camera;
   // The person's look edits from Art (scale, turn) sit on their things only while this draws.
   bridge.shapeLooks(true);
@@ -937,17 +935,15 @@ const bridge = createStageBridge({
     look.update();
     draw(0);
   },
-  /** False when nothing was drawn: a run whose programs still compile, or none. */
-  drawFrom(camera) {
-    if (run === null || run.compiling === true) return false;
-    portraitCamera = camera;
-    try {
-      look.update();
-      draw(0);
-    } finally {
-      portraitCamera = null;
-    }
-    return true;
+  /**
+   * For a portrait, which the bridge draws itself, straight into a target: null while nothing
+   * draws (no run, or one whose programs still compile), else the look set for a picture of one
+   * thing, as the call that puts it back.
+   */
+  picture() {
+    if (run === null || run.compiling === true) return null;
+    look.update();
+    return look.forPicture();
   },
 });
 onModelCopy(bridge.assetCopy);

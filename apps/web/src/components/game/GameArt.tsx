@@ -1335,7 +1335,15 @@ function ArtDetail({
   );
 }
 
-const ORBIT_PX = 384;
+/** The view's picture is drawn for the pixels it covers: its width times the display's ratio, capped. */
+const ORBIT_MOST_PX = 1024;
+const orbitPx = (view: HTMLElement | null) =>
+  Math.round(
+    Math.min(
+      ORBIT_MOST_PX,
+      Math.max(256, (view?.clientWidth ?? 384) * Math.min(2, window.devicePixelRatio || 1)),
+    ),
+  );
 const ORBIT_PER_PX = 0.012;
 
 /**
@@ -1370,6 +1378,7 @@ function CodeModelDetail({
   const [picture, setPicture] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const drag = useRef<{ x: number; y: number } | null>(null);
+  const view = useRef<HTMLDivElement | null>(null);
   // One picture in flight; the angle asked for meanwhile is drawn after it.
   const busy = useRef(false);
   const wanted = useRef(angle);
@@ -1378,7 +1387,10 @@ function CodeModelDetail({
     busy.current = true;
     let asked = wanted.current;
     for (;;) {
-      const portrait = await portraitStageThing(entry.id, { size: ORBIT_PX, ...asked });
+      const portrait = await portraitStageThing(entry.id, {
+        size: orbitPx(view.current),
+        ...asked,
+      });
       if (portrait === null) setFailed(true);
       else {
         setFailed(false);
@@ -1406,6 +1418,7 @@ function CodeModelDetail({
   return (
     <>
       <div
+        ref={view}
         role="img"
         aria-label={`${entry.name}, drag to turn it`}
         className="relative aspect-square w-full shrink-0 cursor-grab touch-none bg-stage-well active:cursor-grabbing"

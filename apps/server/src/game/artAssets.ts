@@ -22,6 +22,7 @@ import { creditedLibraryFiles, gltfTriangles } from "./assetFacts.ts";
 import { reviewedNotExported } from "./blenderPipeline.ts";
 import { gamePaths } from "./engineProfile.ts";
 import { fileSha256 } from "./fileHash.ts";
+import { ensureGameDir } from "./gameKeptSaves.ts";
 import { GENERATED_DIR } from "./generatedSource.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import { walkFiles } from "./walkFiles.ts";
@@ -263,13 +264,9 @@ export const saveArtThumbnail = async (
   const bytes = Buffer.from(png.slice(png.indexOf(",") + 1), "base64");
   if (bytes.length < PNG_SIGNATURE.length || !bytes.subarray(0, 8).equals(PNG_SIGNATURE))
     throw new Error("not a PNG");
-  const folder = NodePath.join(root, ART_THUMBNAIL_DIR);
-  await NodeFSP.mkdir(folder, { recursive: true });
-  const real = await NodeFSP.realpath(folder);
-  const realRoot = await NodeFSP.realpath(root);
-  if (!real.startsWith(realRoot + NodePath.sep))
-    throw new Error("the thumbnail folder leaves the game");
-  const target = NodePath.join(real, `${sha256}.png`);
+  // Checked before anything is made: a link on the way would have its folder made outside.
+  const folder = await ensureGameDir(root, ART_THUMBNAIL_DIR);
+  const target = NodePath.join(folder, `${sha256}.png`);
   // Written aside and moved in, so a list read meanwhile never names half a picture.
   const scratch = `${target}.${process.pid}.tmp`;
   await NodeFSP.writeFile(scratch, bytes);

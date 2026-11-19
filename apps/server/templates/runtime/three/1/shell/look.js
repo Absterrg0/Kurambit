@@ -995,11 +995,6 @@ export async function createLook(canvas, options = {}) {
       scene.add(dome);
       domes.set(scene, dome);
     }
-    // A Stage portrait (stage-bridge.js) draws its thing on nothing.
-    if (camera.userData.kurambitPortrait === true) {
-      dome.visible = false;
-      return;
-    }
     const narrow = camera.isPerspectiveCamera === true && camera.fov <= BAND_FOV;
     dome.visible = narrow;
     scene.background = narrow ? null : sky.background;
@@ -1106,6 +1101,28 @@ export async function createLook(canvas, options = {}) {
      * around the scene (the game's own environment when given), no baked level shadow. Returns
      * the call that puts the renderer back.
      */
+    /**
+     * The look for a picture of one thing drawn straight into a target (the Stage's portraits):
+     * its tone mapping on the materials, as a frame without the post chain has it, at a plain
+     * exposure, and its grade and baked shadows off, so the picture is the thing and not the
+     * game's mood. Returns the call that puts the renderer back.
+     */
+    forPicture() {
+      const tone = renderer.toneMapping;
+      const exposure = renderer.toneMappingExposure;
+      const baked = shared.lookBakedOn.value;
+      const grade = shared.lookGrade.value.clone();
+      if (!look.plain) renderer.toneMapping = TONE[look.toneMapping];
+      renderer.toneMappingExposure = 1;
+      shared.lookBakedOn.value = 0;
+      shared.lookGrade.value.set(1, 1, 0, 0);
+      return () => {
+        renderer.toneMapping = tone;
+        renderer.toneMappingExposure = exposure;
+        shared.lookBakedOn.value = baked;
+        shared.lookGrade.value.copy(grade);
+      };
+    },
     lightForPicture(scene, environment = null) {
       const tone = renderer.toneMapping;
       const baked = shared.lookBakedOn.value;

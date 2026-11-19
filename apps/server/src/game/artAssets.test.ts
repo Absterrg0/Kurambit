@@ -55,7 +55,7 @@ describe("saveArtThumbnail", () => {
   it("keeps a PNG by its content hash under the ignored builds folder", async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "art-thumb-"));
     const kept = await saveArtThumbnail(root, SHA, PNG);
-    expect(kept).toBe(`builds/thumbnails/${SHA}.png`);
+    expect(kept).toBe(`builds/thumbnails/2x/${SHA}.png`);
     expect((await NodeFSP.stat(NodePath.join(root, kept))).isFile()).toBe(true);
     await NodeFSP.rm(root, { recursive: true, force: true });
   });

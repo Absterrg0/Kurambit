@@ -271,7 +271,8 @@ const backdropCovers = (out, size) => {
  * `runSoFar()` is the run in play so far as a play (or null),
  * `dev` takes the Stage's dev views (shell/dev-view.js) and a frozen run's one-frame step, and
  * `rewind` takes the run so far, replays a play to a moment and hands it over, or starts afresh,
- * and `drawFrom(camera)` draws one frame as play draws it, from another camera (a portrait).
+ * and `picture()` sets the look for a portrait the bridge draws itself (null while nothing draws)
+ * and returns how to put it back.
  */
 export function createStageBridge({
   canvas,
@@ -288,7 +289,7 @@ export function createStageBridge({
   runSoFar,
   dev,
   rewind,
-  drawFrom,
+  picture,
 }) {
   let active = false;
   let frozen = false;
@@ -1591,14 +1592,16 @@ export function createStageBridge({
     if (key === null) added.push((key = new THREE.DirectionalLight()));
     for (const light of added) scene.add(light);
     if (key.target.parent === null && added.includes(key)) scene.add(key.target);
+    // Together with the key and the studio's environment, a surface facing the key comes out
+    // near its own colour, so a swatch and its picture agree.
     sky.color.setHex(0xffffff);
     sky.groundColor.setHex(0x5a5a66);
-    sky.intensity = 2.2;
+    sky.intensity = 1.1;
     // From above and to the left of where the camera looks from.
     const offset = camera.position.clone().sub(sphere.center).normalize();
     offset.add(new THREE.Vector3(-offset.z, 0.9, offset.x).multiplyScalar(0.8));
     key.color.setHex(0xffffff);
-    key.intensity = 2.6;
+    key.intensity = 1.9;
     key.position.copy(sphere.center).addScaledVector(offset.normalize(), sphere.radius * 4);
     if (key.parent !== scene && key.parent !== null) key.parent.worldToLocal(key.position);
     key.target.position.copy(sphere.center);
@@ -1650,6 +1653,27 @@ export function createStageBridge({
     return null;
   };
 
+  // The most a portrait is across: enough for the inspector's view on a 2× display.
+  const PORTRAIT_MOST_PX = 1024;
+  // One target for every portrait, sized to the last one asked for. Drawn as the screen is
+  // (three's own rule for an XR target): materials tone map and encode sRGB into it with the
+  // programs the game's frames already compiled, so a portrait compiles nothing and its colours
+  // are the ones that play.
+  let portraitBuffer = null;
+  const portraitTarget = (px) => {
+    if (portraitBuffer === null) {
+      portraitBuffer = new THREE.WebGLRenderTarget(px, px, {
+        samples: 4,
+        colorSpace: renderer.outputColorSpace,
+      });
+      portraitBuffer.isXRRenderTarget = true;
+      // The materials already encode sRGB, so the texture holds plain bytes, as the target's
+      // multisample buffer does under that rule: the two must match for the resolve.
+      portraitBuffer.texture.internalFormat = "RGBA8";
+    } else if (portraitBuffer.width !== px) portraitBuffer.setSize(px, px);
+    return portraitBuffer;
+  };
+
   // A points thing (fireflies, sparks) is a few pixels from a framing distance, and its glow adds
   // to whatever is behind it: drawn larger, on this dark backdrop, opaque.
   const BACKDROP = new THREE.Color(0x17181b);
@@ -1678,16 +1702,6 @@ export function createStageBridge({
     });
   };
 
-  /**
-   * One named thing alone, in a neutral studio light: everything else hidden, the sky and fog let
-   * go, a camera around it at `yaw` and `pitch` (a wide flat thing, a lake or a field, from at
-   * least 45° above) fitted to its bounds, drawn twice (on black, then on white) so its edges come
-   * out transparent, and a square of `size` px cut from the middle. A thing that leaves no picture
-   * that way (water that shows what is behind it, points that glow) is drawn once more, opaque,
-   * on a dark backdrop. Done between two frames and put back exactly before the next, so play
-   * never sees it; null when the game is not drawing (its programs still compiling) or the thing
-   * draws nothing in either picture.
-   */
   /**
    * One named thing as a GLB, for Art's Save to library: copies of its bodies as they stand in
    * the scene, its look's edits and scale included, set so it stands on the origin, written by
@@ -1727,17 +1741,57 @@ export function createStageBridge({
     return `data:model/gltf-binary;base64,${btoa(binary)}`;
   };
 
+  /**
+   * One named thing alone, in a neutral studio light: everything else hidden, the sky and fog let
+   * go, a camera around it at `yaw` and `pitch` (a wide flat thing, a lake or a field, from at
+   * least 45° above) fitted to its bounds, drawn twice (on black, then on white) so its edges come
+   * out transparent, as a square `size` px across. A thing that leaves no picture that way (water
+   * that shows what is behind it, points that glow) is drawn once more, opaque, on a dark
+   * backdrop. Drawn into a target of its own and put back exactly, so play and the Stage never
+   * see it; null when the game is not drawing (its programs still compiling) or the thing draws
+   * nothing in either picture.
+   */
   const portrait = ({ id, size, yaw, pitch }) => {
     const record = things.get(id);
     const seen = view();
-    if (record === undefined || seen === null || drawFrom === undefined) return null;
+    if (record === undefined || seen === null || picture === undefined) return null;
     const bodies = bodiesOf(record).filter((body) => attached(body, seen.scene));
     if (bodies.length === 0) return null;
     shapeLooks(true);
+    // The look's scale and turn have just been put on the thing: its pieces' places in the world
+    // are stale until they are worked out again, and a box measured from them is the unturned
+    // thing's, which a turned rod then swings out of.
+    for (const body of bodies) body.updateWorldMatrix(true, true);
     const bounds = new THREE.Box3();
     for (const body of bodies) bounds.union(partBox.setFromObject(body, true));
+    // What the picture is fitted to: the corners of each drawn piece's own box, where it stands.
+    // A rod's own box is as thin as the rod; the thing's box as a whole is mostly air around it,
+    // and fitting that leaves the body small in a corner.
+    const reaches = [];
+    for (const body of bodies)
+      body.traverse((node) => {
+        if (!(node.isMesh || node.isLine || node.isPoints || node.isSprite) || !shown(node)) return;
+        const own =
+          node.isInstancedMesh || node.isSkinnedMesh || node.isSprite
+            ? null
+            : (node.geometry?.boundingBox ??
+              (node.geometry?.computeBoundingBox?.(), node.geometry?.boundingBox ?? null));
+        // Instances, a posed skin and a sprite have no one box of their own: their box in the world.
+        const boxed = own ?? partBox.setFromObject(node, true);
+        if (boxed.isEmpty()) return;
+        for (let i = 0; i < 8; i += 1) {
+          const corner = new THREE.Vector3(
+            i & 1 ? boxed.max.x : boxed.min.x,
+            i & 2 ? boxed.max.y : boxed.min.y,
+            i & 4 ? boxed.max.z : boxed.min.z,
+          );
+          reaches.push(own === null ? corner : corner.applyMatrix4(node.matrixWorld));
+        }
+      });
     shapeLooks(false);
     if (bounds.isEmpty()) return null;
+    const neutral = picture();
+    if (neutral === null) return null;
     const keep = new Set();
     let onlyPoints = true;
     for (const body of bodies) {
@@ -1763,14 +1817,10 @@ export function createStageBridge({
     const fogWas = fog === null ? null : { near: fog.near, far: fog.far, density: fog.density };
     const clear = renderer.getClearColor(new THREE.Color());
     const clearAlpha = renderer.getClearAlpha();
-    const { width: w, height: h } = canvas;
-    const side = Math.min(w, h);
-    const camera = new THREE.PerspectiveCamera(30, w / h, 0.01, 1000);
-    // The look's sky band never draws behind a portrait.
-    camera.userData.kurambitPortrait = true;
-    // 30 degrees across the square cut from the middle, whichever way the canvas is long.
-    if (w < h)
-      camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(Math.PI / 12) * (h / w)));
+    const drawnTo = renderer.getRenderTarget();
+    const px = Math.round(Math.min(Math.max(size, 64), PORTRAIT_MOST_PX));
+    const target = portraitTarget(px);
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 1000);
     const extent = bounds.getSize(new THREE.Vector3());
     const flat = extent.y < 0.05 * Math.max(extent.x, extent.z);
     const tilt = flat ? Math.max(pitch, Math.PI / 4) : pitch;
@@ -1790,32 +1840,53 @@ export function createStageBridge({
     camera.lookAt(sphere.center);
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
-    // Fitted to its bounds as they fall in the square, not its sphere: a tall figure or a lake
-    // seen from above fills the picture.
-    let reach = 0;
-    const corner = new THREE.Vector3();
-    for (let i = 0; i < 8; i += 1) {
-      corner
-        .set(
-          i & 1 ? bounds.max.x : bounds.min.x,
-          i & 2 ? bounds.max.y : bounds.min.y,
-          i & 4 ? bounds.max.z : bounds.min.z,
-        )
-        .project(camera);
-      reach = Math.max(reach, Math.abs(corner.x) * (w / side), Math.abs(corner.y) * (h / side));
+    // Fitted to its pieces as they fall in the square from this side, not to its sphere: the
+    // view is slid until they sit in the middle, then zoomed until the farthest is just inside,
+    // so the whole thing is in the picture at every angle and fills it as far as its shape lets.
+    if (!flat && reaches.length > 0) {
+      const at = new THREE.Vector3();
+      const across = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      const halfView = distance * Math.tan(Math.PI / 12);
+      const span = () => {
+        let left = Infinity;
+        let right = -Infinity;
+        let bottom = Infinity;
+        let top = -Infinity;
+        for (const point of reaches) {
+          at.copy(point).project(camera);
+          left = Math.min(left, at.x);
+          right = Math.max(right, at.x);
+          bottom = Math.min(bottom, at.y);
+          top = Math.max(top, at.y);
+        }
+        return { left, right, bottom, top };
+      };
+      // Twice: a slide changes the perspective a little, and the second pass takes that up.
+      for (let pass = 0; pass < 2; pass += 1) {
+        const { left, right, bottom, top } = span();
+        camera.matrixWorld.extractBasis(across, up, at);
+        camera.position
+          .addScaledVector(across, ((left + right) / 2) * halfView)
+          .addScaledVector(up, ((bottom + top) / 2) * halfView);
+        camera.updateMatrixWorld();
+      }
+      const { left, right, bottom, top } = span();
+      const reach = Math.max(Math.abs(left), Math.abs(right), Math.abs(bottom), Math.abs(top));
+      if (reach > 0 && Number.isFinite(reach))
+        camera.zoom = Math.min(20, Math.max(0.2, 0.86 / reach));
     }
-    if (reach > 0 && !flat) camera.zoom = Math.min(20, Math.max(0.2, 0.86 / reach));
     camera.updateProjectionMatrix();
     const out = [0, 1].map(() => {
       const layer = document.createElement("canvas");
-      layer.width = size;
-      layer.height = size;
+      layer.width = px;
+      layer.height = px;
       return layer.getContext("2d", { willReadFrequently: true });
     });
     const rig = studioRig(scene, keep, sphere, camera);
     const points = [];
     const swapped = [];
-    const pointPx = (POINT_PX * side) / size / renderer.getPixelRatio();
+    const pointPx = (POINT_PX * px) / 256 / renderer.getPixelRatio();
     for (const body of bodies)
       body.traverse((node) => {
         if (!node.isPoints || node.material == null || Array.isArray(node.material)) return;
@@ -1828,8 +1899,25 @@ export function createStageBridge({
           node.material = plainPoints(node.material, pointPx);
         }
       });
-    const draw = () => {
-      if (drawFrom(camera) === false) throw new Error("the game is not drawing yet");
+    // Straight into the target with the renderer, never through the game's frame: the picture
+    // has the size asked for whatever the game's render scale is, none of its post-processing,
+    // and the game's canvas is not touched, so the Stage never shows a portrait being made.
+    const bytes = new Uint8Array(px * px * 4);
+    const draw = (paint) => {
+      shapeLooks(true);
+      try {
+        renderer.setRenderTarget(target);
+        renderer.clear();
+        renderer.render(scene, camera);
+      } finally {
+        shapeLooks(false);
+      }
+      renderer.readRenderTargetPixels(target, 0, 0, px, px, bytes);
+      // A target's rows run from the bottom up.
+      const image = paint.createImageData(px, px);
+      for (let row = 0; row < px; row += 1)
+        image.data.set(bytes.subarray((px - 1 - row) * px * 4, (px - row) * px * 4), row * px * 4);
+      paint.putImageData(image, 0, 0);
     };
     let covers = 0;
     try {
@@ -1837,7 +1925,7 @@ export function createStageBridge({
       const studio = studioEnvironment(scene);
       if (studio !== null) {
         scene.environment = studio;
-        scene.environmentIntensity = 0.9;
+        scene.environmentIntensity = 0.4;
       }
       if (fog !== null) {
         fog.near = 1e9;
@@ -1847,10 +1935,9 @@ export function createStageBridge({
       if (!onlyPoints)
         for (const [n, paint] of out.entries()) {
           renderer.setClearColor(n === 0 ? 0x000000 : 0xffffff, 1);
-          draw();
-          paint.drawImage(canvas, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
+          draw(paint);
         }
-      if (!onlyPoints) covers = cutout(out, size);
+      if (!onlyPoints) covers = cutout(out, px);
       if (covers < LEAST_COVER) {
         // The backdrop alone, then the thing on it: what differs is the thing, whatever the
         // game's grade and tone mapping make of the backdrop.
@@ -1858,14 +1945,12 @@ export function createStageBridge({
         const shown = bodies.map((body) => body.visible);
         for (const body of bodies) body.visible = false;
         try {
-          draw();
+          draw(out[1]);
         } finally {
           for (const [n, body] of bodies.entries()) body.visible = shown[n];
         }
-        out[1].drawImage(canvas, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
-        draw();
-        out[0].drawImage(canvas, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
-        covers = backdropCovers(out, size);
+        draw(out[0]);
+        covers = backdropCovers(out, px);
       }
     } finally {
       for (const [material, was, attenuates] of points) {
@@ -1882,7 +1967,10 @@ export function createStageBridge({
       scene.environment = environment;
       scene.environmentIntensity = environmentIntensity;
       if (fog !== null && fogWas !== null) Object.assign(fog, fogWas);
+      renderer.setRenderTarget(drawnTo);
       renderer.setClearColor(clear, clearAlpha);
+      neutral();
+      // The shadow maps were drawn for the thing alone: the next frame draws them for the scene.
       redraw();
     }
     // Nothing of it in either picture: no picture, rather than an empty square.
@@ -2003,7 +2091,7 @@ export function createStageBridge({
           text(data.id, 400) &&
           Number.isInteger(data.size) &&
           data.size >= 32 &&
-          data.size <= 512 &&
+          data.size <= 1024 &&
           finite(data.yaw) &&
           finite(data.pitch)
         );

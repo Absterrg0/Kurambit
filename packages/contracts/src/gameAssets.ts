@@ -192,8 +192,10 @@ export type GameArtAssetsResult = typeof GameArtAssetsResult.Type;
 /**
  * Where Art's thumbnails are kept, game-relative: beside the build evidence, out of every build.
  * A model file's is named by its content; a thing the game's code makes, by its build and name.
+ * `2x`: drawn 384 px across, for a tile on a 2× display; the folder above holds the 192 px ones
+ * earlier versions drew, which are left alone.
  */
-export const GAME_ART_THUMBNAIL_DIR = "builds/thumbnails";
+export const GAME_ART_THUMBNAIL_DIR = "builds/thumbnails/2x";
 
 /** A model's thumbnail as the Art tab's viewer drew it once: a small PNG, cached by content. */
 export const GameArtThumbnailInput = Schema.Struct({
@@ -201,7 +203,7 @@ export const GameArtThumbnailInput = Schema.Struct({
   sha256: Sha256,
   png: Schema.String.check(
     Schema.isPattern(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/),
-    Schema.isMaxLength(400_000),
+    Schema.isMaxLength(1_200_000),
   ),
 });
 export type GameArtThumbnailInput = typeof GameArtThumbnailInput.Type;

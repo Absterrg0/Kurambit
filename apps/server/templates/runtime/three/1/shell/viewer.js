@@ -29,7 +29,8 @@ import { drawnBox, stats } from "./model.js";
 import { personFigure } from "./sheet.js";
 
 const THUMBNAILS = new URLSearchParams(location.search).has("thumbnails");
-const THUMBNAIL_SIZE = 192;
+// A tile is at most about 190 px across: drawn once for a 2× display, sharp on any.
+const THUMBNAIL_SIZE = 384;
 // Normals of more vertices than this read as fur, and cost a draw each: the toggle says so instead.
 const MAX_NORMALS = 60_000;
 

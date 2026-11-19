@@ -342,7 +342,8 @@ export const StudioPortrait = Schema.Struct({
   type: Schema.Literal("studio-portrait"),
   request: Schema.Finite,
   id: Schema.String,
-  size: Schema.Int.check(Schema.isBetween({ minimum: 32, maximum: 512 })),
+  /** Pixels across: what the picture covers where it is shown, on that display. */
+  size: Schema.Int.check(Schema.isBetween({ minimum: 32, maximum: 1024 })),
   yaw: Schema.Finite,
   pitch: Schema.Finite,
 });

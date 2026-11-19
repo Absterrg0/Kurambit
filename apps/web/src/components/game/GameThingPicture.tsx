@@ -69,13 +69,14 @@ export const useThingFacts = (threadRef: ScopedThreadRef, build: string | null, 
 
 // One portrait at a time: each is two frames of the game drawn between two of its own.
 let drawing: Promise<unknown> = Promise.resolve();
-const PICTURE_PX = 256;
+/** A tile is at most about 190 px across: drawn once for a 2× display, sharp on any. */
+const PICTURE_PX = 384;
 /**
  * How the game draws a picture: part of the key a picture is kept by, so pictures drawn the old
- * way are drawn again. 3: none while a run compiles (those were solid black), flat things from
- * above, points on a dark backdrop, the studio's environment light.
+ * way are drawn again. 4: straight into a target of the size asked for, whatever the game's
+ * render scale, without its grade or post-processing.
  */
-const PICTURE_RENDERER = 3;
+const PICTURE_RENDERER = 4;
 /** A game that cannot draw yet (its run's programs compile) is asked again this many times. */
 const PICTURE_TRIES = 4;
 const PICTURE_RETRY_MS = 1500;
