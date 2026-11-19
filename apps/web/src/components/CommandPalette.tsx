@@ -98,7 +98,8 @@ import {
   type SourceControlRepositoryInfo,
   type ThreadId,
   resolveEnvironmentMachineKind,
-  partitionGameChats,
+  gameOpenChat,
+  isGameChat,
 } from "@kurambit/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -191,7 +192,6 @@ import { Atom } from "effect/reactivity";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNewChat } from "./game/useNewGameChat";
 import { unresolvedText, useCopyActions, useCopyPlace } from "./game/useGameCopies";
-import { OWN_CHAT_NEVER_SETTLES, readIsGameOwnChat } from "./game/gameOwnChat";
 import { libraryItemName } from "./library/library.logic";
 import { settleAndAdvance } from "../settleAndAdvance";
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -1307,9 +1307,9 @@ function OpenCommandPaletteDialog(props: {
       });
     },
   });
-  // The palette's games are the sidebar's: one row per game, latest first, that opens its
-  // main Log and reads like the sidebar's (still, name, latest status). Projects that are
-  // not games, and their threads, stay out; the Developer view still reaches them.
+  // The palette's games: one row per game, latest first, that opens the chat the game opens to
+  // and reads like its card on Home (still, name, latest status). Projects that are not games,
+  // and their threads, stay out; the Developer view still reaches them.
   const threadShellById = new Map(threads.map((thread) => [thread.id, thread] as const));
   const gameRowItems: CommandPaletteActionItem[] = [];
   {
@@ -1325,26 +1325,27 @@ function OpenCommandPaletteDialog(props: {
       if (thread === undefined || gameKey === null || game === undefined) continue;
       if (seenGames.has(gameKey)) continue;
       seenGames.add(gameKey);
-      const chats = partitionGameChats(
-        threads.filter(
-          (candidate) => `${candidate.environmentId}:${candidate.projectId}` === gameKey,
-        ),
-        liveThreadIds,
+      const chats = threads.filter(
+        (candidate) =>
+          `${candidate.environmentId}:${candidate.projectId}` === gameKey &&
+          candidate.archivedAt === null &&
+          isGameChat(candidate, liveThreadIds),
       );
-      const main = chats.main ?? thread;
+      // A game opens to its most recently active chat, as its card on Home does.
+      const opens = gameOpenChat(chats, liveThreadIds) ?? thread;
       const chatsStatus = resolveGameSidebarStatus(chats);
       gameRowItems.push({
         kind: "action",
         value: `game:${gameKey}`,
         searchTerms: [game.name, "game"],
         title: game.name,
-        description: <PaletteGameStatus game={game} main={main} chats={chatsStatus} />,
-        icon: <PaletteGameIcon game={game} main={main} chats={chatsStatus} />,
+        description: <PaletteGameStatus game={game} opens={opens} chats={chatsStatus} />,
+        icon: <PaletteGameIcon game={game} opens={opens} chats={chatsStatus} />,
         ...(item.searchRecency === undefined ? {} : { searchRecency: item.searchRecency }),
         run: async () => {
           await navigate({
             to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(scopeThreadRef(main.environmentId, main.id)),
+            params: buildThreadRouteParams(scopeThreadRef(opens.environmentId, opens.id)),
           });
         },
       });
@@ -1713,6 +1714,21 @@ function OpenCommandPaletteDialog(props: {
         icon: <CircleStopIcon className={ITEM_ICON_CLASS} />,
         run: runGameAction("stop"),
       });
+    if (activeThread !== null) {
+      const projectRef = scopeProjectRef(activeThread.environmentId, activeThread.projectId);
+      actionItems.push({
+        kind: "action",
+        value: "action:game-new-chat",
+        title: "New chat",
+        description: projectTitleById.get(activeThread.projectId) ?? "",
+        searchTerms: ["new chat", "chat", "thread", "game"],
+        icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: "chat.new",
+        run: async () => {
+          await handleNewThread(projectRef);
+        },
+      });
+    }
     if (copiesArrived && activeThread !== null && copyPlace === null) {
       const projectRef = scopeProjectRef(activeThread.environmentId, activeThread.projectId);
       actionItems.push({
@@ -1752,25 +1768,13 @@ function OpenCommandPaletteDialog(props: {
           },
         });
     }
-    // A chat's work is done: it leaves the game's list for the Settled shelf, and comes back
-    // the same way. The game's own chat is the game's row, which never settles: there the action
-    // is listed disabled with the reason, so a search for it is never answered with nothing.
+    // A chat's work is done: it leaves the list for the Settled shelf, and comes back the same
+    // way.
     const canSettleHere =
       activeThread !== null &&
       readEnvironmentSupportsSettlement(threadRef.environmentId) &&
       readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
-    if (canSettleHere && readIsGameOwnChat(threadRef))
-      actionItems.push({
-        kind: "action",
-        value: "action:game-settle-chat",
-        title: "Settle chat",
-        description: `${OWN_CHAT_NEVER_SETTLES.title}. ${OWN_CHAT_NEVER_SETTLES.description}`,
-        searchTerms: ["settle", "done", "finish", "chat", "shelf"],
-        icon: <CircleCheckIcon className={ITEM_ICON_CLASS} />,
-        disabled: true,
-        run: async () => {},
-      });
-    else if (canSettleHere && activeThread !== null) {
+    if (canSettleHere && activeThread !== null) {
       const settled = activeThread.settledOverride === "settled";
       actionItems.push({
         kind: "action",
@@ -2261,7 +2265,8 @@ function OpenCommandPaletteDialog(props: {
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
-    if (activeProjectTitle) {
+    // A game's own group already offers New chat for the open game.
+    if (activeProjectTitle && !isGameThread) {
       developerItems.push({
         kind: "action",
         value: "action:new-thread",

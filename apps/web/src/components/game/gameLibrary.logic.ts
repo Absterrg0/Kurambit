@@ -175,10 +175,19 @@ export const sortGameSummaries = <T extends GameSummary>(games: readonly T[]): T
       left.name.localeCompare(right.name),
   );
 
-export const sortGameThreadsByActivity = <T extends { readonly updatedAt: string }>(
-  threads: readonly T[],
-): T[] =>
-  [...threads].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+/**
+ * A chat's title as the sidebar, the top bar and Checks say it. Kurambit once titled a game's
+ * chats with the game's name, which every one of those places already says beside it: such a chat
+ * nobody wrote in yet is a new chat, and one with messages is the chat the game was made in.
+ */
+export const chatTitle = (
+  chat: { readonly title: string; readonly latestUserMessageAt: string | null },
+  gameName: string,
+): string => {
+  const title = chat.title.trim();
+  if (title !== "" && title !== gameName.trim()) return title;
+  return chat.latestUserMessageAt === null ? "New chat" : "First chat";
+};
 
 /** Newest session per game, the row a game click should open. */
 export const newestThreadByProject = <

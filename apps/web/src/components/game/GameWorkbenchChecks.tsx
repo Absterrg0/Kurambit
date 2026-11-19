@@ -85,11 +85,12 @@ import {
 } from "./GameChecksBoard";
 import { colourHex } from "./GameColourField";
 import { GameDecisionsSection, SwatchText } from "./GameDecisions";
+import { chatTitle } from "./gameLibrary.logic";
+import { useThreadGameName } from "./GameName";
 import { clockLabel } from "./gameStageRewind";
 import { sameShape, stageDeviceAt } from "./gameStageDevice";
 import { clearStageConsole, type StageConsoleLine, useStageConsole } from "./gameStageWatch";
 import { Workbench } from "./GameWorkbenchParts";
-import { useGameOwnChat } from "./gameOwnChat";
 import { valueLabel } from "./GameInspector";
 import { useChangedSinceBase } from "./useChangedSinceBase";
 import { readNextLine } from "@kurambit/shared/gameNextLine";
@@ -281,17 +282,19 @@ function BuildHeader({
   // can each name a different build, and only this relates them.
   const madeIn = build.source._tag === "saved" ? null : build.source.threadId;
   const otherChat = madeIn === null || madeIn === threadRef.threadId ? null : madeIn;
-  const ownChat = useGameOwnChat(threadRef);
   const otherShell = useQuietThreadShell(
     otherChat === null ? null : scopeThreadRef(threadRef.environmentId, otherChat),
   );
+  const gameName = useThreadGameName(threadRef);
+  // By that chat's title, as its row in the sidebar says it.
   const from =
     otherChat === null
       ? null
-      : ownChat?.id === otherChat
-        ? "the game's own chat"
-        : (otherShell?.title ??
-          (build.source._tag === "turn" ? build.source.threadTitle : "another chat"));
+      : otherShell !== null
+        ? chatTitle(otherShell, gameName)
+        : build.source._tag === "turn"
+          ? build.source.threadTitle
+          : "another chat";
   return (
     <div className="flex flex-col gap-1 pt-2.5 pb-1">
       <div className="flex h-8 items-center gap-2 ps-4 pe-2">

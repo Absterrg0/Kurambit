@@ -5,7 +5,7 @@ import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
 } from "@kurambit/client-runtime/state/runtime";
-import { isNestedUnderLiveParent, type ContextMenuItem, type GameChats } from "@kurambit/contracts";
+import { isNestedUnderLiveParent, type ContextMenuItem } from "@kurambit/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kurambit/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
 import {
@@ -736,13 +736,10 @@ const SIDEBAR_STATUS_URGENCY: readonly SidebarThreadStatus[] = [
 
 /** A game row's status is the whole game's: the most urgent of its chats. */
 export function resolveGameSidebarStatus(
-  chats: GameChats<SidebarThreadStatusInput>,
+  chats: ReadonlyArray<SidebarThreadStatusInput>,
 ): SidebarThreadStatus {
   let urgency = SIDEBAR_STATUS_URGENCY.length - 1;
-  const consider = (status: SidebarThreadStatus) => {
-    urgency = Math.min(urgency, SIDEBAR_STATUS_URGENCY.indexOf(status));
-  };
-  for (const chat of chats.main === null ? chats.others : [chats.main, ...chats.others])
-    consider(resolveSidebarThreadStatus(chat));
+  for (const chat of chats)
+    urgency = Math.min(urgency, SIDEBAR_STATUS_URGENCY.indexOf(resolveSidebarThreadStatus(chat)));
   return SIDEBAR_STATUS_URGENCY[urgency]!;
 }

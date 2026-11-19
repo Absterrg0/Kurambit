@@ -16,10 +16,16 @@ import {
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArchiveIcon,
   ArrowUpIcon,
+  CopyIcon,
+  EllipsisIcon,
   FolderOpenIcon,
   ImagePlusIcon,
+  PencilIcon,
   SlidersHorizontalIcon,
+  SquarePenIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -67,10 +73,11 @@ import {
 } from "./GameCharacterRoute";
 import { showOpenGameDialog, useGameEntryStore } from "./gameEntryStore";
 import { GameLibraryStatusText, useGameLibraryLine } from "./GameLibraryStatus";
-import { useGameName } from "./GameName";
+import { GameNameInput, useGameName, useGameRenameStore, useRenameGame } from "./GameName";
 import { draftGameName } from "./gameLibrary.logic";
 import { engineToolFor } from "./gameStageLogic";
 import { GameToolLink } from "./GameToolLink";
+import { useGameActions } from "./useGameActions";
 import { useGameLibraryRefresh } from "./useGameLibrary";
 import { type GameCover, useGameCovers } from "./useGameCovers";
 import { chooseEngine, useEngineReadiness } from "./useEngineReadiness";
@@ -82,19 +89,22 @@ const BRIEF_IDEAS = [
   "A paper boat racing down a storm drain",
 ] as const;
 
-// Home continues the latest few; the sidebar already lists every game.
-const SHELF_CARDS = 3;
+// Home is where every game is: the sidebar lists chats, and a game whose chats are all settled
+// has no row there. The latest two rows show; the rest are one press away.
+const SHELF_CARDS = 8;
 
 export function GamesHome() {
-  const { covers, isLoading, error } = useGameCovers();
+  const { covers: every, isLoading, error } = useGameCovers();
+  // A game put away is on the sidebar's Archived shelf, not here.
+  const covers = every.filter((cover) => !cover.archived);
   const environmentId = usePrimaryEnvironmentId();
   const navigate = useNavigate();
   const handleNewThread = useNewThreadHandler();
   const openGame = (cover: GameCover) => {
-    if (cover.main !== null) {
+    if (cover.opens !== null) {
       void navigate({
         to: "/$environmentId/$threadId",
-        params: { environmentId: cover.main.environmentId, threadId: cover.main.id },
+        params: { environmentId: cover.opens.environmentId, threadId: cover.opens.id },
       });
       return;
     }
@@ -347,7 +357,8 @@ function BriefBox({
           rows={2}
           disabled={busy}
           placeholder="Describe the game you want to play…"
-          className="min-h-20 w-full resize-none bg-transparent px-4 pt-3.5 text-base/6 text-foreground outline-none placeholder:text-placeholder"
+          // Grows with what is typed up to a cap, then scrolls, as ui/textarea does.
+          className="field-sizing-content max-h-64 min-h-20 w-full resize-none overflow-y-auto bg-transparent px-4 pt-3.5 text-base/6 text-foreground outline-none placeholder:text-placeholder"
         />
         {picture === null ? null : (
           <div className="px-4 pt-1">
@@ -663,7 +674,8 @@ function ContinueShelf({
   onOpen: (cover: GameCover) => void;
 }) {
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
-  const shown = covers.slice(0, SHELF_CARDS);
+  const [all, setAll] = useState(false);
+  const shown = all ? covers : covers.slice(0, SHELF_CARDS);
   return (
     <section aria-labelledby="games" className="@container flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -677,66 +689,156 @@ function ContinueShelf({
           <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
         ))}
       </ul>
+      {covers.length > shown.length ? (
+        <div className="flex justify-center">
+          <Button size="sm" variant="ghost-muted" onClick={() => setAll(true)}>
+            Show all {covers.length}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
+  const { game } = cover;
   const { status, build, still } = useGameLibraryLine({
-    game: cover.game,
-    main: cover.main,
+    game,
+    opens: cover.opens,
     chats: cover.chats,
     read: leaseLiveStatus,
   });
-  const name = useGameName(cover.game.environmentId, cover.game.projectId, cover.game.name);
+  const name = useGameName(game.environmentId, game.projectId, game.name);
+  const renaming = useGameRenameStore((state) => state.renaming === game.projectId);
+  const rename = useRenameGame(game.environmentId);
+  const actions = useGameActions();
+  const canOperate = actions.canOperate(game);
+  // The card's menu, from its ⋯ and from a right-click anywhere on it.
+  const [menuOpen, setMenuOpen] = useState(false);
   // The newest picture any build has, as the sidebar shows: a build being made, or one not
   // pictured yet, never turns the card back into an empty frame.
-  const picture = still ?? cover.game.keyArt;
+  const picture = still ?? game.keyArt;
   // Before any build has a still, the frame the Stage last showed of this game, when it
   // played in this session: the game's own title, not a stand-in.
   const shown = useStageStill(
-    cover.main === null
+    cover.opens === null
       ? ""
-      : scopedThreadKey(scopeThreadRef(cover.main.environmentId, cover.main.id)),
+      : scopedThreadKey(scopeThreadRef(cover.opens.environmentId, cover.opens.id)),
   );
   // A game at work with no picture to show says so in the frame, and only there.
   const making = picture === null && shown === null && status.tone === "live";
-  return (
-    <li className="min-w-0">
-      <button
-        ref={rowRef}
-        type="button"
-        onClick={onOpen}
-        className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 text-left outline-none"
-      >
-        {/* The name is said once, under the cover, so every card reads the same way. */}
-        <GamePicture
-          environmentId={cover.game.environmentId}
-          root={cover.game.root}
-          path={picture}
-          gameName={name}
-          mark="none"
-          className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset transition-shadow duration-150 group-hover:ring-foreground/30 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none"
-        >
-          {/* Without a picture yet: the Stage's last frame, else what is being made, said where
-              its picture will be, else the game's own colour. */}
-          {picture !== null ? null : shown !== null ? (
-            <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
-          ) : making ? (
-            <span className="absolute inset-0 flex items-center justify-center px-3">
-              <GameLibraryStatusText status={status} />
-            </span>
-          ) : null}
-        </GamePicture>
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <Text variant="label" tone="strong" truncate>
-            {name}
-          </Text>
-          {making ? null : <GameLibraryStatusText status={status} />}
-          <CoverSummary build={build} status={status.text} />
+  const frame = (
+    // The name is said once, under the cover, so every card reads the same way.
+    <GamePicture
+      environmentId={game.environmentId}
+      root={game.root}
+      path={picture}
+      gameName={name}
+      mark="none"
+      className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset transition-shadow duration-150 group-hover:ring-foreground/30 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none"
+    >
+      {/* Without a picture yet: the Stage's last frame, else what is being made, said where
+          its picture will be, else the game's own colour. */}
+      {picture !== null ? null : shown !== null ? (
+        <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
+      ) : making ? (
+        <span className="absolute inset-0 flex items-center justify-center px-3">
+          <GameLibraryStatusText status={status} />
         </span>
-      </button>
+      ) : null}
+    </GamePicture>
+  );
+  return (
+    <li
+      className="group/card relative min-w-0"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenuOpen(true);
+      }}
+    >
+      {renaming ? (
+        // The name becomes its own field, so the card is no button while it is typed in.
+        <div ref={rowRef} className="group flex w-full min-w-0 flex-col gap-2.5">
+          {frame}
+          <GameNameInput
+            name={name}
+            onRename={(next) => void rename(game.projectId, next)}
+            onDone={() => useGameRenameStore.getState().stop()}
+          />
+        </div>
+      ) : (
+        <button
+          ref={rowRef}
+          type="button"
+          onClick={onOpen}
+          className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 text-left outline-none"
+        >
+          {frame}
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <Text variant="label" tone="strong" truncate>
+              {name}
+            </Text>
+            {making ? null : <GameLibraryStatusText status={status} />}
+            <CoverSummary build={build} status={status.text} />
+          </span>
+        </button>
+      )}
+      {/* The game's own actions, on its picture: shown to a pointer, the keyboard, and while open. */}
+      <span className="absolute end-1.5 top-1.5 opacity-0 transition-opacity group-hover/card:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
+        <Menu open={menuOpen} onOpenChange={setMenuOpen}>
+          <MenuTrigger
+            render={<Button size="icon-xs" variant="overlay" aria-label={`${name}, game menu`} />}
+          >
+            <EllipsisIcon aria-hidden="true" />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem disabled={!canOperate} onClick={() => actions.newChat(game)}>
+              <SquarePenIcon />
+              New chat
+            </MenuItem>
+            {actions.offersCopy ? (
+              <MenuItem
+                disabled={!canOperate}
+                onClick={() => actions.newChat(game, { inCopy: true })}
+              >
+                <CopyIcon />
+                New chat in a copy
+              </MenuItem>
+            ) : null}
+            <MenuSeparator />
+            <MenuItem
+              disabled={!canOperate}
+              onClick={() => useGameRenameStore.getState().start(game.projectId)}
+            >
+              <PencilIcon />
+              Rename
+            </MenuItem>
+            {actions.canOpenFolder(game) ? (
+              <MenuItem onClick={() => actions.openFolder(game)}>
+                <FolderOpenIcon />
+                Open folder
+              </MenuItem>
+            ) : null}
+            <MenuItem
+              disabled={!canOperate || !actions.canArchive(game)}
+              onClick={() => void actions.archive(game)}
+            >
+              <ArchiveIcon />
+              Archive
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem
+              variant="destructive"
+              disabled={!canOperate}
+              onClick={() => void actions.remove(game)}
+            >
+              <Trash2Icon />
+              Delete…
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+      </span>
     </li>
   );
 }

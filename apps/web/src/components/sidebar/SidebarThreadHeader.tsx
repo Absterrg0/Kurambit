@@ -5,7 +5,7 @@ import { ArrivalDot } from "../game/ArrivalDot";
 import { useLibraryArrival } from "../game/useGameArrivals";
 import { Kbd } from "../ui/kbd";
 import { Text } from "../ui/text";
-import { SIDEBAR_TREE_ROW } from "./SidebarGameRows";
+import { SIDEBAR_ROW } from "./SidebarChatRows";
 
 export interface SidebarThreadHeaderProps {
   onNewGame: () => void;
@@ -80,7 +80,7 @@ function SidebarHeaderRow({
       data-active={active}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
-      className={SIDEBAR_TREE_ROW}
+      className={SIDEBAR_ROW}
     >
       {/* The icon sits where a game's picture does, so the column reads as one list. */}
       <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4">

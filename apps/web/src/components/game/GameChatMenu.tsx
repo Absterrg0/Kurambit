@@ -27,25 +27,25 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "../ui/menu";
 import { Text } from "../ui/text";
 import { toastManager } from "../ui/toast";
-import { GameNameInput } from "./GameName";
-import { useGameOwnChat } from "./gameOwnChat";
+import { chatTitle } from "./gameLibrary.logic";
+import { GameNameInput, useThreadGameName } from "./GameName";
 
 /**
- * Which chat of the game is on screen, after the game's name, when it is not the game's own
- * chat: its title, and in its menu what can be done with it. Settle says its work is done: it
- * leaves the game's list for the Settled shelf (T3's settle, with its Undo), and its builds stay
- * in the game's History.
+ * Which chat of the game is on screen, after the game's name: its title, and in its menu what can
+ * be done with it. Settle says its work is done: it leaves the list for the Settled shelf (T3's
+ * settle, with its Undo), and its builds stay in the game's History.
  */
 export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
   const shell = useQuietThreadShell(threadRef);
-  const own = useGameOwnChat(threadRef);
+  const gameName = useThreadGameName(threadRef);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { settleThread, unsettleThread, confirmAndDeleteThread } = useThreadActions();
   const rename = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
   const [renaming, setRenaming] = useState(false);
-  if (shell === null || own === null || own.id === shell.id) return null;
+  if (shell === null) return null;
+  const title = chatTitle(shell, gameName);
   const settled = shell.settledOverride === "settled";
   const canOperate = readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
   const said = (title: string) => (result: AtomCommandResult<unknown, unknown>) => {
@@ -63,7 +63,7 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
       <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-dim-foreground" />
       {renaming ? (
         <GameNameInput
-          name={shell.title}
+          name={title}
           onRename={(title) =>
             void rename({
               environmentId: threadRef.environmentId,
@@ -81,20 +81,20 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
                 size="sm"
                 variant="ghost"
                 data-game-chat-menu=""
-                aria-label={`${shell.title}, chat menu`}
+                aria-label={`${title}, chat menu`}
                 className="min-w-0 shrink"
               />
             }
           >
             <Text variant="label" tone="default" truncate>
-              {shell.title}
+              {title}
             </Text>
             <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
           </MenuTrigger>
           <MenuPopup align="start">
             <MenuItem disabled={!canOperate} onClick={() => setRenaming(true)}>
               <PencilIcon />
-              Rename
+              Rename chat
             </MenuItem>
             {settled ? (
               <MenuItem
@@ -111,7 +111,7 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
               <MenuItem
                 disabled={!canOperate}
                 onClick={() => {
-                  // The sidebar settles it and moves on to the game's own chat.
+                  // The sidebar settles it and moves on to the next chat at work.
                   if (settleAndAdvance(threadRef)) return;
                   void settleThread(threadRef).then(said("Could not settle the chat"));
                 }}
@@ -130,7 +130,7 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
               }
             >
               <Trash2Icon />
-              Delete…
+              Delete chat…
             </MenuItem>
           </MenuPopup>
         </Menu>

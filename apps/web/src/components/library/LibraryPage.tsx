@@ -26,7 +26,7 @@ import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { cn, randomUUID } from "../../lib/utils";
 import { observeResize } from "../../lib/observeResize";
 import { usePrimaryEnvironmentId } from "../../state/environments";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { useProjects } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -41,8 +41,7 @@ import {
 import { bytesWords, countWords } from "../game/gameArt.logic";
 import { attachAssetToComposer } from "../game/gameComposerContext";
 import { useNewGame } from "../game/gameEntryStore";
-import { useGameLibrary } from "../game/useGameLibrary";
-import { buildGameTree } from "../sidebar/gameTree.logic";
+import { useGameCovers } from "../game/useGameCovers";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import {
@@ -554,14 +553,13 @@ function LibraryDetail({
   const newGame = useNewGame();
   const lastChat = useLastGameChat((state) => state.chat);
   const lastProject = useLastGameChat((state) => state.projectId);
-  const library = useGameLibrary();
-  const threads = useThreadShells();
-  const games = buildGameTree({ games: library.games, threads, sort: "recent" }).live.flatMap(
-    (node) => (node.main === null ? [] : [{ node, main: node.main }]),
+  // Each game with the chat it opens to: the chat the asset is added through.
+  const games = useGameCovers().covers.flatMap((cover) =>
+    cover.opens === null ? [] : [{ game: cover.game, opens: cover.opens }],
   );
   const ordered = [
-    ...games.filter((each) => each.node.game.projectId === lastProject),
-    ...games.filter((each) => each.node.game.projectId !== lastProject),
+    ...games.filter((each) => each.game.projectId === lastProject),
+    ...games.filter((each) => each.game.projectId !== lastProject),
   ];
   const add = useAtomCommand(gameEnvironment.libraryAdd, { reportFailure: false });
   const remove = useAtomCommand(gameEnvironment.libraryRemove, { reportFailure: false });
@@ -579,10 +577,10 @@ function LibraryDetail({
     setBusy(true);
     const result = await add({
       environmentId,
-      input: { threadId: target.main.id, id: item.id, commandId: randomUUID() },
+      input: { threadId: target.opens.id, id: item.id, commandId: randomUUID() },
     });
     setBusy(false);
-    const gameName = nameOf(target.node.game.projectId, target.node.game.name);
+    const gameName = nameOf(target.game.projectId, target.game.name);
     if (result._tag === "Failure") {
       if (isAtomCommandInterrupted(result)) return;
       const error = squashAtomCommandFailure(result);
@@ -604,7 +602,7 @@ function LibraryDetail({
           if (item.kind !== "look") openArtAsset(landed);
           void navigate({
             to: "/$environmentId/$threadId",
-            params: { environmentId, threadId: target.main.id },
+            params: { environmentId, threadId: target.opens.id },
           });
         },
       },
@@ -699,8 +697,8 @@ function LibraryDetail({
               <MenuGroup>
                 <MenuGroupLabel>{item.kind === "look" ? "Use in" : "Add to"}</MenuGroupLabel>
                 {ordered.map((target) => (
-                  <MenuItem key={target.node.key} onClick={() => void addTo(target)}>
-                    {nameOf(target.node.game.projectId, target.node.game.name)}
+                  <MenuItem key={target.game.projectId} onClick={() => void addTo(target)}>
+                    {nameOf(target.game.projectId, target.game.name)}
                   </MenuItem>
                 ))}
               </MenuGroup>

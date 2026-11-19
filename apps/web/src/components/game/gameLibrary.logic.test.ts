@@ -7,7 +7,7 @@ import {
   gameTemplateAppearance,
   newestThreadByProject,
   sortGameSummaries,
-  sortGameThreadsByActivity,
+  chatTitle,
 } from "./gameLibrary.logic";
 
 const summary = (name: string, updatedAt: string): GameSummary => ({
@@ -62,14 +62,19 @@ describe("newestThreadByProject", () => {
   });
 });
 
-describe("sortGameThreadsByActivity", () => {
-  it("orders a game's sessions newest first", () => {
-    expect(
-      sortGameThreadsByActivity([
-        { id: "older", updatedAt: "2026-10-18T00:00:00.000Z" },
-        { id: "newer", updatedAt: "2026-10-20T00:00:00.000Z" },
-      ]).map((thread) => thread.id),
-    ).toEqual(["newer", "older"]);
+describe("chatTitle", () => {
+  it("never says a chat's title is its game's name", () => {
+    const at = "2026-11-19T10:00:00.000Z";
+    expect(chatTitle({ title: "Widen the pond", latestUserMessageAt: at }, "Moonlit Pond")).toBe(
+      "Widen the pond",
+    );
+    // A chat Kurambit once titled with the game's name: new while empty, else the first chat.
+    expect(chatTitle({ title: "Moonlit Pond", latestUserMessageAt: null }, "Moonlit Pond")).toBe(
+      "New chat",
+    );
+    expect(chatTitle({ title: " Moonlit Pond ", latestUserMessageAt: at }, "Moonlit Pond")).toBe(
+      "First chat",
+    );
   });
 });
 

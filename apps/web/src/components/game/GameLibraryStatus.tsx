@@ -62,8 +62,8 @@ const latestStillOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown
  */
 export function useGameLibraryLine(input: {
   readonly game: GameLibraryEntry;
-  /** The chat the game opens on; its turn times the elapsed clock. */
-  readonly main: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime"> | null;
+  /** The chat the game opens to (gameOpenChat); its turn times the elapsed clock. */
+  readonly opens: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime"> | null;
   /** The most urgent state of the game's chats (resolveGameSidebarStatus). */
   readonly chats: SidebarThreadStatus | null;
   readonly read: boolean;
@@ -75,22 +75,23 @@ export function useGameLibraryLine(input: {
   /** The builds are still being read: the picture and the line wait rather than guess. */
   readonly pending: boolean;
 } {
-  const { game, main, chats } = input;
-  const mainRef = input.read && main !== null ? scopeThreadRef(game.environmentId, main.id) : null;
+  const { game, opens, chats } = input;
+  const opensRef =
+    input.read && opens !== null ? scopeThreadRef(game.environmentId, opens.id) : null;
   const builds =
-    mainRef === null
+    opensRef === null
       ? null
       : gameEnvironment.builds({
-          environmentId: mainRef.environmentId,
-          input: { threadId: mainRef.threadId },
+          environmentId: opensRef.environmentId,
+          input: { threadId: opensRef.threadId },
         });
   const build = useEnvironmentQuerySelector(builds, latestBuildOf);
   const nextBuild = useEnvironmentQuerySelector(builds, nextBuildOf);
   const still = useEnvironmentQuerySelector(builds, latestStillOf) ?? null;
   // Between a turn's end and its build being listed, as the game screen says it.
-  const saving = useTurnLanding(mainRef, derivePhase(main?.runtime ?? null) === "running");
+  const saving = useTurnLanding(opensRef, derivePhase(opens?.runtime ?? null) === "running");
   // A game Keep going runs on reads its run, so a step that only waits shows no working dot.
-  const keepGoing = useKeepGoing(game.run !== null ? mainRef : null);
+  const keepGoing = useKeepGoing(game.run !== null ? opensRef : null);
   const status = gameLibraryStatus({
     chats:
       chats === "approval" || chats === "input" || chats === "failed"
@@ -108,9 +109,9 @@ export function useGameLibraryLine(input: {
         ? null
         : { name: buildName(build), at: build.at, doesNotStart: doesNotStart(build.facts) },
     // A game with no chat has no builds to read; any other waits for its read.
-    known: main === null || build !== undefined,
+    known: opens === null || build !== undefined,
   });
-  return { status, build: build ?? null, still, pending: main !== null && build === undefined };
+  return { status, build: build ?? null, still, pending: opens !== null && build === undefined };
 }
 
 /** A game's one status line: a dot for live work or a failure, the words, then its time. */
@@ -167,27 +168,30 @@ function ShortRelativeTime({ timestamp }: { timestamp: string }) {
  */
 export function GameLibraryPicture(props: {
   readonly game: GameLibraryEntry;
-  readonly main: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime"> | null;
+  readonly opens: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime"> | null;
   readonly chats: SidebarThreadStatus | null;
   readonly gameName: string;
   /** Size and placement; the picture's own rounding matches the sidebar's. */
   readonly className: string;
+  /** At an icon's size (16 px), where the usual rounding would make it a disc: T3's project icon. */
+  readonly icon?: boolean;
   /** False reads nothing (a row scrolled out of view). */
   readonly read?: boolean;
 }) {
   const read = props.read !== false;
   const { build, still, pending } = useGameLibraryLine({
     game: props.game,
-    main: props.main,
+    opens: props.opens,
     chats: props.chats,
     read,
   });
   // The Stage's frame of the latest build, once taken, as its card and the Inspector show.
   const frame = useBuildFrame(build?.id ?? null);
+  const rounding = props.icon === true ? "rounded-sm" : "rounded-md";
   if (pending) return <Skeleton shape="card" className={props.className} />;
   if (frame !== null)
     return (
-      <span className={cn("relative block overflow-hidden rounded-md", props.className)}>
+      <span className={cn("relative block overflow-hidden", props.className, rounding)}>
         <img src={frame} alt="" className="absolute inset-0 size-full object-cover" />
       </span>
     );
@@ -197,7 +201,7 @@ export function GameLibraryPicture(props: {
       root={props.game.root}
       path={still ?? props.game.keyArt}
       gameName={props.gameName}
-      className={cn(props.className, "rounded-md")}
+      className={cn(props.className, rounding)}
     />
   );
 }

@@ -4,55 +4,54 @@ import { isNestedUnderLiveParent, type OrchestrationV2AppThread } from "./orches
 
 type At = string | DateTime.Utc;
 
-/** The fields of a thread a game's chats are told apart by; the web holds its times as text. */
+/** The fields of a thread a game's chats are listed by; the web holds its times as text. */
 export interface GameChatShell {
   readonly id: string;
   readonly lineage: OrchestrationV2AppThread["lineage"];
-  readonly createdAt: At;
   readonly updatedAt: At;
+  readonly latestUserMessageAt?: At | null;
   readonly archivedAt: At | null;
   readonly deletedAt: At | null;
+  readonly settledOverride: "settled" | "active" | null;
 }
 
 const millis = (at: At) => (typeof at === "string" ? Date.parse(at) : DateTime.toEpochMillis(at));
 
-/**
- * A game's main chat: its oldest live top-level chat. A game's create
- * launches exactly this thread with the brief; archiving it promotes the next.
- */
-export function gameMainThread<T extends GameChatShell>(threads: readonly T[]): T | null {
-  let main: T | null = null;
-  for (const thread of threads) {
-    if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
-    if (thread.lineage.relationshipToParent !== null) continue;
-    if (main === null || millis(thread.createdAt) < millis(main.createdAt)) main = thread;
-  }
-  return main;
-}
-
-export interface GameChats<T> {
-  /** The game's own chat; when the game has no top-level chat left, its newest other chat. */
-  readonly main: T | null;
-  /** Every other chat of the game, newest first. */
-  readonly others: readonly T[];
-}
+/** When a chat last moved: the person's latest message, else its last change. */
+const activityOf = (chat: GameChatShell) => millis(chat.latestUserMessageAt ?? chat.updatedAt);
 
 /**
- * One game's live threads, by lineage alone: the one rule for which chat is the game's own, for
- * the sidebar and the server alike. A `role` thread is one an earlier Kurambit's production run
- * launched: it never lists as a chat. A subagent under a listed parent stays nested there.
+ * Whether a thread lists as a chat: every chat is equal, whichever made the game. A `role` thread
+ * is one an earlier Kurambit's production run launched: it never lists. A subagent under a listed
+ * parent stays nested there.
  */
-export function partitionGameChats<T extends GameChatShell>(
+export const isGameChat = (
+  thread: Pick<GameChatShell, "lineage" | "deletedAt">,
+  liveThreadIds: ReadonlySet<string>,
+): boolean =>
+  thread.deletedAt === null &&
+  thread.lineage.relationshipToParent !== "role" &&
+  !isNestedUnderLiveParent(thread, liveThreadIds);
+
+/**
+ * The chat a game opens to, from Home, the palette and its picture: its most recently active chat
+ * still at work, else its most recently active settled one. Null when it has no chat left.
+ */
+export function gameOpenChat<T extends GameChatShell>(
   threads: readonly T[],
   liveThreadIds: ReadonlySet<string>,
-): GameChats<T> {
-  const chats: T[] = [];
+): T | null {
+  let open: T | null = null;
   for (const thread of threads) {
-    if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
-    if (thread.lineage.relationshipToParent === "role") continue;
-    if (!isNestedUnderLiveParent(thread, liveThreadIds)) chats.push(thread);
+    if (thread.archivedAt !== null || !isGameChat(thread, liveThreadIds)) continue;
+    if (open === null) {
+      open = thread;
+      continue;
+    }
+    const settled = thread.settledOverride === "settled";
+    const openSettled = open.settledOverride === "settled";
+    if (settled === openSettled ? activityOf(thread) > activityOf(open) : openSettled)
+      open = thread;
   }
-  chats.sort((left, right) => millis(right.updatedAt) - millis(left.updatedAt));
-  const main = gameMainThread(chats) ?? chats[0] ?? null;
-  return { main, others: chats.filter((thread) => thread !== main) };
+  return open;
 }

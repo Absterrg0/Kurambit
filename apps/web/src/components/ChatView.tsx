@@ -9,7 +9,6 @@ import {
   toggleWorkbenchTab,
   useRowWidth,
 } from "./game/gameWorkbenchPanel";
-import { OWN_CHAT_NEVER_SETTLES, readIsGameOwnChat } from "./game/gameOwnChat";
 import { useStageSelectionChip } from "./game/gameComposerContext";
 import { stepStageFrame, toggleStageDevView } from "./game/gameStageBridge";
 import { flipStageCannotLose } from "./game/GameStageControls";
@@ -4623,11 +4622,8 @@ export default function ChatView(props: ChatViewProps) {
     lastVisitedAt: activeThreadLastVisitedAt,
     latestRunCompletedAt: activeLatestRun?.completedAt ?? null,
   });
-  // A game's own chat is the game's row: auto-settle may mark it, and nothing shows it as done.
-  const activeIsGameOwnChat =
-    isGameThread && activeThreadRef !== null && readIsGameOwnChat(activeThreadRef);
   const activeThreadSettled =
-    supportsSettlement && activeThreadShell?.settledOverride === "settled" && !activeIsGameOwnChat;
+    supportsSettlement && activeThreadShell?.settledOverride === "settled";
   const unsettleThreadMutation = useOrchestrationCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
@@ -5364,12 +5360,7 @@ export default function ChatView(props: ChatViewProps) {
           void handleUnsettleActiveThreadStable();
           return;
         }
-        // The key is disabled on a game's own chat, and says so rather than do nothing.
-        if (activeIsGameOwnChat) {
-          toastManager.add({ type: "info", ...OWN_CHAT_NEVER_SETTLES });
-          return;
-        }
-        // The sidebar settles it and moves on to the game's own chat.
+        // The sidebar settles it and moves on to the next chat at work.
         if (settleAndAdvance(activeThreadRef)) return;
         void settleThread(activeThreadRef).then(toastPinFailure("Failed to settle chat"));
       },

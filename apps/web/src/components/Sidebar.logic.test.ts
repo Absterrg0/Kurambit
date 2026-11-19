@@ -34,8 +34,8 @@ import {
 
 import {
   EnvironmentId,
-  gameMainThread,
-  partitionGameChats,
+  gameOpenChat,
+  isGameChat,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -1359,90 +1359,72 @@ describe("sortPinnedThreadsForSidebar", () => {
 describe("a game's chats", () => {
   const chat = (
     id: string,
-    createdAt: string,
-    lineage: {
-      parentThreadId: string | null;
-      relationshipToParent: "fork" | "subagent" | "role" | null;
-    } = {
-      parentThreadId: null,
-      relationshipToParent: null,
-    },
-    overrides: { archivedAt?: string; deletedAt?: string; updatedAt?: string } = {},
+    at: string,
+    overrides: {
+      parentThreadId?: string;
+      relationshipToParent?: "fork" | "subagent" | "role";
+      settled?: boolean;
+      archivedAt?: string;
+      deletedAt?: string;
+      latestUserMessageAt?: string;
+    } = {},
   ) => ({
     id: ThreadId.make(id),
     lineage: {
       parentThreadId:
-        lineage.parentThreadId === null ? null : ThreadId.make(lineage.parentThreadId),
-      relationshipToParent: lineage.relationshipToParent,
+        overrides.parentThreadId === undefined ? null : ThreadId.make(overrides.parentThreadId),
+      relationshipToParent: overrides.relationshipToParent ?? null,
       rootThreadId: ThreadId.make(id),
     },
-    createdAt,
-    updatedAt: overrides.updatedAt ?? createdAt,
+    updatedAt: at,
+    latestUserMessageAt: overrides.latestUserMessageAt ?? null,
     archivedAt: overrides.archivedAt ?? null,
     deletedAt: overrides.deletedAt ?? null,
+    settledOverride: overrides.settled === true ? ("settled" as const) : null,
   });
-  const role = (id: string, parent: string, createdAt: string) =>
-    chat(id, createdAt, { parentThreadId: parent, relationshipToParent: "role" });
+  const live = (...chats: ReturnType<typeof chat>[]) => new Set<string>(chats.map((c) => c.id));
 
-  it("opens the oldest live top-level chat, however recent the others are", () => {
-    const main = chat("main", "2026-11-01T10:00:00Z", undefined, {
-      updatedAt: "2026-11-01T11:00:00Z",
-    });
+  it("opens a game to its most recently active chat, whichever made the game", () => {
+    const first = chat("first", "2026-11-01T10:00:00Z");
     const later = chat("later", "2026-11-02T10:00:00Z");
-    const fork = chat("fork", "2026-10-30T10:00:00Z", {
-      parentThreadId: "main",
-      relationshipToParent: "fork",
+    expect(gameOpenChat([first, later], live(first, later))?.id).toBe("later");
+    // The person's latest message is the activity, not an agent's later change.
+    const written = { ...first, latestUserMessageAt: "2026-11-03T10:00:00Z" };
+    expect(gameOpenChat([written, later], live(first, later))?.id).toBe("first");
+  });
+
+  it("prefers a chat at work to a settled one, and opens a settled one when that is all", () => {
+    const old = chat("old", "2026-11-01T10:00:00Z");
+    const done = chat("done", "2026-11-05T10:00:00Z", { settled: true });
+    const doneEarlier = chat("done-earlier", "2026-11-04T10:00:00Z", { settled: true });
+    expect(gameOpenChat([done, old], live(done, old))?.id).toBe("old");
+    expect(gameOpenChat([doneEarlier, done], live(done, doneEarlier))?.id).toBe("done");
+    const archived = chat("gone", "2026-11-06T10:00:00Z", { archivedAt: "2026-11-07T10:00:00Z" });
+    expect(gameOpenChat([archived], live(archived))).toBe(null);
+  });
+
+  it("never lists a role thread, and keeps a subagent under its listed parent", () => {
+    const parent = chat("parent", "2026-11-01T10:00:00Z");
+    const role = chat("role", "2026-11-01T11:00:00Z", {
+      parentThreadId: "gone",
+      relationshipToParent: "role",
     });
-    expect(gameMainThread([later, fork, main])?.id).toBe("main");
-    // Archiving the main chat promotes the next-oldest.
-    expect(gameMainThread([later, { ...main, archivedAt: "2026-11-03T10:00:00Z" }])?.id).toBe(
-      "later",
-    );
-  });
-
-  it("never lists a role thread an earlier Kurambit's run launched as a chat", () => {
-    const main = chat("main", "2026-11-01T10:00:00Z");
-    const result = partitionGameChats(
-      [
-        main,
-        role("r1", "main", "2026-11-01T11:00:00Z"),
-        role("o1", "gone", "2026-10-01T10:00:00Z"),
-      ],
-      new Set(["main", "r1", "o1"]),
-    );
-    expect(result.main?.id).toBe("main");
-    expect(result.others).toEqual([]);
-  });
-
-  it("keeps a subagent nested under its listed parent and lists an orphaned one", () => {
-    const main = chat("main", "2026-11-01T10:00:00Z");
-    const nested = chat("sub", "2026-11-01T11:00:00Z", {
-      parentThreadId: "main",
+    const nested = chat("sub", "2026-11-01T12:00:00Z", {
+      parentThreadId: "parent",
       relationshipToParent: "subagent",
     });
-    const orphan = chat("orphan", "2026-11-01T12:00:00Z", {
+    const orphan = chat("orphan", "2026-11-01T13:00:00Z", {
       parentThreadId: "gone",
       relationshipToParent: "subagent",
     });
-    const result = partitionGameChats([main, nested, orphan], new Set(["main", "sub", "orphan"]));
-    expect(result.others.map((thread) => thread.id)).toEqual(["orphan"]);
-  });
-
-  it("stands for a game with no top-level chat by its newest other chat", () => {
-    const fork = chat("fork", "2026-11-01T10:00:00Z", {
-      parentThreadId: "gone",
-      relationshipToParent: "fork",
-    });
-    const result = partitionGameChats([fork, role("r", "gone", "2026-11-01T09:00:00Z")], new Set());
-    expect(result.main?.id).toBe("fork");
-    expect(result.others).toEqual([]);
-    expect(partitionGameChats([role("r", "gone", "2026-11-01T09:00:00Z")], new Set()).main).toBe(
-      null,
-    );
+    const ids = live(parent, role, nested, orphan);
+    expect(
+      [parent, role, nested, orphan].filter((c) => isGameChat(c, ids)).map((c) => c.id),
+    ).toEqual(["parent", "orphan"]);
   });
 });
 
-describe("a game row's status", () => {
+describe("a game's status", () => {
   const thread = (
     status: "idle" | "running" | "failed" | null,
     pending: { approvals?: boolean; input?: boolean } = {},
@@ -1452,26 +1434,20 @@ describe("a game row's status", () => {
     pendingSubagentRequest: null,
     runtime: status === null ? null : ({ status } as never),
   });
-  const game = (main: ReturnType<typeof thread>, others: ReturnType<typeof thread>[] = []) => ({
-    main,
-    others,
-  });
 
   it("is the most urgent state among every chat of the game", () => {
-    expect(resolveGameSidebarStatus(game(thread(null)))).toBe("ready");
-    // Another chat works while the main chat is idle: the game is working.
-    expect(resolveGameSidebarStatus(game(thread("idle"), [thread("running")]))).toBe("working");
+    expect(resolveGameSidebarStatus([thread(null)])).toBe("ready");
+    // One chat works while another is idle: the game is working.
+    expect(resolveGameSidebarStatus([thread("idle"), thread("running")])).toBe("working");
     // A question anywhere outranks work anywhere.
-    expect(resolveGameSidebarStatus(game(thread("running"), [thread(null, { input: true })]))).toBe(
+    expect(resolveGameSidebarStatus([thread("running"), thread(null, { input: true })])).toBe(
       "input",
     );
     expect(
-      resolveGameSidebarStatus(
-        game(thread(null, { input: true }), [thread(null, { approvals: true })]),
-      ),
+      resolveGameSidebarStatus([thread(null, { input: true }), thread(null, { approvals: true })]),
     ).toBe("approval");
     // A failed chat needs attention.
-    expect(resolveGameSidebarStatus(game(thread(null), [thread("failed")]))).toBe("failed");
+    expect(resolveGameSidebarStatus([thread(null), thread("failed")])).toBe("failed");
   });
 });
 

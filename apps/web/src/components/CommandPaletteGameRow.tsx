@@ -6,14 +6,14 @@ import type { GameLibraryEntry } from "./game/useGameLibrary";
 
 interface PaletteGameRowProps {
   readonly game: GameLibraryEntry;
-  readonly main: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime">;
+  readonly opens: Pick<SidebarThreadSummary, "id" | "latestRun" | "runtime">;
   readonly chats: SidebarThreadStatus;
 }
 
 // A Recent row in the palette is the game as the sidebar shows it: its latest build's
 // still and its one status line, read from the same hook so the times agree.
-export function PaletteGameIcon({ game, main, chats }: PaletteGameRowProps) {
-  const { build } = useGameLibraryLine({ game, main, chats, read: true });
+export function PaletteGameIcon({ game, opens, chats }: PaletteGameRowProps) {
+  const { build } = useGameLibraryLine({ game, opens, chats, read: true });
   return (
     <GamePicture
       environmentId={game.environmentId}
@@ -25,7 +25,7 @@ export function PaletteGameIcon({ game, main, chats }: PaletteGameRowProps) {
   );
 }
 
-export function PaletteGameStatus({ game, main, chats }: PaletteGameRowProps) {
-  const { status } = useGameLibraryLine({ game, main, chats, read: true });
+export function PaletteGameStatus({ game, opens, chats }: PaletteGameRowProps) {
+  const { status } = useGameLibraryLine({ game, opens, chats, read: true });
   return <GameLibraryStatusText status={status} />;
 }

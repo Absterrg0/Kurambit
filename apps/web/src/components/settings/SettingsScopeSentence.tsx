@@ -71,7 +71,7 @@ export function SettingsScopeSentence() {
   if (scope === null || SETTINGS_DEVICE_ONLY_PATHS.has(pathname)) return null;
   // A picker reading "All games" on every visit is noise. It shows once a game is chosen
   // (to say so, and to go back) or once some game holds a value of its own. Until then the
-  // way in is the game's own "Game settings" (sidebar menu, palette), not a line under every
+  // way in is the game's own "Game settings" (the palette), not a line under every
   // page title. Storage cleans up after every game at once.
   const gameInPlay =
     Boolean(scope.search.project) ||

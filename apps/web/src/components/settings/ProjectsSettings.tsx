@@ -42,13 +42,13 @@ export function ProjectsSettings() {
 function GamePicker() {
   const { selectScope, groups } = useSettingsScope();
   const { covers, isLoading } = useGameCovers();
-  const choices = covers.flatMap(({ game, main, chats }) => {
+  const choices = covers.flatMap(({ game, opens, chats }) => {
     const group = groups.find((candidate) =>
       candidate.memberProjects.some(
         (member) => member.environmentId === game.environmentId && member.id === game.projectId,
       ),
     );
-    return group === undefined ? [] : [{ game, main, chats, group }];
+    return group === undefined ? [] : [{ game, opens, chats, group }];
   });
   return (
     <SettingsPageContainer description="Choose a game to change its name, icon, side copies and actions.">
@@ -63,7 +63,7 @@ function GamePicker() {
         )
       ) : (
         <SettingsGroup>
-          {choices.map(({ game, main, chats, group }) => (
+          {choices.map(({ game, opens, chats, group }) => (
             <button
               key={`${game.environmentId}:${game.projectId}`}
               type="button"
@@ -75,7 +75,7 @@ function GamePicker() {
             >
               <GameLibraryPicture
                 game={game}
-                main={main}
+                opens={opens}
                 chats={chats}
                 gameName={group.displayName}
                 className="size-7.5 shrink-0"
