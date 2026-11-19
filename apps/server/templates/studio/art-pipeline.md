@@ -265,8 +265,8 @@ scratch, never a library model reshaped, in this order. Each step is
 human body, which is op `character`.
 
 1. **Body.** A human: op `character` with body `{mpfb: {age, gender,
-weight, muscle}}` (MPFB2, CC0 bodies; with no MPFB2 the op says how to
-   ask the person for it), a `style` (`{preset: "chibi"|"cartoon"|"heroic"|"realistic",
+weight, muscle}}` (cartoon and chibi start from a drawn body in the kit;
+   the others need MPFB2, and the op says how to ask for it), a `style` (`{preset: "chibi"|"cartoon"|"heroic"|"realistic",
 head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
    preset) and its `height` in metres from the brief. A creature or spirit:
    a sketch of chains of points `(x, y, z, radius)`, facing -Y, +X its left,

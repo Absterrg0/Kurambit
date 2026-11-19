@@ -1,5 +1,16 @@
 # Third-party notices (Blender kit)
 
+## Human Base Meshes (CC0 1.0)
+
+Blender Studio, https://www.blender.org/download/demo-files/#assets, bundle v1.4.1
+(`human-base-meshes-bundle-v1.4.1.zip`, sha256
+`811f43accbb31a88266d932f8f5563b2d13586fca0ba2693aad1f5fe582b3515`), dedicated to the public domain
+under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+
+`kurambit/bodies/stylised.blend` is two of its objects, `GEO-body_male_stylized` and
+`GEO-body_female_stylized`, each with its two eyes, stripped to vertex positions, faces and sculpt
+face sets (no UVs, materials or modifiers). `kurambit/studio.py` rigs them.
+
 ## blender-kiln (MIT)
 
 Copyright (c) 2026 Nicolas Dolphens, https://github.com/elithril/blender-kiln, at commit

@@ -417,28 +417,6 @@ const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", f
 const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
   `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}"} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
 /**
- * Blender Studio's Human Base Meshes (CC0), the drawn bodies a cartoon or chibi character starts
- * from, when the person has them: KURAMBIT_BASE_MESHES names the bundle's .blend, else it is looked
- * for in the tools folder. Nothing here downloads it; without it those styles restyle an MPFB2 body
- * and the op says so.
- */
-const BASE_MESHES = "human-base-meshes-bundle-v1.4.1/human_base_meshes_bundle.blend";
-const baseMeshesFile = async () => {
-  const candidates = [
-    process.env.KURAMBIT_BASE_MESHES?.trim(),
-    NodePath.join(GameToolchain.toolsDirectory(), "blender-assets", BASE_MESHES),
-  ];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const found = await NodeFSP.stat(candidate).then(
-      (stat) => stat.isFile(),
-      () => false,
-    );
-    if (found) return candidate;
-  }
-  return null;
-};
-/**
  * The person's choice refuses a Blender-made character on code with the library off (and on
  * generated): an MPFB2 body, or a mesh no library
  * or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
@@ -2468,28 +2446,32 @@ const make = Effect.gen(function* () {
                 modelChoice(yield* projects.read(root)),
               );
               if (refused !== null) return yield* fail("invalid-input", refused);
-              const mpfb = (yield* tools.addon("mpfb"))!;
-              if (mpfb.zip === null) {
-                // A small official add-on a route needs installs on first need; the rest ask first.
-                if (GameToolchain.addonAsksFirst(mpfb.entry))
-                  return yield* fail(
-                    "tool-missing",
-                    addonAsk(
-                      "An mpfb body",
-                      mpfb.entry,
-                      `Meanwhile use a library body: ${LIBRARY_BODY}.`,
-                    ),
-                  );
-                yield* tools.install(mpfb.entry.id);
-              }
-              // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
-              if (!(yield* ensure(root)).addons.has("mpfb")) {
-                yield* drop(root);
-                if (!(yield* ensure(root)).addons.has("mpfb"))
-                  return yield* fail(
-                    "tool-failed",
-                    "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
-                  );
+              // A cartoon or chibi starts from the drawn bodies the kit ships (studio.py), not MPFB2.
+              const drawn = input.style?.preset === "cartoon" || input.style?.preset === "chibi";
+              if (!drawn) {
+                const mpfb = (yield* tools.addon("mpfb"))!;
+                if (mpfb.zip === null) {
+                  // A small official add-on a route needs installs on first need; the rest ask first.
+                  if (GameToolchain.addonAsksFirst(mpfb.entry))
+                    return yield* fail(
+                      "tool-missing",
+                      addonAsk(
+                        "An mpfb body",
+                        mpfb.entry,
+                        `Meanwhile use a library body: ${LIBRARY_BODY}.`,
+                      ),
+                    );
+                  yield* tools.install(mpfb.entry.id);
+                }
+                // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
+                if (!(yield* ensure(root)).addons.has("mpfb")) {
+                  yield* drop(root);
+                  if (!(yield* ensure(root)).addons.has("mpfb"))
+                    return yield* fail(
+                      "tool-failed",
+                      "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
+                    );
+                }
               }
               body = { mpfb: input.body.mpfb };
             } else if (input.body.game.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`)) {
@@ -2574,7 +2556,6 @@ const make = Effect.gen(function* () {
                 name: input.name,
                 body,
                 standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
-                baseMeshes: yield* Effect.promise(baseMeshesFile),
                 clips,
                 chains: input.chains ?? [],
                 replace: input.replace ?? false,

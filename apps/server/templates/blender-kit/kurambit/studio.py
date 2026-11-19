@@ -1,5 +1,8 @@
 """A stylised human body from Blender Studio's Human Base Meshes bundle (CC0), rigged here.
 
+The two stylised bodies ship in the kit (bodies/stylised.blend, 0.6 MB: the bundle's v1.4.1 stripped
+to their positions, faces and face sets; see THIRD-PARTY-NOTICES.md), so these styles need no install.
+
 The bundle's stylised bodies are drawn characters: a big skull with eye sockets, a short nose, simple
 hands with five fingers. A cartoon or chibi made by smoothing a realistic adult head reads as an
 adult with big eyes stuck on; these are the start those styles need. They come unrigged, in an
@@ -10,6 +13,8 @@ weights, and character() conforms it as it conforms any rigged body.
 
 The face sets are the asset's own data at the pinned version (v1.4.1): SETS names them once.
 """
+import os
+
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
@@ -24,7 +29,7 @@ PRESETS = ("cartoon", "chibi")
 SOFT = {"cartoon": 0.35, "chibi": 1.0}
 NOSE = {"cartoon": 0.9, "chibi": 0.6}
 SOFT_KEPT = ("Head", "hand", "thumb", "index", "middle", "ring", "pinky", "ball")
-HELP = "the person adds Blender Studio's Human Base Meshes (CC0, 50 MB) in Settings → Game tools"
+BODIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bodies", "stylised.blend")
 
 # Face sets by what they cover (.sculpt_face_set), the same on both bodies.
 SETS = {
@@ -261,7 +266,7 @@ def soften(mesh, preset):
 NOSE_GROUP = "face_nose"
 
 
-def body(path, gender=0.5):
+def body(gender=0.5, path=BODIES):
     """(rig, [mesh], name map): the stylised body for gender (0 female .. 1 male), standing at the
     origin facing -Y, bound to a rig of the standard joints' names in its own A-pose, its eye sockets
     and lips marked for the face kit as an MPFB2 body's are."""

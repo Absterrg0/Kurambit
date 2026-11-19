@@ -8,8 +8,6 @@ params (the server resolves every path):
               A game body keeps its own clips, and every body its own skinned bone chains (cloth,
               hair) as spring chains.
     standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
-    baseMeshes abs path of Blender Studio's Human Base Meshes .blend, or None when it is not
-              installed: the drawn body a cartoon or chibi style starts from (studio.py)
     clips     [{pack, name, path, licence?}] | {pack, name, path, licence, source, motion: true}: a GLB
               the motion lane delivered (one clip retargeted onto the body it holds), its source
               the generation's stamp {from, licence, ai, credits}
@@ -468,11 +466,8 @@ def character(params):
         taken = _take_clips(params.get("clips", []), standard, std_actions, reference, _height(std_arm, {}))
         preset = (params.get("style") or {}).get("preset")
         drawn = "mpfb" in body_spec and preset in studio.PRESETS
-        if drawn and not params.get("baseMeshes"):
-            notes.append(f"the {preset} style starts from a drawn body when it can: {studio.HELP}. This one is an MPFB2 adult restyled, which reads less drawn")
-            drawn = False
         if drawn:
-            body_arm, meshes, name_map = studio.body(params["baseMeshes"], body_spec["mpfb"].get("gender", 0.5))
+            body_arm, meshes, name_map = studio.body(body_spec["mpfb"].get("gender", 0.5))
             studio.soften(meshes[0], preset)
             body_part = {**MADE_BODY, "from": "blender-studio-human-base-meshes", "licence": studio.LICENCE}
             base = "studio"
