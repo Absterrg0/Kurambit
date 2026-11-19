@@ -253,13 +253,21 @@ const shared = {
   lookGrade: { value: new THREE.Vector4(1, 1, 0, 0) },
   lookResolution: { value: new THREE.Vector2(1, 1) },
 };
+// Contrast pivots on the display's mid grey, not on 0.5 of linear light: there a contrast of 1.07
+// takes 0.035 off every channel, which is all the light a dark cloth in shade has, and it drew black.
+const CONTRAST = /* glsl */ `
+vec3 lookContrast( vec3 c, float k ) {
+  vec3 e = pow( max( c, 0.0 ), vec3( 1.0 / 2.2 ) );
+  return pow( max( ( e - 0.5 ) * k + 0.5, 0.0 ), vec3( 2.2 ) );
+}`;
 // The grade inside the materials, for looks without the chain: after tone mapping.
 const GRADE_PARS = /* glsl */ `
 uniform vec4 lookGrade;
 uniform vec2 lookResolution;
+${CONTRAST}
 vec3 lookGraded( vec3 c ) {
   c *= vec3( 1.0 + lookGrade.z, 1.0, 1.0 - lookGrade.z );
-  c = ( c - 0.5 ) * lookGrade.y + 0.5;
+  c = lookContrast( c, lookGrade.y );
   c = mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, lookGrade.x );
   vec2 v = gl_FragCoord.xy / lookResolution - 0.5;
   return max( c * mix( 1.0, 1.0 - dot( v, v ) * 1.6, lookGrade.w ), 0.0 );
@@ -1303,6 +1311,7 @@ uniform float contrast;
 uniform float warmth;
 uniform float vignette;
 uniform float sharpen;
+${CONTRAST}
 void mainImage( const in vec4 inputColor, const in vec2 uv, out vec4 outputColor ) {
   vec3 c = inputColor.rgb;
   if ( sharpen > 0.0 ) {
@@ -1315,7 +1324,7 @@ void mainImage( const in vec4 inputColor, const in vec2 uv, out vec4 outputColor
     c *= 1.0 + sharpen * clamp( ( l0 * 4.0 - ln ) / max( ln, 1e-3 ), -0.4, 0.4 );
   }
   c *= vec3( 1.0 + warmth, 1.0, 1.0 - warmth );
-  c = ( c - 0.5 ) * contrast + 0.5;
+  c = lookContrast( c, contrast );
   float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
   c = mix( vec3( l ), c, saturation );
   vec2 v = uv - 0.5;
