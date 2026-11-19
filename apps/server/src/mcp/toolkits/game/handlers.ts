@@ -482,6 +482,10 @@ const blenderHandlers = {
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.assetsImport(threadId, asset),
             ).pipe(as(GameBlenderAssetsImportResult)),
+          addon: (addon) =>
+            withGame(GameBlender.GameBlender, (blender, threadId) =>
+              blender.addon(threadId, addon),
+            ).pipe(as(GameBlenderSceneResult)),
         }),
       ),
     ),

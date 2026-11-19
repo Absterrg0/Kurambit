@@ -147,10 +147,15 @@ check that matters.
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and
   `generated`, still opens the game; a game.json with no `library` key predates the switch and
   keeps its library on (`gameModelChoice`). New games default to `blender`, which routes by kind
-  of model: characters and creatures in Blender, props, buildings and terrain in code. The AQ
-  bake-off (the same hero brief through every route on Opus) chose it: sculpted and tailored
-  Blender characters beat code's capsules and reshaped library bodies, while code builds the
-  world well. A game.json with no key stays code, whatever the default becomes.
+  of model: characters, creatures, trees, rocks and buildings in Blender, ground, furniture
+  and clutter in code. The AQ bake-off (the same hero brief through every route on Opus) chose
+  Blender for characters: sculpted and tailored ones beat code's capsules and reshaped library
+  bodies. Round 6B's side-by-side (each subject in code, with Blender's own modifiers and
+  geometry nodes, and with an official extension, in one running game) gave the kit's `world`
+  helpers trees, rocks and buildings, and left code the kinds that came out the same with no
+  round trip; the ground also stays code because the game needs its height function. The
+  official extensions lost every kind at a game's budget, so none is on the add-ons list for
+  them. A game.json with no key stays code, whatever the default becomes.
 - A character or creature is done when its sheet is kept in `art/sheets/` and the agent's critique
   of it sits beside it ([heroSheets.ts](../../apps/server/src/game/heroSheets.ts)). The tools keep
   the sheet (the Blender review and export, the code model sheet), `game_check` op `final` lists
@@ -188,8 +193,19 @@ check that matters.
   draws between the 30 fps keys: a bone turning past about 90° against its parent in one frame
   shows as a spin there and nowhere in Blender, so the kit unwraps twists, smooths the prop's
   roll, and reports spins and pops instead of trusting the keyed frames.
-  MPFB2 is GPL code with CC0 output, so it is downloaded into Kurambit's own Blender folder on the
-  person's request and never bundled (`KURAMBIT_MPFB` may name a copy of the same pinned zip).
+  MPFB2 is GPL code with CC0 output, so it is an entry of the add-ons list
+  (`BLENDER_ADDONS` in [GameToolchain.ts](../../apps/server/src/game/GameToolchain.ts)): tools
+  that make something, each pinned, checksummed and fetched into Kurambit's own Blender folder,
+  never bundled and never into the person's Blender (`KURAMBIT_MPFB` may name a copy of the same
+  pinned zip). A small extension from Blender's own platform installs on first need; a large one
+  or one from anywhere else is asked for. The ask is the agent's own question and the install is
+  its own op (`game_blender` op `addon`), because the server cannot raise a question in a chat:
+  a `user_input_request` comes only from a provider. Finished assets are never add-ons: those
+  stay under the library switch.
+- A game with the library off makes its textures: `kurambit.surface` bakes a tiling set from
+  Blender's procedural nodes on a flat torus (no seam), and the colour map holds only the
+  pattern's light and dark, multiplied by the material's colour, so Art's one colour field
+  recolours a whole surface on a model and on what the game's code tiles it over.
 - A hero is made, not picked, through one recipe (the art skill's Heroes): a body, clothes, the
   rig, motion, springs and the gates. A human body is restyled (`proportions.py`: per-region maps
   that agree at the joints, blended by the skin's own weights) and sized before the conform, so the

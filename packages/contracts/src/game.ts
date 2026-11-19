@@ -425,10 +425,40 @@ export type GameToolSource = typeof GameToolSource.Type;
  * Kurambit finds it. `warning` is usable with a gap the message names;
  * `error` is not usable.
  */
-export const GameToolName = Schema.Literals(["blender", "uv", "mpfb", "ffmpeg"]);
+export const GameToolName = Schema.Literals(["blender", "uv", "addon", "ffmpeg"]);
 export type GameToolName = typeof GameToolName.Type;
+/** An add-on's id in Kurambit's add-ons list ("mpfb"). */
+export const GameAddonId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/));
+export type GameAddonId = typeof GameAddonId.Type;
+/**
+ * An entry of the add-ons list: a tool that makes something, fetched pinned and checked into
+ * Kurambit's own Blender folder. A pack of finished assets is no add-on: those are the library's.
+ */
+export const GameAddon = Schema.Struct({
+  id: GameAddonId,
+  /** The add-on's own name ("MPFB2"). */
+  name: Schema.String,
+  /** What it lets a game make, as a row's title ("Human bodies"). */
+  makes: Schema.String,
+  /** The same in a sentence. */
+  purpose: Schema.String,
+  /** The host it is fetched from ("extensions.blender.org"). */
+  source: Schema.String,
+  /** From Blender's own extensions platform. */
+  official: Schema.Boolean,
+  licence: Schema.String,
+  version: Schema.String,
+  bytes: Schema.Number,
+  /** The person is asked before it is fetched: a large download, or one not from Blender's platform. */
+  asksFirst: Schema.Boolean,
+  /** What a game does without it. */
+  without: Schema.String,
+});
+export type GameAddon = typeof GameAddon.Type;
 export const GameToolStatus = Schema.Struct({
   tool: GameToolName,
+  /** The add-ons list's entry, on an "addon" row. */
+  addon: Schema.optionalKey(GameAddon),
   installed: Schema.Boolean,
   path: Schema.NullOr(Schema.String),
   version: Schema.NullOr(Schema.String),

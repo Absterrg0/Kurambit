@@ -406,7 +406,15 @@ const decodePass = Schema.decodeUnknownEffect(PassResult);
 const STANDARD_BODY_PACKS = LIBRARY_CATALOG.filter(
   (pack) => pack.rig === STANDARD_RIG && pack.kinds.includes("character"),
 ).map((pack) => pack.id);
-const MPFB_MISSING = `An mpfb body needs MPFB2, which is not installed. Only the person installs it, in Settings → Game tools (the MPFB2 row); say so in your reply if the request needs it. Meanwhile use a library body: {library: {pack: "quaternius-universal-base-characters", file: "Base Characters/Godot - UE/Superhero_Female_FullBody.gltf"}} (or Superhero_Male_FullBody.gltf), or the Universal Animation Library's mannequin.`;
+/** A human body's library stand-in, while MPFB2 is not installed. */
+const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", file: "Base Characters/Godot - UE/Superhero_Female_FullBody.gltf"}} (or Superhero_Male_FullBody.gltf), or the Universal Animation Library's mannequin`;
+/**
+ * What an agent is told when a route needs an add-on the person is asked for first: the ask is
+ * the agent's own (its question tool where it has one, its reply otherwise), and the install is
+ * one op, so a provider that asks before tool calls names exactly it.
+ */
+export const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
+  `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}"} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
 /**
  * The person's choice refuses a Blender-made character on code with the library off (and on
  * generated): an MPFB2 body, or a mesh no library
@@ -444,8 +452,8 @@ interface Session extends LiveHealth {
   readonly live: LiveExecutables;
   /** live.blend as the session holds it in memory; a change on disk makes the session stale. */
   readonly blend: HeldSources;
-  /** MPFB2 is installed in this session's own Blender folder (it was ready when the session opened). */
-  readonly mpfb: boolean;
+  /** The add-ons installed in this session's own Blender folder (ready when the session opened). */
+  readonly addons: ReadonlySet<string>;
   lastActive: number;
 }
 
@@ -700,6 +708,11 @@ export class GameBlender extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderRenderSpritesInput,
     ) => Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError>;
+    /** Installs an add-on of the list, as Settings → Game tools does, and reopens this game's Blender with it. */
+    readonly addon: (
+      threadId: ThreadId,
+      input: { readonly install: string },
+    ) => Effect.Effect<{ readonly text: string }, GameOperationError>;
     /** Stop one game's live session by root; game_builds op stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
   }
@@ -875,48 +888,60 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * MPFB2 in Kurambit's own Blender folder (BLENDER_USER_RESOURCES), never the user's: while
-   * Settings holds the verified zip it is installed once (a marker names the zip), and after a
-   * Remove the next session takes it out again. A failed install never stops the session; an
-   * mpfb body then says why.
+   * The add-ons list in Kurambit's own Blender folder (BLENDER_USER_RESOURCES), never the user's:
+   * while the toolchain holds an entry's verified zip it is installed once (a marker names the
+   * zip), and after a Remove the next session takes it out again. A failed install never stops
+   * the session; the op that needs the add-on then says why. Returns the ids installed.
    */
-  const installMpfb = (root: string, blender: string, homeDir: string, userResources: string) =>
+  const installAddons = (root: string, blender: string, homeDir: string, userResources: string) =>
     Effect.gen(function* () {
-      const zip = yield* tools.blenderExtension("mpfb");
-      const marker = NodePath.join(userResources, "mpfb.installed");
-      const have = yield* Effect.promise(() => NodeFSP.readFile(marker, "utf8").catch(() => null));
-      const want = zip === null ? null : NodePath.basename(zip);
-      if (have === want) return want !== null;
-      const run = (args: ReadonlyArray<string>, operation: string) =>
-        processes
-          .run({
-            root,
-            executable: blender,
-            args: ["--background", "--command", "extension", ...args],
-            operation,
-            timeoutMs: 180_000,
-            env: sessionEnv(homeDir, userResources),
-            envMode: "replace",
-          })
-          .pipe(
-            Effect.map((result) => result.exitCode === 0 && !result.timedOut),
-            Effect.orElseSucceed(() => false),
+      const installed = new Set<string>();
+      for (const { entry, zip } of yield* tools.addons) {
+        const marker = NodePath.join(userResources, `${entry.id}.installed`);
+        const have = yield* Effect.promise(() =>
+          NodeFSP.readFile(marker, "utf8").catch(() => null),
+        );
+        const want = zip === null ? null : NodePath.basename(zip);
+        if (have === want) {
+          if (want !== null) installed.add(entry.id);
+          continue;
+        }
+        const run = (args: ReadonlyArray<string>, operation: string) =>
+          processes
+            .run({
+              root,
+              executable: blender,
+              args: ["--background", "--command", "extension", ...args],
+              operation,
+              timeoutMs: 180_000,
+              env: sessionEnv(homeDir, userResources),
+              envMode: "replace",
+            })
+            .pipe(
+              Effect.map((result) => result.exitCode === 0 && !result.timedOut),
+              Effect.orElseSucceed(() => false),
+            );
+        if (zip === null) {
+          yield* run(
+            ["remove", `user_default.${entry.extension}`],
+            `blender-live-${entry.id}-remove`,
           );
-      if (zip === null) {
-        yield* run(["remove", "user_default.mpfb"], "blender-live-mpfb-remove");
-        yield* Effect.promise(() => NodeFSP.rm(marker, { force: true }));
-        return false;
+          yield* Effect.promise(() => NodeFSP.rm(marker, { force: true }));
+          continue;
+        }
+        if (
+          !(yield* run(
+            ["install-file", "--repo", "user_default", "--enable", zip],
+            `blender-live-${entry.id}`,
+          ))
+        ) {
+          yield* Effect.logWarning(`${entry.name} did not install into the live Blender`, { root });
+          continue;
+        }
+        yield* Effect.promise(() => NodeFSP.writeFile(marker, want!).catch(() => undefined));
+        installed.add(entry.id);
       }
-      const installed = yield* run(
-        ["install-file", "--repo", "user_default", "--enable", zip],
-        "blender-live-mpfb",
-      );
-      if (!installed) {
-        yield* Effect.logWarning("MPFB2 did not install into the live Blender", { root });
-        return false;
-      }
-      yield* Effect.promise(() => NodeFSP.writeFile(marker, want!).catch(() => undefined));
-      return true;
+      return installed as ReadonlySet<string>;
     });
 
   const ensure = (root: string): Effect.Effect<Session, GameOperationError> =>
@@ -949,14 +974,14 @@ const make = Effect.gen(function* () {
       );
     });
 
-  /** The pinned addon, enabled, and MPFB2 in the shared user folder; whether MPFB2 is there. */
+  /** The pinned addon, enabled, and the add-ons list in the shared user folder; which of it is there. */
   const setUpUserResources = (
     root: string,
     blender: { readonly path: string; readonly version: string },
     homeDir: string,
     userResources: string,
     uv: UvPaths,
-  ): Effect.Effect<boolean, GameOperationError> =>
+  ): Effect.Effect<ReadonlySet<string>, GameOperationError> =>
     Effect.gen(function* () {
       // Blender says where its user addons live under the isolated user folder
       // (BLENDER_USER_RESOURCES), so no version or OS layout is guessed.
@@ -1048,7 +1073,7 @@ const make = Effect.gen(function* () {
           `Blender ${blender.version} could not enable the pinned addon in the isolated config (it was not found or failed to load).`,
           enable,
         );
-      return yield* installMpfb(root, blender.path, homeDir, userResources);
+      return yield* installAddons(root, blender.path, homeDir, userResources);
     });
 
   const start = (root: string): Effect.Effect<Session, GameOperationError> =>
@@ -1091,7 +1116,7 @@ const make = Effect.gen(function* () {
         },
         catch: (cause) => opError("blender-live", homeDir, "io", undefined, cause),
       });
-      const mpfb = yield* userResourcesLock.withPermits(1)(
+      const addons = yield* userResourcesLock.withPermits(1)(
         setUpUserResources(root, blender, homeDir, userResources, uv),
       );
       // The kit is importable in every exec (`import kurambit`): on sys.path and imported at
@@ -1281,7 +1306,7 @@ const make = Effect.gen(function* () {
         transport,
         live: { blender: blender.path, uvx: uv.uvx },
         blend,
-        mpfb,
+        addons,
         broken: null,
         lastActive: startedAt,
       };
@@ -2419,12 +2444,24 @@ const make = Effect.gen(function* () {
                 modelChoice(yield* projects.read(root)),
               );
               if (refused !== null) return yield* fail("invalid-input", refused);
-              if ((yield* tools.blenderExtension("mpfb")) === null)
-                return yield* fail("tool-missing", MPFB_MISSING);
+              const mpfb = (yield* tools.addon("mpfb"))!;
+              if (mpfb.zip === null) {
+                // A small official add-on a route needs installs on first need; the rest ask first.
+                if (GameToolchain.addonAsksFirst(mpfb.entry))
+                  return yield* fail(
+                    "tool-missing",
+                    addonAsk(
+                      "An mpfb body",
+                      mpfb.entry,
+                      `Meanwhile use a library body: ${LIBRARY_BODY}.`,
+                    ),
+                  );
+                yield* tools.install(mpfb.entry.id);
+              }
               // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
-              if (!(yield* ensure(root)).mpfb) {
+              if (!(yield* ensure(root)).addons.has("mpfb")) {
                 yield* drop(root);
-                if (!(yield* ensure(root)).mpfb)
+                if (!(yield* ensure(root)).addons.has("mpfb"))
                   return yield* fail(
                     "tool-failed",
                     "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
@@ -2931,6 +2968,26 @@ const make = Effect.gen(function* () {
             return yield* renderSprites({ callText, manifest: projects.read }, root, input);
           }),
         ),
+      ),
+    addon: (threadId, input) =>
+      projects.exclusive(threadId, "Blender add-on", (root) =>
+        Effect.gen(function* () {
+          const found = yield* tools.addon(input.install);
+          if (found === null)
+            return yield* opError(
+              "blender-addon",
+              input.install,
+              "invalid-input",
+              `${input.install} is not on the add-ons list; game_check op status lists it.`,
+            );
+          const had = found.zip !== null;
+          if (!had) yield* tools.install(found.entry.id);
+          // The scene is saved after every change, so the next call opens a Blender that has it.
+          yield* drop(root);
+          return {
+            text: `${GameToolchain.addonAbout(found.entry)} ${had ? "It was already installed" : "Installed"}; this game's Blender opens with it on its next call. The person can remove it in Settings → Game tools.`,
+          };
+        }),
       ),
     stop: drop,
   });

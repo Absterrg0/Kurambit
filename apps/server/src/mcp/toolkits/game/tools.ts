@@ -100,7 +100,7 @@ export const GameAssetsTool = Tool.make("game_assets", {
   .annotate(McpSchema.EnabledWhen, listedFor("game_assets"));
 
 export const GameBlenderTool = Tool.make("game_blender", {
-  description: `This game's managed Blender: a live scene, saved as the game's .blend after each change. ${ONE_OP} code: runs bpy Python. look: the scene as an image; mode review shows what export writes. scene: objects as text. export: the reviewed objects as a GLB with its sidecar. character: a rigged humanoid on the standard skeleton, styled and sized. paint: textures from a turnaround sheet. carve: a prop from a three-view sheet. sprites: framed 2D strips. animate: keys a move from poses on beats. asset_search, asset_import: Poly Haven, Sketchfab, Poly Pizza, library or generated assets into the scene. How: studio-skills/art-pipeline.md; heroes (made creatures, clothes on hem chains, gaits, gates): its Heroes.`,
+  description: `This game's managed Blender: a live scene, saved as the game's .blend after each change. ${ONE_OP} code: runs bpy Python. look: the scene as an image; mode review shows what export writes. scene: objects as text. export: the reviewed objects as a GLB with its sidecar. character: a rigged humanoid on the standard skeleton, styled and sized. paint: textures from a turnaround sheet. carve: a prop from a three-view sheet. sprites: framed 2D strips. animate: keys a move from poses on beats. asset_search, asset_import: Poly Haven, Sketchfab, Poly Pizza, library or generated assets into the scene. addon: installs a listed add-on once the person agrees. How: studio-skills/art-pipeline.md; heroes (made creatures, clothes on hem chains, gaits, gates): its Heroes.`,
   parameters: GameBlenderToolInput,
   ...answers,
   dependencies: [

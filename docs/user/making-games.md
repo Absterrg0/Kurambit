@@ -177,11 +177,13 @@ also ask your agent in chat to switch; it never switches on its own.
 
 Blender building needs Blender installed (Settings › Game tools).
 
-Human bodies on **Blender** come from MPFB2, which you install once: **Settings → Game tools**, under
-Blender, **Human bodies**, **Install**. Its code is GPL-3.0, so Kurambit does not ship it; Install downloads
-it from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender
-settings, and the bodies it makes are CC0. **Remove** deletes it again; a live Blender view already
-open keeps it until it reopens. Without MPFB2, Blender characters use library bodies.
+Human bodies on **Blender** come from MPFB2, an add-on Kurambit fetches for you. When a game first
+needs it the agent asks you, and adds it on your yes; you can also add it yourself in **Settings →
+Game tools**, under Blender, **Human bodies**, **Install**. Its code is GPL-3.0, so Kurambit does not
+ship it: it is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions,
+never your Blender settings, and the bodies it makes are CC0. **Remove** deletes it again; a live
+Blender view already open keeps it until it reopens. Without MPFB2, Blender characters use library
+bodies. Add-ons are tools that make things; finished models and textures are the Library's.
 
 A character or creature is finished only once its sheet (its turnaround and every move in one
 image) is kept in `art/sheets/`, it passes its measured gates, and the agent has written its

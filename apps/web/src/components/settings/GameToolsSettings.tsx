@@ -11,18 +11,14 @@ import {
   PersonStandingIcon,
   TerminalIcon,
 } from "lucide-react";
-import {
-  type EnvironmentId,
-  type GameToolchainChangeInput,
-  type GameToolStatus,
-} from "@kurambit/contracts";
+import { type EnvironmentId, type GameToolStatus } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { gameEnvironment } from "../../state/game";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { GAME_TOOL_NAMES, GameToolLink } from "../game/GameToolLink";
+import { gameToolName, GameToolLink } from "../game/GameToolLink";
 import { Button, InlineButton } from "../ui/button";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -33,35 +29,41 @@ import { Text } from "../ui/text";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
-// One line each; requirements and where a tool comes from sit behind the row's About.
-const TOOL_PURPOSE = {
-  blender: "Models, rigs and renders game art.",
-  uv: "Lets the agent work in a running Blender.",
-  mpfb: "Makes human bodies for characters.",
-  ffmpeg: "Records each bot play.",
-} as const satisfies Record<GameToolStatus["tool"], string>;
+// One line each; requirements and where a tool comes from sit behind the row's About. An
+// add-on's words come from the add-ons list the server sends with its row.
+const megabytes = (bytes: number) =>
+  bytes >= 1_000_000
+    ? `${Math.round(bytes / 1_000_000)} MB`
+    : `${Math.max(1, Math.round(bytes / 1000))} KB`;
+const toolPurpose = (tool: GameToolStatus): string =>
+  tool.addon?.purpose ??
+  {
+    blender: "Models, rigs and renders game art.",
+    uv: "Lets the agent work in a running Blender.",
+    addon: "",
+    ffmpeg: "Records each bot play.",
+  }[tool.tool];
 
 // Helpers that only matter through Blender sit under it, named by what they let a game do;
 // the program's own name stays on the row's meta line for troubleshooting.
-const BLENDER_HELPERS = {
-  uv: "Live Blender",
-  mpfb: "Human bodies",
-} as const satisfies Partial<Record<GameToolStatus["tool"], string>>;
-const isBlenderHelper = (tool: GameToolStatus["tool"]): tool is keyof typeof BLENDER_HELPERS =>
-  tool in BLENDER_HELPERS;
+const helperTitle = (tool: GameToolStatus): string | null =>
+  tool.addon?.makes ?? (tool.tool === "uv" ? "Live Blender" : null);
 
-const TOOL_ABOUT = {
-  blender: "Blender 4.2 or later.",
-  uv: "Kurambit fetches it itself when it is not installed.",
-  mpfb: "MPFB2 2.0.18. Its code is GPL-3.0 and is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions, never your Blender settings; the bodies it makes are CC0. Without it, characters use library bodies.",
-  ffmpeg:
-    "A build's play checks and Keep going are read from its videos; without ffmpeg a build is only checked for starting.",
-} as const satisfies Record<GameToolStatus["tool"], string>;
+const toolAbout = (tool: GameToolStatus): string =>
+  tool.addon !== undefined
+    ? `${tool.addon.name} ${tool.addon.version}. ${tool.addon.licence}. Downloaded from ${tool.addon.source} (${megabytes(tool.addon.bytes)}) into Kurambit's own Blender sessions, never your Blender settings. ${tool.addon.asksFirst ? "The agent asks you before it adds it." : "The agent adds it when a game first needs it."} ${tool.addon.without}`
+    : {
+        blender: "Blender 4.2 or later.",
+        uv: "Kurambit fetches it itself when it is not installed.",
+        addon: "",
+        ffmpeg:
+          "A build's play checks and Keep going are read from its videos; without ffmpeg a build is only checked for starting.",
+      }[tool.tool];
 
 const TOOL_ICONS = {
   blender: BoxIcon,
   uv: TerminalIcon,
-  mpfb: PersonStandingIcon,
+  addon: PersonStandingIcon,
   ffmpeg: FilmIcon,
 } as const satisfies Record<GameToolStatus["tool"], unknown>;
 
@@ -77,11 +79,6 @@ const STATUS_LABELS = {
   warning: { tone: "warning", label: "Needs attention" },
   error: { tone: "danger", label: "Not ready" },
 } as const;
-
-// The tools only the person installs and removes, here: the agent cannot.
-const INSTALLABLE: ReadonlySet<GameToolStatus["tool"]> = new Set<GameToolchainChangeInput["tool"]>([
-  "mpfb",
-]);
 
 const PATH_ROWS = [{ key: "gameBlenderPath", title: "Blender executable" }] as const;
 type PathKey = (typeof PATH_ROWS)[number]["key"];
@@ -141,7 +138,7 @@ function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) 
     >
       {orderTools(query.data?.tools ?? []).map((tool) => (
         <GameToolRow
-          key={tool.tool}
+          key={tool.addon?.id ?? tool.tool}
           environmentId={environmentId}
           tool={tool}
           blender={query.data?.tools.find((entry) => entry.tool === "blender") ?? null}
@@ -194,9 +191,9 @@ function GameToolsSettings({ environmentId }: { environmentId: EnvironmentId }) 
 
 // Blender's helpers follow Blender, whatever order the server lists them in.
 function orderTools(tools: ReadonlyArray<GameToolStatus>): ReadonlyArray<GameToolStatus> {
-  const helpers = tools.filter((tool) => isBlenderHelper(tool.tool));
+  const helpers = tools.filter((tool) => helperTitle(tool) !== null);
   return tools.flatMap((tool) =>
-    isBlenderHelper(tool.tool) ? [] : tool.tool === "blender" ? [tool, ...helpers] : [tool],
+    helperTitle(tool) !== null ? [] : tool.tool === "blender" ? [tool, ...helpers] : [tool],
   );
 }
 
@@ -225,19 +222,20 @@ function GameToolRow({
   const [error, setError] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
   const change = async (kind: "install" | "remove") => {
-    if (pending !== null || tool.tool !== "mpfb") return;
+    const addon = tool.addon;
+    if (pending !== null || addon === undefined) return;
     setPending(kind);
     setError(null);
     const run = kind === "install" ? install : remove;
-    const result = await run({ environmentId, input: { tool: tool.tool } });
+    const result = await run({ environmentId, input: { tool: addon.id } });
     if (result._tag === "Failure") setError(String(squashAtomCommandFailure(result)));
     setPending(null);
     onChanged();
   };
-  const helper = isBlenderHelper(tool.tool);
+  const helper = helperTitle(tool);
   // A helper works only through Blender, so without a ready Blender it is not ready either,
   // even when its own program is in place.
-  const needsBlender = helper && blender !== null && blender.status !== "ready";
+  const needsBlender = helper !== null && blender !== null && blender.status !== "ready";
   // One that is not installed cannot be installed into a missing Blender: it waits instead
   // of offering a button that cannot work. An installed one can still be removed.
   const waitsOnBlender = needsBlender && !tool.installed;
@@ -249,7 +247,7 @@ function GameToolRow({
     [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]
       .filter((part) => part !== null)
       .join(" · ") || (tool.installed ? "" : "Not installed");
-  const found = [helper ? GAME_TOOL_NAMES[tool.tool] : "", where]
+  const found = [helper !== null ? gameToolName(tool) : "", where]
     .filter((part) => part !== "")
     .join(" · ");
   // Installed but not ready: the message is the fix, so it stays in view. A missing
@@ -257,7 +255,7 @@ function GameToolRow({
   const showMessage = tool.status !== "ready" && tool.installed;
   // One action per row, in one style: Install or Remove for what Kurambit fetches,
   // otherwise the vendor's page while the tool is not ready.
-  const action = waitsOnBlender ? null : INSTALLABLE.has(tool.tool) ? (
+  const action = waitsOnBlender ? null : tool.addon !== undefined ? (
     tool.installed ? (
       <Button
         size="sm"
@@ -286,10 +284,10 @@ function GameToolRow({
       <SettingsRow
         inlineControl
         controlAlign="title"
-        className={helper ? "ps-10 sm:ps-11" : undefined}
+        className={helper !== null ? "ps-10 sm:ps-11" : undefined}
         icon={<ToolIcon />}
-        title={helper ? BLENDER_HELPERS[tool.tool] : GAME_TOOL_NAMES[tool.tool]}
-        description={TOOL_PURPOSE[tool.tool]}
+        title={helper ?? gameToolName(tool)}
+        description={toolPurpose(tool)}
         status={
           <span className="flex flex-wrap items-center gap-x-1.5">
             {found === "" ? null : <span>{found} ·</span>}
@@ -327,7 +325,7 @@ function GameToolRow({
           <CollapsiblePanel>
             <div className="grid gap-1 pb-2">
               <Text variant="meta" tone="muted" render={<p className="text-pretty" />}>
-                {TOOL_ABOUT[tool.tool]}
+                {toolAbout(tool)}
               </Text>
               {tool.installed || tool.status === "ready" ? null : (
                 <Text variant="meta" tone="muted" render={<p className="whitespace-pre-wrap" />}>
@@ -339,7 +337,7 @@ function GameToolRow({
                   <span className="min-w-0 break-all">{tool.path}</span>
                   <InlineButton
                     tone="muted"
-                    aria-label={`Copy ${GAME_TOOL_NAMES[tool.tool]}'s path`}
+                    aria-label={`Copy ${gameToolName(tool)}'s path`}
                     onClick={() => {
                       if (tool.path !== null) copyToClipboard(tool.path);
                     }}

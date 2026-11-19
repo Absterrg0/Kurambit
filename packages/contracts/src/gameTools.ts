@@ -2,7 +2,12 @@
 // key ({"look": {...}}): an MCP tool's input must be one object at the top (providers refuse a
 // top-level union), and the key keeps every op's own typed input whole beside the others.
 import * as Schema from "effect/Schema";
-import { GameModelSheetInput, GameMediaSaveFields, GameSavedDeleteFields } from "./game.ts";
+import {
+  GameAddonId,
+  GameModelSheetInput,
+  GameMediaSaveFields,
+  GameSavedDeleteFields,
+} from "./game.ts";
 import { GameGenerateInput, GameGenerateWaitInput, GameImageEditInput } from "./gameArt.ts";
 import {
   GameAnimateInput,
@@ -106,6 +111,7 @@ export const GameBlenderToolInput = Schema.Struct({
   animate: op(GameAnimateInput),
   asset_search: op(GameBlenderAssetsSearchInput),
   asset_import: op(GameBlenderAssetsImportInput),
+  addon: op(Schema.Struct({ install: GameAddonId })),
 });
 export type GameBlenderToolInput = typeof GameBlenderToolInput.Type;
 

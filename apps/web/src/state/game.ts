@@ -451,7 +451,7 @@ export const gameEnvironment = {
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
   }),
-  // Only the person installs these tools (MPFB2), from Settings.
+  // The add-ons list's entries (MPFB2): installed here and by the agent's game_blender op addon.
   toolchainInstall: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:toolchainInstall",
     tag: WS_METHODS.gameToolchainInstall,

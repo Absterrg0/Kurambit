@@ -4,7 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { verifiedFile } from "./GameToolchain.ts";
+import { BLENDER_ADDONS, addonAsksFirst, verifiedFile } from "./GameToolchain.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -32,4 +32,13 @@ it("counts a Blender extension as installed only with exactly its pinned bytes",
   await NodeFSP.rm(zip);
   await NodeFSP.symlink(real, zip);
   expect(await verifiedFile(zip, pin)).toBe(false);
+});
+
+it("asks the person first for a large add-on or one not from Blender's own platform", () => {
+  // MPFB2, 46 MB, official: a download worth a yes.
+  expect(addonAsksFirst(BLENDER_ADDONS.find((addon) => addon.id === "mpfb")!)).toBe(true);
+  // An official extension of the size a route could need (Sapling Tree Gen, 36 KB) goes in on first need.
+  expect(addonAsksFirst({ official: true, bytes: 36_296 })).toBe(false);
+  // The same bytes from anywhere else are asked for.
+  expect(addonAsksFirst({ official: false, bytes: 36_296 })).toBe(true);
 });

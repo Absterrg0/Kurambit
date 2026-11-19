@@ -38,6 +38,7 @@ import {
   GameSetCharacterRouteResult,
   GameStatus,
   GameThreadInput,
+  GameAddonId,
   GameToolchainStatus,
   GameWebPackageResult,
   GameMediaSaveInput,
@@ -1539,8 +1540,8 @@ const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   success: GameToolchainStatus,
   error: gameError,
 });
-/** The tools only the person installs and removes, from Settings: MPFB2 for Blender. */
-export const GameToolchainChangeInput = Schema.Struct({ tool: Schema.Literal("mpfb") });
+/** An add-on of the add-ons list, installed or removed by its id. */
+export const GameToolchainChangeInput = Schema.Struct({ tool: GameAddonId });
 export type GameToolchainChangeInput = typeof GameToolchainChangeInput.Type;
 const WsGameToolchainInstallRpc = Rpc.make(WS_METHODS.gameToolchainInstall, {
   payload: GameToolchainChangeInput,

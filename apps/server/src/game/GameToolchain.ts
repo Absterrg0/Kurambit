@@ -15,6 +15,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   GameOperationError,
   type GameToolSource,
+  type GameAddon,
   type GameToolStatus,
   type GameToolchainStatus,
 } from "@kurambit/contracts";
@@ -36,20 +37,70 @@ const REQUIRED = {
   blender: "Blender 4.2 or later",
   uv: "uv 0.7 or later",
 } as const;
+/** One entry of the add-ons list, as Kurambit fetches and installs it. */
+export interface BlenderAddon extends Omit<GameAddon, "asksFirst"> {
+  /** The extension's own id on its platform: `user_default.<extension>` once installed. */
+  readonly extension: string;
+  readonly download: string;
+  readonly sha256: string;
+  /** An environment variable naming a copy of the same pinned zip placed by hand. */
+  readonly env: string;
+}
 /**
- * MPFB2, the human-body add-on for Blender: GPL-3.0 code, so never bundled. Only the person
- * installs it (Settings, then the toolchain RPC); it is fetched from extensions.blender.org,
- * whose URL is addressed by the same SHA-256, into Kurambit's own folder, and each live
- * Blender installs it into its isolated user folder, never the user's own Blender config.
+ * The add-ons list: tools that make something, each fetched from its source at a pinned version,
+ * verified against its SHA-256, kept in Kurambit's own folder and installed by each live Blender
+ * into its isolated user folder, never the person's own Blender config. GPL code is fetched,
+ * never bundled. A pack of finished assets does not belong here: those are the asset library's.
  */
-const MPFB = {
-  version: "2.0.18",
-  download:
-    "https://extensions.blender.org/download/sha256:c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad/add-on-mpfb-v2.0.18.zip",
-  sha256: "c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad",
-  bytes: 45_956_992,
-} as const;
-const MPFB_ABOUT = `MPFB2 ${MPFB.version}: human bodies for made characters. GPL-3.0 code, downloaded from extensions.blender.org into Kurambit's own Blender folder (46 MB); the bodies are CC0.`;
+export const BLENDER_ADDONS: ReadonlyArray<BlenderAddon> = [
+  {
+    id: "mpfb",
+    extension: "mpfb",
+    name: "MPFB2",
+    makes: "Human bodies",
+    purpose: "Makes human bodies for characters.",
+    source: "extensions.blender.org",
+    official: true,
+    licence: "GPL-3.0 code; the bodies it makes are CC0",
+    version: "2.0.18",
+    download:
+      "https://extensions.blender.org/download/sha256:c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad/add-on-mpfb-v2.0.18.zip",
+    sha256: "c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad",
+    bytes: 45_956_992,
+    without: "Characters can still use library bodies.",
+    env: "KURAMBIT_MPFB",
+  },
+];
+/**
+ * Past this an add-on is a download worth a yes: the official extensions a route could need are
+ * under 4 MB (Sapling 36 KB, Extra Mesh Objects 133 KB, Archimesh 323 KB, Modular Tree 3.8 MB),
+ * MPFB2 is 46 MB.
+ */
+export const ADDON_ASK_BYTES = 8_000_000;
+/** The person is asked first for a large download, or for anything not from Blender's own platform. */
+export const addonAsksFirst = (addon: Pick<BlenderAddon, "official" | "bytes">): boolean =>
+  !addon.official || addon.bytes > ADDON_ASK_BYTES;
+export const megabytes = (bytes: number): string =>
+  bytes >= 1_000_000
+    ? `${Math.round(bytes / 1_000_000)} MB`
+    : `${Math.max(1, Math.round(bytes / 1000))} KB`;
+/** An add-on as a sentence: what it is, its licence, where it comes from and how big it is. */
+export const addonAbout = (addon: BlenderAddon): string =>
+  `${addon.name} ${addon.version}: ${addon.purpose.replace(/\.$/, "").toLowerCase()}. ${addon.licence}; downloaded from ${addon.source} into Kurambit's own Blender folder (${megabytes(addon.bytes)}).`;
+/** The list's entry as clients and agents read it. */
+export const addonEntry = (addon: BlenderAddon): GameAddon => ({
+  id: addon.id,
+  name: addon.name,
+  makes: addon.makes,
+  purpose: addon.purpose,
+  source: addon.source,
+  official: addon.official,
+  licence: addon.licence,
+  version: addon.version,
+  bytes: addon.bytes,
+  asksFirst: addonAsksFirst(addon),
+  without: addon.without,
+});
 /**
  * Whether `path` is a regular file with exactly the pinned bytes. Kept per file identity, so a
  * status poll never rehashes 46 MB; a file changed or replaced on disk is hashed again.
@@ -164,11 +215,17 @@ export class GameToolchain extends Context.Service<
     /** Grows each time Kurambit fetches a tool, so a cached status of the toolchain knows it moved. */
     readonly revision: () => number;
     readonly status: () => Effect.Effect<GameToolchainStatus>;
-    /** Only the person installs and removes these, from Settings; never into their own Blender config. */
-    readonly install: (tool: "mpfb") => Effect.Effect<GameToolchainStatus, GameOperationError>;
-    readonly remove: (tool: "mpfb") => Effect.Effect<GameToolchainStatus, GameOperationError>;
-    /** The verified MPFB2 zip, or null when it is not installed. */
-    readonly blenderExtension: (id: "mpfb") => Effect.Effect<string | null>;
+    /** An add-on of the list, fetched into Kurambit's own folder or taken out of it; never the person's Blender config. */
+    readonly install: (id: string) => Effect.Effect<GameToolchainStatus, GameOperationError>;
+    readonly remove: (id: string) => Effect.Effect<GameToolchainStatus, GameOperationError>;
+    /** The list's entry and its verified zip (null while it is not installed), or null for an id not on the list. */
+    readonly addon: (
+      id: string,
+    ) => Effect.Effect<{ readonly entry: BlenderAddon; readonly zip: string | null } | null>;
+    /** Every entry of the list with its verified zip, for a live Blender to install or take out. */
+    readonly addons: Effect.Effect<
+      ReadonlyArray<{ readonly entry: BlenderAddon; readonly zip: string | null }>
+    >;
   }
 >()("kurambit/game/GameToolchain") {}
 const isGameOperationError = Schema.is(GameOperationError);
@@ -523,54 +580,59 @@ const make = Effect.gen(function* () {
       return (yield* executable("uv")).path;
     }),
   );
-  const mpfbFile = NodePath.join(directory, "blender-extensions", `mpfb-${MPFB.version}.zip`);
-  // KURAMBIT_MPFB names a copy of the same pinned zip placed by hand (a shared tools folder, a
-  // machine with no network), as KURAMBIT_BLENDER names a Blender; only the pin's bytes count.
-  const mpfbFound = Effect.promise(async () => {
-    const override = process.env.KURAMBIT_MPFB?.trim();
-    if (override && (await verifiedFile(override, MPFB)))
-      return { path: override, source: "env" as const };
-    return (await verifiedFile(mpfbFile, MPFB))
-      ? { path: mpfbFile, source: "kurambit" as const }
-      : null;
-  });
-  const mpfbStatus = Effect.gen(function* () {
-    const base = {
-      tool: "mpfb" as const,
-      path: null,
-      version: null,
-      source: null,
-      // Install is the way in: a link would invite installing it into the person's own Blender, which Kurambit never reads.
-      downloadUrl: null,
-    };
-    // MPFB2 is a Blender extension: it needs a usable Blender with the extension platform (4.2+).
-    const blender = yield* probe("blender").pipe(Effect.orElseSucceed(() => null));
-    if (blender?.kind !== "ok")
+  const addonFile = (addon: BlenderAddon) =>
+    NodePath.join(directory, "blender-extensions", `${addon.id}-${addon.version}.zip`);
+  // The entry's env variable names a copy of the same pinned zip placed by hand (a shared tools
+  // folder, a machine with no network), as KURAMBIT_BLENDER names a Blender; only the pin's bytes count.
+  const addonFound = (addon: BlenderAddon) =>
+    Effect.promise(async () => {
+      const override = process.env[addon.env]?.trim();
+      if (override && (await verifiedFile(override, addon)))
+        return { path: override, source: "env" as const };
+      return (await verifiedFile(addonFile(addon), addon))
+        ? { path: addonFile(addon), source: "kurambit" as const }
+        : null;
+    });
+  const addonStatus = (addon: BlenderAddon) =>
+    Effect.gen(function* () {
+      const about = addonAbout(addon);
+      const base = {
+        tool: "addon" as const,
+        addon: addonEntry(addon),
+        path: null,
+        version: null,
+        source: null,
+        // Install is the way in: a link would invite installing it into the person's own Blender, which Kurambit never reads.
+        downloadUrl: null,
+      };
+      // A Blender extension needs a usable Blender with the extension platform (4.2+).
+      const blender = yield* probe("blender").pipe(Effect.orElseSucceed(() => null));
+      if (blender?.kind !== "ok")
+        return {
+          ...base,
+          installed: false,
+          status: "error",
+          message: `${about} It needs Blender 4.2 or later, which Kurambit cannot use yet: see the Blender row.`,
+        } satisfies GameToolStatus;
+      const found = yield* addonFound(addon);
+      if (found === null)
+        return {
+          ...base,
+          installed: false,
+          status: "warning",
+          message: `Not installed. ${about} ${addon.without}`,
+        } satisfies GameToolStatus;
       return {
         ...base,
-        installed: false,
-        status: "error",
-        message: `${MPFB_ABOUT} It needs Blender 4.2 or later, which Kurambit cannot use yet: see the Blender row.`,
+        installed: true,
+        path: found.path,
+        version: addon.version,
+        source: found.source,
+        status: "ready",
+        message: `${about} A live Blender already open picks a change up when it reopens.`,
+        downloadUrl: null,
       } satisfies GameToolStatus;
-    const found = yield* mpfbFound;
-    if (found === null)
-      return {
-        ...base,
-        installed: false,
-        status: "warning",
-        message: `Not installed. ${MPFB_ABOUT} Characters can still use library bodies.`,
-      } satisfies GameToolStatus;
-    return {
-      ...base,
-      installed: true,
-      path: found.path,
-      version: MPFB.version,
-      source: found.source,
-      status: "ready",
-      message: `${MPFB_ABOUT} A live Blender already open picks a change up when it reopens.`,
-      downloadUrl: null,
-    } satisfies GameToolStatus;
-  });
+    });
   // Found exactly as a bot run finds it (GameBot): KURAMBIT_FFMPEG, then PATH. Only the
   // person installs it; without it no play is measured, so the row says what is lost.
   const ffmpegStatus = Effect.promise(async (): Promise<GameToolStatus> => {
@@ -602,57 +664,77 @@ const make = Effect.gen(function* () {
   });
   // An engine that needs a tool of its own adds its detection here and to GameToolName.
   const status: GameToolchain["Service"]["status"] = () =>
-    Effect.all([binaryStatus("blender"), binaryStatus("uv"), mpfbStatus, ffmpegStatus]).pipe(
-      Effect.map((tools) => ({ tools })),
-    );
+    Effect.all([
+      binaryStatus("blender"),
+      binaryStatus("uv"),
+      ...BLENDER_ADDONS.map(addonStatus),
+      ffmpegStatus,
+    ]).pipe(Effect.map((tools) => ({ tools })));
+  const listed = (id: string, operation: string) => {
+    const addon = BLENDER_ADDONS.find((entry) => entry.id === id);
+    return addon === undefined
+      ? Effect.fail(
+          new GameOperationError({
+            operation,
+            path: id,
+            reason: "invalid-input",
+            detail: `${id} is not on the add-ons list (${BLENDER_ADDONS.map((entry) => entry.id).join(", ")}).`,
+          }),
+        )
+      : Effect.succeed(addon);
+  };
   /** Fetched into a private stage and verified against its pin before it is moved into place. */
-  const installMpfb = fetchLock.withPermits(1)(
-    Effect.gen(function* () {
-      if ((yield* mpfbFound) !== null) return;
-      const stage = yield* makeStage("install-mpfb");
-      yield* Effect.gen(function* () {
-        const staged = NodePath.join(stage, NodePath.basename(mpfbFile));
-        yield* Effect.tryPromise({
-          try: (signal) => downloadPinned(MPFB, staged, signal),
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "install-mpfb",
-              path: MPFB.download,
-              reason: "download",
-              detail: `Could not download MPFB2 ${MPFB.version} from extensions.blender.org.`,
-              cause,
-            }),
-        });
-        if (!(yield* Effect.promise(() => verifiedFile(staged, MPFB))))
-          return yield* new GameOperationError({
-            operation: "install-mpfb",
-            path: MPFB.download,
-            reason: "checksum",
-            detail: `The MPFB2 ${MPFB.version} download does not match its pinned SHA-256, so it was not installed.`,
+  const installAddon = (addon: BlenderAddon) =>
+    fetchLock.withPermits(1)(
+      Effect.gen(function* () {
+        if ((yield* addonFound(addon)) !== null) return;
+        const operation = `install-${addon.id}`;
+        const file = addonFile(addon);
+        const stage = yield* makeStage(operation);
+        yield* Effect.gen(function* () {
+          const staged = NodePath.join(stage, NodePath.basename(file));
+          yield* Effect.tryPromise({
+            try: (signal) => downloadPinned(addon, staged, signal),
+            catch: (cause) =>
+              new GameOperationError({
+                operation,
+                path: addon.download,
+                reason: "download",
+                detail: `Could not download ${addon.name} ${addon.version} from ${addon.source}.`,
+                cause,
+              }),
           });
-        yield* Effect.tryPromise({
-          try: async () => {
-            await NodeFSP.mkdir(NodePath.dirname(mpfbFile), { recursive: true });
-            await NodeFSP.rename(staged, mpfbFile);
-          },
-          catch: (cause) =>
-            new GameOperationError({
-              operation: "install-mpfb",
-              path: mpfbFile,
-              reason: "io",
-              cause,
-            }),
-        });
-      }).pipe(Effect.ensuring(dropStage(stage)));
-    }),
-  );
-  const removeMpfb = fetchLock.withPermits(1)(
-    Effect.tryPromise({
-      try: () => NodeFSP.rm(mpfbFile, { force: true }),
-      catch: (cause) =>
-        new GameOperationError({ operation: "remove-mpfb", path: mpfbFile, reason: "io", cause }),
-    }),
-  );
+          if (!(yield* Effect.promise(() => verifiedFile(staged, addon))))
+            return yield* new GameOperationError({
+              operation,
+              path: addon.download,
+              reason: "checksum",
+              detail: `The ${addon.name} ${addon.version} download does not match its pinned SHA-256, so it was not installed.`,
+            });
+          yield* Effect.tryPromise({
+            try: async () => {
+              await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
+              await NodeFSP.rename(staged, file);
+            },
+            catch: (cause) =>
+              new GameOperationError({ operation, path: file, reason: "io", cause }),
+          });
+        }).pipe(Effect.ensuring(dropStage(stage)));
+      }),
+    );
+  const removeAddon = (addon: BlenderAddon) =>
+    fetchLock.withPermits(1)(
+      Effect.tryPromise({
+        try: () => NodeFSP.rm(addonFile(addon), { force: true }),
+        catch: (cause) =>
+          new GameOperationError({
+            operation: `remove-${addon.id}`,
+            path: addonFile(addon),
+            reason: "io",
+            cause,
+          }),
+      }),
+    );
   const makeStage = (operation: string) =>
     Effect.tryPromise({
       try: async () => {
@@ -669,17 +751,27 @@ const make = Effect.gen(function* () {
     status,
     revision: () => revision,
     // A change moves the revision, so the cached status the Settings row reads is fresh at once.
-    install: (_tool) =>
-      installMpfb.pipe(
+    install: (id) =>
+      listed(id, "install-addon").pipe(
+        Effect.flatMap(installAddon),
         Effect.ensuring(Effect.sync(() => (revision += 1))),
         Effect.andThen(status()),
       ),
-    remove: (_tool) =>
-      removeMpfb.pipe(
+    remove: (id) =>
+      listed(id, "remove-addon").pipe(
+        Effect.flatMap(removeAddon),
         Effect.ensuring(Effect.sync(() => (revision += 1))),
         Effect.andThen(status()),
       ),
-    blenderExtension: (_id) => Effect.map(mpfbFound, (found) => found?.path ?? null),
+    addon: (id) => {
+      const entry = BLENDER_ADDONS.find((each) => each.id === id);
+      return entry === undefined
+        ? Effect.succeed(null)
+        : Effect.map(addonFound(entry), (found) => ({ entry, zip: found?.path ?? null }));
+    },
+    addons: Effect.forEach(BLENDER_ADDONS, (entry) =>
+      Effect.map(addonFound(entry), (found) => ({ entry, zip: found?.path ?? null })),
+    ),
   });
 });
 const isExecutable = async (file: string) => {
