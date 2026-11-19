@@ -938,6 +938,9 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
         lk["facets"] = facets
     facets, chunky, detail = lk["facets"], lk["chunky"], lk["detail"]
     rng = np.random.default_rng(seed)
+    # Made again, a building takes its parts' names: the doors and roof it had before go first.
+    for old in [o for o in bpy.data.objects if o.name == name + "_roof" or o.name.startswith(name + "_door_")]:
+        bpy.data.objects.remove(old, do_unlink=True)
     mat = {r: _material(r, colours, lk) for r in ("wall", "roof", "trim", "floor", "glass", "door", "stone", "cloth")}
     round_plan = bool(sides)
     if sides:
@@ -1138,6 +1141,10 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
         faces += [(2 * m + 1 + (i + 1) % m, 2 * m + 1 + i, i, (i + 1) % m) for i in range(m)] + [tuple(2 * m + 1 + i for i in range(m))]
         roof_parts.append(_mesh_object(name + "_roof", verts, faces))
         roof_parts[-1].data.materials.append(mat["roof"])
+        if detail >= 0.3:
+            # Two corbelled courses step the wall out to meet the eaves.
+            for step_out, z0, z1 in ((0.1, top - 0.62, top - 0.36), (0.22, top - 0.36, top - 0.1)):
+                solid.append(_prism(f"{name}_corbel_{step_out}", _inset(ring, -step_out), z0, z1, mat["stone"]))
     else:
         e_lo, e_hi = ep.min(axis=0), ep.max(axis=0)
         # Along the ridge (u) and across it (v): a gable or hip roof lofted over three sections, so
@@ -1213,12 +1220,17 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
             if detail >= 0.3:
                 slope = math.hypot(half, rise)
                 ang = math.atan2(rise, half)
-                for u in (u0, u1 - 0.07):
+                thick_b, deep_b = 0.08 + 0.07 * chunky, 0.2 + 0.16 * chunky
+                for u in (u0, u1 - thick_b):
                     for sgn in (1, -1):
                         origin = to_xyz(u, vc - sgn * half, 0)[:2]
                         turn = (math.pi / 2 if long_x else 0.0) + (0.0 if sgn > 0 else math.pi)
-                        board = _slab(f"{name}_barge_{u:.1f}_{sgn}", origin, turn, (0.0, -0.035 if sgn > 0 else -0.035, top - 0.2), (slope * 1.0, 0.035, top - 0.02), mat["trim"], lean=ang)
+                        board = _slab(f"{name}_barge_{u:.1f}_{sgn}", origin, turn, (0.0, -thick_b / 2, top - deep_b), (slope * 1.0, thick_b / 2, top - 0.02), mat["trim"], lean=ang)
                         roof_parts.append(board)
+                # A fascia board under each eave closes the roof's low edge.
+                for sgn in (1, -1):
+                    origin = to_xyz(u0, vc - sgn * (half - 0.03), 0)[:2]
+                    roof_parts.append(_slab(f"{name}_fascia_{sgn}", origin, 0.0 if long_x else math.pi / 2, (0.0, -0.04, top - thick - 0.06), (u1 - u0, 0.04, top - 0.01), mat["trim"]))
                 ridge = _mesh_object(name + "_ridge", [to_xyz(u, vc + dv, top + rise + dz - (sag if q == 1 else 0)) for q, u in enumerate(sections) for dv, dz in ((-0.09, -0.07), (0.09, -0.07), (0.09, 0.05), (-0.09, 0.05))],
                                      [(4 * q + j, 4 * q + (j + 1) % 4, 4 * q + 4 + (j + 1) % 4, 4 * q + 4 + j) for q in range(2) for j in range(4)] + [(3, 2, 1, 0), (8, 9, 10, 11)])
                 bm = bmesh.new()
