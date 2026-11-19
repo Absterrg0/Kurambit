@@ -338,6 +338,7 @@ const open = async (url) => {
   disposeModel();
   model = gltf.scene;
   stage.add(model);
+  stand(model);
   model.updateMatrixWorld(true);
   const materials = materialsOf(model);
   ownMaterials = materials;
@@ -379,6 +380,40 @@ const open = async (url) => {
     clips: clips.map((clip) => ({ name: clip.name || "clip", duration: clip.duration })),
     bones: bonesOf(model),
   };
+};
+
+/**
+ * A person's neutral stand: a model on the standard skeleton rests with its arms straight out, which
+ * hides its sides and reads as no character. Its arms are let down until a clip poses it.
+ */
+const stand = (root) => {
+  root.updateMatrixWorld(true);
+  const down = new THREE.Vector3(0, -1, 0);
+  for (const side of ["l", "r"]) {
+    for (const [name, angle] of [
+      ["upperarm", 70],
+      ["lowerarm", 76],
+    ]) {
+      const bone = root.getObjectByName(`${name}_${side}`);
+      const child = bone?.children.find((each) => each.isBone);
+      if (bone?.isBone !== true || child === undefined) return;
+      const from = child
+        .getWorldPosition(new THREE.Vector3())
+        .sub(bone.getWorldPosition(new THREE.Vector3()));
+      const flat = from.clone().setY(0);
+      if (flat.lengthSq() < 1e-8) return;
+      const radians = THREE.MathUtils.degToRad(angle);
+      const to = flat
+        .normalize()
+        .multiplyScalar(Math.cos(radians))
+        .addScaledVector(down, Math.sin(radians));
+      const turn = new THREE.Quaternion().setFromUnitVectors(from.normalize(), to);
+      const world = bone.getWorldQuaternion(new THREE.Quaternion()).premultiply(turn);
+      const parent = bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+      bone.quaternion.copy(parent.multiply(world));
+      bone.updateMatrixWorld(true);
+    }
+  }
 };
 
 const setSkeleton = (on) => {

@@ -7,7 +7,8 @@ One PNG shows exactly what the export would write: a turnaround (front, three-qu
 back); the same views in clay (every material light grey, with cavity), where paint no longer hides
 a part off-centre, floating or poking out; the same views as silhouettes; the model at game
 distance (gamePx tall, at 1x and 3x with nearest filtering) and, for a character, a close-up of its
-head (the top 45% of its height, three-quarter view); six side-view frames of every clip (up to
+head (the top 45% of its height). A person stands for these in a neutral stand, arms let down,
+its face near the camera's line; its clips' poses are in their strips; six side-view frames of every clip (up to
 14, locomotion and jumps first), with six front-view frames beside each locomotion's, where hip roll and arms
 through the body show, and six from above beside a swim's or a slither's; the palette with the swatches the model uses marked; and the concept image
 on the left when there is one. A prop has no close-up: its turnaround already shows all of it at
@@ -44,6 +45,7 @@ LABEL_PX = 20
 TURN_VIEWS = (("front", 0), ("three-quarter", 40), ("side", 90), ("back", 180))
 CLOSE = (300, 300)
 HEAD = 0.45  # the close-up: the top of a character's height
+CLOSE_AZ = 18  # a standing person's close-up: nearly face on, turned enough to show the nose
 MIN_COVER = 0.01
 # Where the game's camera sees a character from (azimuth, elevation) per STYLE.json view.
 GAME_VIEWS = {"perspective": (35, 22), "side": (90, 0), "top-down": (20, 55), "isometric": (45, 35.26)}
@@ -282,6 +284,26 @@ def _concept(path, height):
 
 
 @entry
+def _stand(arm):
+    """A person's neutral stand for the still tiles: the rest pose with the arms let down, so the
+    face and the outfit show as made. A clip's own pose (a crouched guard, a head down) is in its
+    strip. True when arm is on the standard skeleton's arm joints; any other rig keeps its idle."""
+    bones = arm.pose.bones
+    if not all(f"{b}_{s}" in bones for b in ("upperarm", "lowerarm") for s in "lr"):
+        return False
+    skeleton.assign_action(arm, None)
+    for pb in bones:
+        pb.matrix_basis = Matrix()
+    bpy.context.view_layer.update()
+    for s, sx in (("l", 1), ("r", -1)):
+        for b, down, fwd in ((f"upperarm_{s}", 70, 0.0), (f"lowerarm_{s}", 76, -0.14), (f"hand_{s}", 80, -0.14)):
+            if b in bones:
+                a = math.radians(down)
+                helpers.aim(b, (sx * math.cos(a), fwd, -math.sin(a)), arm)
+    bpy.context.view_layer.update()
+    return True
+
+
 def review(params):
     out = params["out"]
     folder = os.path.join(os.path.dirname(out), "review-frames")
@@ -331,9 +353,10 @@ def review(params):
         labels = Labels(folder)
 
         idle = next((a for a in actions if "idle" in a.name.lower()), None)
-        if arm is not None:
+        standing = arm is not None and _stand(arm)
+        if arm is not None and not standing:
             skeleton.assign_action(arm, idle)
-        _set_frame(sc, idle.frame_range[0] if idle is not None else 1)
+        _set_frame(sc, idle.frame_range[0] if idle is not None and not standing else 1)
         points = _world_coords(sc, meshes)
         exts = [_extent(points, az, 8) for _, az in TURN_VIEWS]
         span = max(max(e[1] - e[0] for e in exts) * TURN[1] / TURN[0], max(e[3] - e[2] for e in exts)) * 1.1
@@ -355,10 +378,11 @@ def review(params):
         if arm is not None:
             lo, hi = points[:, 2].min(), points[:, 2].max()
             head = points[points[:, 2] >= hi - HEAD * (hi - lo)]
-            he = _extent(head, 40, 8)
+            caz = CLOSE_AZ if standing else 40
+            he = _extent(head, caz, 8)
             _setup(sc, "BLENDER_EEVEE_NEXT", CLOSE)
-            _camera(cam, 40, 8, he, max(he[1] - he[0], he[3] - he[2]) * 1.08)
-            _aim_lights(lights, 40, 8)
+            _camera(cam, caz, 8, he, max(he[1] - he[0], he[3] - he[2]) * 1.08)
+            _aim_lights(lights, caz, 8)
             close = covered(_render(sc, os.path.join(folder, "close.png")), "head close-up")
 
         _setup(sc, "BLENDER_WORKBENCH", TURN)
