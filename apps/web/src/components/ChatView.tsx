@@ -5079,7 +5079,7 @@ export default function ChatView(props: ChatViewProps) {
   const compactDisabled = compactThreadUnavailable;
   const compactDisabledReason = compactDisabled
     ? !canOperateThread
-      ? "This connection cannot change threads."
+      ? "This connection cannot change chats."
       : !activeProject
         ? "Choose a project before compacting"
         : !manualCompactionProviderAvailable
@@ -6453,7 +6453,7 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError(
         threadIdForSend,
         attachmentCapabilitiesBeforeDispatch.fileBlockReason ??
-          "This connection cannot change threads.",
+          "This connection cannot change chats.",
       );
       setDockedDraftHeroThreadKey((currentThreadKey) =>
         currentThreadKey === activeThreadKey ? null : currentThreadKey,
@@ -7913,7 +7913,7 @@ export default function ChatView(props: ChatViewProps) {
                     isRevertingCheckpoint={isRevertingCheckpoint}
                     sendDisabledReason={
                       !canOperateThread
-                        ? "This connection cannot change threads."
+                        ? "This connection cannot change chats."
                         : isEnvironmentChanging
                           ? "Preparing machine"
                           : isRevertingCheckpoint

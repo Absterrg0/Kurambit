@@ -171,7 +171,7 @@ export const ChatHeader = memo(function ChatHeader({
     if (!readEnvironmentScope(activeThreadEnvironmentId, AuthOrchestrationOperateScope)) return;
     const resolution = resolveRenameCommit({ title, originalTitle: activeThreadTitle });
     if (resolution.action === "reject-empty") {
-      toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
+      toastManager.add({ type: "warning", title: "Chat title cannot be empty" });
       return;
     }
     if (resolution.action === "noop") return;
@@ -183,7 +183,7 @@ export const ChatHeader = memo(function ChatHeader({
         const error = squashAtomCommandFailure(result);
         toastManager.add({
           type: "error",
-          title: "Failed to rename thread",
+          title: "Failed to rename chat",
           description: error instanceof Error ? error.message : "An error occurred.",
         });
       }

@@ -76,7 +76,7 @@ export interface ThreadActionMenuState {
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
   readonly isRegeneratingTitle: boolean;
-  /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
+  /** Archive rejects a chat with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
   readonly supports: {
     readonly settlement: boolean;
@@ -109,7 +109,7 @@ export function buildThreadActionMenuItems(
       ? [
           {
             id: "new-thread-on-branch" as const,
-            label: `New thread on ${state.branch}`,
+            label: `New chat on ${state.branch}`,
             icon: "message-square-plus",
           },
         ]
@@ -117,21 +117,21 @@ export function buildThreadActionMenuItems(
     ...(state.supports.pinning
       ? [
           state.isPinned
-            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
-            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
+            ? { id: "unpin" as const, label: "Unpin chat", icon: "pin-off" }
+            : { id: "pin" as const, label: "Pin chat", icon: "pin" },
         ]
       : []),
     ...(state.supports.settlement
       ? [
           state.isSettled
-            ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
-            : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
+            ? { id: "unsettle" as const, label: "Un-settle chat", icon: "circle-check" }
+            : { id: "settle" as const, label: "Settle chat", icon: "circle-check" },
         ]
       : []),
     ...(state.supports.snooze
       ? [
           state.isSnoozed
-            ? { id: "unsnooze" as const, label: "Wake thread", icon: "clock" }
+            ? { id: "unsnooze" as const, label: "Wake chat", icon: "clock" }
             : {
                 id: "snooze" as const,
                 label: "Snooze",
@@ -147,7 +147,7 @@ export function buildThreadActionMenuItems(
               },
         ]
       : []),
-    { id: "rename", label: "Rename thread", icon: "pencil", separatorBefore: true },
+    { id: "rename", label: "Rename chat", icon: "pencil", separatorBefore: true },
     ...(state.supports.titleRegeneration
       ? [
           {
@@ -201,13 +201,13 @@ export function buildThreadActionMenuItems(
         ...(state.branch
           ? [{ id: "copy-branch" as const, label: "Branch", icon: "git-branch" }]
           : []),
-        { id: "copy-thread-id", label: "Thread ID", icon: "hash" },
+        { id: "copy-thread-id", label: "Chat ID", icon: "hash" },
       ],
     },
     { id: "project-settings", label: "Game settings", icon: "settings" },
     {
       id: "archive",
-      label: "Archive thread",
+      label: "Archive chat",
       icon: "archive",
       disabled: state.isRunning,
       separatorBefore: true,
