@@ -238,8 +238,8 @@ function BriefBox({
     const result = await create({
       environmentId,
       input: {
-        // The game is made under this draft at once; the model's name from the brief replaces
-        // it when it answers. The person renames it whenever they like.
+        // The server names the game from the brief before it makes it; this draft stands only
+        // when that model is slow or fails.
         name: draftGameName(trimmedBrief) || "Untitled Game",
         nameFromBrief: true,
         // Empty: the server's default games folder.

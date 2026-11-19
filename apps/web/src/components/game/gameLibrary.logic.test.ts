@@ -91,6 +91,10 @@ describe("draftGameName", () => {
     );
     expect(draftGameName("Snake")).toBe("Snake");
     expect(
+      draftGameName("Can you please create a really cozy looking fish simulator. Make it chill."),
+    ).toBe("Cozy Looking Fish");
+    expect(draftGameName("I'd like to make a racing game on the moon")).toBe("Racing Moon");
+    expect(
       draftGameName("A cozy game which will be fishing related where a fisherman will basically"),
     ).toBe("Cozy Fishing");
   });

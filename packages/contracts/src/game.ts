@@ -659,7 +659,7 @@ export type GameOperationEvent = typeof GameOperationEvent.Type;
 export const GAME_REFERENCE_MAX_DATA_URL_CHARS = 12_000_000;
 export const GameCreateInput = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
-  /** A model names the game from its brief, as the person would title it; `name` is the fallback. */
+  /** A model names the game from its brief before the game is made; `name` is the fallback. */
   nameFromBrief: Schema.optionalKey(Schema.Boolean),
   parentDirectory: Schema.String,
   brief: Schema.String.check(Schema.isMinLength(1)),

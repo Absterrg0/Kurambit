@@ -249,14 +249,14 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration.TextGeneration;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const config = yield* ServerConfig.ServerConfig;
-  // Names still being made for new games end with the server.
-  const namingScope = yield* Effect.scope;
   /**
    * The game's name from its brief, written by the text-generation model T3 titles threads with:
-   * the title a player sees. A slow or failing model leaves the fallback, so a new game never waits
-   * long or fails over its name.
+   * the title a player sees. The game waits for it, because the name goes into its folder,
+   * game.json, BRIEF.md and the page's title, which the agent reads from its first second: a name
+   * that arrived later would leave the drafted one in all of them. A slow or failing model leaves
+   * the drafted name, so a new game never fails over its name.
    */
-  const nameFromBrief = (brief: string, fallback: string) =>
+  const nameFromBrief = (brief: string, drafted: string) =>
     Effect.gen(function* () {
       const settings = yield* serverSettings.getSettings;
       const generated = yield* textGeneration.generateGameName({
@@ -264,44 +264,16 @@ const make = Effect.gen(function* () {
         brief,
         modelSelection: settings.textGenerationModelSelection,
       });
-      return generated.name;
+      return generated.name.trim() || drafted;
     }).pipe(
       Effect.withSpan("GameProjectService.nameFromBrief"),
-      Effect.timeout("15 seconds"),
+      Effect.timeout("12 seconds"),
       Effect.catchCause((cause) =>
         Effect.as(
           Effect.logWarning("Game name generation failed; the drafted name stands", { cause }),
-          fallback,
+          drafted,
         ),
       ),
-    );
-  /**
-   * A new game's name from its brief, applied once the model answers. The game is made, and its
-   * first turn starts, under the drafted name, as T3 titles a thread after its first message: the
-   * model takes seconds, and the person waits for none of them. Only the project's title, the
-   * name the person sees, changes: the folder and game.json keep the drafted name, as they keep a
-   * game's first name after any rename. A name the person gave it in the meantime stands.
-   */
-  const nameLater = (projectId: ProjectId, brief: string, drafted: string) =>
-    nameFromBrief(brief, drafted).pipe(
-      Effect.flatMap((name) =>
-        name.trim() === "" || name === drafted
-          ? Effect.void
-          : projects.getById(projectId).pipe(
-              Effect.flatMap((project) =>
-                Option.isNone(project) || project.value.title !== drafted
-                  ? Effect.void
-                  : projects.update({
-                      commandId: CommandId.make(NodeCrypto.randomUUID()),
-                      projectId,
-                      title: name,
-                    }),
-              ),
-            ),
-      ),
-      Effect.ignoreCause({ log: true }),
-      Effect.forkIn(namingScope),
-      Effect.asVoid,
     );
   // A card says what a live run is doing. A paused or ended run reads nothing
   // here, so the row never masks "Needs attention"; the chat's banner says paused.
@@ -541,9 +513,8 @@ const make = Effect.gen(function* () {
   });
   const create: GameProjectService["Service"]["create"] = Effect.fn("GameProjectService.create")(
     function* (input) {
-      // A brief's own name comes later (nameLater): the game is made at once under the drafted one.
-      const name = input.name.trim();
-      if (name === "")
+      const drafted = input.name.trim();
+      if (drafted === "")
         return yield* new GameOperationError({
           operation: "create-game",
           path: input.name,
@@ -561,6 +532,8 @@ const make = Effect.gen(function* () {
           reason: "invalid-input",
           detail: `Make characters with ${input.characters}: ${unavailable}`,
         });
+      const name =
+        input.nameFromBrief === true ? yield* nameFromBrief(input.brief, drafted) : drafted;
       const parent = input.parentDirectory.trim() || NodePath.join(NodeOS.homedir(), "Games");
       const free = yield* Effect.promise(() =>
         freeGameFolder(
@@ -577,12 +550,10 @@ const make = Effect.gen(function* () {
       // One create per folder at a time in this server, so a second click
       // cannot take the first's half-made folder for a leftover.
       // The scaffold (game.json, the page's title) and the project take the name the game got.
-      const made = yield* createLocks.withLock(
+      return yield* createLocks.withLock(
         free.root,
         createAt({ ...input, name: free.name }, free.name, free.root),
       );
-      if (input.nameFromBrief === true) yield* nameLater(made.projectId, input.brief, free.name);
-      return made;
     },
   );
   const createAt = (input: GameCreateInput, name: string, requestedRoot: string) =>

@@ -43,9 +43,9 @@ export const gamePigment = (name: string): readonly [string, string] => {
   return GAME_PIGMENTS[hash % GAME_PIGMENTS.length]!;
 };
 
-// Words that frame a brief rather than name the game.
+// Words that frame a brief rather than name the game: "can you please create a…", "I'd like to make…".
 const NAME_FRAMING =
-  /^(?:(?:please|let'?s|i\s+want(?:\s+to)?|make|build|create|design|write|me|a|an|the|some)\s+)+/;
+  /^(?:(?:hey|hi|hello|ok|okay|can|could|would|you|pls|please|kindly|let'?s|(?:i|we)(?:'?d|\s+would)\s+(?:like|love)|i|we|want|need|to|make|build|create|design|write|generate|give|me|us|a|an|the|some)\s+)+/;
 // A clause break: punctuation, or a word that starts the brief's details.
 const NAME_CLAUSE_END = /[,.;:!?()\n]|\s(?:with|where|that|which|who|and|but|while|until|so)\s/;
 const NAME_PREPOSITIONS = new Set([
@@ -78,7 +78,22 @@ const NAME_PREPOSITIONS = new Set([
   "within",
   "set",
 ]);
-const NAME_SKIP = new Set(["a", "an", "the", "game", "games", "your", "my", "our", "its", "their"]);
+const NAME_SKIP = new Set([
+  "a",
+  "an",
+  "the",
+  "game",
+  "games",
+  "your",
+  "my",
+  "our",
+  "its",
+  "their",
+  "really",
+  "very",
+  "super",
+  "extremely",
+]);
 
 const titleWord = (word: string) =>
   word
