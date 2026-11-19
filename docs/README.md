@@ -6,7 +6,6 @@
 - [Vocabulary](./user/vocabulary.md)
 - [Install](./user/install.md)
 - [Messages and context](./user/composer.md)
-- [Working with threads](./user/thread-sidebar.md)
 - [Permission modes](./user/permission-modes.md)
 - [Terminal history](./user/terminal.md)
 - [Project settings](./user/project-settings.md)

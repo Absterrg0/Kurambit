@@ -88,5 +88,5 @@ For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 
 ## Next steps
 
-- [Working with threads](./thread-sidebar.md): start tasks and organize parallel work.
+- [Making games](./making-games.md): start a game, change it in chats, and settle finished work.
 - [Permission modes](./permission-modes.md): choose when agents ask before acting.

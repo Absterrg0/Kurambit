@@ -100,9 +100,15 @@ When a chat's work is done, **Settle** it: hover it in the sidebar and press the
 it, drag it onto **Settled**, press `mod+shift+S`, or use the chat's menu beside the game's name
 above the stage. It leaves the game's list for the **Settled** shelf at the bottom of the sidebar;
 its builds stay in the game's History. A notice offers **Undo** for five seconds (`mod+Z`).
-**Un-settle** brings it back the same ways, and so does sending it a message. Chats left alone
-settle on their own after three days; change that in **Settings → General → Advanced**. A game's
-own chat never settles: archive the game to put it away.
+**Un-settle** brings it back the same ways, and so does sending it a message. A chat that is still
+working, has a message queued, or waits on your answer can't be settled until that is done.
+
+Chats left alone settle on their own after three days; change that in **Settings → General →
+Advanced**. One you un-settle stays in the list until you work in it again, and changing the days
+does not bring settled chats back. Your agent can settle a chat as well, when you ask it to.
+
+A game's own chat never settles: archive the game to put it away. On it the settle key and the
+command palette's **Settle chat** are disabled and say so, and an agent that tries is told the same.
 
 To continue a game, choose its row or its card under **Your games**, or use **Open a game** (on the
 home screen or in the command palette) and pick a folder that contains `game.json`. A game opens on

@@ -160,11 +160,9 @@ through the pages you have visited, as do the arrows beside the sidebar toggle. 
 stop at the first and last page you visited in Kurambit, so they never leave the app.
 
 `chat.new` (`mod+n`, or `mod+shift+o` in a browser, which keeps `mod+n` for new windows) goes to
-the home screen's brief box to start a new game; with the legacy
-sidebar it starts a thread instead. `chat.newLocal` starts a new chat in the current game, on the
-game's screen with its model (in a project that is not a game, with your
-[new-thread defaults](./thread-sidebar.md#start-a-thread)). `chat.newWithoutProject`
-(`mod+alt+n`) starts a thread [without a project](./thread-sidebar.md#start-without-a-project).
+the home screen's brief box to start a new game. `chat.newLocal` starts a new chat in the current
+game, on the game's screen with its model. `chat.newWithoutProject` (`mod+alt+n`) starts a chat
+without a project, in a folder of its own under `~/.kurambit/scratch`.
 
 ## Reserved shortcuts
 

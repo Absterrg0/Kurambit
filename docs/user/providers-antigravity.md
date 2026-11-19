@@ -99,8 +99,7 @@ to inspect with its tools. A video path does not enable native video input.
 
 Antigravity groups subagent activity into batches. You cannot open or control
 individual subagents, and an idle batch does not confirm that every child
-succeeded. See [agent work](./thread-sidebar.md#inspect-agent-work) for where to
-inspect activity.
+succeeded. Expand a tool call in the conversation to see what it ran.
 
 ## Accounts and removal
 
