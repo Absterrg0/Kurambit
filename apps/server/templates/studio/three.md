@@ -18,6 +18,9 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
    with `ctx.thing`, and read every speed, jump, gravity, spawn rate, life
    count, damage and timer from `ctx.tune` where it is used, every frame,
    never copied into a constant, each with its range (TEMPLATE.md, item 5).
+   An effect of your own over the whole picture (film grain, scanlines, a
+   tint) is tuned the same way, on a thing named for it, with 0 as off: the
+   person sees it on everything they look at, and turns it down in Tune.
 4. A message that starts "The person selected this in the running game" is
    an Ask from the Stage's Inspector. The attached image is the canvas as
    they asked; the block names the thing (a `ctx.thing` name, a `ctx.tune` id
