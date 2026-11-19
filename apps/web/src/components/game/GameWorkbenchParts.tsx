@@ -1,3 +1,4 @@
+import { ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
@@ -65,7 +66,8 @@ function Section({
 /**
  * One row of a section: a mark in a fixed column, its name, and its reading at the right in tabular
  * figures. A reading that does not fit beside the name wraps under it as a quieter second line;
- * neither is ever cut. The end slot keeps its width so readings line up.
+ * neither is ever cut. The end slot keeps its width so readings line up. A row that opens to
+ * something under it (`onToggle`) is a button with a chevron in that slot.
  */
 function Row({
   mark,
@@ -73,20 +75,22 @@ function Row({
   reading,
   end,
   muted = false,
+  expanded,
+  onToggle,
   className,
-  ...props
-}: Omit<ComponentProps<"div">, "children"> & {
+}: {
   mark?: ReactNode;
   name: ReactNode;
   reading?: ReactNode;
   end?: ReactNode;
   muted?: boolean;
+  /** Whether what it opens to is showing; only with `onToggle`. */
+  expanded?: boolean;
+  onToggle?: () => void;
+  className?: string;
 }) {
-  return (
-    <div
-      className={cn("flex min-h-7 min-w-0 items-start gap-2 py-1 ps-4 pe-2", className)}
-      {...props}
-    >
+  const slots = (
+    <>
       {mark === undefined ? null : (
         <span className="flex h-5 w-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5">
           {mark}
@@ -113,8 +117,36 @@ function Row({
           </Text>
         )}
       </span>
-      <span className="flex h-5 w-6 shrink-0 items-center justify-end">{end}</span>
-    </div>
+      <span className="flex h-5 w-6 shrink-0 items-center justify-end">
+        {onToggle === undefined ? (
+          end
+        ) : (
+          <ChevronRightIcon
+            aria-hidden="true"
+            className={cn(
+              "motion-popup size-3.5 text-dim-foreground transition-transform",
+              expanded === true && "rotate-90",
+            )}
+          />
+        )}
+      </span>
+    </>
+  );
+  const layout = cn("flex min-h-7 min-w-0 items-start gap-2 py-1 ps-4 pe-2", className);
+  return onToggle === undefined ? (
+    <div className={layout}>{slots}</div>
+  ) : (
+    <button
+      type="button"
+      aria-expanded={expanded === true}
+      onClick={onToggle}
+      className={cn(
+        layout,
+        "w-full cursor-pointer text-left outline-none hover:surface-selected-soft focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+      )}
+    >
+      {slots}
+    </button>
   );
 }
 

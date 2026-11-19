@@ -6,13 +6,13 @@ import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime
 import {
   gameChecksView,
   gameLookId,
+  gameQaFindings,
   ownsUndo,
   playOutcomeWords,
   type GameBuild,
   type GameBuildFacts,
   type GameBuildsResult,
   type GameCheck,
-  type GameFactView,
   type GameSavedPlayReading,
   type GameThing,
   type GameTuneChange,
@@ -64,7 +64,6 @@ import {
   formatBuildTime,
   notMeasuredWhy,
   qaLines,
-  silentControlsNote,
   undoOutcome,
 } from "./gameBuilds.logic";
 import { stageBuildId } from "./gameBuildTimeline.logic";
@@ -175,9 +174,10 @@ export function GameWorkbenchChecks({
 }
 
 /**
- * One build's Checks: its name and time, how many checks pass over a bar of them, what it
- * changed, each check opening in place to its evidence, then the game's console when it said
- * something worth reading, and the decisions every session reads.
+ * One build's Checks: its name and time, what it changed in plain words, then its checks as one
+ * summary (the problems and what the person can try, each with its proof; the passes folded into
+ * a line), the game's console when it said something worth reading, and the decisions every
+ * session reads.
  */
 function BuildChecksBody({
   threadRef,
@@ -195,21 +195,20 @@ function BuildChecksBody({
   const facts = useShownFacts(threadRef, build);
   return (
     <Workbench.Body>
-      <div className="flex flex-col">
+      <div className="flex flex-col pb-2">
         <BuildHeader
           threadRef={threadRef}
           build={build}
           list={list}
           onBackToStage={onBackToStage}
         />
-        <Headline facts={facts.shown} busy={facts.busy} />
+        <WhatChanged
+          threadRef={threadRef}
+          build={build}
+          list={list}
+          onOpenTurnDiff={onOpenTurnDiff}
+        />
       </div>
-      <WhatChanged
-        threadRef={threadRef}
-        build={build}
-        list={list}
-        onOpenTurnDiff={onOpenTurnDiff}
-      />
       <BuildChecks threadRef={threadRef} build={build} list={list} facts={facts} />
       <ChecksConsole threadKey={scopedThreadKey(threadRef)} />
       <GameDecisionsSection threadRef={threadRef} />
@@ -272,7 +271,7 @@ function BuildHeader({
   // Any other build can be its other side: the strip picks it, with this one already first.
   const canPickCompare = build.available && list.builds.some((entry) => entry.id !== build.id);
   return (
-    <div className="flex flex-col gap-1 pt-2.5 pb-2">
+    <div className="flex flex-col gap-1 pt-2.5 pb-1">
       <div className="flex h-8 items-center gap-2 ps-4 pe-2">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <Text variant="label" tone="strong" truncate render={<h2 />}>
@@ -432,34 +431,9 @@ function useShownFacts(threadRef: ScopedThreadRef, build: GameBuild) {
 }
 type ShownFacts = ReturnType<typeof useShownFacts>;
 
-/** A check's colour in the headline's bar: the one colour its mark has. */
-const segmentTone = (check: GameCheck) => {
-  if (check.reading._tag !== "measured") return "bg-muted";
-  if (check.reading.tone === "good") return "bg-success";
-  if (check.reading.tone === "bad") return check.id === "boots" ? "bg-destructive" : "bg-warning";
-  return "bg-muted-foreground/40";
-};
-
-/** "6 of 8 pass", over a bar of one segment per check in its status's colour. */
-function Headline({ facts, busy }: { facts: GameBuildFacts | null; busy: boolean }) {
-  if (facts === null || facts.state === "never") return null;
-  const view = gameChecksView(facts);
-  const passing = view.checks.filter(
-    (check) => check.reading._tag === "measured" && check.reading.tone === "good",
-  ).length;
-  return (
-    <div className="flex flex-col gap-2 px-4 pb-3">
-      <Text variant="title" tone="strong" numeric render={<p />}>
-        {busy ? `${passing} pass so far` : `${passing} of ${view.checks.length} pass`}
-      </Text>
-      <div aria-hidden="true" className="flex h-1.5 gap-1">
-        {view.checks.map((check) => (
-          <span key={check.id} className={cn("flex-1 rounded-full", segmentTone(check))} />
-        ))}
-      </div>
-    </div>
-  );
-}
+/** "1 control", "2 controls": a count and its noun. */
+const countOf = (count: number, one: string, many = `${one}s`) =>
+  `${count} ${count === 1 ? one : many}`;
 
 function BuildChecks({
   threadRef,
@@ -473,10 +447,14 @@ function BuildChecks({
   facts: ShownFacts;
 }) {
   const { shown, busy, measure } = facts;
+  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   const answer = measure.answer(build.id);
   const canMeasureAgain =
     measure.canMeasure && build.available && shown !== null && shown.state !== "never" && !busy;
+  const sorted =
+    shown === null || shown.state === "never" ? null : sortChecks(shown, root !== null);
   return (
+    // The rows are the summary: each fact is said once, in its row.
     <Workbench.Section
       title="Checks"
       detail={
@@ -516,7 +494,7 @@ function BuildChecks({
         ) : (
           <Note>{facts.error}</Note>
         )
-      ) : shown.state === "never" ? (
+      ) : sorted === null ? (
         <div className="flex flex-col items-start gap-2 px-4 py-1">
           {shown.message.trim() === "" ? null : (
             <Text variant="meta" tone="muted" render={<p />}>
@@ -530,7 +508,15 @@ function BuildChecks({
           ) : null}
         </div>
       ) : (
-        <CheckRows threadRef={threadRef} build={build} list={list} facts={shown} />
+        <CheckRows
+          threadRef={threadRef}
+          root={root}
+          build={build}
+          list={list}
+          facts={shown}
+          sorted={sorted}
+          busy={busy}
+        />
       )}
       {answer !== null && answer.failed ? (
         <Text variant="caption" tone="destructive" render={<p role="alert" className="px-4" />}>
@@ -549,77 +535,200 @@ function Note({ children }: { children: string }) {
   );
 }
 
+/** Why a build's checks could not be read when the build itself does not start. */
+const DID_NOT_START = "the game did not start, so the bots could not play it";
+
+const toneOf = (check: GameCheck) =>
+  check.reading._tag === "measured" ? check.reading.tone : null;
+
+/** A frame rate read on a machine that cannot time one: its draw counts are all it has. */
+const frameRateUnread = (facts: GameBuildFacts, check: GameCheck) =>
+  check.id === "performance" &&
+  facts.performance.status === "measured" &&
+  facts.performance.value.fps === null;
+
+/**
+ * PURE. A build's checks sorted by what the person does with them: problems to fix, readings for
+ * them to judge, how many controls are theirs to try, the passes, the ones still being measured
+ * and the ones not measured with each one's reason.
+ */
+const sortChecks = (facts: GameBuildFacts, rooted: boolean) => {
+  const { checks } = gameChecksView(facts);
+  const measured = checks.filter(
+    (check) => check.reading._tag === "measured" && !frameRateUnread(facts, check),
+  );
+  // A build that does not start leaves every other check unread for that one reason.
+  const startFailed = checks.some((check) => check.id === "boots" && toneOf(check) === "bad");
+  return {
+    problems: measured.filter((check) => toneOf(check) === "bad"),
+    judge: measured.filter((check) => toneOf(check) === "neutral"),
+    toTry: facts.qa.status === "measured" ? gameQaFindings(facts.qa.value).silent.length : 0,
+    passes: measured.filter((check) => toneOf(check) === "good"),
+    pending: checks.filter((check) => check.reading._tag === "pending").length,
+    unread: checks.flatMap((check) =>
+      check.reading._tag === "not-measured"
+        ? [{ check, why: startFailed ? DID_NOT_START : notMeasuredWhy(check.reading) }]
+        : frameRateUnread(facts, check)
+          ? [{ check, why: check.value ?? "" }]
+          : [],
+    ),
+    startFailed,
+    rooted,
+  };
+};
+type SortedChecks = ReturnType<typeof sortChecks>;
+
+/**
+ * The checks in one grammar: every row is a mark, a sentence and a reading, and opens to its
+ * proof when it has one. Problems and what the person can try are open; the passes are one line
+ * that opens to them, and so are the checks not measured, each with its reason.
+ */
 function CheckRows({
   threadRef,
+  root,
   build,
   list,
   facts,
+  sorted,
+  busy,
 }: {
   threadRef: ScopedThreadRef;
+  root: string | null;
   build: GameBuild;
   list: GameBuildsResult;
   facts: GameBuildFacts;
+  sorted: SortedChecks;
+  busy: boolean;
 }) {
-  const view = gameChecksView(facts);
-  const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   const base = useBaseFacts(threadRef, build, list);
-  const measured = view.checks.filter((check) => check.reading._tag === "measured");
-  const toneOf = (check: GameCheck) =>
-    check.reading._tag === "measured" ? check.reading.tone : null;
-  // Problems first, then each check whose proof is worth a look; a pass with nothing to show
-  // is said in one line with the others like it.
-  const problems = measured.filter((check) => toneOf(check) === "bad");
-  const proven = measured.filter(
-    (check) => toneOf(check) !== "bad" && hasProof(facts, check, root !== null),
-  );
-  const quiet = measured.filter(
-    (check) => toneOf(check) !== "bad" && !hasProof(facts, check, root !== null),
-  );
-  const quietPasses = quiet.filter((check) => toneOf(check) === "good");
-  const pending = view.checks.filter((check) => check.reading._tag === "pending").length;
-  // Context that changes how to read a row, never a finding of its own: said on hover.
-  const noteOf = (fact: GameFactView): string | null =>
-    fact.id === "performance" && facts.renderer
-      ? `Played with ${facts.renderer}.`
-      : fact.id === "controls"
-        ? silentControlsNote(facts)
-        : null;
+  // What the person folded or opened, against each row's own start.
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
+  const isOpen = (id: string, start: boolean) => flipped.has(id) !== start;
+  const toggle = (id: string) =>
+    setFlipped((before) => {
+      const next = new Set(before);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   const evidence = { threadRef, root, base, facts };
+  const row = (check: GameCheck, start: boolean, grouped: boolean) => {
+    const proof = hasEvidence(facts, check, root !== null);
+    const open = proof && isOpen(check.id, start);
+    return (
+      <div key={check.id} className="flex flex-col">
+        <Workbench.Row
+          // In a group the group's mark stands for its rows.
+          mark={grouped ? <span /> : <CheckMark check={check} />}
+          name={check.sentence}
+          // What a control check leaves the person to try is its own row.
+          reading={check.id === "controls" && toneOf(check) === "good" ? null : check.value}
+          {...(proof ? { expanded: open, onToggle: () => toggle(check.id) } : {})}
+        />
+        {open ? <CheckEvidence check={check} {...evidence} /> : null}
+      </div>
+    );
+  };
+  const passesOpen = isOpen("passes", false);
+  const unreadOpen = isOpen("unread", false);
+  const tryOpen = isOpen("try", true);
   return (
     <div className="flex flex-col">
-      {[...problems, ...proven].map((check) => (
-        <CheckBlock key={check.id} check={check} {...evidence} />
-      ))}
-      {quiet
-        .filter((check) => toneOf(check) !== "good")
-        .map((check) => (
+      {sorted.problems.map((check) => row(check, true, false))}
+      {sorted.judge.map((check) => row(check, true, false))}
+      {sorted.toTry === 0 ? null : (
+        <div className="flex flex-col">
           <Workbench.Row
-            key={check.id}
-            mark={<CheckMark check={check} />}
-            name={check.sentence}
-            reading={check.value}
+            mark={
+              <span
+                aria-hidden="true"
+                className="size-2 rounded-full border border-muted-foreground"
+              />
+            }
+            name={`${countOf(sorted.toTry, "control")} to try yourself`}
+            expanded={tryOpen}
+            onToggle={() => toggle("try")}
           />
-        ))}
-      {quietPasses.length === 0 ? null : (
-        <Workbench.Row
-          mark={<CheckIcon className="text-success" aria-hidden="true" />}
-          name={quietPasses.map((check) => check.sentence).join(" · ")}
-        />
+          {tryOpen ? (
+            <EvidenceBlock>
+              <ControlsEvidence
+                threadKey={scopedThreadKey(threadRef)}
+                facts={facts}
+                only={["try"]}
+              />
+            </EvidenceBlock>
+          ) : null}
+        </div>
       )}
-      {pending > 0 ? (
+      {sorted.passes.length === 0 ? null : (
+        <div className="flex flex-col">
+          <Workbench.Row
+            mark={<CheckIcon className="text-success" aria-hidden="true" />}
+            name={`${sorted.passes.length} pass`}
+            expanded={passesOpen}
+            onToggle={() => toggle("passes")}
+          />
+          {passesOpen ? sorted.passes.map((check) => row(check, false, true)) : null}
+        </div>
+      )}
+      {sorted.pending > 0 ? (
         <Workbench.Row
           mark={<ClockIcon className="text-dim-foreground" aria-hidden="true" />}
-          name={pendingWords(
-            pending,
-            facts.state === "measuring" || facts.state === "queued" ? facts.message : "",
-          )}
+          name={pendingWords(sorted.pending, busy ? facts.message : "")}
           muted
         />
       ) : null}
-      <NotMeasured checks={view.checks} note={noteOf} />
+      {/* While it is measured again, what is still to come is the row above, not a list. */}
+      {sorted.unread.length === 0 || busy ? null : sorted.startFailed ? (
+        <Workbench.Row
+          mark={<MinusIcon className="text-dim-foreground" aria-hidden="true" />}
+          name={`${sorted.unread.length} not measured: it did not start`}
+          muted
+        />
+      ) : (
+        <div className="flex flex-col">
+          <Workbench.Row
+            mark={<MinusIcon className="text-dim-foreground" aria-hidden="true" />}
+            name={`${sorted.unread.length} not measured`}
+            muted
+            expanded={unreadOpen}
+            onToggle={() => toggle("unread")}
+          />
+          {unreadOpen
+            ? sorted.unread.map(({ check, why }) => {
+                const proof = frameRateUnread(facts, check) && hasPerformanceProof(facts);
+                const open = proof && isOpen(check.id, false);
+                return (
+                  <div key={check.id} className="flex flex-col">
+                    <Workbench.Row
+                      mark={<span />}
+                      // Its reason always under its name, however short: one place for every row.
+                      name={
+                        <span className="flex flex-col">
+                          {check.sentence}
+                          {proof || why === "" ? null : (
+                            <Text variant="caption" tone="muted">
+                              {sentenceOf(why)}
+                            </Text>
+                          )}
+                        </span>
+                      }
+                      muted
+                      {...(proof ? { expanded: open, onToggle: () => toggle(check.id) } : {})}
+                    />
+                    {open ? <CheckEvidence check={check} {...evidence} /> : null}
+                  </div>
+                );
+              })
+            : null}
+        </div>
+      )}
     </div>
   );
 }
+
+/** A reason as a sentence of its own: its first letter raised. */
+const sentenceOf = (text: string) =>
+  text === "" ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /** The checks still to come, as one row: what the bot is doing, when it says. */
 const pendingWords = (count: number, step: string) => {
@@ -657,29 +766,6 @@ interface Evidence {
   /** The build this one was made from, whose readings each number is compared with. */
   readonly base: GameBuildFacts | null;
   readonly facts: GameBuildFacts;
-}
-
-/** One check: its mark, sentence and reading, with what proves it always right under it. */
-function CheckBlock({ check, ...evidence }: Evidence & { check: GameCheck }) {
-  const shows = hasEvidence(evidence.facts, check, evidence.root !== null);
-  return (
-    <div className="flex flex-col">
-      <Workbench.Row
-        mark={<CheckMark check={check} />}
-        name={check.sentence}
-        // A frame rate not measured reads its draw counts, which are the fields under it.
-        reading={
-          check.id === "performance" &&
-          evidence.facts.performance.status === "measured" &&
-          evidence.facts.performance.value.fps === null &&
-          hasPerformanceProof(evidence.facts)
-            ? null
-            : check.value
-        }
-      />
-      {shows ? <CheckEvidence check={check} {...evidence} /> : null}
-    </div>
-  );
 }
 
 /**
@@ -796,7 +882,12 @@ function CheckEvidence({ threadRef, root, base, facts, check }: Evidence & { che
     case "controls":
       return (
         <EvidenceBlock>
-          <ControlsEvidence threadKey={scopedThreadKey(threadRef)} facts={facts} />
+          <ControlsEvidence
+            threadKey={scopedThreadKey(threadRef)}
+            facts={facts}
+            // A problem lists the controls that do nothing; a pass, the ones that answered.
+            only={toneOf(check) === "bad" ? ["dead"] : ["works"]}
+          />
           {/* The key rows say which control does nothing; the lines only when there are none. */}
           {hasControls(facts) ? null : <ProblemLines lines={qaLines(facts, "controls")} />}
           {recordings}
@@ -919,82 +1010,12 @@ function EvidenceButtons({
   );
 }
 
-/** Why a build's checks could not be read when the build itself does not start. */
-const DID_NOT_START = "the game did not start, so the bots could not play it";
-
-/** Checks not measured, as one muted line: their names, and each one's reason on hover. */
-function NotMeasured({
-  checks,
-  note,
-}: {
-  checks: ReadonlyArray<GameCheck>;
-  note: (fact: GameFactView) => string | null;
-}) {
-  // A build that does not start leaves every other check unread for that one reason.
-  const startFailed = checks.some(
-    (check) =>
-      check.id === "boots" && check.reading._tag === "measured" && check.reading.tone === "bad",
-  );
-  const unread = checks.flatMap((check) =>
-    check.reading._tag === "not-measured"
-      ? [{ check, why: startFailed ? DID_NOT_START : notMeasuredWhy(check.reading) }]
-      : [],
-  );
-  if (unread.length === 0) return null;
-  const notes = unread.map(({ check }) => note(check)).filter((line) => line !== null);
-  const said = startFailed
-    ? `${unread.length} not measured: it did not start`
-    : unread.map(({ check }) => check.sentence).join(" · ");
-  const sentence = (text: string) => `${text}${/[.!?]$/.test(text) ? "" : "."}`;
-  return (
-    <Workbench.Row
-      mark={<MinusIcon className="text-dim-foreground" aria-hidden="true" />}
-      muted
-      name={
-        <Tooltip>
-          <TooltipTrigger render={<span />}>
-            {said}
-            <span className="sr-only"> (not measured)</span>
-          </TooltipTrigger>
-          <TooltipPopup side="left" className="max-w-sm">
-            <span className="flex flex-col gap-1">
-              {startFailed ? (
-                <span>Not measured: {sentence(DID_NOT_START)}</span>
-              ) : (
-                unread.map(({ check, why }) => (
-                  <span key={check.id}>
-                    {check.sentence}: {sentence(why)}
-                  </span>
-                ))
-              )}
-              {notes.map((line) => (
-                <span key={line}>{line}</span>
-              ))}
-            </span>
-          </TooltipPopup>
-        </Tooltip>
-      }
-    />
-  );
-}
-
 /** The rows' own shape while they are read, so nothing under them moves when they land. */
-const SKELETON_CHECKS = [
-  "Starts without errors",
-  "No errors while playing",
-  "Every control works",
-  "Retry starts clean",
-  "HUD fits the screen",
-  "Holds its frame rate",
-  "Not yet proven winnable",
-] as const;
-
 function CheckRowsLoading() {
   return (
-    <div aria-busy="true" className="flex flex-col">
-      {SKELETON_CHECKS.map((name) => (
-        <Workbench.Row key={name} mark={<span />} name={name} muted />
-      ))}
+    <div aria-busy="true" className="flex flex-col gap-2.5 px-4 py-1.5">
+      <Skeleton className="h-3 w-40" />
+      <Skeleton className="h-3 w-24" />
     </div>
   );
 }
@@ -1371,10 +1392,10 @@ function WhatChanged({
     if (runId !== null) onOpenTurnDiff(runId, path);
   };
   return (
-    <Workbench.Section title="What changed">
-      <div className="flex flex-col gap-1 px-4 pb-1.5">
+    <section aria-label="What changed" className="flex flex-col">
+      <div className="flex flex-col gap-1 px-4 pb-1">
         {headline === null ? null : (
-          <Text variant="body" tone="strong" render={<p className="break-words" />}>
+          <Text variant="body" tone="default" render={<p className="break-words" />}>
             {headline}
           </Text>
         )}
@@ -1384,7 +1405,7 @@ function WhatChanged({
               <Text
                 key={line}
                 variant="meta"
-                tone="default"
+                tone="muted"
                 numeric
                 render={<li className="break-words" />}
               >
@@ -1494,7 +1515,7 @@ function WhatChanged({
           ) : null}
         </>
       )}
-    </Workbench.Section>
+    </section>
   );
 }
 

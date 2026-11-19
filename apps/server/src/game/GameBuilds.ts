@@ -77,6 +77,7 @@ import { BuildName } from "./run/buildNames.ts";
 import { availableEngine, engineCapabilities, engineProfile } from "./engineProfile.ts";
 import { isRestored, measureChange, withBuildInFolder } from "./run/builds.ts";
 import { projectStep, supersedeProposal } from "./run/inFlight.ts";
+import { replaceComposerContextReferences } from "@kurambit/shared/composerContextReferences";
 import { isFirstTurnLead } from "@kurambit/shared/gameFirstTurn";
 import { sameTuneFile, tuneChanges, tuneFileText, tuneFileWith } from "./gameTune.ts";
 import { mergeBuilds } from "./mergeBuilds.ts";
@@ -210,8 +211,10 @@ const decodeNoRunRestore = Schema.decodeUnknownOption(NoRunRestoreJson);
 const encodeNoRunRestore = Schema.encodeEffect(NoRunRestoreJson);
 
 const firstLine = (text: string | null, fallback: string) => {
+  // A thing the person pointed at is a link in the message: here it is its name, before the
+  // line is cut, so no surface ever shows a link's address or half of one.
   const line =
-    (text ?? "")
+    replaceComposerContextReferences(text ?? "", (reference) => reference.label)
       .split("\n")
       .find((each) => each.trim() !== "" && !isFirstTurnLead(each.trim()))
       ?.trim() ?? "";

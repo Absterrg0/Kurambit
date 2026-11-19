@@ -307,23 +307,36 @@ export function PerformanceEvidence({
 }
 
 const CHART_H = 56;
+/** A label's line height, and so the least two labels may be apart. */
+const CHART_LABEL_H = 12;
 
 /**
- * Frames per second through the play, as wide as its column: the 60 line quiet, the 1% low a
- * dashed amber line labelled at its end. Drawn once.
+ * Frames per second through the play: the 60 line quiet, the 1% low a dashed amber line. Their
+ * labels sit in a column of their own after the chart, each beside its line and never on the
+ * drawing or on each other. Drawn once.
  */
 function FrameChart({ series, low }: { series: ReadonlyArray<number>; low: number | null }) {
   const top = Math.max(60, ...series);
   // In a 100-wide box stretched to the column; strokes keep their width.
   const y = (fps: number) => CHART_H - 2 - (fps / top) * (CHART_H - 4);
   const x = (index: number) => (index / (series.length - 1)) * 100;
+  const at = (lineY: number) =>
+    Math.min(CHART_H - CHART_LABEL_H, Math.max(0, lineY - CHART_LABEL_H / 2));
+  const sixtyAt = at(y(60));
+  // The 1% low is under 60 when the two are close; else it sits beside its own line.
+  const lowAt =
+    low === null
+      ? 0
+      : Math.abs(at(y(low)) - sixtyAt) < CHART_LABEL_H
+        ? sixtyAt + CHART_LABEL_H
+        : at(y(low));
   return (
-    <div className="relative">
+    <div className="flex items-stretch gap-2">
       <svg
         viewBox={`0 0 100 ${CHART_H}`}
         preserveAspectRatio="none"
         height={CHART_H}
-        className="block w-full overflow-visible"
+        className="block min-w-0 flex-1 overflow-visible"
         role="img"
         aria-label={`Frame rate through the play, ${Math.min(...series)} to ${Math.max(...series)} fps${low === null ? "" : `, 1% low ${low}`}`}
       >
@@ -359,29 +372,31 @@ function FrameChart({ series, low }: { series: ReadonlyArray<number>; low: numbe
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <Text
-        variant="caption"
-        tone="muted"
-        numeric
-        render={<span className="absolute end-0 top-0 leading-none" />}
-      >
-        60
-      </Text>
-      {low === null ? null : (
+      <div aria-hidden="true" className="relative w-16 shrink-0">
         <Text
           variant="caption"
-          tone="inherit"
+          tone="muted"
           numeric
-          render={
-            <span
-              className="absolute end-0 -translate-y-full bg-background ps-1 leading-none text-warning"
-              style={{ top: y(low) - 2 }}
-            />
-          }
+          render={<span className="absolute start-0 leading-3" style={{ top: sixtyAt }} />}
         >
-          1% low {Math.round(low)}
+          60
         </Text>
-      )}
+        {low === null ? null : (
+          <Text
+            variant="caption"
+            tone="inherit"
+            numeric
+            render={
+              <span
+                className="absolute start-0 leading-3 whitespace-nowrap text-warning"
+                style={{ top: lowAt }}
+              />
+            }
+          >
+            1% low {Math.round(low)}
+          </Text>
+        )}
+      </div>
     </div>
   );
 }
@@ -483,7 +498,7 @@ const keyWord = (code: string) =>
  * the play saw nothing change, so it is the person's to try and the check still passes; or the
  * game never read it, so it does nothing and the check is a problem.
  */
-type ControlVerdict = "works" | "try" | "dead";
+export type ControlVerdict = "works" | "try" | "dead";
 const verdictOf = (control: GameQaControl): ControlVerdict =>
   !control.read ? "dead" : control.answers.length === 0 ? "try" : "works";
 
@@ -493,6 +508,26 @@ interface ControlRow {
   readonly did: string | null;
   readonly verdict: ControlVerdict;
 }
+
+/**
+ * PURE. What a control's presses did, as a player says it. The play also reports each value of
+ * the game's state a press changed, by the code's own name ("changed viewYaw"): said only when
+ * nothing else answered, and then in words ("view yaw changed"), never as the code names it.
+ */
+export const controlAnswerWords = (answers: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const unique = [...new Set(answers)];
+  const seen = unique.filter((answer) => !answer.startsWith("changed "));
+  if (seen.length > 0) return seen;
+  return unique.map((answer) => {
+    const words = answer
+      .slice("changed ".length)
+      .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+      .replace(/[_.-]+/g, " ")
+      .trim()
+      .toLowerCase();
+    return words === "" ? "changed" : `${words} changed`;
+  });
+};
 
 const MOVES = ["move_up", "move_left", "move_down", "move_right"] as const;
 /**
@@ -513,7 +548,7 @@ const controlRows = (
     return code === null ? [] : [keyWord(code)];
   };
   const didOf = (answers: ReadonlyArray<string>) =>
-    answers.length === 0 ? null : [...new Set(answers)].join(", ");
+    answers.length === 0 ? null : controlAnswerWords(answers).join(", ");
   const rows: Array<ControlRow> = [];
   const moves = MOVES.map((name) => controls.find((control) => control.name === name)).filter(
     (control) => control !== undefined,
@@ -551,9 +586,12 @@ export const hasControls = (facts: GameBuildFacts) =>
 export function ControlsEvidence({
   threadKey,
   facts,
+  only,
 }: {
   threadKey: string;
   facts: GameBuildFacts;
+  /** The controls to list: the ones that do nothing, the ones to try, or the ones that work. */
+  only: ReadonlyArray<ControlVerdict>;
 }) {
   const qa = measured(facts.qa);
   const live = useThreadStageBridge(threadKey, (state) => state.controls, null);
@@ -568,7 +606,8 @@ export function ControlsEvidence({
     if (keyless && answersControls && live === null) requestStageControls();
   }, [keyless, answersControls, live]);
   if (qa === null || qa.controls.length === 0) return null;
-  const rows = controlRows(qa.controls, live);
+  const rows = controlRows(qa.controls, live).filter((row) => only.includes(row.verdict));
+  if (rows.length === 0) return null;
   return (
     <ul className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
       {rows.map((row) => (

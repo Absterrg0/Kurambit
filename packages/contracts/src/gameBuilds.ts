@@ -1017,15 +1017,12 @@ const checkWords = (
     case "skilled": {
       if (facts.skilled.status !== "measured") return null;
       const tier = facts.skilled.value;
-      // Only a win proves the game can be won; anything short of one leaves it unproven.
-      if (tier.ending === "won" || BROKE_ENDINGS.has(tier.ending))
-        return tierCheck("by Kurambit's play bot", tier);
+      // Only a win proves the game can be won; a loss leaves it unproven. A play with no
+      // ending is not a check at all (gameChecksView).
+      if (tier.ending !== "lost") return tierCheck("by Kurambit's play bot", tier);
       return {
         sentence: "Not yet proven winnable",
-        value:
-          tier.ending === "lost"
-            ? `Kurambit's play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`
-            : `Kurambit's play bot found no ending in ${seconds(tier.played)}`,
+        value: `Kurambit's play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`,
       };
     }
     case "errors": {
@@ -1150,13 +1147,8 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
   const views = gameFactsView(facts);
   const asCheck = (view: GameFactView): GameCheck => {
     const words = view.reading._tag === "measured" ? checkWords(facts, view.id) : null;
-    // Winning is never claimed before the play bot has won.
     const fallback =
-      view.reading._tag === "measured"
-        ? view.reading.text
-        : view.id === "skilled"
-          ? "Not yet proven winnable"
-          : (CHECK_LABELS[view.id] ?? view.label);
+      view.reading._tag === "measured" ? view.reading.text : (CHECK_LABELS[view.id] ?? view.label);
     const run = view.id === "skilled" ? facts.skilled : null;
     return {
       ...view,
@@ -1165,7 +1157,13 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
       ending: run?.status === "measured" ? run.value.ending : null,
     };
   };
+  // A play that went on with no ending is how an open-ended game plays: such a game is never
+  // held to an ending, so the check is not one of its checks (the play itself is still shown,
+  // as the last play under the errors check).
+  const openEnded =
+    facts.skilled.status === "measured" && facts.skilled.value.ending === "no-ending";
   const checks = GAME_LEAD_FACTS.flatMap((id) => {
+    if (id === "skilled" && openEnded) return [];
     const view = views.find((entry) => entry.id === id);
     return view === undefined ? [] : [asCheck(view)];
   });
