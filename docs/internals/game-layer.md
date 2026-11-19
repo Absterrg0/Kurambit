@@ -594,9 +594,12 @@ cannot both find none.
   Measure again in the Workbench's Checks, or asks their agent to prove the game can be won: it writes
   `.studio/bot/play.mjs` with the bot kit, wins one run with `game_play` op `bot`, and calls
   `game_check` op `facts` with `skilled: true`. Otherwise the skilled fact reads not measured with why
-  (`deferred`, `no-play-bot`). `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own
-  bot. Games from earlier runs keep their `game-builds/bots/<run>` setup points, which list as the
-  build they were written on.
+  (`deferred`, `no-play-bot`). A build whose own code never calls `.win(` reads `no-win` before
+  any bot is looked for (`gameCanWin` on the measured copy): like `no-saved-plays`, no surface shows,
+  compares or counts it. Only the code decides that, so one bot play that found no ending never
+  hides the check. `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own bot. Games
+  from earlier runs keep their `game-builds/bots/<run>` setup points, which list as the build they
+  were written on.
 - **Notes and the captured prefix.** A steer step carries the run's waiting notes; its turn's
   start takes exactly that many off the front of `GameRun.steer`, and a turn that never landed
   (superseded, stopped) gives them back ahead of newer notes. A note only ever appends, so Slice 2

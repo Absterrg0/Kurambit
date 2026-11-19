@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import { expect, it } from "@effect/vitest";
 
 import type { GameManifest } from "@kurambit/contracts";
-import { carriesOldShell, runtimeRequestFile } from "./gameRuntime.ts";
+import { carriesOldShell, gameCanWin, runtimeRequestFile } from "./gameRuntime.ts";
 
 it("serves a file of a known engine's major, and nothing outside the runtime", async () => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-runtime-"));
@@ -63,6 +63,35 @@ it("calls a page old only when it carries every screen of the older demo shell",
       NodePath.join(root, "web", "index.html"),
     );
     expect(await carriesOldShell(root, manifest)).toBe(false);
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("says a game can be won only when its own code calls win()", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kurambit-can-win-"));
+  try {
+    const manifest = { engine: { name: "three" }, project: "web" } as GameManifest;
+    const write = (file: string, text: string) => {
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(root, file)), { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(root, file), text);
+    };
+    // No folder to read is not proof of no ending: the check stays.
+    expect(await gameCanWin(root, manifest)).toBe(true);
+    write(
+      "web/src/main.js",
+      "GameState.lose('The pond froze');\nhud.winStreak = 0;\nhud.window(1);\n",
+    );
+    // The runtime's and a vendored library's win() are not the game's.
+    write("web/_kurambit/shell/run-state.js", "GameState.win('You win!');\n");
+    write("web/vendor/lib.js", "api.win();\n");
+    expect(await gameCanWin(root, manifest)).toBe(false);
+    write("web/src/duel.js", "if (enemy.hp <= 0) GameState.win ('Victory');\n");
+    expect(await gameCanWin(root, manifest)).toBe(true);
+    // Another engine's code is not read: its check stays.
+    expect(await gameCanWin(root, { ...manifest, engine: { name: "godot" } } as GameManifest)).toBe(
+      true,
+    );
   } finally {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }

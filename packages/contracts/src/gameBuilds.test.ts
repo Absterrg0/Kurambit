@@ -2,7 +2,13 @@ import { describe, expect, it } from "@effect/vitest";
 
 import * as Schema from "effect/Schema";
 
-import { diffBuildFacts, GameBuildFacts, GameBuildId, gameFactsView } from "./gameBuilds.ts";
+import {
+  diffBuildFacts,
+  GameBuildFacts,
+  GameBuildId,
+  gameChecksView,
+  gameFactsView,
+} from "./gameBuilds.ts";
 
 const tier = (ending: "won" | "lost" | "no-ending", at: number | null) => ({
   status: "measured" as const,
@@ -71,6 +77,32 @@ describe("diffBuildFacts", () => {
 
   it("has no reading for a build never measured", () => {
     expect(diffBuildFacts(null, facts()).every((d) => d.change === "not-comparable")).toBe(true);
+  });
+});
+
+describe("a game's winnable check", () => {
+  const skilled = facts().skilled;
+  if (skilled.status !== "measured") throw new Error("fixture");
+  const noEnding = facts({
+    skilled: { status: "measured", value: { ...skilled.value, ending: "no-ending", at: null } },
+  });
+  const noWin = facts({
+    skilled: { status: "not-measured", why: "never calls win()", cause: "no-win", retry: false },
+  });
+  const winnable = (of: GameBuildFacts) =>
+    gameChecksView(of).checks.find((check) => check.id === "skilled");
+
+  it("stays unproven when the play bot found no ending", () => {
+    expect(winnable(noEnding)?.sentence).toBe("Not yet proven winnable");
+    expect(winnable(noEnding)?.value).toBe("Kurambit's play bot found no ending in 60 s");
+  });
+
+  it("is not shown or compared for a game whose code cannot win", () => {
+    expect(winnable(noWin)).toBeUndefined();
+    expect(gameFactsView(noWin).some((row) => row.id === "skilled")).toBe(false);
+    expect(byId(diffBuildFacts(noWin, noWin))["skilled"]).toBeUndefined();
+    // Against a build that can be won, the row is there and says why it has no reading.
+    expect(byId(diffBuildFacts(noWin, facts()))["skilled"]?.change).toBe("not-comparable");
   });
 });
 

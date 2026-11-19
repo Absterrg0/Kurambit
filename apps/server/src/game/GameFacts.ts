@@ -31,6 +31,7 @@ import {
   GAME_FACTS_BOUNDS,
   GAME_FACTS_EVENT,
   GAME_FACTS_NO_PLAY_BOT,
+  GAME_FACTS_NO_WIN,
   GAME_FACTS_SKILLED_DEFERRED,
   GameAssetUse,
   GameBuildFacts,
@@ -50,6 +51,7 @@ import {
   manifestProject,
   manifestRuntime,
   noSavedPlays,
+  noWin,
   SAVED_PLAYS_PER_BUILD,
 } from "@kurambit/contracts";
 import {
@@ -77,7 +79,7 @@ import { copyTree } from "./gameFiles.ts";
 import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameTemplates from "./GameTemplates.ts";
-import { runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
+import { gameCanWin, runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
 import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
 import { replaySavedPlays, savedPlays } from "./playFiles.ts";
@@ -87,7 +89,7 @@ import { replaySavedPlays, savedPlays } from "./playFiles.ts";
  * bot, changes; the tier bot files are hashed besides.
  * A new tier needs no bump: planOf measures each fact a stored row lacks, and nothing else.
  */
-const FACTS_VERSION = 4;
+const FACTS_VERSION = 5;
 /** A measurement's operations on copies are its own: no thread owns them. */
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait behind each other. */
@@ -461,10 +463,11 @@ const make = Effect.gen(function* () {
             : (stored?.savedPlays ?? NONE_SAVED),
     };
     // An engine with no asset use or performance is not an incomplete measurement, nor is a
-    // game with no saved plays.
+    // game with no saved plays or no ending to win.
     const counted = Object.entries(facts).flatMap(([name, fact]) =>
       (useNotMeasured(build.engine) !== null && BROWSER_ONLY.has(name as FactName)) ||
-      (name === "savedPlays" && noSavedPlays(facts))
+      (name === "savedPlays" && noSavedPlays(facts)) ||
+      (name === "skilled" && noWin(facts))
         ? []
         : [fact],
     );
@@ -664,7 +667,9 @@ const make = Effect.gen(function* () {
         : skilled?.status !== "measured" || skilled.value.bot.hash !== bot.hash;
     const stillDeferred =
       !skilledWanted && skilled?.status === "not-measured" && skilled.cause === "deferred";
-    if (botChanged && !stillDeferred) tiers.add("skilled");
+    // Read from these very files, which no bot changes: there is no ending to play for.
+    const cannotWin = skilled?.status === "not-measured" && skilled.cause === "no-win";
+    if (botChanged && !stillDeferred && !cannotWin) tiers.add("skilled");
     return tiers;
   };
 
@@ -699,6 +704,14 @@ const make = Effect.gen(function* () {
         (project) =>
           project || (isAvailableEngine(engine) ? engineProfile(engine).projectDirectory : ""),
       ),
+    );
+
+  /** Whether the build's own code ends a run with a win; a copy that cannot say keeps the check. */
+  const canWinOf = (copy: string) =>
+    Effect.promise(() =>
+      NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
+        .then((text) => gameCanWin(copy, decodeCopyManifest(text)))
+        .catch(() => true),
     );
 
   /** The runtime the copy's plays load now, for a game that loads one (gameRuntime.ts). */
@@ -1051,7 +1064,12 @@ const make = Effect.gen(function* () {
 
         if (tiers.has("skilled")) {
           const bot = yield* currentBot(root);
-          if (blocked !== null)
+          if (!(yield* canWinOf(copy))) {
+            // Before any bot: a game with no ending has none to prove, with or without one.
+            const skilled = notMeasured(GAME_FACTS_NO_WIN, false, false, "no-win");
+            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
+            yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
+          } else if (blocked !== null)
             yield* write({ skilled: blocked, ...(yield* useAfter("skilled", null, blocked)) });
           else if (bot === null) {
             const skilled = notMeasured(GAME_FACTS_NO_PLAY_BOT, false, false, "no-play-bot");

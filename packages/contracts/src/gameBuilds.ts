@@ -32,6 +32,8 @@ export const GAME_FACTS_BOUNDS = {
  */
 export const GAME_FACTS_SKILLED_DEFERRED =
   "not asked for: the play bot plays only when you or your agent ask to prove the game can be won";
+/** The skilled fact of a game whose own code never ends a run with a win. */
+export const GAME_FACTS_NO_WIN = "the game's code never calls win(): it has no ending to prove";
 /** The skilled fact of a game with no play bot yet. */
 export const GAME_FACTS_NO_PLAY_BOT =
   "no play bot: ask your agent to prove the game can be won, and it writes one";
@@ -281,6 +283,8 @@ export type GameBuild = typeof GameBuild.Type;
  * - no-play-bot: the game has no play bot to measure skilled play with.
  * - deferred: the play bot plays only when the person or their agent asks for it.
  * - no-saved-plays: the game had no saved play to replay. Such a fact is not shown at all.
+ * - no-win: the game's code never calls win(): it has no ending to prove. Such a fact is not
+ *   shown, compared or counted.
  */
 export const GameFactNotMeasuredCause = Schema.Literals([
   "software",
@@ -290,6 +294,7 @@ export const GameFactNotMeasuredCause = Schema.Literals([
   "no-play-bot",
   "deferred",
   "no-saved-plays",
+  "no-win",
 ]);
 export type GameFactNotMeasuredCause = typeof GameFactNotMeasuredCause.Type;
 
@@ -880,8 +885,16 @@ const evidenceOf = (facts: GameBuildFacts, id: GameMeasuredFactId): GameFactView
 /** A game with no saved play has no Saved plays fact: none is shown, compared or counted. */
 export const noSavedPlays = (facts: Pick<GameBuildFacts, "savedPlays">): boolean =>
   facts.savedPlays.status === "not-measured" && facts.savedPlays.cause === "no-saved-plays";
+/**
+ * A game whose code never calls win() has no "can be won" fact: none is shown, compared or
+ * counted. Read from the build's code (GameFacts), never from how one play ended.
+ */
+export const noWin = (facts: Pick<GameBuildFacts, "skilled">): boolean =>
+  facts.skilled.status === "not-measured" && facts.skilled.cause === "no-win";
 const shownIds = (facts: GameBuildFacts) =>
-  noSavedPlays(facts) ? GAME_FACT_IDS.filter((id) => id !== "saved-plays") : GAME_FACT_IDS;
+  GAME_FACT_IDS.filter(
+    (id) => !(id === "saved-plays" && noSavedPlays(facts)) && !(id === "skilled" && noWin(facts)),
+  );
 
 /**
  * PURE. A build's facts as display rows, in GameFactId order. The one wording
@@ -1017,12 +1030,15 @@ const checkWords = (
     case "skilled": {
       if (facts.skilled.status !== "measured") return null;
       const tier = facts.skilled.value;
-      // Only a win proves the game can be won; a loss leaves it unproven. A play with no
-      // ending is not a check at all (gameChecksView).
-      if (tier.ending !== "lost") return tierCheck("by Kurambit's play bot", tier);
+      // Only a win proves the game can be won; anything short of one leaves it unproven.
+      if (tier.ending === "won" || BROKE_ENDINGS.has(tier.ending))
+        return tierCheck("by Kurambit's play bot", tier);
       return {
         sentence: "Not yet proven winnable",
-        value: `Kurambit's play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`,
+        value:
+          tier.ending === "lost"
+            ? `Kurambit's play bot loses${tier.at === null ? "" : ` at ${seconds(tier.at)}`}`
+            : `Kurambit's play bot found no ending in ${seconds(tier.played)}`,
       };
     }
     case "errors": {
@@ -1157,13 +1173,7 @@ export const gameChecksView = (facts: GameBuildFacts): GameChecksView => {
       ending: run?.status === "measured" ? run.value.ending : null,
     };
   };
-  // A play that went on with no ending is how an open-ended game plays: such a game is never
-  // held to an ending, so the check is not one of its checks (the play itself is still shown,
-  // as the last play under the errors check).
-  const openEnded =
-    facts.skilled.status === "measured" && facts.skilled.value.ending === "no-ending";
   const checks = GAME_LEAD_FACTS.flatMap((id) => {
-    if (id === "skilled" && openEnded) return [];
     const view = views.find((entry) => entry.id === id);
     return view === undefined ? [] : [asCheck(view)];
   });
@@ -1237,6 +1247,9 @@ export const diffBuildFacts = (
     // Saved plays are compared only once some were replayed on either side.
     if (id === "saved-plays" && (a === null || noSavedPlays(a)) && (b === null || noSavedPlays(b)))
       return [];
+    // Nor is winning, between builds of a game with no ending.
+    const measured = [a, b].filter((side) => side !== null);
+    if (id === "skilled" && measured.length > 0 && measured.every(noWin)) return [];
     return [diffFact(id, a, b, sides)];
   });
 

@@ -642,7 +642,8 @@ function ControlLine({ row }: { row: ControlRow }) {
         truncate
         render={<span className={cn("text-end", dead && "text-warning-foreground")} />}
       >
-        {row.verdict === "works" ? row.did : dead ? "does nothing" : "try it yourself"}
+        {/* A control to try sits under a heading that says so. */}
+        {row.verdict === "works" ? row.did : dead ? "does nothing" : null}
       </Text>
     </li>
   );

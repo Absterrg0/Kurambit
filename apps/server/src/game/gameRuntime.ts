@@ -125,40 +125,65 @@ export const carriesOldShell = async (root: string, manifest: GameManifest): Pro
   return page !== null && OLD_SHELL_SECTIONS.every((section) => section.test(page));
 };
 
-// A three.js game can lose when its own code ends a run with a loss or takes damage only while
-// the Stage's Can't lose is off. The runtime under _kurambit and the art never say so.
+// A three.js game's own code says how a run can end: it can lose when it ends a run with a loss
+// or takes damage only while the Stage's Can't lose is off, and win when it ends one with a win.
+// The runtime under _kurambit and the art never say so.
 const LOSES = /\.lose\s*\(|\bcannotLose\b/;
+const WINS = /\.win\s*\(/;
 const NOT_THE_GAMES_CODE = new Set(["_kurambit", "vendor", "node_modules", "assets", "audio"]);
 const MAX_SOURCES = 300;
 const MAX_SOURCE_BYTES = 1_000_000;
+
+/**
+ * Whether any of a three.js game's own sources matches `says`. `unread` is the answer when
+ * nothing matched and some of its code was never read (no folder, too many files, a file too
+ * large): the caller's safe side.
+ */
+const gameCodeSays = async (
+  root: string,
+  manifest: GameManifest,
+  says: RegExp,
+  unread: boolean,
+): Promise<boolean> => {
+  const project = NodePath.join(root, manifestProject(manifest));
+  const entries = await NodeFSP.readdir(project, { recursive: true, withFileTypes: true }).catch(
+    () => null,
+  );
+  if (entries === null) return unread;
+  const sources = entries.filter(
+    (entry) =>
+      entry.isFile() &&
+      /\.m?js$/.test(entry.name) &&
+      !NodePath.relative(project, entry.parentPath)
+        .split(NodePath.sep)
+        .some((part) => NOT_THE_GAMES_CODE.has(part)),
+  );
+  let readAll = sources.length <= MAX_SOURCES;
+  for (const entry of sources.slice(0, MAX_SOURCES)) {
+    const file = NodePath.join(entry.parentPath, entry.name);
+    const stat = await NodeFSP.stat(file).catch(() => null);
+    const text =
+      stat === null || stat.size > MAX_SOURCE_BYTES
+        ? null
+        : await NodeFSP.readFile(file, "utf8").catch(() => null);
+    if (text === null) readAll = false;
+    else if (says.test(text)) return true;
+  }
+  return readAll ? false : unread;
+};
 
 /**
  * Whether the game can be lost, read from its own code, so the Stage offers Can't lose only to a
  * game it can change. Engines without the three.js runtime say yes: their bar decides by the
  * runtime's capabilities as before.
  */
-export const gameCanLose = async (root: string, manifest: GameManifest): Promise<boolean> => {
-  if (manifest.engine.name !== "three") return true;
-  const project = NodePath.join(root, manifestProject(manifest));
-  const entries = await NodeFSP.readdir(project, { recursive: true, withFileTypes: true }).catch(
-    () => [],
-  );
-  const sources = entries
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        /\.m?js$/.test(entry.name) &&
-        !NodePath.relative(project, entry.parentPath)
-          .split(NodePath.sep)
-          .some((part) => NOT_THE_GAMES_CODE.has(part)),
-    )
-    .slice(0, MAX_SOURCES);
-  for (const entry of sources) {
-    const file = NodePath.join(entry.parentPath, entry.name);
-    const stat = await NodeFSP.stat(file).catch(() => null);
-    if (stat === null || stat.size > MAX_SOURCE_BYTES) continue;
-    const text = await NodeFSP.readFile(file, "utf8").catch(() => "");
-    if (LOSES.test(text)) return true;
-  }
-  return false;
-};
+export const gameCanLose = async (root: string, manifest: GameManifest): Promise<boolean> =>
+  manifest.engine.name !== "three" || gameCodeSays(root, manifest, LOSES, false);
+
+/**
+ * Whether the game can be won, read from its own code: one that never calls win() has no ending
+ * for a play bot to prove (GameFacts). Code that could not all be read says yes, as engines
+ * without the three.js runtime do: a check is never dropped on what was not read.
+ */
+export const gameCanWin = async (root: string, manifest: GameManifest): Promise<boolean> =>
+  manifest.engine.name !== "three" || gameCodeSays(root, manifest, WINS, true);

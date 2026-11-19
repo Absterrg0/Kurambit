@@ -552,8 +552,8 @@ so instead of guessing.
 
 **Can it be won** is measured only when you ask: ask your agent to prove the game can be won, and
 it writes a play bot for it and has Kurambit play it; after that, **Measure again** plays it too.
-A game with no ending is never held to one: when the play goes on without ending, this is not one
-of its checks.
+A game with no way to win is never held to one: this is not one of its checks. A game that can be
+won stays **Not yet proven winnable** until the play bot wins it.
 Opening or playing a build that was never measured measures it, one build at a time, and a
 three.js game measures each turn's build in the background when the turn ends. A check Kurambit
 could not measure says **Not measured** and why, and never counts as a result: if a tool failed,
