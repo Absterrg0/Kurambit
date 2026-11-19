@@ -325,9 +325,9 @@ The Workbench and its **Tune**, **Art** and **Checks** are always there. Every o
 when the game first has something for it, and then stays where it is: **Save as test play** once
 a run ends; **Responsive view** once a phone or widescreen check finds a problem; **Try N ways**
 after your third message and **Keep going** once a build starts with a `Next:` line; the
-**Library** with your second game. A new tool, or a Workbench section that has just gained
-something, carries a dot until you open it: one dot at a time, on the newest. Their keys and the
-command palette reach each one before then.
+**Library** with your second game. A new tool, or a Workbench section the first time it has
+something in it, carries a dot until you open it: one dot at a time, on the newest. Their keys and
+the command palette reach each one before then.
 
 The bar's buttons stay put while you play,
 pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
@@ -353,8 +353,8 @@ it** and **Undo**. An error while you play shows as one small line in the game's
 
 The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
 which also opens each section directly). The same key or the header's Workbench button closes it.
-Drag its edge to resize it. Its three sections are always there; one with nothing yet says what
-fills it, and one that has just gained something carries a dot until you open it:
+Drag its edge to resize it. Its three sections are always there, and one with nothing yet says
+what fills it:
 
 - **Tune**: one section for each thing the game names with values to tune, grouped by kind, with
   its values, such as its speed, jump height, timers and counts. The filter at the top finds a
