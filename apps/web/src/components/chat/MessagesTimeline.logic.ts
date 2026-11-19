@@ -276,7 +276,9 @@ export function workEntryIsVisibleInGroup(
   );
 }
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
-export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
+// A map of the chat needs rungs to read as one: two or three are a stray dash in the gutter,
+// beside a chat that fits on screen anyway.
+export const TIMELINE_MINIMAP_MIN_ITEMS = 4;
 const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
