@@ -27,10 +27,13 @@ export const gameNextLine = (reply: string): string | null => {
 };
 
 /**
- * A reply as the person reads it in the chat. `Next: none` is the agent telling Kurambit the
- * brief is done: nothing for a person to read, so the line is left out. A real proposal stays.
+ * A reply as the person reads it in the chat: without its `Next:` line. That line is the agent
+ * talking to Kurambit. A proposal is offered once, in the composer, where Tab takes it; `Next:
+ * none` says the brief is done and is nothing to read. A reply that is only the line keeps it,
+ * so the chat never shows an empty answer.
  */
-export const replyForReading = (reply: string): string =>
-  readNextLine(reply) === "none"
-    ? reply.trimEnd().split("\n").slice(0, -1).join("\n").trimEnd()
-    : reply;
+export const replyForReading = (reply: string): string => {
+  if (readNextLine(reply) === null) return reply;
+  const rest = reply.trimEnd().split("\n").slice(0, -1).join("\n").trimEnd();
+  return rest === "" ? reply : rest;
+};

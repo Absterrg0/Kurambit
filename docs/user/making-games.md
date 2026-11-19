@@ -472,8 +472,8 @@ fills it, and one that has just gained something carries a dot until you open it
 To change the game, write a follow-up in the chat, for example "make the rocks taller and spread
 the trees out". The agent edits the same Blender sources and re-exports to the same paths, so scenes
 keep their references. A game's agent ends its reply with the one change it would make next; when
-it does, the empty composer shows it as **Next:**. Press Tab to put that change in the composer, then
-edit or send it.
+it does, the empty composer shows it as **Next:**, and only there: the chat leaves that line out of
+the reply. Press Tab to put that change in the composer, then edit or send it.
 
 Under the box, the composer's footer holds how your message runs (**Once**, **Try N ways**,
 **Keep going**) and, on the right, the model, how hard it thinks, and how much of its context the
