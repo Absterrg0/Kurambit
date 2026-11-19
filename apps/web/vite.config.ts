@@ -69,8 +69,41 @@ const browserTestApiPort = 61_000 + ((Hash.string(import.meta.dirname) >>> 0) % 
 
 const browserTestProject = {
   extends: true,
-  // Pre-bundled so the first test importing userEvent does not trigger a mid-run reload.
-  optimizeDeps: { include: ["vite-plus/test/browser"] },
+  // Pre-bundled so the first test importing userEvent does not trigger a mid-run reload. The Base
+  // UI parts too, every one the app imports: they share chunks, so one first met mid-run (the
+  // slider, behind a lazy panel) rebuilds them all and Vite reloads the tests that were running.
+  // Add a part here when the app starts importing it.
+  optimizeDeps: {
+    include: [
+      "vite-plus/test/browser",
+      "@base-ui/react/alert-dialog",
+      "@base-ui/react/autocomplete",
+      "@base-ui/react/checkbox",
+      "@base-ui/react/collapsible",
+      "@base-ui/react/combobox",
+      "@base-ui/react/dialog",
+      "@base-ui/react/field",
+      "@base-ui/react/input",
+      "@base-ui/react/menu",
+      "@base-ui/react/merge-props",
+      "@base-ui/react/number-field",
+      "@base-ui/react/popover",
+      "@base-ui/react/radio",
+      "@base-ui/react/radio-group",
+      "@base-ui/react/scroll-area",
+      "@base-ui/react/select",
+      "@base-ui/react/separator",
+      "@base-ui/react/slider",
+      "@base-ui/react/switch",
+      "@base-ui/react/tabs",
+      "@base-ui/react/toast",
+      "@base-ui/react/toggle",
+      "@base-ui/react/toggle-group",
+      "@base-ui/react/toolbar",
+      "@base-ui/react/tooltip",
+      "@base-ui/react/use-render",
+    ],
+  },
   test: {
     name: "browser",
     include: ["src/**/*.browser.test.{ts,tsx}"],
