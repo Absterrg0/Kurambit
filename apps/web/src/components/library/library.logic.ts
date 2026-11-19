@@ -1,5 +1,7 @@
 import type { GameLibraryItem } from "@kurambit/contracts";
 
+import { assetName } from "../game/gameArt.logic";
+
 export type LibraryKindFilter = "all" | "model" | "texture" | "audio" | "font" | "look";
 export type LibrarySourceFilter = "yours" | "packs";
 
@@ -80,3 +82,11 @@ export const familyWords = (family: string) => {
   const spaced = words.replace(/-(?!poly|fi\b)/g, " ");
   return spaced.length === 0 ? family : `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
 };
+
+/**
+ * PURE. A Library item's name as a person reads it. A file of your games is named as Art names it
+ * ("Step grass", not "step-grass"); a pack, a look and a model you saved keep the name they were
+ * given.
+ */
+export const libraryItemName = (item: Pick<GameLibraryItem, "source" | "name" | "file">) =>
+  item.source === "yours" ? assetName(item.file?.path ?? item.name) : item.name;

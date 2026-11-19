@@ -62,6 +62,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useLastGameChat } from "./lastGameChat";
 import {
   familyWords,
+  libraryItemName,
   libraryTiles,
   usedInWords,
   type LibraryKindFilter,
@@ -350,7 +351,7 @@ function LibraryTile({
       </span>
       <span className="flex min-w-0 flex-col">
         <Text variant="meta" tone="default" truncate>
-          {item.name}
+          {libraryItemName(item)}
         </Text>
         <Text variant="caption" tone="muted" truncate>
           {from}
@@ -468,20 +469,26 @@ function WaveTile({
       : { _tag: "draft-workspace-file", cwd: item.file.root, path: item.file.path },
   );
   const wave = useSoundPeaks(state._tag === "Success" ? state.url : null, item.id);
+  // Not read yet (or not readable): the same bars at rest and dimmer, so a tile is a sound's
+  // from the start and nothing swaps when its waveform arrives.
   const peaks = wave === null || wave === "failed" ? null : wave.peaks;
-  if (peaks === null) return <Glyph>{<WaveGlyph />}</Glyph>;
-  const step = peaks.length / WAVE_BARS;
+  const step = peaks === null ? 0 : peaks.length / WAVE_BARS;
   return (
     <svg
       aria-hidden="true"
       viewBox={`0 0 ${WAVE_BARS * 4} 40`}
       preserveAspectRatio="none"
-      className="absolute inset-x-4 top-1/2 h-1/3 w-[calc(100%-2rem)] -translate-y-1/2 text-muted-foreground"
+      className={cn(
+        "absolute inset-x-4 top-1/2 h-1/3 w-[calc(100%-2rem)] -translate-y-1/2",
+        peaks === null ? "text-dim-foreground" : "text-muted-foreground",
+      )}
     >
       {Array.from({ length: WAVE_BARS }, (_, index) => {
-        const slice = peaks.slice(Math.floor(index * step), Math.floor((index + 1) * step));
-        const peak = Math.max(0.04, ...slice);
-        const height = Math.max(2, peak * 40);
+        const slice =
+          peaks === null
+            ? []
+            : peaks.slice(Math.floor(index * step), Math.floor((index + 1) * step));
+        const height = Math.max(2, Math.max(0.04, ...slice) * 40);
         return (
           <rect
             key={index}
@@ -497,18 +504,6 @@ function WaveTile({
     </svg>
   );
 }
-
-const WaveGlyph = () => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-  >
-    <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" />
-  </svg>
-);
 
 /** A font's tile: "Aa" set in it, loaded only while the tile is on screen. */
 function FontTile({
@@ -627,7 +622,7 @@ function LibraryDetail({
       lastChat,
       {
         key: `library-${item.id}`,
-        label: item.name,
+        label: libraryItemName(item),
         context: [
           `From the Library: ${kindWord.toLowerCase()} "${item.name}", ${where}.`,
           item.credit === undefined ? null : `Licence: ${item.credit}.`,
@@ -648,12 +643,12 @@ function LibraryDetail({
   const used = usedInWords(item, nameOf);
   return (
     <aside
-      aria-label={item.name}
+      aria-label={libraryItemName(item)}
       className="flex w-90 shrink-0 flex-col overflow-y-auto border-s border-border"
     >
       <div className="flex h-11 shrink-0 items-center gap-2 ps-4 pe-2">
         <Text variant="label" tone="strong" truncate render={<h2 className="min-w-0 flex-1" />}>
-          {item.name}
+          {libraryItemName(item)}
         </Text>
         <Text variant="caption" tone="muted">
           {kindWord}

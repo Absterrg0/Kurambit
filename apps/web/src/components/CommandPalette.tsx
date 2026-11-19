@@ -191,6 +191,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNewChat } from "./game/useNewGameChat";
 import { unresolvedText, useCopyActions, useCopyPlace } from "./game/useGameCopies";
 import { OWN_CHAT_NEVER_SETTLES, readIsGameOwnChat } from "./game/gameOwnChat";
+import { libraryItemName } from "./library/library.logic";
 import { settleAndAdvance } from "../settleAndAdvance";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useGameArrivalStore } from "../gameArrivalStore";
@@ -1378,13 +1379,14 @@ function OpenCommandPaletteDialog(props: {
     value: `library:${item.id}`,
     searchTerms: [
       item.name,
+      libraryItemName(item),
       LIBRARY_KIND_WORDS[item.kind],
       "library",
       ...item.usedIn.map((use) => use.game),
       ...(item.from === undefined ? [] : [item.from]),
       ...(item.pack === undefined ? [] : [item.pack.author]),
     ],
-    title: item.name,
+    title: libraryItemName(item),
     description: [
       LIBRARY_KIND_WORDS[item.kind],
       item.source === "pack"
