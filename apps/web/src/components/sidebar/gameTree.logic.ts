@@ -1,3 +1,5 @@
+import { sortSettledThreads } from "@kurambit/client-runtime/state/thread-sort";
+
 import type { SidebarThreadSummary } from "../../types";
 import {
   partitionGameChats,
@@ -19,6 +21,9 @@ export type GameTreeChat = Pick<
   | "deletedAt"
   | "pinnedAt"
   | "pinOrderKey"
+  | "settledOverride"
+  | "settledAt"
+  | "latestRun"
   | "lineage"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
@@ -39,10 +44,17 @@ export type GameTreeMark = "working" | "waiting" | null;
 export interface GameTreeNode<G extends GameTreeGame, C extends GameTreeChat> {
   readonly key: string;
   readonly game: G;
-  /** The chat a click on the game opens: its main chat, else its newest. */
+  /**
+   * The game's own chat, the one it was made in: the game's row is this chat, so it is never
+   * listed under it by the same name. Else its newest chat.
+   */
   readonly main: C | null;
-  /** Live chats, newest first; for an archived game, its archived chats. */
+  /** Every live chat of the game; for an archived game, its archived chats. */
   readonly chats: ReadonlyArray<C>;
+  /** Its other chats still at work, newest first: the rows under the game. */
+  readonly open: ReadonlyArray<C>;
+  /** Its other chats that are settled (done), the last settled first: the Settled shelf's rows. */
+  readonly settled: ReadonlyArray<C>;
   readonly pinned: boolean;
   readonly archived: boolean;
   /** When anything last happened in it: its newest chat, else the game folder. */
@@ -58,6 +70,13 @@ const activityOf = (chat: GameTreeChat) => chat.latestUserMessageAt ?? chat.upda
 const newestFirst = (left: GameTreeChat, right: GameTreeChat) =>
   Date.parse(activityOf(right)) - Date.parse(activityOf(left));
 
+/**
+ * A chat is settled when the person, or auto-settle after days of quiet, called its work done.
+ * Only a game's other chats settle: its own chat is the game's row, which archiving puts away.
+ */
+export const isSettledChat = (chat: Pick<GameTreeChat, "settledOverride">) =>
+  chat.settledOverride === "settled";
+
 /** A chat's mark from T3's thread status: approval and questions wait on the person. */
 export const chatMark = (chat: GameTreeChat, picking: boolean): GameTreeMark => {
   const status = resolveSidebarThreadStatus(chat);
@@ -66,9 +85,9 @@ export const chatMark = (chat: GameTreeChat, picking: boolean): GameTreeMark => 
 };
 
 /**
- * PURE. The Games tree: each game with its chats, pinned games first in their pinned order, then
- * the rest by latest activity (or name). A game whose every chat is archived is archived; a game
- * with no chat at all stays with the live ones.
+ * PURE. The Games tree: each game with its open chats under it and its settled ones apart, pinned
+ * games first in their pinned order, then the rest by latest activity (or name). A game whose
+ * every chat is archived is archived; a game with no chat at all stays with the live ones.
  */
 export function buildGameTree<G extends GameTreeGame, C extends GameTreeChat>(input: {
   readonly games: ReadonlyArray<G>;
@@ -104,12 +123,15 @@ export function buildGameTree<G extends GameTreeGame, C extends GameTreeChat>(in
     const isArchived = listed.length === 0 && archivedChats.length > 0;
     const shown = (isArchived ? archivedChats : listed).toSorted(newestFirst);
     const main = isArchived ? (archivedChats[0] ?? null) : chats.main;
+    const others = isArchived ? [] : shown.filter((chat) => chat !== main);
     const newest = shown[0];
     const node: GameTreeNode<G, C> = {
       key,
       game,
       main,
       chats: shown,
+      open: others.filter((chat) => !isSettledChat(chat)),
+      settled: sortSettledThreads(others.filter(isSettledChat)),
       pinned: !isArchived && main?.pinnedAt != null,
       archived: isArchived,
       activeAt:
@@ -133,21 +155,30 @@ export function buildGameTree<G extends GameTreeGame, C extends GameTreeChat>(in
   return { live: [...pinned, ...rest], archived: archived.toSorted(byRecent) };
 }
 
-/** How many chats a game shows before "Show N more". */
-const GAME_TREE_CHAT_LIMIT = 5;
+/** One row of the Settled shelf: a settled chat and the game it worked on. */
+export interface SettledChat<G extends GameTreeGame, C extends GameTreeChat> {
+  readonly chat: C;
+  readonly node: GameTreeNode<G, C>;
+}
+
+/** PURE. Every live game's settled chats as one shelf, the last settled first. */
+export function settledShelf<G extends GameTreeGame, C extends GameTreeChat>(
+  live: ReadonlyArray<GameTreeNode<G, C>>,
+): ReadonlyArray<SettledChat<G, C>> {
+  const nodeOf = new Map(live.flatMap((node) => node.settled.map((chat) => [chat, node] as const)));
+  return sortSettledThreads([...nodeOf.keys()]).map((chat) => ({ chat, node: nodeOf.get(chat)! }));
+}
+
+/** How many settled chats the shelf lists before "Show more". */
+export const SETTLED_SHELF_PAGE = 12;
 
 /**
- * PURE. The chats an expanded game lists: the first five, or all of them once asked, and the open
- * chat always, so the highlighted row is never hidden behind "Show more".
+ * PURE. The chat to open once `chat` is settled while it is the one on screen: the game's own
+ * chat, so the person stays in the game they were working on.
  */
-export function visibleChats<C extends { readonly id: string }>(
-  chats: ReadonlyArray<C>,
-  showAll: boolean,
-  openChatId: string | null,
-): { readonly shown: ReadonlyArray<C>; readonly hidden: number } {
-  if (showAll || chats.length <= GAME_TREE_CHAT_LIMIT) return { shown: chats, hidden: 0 };
-  const shown = chats.slice(0, GAME_TREE_CHAT_LIMIT);
-  const open = chats.findIndex((chat) => chat.id === openChatId);
-  if (open >= GAME_TREE_CHAT_LIMIT) shown.push(chats[open]!);
-  return { shown, hidden: chats.length - shown.length };
+export function chatAfterSettle<G extends GameTreeGame, C extends GameTreeChat>(
+  node: GameTreeNode<G, C>,
+  chat: Pick<C, "id">,
+): C | null {
+  return node.main !== null && node.main.id !== chat.id ? node.main : null;
 }

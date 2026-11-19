@@ -1,6 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   DndContext,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -57,6 +59,7 @@ import {
 } from "../keybindings";
 import { readLocalApi } from "../localApi";
 import { isModelPickerOpen } from "../modelPickerVisibility";
+import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { gameEnvironment } from "../state/game";
 import { allReachableShellsLiveAtom, shellEnvironment } from "../state/shell";
@@ -97,8 +100,11 @@ import { useSidebarRowSubscriptionLease } from "./Sidebar.logic";
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import {
   buildGameTree,
+  chatAfterSettle,
+  isSettledChat,
   chatMark,
-  visibleChats,
+  SETTLED_SHELF_PAGE,
+  settledShelf,
   type GameTreeMark,
   type GameTreeNode,
   type GameTreeSort,
@@ -108,6 +114,8 @@ import {
   SidebarChatRow,
   SidebarGameRow,
   SidebarQuietRow,
+  SidebarShelfHeader,
+  type ChatRowAction,
   type GameAction,
   type GameActionItem,
 } from "./sidebar/SidebarGameRows";
@@ -137,6 +145,10 @@ const SORT_KEY = "kurambit:sidebar:games-sort";
 const GameTreeSortSchema = Schema.Literals(["recent", "name"]);
 const SHOW_ARCHIVED_KEY = "kurambit:sidebar:show-archived";
 const ARCHIVED_OPEN_KEY = "kurambit:sidebar:archived-expanded";
+const SETTLED_OPEN_KEY = "kurambit:sidebar:settled-expanded";
+/** The Settled shelf's header, as a place to drop a chat; a chat's own id while it is dragged. */
+const SETTLED_DROP_ID = "shelf:settled";
+const chatDragId = (chatKey: string) => `chat:${chatKey}`;
 /** A game's own expansion, apart from T3's project rows. */
 const expansionKey = (gameKey: string) => `game:${gameKey}`;
 const DRAG_DISTANCE = 6;
@@ -206,9 +218,10 @@ export default function Sidebar() {
   );
   const [showArchived, setShowArchived] = useLocalStorage(SHOW_ARCHIVED_KEY, true, Schema.Boolean);
   const [archivedOpen, setArchivedOpen] = useLocalStorage(ARCHIVED_OPEN_KEY, false, Schema.Boolean);
+  const [settledOpen, setSettledOpen] = useLocalStorage(SETTLED_OPEN_KEY, false, Schema.Boolean);
+  const [settledShown, setSettledShown] = useState(SETTLED_SHELF_PAGE);
   const expandedById = useUiStateStore((state) => state.projectExpandedById);
   const setExpanded = useUiStateStore((state) => state.setProjectExpanded);
-  const [showAll, setShowAll] = useState<ReadonlySet<string>>(new Set());
   const newGame = useNewGame();
   const newThreadContext = useHandleNewThread();
   const newChat = useNewChat(newThreadContext.handleNewThread);
@@ -216,7 +229,8 @@ export default function Sidebar() {
     pinThread,
     unpinThread,
     reorderPinnedThread,
-    archiveThread: archiveChat,
+    settleThread,
+    unsettleThread,
     deleteThread,
   } = useThreadActions();
   const archive = useOrchestrationCommand(threadEnvironment.archive, { reportFailure: false });
@@ -247,13 +261,24 @@ export default function Sidebar() {
   for (const node of [...tree.live, ...tree.archived])
     for (const chat of node.chats)
       nodeOfThread.set(scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id)), node);
+  const chatKeyOf = (chat: Pick<SidebarThreadSummary, "environmentId" | "id">) =>
+    scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id));
+  const chatByKey = new Map(
+    tree.live.flatMap((node) => node.chats.map((chat) => [chatKeyOf(chat), chat] as const)),
+  );
   const currentNode = routeThreadKey === null ? null : (nodeOfThread.get(routeThreadKey) ?? null);
   const currentGameKey = currentNode?.key ?? null;
-  // The open game is unfolded unless the person folded it; the others keep what they were left.
+  // A game's chats at work show under it unless the person folded it: they are what is open.
   const isExpanded = (node: Node) =>
-    !node.archived &&
-    node.chats.length > 0 &&
-    (expandedById[expansionKey(node.key)] ?? node.key === currentGameKey);
+    !node.archived && node.open.length > 0 && (expandedById[expansionKey(node.key)] ?? true);
+  const shelf = settledShelf(tree.live);
+  // The shelf opens on the chat on screen, so the highlighted row is never folded away.
+  const routeChatSettled =
+    routeThreadKey !== null &&
+    shelf.some(
+      ({ chat }) => scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id)) === routeThreadKey,
+    );
+  const shelfOpen = settledOpen || routeChatSettled;
 
   // The Library knows the game the person was last on.
   const rememberChat = useLastGameChat((state) => state.set);
@@ -406,21 +431,48 @@ export default function Sidebar() {
     if (clicked._tag === "Success" && clicked.value !== null)
       void runGameAction(node, clicked.value);
   };
+  // ─── Settle: a chat whose work is done leaves its game's list for the Settled shelf, T3's
+  // settle with its Undo notice. A game's own chat is the game's row: archiving puts that away.
+  const settleChat = useStableCallback((ref: ScopedThreadRef) => {
+    const chatKey = scopedThreadKey(ref);
+    const node = nodeOfThread.get(chatKey);
+    if (node === undefined || node.main?.id === ref.threadId) return;
+    const onScreen = routeThreadKey === chatKey;
+    void settleThread(ref).then((result) => {
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result))
+          toastFailure("Could not settle the chat", squashAtomCommandFailure(result));
+        return;
+      }
+      // Settled while on screen: the person stays in its game, on the game's own chat.
+      const next = chatAfterSettle(node, { id: ref.threadId });
+      if (onScreen && next !== null) openChat(next);
+    });
+  });
+  useEffect(() => registerSettleAndAdvance(settleChat), [settleChat]);
+  const unsettleChat = (ref: ScopedThreadRef) =>
+    void unsettleThread(ref).then((result) => {
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
+        toastFailure("Could not un-settle the chat", squashAtomCommandFailure(result));
+    });
   const showChatMenu = async (chat: SidebarThreadSummary, position: { x: number; y: number }) => {
     const api = readLocalApi();
     if (!api) return;
     const ref = scopeThreadRef(chat.environmentId, chat.id);
     const operate = readEnvironmentScope(chat.environmentId, AuthOrchestrationOperateScope);
+    const settled = isSettledChat(chat);
     const clicked = await settlePromise(() =>
       api.contextMenu.show(
         [
           { id: "rename" as const, label: "Rename", icon: "pencil", disabled: !operate },
-          {
-            id: "archive" as const,
-            label: chat.archivedAt === null ? "Archive" : "Unarchive",
-            icon: "archive",
-            disabled: !operate || !threadRuntimeCanArchive(chat.runtime),
-          },
+          settled
+            ? {
+                id: "unsettle" as const,
+                label: "Un-settle",
+                icon: "circle-check",
+                disabled: !operate,
+              }
+            : { id: "settle" as const, label: "Settle", icon: "circle-check", disabled: !operate },
           {
             id: "delete" as const,
             label: "Delete",
@@ -435,15 +487,8 @@ export default function Sidebar() {
     );
     if (clicked._tag === "Failure" || clicked.value === null) return;
     if (clicked.value === "rename") return setRenamingChat(scopedThreadKey(ref));
-    if (clicked.value === "archive") {
-      const result =
-        chat.archivedAt === null
-          ? await archiveChat(ref)
-          : await unarchive({ environmentId: chat.environmentId, input: { threadId: chat.id } });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
-        toastFailure("Could not archive the chat", squashAtomCommandFailure(result));
-      return;
-    }
+    if (clicked.value === "settle") return settleChat(ref);
+    if (clicked.value === "unsettle") return unsettleChat(ref);
     if (confirmThreadDelete) {
       const confirmed = await settlePromise(() =>
         api.dialogs.confirm(`Delete “${chat.title}”?\nIts conversation goes with it.`, {
@@ -467,8 +512,9 @@ export default function Sidebar() {
       toastFailure("Could not rename the chat", squashAtomCommandFailure(result));
   };
 
-  // ─── Drag: a game moves among the pinned ones, onto them, or off them; dragged out of the
-  // list, its chat goes to the composer as context, as T3's rows do.
+  // ─── Drag: a game moves among the pinned ones, onto them, or off them; a chat dropped on the
+  // Settled shelf is settled, and a settled one dropped back among the games is at work again;
+  // dragged out of the list, a chat goes to the composer as context, as T3's rows do.
   const listRef = useRef<HTMLUListElement | null>(null);
   const dragKey = useRef<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -476,9 +522,15 @@ export default function Sidebar() {
     const bounds = listRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   };
+  const draggedChat = () => {
+    const id = dragKey.current;
+    if (id === null) return null;
+    if (id.startsWith("chat:")) return chatByKey.get(id.slice(5)) ?? null;
+    return tree.live.find((each) => each.key === id)?.main ?? null;
+  };
   const draggedChats = (): ReadonlyArray<ScopedThreadRef> => {
-    const node = tree.live.find((each) => each.key === dragKey.current);
-    return node?.main == null ? [] : [scopeThreadRef(node.main.environmentId, node.main.id)];
+    const chat = draggedChat();
+    return chat === null ? [] : [scopeThreadRef(chat.environmentId, chat.id)];
   };
   const sensors = useSensors(
     useSensor(SidebarPointerSensor, {
@@ -494,8 +546,11 @@ export default function Sidebar() {
           endThreadContextDrag();
           return false;
         }
-        const node = tree.live.find((each) => each.key === dragKey.current);
-        moveThreadContextDrag(point, { title: node?.game.name ?? "Game", count: 1 });
+        const id = dragKey.current ?? "";
+        const title = id.startsWith("chat:")
+          ? draggedChat()?.title
+          : tree.live.find((each) => each.key === id)?.game.name;
+        moveThreadContextDrag(point, { title: title ?? "Game", count: 1 });
         return true;
       },
       onDrop: (point: { x: number; y: number }) => {
@@ -510,6 +565,16 @@ export default function Sidebar() {
     setDragging(String(event.active.id));
   };
   const onDragEnd = (event: DragEndEvent) => {
+    const id = String(event.active.id);
+    if (id.startsWith("chat:")) {
+      const chat = chatByKey.get(id.slice(5));
+      if (chat === undefined || event.over === null) return;
+      const ref = scopeThreadRef(chat.environmentId, chat.id);
+      const onShelf = event.over.id === SETTLED_DROP_ID;
+      if (!isSettledChat(chat) && onShelf) settleChat(ref);
+      else if (isSettledChat(chat) && !onShelf) unsettleChat(ref);
+      return;
+    }
     const order = tree.live.map((node) => node.key);
     const from = order.indexOf(String(event.active.id));
     const to = event.over === null ? -1 : order.indexOf(String(event.over.id));
@@ -547,10 +612,10 @@ export default function Sidebar() {
     const at = rows.indexOf(document.activeElement as HTMLElement);
     if (at < 0) return;
     if (event.key === "ArrowLeft") {
-      // A chat's Left goes up to its game.
+      // A chat's Left goes up to its game, or to its shelf.
       if (rows[at]?.dataset.treeRow !== "chat") return;
       for (let index = at - 1; index >= 0; index -= 1)
-        if (rows[index]?.dataset.treeRow === "game") {
+        if (rows[index]?.dataset.treeRow === "game" || rows[index]?.dataset.treeRow === "shelf") {
           event.preventDefault();
           rows[index]?.focus();
           return;
@@ -564,18 +629,13 @@ export default function Sidebar() {
   };
 
   // Next and previous chat, and jump to the Nth game: the keys T3's sidebar had.
-  const visibleChatKeys = tree.live.flatMap((node) =>
-    (isExpanded(node) ? node.chats : node.main === null ? [] : [node.main]).map((chat) =>
-      scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id)),
-    ),
-  );
-  const chatByKey = new Map(
-    tree.live.flatMap((node) =>
-      node.chats.map(
-        (chat) => [scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id)), chat] as const,
-      ),
-    ),
-  );
+  const visibleChatKeys = [
+    ...tree.live.flatMap((node) => [
+      ...(node.main === null ? [] : [node.main]),
+      ...(isExpanded(node) ? node.open : []),
+    ]),
+    ...(shelfOpen ? shelf.slice(0, settledShown).map(({ chat }) => chat) : []),
+  ].map(chatKeyOf);
   const jumpTargets = tree.live.flatMap((node) => (node.main === null ? [] : [node.main]));
   const onShortcut = useStableCallback((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen())
@@ -621,49 +681,54 @@ export default function Sidebar() {
 
   const loading = gameLibrary.isLoading || !shellsLive;
   const empty = tree.live.length + tree.archived.length === 0;
-  const renderChats = (node: Node) => {
-    const { shown, hidden } = visibleChats(
-      node.chats,
-      showAll.has(node.key),
-      routeThreadRef?.threadId ?? null,
-    );
+  const draggingChat = dragging?.startsWith("chat:") === true;
+  const renderChat = (node: Node, chat: SidebarThreadSummary, place: "game" | "shelf") => {
+    const chatKey = chatKeyOf(chat);
+    const ref = scopeThreadRef(chat.environmentId, chat.id);
+    const operate = canOperate(node);
     return (
-      <ul role="group" className="flex flex-col gap-px">
-        {shown.map((chat) => {
-          const chatKey = scopedThreadKey(scopeThreadRef(chat.environmentId, chat.id));
-          return (
-            <li key={chatKey} className="list-none">
-              {renamingChat === chatKey ? (
-                <div className="flex h-7 items-center ps-7 pe-1">
-                  <GameNameInput
-                    name={chat.title}
-                    onRename={(title) => void commitChatRename(chat, title)}
-                    onDone={() => setRenamingChat(null)}
-                    className="h-6"
-                  />
-                </div>
-              ) : (
-                <GameChatRow
-                  node={node}
-                  chat={chat}
-                  active={routeThreadKey === chatKey}
-                  onOpen={() => openChat(chat)}
-                  onContextMenu={(position) => void showChatMenu(chat, position)}
-                />
-              )}
-            </li>
-          );
-        })}
-        {hidden > 0 ? (
-          <li className="list-none">
-            <SidebarQuietRow
-              indent
-              label={`Show ${hidden} more`}
-              onClick={() => setShowAll((before) => new Set(before).add(node.key))}
+      <DraggableChat
+        key={chatKey}
+        id={chatDragId(chatKey)}
+        dragging={dragging === chatDragId(chatKey)}
+      >
+        {(rowProps, overShelf) =>
+          renamingChat === chatKey ? (
+            <div className="flex h-7 items-center ps-7 pe-1">
+              <GameNameInput
+                name={chat.title}
+                onRename={(title) => void commitChatRename(chat, title)}
+                onDone={() => setRenamingChat(null)}
+                className="h-6"
+              />
+            </div>
+          ) : (
+            <GameChatRow
+              node={node}
+              chat={chat}
+              place={place}
+              active={routeThreadKey === chatKey}
+              action={!operate ? null : place === "shelf" ? "unsettle" : "settle"}
+              // Carried over where a drop changes it: the row says what the drop does.
+              dropping={
+                dragging !== chatDragId(chatKey) || overShelf === null
+                  ? dragging === chatDragId(chatKey)
+                    ? "carried"
+                    : null
+                  : place === "game" && overShelf
+                    ? "settle"
+                    : place === "shelf" && !overShelf
+                      ? "unsettle"
+                      : "carried"
+              }
+              onAction={() => (place === "shelf" ? unsettleChat(ref) : settleChat(ref))}
+              onOpen={() => openChat(chat)}
+              onContextMenu={(position) => void showChatMenu(chat, position)}
+              rowProps={rowProps}
             />
-          </li>
-        ) : null}
-      </ul>
+          )
+        }
+      </DraggableChat>
     );
   };
 
@@ -771,7 +836,14 @@ export default function Sidebar() {
                           <GameRow
                             node={node}
                             active={currentGameKey === node.key}
+                            // The game's row is its own chat; folded, it also stands for the
+                            // chat open under it.
+                            selected={
+                              currentGameKey === node.key &&
+                              (routeThreadRef?.threadId === node.main?.id || !isExpanded(node))
+                            }
                             expanded={isExpanded(node)}
+                            expandable={node.open.length > 0}
                             menu={menuOf(node)}
                             rowProps={rowProps}
                             onOpen={() => openGame(node)}
@@ -785,19 +857,50 @@ export default function Sidebar() {
                             onAction={(action) => void runGameAction(node, action)}
                             onContextMenu={(position) => void showGameMenu(node, position)}
                           />
-                          {isExpanded(node) ? renderChats(node) : null}
+                          {isExpanded(node) ? (
+                            <ul role="group" className="flex flex-col gap-px">
+                              {node.open.map((chat) => renderChat(node, chat, "game"))}
+                            </ul>
+                          ) : null}
                         </>
                       )}
                     </SortableGame>
                   ))}
-                  {showArchived && tree.archived.length > 0 ? (
+                  {shelf.length > 0 || draggingChat ? (
                     <li className="mt-2 list-none">
-                      <SidebarQuietRow
-                        label="Archived"
-                        count={tree.archived.length}
-                        expanded={archivedOpen}
-                        onClick={() => setArchivedOpen((open) => !open)}
+                      <SettledShelfHeader
+                        count={shelf.length}
+                        expanded={shelfOpen}
+                        dragging={draggingChat}
+                        onToggle={() => setSettledOpen(!shelfOpen)}
                       />
+                      {shelfOpen ? (
+                        <ul role="group" className="flex flex-col gap-px">
+                          {shelf
+                            .slice(0, settledShown)
+                            .map(({ chat, node }) => renderChat(node, chat, "shelf"))}
+                          {shelf.length > settledShown ? (
+                            <li className="list-none">
+                              <SidebarQuietRow
+                                label={`Show ${Math.min(SETTLED_SHELF_PAGE, shelf.length - settledShown)} more`}
+                                onClick={() => setSettledShown(settledShown + SETTLED_SHELF_PAGE)}
+                              />
+                            </li>
+                          ) : null}
+                        </ul>
+                      ) : null}
+                    </li>
+                  ) : null}
+                  {showArchived && tree.archived.length > 0 ? (
+                    <li className="list-none">
+                      <div className="-mx-1">
+                        <SidebarShelfHeader
+                          label="Archived"
+                          count={tree.archived.length}
+                          expanded={archivedOpen}
+                          onToggle={() => setArchivedOpen((open) => !open)}
+                        />
+                      </div>
                       {archivedOpen ? (
                         <ul role="group" className="flex flex-col gap-px">
                           {tree.archived.map((node) => (
@@ -805,7 +908,9 @@ export default function Sidebar() {
                               <GameRow
                                 node={node}
                                 active={currentGameKey === node.key}
+                                selected={currentGameKey === node.key}
                                 expanded={false}
+                                expandable={false}
                                 menu={menuOf(node)}
                                 onOpen={() => openGame(node)}
                                 onToggle={() => {}}
@@ -875,10 +980,65 @@ function SortableGame({
   );
 }
 
+/** A chat that can be carried: onto the Settled shelf, back among the games, or to the composer. */
+function DraggableChat({
+  id,
+  dragging,
+  children,
+}: {
+  id: string;
+  dragging: boolean;
+  children: (rowProps: Record<string, unknown>, overShelf: boolean | null) => React.ReactNode;
+}) {
+  const { setNodeRef, listeners, transform, over } = useDraggable({ id });
+  return (
+    <li
+      ref={setNodeRef}
+      className={cn(
+        "list-none",
+        dragging && "relative z-10 rounded-md bg-sidebar shadow-lg ring-1 ring-border",
+      )}
+      style={{ transform: CSS.Translate.toString(transform) }}
+    >
+      {children({ ...listeners }, dragging && over !== null ? over.id === SETTLED_DROP_ID : null)}
+    </li>
+  );
+}
+
+/** The Settled shelf's header: a chat dropped on it is settled. */
+function SettledShelfHeader({
+  count,
+  expanded,
+  dragging,
+  onToggle,
+}: {
+  count: number;
+  expanded: boolean;
+  /** A chat is being carried: the header is where it can land. */
+  dragging: boolean;
+  onToggle: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: SETTLED_DROP_ID });
+  return (
+    // The header's own inset, taken back so its label sits under "Games".
+    <div ref={setNodeRef} className="-mx-1">
+      <SidebarShelfHeader
+        label="Settled"
+        count={count}
+        expanded={expanded}
+        target={dragging && isOver}
+        onToggle={onToggle}
+      />
+    </div>
+  );
+}
+
 function GameRow({
   node,
   active,
+  selected,
   expanded,
+  expandable,
   menu,
   rowProps,
   onOpen,
@@ -889,8 +1049,12 @@ function GameRow({
   onContextMenu,
 }: {
   node: Node;
+  /** A chat of this game is on screen. */
   active: boolean;
+  /** This row is the one on screen: the game's own chat, or the folded game of the open chat. */
+  selected: boolean;
   expanded: boolean;
+  expandable: boolean;
   menu: ReadonlyArray<GameActionItem>;
   rowProps?: Record<string, unknown>;
   onOpen: () => void;
@@ -915,7 +1079,10 @@ function GameRow({
     buildStateOf,
   );
   const picking = new Set((builds?.picking ?? "").split("\n").filter((id) => id !== ""));
-  const marks = new Set(node.chats.map((chat) => chatMark(chat, picking.has(chat.id))));
+  // Its own chat always, and its other chats while they are folded under it: an unfolded chat
+  // says its own state on its own row.
+  const marked = [...(main === null ? [] : [main]), ...(expanded ? [] : node.open)];
+  const marks = new Set(marked.map((chat) => chatMark(chat, picking.has(chat.id))));
   const working = marks.has("working") || game.run !== null || game.operation?.state === "running";
   const mark: GameTreeMark = node.archived
     ? null
@@ -951,8 +1118,9 @@ function GameRow({
         }
         name={name}
         active={active}
+        selected={selected}
         expanded={expanded}
-        expandable={!node.archived && node.chats.length > 0}
+        expandable={expandable}
         mark={mark}
         broken={builds?.broken === true}
         muted={node.archived}
@@ -970,22 +1138,37 @@ function GameRow({
   );
 }
 
-/** A chat row: its mark is its own state, and a Try waiting on a pick in it. */
+/**
+ * A chat row: its mark is its own state, and a Try waiting on a pick in it. Under its game it is
+ * a title; on the Settled shelf it leads with its game's picture and says when it was settled.
+ */
 function GameChatRow({
   node,
   chat,
+  place,
   active,
+  action,
+  dropping,
+  onAction,
   onOpen,
   onContextMenu,
+  rowProps,
 }: {
   node: Node;
   chat: SidebarThreadSummary;
+  place: "game" | "shelf";
   active: boolean;
+  action: ChatRowAction | null;
+  dropping: ChatRowAction | "carried" | null;
+  onAction: () => void;
   onOpen: () => void;
   onContextMenu: (position: { x: number; y: number }) => void;
+  rowProps?: Record<string, unknown>;
 }) {
+  const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(active);
+  const name = useGameName(node.game.environmentId, node.game.projectId, node.game.name);
   const picking = useEnvironmentQuerySelector(
-    node.main === null || node.archived
+    node.main === null || node.archived || place === "shelf"
       ? null
       : gameEnvironment.builds({
           environmentId: node.game.environmentId,
@@ -1001,14 +1184,41 @@ function GameChatRow({
   const ownMark = chatMark(chat, new Set((picking?.picking ?? "").split("\n")).has(chat.id));
   const mark = ownMark === null && copyWaits ? "waiting" : ownMark;
   return (
-    <SidebarChatRow
-      title={chat.title}
-      time={<ChatTime at={chat.latestUserMessageAt ?? chat.updatedAt} />}
-      active={active}
-      copy={chat.worktreePath !== null}
-      mark={mark}
-      onOpen={onOpen}
-      onContextMenu={onContextMenu}
-    />
+    <div ref={rowRef}>
+      <SidebarChatRow
+        title={chat.title}
+        time={
+          <ChatTime
+            at={
+              place === "shelf"
+                ? (chat.settledAt ?? chat.updatedAt)
+                : (chat.latestUserMessageAt ?? chat.updatedAt)
+            }
+          />
+        }
+        active={active}
+        copy={chat.worktreePath !== null}
+        mark={mark}
+        picture={
+          place === "shelf" ? (
+            <GameLibraryPicture
+              game={node.game}
+              main={node.main}
+              chats={null}
+              gameName={name}
+              read={leaseLiveStatus}
+              className="size-5"
+            />
+          ) : null
+        }
+        game={place === "shelf" ? name : null}
+        action={action}
+        dropping={dropping}
+        onAction={onAction}
+        onOpen={onOpen}
+        onContextMenu={onContextMenu}
+        {...(rowProps === undefined ? {} : { rowProps })}
+      />
+    </div>
   );
 }

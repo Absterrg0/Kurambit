@@ -102,6 +102,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   RefreshCwIcon,
+  CircleCheckIcon,
   CopyIcon,
   ArrowDownToLineIcon,
   ArrowLeftIcon,
@@ -189,6 +190,9 @@ import { Atom } from "effect/reactivity";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useNewChat } from "./game/useNewGameChat";
 import { unresolvedText, useCopyActions, useCopyPlace } from "./game/useGameCopies";
+import { readIsGameOwnChat } from "./game/gameOwnChat";
+import { settleAndAdvance } from "../settleAndAdvance";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { useGameArrivalStore } from "../gameArrivalStore";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import {
@@ -234,7 +238,12 @@ import {
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { useProjects, useThreadShells, waitForProject } from "../state/entities";
+import {
+  readEnvironmentSupportsSettlement,
+  useProjects,
+  useThreadShells,
+  waitForProject,
+} from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -893,6 +902,7 @@ function OpenCommandPaletteDialog(props: {
   const keepGoing = useKeepGoing(isGameThread ? activeThreadRef : null);
   const copyPlace = useCopyPlace(isGameThread ? activeThreadRef : null);
   const copyActions = useCopyActions(isGameThread ? activeThreadRef : null);
+  const { settleThread, unsettleThread } = useThreadActions();
   const copiesArrived = useGameArrivalStore((state) => state.met.includes("copies"));
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
   const characterRouteBlocker = useCharacterRouteBlockers(
@@ -1739,6 +1749,42 @@ function OpenCommandPaletteDialog(props: {
             await copyActions.update(threadRef.threadId);
           },
         });
+    }
+    // A chat's work is done: it leaves the game's list for the Settled shelf, and comes back
+    // the same way. The game's own chat is the game's row, which never settles.
+    if (
+      activeThread !== null &&
+      readEnvironmentSupportsSettlement(threadRef.environmentId) &&
+      readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) &&
+      !readIsGameOwnChat(threadRef)
+    ) {
+      const settled = activeThread.settledOverride === "settled";
+      actionItems.push({
+        kind: "action",
+        value: settled ? "action:game-unsettle-chat" : "action:game-settle-chat",
+        title: settled ? "Un-settle chat" : "Settle chat",
+        description: activeThread.title,
+        searchTerms: [
+          "settle",
+          "done",
+          "finish",
+          "chat",
+          "shelf",
+          ...(settled ? ["unsettle"] : []),
+        ],
+        icon: settled ? (
+          <Undo2Icon className={ITEM_ICON_CLASS} />
+        ) : (
+          <CircleCheckIcon className={ITEM_ICON_CLASS} />
+        ),
+        shortcutCommand: "thread.settle",
+        run: async () => {
+          if (!settled && settleAndAdvance(threadRef)) return;
+          const result = await (settled ? unsettleThread(threadRef) : settleThread(threadRef));
+          if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
+            throw squashAtomCommandFailure(result);
+        },
+      });
     }
     actionItems.push({
       kind: "action",

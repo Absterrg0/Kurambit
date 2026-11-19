@@ -9,6 +9,7 @@ import {
   toggleWorkbenchTab,
   useRowWidth,
 } from "./game/gameWorkbenchPanel";
+import { readIsGameOwnChat } from "./game/gameOwnChat";
 import { useStageSelectionChip } from "./game/gameComposerContext";
 import { stepStageFrame, toggleStageDevView } from "./game/gameStageBridge";
 import { flipStageCannotLose } from "./game/GameStageControls";
@@ -226,6 +227,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { settleAndAdvance } from "../settleAndAdvance";
 import { subscribeComposerFocus } from "../lib/desktopSnapShot";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
@@ -4621,8 +4623,11 @@ export default function ChatView(props: ChatViewProps) {
     lastVisitedAt: activeThreadLastVisitedAt,
     latestRunCompletedAt: activeLatestRun?.completedAt ?? null,
   });
+  // A game's own chat is the game's row: auto-settle may mark it, and nothing shows it as done.
   const activeThreadSettled =
-    supportsSettlement && activeThreadShell?.settledOverride === "settled";
+    supportsSettlement &&
+    activeThreadShell?.settledOverride === "settled" &&
+    !(activeThreadRef !== null && readIsGameOwnChat(activeThreadRef));
   const unsettleThreadMutation = useOrchestrationCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
@@ -4646,7 +4651,7 @@ export default function ChatView(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to un-settle thread",
+          title: "Failed to un-settle chat",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -5359,7 +5364,9 @@ export default function ChatView(props: ChatViewProps) {
           void handleUnsettleActiveThreadStable();
           return;
         }
-        void settleThread(activeThreadRef).then(toastPinFailure("Failed to settle thread"));
+        // The sidebar settles it and moves on to the game's own chat, which itself never settles.
+        if (settleAndAdvance(activeThreadRef)) return;
+        void settleThread(activeThreadRef).then(toastPinFailure("Failed to settle chat"));
       },
       "thread.pin": () => {
         if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;

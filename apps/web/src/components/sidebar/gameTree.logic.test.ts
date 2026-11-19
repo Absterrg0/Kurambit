@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ThreadId } from "@kurambit/contracts";
 
-import { buildGameTree, visibleChats, type GameTreeChat } from "./gameTree.logic";
+import { buildGameTree, chatAfterSettle, settledShelf, type GameTreeChat } from "./gameTree.logic";
 
 const game = (projectId: string, name: string, updatedAt = "2026-11-01T00:00:00Z") => ({
   environmentId: "env",
@@ -13,7 +13,9 @@ const chat = (
   id: string,
   projectId: string,
   at: string,
-  more: Partial<Pick<GameTreeChat, "archivedAt" | "pinnedAt" | "pinOrderKey">> = {},
+  more: Partial<
+    Pick<GameTreeChat, "archivedAt" | "pinnedAt" | "pinOrderKey" | "settledOverride" | "settledAt">
+  > = {},
 ) =>
   ({
     id: ThreadId.make(id),
@@ -27,6 +29,9 @@ const chat = (
     deletedAt: null,
     pinnedAt: more.pinnedAt ?? null,
     pinOrderKey: more.pinOrderKey ?? null,
+    settledOverride: more.settledOverride ?? null,
+    settledAt: more.settledAt ?? null,
+    latestRun: null,
     lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: ThreadId.make(id) },
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -64,17 +69,37 @@ describe("the Games tree", () => {
     expect(tree.live[0]?.main).toBeNull();
   });
 
-  it("lists five chats, then the open one when it is further down", () => {
-    const chats = ["1", "2", "3", "4", "5", "6", "7"].map((id) => ({ id }));
-    expect(visibleChats(chats, false, null)).toEqual({ shown: chats.slice(0, 5), hidden: 2 });
-    expect(visibleChats(chats, false, "7").shown.map((each) => each.id)).toEqual([
-      "1",
-      "2",
-      "3",
-      "4",
-      "5",
-      "7",
-    ]);
-    expect(visibleChats(chats, true, null).hidden).toBe(0);
+  it("keeps a game's own chat as its row, its open chats under it and its settled ones apart", () => {
+    const tree = buildGameTree({
+      games: [game("a", "Alpha"), game("b", "Bravo")],
+      threads: [
+        chat("a-own", "a", "2026-11-01T10:00:00Z"),
+        chat("a-hat", "a", "2026-11-05T10:00:00Z"),
+        chat("a-done", "a", "2026-11-03T10:00:00Z", {
+          settledOverride: "settled",
+          settledAt: "2026-11-04T10:00:00Z",
+        }),
+        // Auto-settle may mark a game's own chat; the game's row stays where it is.
+        chat("b-own", "b", "2026-11-02T10:00:00Z", {
+          settledOverride: "settled",
+          settledAt: "2026-11-06T10:00:00Z",
+        }),
+        chat("b-done", "b", "2026-11-03T10:00:00Z", {
+          settledOverride: "settled",
+          settledAt: "2026-11-07T10:00:00Z",
+        }),
+      ],
+      sort: "name",
+    });
+    const [alpha, bravo] = tree.live;
+    expect(alpha?.main?.id).toBe("a-own");
+    expect(alpha?.open.map((each) => each.id)).toEqual(["a-hat"]);
+    expect(alpha?.settled.map((each) => each.id)).toEqual(["a-done"]);
+    expect(bravo?.main?.id).toBe("b-own");
+    expect(bravo?.open).toEqual([]);
+    // One shelf for every game, the last settled first.
+    expect(settledShelf(tree.live).map((each) => each.chat.id)).toEqual(["b-done", "a-done"]);
+    // Settling the chat on screen leaves the person in its game.
+    expect(chatAfterSettle(alpha!, { id: alpha!.open[0]!.id })?.id).toBe("a-own");
   });
 });

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
-  ChevronRightIcon,
+  CircleCheckIcon,
   CopyIcon,
   EllipsisIcon,
   FolderOpenIcon,
@@ -13,10 +13,12 @@ import {
   SquarePenIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  Undo2Icon,
 } from "lucide-react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { StatusDot } from "../ui/status-dot";
@@ -127,6 +129,7 @@ export function SidebarGameRow({
   picture,
   name,
   active,
+  selected,
   expanded,
   expandable,
   mark,
@@ -144,7 +147,10 @@ export function SidebarGameRow({
 }: {
   picture: ReactNode;
   name: ReactNode;
+  /** A chat of this game is on screen. */
   active: boolean;
+  /** This row is the one on screen: the game's own chat, or the folded game of the open chat. */
+  selected: boolean;
   expanded: boolean;
   expandable: boolean;
   mark: GameTreeMark;
@@ -166,14 +172,15 @@ export function SidebarGameRow({
       <button
         type="button"
         data-tree-row="game"
-        // The open chat is the highlighted row; the game carries it only while folded.
-        data-active={active && !expanded}
+        data-active={selected}
+        aria-current={selected ? "page" : undefined}
         aria-expanded={expandable ? expanded : undefined}
         className={cn(SIDEBAR_TREE_ROW, "pe-1")}
         onClick={(event) => {
           if (event.detail > 1) return;
-          // Opening a game that is not open also unfolds it; a click on the open one folds it.
-          if (active && expandable) onToggle();
+          // The game's row opens the game's own chat; a click on it while it is the one on
+          // screen folds its other chats.
+          if (selected && expandable) onToggle();
           else onOpen();
         }}
         onKeyDown={(event) => {
@@ -267,16 +274,32 @@ export function SidebarGameRow({
   );
 }
 
-/** A chat under its game: its title, when it last moved, and its mark. */
+/** What a chat row offers on hover: settle one at work, bring a settled one back. */
+export type ChatRowAction = "settle" | "unsettle";
+const CHAT_ROW_ACTIONS = {
+  settle: { label: "Settle", icon: <CircleCheckIcon aria-hidden="true" /> },
+  unsettle: { label: "Un-settle", icon: <Undo2Icon aria-hidden="true" /> },
+} as const;
+
+/**
+ * A chat: its title, when it last moved, and its mark. Under its game it is indented; in the
+ * Settled shelf, where games mix, it leads with its game's picture. On hover its time gives way
+ * to the one thing to do with it.
+ */
 export function SidebarChatRow({
   title,
   time,
   active,
   copy = false,
   mark,
+  picture = null,
+  game = null,
+  action = null,
+  dropping = null,
+  onAction,
   onOpen,
   onContextMenu,
-  onPointerDown,
+  rowProps,
 }: {
   title: ReactNode;
   time: ReactNode;
@@ -284,96 +307,160 @@ export function SidebarChatRow({
   /** The chat works in a copy of the game. */
   copy?: boolean;
   mark: GameTreeMark;
+  /** Its game's picture, where the row is not under its game. */
+  picture?: ReactNode;
+  /** Its game's name, said on its picture where the row is not under its game. */
+  game?: string | null;
+  action?: ChatRowAction | null;
+  /** While it is carried: what dropping it here does, or "carried" where a drop changes nothing. */
+  dropping?: ChatRowAction | "carried" | null;
+  onAction?: () => void;
   onOpen: () => void;
   onContextMenu: (position: { x: number; y: number }) => void;
-  onPointerDown?: (event: React.PointerEvent<HTMLButtonElement>) => void;
+  rowProps?: Record<string, unknown>;
 }) {
   return (
-    <button
-      type="button"
-      data-tree-row="chat"
-      data-active={active}
-      aria-current={active ? "page" : undefined}
-      className={cn(SIDEBAR_TREE_ROW, "ps-8 pe-2")}
-      onClick={(event) => {
-        if (event.detail > 1) return;
-        onOpen();
-      }}
-      onPointerDown={onPointerDown}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onContextMenu({ x: event.clientX, y: event.clientY });
-      }}
-    >
-      <Text
-        variant="label"
-        tone={active ? "default" : "muted"}
-        truncate
-        render={<span className="min-w-0 flex-1" />}
+    <div className="group/chat relative">
+      <button
+        type="button"
+        data-tree-row="chat"
+        data-active={active}
+        aria-current={active ? "page" : undefined}
+        className={cn(SIDEBAR_TREE_ROW, picture === null ? "ps-8 pe-2" : "pe-2")}
+        onClick={(event) => {
+          if (event.detail > 1) return;
+          onOpen();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onContextMenu({ x: event.clientX, y: event.clientY });
+        }}
+        {...rowProps}
       >
-        {title}
-      </Text>
-      {copy ? (
-        <CopyIcon
-          aria-label="Works in a copy"
-          data-copy-glyph=""
-          className="size-3.5 shrink-0 text-muted-foreground"
-        />
-      ) : null}
-      {mark === null ? (
-        <Text variant="caption" tone="dim" numeric render={<span className="shrink-0" />}>
-          {time}
+        {picture === null ? null : (
+          <Tooltip>
+            <TooltipTrigger render={<span className="relative size-5 shrink-0" />}>
+              {picture}
+            </TooltipTrigger>
+            {game === null ? null : <TooltipPopup side="top">{game}</TooltipPopup>}
+          </Tooltip>
+        )}
+        <Text
+          variant="label"
+          tone={active ? "default" : "muted"}
+          truncate
+          render={<span className="min-w-0 flex-1" />}
+        >
+          {title}
         </Text>
-      ) : (
-        <span className="flex size-4 shrink-0 items-center justify-center">
-          <TreeMark mark={mark} />
+        {copy ? (
+          <CopyIcon
+            aria-label="Works in a copy"
+            data-copy-glyph=""
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+        ) : null}
+        {/* The state, until a pointer or the keyboard is on the row: then its action. */}
+        <span
+          className={cn(
+            "flex h-5 shrink-0 items-center justify-end",
+            action !== null &&
+              dropping === null &&
+              "group-hover/chat:invisible group-focus-within/chat:invisible",
+          )}
+        >
+          {dropping === "carried" ? null : dropping !== null ? (
+            <Text
+              variant="caption"
+              tone="inherit"
+              data-chat-drop={dropping}
+              render={<span className="flex items-center gap-1 text-primary [&_svg]:size-3.5" />}
+            >
+              {CHAT_ROW_ACTIONS[dropping].icon}
+              {CHAT_ROW_ACTIONS[dropping].label}
+            </Text>
+          ) : mark === null ? (
+            <Text variant="caption" tone="dim" numeric>
+              {time}
+            </Text>
+          ) : (
+            <span className="flex size-4 items-center justify-center">
+              <TreeMark mark={mark} />
+            </span>
+          )}
+        </span>
+      </button>
+      {action === null || dropping !== null ? null : (
+        <span className="invisible absolute inset-y-0 end-1 flex items-center group-hover/chat:visible group-focus-within/chat:visible">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`${CHAT_ROW_ACTIONS[action].label} ${typeof title === "string" ? title : "chat"}`}
+                  data-chat-action={action}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAction?.();
+                  }}
+                />
+              }
+            >
+              {CHAT_ROW_ACTIONS[action].icon}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{CHAT_ROW_ACTIONS[action].label}</TooltipPopup>
+          </Tooltip>
         </span>
       )}
-    </button>
+    </div>
   );
 }
 
-/** A quiet row in the tree: "Show 3 more", "Archived (2)". */
-export function SidebarQuietRow({
+/**
+ * A shelf under the games: "Settled 4", "Archived 2". T3's section header: its label, a rule and
+ * a chevron; while a chat is dragged over it, it takes the accent to say the drop lands here.
+ */
+export function SidebarShelfHeader({
   label,
   count,
   expanded,
-  indent = false,
-  onClick,
+  target = false,
+  onToggle,
 }: {
   label: string;
-  count?: number;
-  expanded?: boolean;
-  indent?: boolean;
-  onClick: () => void;
+  count: number;
+  expanded: boolean;
+  /** A dragged chat is over it. */
+  target?: boolean;
+  onToggle: () => void;
 }) {
+  return (
+    <CollapsibleSectionHeader
+      expanded={expanded}
+      tone={target ? "accent" : "muted"}
+      data-tree-row="shelf"
+      data-shelf={label.toLowerCase()}
+      onClick={onToggle}
+    >
+      {label}
+      {count === 0 ? null : <span className="ms-1.5 tabular-nums opacity-70">{count}</span>}
+    </CollapsibleSectionHeader>
+  );
+}
+
+/** A quiet row in the tree: "Show 12 more". */
+export function SidebarQuietRow({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
       data-tree-row="more"
-      aria-expanded={expanded}
-      className={cn(SIDEBAR_TREE_ROW, indent ? "ps-8" : "ps-1")}
+      className={cn(SIDEBAR_TREE_ROW, "ps-8")}
       onClick={onClick}
     >
-      {expanded === undefined ? null : (
-        <span className="flex size-5 shrink-0 items-center justify-center">
-          <ChevronRightIcon
-            aria-hidden="true"
-            className={cn(
-              "size-3.5 text-dim-foreground transition-transform",
-              expanded && "rotate-90",
-            )}
-          />
-        </span>
-      )}
       <Text variant="meta" tone="muted" truncate>
         {label}
       </Text>
-      {count === undefined ? null : (
-        <Text variant="caption" tone="dim" numeric>
-          {count}
-        </Text>
-      )}
     </button>
   );
 }

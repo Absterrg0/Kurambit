@@ -30,7 +30,11 @@ import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isEditableFocused } from "../lib/editableFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
-import { undoLatestThreadAction } from "../hooks/showThreadUndoNotice";
+import {
+  releaseThreadUndoShortcut,
+  threadUndoClaimsShortcut,
+  undoLatestThreadAction,
+} from "../hooks/showThreadUndoNotice";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -40,6 +44,7 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import type { ThreadRouteTarget } from "../threadRoutes";
 
+const MODIFIER_KEYS: ReadonlySet<string> = new Set(["Control", "Meta", "Shift", "Alt"]);
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
@@ -188,9 +193,38 @@ function ChatRouteGlobalShortcuts() {
       }
     };
 
+    // Right after a settle the notice owns its Undo key even in the composer, whose editor
+    // would otherwise take the key first: caught on the way down, until another key is pressed.
+    const onClaimedUndo = (event: KeyboardEvent) => {
+      if (!threadUndoClaimsShortcut()) return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: {
+          terminalFocus: isTerminalFocused(),
+          terminalOpen,
+          previewFocus: isPreviewFocused(),
+          previewOpen,
+          editableFocus: false,
+          modelPickerOpen: isModelPickerOpen(),
+        },
+      });
+      if (command !== "thread.undo") {
+        if (!MODIFIER_KEYS.has(event.key)) releaseThreadUndoShortcut();
+        return;
+      }
+      if (event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) return;
+      if (undoLatestThreadAction()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
     window.addEventListener("keydown", onWindowKeyDown);
+    window.addEventListener("keydown", onClaimedUndo, true);
+    // Pastes from a menu, dictation and drops edit text without a keypress.
+    window.addEventListener("input", releaseThreadUndoShortcut, true);
     return () => {
       window.removeEventListener("keydown", onWindowKeyDown);
+      window.removeEventListener("keydown", onClaimedUndo, true);
+      window.removeEventListener("input", releaseThreadUndoShortcut, true);
     };
   }, [
     activeDraftThread,

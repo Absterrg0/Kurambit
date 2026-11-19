@@ -90,6 +90,7 @@ import { ArrivalDot } from "./ArrivalDot";
 import { GameCopyActions, GameCopyLabel } from "./GameCopyHeader";
 import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHistory";
 import { GameExports } from "./GameExports";
+import { GameChatMenu } from "./GameChatMenu";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
 import { GameStageOverlay } from "./GameStageOverlay";
 import { CODE_MODEL_PREFIX } from "./gameArt.logic";
@@ -1436,6 +1437,7 @@ function ThreadGameStage({
               </MenuPopup>
             </Menu>
           )}
+          <GameChatMenu threadRef={threadRef} />
           {/* What plays on the Stage, as a button that opens the game's History. Nothing names
               builds before the first one exists: the Stage says what is being made. */}
           <span className={historyLabel === null ? "hidden" : "contents"}>
