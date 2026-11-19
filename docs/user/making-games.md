@@ -103,7 +103,7 @@ its builds stay in the game's History. A notice offers **Undo** for five seconds
 **Un-settle** brings it back the same ways, and so does sending it a message. A chat that is still
 working, has a message queued, or waits on your answer can't be settled until that is done.
 
-Chats left alone settle on their own after three days; change that in **Settings → General →
+Chats left alone settle on their own after seven days; change that in **Settings → General →
 Advanced**. One you un-settle stays in the list until you work in it again, and changing the days
 does not bring settled chats back. Your agent can settle a chat as well, when you ask it to.
 
