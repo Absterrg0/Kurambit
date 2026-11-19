@@ -16,7 +16,6 @@ import { GamesHome } from "../components/game/GamesHome";
 import { AppNotFound } from "../components/AppNotFound";
 import { isSettingsPage } from "../components/sidebar/mainAppLocation";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
-import { useLegacySidebarEnabled } from "../hooks/useSettings";
 import { isPreviewAvailableFor } from "../browser/previewRuntime";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useEnvironmentScope } from "../state/session";
@@ -61,7 +60,6 @@ function ChatRouteGlobalShortcuts() {
     AuthPreviewOperateScope,
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const legacySidebarEnabled = useLegacySidebarEnabled();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { scratchEnvironmentId, startScratchThread } = useScratchProject();
   const newGame = useNewGame();
@@ -137,17 +135,8 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // A game starts in Home's brief box; the legacy sidebar keeps T3's new chat.
-        if (!legacySidebarEnabled) {
-          newGame();
-          return;
-        }
-        void startNewThreadFromContext({
-          activeDraftThread,
-          activeThread: activeThread ?? undefined,
-          defaultProjectRef,
-          handleNewThread,
-        });
+        // A game starts in Home's brief box.
+        newGame();
         return;
       }
 
@@ -241,7 +230,6 @@ function ChatRouteGlobalShortcuts() {
     scratchEnvironmentId,
     selectedThreadKeysSize,
     startScratchThread,
-    legacySidebarEnabled,
     terminalOpen,
   ]);
 

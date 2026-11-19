@@ -123,7 +123,6 @@ export const ADVANCED_TARGET_IDS: ReadonlySet<string> = new Set([
   "legacy-features",
   "legacy-plan-mode",
   "legacy-context-window-indicator",
-  "legacy-sidebar",
 ]);
 
 type SettingsSearchPlace = Pick<SettingsSearchItem, "id" | "targetId" | "to">;
@@ -633,12 +632,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Context window indicator (legacy)",
     to: "/settings/general",
     searchTerms: ["composer meter usage tokens circle old"],
-  },
-  {
-    id: "legacy-sidebar",
-    title: "Sidebar (legacy)",
-    to: "/settings/general",
-    searchTerms: ["project thread tree old flat list"],
   },
   {
     id: "restore-defaults",

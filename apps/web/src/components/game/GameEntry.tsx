@@ -24,30 +24,9 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Text } from "../ui/text";
-import { showOpenGameDialog, useGameEntryStore, useNewGame } from "./gameEntryStore";
+import { useGameEntryStore } from "./gameEntryStore";
 import { useGameLibraryRefresh } from "./useGameLibrary";
 import { useGameModelChoice } from "./useGameModelChoice";
-
-/** New game and Open game, for the legacy sidebar's empty state and header. */
-export function GameEntry() {
-  const environmentId = usePrimaryEnvironmentId();
-  return environmentId ? <GameEntryButtons environmentId={environmentId} /> : null;
-}
-
-function GameEntryButtons({ environmentId }: { environmentId: EnvironmentId }) {
-  const newGame = useNewGame();
-  const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
-  return (
-    <div className="flex flex-wrap justify-center gap-2 p-2">
-      <Button size="sm" variant="outline" onClick={() => newGame()}>
-        New game
-      </Button>
-      <Button size="sm" variant="ghost" disabled={!canOpen} onClick={showOpenGameDialog}>
-        Open game
-      </Button>
-    </div>
-  );
-}
 
 export function GameOpenDialogHost() {
   const environmentId = usePrimaryEnvironmentId();

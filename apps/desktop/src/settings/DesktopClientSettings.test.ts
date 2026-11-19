@@ -64,8 +64,6 @@ const clientSettings: ClientSettings = {
   },
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
-  sidebarThreadPreviewCount: 6,
-  legacySidebarEnabled: false,
   sidebarWorkingShelfEnabled: false,
   pullRequestMergeMethodOverrides: {},
   timestampFormat: "24-hour",
