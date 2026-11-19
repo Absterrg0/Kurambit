@@ -99,7 +99,7 @@ def foot_track(phase, duty, stride, lift, push=0.5):
     return f, lift * math.sin(math.pi * u) ** 1.2, u
 
 
-def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, bob=None, tail=0, ears=0, size=0.3, crouch=None):
+def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, bob=None, tail=0, ears=0, size=0.3, crouch=None, tilt=0.0):
     """One loop of the gait as frames (frame 0 and the frame after the last are the same pose):
     {"frames": n, "groundSpeed": m/s, "stride": m, "poses": [pose]}. A pose:
         body   {"at": (x, y, z) offset from rest, "pitch", "roll", "yaw"} degrees; pitch > 0 nose up
@@ -107,7 +107,8 @@ def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, 
         tail   [(yaw, pitch)] per tail bone, degrees
         ears   [(yaw, pitch)] per ear bone, degrees
     A body with no legs (a hopping spirit) takes size, metres, for the leg length its hop scales by;
-    crouch (a share of leg length) lowers the body so straight legs can reach a stride.
+    crouch (a share of leg length) lowers the body so straight legs can reach a stride; tilt
+    (degrees) leans a planted foot's own bones with the leg.
     """
     if gait not in GAITS:
         raise ValueError(f"gait {gait!r}: one of {', '.join(GAITS)}")
@@ -130,7 +131,11 @@ def walk_cycle(legs, gait="walk", fps=30, stride=None, seconds=None, lift=None, 
         for leg, off in zip(legs, phases):
             f, z, u = foot_track(t - off, duty, S, H)
             at = np.asarray(leg["foot"], float) + FORWARD * f + np.array([0, 0, z])
-            feet[leg["name"]] = {"at": tuple(at), "roll": 0.0 if u < 0 else 35.0 * math.sin(math.pi * min(1.0, u * 1.6)),
+            # Planted, the foot's own bones lean with the leg: toward the body when it lands ahead,
+            # away as it pushes off behind (tilt degrees at each end), which is most of a long
+            # leg's stride. Swinging, the toe trails.
+            lean = -float(tilt) * max(-1.0, min(1.0, f / max(1e-9, S / 2)))
+            feet[leg["name"]] = {"at": tuple(at), "roll": lean if u < 0 else lean * (1 - min(1.0, u * 4)) + 35.0 * math.sin(math.pi * min(1.0, u * 1.6)),
                                  "planted": u < 0}
             lifts.append(z / H if H > 0 else 0.0)
         # Each group of legs vaults its end of the body: high mid-stance in a walk, low in a trot or

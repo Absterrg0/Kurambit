@@ -170,7 +170,7 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
      the styles lack: eyes stand out of the face about 60% of their depth,
      with an iris and a highlight; lids sit high (low lids read grumpy).
    - **Hands**: a human body's own hands, five fingers, hold through every
-     library clip: keep them, glove them with `hero.dress`. Paws get pads.
+     library clip: keep them, glove them with `hero.garment`.
    - **Clothes**: `hero.garment` (Heroes 2); by hand, a part across a joint
      takes weights over its region's bones, never one.
    - **Joins**: a part that meets another enters it. Nothing floats or pokes
@@ -273,9 +273,9 @@ head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
    knee so it can reach; six legs and more are `leg_1_l`...), `tail`,
    `ear_l` (`_l` mirrors to `_r`), `wing_l` (shoulder to tip, spread), any
    other name a part of its own (`lantern`, `fin_top`):
-   `body = hero.creature_body("cat", sketch)`, then named passes
-   `hero.sculpt(body, "inflate"|"crease"|"smooth"|"grab"|"flatten", at=, to=,
-radius=, amount=)` (a round belly, a mouth line, toes) and
+   `body = hero.creature_body("cat", sketch)` (it adds the plan's chest,
+   haunches and cheeks), then named passes `hero.sculpt(body,
+"inflate"|"crease"|"smooth"|"grab"|"flatten", at=, to=, radius=, amount=)` and
    `hero.decimate(body, 15000)` (it keeps a body skinned, its hands and
    head densest).
 2. **Clothes**, innermost first: `hero.garment("fisher", "top"|"trousers"|
@@ -294,8 +294,13 @@ hang=<shoulder height>, chains=6)`. A scarf's end, a
    its joints, so the library's clips play on it unchanged. A creature's:
    `arm = hero.creature_rig(body, height=(0.3, 0.45))`, bones from the same
    sketch, automatic weights; look at it (op `look`) and move a joint in the
-   sketch if a bend falls wrong. A wing's or a fin's surface:
-   `hero.membrane(arm, "wing", depth)`. To pose a move by hand, `hero.controls(arm)`
+   sketch if a bend falls wrong. Then what makes it an animal:
+   `hero.creature_face(arm, eyes=, set="side"|"front"|"top")` (eyes that
+   blink, nostrils, a mouth), `hero.feet(arm, "hoof"|"paw"|"claw")`,
+   `hero.fur(arm, "neck"|"tail", side="top"|"end")` (a mane, a tail's tuft),
+   `hero.feathers(arm, "wing", depth=)` or `hero.wing(arm, "wing", depth=)`
+   (a ribbed skin); a fin: `hero.membrane(arm, "fin_top", depth)`. To pose a
+   move by hand, `hero.controls(arm)`
    generates a Rigify control rig (IK paws, a torso); key it, then
    `hero.bake_controls(arm, "Pounce", start, end)` and `hero.controls(arm,
 on=False)`.

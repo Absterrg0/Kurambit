@@ -32,7 +32,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import animrig, gait, helpers, skeleton
+from . import anatomy, animrig, gait, helpers, skeleton
 from .character import MADE_BODY
 
 SPRINGS = ("tail", "ear", "antenna", "whisker", "tendril")
@@ -40,6 +40,9 @@ SKIN_ROUND = 0.7
 # A round, short-legged body crouched a quarter of its leg drags its belly (the cat re-run's
 # reviewer): past this the stride shortens instead.
 MAX_CROUCH = 0.12
+# How far a planted foot's own bones lean with the leg at each end of a stride, degrees: a horse's
+# cannon and pastern swing through about this, and it is most of what lets a long leg stride out.
+FOOT_TILT = 24.0
 
 
 def _chains(chains, mirror=True):
@@ -66,10 +69,12 @@ def _apply(o):
             bpy.ops.object.modifier_apply(modifier=m.name)
 
 
-def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None, triangles=24000):
+def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None, triangles=24000, masses=True):
     """The body mesh <name>_body from the sketch: skin, subdivision, a voxel remesh (voxel metres;
     default a 90th of its longest side, finer for thin parts), smooth passes, then thinned to
-    about triangles (None keeps every one the remesh made). Returns the object."""
+    about triangles (None keeps every one the remesh made). masses: the plan's own forms fused in
+    (a four-legged body's deep chest, croup and belly, the muscle over each leg's first bone, cheeks
+    behind a muzzle); False keeps the bare sketch. Returns the object."""
     chains = _chains(chains, mirror)
     verts, radii, edges, joins = [], [], [], {}
     for cname, pts in chains.items():
@@ -117,6 +122,10 @@ def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide
             bmesh.ops.create_icosphere(bm, subdivisions=2, radius=ra + (rb - ra) * t, matrix=Matrix.Translation(p.tolist()))
     for (x, y, z), r in zip(verts, radii):
         bmesh.ops.create_icosphere(bm, subdivisions=3, radius=r, matrix=Matrix.Translation((x, y, z)))
+    if masses:
+        # What every animal of this plan has over its pipes: chest, haunches, shoulders, cheeks.
+        for centre, (rx, ry, rz) in anatomy.masses(chains):
+            bmesh.ops.create_icosphere(bm, subdivisions=3, radius=1.0, matrix=Matrix.Translation(centre) @ Matrix.Diagonal((rx, ry, rz, 1.0)))
     bm.to_mesh(me)
     bm.free()
     co = np.array([v.co for v in me.vertices])
@@ -469,6 +478,8 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
     necks = roles.get("neck", [])
     # How big the body is, for what has no legs to measure: the height of its spine.
     size = max(0.05, float(np.mean([rig.head(b)[2] for b in spine])))
+    # A wing with a skin (anatomy.wing) rests half folded; feathers fold flat.
+    fold = [tuple(x) for x in json.loads(arm[anatomy.FOLD_KEY])] if anatomy.FOLD_KEY in arm else FOLD
     out = {}
     for clip in clips:
         if clip not in CLIPS:
@@ -489,7 +500,10 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
         if clip in ("walk", "trot", "run", "hop") and not legs and clip != "hop":
             raise ValueError(f"{clip}: {arm.name} has no legs; hop or hover move a legless body")
         if clip in ("walk", "trot", "run", "hop") and legs:
-            stride, crouch = _stride_cap(rig, legs_rec, clip)
+            # A leg with a foot of its own (three bones and more) leans it through the stance.
+            tilt = FOOT_TILT if clip != "hop" and all(len(leg["bones"]) >= 3 for leg in legs_rec) else 0.0
+            kw.setdefault("tilt", tilt)
+            stride, crouch = _stride_cap(rig, legs_rec, clip, kw["tilt"])
             kw.setdefault("stride", stride)
             kw.setdefault("crouch", crouch)
         if not legs and clip == "hop":
@@ -503,7 +517,7 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
             for w in wings:
                 side = -1.0 if "_r_" in w[0] else 1.0
                 for j, b in enumerate(w):
-                    sweep, lift = pose["wings"][j] if "wings" in pose and j < len(pose["wings"]) else FOLD[min(j, len(FOLD) - 1)]
+                    sweep, lift = pose["wings"][j] if "wings" in pose and j < len(pose["wings"]) else fold[min(j, len(fold) - 1)]
                     turns[b] = (side * sweep, lift)
             pose["turns"] = turns
         act = _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads, tails, ears)
@@ -514,7 +528,7 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
     return out
 
 
-def _stride_cap(rig, legs_rec, clip):
+def _stride_cap(rig, legs_rec, clip, tilt=0.0):
     """(stride, crouch) every leg reaches: a foot swept S/2 ahead of and behind its hip with the
     leg at most 95% straight. Legs sketched straight cannot reach a stride standing tall, so the
     body crouches for it, as an animal walks on bent legs, up to MAX_CROUCH of its leg length;
@@ -526,12 +540,15 @@ def _stride_cap(rig, legs_rec, clip):
         reach = 0.95 * sum(rig.length[b] for b in bones[:2])
         J0 = rig.head(bones[0])
         end = rig.head(bones[2]) if len(bones) >= 3 else rig.L[bones[-1]][:3, 3] + rig.L[bones[-1]][:3, 1] * rig.length[bones[-1]]
-        legs.append((reach, max(1e-4, J0[2] - end[2]), table["stride"] * leg["length"]))
+        # The foot leaning tilt degrees carries its top joint that much nearer the hip, and lower.
+        foot = float(np.linalg.norm(rig.L[bones[-1]][:3, 3] + rig.L[bones[-1]][:3, 1] * rig.length[bones[-1]] - end)) if len(bones) >= 3 else 0.0
+        lean = math.radians(tilt)
+        legs.append((reach, max(1e-4, J0[2] - end[2]) + foot * (1 - math.cos(lean)), table["stride"] * leg["length"], foot * math.sin(lean)))
     if not legs:
         return None, table.get("crouch", 0.0)
     crouch = max([table.get("crouch", 0.0)] + [
-        min(MAX_CROUCH, max(0.0, 1 - math.sqrt(max(0.0, r * r - (w / 2) ** 2)) / h0)) for r, h0, w in legs])
-    caps = [min(w, 2 * math.sqrt(max(0.0, r * r - (h0 * (1 - crouch)) ** 2))) for r, h0, w in legs]
+        min(MAX_CROUCH, max(0.0, 1 - math.sqrt(max(0.0, r * r - max(0.0, w / 2 - more) ** 2)) / h0)) for r, h0, w, more in legs])
+    caps = [min(w, 2 * (math.sqrt(max(0.0, r * r - (h0 * (1 - crouch)) ** 2)) + more)) for r, h0, w, more in legs]
     return max(0.02, min(caps)), crouch
 
 
@@ -677,7 +694,7 @@ def membrane(armature, chain, depth, *, direction=(0, 1, 0), taper=0.3, thick=0.
     """A thin surface hanging from a chain of the sketch, each part of it following the bone it
     hangs from: a wing's feathers or skin (chain "wing": both sides; direction back, the default),
     a fish's back fin or tail fluke (direction up or down), a crest. depth metres at the chain's
-    root, taper times that at its tip. Returns the objects."""
+    root, taper times that at its tip. A wing is hero.feathers or hero.wing. Returns the objects."""
     arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
     roles = json.loads(arm["kurambit_creature"])
     names = [c for c in roles if c == chain or c in (f"{chain}_l", f"{chain}_r")]

@@ -11,6 +11,10 @@ Clothes: hero.garment(armature, "top"|"trousers"|"boots"|"gloves"|"skirt", colou
          garment made from the body's own surface between clean cuts, fitted and bound; by hand,
          hero.dress(garment, armature, hang=..., chains=6), hero.dangle(part, armature, start, end),
          hero.follow_hem(armature)
+Animal:  hero.creature_face(armature, eyes=, set="side"|"front"|"top"): eyes that blink, nostrils,
+         a mouth; hero.feet(armature, "hoof"|"paw"|"claw"); hero.fur(armature, "neck"|"tail"|chain,
+         side="top"|"under"|"end"): a mane, a ruff, a tail's tuft; hero.feathers(armature, "wing",
+         depth=) or hero.wing(armature, "wing", depth=): a wing's feathers, or its ribbed skin
 Rig:     hero.creature_rig(body, height=(lo, hi)), hero.bind(mesh, armature),
          hero.membrane(armature, "wing", depth): a wing's or a fin's surface on its chain
 Motion:  hero.creature_clips(armature, ["walk", "trot", "run", "idle", "look", "sit"]), and "swim",
@@ -21,6 +25,7 @@ Machine: hero.hinge_rig(name, parts, base=[...], height=(lo, hi)), hero.hinge_cl
          {"Open": {"lid": [(0, 0), (0.5, -100)]}}): parts on hinges with their own clips
 Gates:   hero.gates(armature): the review's gate numbers now, in the live scene
 """
+from .anatomy import creature_face, feathers, feet, fur, wing
 from .cloth import dangle, dress, follow_hem
 from .face import face
 from .garment import garment
