@@ -984,7 +984,7 @@ function ThreadGameStage({
       return;
     }
     if (studio.type === "studio-ready") {
-      if (makingFirstBuild && firstPlayableTurn !== turnStartedAt)
+      if (makingFirstBuild && studio.blank !== true && firstPlayableTurn !== turnStartedAt)
         setFirstPlayableTurn(turnStartedAt);
       return;
     }
@@ -1168,7 +1168,10 @@ function ThreadGameStage({
     {
       focused: (playerIn || midRun) && !frameHidden,
       hidden: frameHidden,
-      newBuild,
+      // A first turn's save comes up as the game starts, unless the person has a run of their
+      // own to come back to: nobody played what was showing, so there is nothing to resume.
+      newBuild:
+        newBuild || (makingFirstBuild && !(runs.inPlay !== null && playedRun === runs.inPlay)),
     },
   );
   // A reload into play first takes the run in play from the page, which the page that comes up
@@ -1327,11 +1330,12 @@ function ThreadGameStage({
       : null;
   // The header names what plays: a copy by its own name, else the folder's build.
   // While a turn's build is saved it already plays: the header names it by its number.
+  // A first build on the Stage before its turn ends is named as what it is: still being made.
   const historyLabel =
     playTarget?.label ??
     (landing ? `Build ${nextBuildNumber}` : null) ??
     folderShort ??
-    (hasBuild ? "History" : null);
+    (hasBuild ? "History" : firstPlayable ? `Making build ${nextBuildNumber}` : null);
   const keepGoingMaking =
     keepGoingHere && (keepGoingStatus.phase === "turn" || keepGoingStatus.phase === "waiting");
   const buildSlot: GameBuildSlot | null = keepGoingMaking

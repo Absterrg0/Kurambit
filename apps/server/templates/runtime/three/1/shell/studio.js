@@ -209,6 +209,8 @@ function position(player) {
  * (shell/stage-bridge.js), is announced in studio-ready: a shell without it
  * posts the bare boot signal, and the Stage then offers no selecting.
  * `scene`, when the shell has one, is the scene report the harness reads.
+ * `blank`: the game has no main.js yet (the server answers an empty module), so the page runs
+ * nothing; studio-ready says so, and the Stage keeps waiting for a game to show.
  */
 export function installStudio({
   player,
@@ -222,6 +224,7 @@ export function installStudio({
   takePlays,
   sheet,
   play,
+  blank,
 }) {
   let ready = false;
   const studio = {
@@ -232,7 +235,12 @@ export function installStudio({
       return ready;
     },
     set ready(value) {
-      if (value === true && !ready) toStage({ type: "studio-ready", ...(bridge?.hello ?? {}) });
+      if (value === true && !ready)
+        toStage({
+          type: "studio-ready",
+          ...bridge?.hello,
+          ...(blank === true ? { blank: true } : {}),
+        });
       ready = value === true;
     },
     errors,
@@ -312,6 +320,10 @@ export function installStudio({
   // The stage's visibility bridge: while its tab is hidden the run holds and
   // the sound is suspended, then both come back as they were. The hold is not
   // the shell's pause, so a game paused before the hide stays paused after.
+  // Told it is visible, the page answers twice: at once with what it did, and again (`drawn`)
+  // when the next frame is on the canvas. A Stage that let a page start behind another shows it
+  // on the second: its first frame was drawn held, before the run had moved.
+  let shown = null;
   window.addEventListener("message", (event) => {
     if (event.data?.type !== "studio-visibility") return;
     const hidden = event.data.visible === false;
@@ -319,6 +331,13 @@ export function installStudio({
     const ack = { type: "studio-visibility-ack", visible: !hidden, paused: hidden, muted };
     event.source?.postMessage?.(ack, "*");
     window.__studioVisibilityAck = ack;
+    shown = hidden ? null : ack;
   });
+  /** The shell calls it after each frame it draws. */
+  studio.frame = () => {
+    if (shown === null) return;
+    toStage({ ...shown, drawn: true });
+    shown = null;
+  };
   return studio;
 }

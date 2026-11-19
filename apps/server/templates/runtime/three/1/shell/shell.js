@@ -998,6 +998,7 @@ const sheet = createSheet({
 });
 
 const studio = installStudio({
+  blank: Object.keys(game).length === 0,
   sheet,
   perf: () => ({ ...look.stats(), springs: animateShell.springCost() }),
   player: () => run?.ctx.player ?? null,
@@ -1010,6 +1011,8 @@ const studio = installStudio({
   },
   hold(on) {
     hidden = on;
+    // Shown again: one frame is drawn whether or not the run moves, and the Stage hears of it.
+    if (!on) redraw = true;
     return applyHold();
   },
   bridge,
@@ -1174,5 +1177,10 @@ renderer.setAnimationLoop((now) => {
   // The run's state on the page, so a game's own CSS can show its screens by it.
   if (document.body.dataset.state !== GameState.state)
     document.body.dataset.state = GameState.state;
-  studio.ready = true;
+  // Ready is the first frame on the canvas, not the first tick: a run still compiling its
+  // programs has drawn nothing, and the Stage takes its cover down on this.
+  if (drawing) {
+    studio.ready = true;
+    studio.frame();
+  }
 });

@@ -74,8 +74,9 @@ then makes that one in Blender in the same turn, which can take several minutes 
 after that makes it better, and what you ask for is done in that turn rather than put off.
 
 A three.js game is live on the stage from the moment it exists: Kurambit serves the game folder and
-plays it. While the first build is being made, the stage plays the game as soon as the agent's check
-of it passes, marked **First playable**, and keeps it on screen while the agent goes on working.
+plays it. While the first build is being made, the stage shows the game as soon as it draws
+anything, and follows the agent's saves from then on: a save takes the stage once it has drawn
+too, so a half-written one never shows. The bar on top says **Making build 1** until the turn ends.
 A turn's changes reach the stage when the turn ends, as its build. If you are playing at that moment (you clicked into
 the game), it is not reloaded under you: the stage says your agent changed the game while you were
 playing, with **Reload**. A hidden stage catches up when you show it. If a save breaks the game, the

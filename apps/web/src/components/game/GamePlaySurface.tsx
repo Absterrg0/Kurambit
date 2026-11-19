@@ -19,6 +19,7 @@ import {
   type StudioError,
 } from "@kurambit/contracts";
 import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { GameElapsed } from "./GameElapsed";
@@ -52,7 +53,9 @@ const visibilityMessage = (visible: boolean): GameStageToGameMessage => ({
  */
 export type StudioMessage =
   | { readonly type: "studio-error"; readonly message: string }
-  | { readonly type: "studio-ready" }
+  | { readonly type: "studio-ready"; readonly blank?: boolean }
+  /** Shown again (or let run behind another frame), the page has drawn a frame. */
+  | { readonly type: "studio-drawn" }
   | { readonly type: "studio-play"; readonly play: GamePlay; readonly asked?: boolean }
   | { readonly type: "studio-run-reset" };
 
@@ -76,6 +79,15 @@ const MODAL_SURFACES =
 
 /** How long a game may take to load before the Stage says it is slow, and offers a reload. */
 const SLOW_START_MS = 15_000;
+/** While following saves: how long a newer save waits for the frame that is still starting. */
+const START_PATIENCE_MS = 45_000;
+/** How long a ready frame may run unseen without saying it drew, before it is shown anyway. */
+const RUNNING_PATIENCE_MS = 4_000;
+/** One save's frame: the key it is mounted by and the page it loads. */
+interface FrameSave {
+  readonly key: string;
+  readonly url: string;
+}
 
 export function GamePlaySurface({
   phase,
@@ -148,34 +160,103 @@ export function GamePlaySurface({
   const playing = phase.kind === "playing" && previewUrl !== null;
   // Under the first build's card the game's frame already loads, to say when it draws.
   const probing = follow && phase.kind === "first-build" && previewUrl !== null;
-  const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
-  const onBridgeMessage = useStageBridgeFrame(
-    `${bridge.threadKey}\0${frameKey}`,
-    playing || probing ? frame : null,
-    bridge.enabled,
-  );
+  const latest = previewUrl === null ? null : { key: frameKey, url: previewUrl };
   // While following, the frame that last drew: it stays on the Stage until a later save's has.
-  const [drawn, setDrawn] = useState<{ readonly key: string; readonly url: string } | null>(null);
-  const kept = follow && playing && drawn !== null && drawn.key !== frameKey ? drawn : null;
+  const [drawn, setDrawn] = useState<FrameSave | null>(null);
+  // The save whose frame is starting unseen. A newer save waits for it to draw, to fail or to run
+  // out of patience: where a game takes longer to start than its saves are apart (a slow
+  // machine, a burst of saves), replacing a frame that is still starting means none ever draws.
+  // It starts held and silent. Once its page is ready it is let run, still unseen (`running`),
+  // and it takes the Stage when it says it drew a frame that way: a held page's first frame is
+  // from before its run moved (a camera not placed yet), and is not the game to show.
+  const [starting, setStarting] = useState<
+    (FrameSave & { readonly settled: boolean; readonly running: boolean }) | null
+  >(null);
+  const pending =
+    follow && starting !== null && !starting.settled && drawn?.key !== starting.key
+      ? starting
+      : null;
+  if (!follow) {
+    if (starting !== null) setStarting(null);
+  } else if (latest !== null && pending === null && starting?.key !== latest.key)
+    setStarting({ ...latest, settled: false, running: false });
+  const settle = (key: string) =>
+    setStarting((now) => (now?.key === key ? { ...now, settled: true } : now));
+  const overdue = pending !== null && latest !== null && pending.key !== latest.key;
+  const pendingKey = pending?.key ?? null;
+  useEffect(() => {
+    if (!overdue || pendingKey === null) return;
+    const timer = window.setTimeout(
+      () => setStarting((now) => (now?.key === pendingKey ? { ...now, settled: true } : now)),
+      START_PATIENCE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [overdue, pendingKey]);
+  // The frame that loads now: the one still starting, else the latest save's.
+  const next = pending ?? latest;
+  const kept =
+    follow && playing && drawn !== null && next !== null && drawn.key !== next.key ? drawn : null;
   // Unseen only behind something: the card, or the kept frame. With neither, it starts as any game does.
-  const unseen = follow && drawn?.key !== frameKey && (probing || kept !== null);
+  const unseen = follow && next !== null && drawn?.key !== next.key && (probing || kept !== null);
+  const running = unseen && starting !== null && starting.key === next?.key && starting.running;
   const frames = [
     ...(kept === null ? [] : [{ ...kept, role: "kept" as const }]),
-    ...((playing || probing) && previewUrl !== null
-      ? [
-          {
-            key: frameKey,
-            url: previewUrl,
-            role: unseen ? ("unseen" as const) : ("shown" as const),
-          },
-        ]
+    ...((playing || probing) && next !== null
+      ? [{ ...next, role: unseen ? ("unseen" as const) : ("shown" as const) }]
       : []),
   ];
+  // What an unseen frame threw: said once that frame is on the Stage, never over the one that drew.
+  const [threw, setThrew] = useState<{
+    readonly key: string;
+    readonly message: StudioMessage;
+  } | null>(null);
+  /** The frame takes the Stage, and the Stage hears that its game is up. */
+  const show = (save: FrameSave) => {
+    setDrawn(save);
+    onStudioMessage({ type: "studio-ready" });
+  };
   const onFrameMessage = (message: StudioMessage) => {
-    if (follow && message.type === "studio-ready" && previewUrl !== null)
-      setDrawn({ key: frameKey, url: previewUrl });
+    if (next === null) return;
+    if (unseen && message.type === "studio-error") {
+      setThrew({ key: next.key, message });
+      // Broken: a newer save does not wait for it.
+      settle(next.key);
+      return;
+    }
+    if (follow && message.type === "studio-ready") {
+      // A game with no main.js yet boots and draws nothing: the Stage waits for one that does.
+      if (message.blank === true) settle(next.key);
+      else if (unseen)
+        setStarting((now) => (now?.key === next.key ? { ...now, running: true } : now));
+      else show(next);
+      return;
+    }
+    if (message.type === "studio-drawn") {
+      if (running) show(next);
+      return;
+    }
     onStudioMessage(message);
   };
+  // A page that never says it drew (its run does not move, an older runtime) is shown all the same.
+  const runningKey = running ? (next?.key ?? null) : null;
+  const showRunning = useStableCallback(() => {
+    if (running && next !== null) show(next);
+  });
+  useEffect(() => {
+    if (runningKey === null) return;
+    const timer = window.setTimeout(showRunning, RUNNING_PATIENCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [runningKey, showRunning]);
+  // The kept frame said ready long ago, and what it throws is about to be replaced: only the
+  // runs played on it are still heard.
+  const onKeptMessage = (message: StudioMessage) => {
+    if (message.type === "studio-play" || message.type === "studio-run-reset")
+      onStudioMessage(message);
+  };
+  const shownThrew = !unseen && threw !== null && threw.key === next?.key ? threw.message : null;
+  useEffect(() => {
+    if (shownThrew !== null) onStudioMessage(shownThrew);
+  }, [shownThrew, onStudioMessage]);
   const { setWell, shown, scale, frameStyle, handles } = useStageDeviceLayout(
     device?.value ?? null,
     (next) => device?.onChange(next),
@@ -219,7 +300,10 @@ export function GamePlaySurface({
                 inert={each.role === "unseen"}
                 className={
                   each.role === "unseen"
-                    ? "pointer-events-none absolute inset-0 opacity-0"
+                    ? // One percent, not none: a frame the browser does not draw at all keeps no
+                      // picture to show at the moment it takes the Stage. Under two steps of
+                      // 255, it cannot be seen over what covers it.
+                      "pointer-events-none absolute inset-0 opacity-1"
                     : "contents"
                 }
               >
@@ -227,12 +311,19 @@ export function GamePlaySurface({
                   url={each.url}
                   title={`${gameName} on the Stage`}
                   gameName={gameName}
-                  hidden={hidden}
+                  // An unseen frame holds and stays silent until its page is ready; then it runs
+                  // for the moment it takes to draw, and takes the Stage.
+                  hidden={hidden || (each.role === "unseen" && !running)}
                   drawsReady={bridge.enabled}
-                  onStudioMessage={each.role === "kept" ? undefined : onFrameMessage}
-                  onBridgeMessage={each.role === "kept" ? undefined : onBridgeMessage}
-                  focusRequest={each.role === "kept" ? 0 : focusRequest}
-                  onFrame={each.role === "kept" ? undefined : setFrame}
+                  onStudioMessage={each.role === "kept" ? onKeptMessage : onFrameMessage}
+                  // The bridge is the frame on the Stage's: Tune and Art act on the game the
+                  // person sees, never on a save still loading behind it.
+                  bridgeOwner={
+                    bridge.enabled && (kept === null || each.role === "kept")
+                      ? `${bridge.threadKey}\0${each.key}`
+                      : null
+                  }
+                  focusRequest={focusRequest}
                 />
               </div>
             ))}
@@ -322,7 +413,7 @@ export function GameFrame({
   title,
   hidden,
   onStudioMessage,
-  onBridgeMessage,
+  bridgeOwner = null,
   focusRequest = 0,
   onFrame,
   gameName,
@@ -342,18 +433,28 @@ export function GameFrame({
   hidden: boolean;
   /** Hears the page's error and ready messages from this frame only. */
   onStudioMessage?: ((message: StudioMessage) => void) | undefined;
-  /** The Stage bridge's end of this frame, while it owns the bridge. */
-  onBridgeMessage?: ((message: GameToStageMessage) => void) | undefined;
+  /** The Stage bridge's name for this frame while it owns the bridge (`thread\0frame key`). */
+  bridgeOwner?: string | null;
   focusRequest?: number;
-  /** Hands the iframe to the Stage bridge. */
+  /** Hands the iframe to its owner: a copy's frame, which the Stage reads itself. */
   onFrame?: ((frame: HTMLIFrameElement | null) => void) | undefined;
 }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const [element, setElement] = useState<HTMLIFrameElement | null>(null);
   const pauseWhenAway = useGameWorkspaceStore((state) => state.pauseWhenAway);
   const setFrameRef = (node: HTMLIFrameElement | null) => {
     frameRef.current = node;
+    setElement(node);
     onFrame?.(node);
   };
+  // The page's studio-ready, kept for a bridge that takes this frame after it was said.
+  const hello = useRef<GameToStageMessage | null>(null);
+  const onBridgeMessage = useStageBridgeFrame(
+    bridgeOwner ?? "",
+    bridgeOwner === null ? null : element,
+    bridgeOwner !== null,
+    hello,
+  );
   const [frameFocused, setFrameFocused] = useState(false);
   // Reached by Tab: the game shows the app's focus ring, which an iframe's own outline cannot.
   const [keyboardFocused, setKeyboardFocused] = useState(false);
@@ -422,6 +523,7 @@ export function GameFrame({
   const reload = () => {
     setLoaded(false);
     setDrawn(false);
+    hello.current = null;
     setAttempt(attempt + 1);
   };
   const started = loaded && (!drawsReady || drawn);
@@ -475,6 +577,7 @@ export function GameFrame({
       if (Option.isNone(decoded)) return;
       const message = decoded.value;
       if (message.type === "studio-visibility-ack") {
+        if (message.visible && message.drawn === true) onStudioMessage?.({ type: "studio-drawn" });
         // Only a hide the game actually applied retires the warning. A resumed
         // ack, or one that admits the tree is still running or the bus is
         // audible, does not: that is exactly the state the hint names.
@@ -489,7 +592,11 @@ export function GameFrame({
       }
       if (message.type === "studio-ready") {
         setDrawn(true);
-        onStudioMessage?.({ type: "studio-ready" });
+        hello.current = message;
+        onStudioMessage?.({
+          type: "studio-ready",
+          ...(message.blank === true ? { blank: true } : {}),
+        });
       }
       if (message.type === "studio-play")
         onStudioMessage?.({

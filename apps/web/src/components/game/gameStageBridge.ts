@@ -166,22 +166,26 @@ const settleCapture = (png: string | null) => {
 /**
  * Wires one game frame to the bridge while it is mounted and shown, and returns what to do
  * with each message the frame posts (GameFrame owns the one listener). `enabled` is false for
- * engines whose shells have no bridge: their frame never owns it.
+ * engines whose shells have no bridge: their frame never owns it. `hello` holds the page's
+ * studio-ready when it came before the frame owned the bridge (a save's frame that drew behind
+ * the one on the Stage): the bridge hears it as it takes the frame.
  */
 export function useStageBridgeFrame(
   owner: string,
   frame: HTMLIFrameElement | null,
   enabled: boolean,
+  hello: { readonly current: GameToStageMessage | null },
 ): ((message: GameToStageMessage) => void) | undefined {
   const target = enabled ? (frame?.contentWindow ?? null) : null;
   useEffect(() => {
-    if (target === null) return;
+    if (target === null || frame === null) return;
     const post = (message: GameStageToGameMessage) => target.postMessage(message, "*");
     const hold = (on: boolean) => {
       post({ type: "studio-visibility", visible: !on });
       useStageBridge.setState({ frozen: on });
     };
     useStageBridge.setState({ ...EMPTY, owner, post, hold });
+    if (hello.current !== null) receive(owner, frame, hello.current);
     return () => {
       settleCapture(null);
       settleRun(null);
@@ -189,7 +193,7 @@ export function useStageBridgeFrame(
       if (useStageBridge.getState().owner === owner)
         useStageBridge.setState({ ...EMPTY, owner: null, post: null, hold: null });
     };
-  }, [owner, target]);
+  }, [owner, target, frame, hello]);
   return target === null || frame === null
     ? undefined
     : (message: GameToStageMessage) => receive(owner, frame, message);

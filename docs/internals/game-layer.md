@@ -319,8 +319,17 @@ on the game event stream, which the Stage remounts on; it rereads nothing. Servi
 so Play there takes no lock and records no operation, and Stop closes the watch before the server
 so nothing is pushed after it. What the person sees mid-turn is never a build: builds stay the
 turns' checkpoints, because facts, Undo and Go back need a fixed tree, and a folder the agent is
-still writing is not one. A `live` engine's Web export is a release only and never replaces the
-live serve. An `export` engine would play the selected Web export, rebuilt when stale, and a
+still writing is not one. The turn that makes a game's first build has no build to hold, so
+there the Stage follows the saves (`follow` on `GamePlaySurface`): each save's frame starts
+unseen, held and silent, behind the card or the frame that last drew. When its page is ready
+(`studio-ready`; a page with no `main.js` yet says `blank`, which does not count) it is let run,
+still unseen, and it takes the Stage when it says it drew a frame that way (the second
+`studio-visibility-ack`, `drawn`): a held page's first frame is from before its run moved, with
+a camera not placed yet, and is not the game to show. A newer save waits for a frame that is
+still starting, because a game that takes longer to start than its saves are apart would
+otherwise never draw. The Stage bridge stays with the frame on the Stage, so Tune and Art act on
+the game the person sees. A `live` engine's Web
+export is a release only and never replaces the live serve. An `export` engine would play the selected Web export, rebuilt when stale, and a
 `window` engine in its own window; both kinds are kept for the next engine.
 
 The Stage talks to a live three.js game through the **Stage bridge**

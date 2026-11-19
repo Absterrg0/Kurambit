@@ -217,7 +217,6 @@ const make = Effect.gen(function* () {
           : statusOptions?.checkSources !== true
             ? "unknown"
             : (matchesSelected ?? "unknown");
-      const cleanCheckAt = live ? yield* engines.cleanCheckAt(root) : null;
       const oldShell = yield* Effect.promise(() => carriesOldShell(root, manifest));
       const canLose = yield* Effect.promise(() => gameCanLose(root, manifest));
       return {
@@ -250,7 +249,6 @@ const make = Effect.gen(function* () {
         )),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
-        ...(cleanCheckAt === null ? {} : { cleanCheckAt }),
       };
     }),
   });

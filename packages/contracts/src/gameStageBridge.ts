@@ -389,6 +389,8 @@ export const StudioReady = Schema.Struct({
   type: Schema.Literal("studio-ready"),
   bridge: Schema.optionalKey(Schema.Literal(GAME_STAGE_BRIDGE_VERSION)),
   capabilities: Schema.optionalKey(Schema.Array(GameStageCapability)),
+  /** The game has no main.js yet: the page booted and runs nothing. */
+  blank: Schema.optionalKey(Schema.Boolean),
 });
 /** The page's first error, once: where it came from when the page knows. */
 export const StudioError = Schema.Struct({
@@ -403,6 +405,8 @@ export const StudioVisibilityAck = Schema.Struct({
   visible: Schema.Boolean,
   paused: Schema.Boolean,
   muted: Schema.Boolean,
+  /** Sent once more after `visible`: the next frame is on the canvas. */
+  drawn: Schema.optionalKey(Schema.Boolean),
 });
 /** On boot and whenever the set changes (or a value does); at most GAME_STAGE_MAX_THINGS. */
 export const StudioThings = Schema.Struct({
