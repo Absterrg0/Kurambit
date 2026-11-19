@@ -2,6 +2,8 @@
 
 Body:    hero.creature_body(name, sketch), hero.sculpt(obj, kind, ...), hero.decimate(obj, tris)
          (a human body is game_blender op character's: body mpfb or library, style, height)
+Face:    hero.face(armature, iris="#4f7396", brows="#3a2a20"): eyes that blink, brows and a mouth in
+         the body's style
 Clothes: hero.dress(garment, armature, hang=..., chains=6), hero.dangle(part, armature, start, end),
          hero.follow_hem(armature)
 Rig:     hero.creature_rig(body, height=(lo, hi)), hero.bind(mesh, armature)
@@ -11,6 +13,7 @@ Motion:  hero.creature_clips(armature, ["walk", "trot", "run", "idle", "look", "
 Gates:   hero.gates(armature): the review's gate numbers now, in the live scene
 """
 from .cloth import dangle, dress, follow_hem
+from .face import face
 from .creature import bake_controls, bind, controls, creature_body, creature_clips, creature_rig, decimate, sculpt
 
 
@@ -26,4 +29,4 @@ def gates(armature, budgets=None):
     return deform.hero_gates(arm, meshes, budgets or {"character": 30000, "texture": 2048})
 
 
-__all__ = ["bake_controls", "bind", "controls", "creature_body", "creature_clips", "creature_rig", "dangle", "decimate", "dress", "follow_hem", "gates", "sculpt"]
+__all__ = ["bake_controls", "bind", "controls", "creature_body", "creature_clips", "creature_rig", "dangle", "decimate", "dress", "face", "follow_hem", "gates", "sculpt"]

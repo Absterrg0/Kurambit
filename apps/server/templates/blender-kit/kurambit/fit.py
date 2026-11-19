@@ -441,16 +441,95 @@ def _keys(fc, at, values):
     fc.update()
 
 
-def fit(arm, meshes, actions, params):
-    """Applies params {arms?, calm?} to each action (library clips on this body). Returns notes."""
+# ---- stride -----------------------------------------------------------------------------------
+# A library gait is the mannequin's: its speed on another body is its leg length times the same
+# steps a second, so legs short for their body (a cartoon's, a chibi's) crawl. A walk speeds up
+# two ways at once, longer steps and more of them, each by about the square root of the whole;
+# past 1.3x a stride over-reaches the leg and past 1.6x a cadence scurries, so each stops there.
+STRIDE_MAX, CADENCE_MAX = 1.3, 1.6
+SHORT_LEGS = 0.95
+GAITS = ("walk", "jog", "run", "sprint")
+
+
+def _read_at(rig, action, times):
+    """_read at fractional frames."""
+    arm, scene = rig.arm, bpy.context.scene
+    skeleton.assign_action(arm, action)
+    out = []
+    for t in times:
+        scene.frame_set(int(math.floor(t)), subframe=t - math.floor(t))
+        pose = {pb.name: np.array(pb.matrix) for pb in arm.pose.bones}
+        out.append(({n: m[:3, :3].copy() for n, m in pose.items()}, {n: m[:3, 3].copy() for n, m in pose.items()}))
+    return out
+
+
+def _speed(rig, frames, fps):
+    """An in-place gait's ground speed (m/s, armature units): how fast its planted feet go back."""
+    from . import gates
+
+    feet = [f"ball_{s}" if f"ball_{s}" in rig.rest else f"foot_{s}" for s in "lr" if f"foot_{s}" in rig.rest]
+    if not feet or len(frames) < 3:
+        return 0.0
+    to_world = np.stack([rig.axes[:, 0], -rig.axes[:, 2], rig.axes[:, 1]])  # x left, y back, z up
+    tracks = {f: np.array([pos[f] @ to_world.T for _, pos in frames]) for f in feet}
+    band = {f: 0.02 * rig.height for f in feet}
+    return gates.ground_speed(tracks, band, fps)
+
+
+def stride(rig, action, factor, fps):
+    """Makes a looping gait cover factor times its ground a second: steps longer by the stride gain
+    (each ankle's fore-aft travel about its mean, the legs solved to reach it, the hips lowered by
+    what they cannot) and the cycle shorter by the cadence gain, on whole frames. Returns (stride
+    gain, cadence gain, speed before, speed after)."""
+    f0, f1 = (int(round(x)) for x in action.frame_range)
+    n = f1 - f0
+    g = min(STRIDE_MAX, max(1 / STRIDE_MAX, math.sqrt(factor)))
+    c = min(CADENCE_MAX, max(1 / CADENCE_MAX, factor / g))
+    m = max(4, int(round(n / c)))
+    c = n / m
+    work = _read_at(rig, action, [f0 + i * n / m for i in range(m)])
+    before = _speed(rig, _read_at(rig, action, [f0 + i for i in range(n)]), fps)
+    fwd = rig.axes[:, 2]
+    sides = [s for s in "lr" if f"foot_{s}" in rig.rest]
+    mean = {s: float(np.mean([pos[f"foot_{s}"] @ fwd for _, pos in work])) for s in sides}
+    ankles = [{s: pos[f"foot_{s}"] + ((pos[f"foot_{s}"] @ fwd) - mean[s]) * (g - 1) * fwd for s in sides} for _, pos in work]
+    place_feet(rig, work, ankles)
+    root = rig.order[0]
+    after = _speed(rig, [(wr, {b: m_[:3, 3] for b, m_ in _posed(rig, wr, pos["pelvis"], pos[root])[0].items()}) for wr, pos in work], fps * c)
+    work.append(work[0])
+    _write(rig, action, list(range(f0, f0 + m + 1)), work)
+    if action.use_frame_range:
+        action.frame_end = f0 + m
+    return g, c, before, after
+
+
+def fit(arm, meshes, actions, params, legs=1.0):
+    """Applies params {arms?, calm?, walk?} to each action (library clips on this body). legs: its
+    leg length for its height against the standard skeleton's; under SHORT_LEGS every looping gait
+    is strode out to the speed a body of its height walks at, and walk (m/s) sets the walk's own
+    speed. Returns notes."""
     arms, c = bool(params.get("arms")), float(params.get("calm") or 0.0)
-    if not arms and c <= 0:
+    walk = params.get("walk")
+    gaits = [a for a in actions if "loop" in a.name.lower() and any(w in a.name.lower() for w in GAITS)] if (legs < SHORT_LEGS or walk) else []
+    if not arms and c <= 0 and not gaits:
         return []
     rig = Rig(arm, meshes)
-    proxy = _proxy(rig) if arms else None
     keep = bpy.context.scene.frame_current
+    fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+    strode = []
+    for act in gaits:
+        factor = 1 / legs if legs < SHORT_LEGS else 1.0
+        if walk and "walk" in act.name.lower():
+            now = _speed(rig, _read_at(rig, act, list(range(int(round(act.frame_range[0])), int(round(act.frame_range[1]))))), fps)
+            scale = arm.matrix_world.to_scale().z
+            factor = float(walk) / (now * scale) if now > 1e-6 else factor
+        if abs(factor - 1) > 0.02:
+            g, k, v0, v1 = stride(rig, act, factor, fps)
+            scale = arm.matrix_world.to_scale().z
+            strode.append(f"{act.get('kurambit_clip', act.name)} {v0 * scale:.2f}→{v1 * scale:.2f} m/s (steps {g:.2f}x longer, {k:.2f}x as many)")
+    proxy = _proxy(rig) if arms else None
     notes, swings, calmed, tumbling = [], [], None, []
-    for act in actions:
+    for act in (actions if arms or c > 0 else []):
         f0, f1 = (int(round(x)) for x in act.frame_range)
         at = list(range(f0, f1 + 1))
         frames = _read(rig, act, at)
@@ -475,6 +554,9 @@ def fit(arm, meshes, actions, params):
     for pb in arm.pose.bones:
         pb.matrix_basis = Matrix()
     bpy.context.scene.frame_set(keep)
+    if strode:
+        why = f"legs {legs:.2f} of the standard skeleton's for this height" if legs < SHORT_LEGS else "fit walk"
+        notes.append(f"strode out ({why}): {'; '.join(strode)}")
     if swings:
         notes.append(f"fit arms: swung out of the body up to {max(s[0] for s in swings):.1f}° (median {float(np.median([s[1] for s in swings])):.1f}°, cap {MAX_SWING_DEG:.0f}°)")
     if calmed is not None:

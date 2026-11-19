@@ -13,7 +13,8 @@ params (the server resolves every path):
               the generation's stamp {from, licence, ai, credits}
     chains    [{name, parent, bones, direction, length, mirror?}]
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
-    fit       {arms?, calm?} | None: fit.fit() on every library clip, after the conform
+    fit       {arms?, calm?, walk?} | None: fit.fit() on every library clip, after the conform (its
+              gaits are strode out on short legs with or without it)
     style     {preset?: realistic|heroic|cartoon|chibi, head?, legs?, arms?, hands?, feet?, girth?, limbs?}:
               the body and its rig restyled before the conform (proportions.py)
     height    metres: the body and its rig scaled to it before the conform
@@ -28,7 +29,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import fit, helpers, proportions, skeleton
+from . import face, fit, helpers, proportions, skeleton
 from .protocol import Refused, entry
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
@@ -71,16 +72,45 @@ def _mpfb_body(spec):
     for k in ("age", "gender", "weight", "muscle", "height", "proportions"):
         if k in spec:
             macro[k] = float(spec[k])
-    body = human.create_human(mask_helpers=True, detailed_helpers=True, extra_vertex_groups=False,
+    body = human.create_human(mask_helpers=True, detailed_helpers=True, extra_vertex_groups=True,
                               feet_on_ground=True, scale=0.1, macro_detail_dict=macro)
+    # The base mesh carries where its face is: an eyeball in each socket (helper geometry its mask
+    # hides) and its lips' vertices. Both stay through the restyle and the conform, weighted to the
+    # head, so the face kit finds them on the finished body (face.take_landmarks).
+    shown = body.vertex_groups.new(name="kurambit_shown")
+    marked = {g.index: face.EYES[g.name[7]] for g in body.vertex_groups if g.name in ("helper-l-eye", "helper-r-eye")}
+    skin = body.vertex_groups.get("body")
+    eye_verts = {}
+    for v in body.data.vertices:
+        groups = {e.group for e in v.groups}
+        if skin is not None and skin.index in groups:
+            shown.add([v.index], 1.0, "REPLACE")
+        for gi, name in marked.items():
+            if gi in groups:
+                shown.add([v.index], 1.0, "REPLACE")
+                eye_verts.setdefault(name, []).append(v.index)
+    for m in body.modifiers:
+        if m.type == "MASK":
+            m.vertex_group = shown.name
+    for name, idx in eye_verts.items():
+        body.vertex_groups.new(name=name).add(idx, 1.0, "REPLACE")
+    lips = body.vertex_groups.get("lips")
+    if lips is not None:
+        lips.name = face.LIPS
     # MPFB fits its rig to the vertex coordinates: bake the targets first, or an adult skeleton
     # ends up inside a child's mesh.
     _bake_shape_keys(body)
     rig = human.add_builtin_rig(body, "game_engine", import_weights=True)
     skeleton.baked_mesh(body, keep=lambda m: m.type == "ARMATURE")
+    bones = {b.name for b in rig.data.bones}
     for vg in list(body.vertex_groups):
-        if vg.name.startswith(("joint-", "helper-")) or vg.name == "body":
+        if vg.name not in bones and vg.name not in (face.LIPS, *face.EYES.values()):
             body.vertex_groups.remove(vg)
+    head = body.vertex_groups.get("head")
+    for name in face.EYES.values():
+        g = body.vertex_groups.get(name)
+        if g is not None and head is not None:
+            head.add([v.index for v in body.data.vertices if any(e.group == g.index for e in v.groups)], 1.0, "REPLACE")
     return rig, [body], skeleton.NAME_MAPS["mpfb_game_engine"]
 
 
@@ -465,12 +495,19 @@ def character(params):
         own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
         # Its clips move the pelvis in the body's own units.
         unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z
-        ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
+        height_ratio, ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
     except BaseException:
         # a refused or failed build leaves the live scene as it was
         bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken), *own_actions] if _alive(a)})
         skeleton.remove_objects([o for o in [std_arm, body_arm, *meshes] if o is not None and _alive(o)])
         raise
+
+    # The face the body brought, and the head drawn as far as its style is.
+    face.take_landmarks(std_arm, meshes)
+    preset = (params.get("style") or {}).get("preset")
+    if preset:
+        std_arm[face.STYLE] = preset
+        face.soften(std_arm, meshes, face.STYLES[preset]["soften"])
 
     parts, old_chains = [], {}
     if old is not None:
@@ -514,7 +551,9 @@ def character(params):
         notes.append(f"kept the body's own clips: {', '.join(label for _, label, c, _ in taken if c.get('own'))}")
     for act, label, c, made in taken:
         # A clip made on this body already moves its pelvis this body's distances.
-        skeleton.fit_clip(act, ratio / made)
+        # A motion made on a body is in that body's metres, by its height; a library clip's hips
+        # travel by this body's legs.
+        skeleton.fit_clip(act, (height_ratio if c.get("motion") else ratio) / made)
         act.use_fake_user = True
         act["kurambit_from"] = c["pack"]
         act["kurambit_owner"] = name
@@ -535,8 +574,7 @@ def character(params):
     if packs:
         stamp(arm, "clips", packs[0]["from"], packs[0]["licence"])
     arm["kurambit_clips"] = json.dumps(packs)
-    if params.get("fit"):
-        notes += fit.fit(arm, meshes, [a for a, _, c, _ in taken if not c.get("own")], params["fit"])
+    notes += fit.fit(arm, meshes, [a for a, _, c, _ in taken if not c.get("own")], params.get("fit") or {}, legs=ratio / height_ratio)
     arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
     # The height gate's range: as asked, else around the height it was scaled to, else a human's.
     if params.get("heightRange"):

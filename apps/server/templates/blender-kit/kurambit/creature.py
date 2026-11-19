@@ -32,7 +32,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import animrig, gait, helpers
+from . import animrig, gait, helpers, skeleton
 from .character import MADE_BODY
 
 SPRINGS = ("tail", "ear", "antenna", "whisker", "tendril")
@@ -218,16 +218,56 @@ def sculpt(obj, kind, *, at=None, to=None, radius=None, amount=0.0, iterations=1
     return int((w > 1e-3).sum())
 
 
+# Where a skinned body keeps more of its triangles: a face is where the camera looks, and hands
+# thinned as hard as a thigh lose their fingers.
+SPARED = ("hand", "thumb", "index", "middle", "ring", "pinky", "head", "jaw", "eye")
+SPARED_SHARE = 1.6
+
+
 def decimate(obj, triangles):
-    """Down to about this many triangles (a collapse decimate, applied)."""
+    """Down to about this many triangles (a collapse decimate, applied). A skinned mesh stays
+    skinned, and its hands and head are thinned SPARED_SHARE times less than the rest."""
     o = bpy.data.objects[obj] if isinstance(obj, str) else obj
-    have = sum(len(p.vertices) - 2 for p in o.data.polygons)
+    count = lambda: sum(len(p.vertices) - 2 for p in o.data.polygons)
+    have = count()
     if have <= triangles:
         return have
-    m = o.modifiers.new("decimate", "DECIMATE")
-    m.ratio = max(0.01, triangles / have)
-    _apply(o)
-    return sum(len(p.vertices) - 2 for p in o.data.polygons)
+    if not any(m.type == "ARMATURE" for m in o.modifiers):
+        m = o.modifiers.new("decimate", "DECIMATE")
+        m.ratio = max(0.01, triangles / have)
+        _apply(o)
+        return count()
+    spared = {g.index for g in o.vertex_groups if g.name.lower().startswith(SPARED)}
+    lead = [max(v.groups, key=lambda e: e.weight, default=None) for v in o.data.vertices]
+    mine = {v.index for v, e in zip(o.data.vertices, lead) if e is not None and e.group in spared}
+    kept = sum(len(p.vertices) - 2 for p in o.data.polygons if all(v in mine for v in p.vertices))
+    rest = have - kept
+    ratio = triangles / have
+    spare = min(1.0, SPARED_SHARE * ratio)
+    thin = max(0.01, (triangles - kept * spare) / max(1, rest))
+    if thin < 0.6 * ratio:  # the rest of the body is never starved to feed the hands
+        thin = 0.6 * ratio
+        spare = max(0.01, (triangles - rest * thin) / max(1, kept))
+    mark = o.vertex_groups.new(name="kurambit_spared")
+    mark.add(sorted(mine), 1.0, "REPLACE")
+    skeleton.object_mode()
+    bpy.context.view_layer.objects.active = o
+    o.vertex_groups.active_index = mark.index
+    with bpy.context.temp_override(object=o, active_object=o):
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bpy.ops.mesh.select_mode(type="VERT")
+            for invert, r in ((False, spare), (True, thin)):
+                bpy.ops.mesh.select_all(action="DESELECT")
+                bpy.ops.object.vertex_group_select()
+                if invert:
+                    bpy.ops.mesh.select_all(action="INVERT")
+                if r < 0.999:
+                    bpy.ops.mesh.decimate(ratio=r)
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+    o.vertex_groups.remove(o.vertex_groups["kurambit_spared"])
+    return count()
 
 
 def _role(cname):

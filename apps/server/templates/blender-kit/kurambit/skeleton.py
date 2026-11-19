@@ -454,7 +454,8 @@ def conform(std_arm, body_arm, body_meshes, name_map, chains=()):
     3. Skin the meshes to the standard armature by name (the body's weights, renamed by the map).
     chains (body_chains) are the body's own bones that stay: added under their joint where the
     posed body has them, keeping their weights.
-    Returns the height ratio (body / standard), which scales the pelvis translation of the clips."""
+    Returns the height ratio (body / standard) and the leg-length ratio, which scales the pelvis
+    translation of the clips."""
     std_name = lambda n: name_map.get(n, n)
     std_world = {b.name: std_arm.matrix_world @ b.head_local for b in std_arm.data.bones}
     std_bones = {b.name: b for b in std_arm.data.bones}
@@ -483,6 +484,11 @@ def conform(std_arm, body_arm, body_meshes, name_map, chains=()):
     if missing:
         raise ValueError(f"the body's rig has no {', '.join(missing)} joint: it is not a humanoid on a known name map")
     ratio = (joints["Head"].z - joints["foot_l"].z) / (std_world["Head"].z - std_world["foot_l"].z)
+    # The clips' hips travel by the legs under them: on legs short for the body (a chibi's), hips
+    # moved by the body's height bob further than the legs reach and the feet leave the ground.
+    travel = ratio
+    if "thigh_l" in joints and "thigh_l" in std_world:
+        travel = (joints["thigh_l"].z - joints["foot_l"].z) / (std_world["thigh_l"].z - std_world["foot_l"].z)
 
     inv = std_arm.matrix_world.inverted()
     with edit_bones(std_arm) as eb:
@@ -528,7 +534,7 @@ def conform(std_arm, body_arm, body_meshes, name_map, chains=()):
         bind(o, std_arm)
     if body_arm is not None:
         remove_objects([body_arm])
-    return ratio
+    return ratio, travel
 
 
 def bind(obj, arm):

@@ -121,7 +121,8 @@ through the review and the export is not finished.
    name one in `clips` (`Punch_Jab`, `Sword_Attack`, `Spell_Simple_Shoot`)
    when the character fights. Choose `fit` from the review's strips: `arms:
 true` swings arms out of the torso, `calm` (0..1) calms a waddle or a
-   rolling head on a wide or big-headed body.
+   rolling head on a wide or big-headed body, `walk` (m/s) strides the walk
+   out to the speed the game walks at.
 3. **Parts** with `game_blender` op `code`, in world space at the rest pose.
    `import kurambit` first in each call (every call starts afresh):
    - `kurambit.material("#RRGGBB", glow=0, name="Brass")`: a colour by
@@ -151,12 +152,12 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
      locks lifting toward flicked tips, one signature lock, the under-locks a
      shade darker. Never one smooth shell: it reads as a helmet, and cones on
      it read as horns.
-   - **Eyes** stand out of the face (about 60% of their depth), with an iris
-     and a highlight lit from one side. Lids sit high: low lids read grumpy.
-   - **Face**: a small nose (it sticks out in profile sooner than you think);
-     an open smile sunk into the skin.
-   - **Hands**: a flatter palm with a thumb; round mittens read as stumps.
-     Paws get pads.
+   - **Face**: `hero.face("<name>", iris=, brows=)` gives a human its eyes
+     (they blink), brows and mouth in its body's `style`. By hand, for a face
+     the styles lack: eyes stand out of the face about 60% of their depth,
+     with an iris and a highlight; lids sit high (low lids read grumpy).
+   - **Hands**: a human body's own hands, five fingers, hold through every
+     library clip: keep them, glove them with `hero.dress`. Paws get pads.
    - **Clothes** are projected onto the skin and lifted a few millimetres; a
      part across a joint takes weights over its region's bones, never one.
    - **Joins**: a part that meets another enters it. Nothing floats or pokes
@@ -262,7 +263,8 @@ head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
    `body = hero.creature_body("cat", sketch)`, then named passes
    `hero.sculpt(body, "inflate"|"crease"|"smooth"|"grab"|"flatten", at=, to=,
 radius=, amount=)` (a round belly, a mouth line, toes) and
-   `hero.decimate(body, 15000)`.
+   `hero.decimate(body, 15000)` (it keeps a body skinned, its hands and
+   head densest).
 2. **Clothes.** Model each garment over the body at rest as its own mesh,
    then `hero.dress(coat, "fisher", hang=<hip height>, chains=6)`: it is
    pushed outside the skin, takes the skin's weights, and below `hang` hangs

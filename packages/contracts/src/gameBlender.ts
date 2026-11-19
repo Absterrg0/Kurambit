@@ -211,13 +211,15 @@ export const GameBlenderCharacterInput = Schema.Struct({
   /** Rebuild the body and armature of an existing <name>, re-binding its other objects by parent bone. */
   replace: Schema.optionalKey(Schema.Boolean),
   /**
-   * Fit the library clips to this body: arms swung clear of the torso, and hips, spine and head
-   * turns calmed (0 none, 1 full). Chosen from the review's strips, never applied unasked.
+   * Fit the library clips to this body: arms swung clear of the torso, hips, spine and head
+   * turns calmed (0 none, 1 full), and the walk strode out to the speed the game walks at (m/s).
+   * Chosen from the review's strips; gaits on legs short for the body are strode out without it.
    */
   fit: Schema.optionalKey(
     Schema.Struct({
       arms: Schema.optionalKey(Schema.Boolean),
       calm: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+      walk: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0.2, maximum: 4 }))),
     }),
   ),
   /**

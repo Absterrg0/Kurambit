@@ -19,6 +19,9 @@ from mathutils import Vector
 from . import helpers
 
 GARMENT_OFFSET = 0.006
+# How far under a garment's vertex, along its normal, the skin it lies on may be (metres).
+UNDER = 0.04
+SOFTEN = 2
 # The most of a thigh's swing a hem chain takes where the leg pushes into it: all of it folds the
 # hem's front panel like a second leg (run 1's fisherman); this keeps it a panel the leg carries.
 PUSHED = 0.8
@@ -75,6 +78,50 @@ def _nearest_bone(arm, point, skip=()):
     return best
 
 
+def _unweight(o):
+    """No vertex group and no weight left in the mesh. A garment cut from a copy of the body keeps
+    the body's weights in its mesh by group index even with no group on the object, and new groups
+    in another order then read them as their own: a cuff weighted to the upper arm."""
+    import bmesh
+
+    o.vertex_groups.clear()
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    layer = bm.verts.layers.deform.active
+    if layer is not None:
+        bm.verts.layers.deform.remove(layer)
+        bm.to_mesh(o.data)
+    bm.free()
+
+
+def _soften(o, rounds=SOFTEN):
+    """Each vertex's weights averaged with its neighbours', rounds times. The skin's weights step
+    from one bone to the next across a joint's crease, where its mesh is dense; a garment's wider
+    faces put that whole step on one edge, which then takes the bend alone."""
+    me = o.data
+    n, groups = len(me.vertices), list(o.vertex_groups)
+    if n == 0 or not groups:
+        return
+    w = np.zeros((n, len(groups)))
+    for v in me.vertices:
+        for e in v.groups:
+            w[v.index, e.group] = e.weight
+    edges = np.empty(len(me.edges) * 2, np.int64)
+    me.edges.foreach_get("vertices", edges)
+    a, b = edges[0::2], edges[1::2]
+    count = np.bincount(np.concatenate([a, b]), minlength=n)[:, None]
+    for _ in range(rounds):
+        near = np.zeros_like(w)
+        np.add.at(near, a, w[b])
+        np.add.at(near, b, w[a])
+        w = (w + near) / (1 + count)
+    for vg in groups:
+        vg.remove(list(range(n)))
+    for j, vg in enumerate(groups):
+        for i in np.nonzero(w[:, j] > 1e-3)[0]:
+            vg.add([int(i)], float(w[i, j]), "REPLACE")
+
+
 def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, chains=6, bones=3, name=None):
     """Fits garment (a mesh you modelled over the character at rest) and binds it.
 
@@ -98,6 +145,12 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
             _apply(g, m)
     for m in list(g.modifiers):
         g.modifiers.remove(m)
+    # The garment was modelled over the body at rest, and the character stands in its idle: fitted
+    # to that pose, a sleeve modelled along a T-posed arm takes the weights of whatever the hanging
+    # arm left nearest (a cuff on the upper arm), and tears on the first clip.
+    posed = arm.data.pose_position
+    arm.data.pose_position = "REST"
+    bpy.context.view_layer.update()
     target = bodies[0]
     if len(bodies) > 1:
         # One surface to wrap onto: the body's parts joined in a throwaway copy.
@@ -117,23 +170,32 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
         sw.wrap_mode = "OUTSIDE"
         sw.offset = float(offset)
         _apply(g, sw)
-        g.vertex_groups.clear()
-        dt = g.modifiers.new("weights", "DATA_TRANSFER")
-        dt.object = target
-        dt.use_vert_data = True
-        dt.data_types_verts = {"VGROUP_WEIGHTS"}
-        dt.vert_mapping = "POLYINTERP_NEAREST"
-        dt.layers_vgroup_select_src = "ALL"
-        dt.layers_vgroup_select_dst = "NAME"
-        with bpy.context.temp_override(object=g, active_object=g):
-            bpy.ops.object.datalayout_transfer(modifier=dt.name)
-        _apply(g, dt)
+        _unweight(g)
+        # The nearest skin first, then the skin straight under each vertex where there is some
+        # within reach: in an armpit the nearest skin to a sleeve is the ribs, and a sleeve
+        # weighted to the ribs tears when the arm comes down.
+        for mapping in ("POLYINTERP_NEAREST", "POLYINTERP_VNORPROJ"):
+            dt = g.modifiers.new("weights", "DATA_TRANSFER")
+            dt.object = target
+            dt.use_vert_data = True
+            dt.data_types_verts = {"VGROUP_WEIGHTS"}
+            dt.vert_mapping = mapping
+            if mapping == "POLYINTERP_VNORPROJ":
+                dt.use_max_distance = True
+                dt.max_distance = UNDER
+            dt.layers_vgroup_select_src = "ALL"
+            dt.layers_vgroup_select_dst = "NAME"
+            with bpy.context.temp_override(object=g, active_object=g):
+                bpy.ops.object.datalayout_transfer(modifier=dt.name)
+            _apply(g, dt)
     finally:
         if target not in bodies:
             bpy.data.objects.remove(target)
+        arm.data.pose_position = posed
     for vg in list(g.vertex_groups):
         if vg.name not in arm.data.bones:
             g.vertex_groups.remove(vg)
+    _soften(g)
     _unsleeved(g, arm)
     made = {}
     if hang is not None and chains > 0:

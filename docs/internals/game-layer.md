@@ -195,7 +195,12 @@ check that matters.
   that agree at the joints, blended by the skin's own weights) and sized before the conform, so the
   standard skeleton still lands on its joints. Humans use no Rigify: the conform already is the
   game rig, deform bones under standard names whose rest frames are the library's, so its clips
-  play with no retarget loss, which a Rigify rig retargeted onto would add. A creature's body and
+  play with no retarget loss, which a Rigify rig retargeted onto would add. A clip's hips travel
+  by the body's leg length, not its height, and on legs short for the body its gaits are strode
+  out (`fit.py`): scaled by height, a chibi's hips bob further than its legs reach and its feet
+  leave the ground. A face is built in the body's style from the body's own landmarks (`face.py`:
+  an MPFB2 base mesh's eye helpers and lips ride through the restyle and the conform), so an
+  agent does not model eyes by hand on whatever head the body has. A creature's body and
   rig come from one sketch of joint chains (`creature.py`), so its joints sit inside its body by
   construction, and its clips come from a gait generator (`gait.py`) rather than keys by hand. The
   same rig types its chains for Rigify, which generates a control rig only for posing by hand

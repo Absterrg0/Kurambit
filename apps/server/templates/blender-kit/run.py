@@ -103,7 +103,7 @@ def refusals_of(measured, info, params, creatures=()):
         out.append({"code": "rest-frames", "text": f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°): library clips would play twisted. Build the body with game_blender op character, which conforms it."})
     budget = params["budgets"][kind]
     if measured["triangles"] > budget:
-        out.append({"code": "triangles", "text": f"{measured['triangles']} triangles, over STYLE.json's budget.{kind} of {budget}: raise that budget if the model needs them (the game's Performance row counts the scene), or thin a dense part (hero.decimate)."})
+        out.append({"code": "triangles", "text": f"{measured['triangles']} triangles, over STYLE.json's budget.{kind} of {budget}: raise that budget if the model needs them (the game's Performance row counts the scene), or thin a dense part (hero.decimate keeps hands and head densest)."})
     side = params["budgets"]["texture"]
     big = [t for t in measured["textures"] if max(t["width"], t["height"]) > side]
     if big:
