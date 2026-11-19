@@ -141,15 +141,30 @@ def face_of(arm):
 # and the arch. mouth: the body's own lips tinted, or a drawn smile that wide (of the lips' width).
 # soften: how far the head's sculpted features are smoothed away, so drawn eyes sit on a drawn head.
 STYLES = {
-    "realistic": dict(eye=1.0, proud=0.0, flat=1.0, tall=1.0, iris=0.5, pupil=0.42, lid=165.0, brow=(0.34, 2.6, 1.3, 5.0, 0.14), mouth=None, soften=0.0),
-    "heroic": dict(eye=1.0, proud=0.0, flat=1.0, tall=1.0, iris=0.48, pupil=0.4, lid=160.0, brow=(0.5, 2.8, 1.15, 14.0, 0.05), mouth=None, soften=0.0),
+    "realistic": dict(eye=1.0, proud=0.0, flat=1.0, tall=1.0, iris=0.5, pupil=0.42, lid=150.0, brow=(0.34, 2.6, 1.3, 5.0, 0.14), mouth=None, soften=0.0),
+    "heroic": dict(eye=1.0, proud=0.0, flat=1.0, tall=1.0, iris=0.48, pupil=0.4, lid=146.0, brow=(0.5, 2.8, 1.15, 14.0, 0.05), mouth=None, soften=0.0),
     "cartoon": dict(eye=1.45, proud=1.4, flat=0.7, tall=1.1, iris=0.62, pupil=0.5, lid=None, brow=(0.6, 2.5, 2.1, -5.0, 0.3), mouth=0.95, soften=0.7),
     "chibi": dict(eye=1.6, proud=1.45, flat=0.45, tall=1.3, iris=0.76, pupil=0.55, lid=None, brow=(0.3, 1.8, 2.5, -8.0, 0.25), mouth=0.5, soften=1.0),
 }
+# On a drawn body (studio.py) the head already has the style's skull and sockets: the eyes sit in
+# them and turn their lids shut, nothing is smoothed away, and its own lips stay.
+DRAWN = {
+    "cartoon": dict(eye=1.0, proud=0.0, flat=1.0, tall=1.0, iris=0.6, pupil=0.5, lid=180.0, brow=(0.3, 1.5, 1.05, -4.0, 0.2), mouth="own", soften=0.0),
+    "chibi": dict(eye=1.0, proud=0.0, flat=1.0, tall=1.0, iris=0.68, pupil=0.55, lid=180.0, brow=(0.22, 1.2, 1.1, -6.0, 0.18), mouth="own", soften=0.0),
+}
 LANDMARKS = "kurambit_face"
+BASE = "kurambit_base"
 STYLE = "kurambit_style"
 EYES = {"l": "face_eye_l", "r": "face_eye_r"}
 LIPS = "face_lips"
+
+
+def style_of(arm, style=None):
+    """The face table for arm's style on the body it was made from."""
+    style = style or arm.get(STYLE) or "realistic"
+    if style not in STYLES:
+        raise ValueError(f"face style {style!r}: one of {', '.join(STYLES)}")
+    return DRAWN[style] if arm.get(BASE) == "studio" and style in DRAWN else STYLES[style]
 
 
 def take_landmarks(arm, meshes):
@@ -326,9 +341,7 @@ def face(armature, *, style=None, iris="#4f7396", brows="#3a2a20", lips="#b4645c
 
     arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
     style = style or arm.get(STYLE) or "realistic"
-    if style not in STYLES:
-        raise ValueError(f"face style {style!r}: one of {', '.join(STYLES)}")
-    st = STYLES[style]
+    st = style_of(arm, style)
     marks = json.loads(arm.get(LANDMARKS, "{}") or "{}")
     if eyes is not None:
         x, y, z = eyes[0] if isinstance(eyes[0], (list, tuple)) else eyes
@@ -376,8 +389,11 @@ def face(armature, *, style=None, iris="#4f7396", brows="#3a2a20", lips="#b4645c
         parts.append(brow.name)
     if "mouth" in marks and lips:
         mx, my, mz, width = marks["mouth"]
-        if st["mouth"] is None:
-            tint = helpers.material(lips, name="Lips")
+        if st["mouth"] == "own":
+            pass  # a drawn head's lips are its skin's colour
+        elif st["mouth"] is None:
+            # Lips are the skin's own colour a little redder: the full tint reads as lipstick.
+            tint = helpers.material(_mix(_hex_of(skin), lips, LIP_TINT), name="Lips")
             for o in body:
                 g = o.vertex_groups.get(LIPS)
                 if g is None:
@@ -399,6 +415,22 @@ def face(armature, *, style=None, iris="#4f7396", brows="#3a2a20", lips="#b4645c
             helpers.skin_rigid(smile, "Head", armature=arm)
             parts.append(smile.name)
     return {"style": style, "parts": parts, "blinks": blinks}
+
+
+LIP_TINT = 0.45
+
+
+def _hex_of(material):
+    """A material's base colour as hex (sRGB), as helpers.material set it."""
+    bsdf = next((n for n in material.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None) if material.node_tree else None
+    c = bsdf.inputs["Base Color"].default_value[:3] if bsdf is not None else material.diffuse_color[:3]
+    to_srgb = lambda v: 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
+    return "#" + "".join(f"{max(0, min(255, round(to_srgb(v) * 255))):02x}" for v in c)
+
+
+def _mix(a, b, t):
+    a, b = a.lstrip("#"), b.lstrip("#")
+    return "#" + "".join(f"{round(int(a[i:i + 2], 16) * (1 - t) + int(b[i:i + 2], 16) * t):02x}" for i in (0, 2, 4))
 
 
 def _blob(centre, radius, rings=5, segs=10):

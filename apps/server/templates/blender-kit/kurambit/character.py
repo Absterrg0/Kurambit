@@ -8,6 +8,8 @@ params (the server resolves every path):
               A game body keeps its own clips, and every body its own skinned bone chains (cloth,
               hair) as spring chains.
     standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
+    baseMeshes abs path of Blender Studio's Human Base Meshes .blend, or None when it is not
+              installed: the drawn body a cartoon or chibi style starts from (studio.py)
     clips     [{pack, name, path, licence?}] | {pack, name, path, licence, source, motion: true}: a GLB
               the motion lane delivered (one clip retargeted onto the body it holds), its source
               the generation's stamp {from, licence, ai, credits}
@@ -29,7 +31,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import face, fit, helpers, proportions, skeleton
+from . import face, fit, helpers, proportions, skeleton, studio
 from .protocol import Refused, entry
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
@@ -454,7 +456,7 @@ def character(params):
     std_arm = next(o for o in std_new if o.type == "ARMATURE")
     skeleton.remove_objects([o for o in std_new if o is not std_arm])
     reference = skeleton.local_frames(std_arm)
-    taken, body_arm, meshes, own_actions, own, extra, unit = [], None, [], [], [], [], 1.0
+    taken, body_arm, meshes, own_actions, own, extra, unit, base = [], None, [], [], [], [], 1.0, None
     joints = set(std_arm.data.bones.keys())
     try:
         asked_bones = set()
@@ -464,7 +466,17 @@ def character(params):
             labels = [f"{chain['name']}_l", f"{chain['name']}_r"] if chain.get("mirror") else [chain["name"]]
             asked_bones |= {f"{label}_{i + 1:02d}" for label in labels for i in range(int(chain["bones"]))}
         taken = _take_clips(params.get("clips", []), standard, std_actions, reference, _height(std_arm, {}))
-        if "mpfb" in body_spec:
+        preset = (params.get("style") or {}).get("preset")
+        drawn = "mpfb" in body_spec and preset in studio.PRESETS
+        if drawn and not params.get("baseMeshes"):
+            notes.append(f"the {preset} style starts from a drawn body when it can: {studio.HELP}. This one is an MPFB2 adult restyled, which reads less drawn")
+            drawn = False
+        if drawn:
+            body_arm, meshes, name_map = studio.body(params["baseMeshes"], body_spec["mpfb"].get("gender", 0.5))
+            studio.soften(meshes[0], preset)
+            body_part = {**MADE_BODY, "from": "blender-studio-human-base-meshes", "licence": studio.LICENCE}
+            base = "studio"
+        elif "mpfb" in body_spec:
             body_arm, meshes, name_map = _mpfb_body(body_spec["mpfb"])
             body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
         else:
@@ -504,10 +516,11 @@ def character(params):
 
     # The face the body brought, and the head drawn as far as its style is.
     face.take_landmarks(std_arm, meshes)
-    preset = (params.get("style") or {}).get("preset")
     if preset:
         std_arm[face.STYLE] = preset
-        face.soften(std_arm, meshes, face.STYLES[preset]["soften"])
+        if base == "studio":
+            std_arm[face.BASE] = base
+        face.soften(std_arm, meshes, face.style_of(std_arm)["soften"])
 
     parts, old_chains = [], {}
     if old is not None:

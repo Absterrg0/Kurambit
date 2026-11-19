@@ -417,6 +417,28 @@ const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", f
 const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
   `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}"} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
 /**
+ * Blender Studio's Human Base Meshes (CC0), the drawn bodies a cartoon or chibi character starts
+ * from, when the person has them: KURAMBIT_BASE_MESHES names the bundle's .blend, else it is looked
+ * for in the tools folder. Nothing here downloads it; without it those styles restyle an MPFB2 body
+ * and the op says so.
+ */
+const BASE_MESHES = "human-base-meshes-bundle-v1.4.1/human_base_meshes_bundle.blend";
+const baseMeshesFile = async () => {
+  const candidates = [
+    process.env.KURAMBIT_BASE_MESHES?.trim(),
+    NodePath.join(GameToolchain.toolsDirectory(), "blender-assets", BASE_MESHES),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const found = await NodeFSP.stat(candidate).then(
+      (stat) => stat.isFile(),
+      () => false,
+    );
+    if (found) return candidate;
+  }
+  return null;
+};
+/**
  * The person's choice refuses a Blender-made character on code with the library off (and on
  * generated): an MPFB2 body, or a mesh no library
  * or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
@@ -2552,6 +2574,7 @@ const make = Effect.gen(function* () {
                 name: input.name,
                 body,
                 standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
+                baseMeshes: yield* Effect.promise(baseMeshesFile),
                 clips,
                 chains: input.chains ?? [],
                 replace: input.replace ?? false,

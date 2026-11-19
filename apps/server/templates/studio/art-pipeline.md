@@ -162,10 +162,9 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
    Model shapes, not boxes: bevels, subdivided spheres, boolean openings.
    Glow is an accent, never a fill. The craft that separates a made character
    from a cheap one:
-   - **Hair**: a thin cap ending low at the nape, then about 20 to 25 chunky
-     locks lifting toward flicked tips, one signature lock, the under-locks a
-     shade darker. Never one smooth shell: it reads as a helmet, and cones on
-     it read as horns.
+   - **Hair**: `hero.hair("<name>", "short"|"long"|"tied"|"curly", colour=)`
+     fits a cap and chunky locks to the head; `hero.beard`, `hero.glasses`
+     likewise. Never one smooth shell: it reads as a helmet.
    - **Face**: `hero.face("<name>", iris=, brows=)` gives a human its eyes
      (they blink), brows and mouth in its body's `style`. By hand, for a face
      the styles lack: eyes stand out of the face about 60% of their depth,
@@ -284,8 +283,9 @@ radius=, amount=)` (a round belly, a mouth line, toes) and
    pushed outside the skin, takes the skin's weights, and below `hang` hangs
    on `spring_` hem chains instead of the legs, so it swings rather than
    flaring as a cone. A cape: `hang` at the shoulders. A scarf's end, a
-   strap: `hero.dangle(part, "fisher", start, end)`. Hats, bags: separate
-   meshes, `kurambit.skin_rigid(hat, "Head")`. What a hand holds:
+   strap: `hero.dangle(part, "fisher", start, end)`. A hat or helmet:
+   `hero.wear(hat, "fisher")` sizes it to the head and its hair. Bags:
+   `kurambit.skin_rigid(bag, "spine_03")`. What a hand holds:
    `kurambit.hold(rod, "r", grip=, tip=)` puts it in the palm and returns its
    length against the body.
 3. **Rig.** A human's is op `character`'s: the standard skeleton fitted to
