@@ -591,6 +591,12 @@ const layerMakeRoutes = Layer.mergeAll(
       yield* reactor.start();
     }),
   ).pipe(Layer.provide(GameBuildsReactor.layer.pipe(Layer.provide(ProjectionStoreV2.layer)))),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const games = yield* GameProjectService.GameProjectService;
+      yield* forkParked(games.retitleChatsNamedAfterGames());
+    }),
+  ),
   // Keep going is a long-lived job: a restart (an update, a crash, a dev
   // reload) re-runs the step it cut off instead of leaving it dead.
   Layer.effectDiscard(

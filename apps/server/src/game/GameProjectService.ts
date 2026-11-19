@@ -39,6 +39,7 @@ import {
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { truncate } from "@kurambit/shared/String";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
+import { namedAfterGame, titleFromFirstMessage } from "./gameChatTitle.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -185,6 +186,13 @@ export class GameProjectService extends Context.Service<
      * files, never on HEAD, which in a game is the empty scaffold: T3's `worktreeSeed`.
      */
     readonly seatWorktreesOnFiles: (projectId: ProjectId) => Effect.Effect<void>;
+    /**
+     * Chats Kurambit once titled with their game's name take a title from their own first
+     * message (titleFromFirstMessage), by the command a rename uses. Run at startup: a retitled
+     * chat no longer matches, so every start and a start after a crash halfway do only what is
+     * left. Gives how many it retitled.
+     */
+    readonly retitleChatsNamedAfterGames: () => Effect.Effect<number>;
     /** Between turns: the game's studio skills brought up to this server. */
     readonly refreshGuidance: (root: string) => Effect.Effect<void, GameOperationError>;
     /** The manifest and the resolution the game plays at. */
@@ -748,9 +756,67 @@ const make = Effect.gen(function* () {
   const resolve = (threadId: ThreadId, options: { readonly deleted?: "allowed" } = {}) =>
     Effect.map(place(threadId, options), (placed) => placed.root);
   const home = (threadId: ThreadId) => place(threadId, { home: true });
+  const retitleChatsNamedAfterGames = Effect.fn("GameProjectService.retitleChatsNamedAfterGames")(
+    function* () {
+      const [projectSnapshot, active, archived] = yield* Effect.all([
+        projects.snapshot,
+        threads.getShellSnapshot(),
+        threads.getShellSnapshot({ location: "archive" }),
+      ]);
+      const chats = [...active.threads, ...archived.threads].filter(
+        (chat) => chat.deletedAt === null && chat.latestUserMessageAt !== null,
+      );
+      let retitled = 0;
+      for (const project of projectSnapshot.projects) {
+        const mine = chats.filter((chat) => chat.projectId === project.id);
+        if (mine.length === 0) continue;
+        const manifest = yield* Effect.tryPromise(() => realGameRoot(project.workspaceRoot)).pipe(
+          Effect.flatMap(read),
+          Effect.option,
+        );
+        if (Option.isNone(manifest)) continue;
+        const gameNames = [project.title, manifest.value.name];
+        for (const chat of mine) {
+          // Only a chat that matches reads its messages: every other start costs two listings.
+          if (!namedAfterGame(chat.title, gameNames)) continue;
+          const records = yield* threads.getThreadRecords(chat.id, ["messages"], {
+            messageRoles: ["user"],
+          });
+          const first = records.messages
+            .filter((message) => !message.streaming)
+            .toSorted(
+              (left, right) =>
+                DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt),
+            )[0];
+          const title = titleFromFirstMessage({
+            title: chat.title,
+            gameNames,
+            firstMessage: first?.text ?? null,
+          });
+          if (title === null) continue;
+          yield* threads.dispatch({
+            type: "thread.metadata.update",
+            // One per chat for good: a person who names a chat after its game keeps that name.
+            commandId: CommandId.make(`game-chat-title:${chat.id}`),
+            threadId: chat.id,
+            title,
+          });
+          retitled += 1;
+        }
+      }
+      return retitled;
+    },
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Could not retitle chats named after their games.", { cause }).pipe(
+        Effect.as(0),
+      ),
+    ),
+  );
+
   return GameProjectService.of({
     create,
     home,
+    retitleChatsNamedAfterGames,
     seatWorktreesOnFiles,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
