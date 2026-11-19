@@ -716,19 +716,17 @@ export function useThreadActions() {
     ThreadUndo.invalidate("pin", scopedThreadKey(target));
     ThreadUndo.invalidate("snooze", scopedThreadKey(target));
     const action = ThreadUndo.begin("settle", scopedThreadKey(target));
-    const result = await settleThreadMutation({
+    const settling = settleThreadMutation({
       environmentId: target.environmentId,
       input: { threadId: target.threadId },
     });
-    if (result._tag !== "Success") {
-      action.finish();
-      return result;
-    }
-    if (wokeAt !== null) {
-      markThreadVisited(scopedThreadKey(target), wokeAt);
-    }
-    showThreadUndoNotice({
-      action: "Settled",
+    // The call above moved the chat at once when it can settle now. The notice goes up with
+    // that move, so Undo is in reach while the server answers; a refusal takes both back
+    // (finishing the claim drops the notice). A chat at work does not move until the server
+    // says so, and its notice waits with it.
+    const movedAtOnce = readThreadShell(target)?.settledOverride === "settled";
+    const notice = {
+      action: "Settled" as const,
       claim: action,
       undo: async () => {
         const unsettled = await unsettleThread(target);
@@ -749,7 +747,17 @@ export function useThreadActions() {
         return unsettled;
       },
       failureTitle: "Failed to undo settle",
-    });
+    };
+    if (movedAtOnce) showThreadUndoNotice(notice);
+    const result = await settling;
+    if (result._tag !== "Success") {
+      action.finish();
+      return result;
+    }
+    if (wokeAt !== null) {
+      markThreadVisited(scopedThreadKey(target), wokeAt);
+    }
+    if (!movedAtOnce) showThreadUndoNotice(notice);
     return result;
   };
 
