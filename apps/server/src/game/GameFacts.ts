@@ -1078,9 +1078,24 @@ const make = Effect.gen(function* () {
             yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
           } else if (!skilledWanted) {
             // The play bot plays only when the person or their agent asks (GameFacts.measure).
-            const skilled = notMeasured(GAME_FACTS_SKILLED_DEFERRED, false, false, "deferred");
+            // A win it already has stays proven through a new harness: these files and this bot
+            // won, and no change to how Kurambit measures unproves that. Anything short of a
+            // win is played again when asked, since a new harness may read it differently.
+            const before = found !== null && found.harness !== harness ? found.stored : null;
+            const won =
+              before?.skilled?.status === "measured" &&
+              before.skilled.value.ending === "won" &&
+              before.skilled.value.bot.hash === bot.hash &&
+              (before.runtime === undefined || before.runtime === stored.runtime)
+                ? before.skilled
+                : null;
+            const skilled =
+              won ?? notMeasured(GAME_FACTS_SKILLED_DEFERRED, false, false, "deferred");
             const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
-            yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
+            yield* write({
+              skilled,
+              ...(yield* useAfter("skilled", won?.value.evidence ?? null, why)),
+            });
           } else {
             // The game's own bot and its copy of the kit, beside the harness's kit.
             // Links out of the game are left behind, so the copy never runs or reads what they point at.
