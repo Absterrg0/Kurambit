@@ -40,7 +40,8 @@ machine's setting. Every other provider setting stays per machine.
 
 ## Worktree branch names
 
-In **Settings → Git → Branch naming**, choose a static prefix,
+Search Settings for **Branch naming** (its Git page is not in the list, since games do not use
+it: a game's copies have no branch). There, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
 for the complete name. The static prefix defaults to `kurambit/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix

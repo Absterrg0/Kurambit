@@ -74,7 +74,9 @@ const SETTINGS_SECTION_ICONS: Readonly<
 };
 
 // A game studio's order: what a game maker changes first, then the agents, then
-// the coding and machine settings most never open.
+// the machine settings most never open. Git's page is left out: a game's branch, commits and
+// copies are the harness's, and none of them read its rows. Settings search still finds the rows
+// for a code project.
 const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   readonly heading: string;
   readonly paths: ReadonlyArray<SettingsPath>;
@@ -95,7 +97,6 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     heading: "Advanced",
     paths: [
       "/settings/projects",
-      "/settings/source-control",
       "/settings/storage",
       "/settings/scheduled-tasks",
       "/settings/archived",

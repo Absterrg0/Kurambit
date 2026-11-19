@@ -36,7 +36,7 @@ export function BranchNamingSettings() {
         serverScoped
         settingKeys={["branchNamingMode"]}
         {...searchableSetting("worktree-branch-naming")}
-        description="How the branch for a side copy of a game is named from your first message."
+        description="How a code project's side copy names its branch from your first message. A game's copies have no branch."
         status={
           !modeMixed && settings.branchNamingMode === "semantic"
             ? "The model chooses a prefix that describes the work, such as feat/add-search, fix/login-timeout, or refactor/auth."
