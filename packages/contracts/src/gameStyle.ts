@@ -115,7 +115,7 @@ export const GameStyle = Schema.Struct({
       Schema.Array(Hex).check(Schema.isMinLength(2), Schema.isMaxLength(64)),
     ]),
   ),
-  /** The 3D style pass's shading: gradient strength of each swatch, roughness, emissive strength of glow colours. */
+  /** The 3D style pass's shading: gradient strength of each swatch, roughness, emissive strength of glow colours, baked depth. */
   shading: Schema.optionalKey(
     Schema.Struct({
       gradient: Schema.optionalKey(
@@ -125,6 +125,8 @@ export const GameStyle = Schema.Struct({
         Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
       ),
       glow: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 20 }))),
+      /** How strongly a made model is shaded into its vertex colours (creases, a gradient, a darker underside); 0 leaves it flat. */
+      depth: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
     }),
   ),
   /** Metres: a made character is scaled to this standing height. */

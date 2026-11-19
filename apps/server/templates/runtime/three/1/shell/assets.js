@@ -218,6 +218,7 @@ async function readSurface(path) {
 
 // Every copy of a model casts and receives the look's shadows (shell/look.js), and its foliage is
 // lit from both faces alike. The model viewer loads its file the same way, so it shows what plays.
+const PAINT = /^Paint( \d+)?$/;
 export function withShadows(gltf) {
   gltf.scene.traverse((object) => {
     if (!object.isMesh) return;
@@ -227,6 +228,13 @@ export function withShadows(gltf) {
         material.vertexColors = false;
         material.needsUpdate = true;
       }
+    // The export's folded paint: its vertex colours' alpha is a baked shade (shell/look.js).
+    if (object.geometry?.attributes?.color?.itemSize === 4)
+      for (const material of [object.material].flat())
+        if (PAINT.test(material?.name ?? "") && material.vertexColors === true) {
+          material.defines = { ...material.defines, LOOK_SHADE: "" };
+          material.needsUpdate = true;
+        }
     if (isFoliage(object))
       for (const material of [object.material].flat()) {
         material.defines = { ...material.defines, LOOK_FOLIAGE: "" };

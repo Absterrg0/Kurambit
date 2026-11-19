@@ -35,7 +35,9 @@ only colours), `painted` or `real` surfaces. Every role (bark, leaf, stone,
 moss, grass, soil, path, sand, water, wall, roof, trim, floor, door, glass,
 metal) gets the palette's nearest colour unless `roles` names it. Made
 things build from it: `kurambit.world`, `surface("wall")` and
-`material("wall")` in Blender, `M.paintOf("wall")` in code.
+`material("wall")` in Blender, `M.paintOf("wall")` in code. `shading.depth`
+(0 to 1) is how strongly a made model's creases, underside and height are
+shaded into its colours; each stays one swatch in Art.
 
 With the library on, `game_assets` op `search` with no words lists it by
 style family; with words it ranks packs and single assets (Poly Haven,

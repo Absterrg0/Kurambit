@@ -423,7 +423,13 @@ const GROUND_VERTEX = /* glsl */ `
 #ifdef LOOK_GROUND
   vLookGround = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;
 #endif`;
+// A made model's paint (shell/assets.js marks it) carries a baked shade in its vertex colour's
+// alpha, which an opaque material never draws: creases, a gradient, a darker underside. The colour
+// itself stays flat, so each colour of the model is still one swatch to read and repaint.
 const GROUND_FRAGMENT = /* glsl */ `#include <color_fragment>
+#if defined( LOOK_SHADE ) && defined( USE_COLOR_ALPHA ) && defined( OPAQUE )
+	diffuseColor.rgb *= vColor.a;
+#endif
 #ifdef LOOK_GROUND
 {
   float lookPatch = lookGroundNoise( vLookGround * 0.09 ) * 0.5

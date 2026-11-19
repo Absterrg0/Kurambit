@@ -30,7 +30,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import helpers, skeleton
+from . import helpers, skeleton, stylepass
 from .protocol import Refused, entry
 
 BG = (0.29, 0.30, 0.33)
@@ -321,6 +321,7 @@ def review(params):
             window.scene = sc
         meshes = [o for o in new if o.type == "MESH"]
         arm = next((o for o in new if o.type == "ARMATURE"), None)
+        stylepass.show_shade({s.material for o in meshes for s in o.material_slots})
         cam = bpy.data.objects.new("kurambit_review_cam", bpy.data.cameras.new("kurambit_review_cam"))
         cam.data.type = "ORTHO"
         sc.collection.objects.link(cam)
