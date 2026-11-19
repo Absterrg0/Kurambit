@@ -124,8 +124,14 @@ check that matters.
   every standard clip plays on every made or library body on it.
 - `STYLE.json` at the game root records the game's look (`packages/contracts/src/gameStyle.ts`),
   read by `gameStyle.ts` on every call of every tool that brings art in, and never cached, so an
-  edit takes effect at once. `game_assets` op `add`'s optional `lock` writes it from a style family
-  (`styleFromLock`), so agents never hand-write its shape. Tools fill defaults from it (sprite
+  edit takes effect at once. `game_assets` op `lock` writes the look of what the game makes
+  (`styleFromLook`: a colour per role, shape, finish, surfaces) and needs no library pack; op
+  `add`'s optional `lock` adds a style family's packs and rig (`styleFromLock`). The made look
+  has two readers that must agree, so one lock gives one family: the Blender kit reads the file
+  (`kurambit/look.py`), and the game's own code reads it at `_kurambit/look.json`
+  (`shell/model.js`), which the game servers answer from the file and an export carries as a
+  file, because STYLE.json lives outside the served folder. The `lock` op is published as a bare
+  object and decoded by the service, so its fields are not paid for with every tool call. Tools fill defaults from it (sprite
   palette and views, export budgets, loudness targets, the clip packs a character gets) and search
   ranks its packs first, but nothing is refused for falling outside it: refusals that kept a game
   inside a family the harness picked decided the look for the agent, which is its and the

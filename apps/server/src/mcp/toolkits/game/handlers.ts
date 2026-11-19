@@ -400,6 +400,10 @@ const assetsHandlers = {
             withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
               library.add(threadId, add),
             ).pipe(as(GameAssetsAddResult)),
+          lock: (lock) =>
+            withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
+              library.lock(threadId, lock),
+            ).pipe(as(LibraryText)),
           generate: (generate) =>
             withGame(GameArt.GameArt, (art, threadId) => art.generate(threadId, generate)).pipe(
               as(GameGenerateResult),

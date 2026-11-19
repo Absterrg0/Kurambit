@@ -91,6 +91,9 @@ export type GamePlayToolInput = typeof GamePlayToolInput.Type;
 export const GameAssetsToolInput = Schema.Struct({
   search: op(GameAssetsSearchInput),
   add: op(GameAssetsAddInput),
+  // Published as a bare object: the fields are GameStyleLockInput's, decoded by the service and
+  // taught by the art skill, so the look's schema is not paid for with every tool call.
+  lock: op(Schema.Record(Schema.String, Schema.Unknown)),
   generate: op(GameGenerateInput),
   wait: op(GameGenerateWaitInput),
   image_edit: op(GameImageEditInput),

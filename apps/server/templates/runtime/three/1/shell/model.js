@@ -8,6 +8,9 @@
 //     // coat), metal, chrome, glass, wood, rubber, cloth, stone, water; or { rough, metal, coat,
 //     // glow, smooth, opacity, map }. They mirror the look's sky. Every model drawing with
 //     // paint.hull is one world, and merges into one draw.
+//   M.paintOf("wall"); M.role("leaf"); // a role of the game's look (STYLE.json): its material, its
+//     // colour. M.lock() is the lock: { palette, roles, shape: { edges, bevel, chunky, detail },
+//     // finish, surfaces }. Colour by role so what you build sits with what Blender makes.
 //   M.paintOf("#fff", { kind: "paint", map: M.canvasTexture(512, 64, (g, w, h) => {...}) });
 //     // a texture drawn with the 2D canvas API: windows, panel lines, names, decals
 //   const boat = new THREE.Group();
@@ -71,7 +74,27 @@ let paints = new Map();
 // Tuned models by Stage id, rebuilt when the Stage changes one of their values.
 let tunedModels = new Map();
 
-const colour = (value) => new THREE.Color(value);
+// The game's look: STYLE.json as Kurambit serves it beside the runtime (and writes it into an
+// export), read once before the game's own module runs. Its roles always hold the defaults.
+const look = await fetch(new URL("../../../../look.json", import.meta.url), { cache: "no-store" })
+  .then((response) => (response.ok ? response.json() : null))
+  .catch(() => null);
+
+/** The game's look, or null for a game served without one: see the header. */
+export const lock = () => look;
+
+/** A role's colour ("#rrggbb"): the lock's, so made things share one palette. */
+export function role(name) {
+  const hex = look?.roles?.[name];
+  if (hex === undefined)
+    throw new Error(`No role "${name}" in the look: ${Object.keys(look?.roles ?? {}).join(", ")}`);
+  return hex;
+}
+
+const colour = (value) =>
+  new THREE.Color(
+    typeof value === "string" && look?.roles?.[value] !== undefined ? look.roles[value] : value,
+  );
 
 /**
  * What each kind of surface is, physically: roughness, metalness, a clear coat over paint, and how
@@ -112,7 +135,11 @@ export function paintOf(value, options = {}) {
     map,
     reflect = 1,
   } = o;
-  const smooth = o.smooth ?? (o.kind !== undefined && o.kind !== "matte" && o.kind !== "stone");
+  // A soft-edged look shades everything smooth; otherwise matte and stone show their facets.
+  const smooth =
+    o.smooth ??
+    (look?.shape?.edges === "soft" ||
+      (o.kind !== undefined && o.kind !== "matte" && o.kind !== "stone"));
   const key = `${colour(value).getHexString()}|${rough}|${metal}|${coat}|${coatRough}|${glow}|${smooth}|${opacity}|${reflect}|${map?.uuid ?? ""}`;
   let material = paints.get(key);
   if (material === undefined) {
@@ -176,8 +203,8 @@ export function palette(colours) {
   return named;
 }
 
-/** A box with its edges rounded by `radius` (bevelled with `segments` 1). */
-export function box(width, height, depth, radius = 0, segments = 2) {
+/** A box with its edges rounded by `radius` (the look's bevel by default; bevelled with `segments` 1). */
+export function box(width, height, depth, radius = look?.shape?.bevel ?? 0, segments = 2) {
   if (radius <= 0) return new THREE.BoxGeometry(width, height, depth);
   const most = Math.min(width, height, depth) / 2 - 1e-4;
   return new RoundedBoxGeometry(width, height, depth, segments, Math.min(radius, most));

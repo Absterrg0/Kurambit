@@ -14,6 +14,7 @@ import * as HttpStaticServer from "effect/http/HttpStaticServer";
 import * as Mime from "effect/http/Mime";
 import { guardHttpResponseWriteErrors } from "../httpResponseErrorGuard.ts";
 import { runtimeRequestFile } from "./gameRuntime.ts";
+import { gameLookJson, LOOK_ROUTE } from "./gameStyle.ts";
 import { insideGame } from "./gamePath.ts";
 
 export interface WebStaticServer {
@@ -106,6 +107,13 @@ export const serveGameDirectory = async (
             runtimeRequestFile(runtimes, decodeURIComponent(request.url.split("?")[0] ?? "/")),
           );
     if (runtimeFile !== null) return yield* serveFile(runtimeFile, "no-cache");
+    // The look is the game's STYLE.json, which lives outside the served folder: the page reads
+    // what made things are built from here, so the code route and the Blender kit share one lock.
+    if (runtimes !== null && request.url.split("?")[0] === `/${LOOK_ROUTE}`)
+      return HttpServerResponse.text(yield* gameLookJson(root), {
+        contentType: "application/json; charset=utf-8",
+        headers: { "cache-control": "no-store" },
+      });
     const file = yield* Effect.promise(() => gameRequestFile(webRoot, request.url));
     // A new game is an empty folder until its first turn writes main.js, which the runtime's page
     // imports: until then the page runs nothing rather than failing to load. A static import

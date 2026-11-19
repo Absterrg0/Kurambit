@@ -45,6 +45,7 @@ import {
 } from "./webPlaySession.ts";
 import type { GameEngineBackend, GameEngineContext } from "./GameEngine.ts";
 import { copyRuntimeInto, hasRuntime } from "./gameRuntime.ts";
+import { gameLookJson, LOOK_ROUTE } from "./gameStyle.ts";
 import { copyTree } from "./gameFiles.ts";
 import { THREE_PROFILE } from "./threeProfile.ts";
 import {
@@ -675,11 +676,15 @@ export const makeThreeBackend = (
     release: (ctx, input) =>
       Effect.gen(function* () {
         const runtimeFolder = yield* runtimeOf(ctx, input.operation);
+        const look = yield* gameLookJson(ctx.root);
         yield* Effect.tryPromise({
           try: async (signal) => {
             await copyTree(ctx.projectDir, input.staging, signal);
-            if (runtimeFolder !== null && ctx.runtime !== null)
+            if (runtimeFolder !== null && ctx.runtime !== null) {
               await copyRuntimeInto(runtimeFolder, "three", ctx.runtime, input.staging, signal);
+              // The release has no Kurambit to ask for the look, so it carries it as a file.
+              await NodeFSP.writeFile(NodePath.join(input.staging, ...LOOK_ROUTE.split("/")), look);
+            }
           },
           catch: (cause) =>
             new GameOperationError({

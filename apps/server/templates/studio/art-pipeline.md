@@ -15,28 +15,42 @@ not yours; print every path you write.
 
 ## Lock the look: STYLE.json
 
-`game_assets` op `search` with no words lists the library by style family; with
-words it ranks packs and single assets (Poly Haven, ambientCG, Poly Pizza)
-with their pictures. Look at the contact sheet before choosing, then pass
-the family and the view as `lock` with the first `game_assets` op `add`: it
-writes `STYLE.json` at the game root with the family, its rig and pixel
-palette. Every pack of the family fits the lock; `packs` lists the curated
-ones and whatever you add beyond the family on purpose (a source such as
-`ambientcg` admits all its assets). What you may add to it later, on purpose:
+Before the first model, `game_assets` op `lock` writes the look of what this
+game makes, from the brief:
 
-- `anchor`: the image the look answers to (`art/key-art.png`): its palette is
-  the lock's, and every generation passes it as a reference.
-- 3D made models: `palette` as a hex list (2 to 64 colours, from the
-  family's own textures so made models sit with the packs), with `shading`,
-  `scale.character` (metres; KayKit heroes are about 2.1) and `budget`
-  (triangles and texture size). A made character's `rig` is
-  `standard-humanoid`.
-- `audio.packs`: the effects families and music sources.
+```json
+{
+  "view": "perspective",
+  "palette": ["#2e3440", "#a2523a"],
+  "finish": "flat",
+  "shape": { "edges": "faceted", "bevel": 0.03, "chunky": 0.5, "detail": 0.6 },
+  "roles": { "roof": "#a2523a" },
+  "surfaces": { "wall": { "kind": "stone", "pattern": "bricks" } }
+}
+```
 
-The art tools fill their defaults from it and search ranks its packs first.
-Changing direction is a change to STYLE.json made on purpose, never a drift: change
-the lock first (`lock` again for another family), then the art. STYLE.json
-is the person's to read and edit too.
+`palette` is hex colours or a PNG here (the key art, the person's
+reference). `finish`: `flat` colours (the palette is then every model's
+only colours), `painted` or `real` surfaces. Every role (bark, leaf, stone,
+moss, grass, soil, path, sand, water, wall, roof, trim, floor, door, glass,
+metal) gets the palette's nearest colour unless `roles` names it. Made
+things build from it: `kurambit.world`, `surface("wall")` and
+`material("wall")` in Blender, `M.paintOf("wall")` in code.
+
+With the library on, `game_assets` op `search` with no words lists it by
+style family; with words it ranks packs and single assets (Poly Haven,
+ambientCG, Poly Pizza) with their pictures. Look at the contact sheet, then
+pass the family and the view as `lock` with the first `game_assets` op
+`add`: it adds the family, its rig, pixel palette and `packs` (the curated
+ones, and what you add beyond the family on purpose).
+
+What you may add later, on purpose: `anchor` (the image the look answers
+to, passed to every generation), `shading`, `scale.character` (metres;
+KayKit heroes are about 2.1), `budget` (triangles and texture size),
+`audio.packs`. A made character's `rig` is `standard-humanoid`.
+
+Changing direction is a change to STYLE.json made on purpose, never a drift:
+lock again, then the art. STYLE.json is the person's to read and edit too.
 
 ## Characters
 

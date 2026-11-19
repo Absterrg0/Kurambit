@@ -66,7 +66,7 @@ const linear = (v: number) => {
 };
 
 /** OKLab, so "nearest colour" means nearest as seen. */
-const oklab = (c: number): readonly [number, number, number] => {
+export const oklab = (c: number): readonly [number, number, number] => {
   const r = linear(red(c));
   const g = linear(green(c));
   const b = linear(blue(c));

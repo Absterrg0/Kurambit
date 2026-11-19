@@ -17,6 +17,7 @@ import {
   modelChoice,
   styleBudgets,
   styleFromLock,
+  styleFromLook,
   styleHash,
 } from "./gameStyle.ts";
 
@@ -228,4 +229,27 @@ it("derives a lock from a family, and choosing again keeps what the person set",
   expect(
     styleFromLock({ family: "kenney-interface", view: "side" }, pack("kenney-ui-pack"), null),
   ).toHaveProperty("refusal");
+});
+
+it("locks a made look with no library pack, and keeps an older lock's own fields", () => {
+  const palette = ["#2e3440", "#6b4a32", "#4f8a3c", "#7fb04a", "#8a8780", "#d9cdb4", "#a2523a"];
+  const made = styleFromLook({ view: "perspective", roles: { door: "#123456" } }, palette, null);
+  if (!("style" in made)) throw new Error(made.refusal);
+  // A palette makes the finish flat and is kept as the models' only colours; no packs are needed.
+  expect(made.style).toMatchObject({ mode: "smooth", finish: "flat", palette });
+  expect(made.style.packs).toBeUndefined();
+  // Every role has a colour: the palette's nearest, the named one as named, and a second tone
+  // never the colour its role took.
+  expect(made.style.roles).toMatchObject({ roof: "#a2523a", door: "#123456", leaf: "#4f8a3c" });
+  expect(made.style.roles?.leaf2).toBe("#7fb04a");
+  // A painted finish drops the palette, so models keep their surfaces; the roles stay.
+  const painted = styleFromLook({ finish: "painted" }, null, made.style);
+  if (!("style" in painted)) throw new Error(painted.refusal);
+  expect(painted.style.palette).toBeUndefined();
+  expect(painted.style.roles).toEqual(made.style.roles);
+  // A library lock from before keeps its family, rig and packs under a made look.
+  const both = styleFromLook({ shape: { edges: "soft" } }, null, kaykit);
+  if (!("style" in both)) throw new Error(both.refusal);
+  expect(both.style).toMatchObject({ family: "kaykit", rig: "kaykit-1", packs: kaykit.packs });
+  expect(styleFromLook({}, null, null)).toHaveProperty("refusal");
 });

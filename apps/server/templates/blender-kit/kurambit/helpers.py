@@ -89,8 +89,13 @@ def use_nodes(idb):
 
 
 def material(hex_colour, glow=0.0, name=None, roughness=0.55):
-    """A material of one sRGB colour ("#RRGGBB"); glow > 0 makes it emissive (the style pass turns
-    emissive materials into the Glow material and snaps every colour to STYLE.json's palette)."""
+    """A material of one sRGB colour ("#RRGGBB"), or of a role of the game's look ("wall", "leaf":
+    kurambit.look); glow > 0 makes it emissive (the style pass turns emissive materials into the
+    Glow material and snaps every colour to STYLE.json's palette)."""
+    if not hex_colour.startswith("#"):
+        from . import look
+
+        name, hex_colour = name or hex_colour.capitalize(), look.colour(hex_colour)
     name = name or f"pal:{hex_colour.lower()}"
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     use_nodes(m)

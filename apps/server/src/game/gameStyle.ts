@@ -14,17 +14,21 @@ import {
   GAME_STYLE_DEFAULT_MUSIC_LUFS,
   GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   GAME_STYLE_FILE,
+  GAME_STYLE_ROLES,
   type GameBlenderRenderSpritesInput,
   type GameCharacterRoute,
   type GameManifest,
   GameOperationError,
   GameStyle,
+  type GameLook,
   type GameStyleLock,
+  type GameStyleLockInput,
   gameModelChoice,
 } from "@kurambit/contracts";
 import { awaitsMirror, type LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
 import { LIBRARY_SOURCES } from "./assetLibrarySources.ts";
+import { colourHex, hexColour, oklab } from "./spriteRender.ts";
 import {
   CURATED_PACKS,
   LIBRARY_CATALOG,
@@ -76,7 +80,7 @@ const OFFERED = LIBRARY_CATALOG.filter((pack) => !awaitsMirror(pack));
 const styleProblem = (style: GameStyle): string | null => {
   const packIds = PACK_IDS;
   for (const [field, ids] of [
-    ["packs", style.packs],
+    ["packs", style.packs ?? []],
     ["audio.packs", style.audio?.packs ?? []],
   ] as const)
     for (const [index, id] of ids.entries())
@@ -214,9 +218,10 @@ const soundOnly = (pack: LibraryPack) =>
  */
 export const inLook = (pack: LibraryPack, style: GameStyle | null): boolean => {
   if (style === null) return false;
-  if (style.packs.includes(pack.id) || style.palette === pack.id) return true;
+  const packs = style.packs ?? [];
+  if (packs.includes(pack.id) || style.palette === pack.id) return true;
   if (!soundOnly(pack) && style.family !== undefined && pack.family === style.family) return true;
-  if (pack.group !== undefined && style.packs.includes(pack.group)) return true;
+  if (pack.group !== undefined && packs.includes(pack.group)) return true;
   return (style.audio?.packs ?? []).includes(pack.id);
 };
 
@@ -319,6 +324,122 @@ export const styleFromLock = (
     ? { style: checked.success }
     : { refusal: `The lock for ${family.id} is not valid: ${problem}` };
 };
+
+/**
+ * A colour for every role from a palette: the palette colour nearest the role's own. A role
+ * named `<role>2` is its role's second tone: the colour nearest the one its role took.
+ */
+const rolesFrom = (palette: ReadonlyArray<string>): Record<string, string> => {
+  const colours = palette.flatMap((hex) => hexColour(hex) ?? []);
+  const roles: Record<string, string> = {};
+  if (colours.length === 0) return roles;
+  // A role is its hue first (water is the blue one, however light), so lightness counts less.
+  const apart = (a: number, b: number) => {
+    const [l1, a1, b1] = oklab(a);
+    const [l2, a2, b2] = oklab(b);
+    return 0.3 * (l1 - l2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2;
+  };
+  for (const [role, own] of Object.entries(GAME_STYLE_ROLES)) {
+    const base = role.endsWith("2") ? roles[role.slice(0, -1)] : undefined;
+    const pool = colours.filter((colour) => colours.length < 2 || colourHex(colour) !== base);
+    // A second tone sits beside its role's colour, not beside the default it never took.
+    const wanted = hexColour(base ?? own)!;
+    roles[role] = colourHex(
+      pool.reduce((best, c) => (apart(c, wanted) < apart(best, wanted) ? c : best)),
+    );
+  }
+  return roles;
+};
+
+/**
+ * STYLE.json for a look the game makes, as game_assets op lock writes it: the fields the input
+ * names over those already there, with a colour for every role (named ones first, then the
+ * palette's nearest, then what the lock held). `palette` is the hex list to derive from, already
+ * read when the input named an image; a flat finish keeps it as the lock's palette (the style
+ * pass's atlas), any other finish drops it so models keep their surfaces.
+ */
+export const styleFromLook = (
+  input: GameStyleLockInput,
+  palette: ReadonlyArray<string> | null,
+  existing: GameStyle | null,
+): { readonly style: GameStyle } | { readonly refusal: string } => {
+  if (existing?.mode === "pixel")
+    return {
+      refusal: `${GAME_STYLE_FILE} is a pixel lock: its palette is its pack's and its sprites are drawn, not built. Delete it to lock a made 3D look instead.`,
+    };
+  const view = input.view ?? existing?.view;
+  if (view === undefined)
+    return { refusal: "lock needs view: side, top-down, isometric or perspective." };
+  const held = Array.isArray(existing?.palette) ? existing.palette : null;
+  const finish = input.finish ?? existing?.finish ?? (palette !== null || held ? "flat" : "real");
+  const source = palette ?? held;
+  const roles = {
+    ...existing?.roles,
+    ...(palette === null ? {} : rolesFrom(palette)),
+    ...input.roles,
+  };
+  const kept = existing === null ? {} : Struct.omit(existing, ["palette", "anchor"]);
+  const anchor = typeof input.palette === "string" ? input.palette : existing?.anchor;
+  const candidate = {
+    ...kept,
+    version: 1,
+    mode: "smooth",
+    view,
+    ...(finish === "flat" && source !== null ? { palette: source } : {}),
+    ...(anchor === undefined ? {} : { anchor }),
+    ...(Object.keys(roles).length === 0 ? {} : { roles }),
+    ...(input.shape === undefined && existing?.shape === undefined
+      ? {}
+      : { shape: { ...existing?.shape, ...input.shape } }),
+    finish,
+    ...(input.surfaces === undefined && existing?.surfaces === undefined
+      ? {}
+      : { surfaces: { ...existing?.surfaces, ...input.surfaces } }),
+  };
+  const checked = checkStyle(candidate);
+  if (Result.isFailure(checked))
+    return { refusal: `The lock is not valid: ${checked.failure.message.slice(0, 1200)}` };
+  const problem = styleProblem(checked.success);
+  return problem === null
+    ? { style: checked.success }
+    : { refusal: `The lock is not valid: ${problem}` };
+};
+
+/** What of a lock the game's code reads (shell/model.js): its colours, shape, finish and surfaces, every role holding a colour. */
+export const gameLook = (style: GameStyle | null): GameLook => ({
+  ...(style === null ? {} : { view: style.view }),
+  ...(Array.isArray(style?.palette) ? { palette: style.palette } : {}),
+  roles: { ...GAME_STYLE_ROLES, ...style?.roles },
+  ...(style?.shape === undefined ? {} : { shape: style.shape }),
+  ...(style?.finish === undefined ? {} : { finish: style.finish }),
+  ...(style?.surfaces === undefined ? {} : { surfaces: style.surfaces }),
+});
+
+/**
+ * The character preset a lock's proportions ask for, for a character made with no style named:
+ * the same `shape.chunky` the world's trunks and roofs are built by. Null when the lock names none.
+ */
+export const lockedCharacterStyle = (style: GameStyle | null) => {
+  const chunky = style?.shape?.chunky;
+  if (chunky === undefined) return null;
+  const preset =
+    chunky < 0.2 ? "realistic" : chunky < 0.45 ? "heroic" : chunky < 0.75 ? "cartoon" : "chibi";
+  return { preset } as const;
+};
+
+/** Where a game's page finds its look, beside the runtime it loads (and inside an export). */
+export const LOOK_ROUTE = "_kurambit/look.json";
+
+/**
+ * The look as the game's page reads it: JSON of gameLook. A game with no lock, or one that does
+ * not read (the art tools refuse that one loudly), gets the roles' own colours and nothing else.
+ */
+export const gameLookJson = (root: string): Effect.Effect<string> =>
+  Effect.tryPromise(() => NodeFSP.realpath(root)).pipe(
+    Effect.flatMap(readGameStyle),
+    Effect.orElseSucceed(() => null),
+    Effect.map((style) => JSON.stringify(gameLook(style))),
+  );
 
 /** The loudness targets a lock sets, or the defaults without one. */
 export const loudnessTargets = (style: GameStyle | null) => ({

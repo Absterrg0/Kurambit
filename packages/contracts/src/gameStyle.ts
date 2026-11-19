@@ -30,10 +30,74 @@ export const GameStyleView = Schema.Literals(["side", "top-down", "isometric", "
 export type GameStyleView = typeof GameStyleView.Type;
 
 /**
- * STYLE.json: the look a game records. game_assets op add writes it from the
- * style family the agent chooses (GameStyleLock), the person may edit it, and
- * the art tools read it on every call to fill their defaults; none refuses an
- * asset for falling outside it.
+ * The colour each kind of made thing takes when STYLE.json names none: the roles the Blender kit's
+ * world helpers and the code route's shell/model.js colour by, so one lock gives one family.
+ * A lock may name more of its own.
+ */
+export const GAME_STYLE_ROLES = {
+  bark: "#6b4a32",
+  leaf: "#4f8a3c",
+  leaf2: "#6fa84a",
+  stone: "#8a8780",
+  stone2: "#6f6c66",
+  moss: "#5f7a3a",
+  grass: "#6a9a48",
+  grass2: "#8aae52",
+  soil: "#7a5c3c",
+  path: "#b89a6a",
+  sand: "#d8c690",
+  water: "#4a86a8",
+  wall: "#d9cdb4",
+  roof: "#a2523a",
+  trim: "#5a4030",
+  floor: "#9a7650",
+  door: "#6a4a2e",
+  glass: "#9fc4d6",
+  metal: "#8a8f96",
+} as const;
+
+/** How made things are shaped: read by the kit's world helpers and shell/model.js. */
+export const GameStyleShape = Schema.Struct({
+  /** faceted: flat faces and hard edges; soft: smooth shading and rounder forms. */
+  edges: Schema.optionalKey(Schema.Literals(["faceted", "soft"])),
+  /** Metres a built thing's edges are rounded by. */
+  bevel: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 0.2 }))),
+  /** 0 true to life, 1 chunky: thick trunks, big crowns and roofs, squat walls. */
+  chunky: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  /** 0 bare forms, 1 every beam, sill and tuft. */
+  detail: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+});
+export type GameStyleShape = typeof GameStyleShape.Type;
+
+/** flat: plain colours; painted: soft hand-painted surfaces; real: surfaces with full grain and relief. */
+export const GameStyleFinish = Schema.Literals(["flat", "painted", "real"]);
+export type GameStyleFinish = typeof GameStyleFinish.Type;
+
+const Role = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,23}$/));
+/** The made surface a role wears (kurambit.surface): its kind, pattern, tile size in metres and wear. */
+export const GameStyleSurface = Schema.Struct({
+  kind: Schema.String.check(Schema.isMaxLength(24)),
+  pattern: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(24))),
+  metres: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 50 }))),
+  wear: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+});
+
+/** What of a lock made things are built from: served to the game's code and read by the Blender kit. */
+const lookFields = {
+  /** A colour per role (GAME_STYLE_ROLES and the game's own): what made things are coloured by. */
+  roles: Schema.optionalKey(Schema.Record(Role, Hex)),
+  shape: Schema.optionalKey(GameStyleShape),
+  /** Omitted: flat under a hex palette, real without one. */
+  finish: Schema.optionalKey(GameStyleFinish),
+  /** The surface set: the made surface each role wears where the finish is not flat. */
+  surfaces: Schema.optionalKey(Schema.Record(Role, GameStyleSurface)),
+};
+
+/**
+ * STYLE.json: the look a game records. game_assets op lock writes it for what the game makes
+ * (palette by role, shape, finish, surfaces) and op add from a library family (GameStyleLock);
+ * the person may edit it, and the art tools read it on every call to fill their defaults; none
+ * refuses an asset for falling outside it.
  */
 export const GameStyle = Schema.Struct({
   version: Schema.Literal(1),
@@ -98,8 +162,12 @@ export const GameStyle = Schema.Struct({
    * lists may still bring characters on its own rig. Omitted when none is rigged.
    */
   rig: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
-  /** The library packs the game's visuals come from; a pack-id palette is allowed without listing it. */
-  packs: Schema.Array(GameLibraryPackId).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
+  ...lookFields,
+  /**
+   * The library packs the game's visuals come from; a pack-id palette is allowed without listing
+   * it. A game that makes everything lists none.
+   */
+  packs: Schema.optionalKey(Schema.Array(GameLibraryPackId).check(Schema.isMaxLength(32))),
   audio: Schema.optionalKey(
     Schema.Struct({
       /** The library packs the game's sounds and music come from; omitted, sound is not locked. */
@@ -140,6 +208,31 @@ export const GameStyleLock = Schema.Struct({
   view: GameStyleView,
 });
 export type GameStyleLock = typeof GameStyleLock.Type;
+
+/**
+ * game_assets op lock: the look of what the game makes, written into STYLE.json. What it leaves
+ * out keeps its value there; `roles` it does not name come from the palette.
+ */
+export const GameStyleLockInput = Schema.Struct({
+  view: Schema.optionalKey(GameStyleView),
+  /** Hex colours, or a PNG in the game (the key art, the person's reference) to read them from. */
+  palette: Schema.optionalKey(
+    Schema.Union([
+      Schema.Array(Hex).check(Schema.isMinLength(2), Schema.isMaxLength(64)),
+      Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300)),
+    ]),
+  ),
+  ...lookFields,
+});
+export type GameStyleLockInput = typeof GameStyleLockInput.Type;
+
+/** The part of a lock the game's own code reads, served beside the runtime (gameWebServer). */
+export const GameLook = Schema.Struct({
+  view: Schema.optionalKey(GameStyleView),
+  palette: Schema.optionalKey(Schema.Array(Hex)),
+  ...lookFields,
+});
+export type GameLook = typeof GameLook.Type;
 
 export const GAME_STYLE_DEFAULT_MUSIC_LUFS = -23;
 export const GAME_STYLE_DEFAULT_SFX_PEAK_DBTP = -1;

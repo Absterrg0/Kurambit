@@ -110,6 +110,7 @@ import {
   modelChoice,
   lockCharacterRouteRefusal,
   ownRigRefusal,
+  lockedCharacterStyle,
   readGameStyle,
   resolveRig,
   standardClipPacks,
@@ -2423,7 +2424,8 @@ const make = Effect.gen(function* () {
             const fail = (reason: GameOperationError["reason"], detail: string) =>
               Effect.fail(opError("blender-character", root, reason, detail));
             const realRoot = yield* realRootOf(root);
-            const standardPacks = standardClipPacks(yield* readGameStyle(realRoot));
+            const lock = yield* readGameStyle(realRoot);
+            const standardPacks = standardClipPacks(lock);
             let body: Record<string, unknown>;
             if ("library" in input.body) {
               const { pack: id, file } = input.body.library;
@@ -2554,7 +2556,8 @@ const make = Effect.gen(function* () {
                 chains: input.chains ?? [],
                 replace: input.replace ?? false,
                 fit: input.fit ?? null,
-                style: input.style ?? null,
+                // A character with no style named takes the lock's proportions, as the world does.
+                style: input.style ?? lockedCharacterStyle(lock),
                 height: input.height ?? null,
                 heightRange: input.heightRange ?? null,
               })})`,

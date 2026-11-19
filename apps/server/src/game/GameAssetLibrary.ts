@@ -6,6 +6,8 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { LRUCache } from "lru-cache";
 import {
@@ -15,6 +17,7 @@ import {
   type GameAssetsAddResult,
   type GameAssetsSearchInput,
   type GameAssetsSearchResult,
+  GameStyleLockInput,
   GAME_STYLE_FILE,
   type GameLibraryKind,
   manifestProject,
@@ -36,11 +39,14 @@ import {
   loudnessTargets,
   readGameStyle,
   styleFromLock,
+  styleFromLook,
   isClipPack,
   LIBRARY_OFF_REFUSAL,
   modelChoice,
 } from "./gameStyle.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
+import { decodePng } from "./run/spriteFacts.ts";
+import { colourHex, quantize } from "./spriteRender.ts";
 import { hashFile } from "./hashFile.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import {
@@ -131,6 +137,11 @@ export class GameAssetLibrary extends Context.Service<
       threadId: ThreadId,
       input: GameAssetsAddInput,
     ) => Effect.Effect<GameAssetsAddResult, GameOperationError>;
+    /** Write the look of what the game makes into STYLE.json: palette by role, shape, finish, surfaces. */
+    readonly lock: (
+      threadId: ThreadId,
+      input: unknown,
+    ) => Effect.Effect<{ readonly text: string }, GameOperationError>;
     /** The absolute cached path of one pack file, fetching the pack once; refused outside the pack. */
     readonly packFile: (pack: string, path: string) => Effect.Effect<string, GameOperationError>;
     /** The pack's in-place clip libraries (GLBs with clips), each with every clip name it holds. */
@@ -1034,7 +1045,7 @@ const make = Effect.gen(function* () {
       const lockLine =
         style === null
           ? ""
-          : `STYLE.json records this game's look: ${style.family === undefined ? "" : `the ${style.family} family, `}packs ${style.packs.join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}. Its packs come first; any pack may be added.`;
+          : `STYLE.json records this game's look: ${style.family === undefined ? "" : `the ${style.family} family, `}packs ${(style.packs ?? []).join(", ")}${style.rig === undefined ? "" : `, rig ${style.rig}`}. Its packs come first; any pack may be added.`;
       // Browsing: each family's look, its packs on one line, and its sources' counts, so a look
       // can be chosen from the whole library.
       if (
@@ -1517,6 +1528,75 @@ const make = Effect.gen(function* () {
           : `${creditsRel} already credits it.`;
     });
 
+  const decodeLock = Schema.decodeUnknownResult(GameStyleLockInput, {
+    errors: "all",
+    onExcessProperty: "error",
+  });
+  /** The colours of a PNG in the game: a lock's palette read from key art. */
+  const LOCK_COLOURS = 12;
+  const imagePalette = (gameRoot: string, relative: string) =>
+    Effect.gen(function* () {
+      const refuse = (detail: string) => fail("Lock the look", relative, "invalid-input", detail);
+      const real = yield* Effect.promise(() =>
+        NodeFSP.realpath(NodePath.join(gameRoot, relative)).catch(() => null),
+      );
+      if (real === null || !real.startsWith(`${gameRoot}${NodePath.sep}`))
+        return yield* refuse(
+          `No image at ${relative} in this game. palette is a hex list, or a PNG here to read one from.`,
+        );
+      const bytes = yield* Effect.tryPromise({
+        try: () => NodeFSP.readFile(real),
+        catch: io("Lock the look", relative),
+      });
+      const decoded = yield* Effect.promise(() => decodePng(bytes));
+      if ("skip" in decoded)
+        return yield* refuse(`${relative} is not a PNG this can read (${decoded.skip}).`);
+      const colours = quantize([decoded], null, LOCK_COLOURS).map(colourHex);
+      return colours.length >= 2
+        ? colours
+        : yield* refuse(`${relative} holds fewer than two opaque colours.`);
+    });
+
+  const lock = (root: string, fields: unknown) =>
+    Effect.gen(function* () {
+      const decoded = decodeLock(fields);
+      if (Result.isFailure(decoded))
+        return yield* fail(
+          "Lock the look",
+          GAME_STYLE_FILE,
+          "invalid-input",
+          `lock takes view, palette (hex colours, or a PNG in the game), roles {role: "#rrggbb"}, shape {edges: faceted or soft, bevel, chunky, detail}, finish (flat, painted, real) and surfaces {role: {kind, pattern, metres, wear}}: ${decoded.failure.message.slice(0, 800)}`,
+        );
+      const input = decoded.success;
+      const gameRoot = yield* realRootOf(root, "Lock the look");
+      const before = yield* readGameStyle(gameRoot);
+      const palette =
+        input.palette === undefined
+          ? null
+          : typeof input.palette === "string"
+            ? yield* imagePalette(gameRoot, input.palette)
+            : input.palette;
+      const locked = styleFromLook(input, palette, before);
+      if ("refusal" in locked)
+        return yield* fail("Lock the look", GAME_STYLE_FILE, "invalid-input", locked.refusal);
+      yield* writeAtomic(
+        NodePath.join(gameRoot, GAME_STYLE_FILE),
+        `${JSON.stringify(locked.style, null, 2)}\n`,
+        "Lock the look",
+      );
+      const { style } = locked;
+      const roles = Object.entries(style.roles ?? {})
+        .map(([role, hex]) => `${role} ${hex}`)
+        .join(", ");
+      return {
+        text: [
+          `${before === null ? "Wrote" : "Rewrote"} ${GAME_STYLE_FILE}: ${style.finish} finish, ${style.view} view${Array.isArray(style.palette) ? `, a palette of ${style.palette.length}` : ""}${style.anchor === undefined ? "" : `, anchored to ${style.anchor}`}.`,
+          ...(roles === "" ? [] : [`Roles: ${roles}.`]),
+          "Made things take it: the Blender kit's world, surface and material helpers, and shell/model.js (M.role, M.paintOf with a role). What is already built keeps its look until it is made again.",
+        ].join("\n"),
+      };
+    });
+
   /** What a library-off game may still take from a pack: its sounds and fonts. */
   const SOUND_OR_TYPE: ReadonlySet<string> = new Set(["sfx", "music", "font"]);
   const add = (root: string, input: GameAssetsAddInput) =>
@@ -1854,7 +1934,7 @@ const make = Effect.gen(function* () {
         locked === null
           ? []
           : [
-              `${lockBefore === null ? "Wrote" : "Rewrote"} ${GAME_STYLE_FILE}: the ${locked.style.family} family, ${locked.style.mode}, ${locked.style.view} view${locked.style.rig === undefined ? "" : `, rig ${locked.style.rig}`}; packs ${locked.style.packs.join(", ")}. The person may edit it; to change the look, pass lock again.`,
+              `${lockBefore === null ? "Wrote" : "Rewrote"} ${GAME_STYLE_FILE}: the ${locked.style.family} family, ${locked.style.mode}, ${locked.style.view} view${locked.style.rig === undefined ? "" : `, rig ${locked.style.rig}`}; packs ${(locked.style.packs ?? []).join(", ")}. The person may edit it; to change the look, pass lock again.`,
             ];
       const text = [
         ...lockLine,
@@ -1970,6 +2050,8 @@ const make = Effect.gen(function* () {
       Effect.flatMap(projects.resolve(threadId), (root) => search(root, input)),
     add: (threadId, input) =>
       projects.exclusive(threadId, "Library add", (root) => add(root, input)),
+    lock: (threadId, input) =>
+      projects.exclusive(threadId, "Lock the look", (root) => lock(root, input)),
     packFile,
     packClips,
     entry: packOf,

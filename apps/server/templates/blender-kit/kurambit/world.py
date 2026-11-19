@@ -9,8 +9,8 @@ modifiers and geometry nodes.
 Each returns its object, standing on z = 0 at the origin, facing -Y, named name, with colours by
 role (bark, leaf, stone, wall, roof, ...): pass `colours={"leaf": "#5a8f3c"}` to set one, or a
 material (a made surface: `colours={"bark": kurambit.surface("bark", "bark", "#6b4a32")}`), which
-is box-mapped in metres. The look comes from STYLE.json: with a hex palette every role takes its
-nearest palette colour and shapes are faceted; without one they are smooth and denser. `seed` makes
+is box-mapped in metres. The look comes from STYLE.json (kurambit.look): each role's colour and
+surface, faceted or soft shapes. `seed` makes
 another of the same kind: export three seeds of a tree and scatter each in the game (shell/model.js
 M.scatter) for a forest in three draws. Ground, furniture and clutter are built in the game's code."""
 import json
@@ -22,41 +22,21 @@ import bpy
 import numpy as np
 from mathutils import Vector, noise
 
-from . import helpers
+from . import helpers, look
 
-# Each role's own colour when the game has no palette and the caller names none.
-ROLES = {"bark": "#6b4a32", "leaf": "#4f8a3c", "leaf2": "#6fa84a", "stone": "#8a8780", "stone2": "#6f6c66", "moss": "#5f7a3a",
-         "wall": "#d9cdb4", "roof": "#a2523a", "trim": "#5a4030", "floor": "#9a7650", "glass": "#9fc4d6", "door": "#6a4a2e"}
-
-
-def look():
-    """The game's look for made things: {"palette": [hex] | None, "facets": bool}, from STYLE.json
-    in the game root (the live scene's working directory)."""
-    try:
-        with open("STYLE.json", encoding="utf8") as f:
-            style = json.load(f)
-    except (OSError, ValueError):
-        style = {}
-    palette = style.get("palette") if isinstance(style.get("palette"), list) and style.get("palette") else None
-    return {"palette": palette, "facets": palette is not None}
-
-
-def _rgb(h):
-    return np.array([int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)])
-
-
-def _material(role, colours, palette, rough=None):
-    """The material of a role: the caller's colour, else the role's own, on the palette when there is one."""
+def _material(role, colours, lk, rough=None):
+    """The material of a role: the caller's (a colour, or a material such as a made surface), else
+    the look's: its surface where the finish is not flat and the role has one, else its colour."""
     given = (colours or {}).get(role)
-    if isinstance(given, bpy.types.Material):  # a made surface (kurambit.surface), or any material of the game's
+    if isinstance(given, bpy.types.Material):
         return given
-    h = given or ROLES[role]
-    if palette and not given:
-        from .stylepass import _lab  # nearest as the style pass snaps: in Lab
-
-        want = _lab(list(_rgb(h)))
-        h = min(palette, key=lambda p: sum((a - b) ** 2 for a, b in zip(_lab(list(_rgb(p))), want)))
-    return helpers.material(h, name=role.capitalize(), roughness=rough if rough is not None else (0.35 if role == "glass" else 0.8))
+    if given is None and lk["finish"] != "flat" and role in lk["surfaces"]:
+        made = bpy.data.materials.get(role)
+        if made is not None and "kurambit_surface" in made:
+            return made
+        from .surfaces import surface
+        return surface(role)
+    return helpers.material(given or look.colour(role, lk), name=role.capitalize(), roughness=rough if rough is not None else (0.35 if role == "glass" else 0.8))
 
 
 def _new(name, me):
@@ -209,7 +189,7 @@ def tree(name, height=6.0, crown="cone", *, trunk=None, spread=None, limbs=None,
     density: foliage amount (0.5 for a tree that repeats: a forest draws each seed many times);
     bare: the share of the trunk below the crown; lean: metres the top is off the base. Returns
     the object: wood and leaves, two colours."""
-    lk = look()
+    lk = look.read()
     facets = lk["facets"] if facets is None else facets
     rng = np.random.default_rng(seed)
     trunk = trunk or height * 0.035
@@ -298,7 +278,7 @@ def tree(name, height=6.0, crown="cone", *, trunk=None, spread=None, limbs=None,
         dirs.append(np.array([0, 0, 1.0]))
         sizes.append(spread * 0.75)
     wood = _new(name + "_wood", cu)
-    wood.data.materials.append(_material("bark", colours, lk["palette"]))
+    wood.data.materials.append(_material("bark", colours, lk))
     wood = _apply(wood)
     _shade(wood, facets)
     # Foliage: a point per piece, instanced by geometry nodes.
@@ -330,7 +310,7 @@ def tree(name, height=6.0, crown="cone", *, trunk=None, spread=None, limbs=None,
         leaves = _apply(leaves)
     # Realised instances bring an empty material slot of their own.
     leaves.data.materials.clear()
-    leaves.data.materials.append(_material("leaf", colours, lk["palette"]))
+    leaves.data.materials.append(_material("leaf", colours, lk))
     leaves.data.polygons.foreach_set("material_index", [0] * len(leaves.data.polygons))
     _shade(leaves, facets or foliage == "strand", 60)
     out = _wrap(_join(name, [wood, leaves]))
@@ -344,7 +324,7 @@ def rock(name, size=(2.0, 1.6, 1.2), *, sharp=0.5, strata=0.0, cracks=0.3, moss=
     """A rock size (wide, deep, tall) metres. sharp: 0 a water-worn stone, 1 broken and angular;
     strata: 0..1 layered ledges (with a wide, tall size: a cliff face); cracks: 0..1 deep creases;
     moss: 0..1 of its top in the moss colour. Flat under, sitting a little into the ground."""
-    lk = look()
+    lk = look.read()
     facets = lk["facets"] if facets is None else facets
     triangles = triangles or (260 if facets else 2400)
     sx, sy, sz = size
@@ -393,7 +373,7 @@ def rock(name, size=(2.0, 1.6, 1.2), *, sharp=0.5, strata=0.0, cracks=0.3, moss=
         d = o.modifiers.new("thin", "DECIMATE")
         d.ratio = triangles / tris(o)
         o = _apply(o)
-    stone, stone2, mossy = (_material(r, colours, lk["palette"]) for r in ("stone", "stone2", "moss"))
+    stone, stone2, mossy = (_material(r, colours, lk) for r in ("stone", "stone2", "moss"))
     o.data.materials.clear()
     for m in (stone, stone2, mossy):
         o.data.materials.append(m)
@@ -473,9 +453,9 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
     wall and framed, a window glazed, a door hung as its own named part (<name>_door_N, hinged
     at its edge, for the game to swing). interior: a floor in every storey. Colours by role:
     wall, roof, trim, floor, glass, door. Returns the building's object."""
-    lk = look()
+    lk = look.read()
     facets = lk["facets"] if facets is None else facets
-    mat = {r: _material(r, colours, lk["palette"]) for r in ("wall", "roof", "trim", "floor", "glass", "door")}
+    mat = {r: _material(r, colours, lk) for r in ("wall", "roof", "trim", "floor", "glass", "door")}
     if sides:
         r = plan if isinstance(plan, (int, float)) else plan[0] / 2
         ring = [(r * math.sin(2 * math.pi * (k + 0.5) / sides), -r * math.cos(2 * math.pi * (k + 0.5) / sides)) for k in range(sides)]

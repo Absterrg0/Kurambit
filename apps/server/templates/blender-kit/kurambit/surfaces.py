@@ -1,6 +1,7 @@
 """Made surfaces: a material described in a few values, baked to a tiling texture set.
 
   kurambit.surface("oak", "wood", "#9a6b3f", metres=1.5, wear=0.3, pattern="planks")
+  kurambit.surface("wall")     a role of the game's look: its colour and its surface (kurambit.look)
 
 builds the kind's pattern from Blender's own procedural nodes (noise and Voronoi sampled on a flat
 torus, so the tile has no seam; bricks and planks on whole counts), bakes it with Cycles on the
@@ -8,13 +9,14 @@ CPU, and returns a material of that name: a colour texture holding only the patt
 dark, multiplied by the colour (so Art's colour field recolours the whole surface), a normal map
 and an occlusion-roughness-metal map. The files go to <folder>/<name>_color.webp, _normal.webp
 and _orm.webp with <name>.surface.json beside them, which a three.js game names in ASSETS to tile
-the same surface on what it builds in code (shell/assets.js). With a hex palette in STYLE.json the
-pattern is drawn flat in the palette's colour nearest the colour, its dark in a darker palette
-colour of the same hue when there is one; its relief carries the rest.
+the same surface on what it builds in code (shell/assets.js). The look's finish (kurambit.look)
+decides how it is drawn: "real" with its full grain and relief; "painted" soft, in broad strokes
+with little relief; "flat" in two flat tones (under a hex palette, the palette's colour nearest
+the colour and a darker one of the same hue when there is one).
 
 Kinds: wood, bark, stone, metal, cloth, ground, worn (water-worn: smooth, pitted) and painted
-(paint over a base, chipped by wear). pattern: "planks", "bricks" or "tiles" lays the kind in
-courses. metres: how much ground one tile covers. wear: 0 new to 1 old. size: px a side (default
+(paint over a base, chipped by wear). pattern: "planks" (along the tile), "boards" (up it: a door,
+a fence), "bricks" or "tiles" lays the kind in courses. metres: how much ground one tile covers. wear: 0 new to 1 old. size: px a side (default
 STYLE.json's budget.texture, 1024)."""
 import json
 import math
@@ -23,22 +25,23 @@ import os
 import bpy
 import numpy as np
 
-from . import helpers
+from . import helpers, look
 
 KINDS = ("wood", "bark", "stone", "metal", "cloth", "ground", "worn", "painted")
-PATTERNS = (None, "planks", "bricks", "tiles")
+PATTERNS = (None, "planks", "boards", "bricks", "tiles")
 TAU = 2 * math.pi
 
 
 class _Graph:
     """A few node shorthands over one material tree; every value is a socket or a number."""
 
-    def __init__(self, tree):
+    def __init__(self, tree, turned=False):
         self.n, self.l = tree.nodes, tree.links
         uv = self.n.new("ShaderNodeTexCoord")
         sep = self.n.new("ShaderNodeSeparateXYZ")
         self.l.new(uv.outputs["UV"], sep.inputs[0])
-        self.u, self.v = sep.outputs["X"], sep.outputs["Y"]
+        # turned: the pattern drawn a quarter turn round, so what ran along the tile runs up it.
+        self.u, self.v = (sep.outputs["Y"], sep.outputs["X"]) if turned else (sep.outputs["X"], sep.outputs["Y"])
 
     def _set(self, socket, value):
         if isinstance(value, bpy.types.NodeSocket):
@@ -132,7 +135,7 @@ class _Graph:
 def _build(g, kind, pattern, wear):
     """The kind's pattern as (tone 0..1 light and dark, height 0..1, roughness 0..1, metal 0 or 1)."""
     piece, ident = (1.0, 0.5)
-    if pattern == "planks":
+    if pattern in ("planks", "boards"):
         piece, ident = g.courses(6, 2, stagger=0.37, gap=0.035)
     elif pattern == "bricks":
         piece, ident = g.courses(8, 4, stagger=0.5, gap=0.07)
@@ -212,7 +215,7 @@ def _build(g, kind, pattern, wear):
     return tone, height, rough, metal
 
 
-def _bake(build, size):
+def _bake(build, size, turned=False):
     """Bakes build(graph) -> (tone, height, rough, metal) on a plane, as (tone (h, w), data (h, w, 3))."""
     scene = bpy.data.scenes.new("kurambit_surface")
     made = [scene]
@@ -227,7 +230,7 @@ def _bake(build, size):
         tree = mat.node_tree
         for node in list(tree.nodes):
             tree.nodes.remove(node)
-        g = _Graph(tree)
+        g = _Graph(tree, turned)
         tone, height, rough, metal = build(g)
         emit, out = tree.nodes.new("ShaderNodeEmission"), tree.nodes.new("ShaderNodeOutputMaterial")
         tree.links.new(emit.outputs[0], out.inputs["Surface"])
@@ -333,44 +336,64 @@ def _record(folder, name, what, files):
         f.write("\n".join(kept) + "\n")
 
 
-def surface(name, kind, colour, *, metres=1.0, wear=0.3, pattern=None, size=None, folder="web/assets/textures", relief=1.0):
-    """A tiling surface as a material named name: see the module's text. Returns the material;
-    material["kurambit_surface"] holds {files, colour, metres}."""
+def surface(name, kind=None, colour=None, *, metres=None, wear=None, pattern=None, size=None, folder="web/assets/textures", relief=1.0):
+    """A tiling surface as a material named name: see the module's text. With only a name, the
+    surface of that role of the game's look. Returns the material; material["kurambit_surface"]
+    holds {files, colour, metres}."""
+    lk = look.read()
+    if kind is None:
+        if name not in lk["surfaces"]:
+            raise ValueError(f"the look has no surface for {name!r}: pass a kind, or one of {', '.join(lk['surfaces'])}")
+        own = lk["surfaces"][name]
+        kind, pattern = own["kind"], pattern or own.get("pattern")
+        metres, wear = metres or own.get("metres"), own.get("wear") if wear is None else wear
+    colour = look.colour(colour or name, lk)
+    metres, wear = metres or 1.0, 0.3 if wear is None else wear
     if kind not in KINDS:
         raise ValueError(f"surface kind is one of {', '.join(KINDS)}, not {kind!r}")
     if pattern not in PATTERNS:
-        raise ValueError(f"surface pattern is planks, bricks or tiles, not {pattern!r}")
-    style = _style()
-    budget = (style.get("budget") or {}).get("texture") or 1024
+        raise ValueError(f"surface pattern is planks, boards, bricks or tiles, not {pattern!r}")
+    budget = lk["budget"].get("texture") or 1024
     size = int(min(size or budget, budget, 2048))
-    palette = style.get("palette") if isinstance(style.get("palette"), list) and style.get("palette") else None
-    tone, data = _bake(lambda g: _build(g, kind, pattern, float(wear)), size)
+    palette, finish = lk["palette"], lk["finish"]
+    tone, data = _bake(lambda g: _build(g, kind, pattern, float(wear)), size, turned=pattern == "boards")
     height, rough, metal = data[:, :, 0], np.clip(data[:, :, 1], 0.04, 1), np.clip(data[:, :, 2], 0, 1)
     tone = np.clip(tone, 0, 1)
     tone = tone / max(1e-6, float(np.percentile(tone, 99.5)))  # the lightest of the pattern is the colour itself
     base = _hex(colour)
-    if palette:
-        # Flat steps in the palette's own colours: the one nearest the colour, and for the
-        # pattern's dark a darker palette colour of the same hue when the palette has one.
+    if finish == "flat":
+        # Two flat tones. Under a hex palette they are the palette's own: the colour nearest the
+        # colour, and for the pattern's dark a darker one of the same hue when the palette has one.
         lum = np.array([0.2126, 0.7152, 0.0722])
-        from .stylepass import _lab  # nearest as the style pass snaps: in Lab
+        main, shade = colour, None
+        if palette:
+            from .stylepass import _lab  # nearest as the style pass snaps: in Lab
 
-        goal = _lab(list(base))
-        main = min(palette, key=lambda h: sum((a - b) ** 2 for a, b in zip(_lab(list(_hex(h))), goal)))
-        m = _lin(_hex(main))
+            goal = _lab(list(base))
+            main = min(palette, key=lambda h: sum((a - b) ** 2 for a, b in zip(_lab(list(_hex(h))), goal)))
+            m = _lin(_hex(main))
 
-        def same_hue(h):
-            c = _lin(_hex(h))
-            cos = float(c @ m) / max(1e-9, float(np.linalg.norm(c) * np.linalg.norm(m)))
-            return cos > 0.985 and 0.35 < float(c @ lum) / max(1e-9, float(m @ lum)) < 0.92
+            def same_hue(h):
+                c = _lin(_hex(h))
+                cos = float(c @ m) / max(1e-9, float(np.linalg.norm(c) * np.linalg.norm(m)))
+                return cos > 0.985 and 0.35 < float(c @ lum) / max(1e-9, float(m @ lum)) < 0.92
 
-        darker = [h for h in palette if h != main and same_hue(h)]
-        shade = max(darker, key=lambda h: float(_lin(_hex(h)) @ lum)) if darker else main
+            darker = [h for h in palette if h != main and same_hue(h)]
+            shade = max(darker, key=lambda h: float(_lin(_hex(h)) @ lum)) if darker else None
+        dark = _hex(shade) if shade else _srgb(_lin(_hex(main)) * 0.72)
         soft = _blur(tone, max(1, size // 256))
-        colour_px = np.array([_hex(shade), _hex(main)])[(soft > np.percentile(soft, 30)).astype(int)]
+        colour_px = np.array([dark, _hex(main)])[(soft > np.percentile(soft, 30)).astype(int)]
         factor = "#ffffff"
         height = _blur(height, max(1, size // 128))
         relief *= 0.6
+    elif finish == "painted":
+        # Broad soft strokes: the pattern's big shapes kept, its grain blurred away, little relief.
+        soft = _blur(tone, max(2, size // 96))
+        colour_px = _srgb(np.repeat(np.clip(1.0 - (1.0 - soft) * 0.7, 0, 1)[:, :, None], 3, axis=2))
+        factor = colour
+        height = _blur(height, max(2, size // 96))
+        rough = np.clip(_blur(rough, max(2, size // 96)), 0.5, 1)
+        relief *= 0.45
     else:
         colour_px = _srgb(np.repeat(np.clip(tone, 0, 1)[:, :, None], 3, axis=2) ** 1.0)
         factor = colour
