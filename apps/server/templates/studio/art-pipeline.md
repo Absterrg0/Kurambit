@@ -234,8 +234,8 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
 
    Two changes to the same region go one per round. A defect back after two
    fixes is the method's, not the amount's: rebuild that part another way.
-   Stop when nothing blocking is left, or after 8 reviews with what is left
-   named in your reply. A background prop needs one reading.
+   Stop when nothing blocking is left, or when two reviews running fixed
+   nothing: name what is left in your reply. A background prop needs one reading.
 
 6. **Export:** `game_blender` op `export` writes exactly the reviewed model and
    its sidecar; any change after the review needs a new review. Name it in
