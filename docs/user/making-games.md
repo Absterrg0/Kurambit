@@ -87,12 +87,22 @@ tools, with a Web export.
 Your games are listed in the sidebar under **Games**, pinned ones first, then the most recently
 worked on (or by name, from the **⋯** beside **Games**). Each row shows its latest build's picture
 and, at its end, a spinner while an agent works, an amber dot when a chat waits for your answer or
-for you to keep one of several tries, or a red triangle when its build does not start. The open game
-unfolds to its chats, each with when it last moved; any game unfolds with the right arrow or a click
-on the open one, and keeps how you left it. Hover a game for **+** (a new chat) and **⋯** (rename,
-open its folder, pin, archive, delete). Drag a game onto the pinned ones to pin it. Archived games
-wait under **Archived** at the bottom, and **Unarchive** in their menu brings them back; **Delete…**
-removes a game from Kurambit and leaves its folder on disk. Home's cards show the same games.
+for you to keep one of several tries, or a red triangle when its build does not start. A game's row
+is its own chat, the one it was made in. Its other chats still at work are listed under it, each
+with when it last moved; fold them with the left arrow, or a click on the game while its own chat
+is open. Hover a game
+for **+** (a new chat) and **⋯** (rename, open its folder, pin, archive, delete). Drag a game onto
+the pinned ones to pin it. Archived games wait under **Archived** at the bottom, and **Unarchive**
+in their menu brings them back; **Delete…** removes a game from Kurambit and leaves its folder on
+disk. Home's cards show the same games.
+
+When a chat's work is done, **Settle** it: hover it in the sidebar and press the tick, right-click
+it, drag it onto **Settled**, press `mod+shift+S`, or use the chat's menu beside the game's name
+above the stage. It leaves the game's list for the **Settled** shelf at the bottom of the sidebar;
+its builds stay in the game's History. A notice offers **Undo** for five seconds (`mod+Z`).
+**Un-settle** brings it back the same ways, and so does sending it a message. Chats left alone
+settle on their own after three days; change that in **Settings → General → Advanced**. A game's
+own chat never settles: archive the game to put it away.
 
 To continue a game, choose its row or its card under **Your games**, or use **Open a game** (on the
 home screen or in the command palette) and pick a folder that contains `game.json`. A game opens on
@@ -352,8 +362,10 @@ Drag its edge to resize it. Its three sections, each shown once it has arrived:
   numbers, tunable.
 - **Art** (`mod+Alt+R`): every asset the game has, with search and a filter for models, textures
   and sounds. Models (the ones the game's code builds too) and textures show as pictures, with
-  their triangles or size in pixels; sounds show their length and waveform, with a play button;
-  fonts show a line set in them. An asset the last measured play never used is dimmed. A model
+  their triangles or size in pixels; sounds are grouped by what they are for (music, ambience,
+  footsteps, interface, effects), each with a play button, its waveform and its length; fonts
+  show a line set in them. A model or texture the last measured play never used is dimmed, and
+  the count beside **Sounds** narrows the list to the sounds it never played. A model
   built from named parts (an island's cabin, dock and trees) is followed by its parts, each with
   its own picture. Open a model to inspect it: it turns as you drag it, and under it are its
   parts, its **Transform** (scale on each axis, together while the lock is on, its turn, and its
@@ -369,15 +381,15 @@ Drag its edge to resize it. Its three sections, each shown once it has arrived:
   thing in the paused game opens it here while Art is showing (or says it has no model); click the
   same spot again to step out from a part to what holds it. Pointing never changes which section
   the Workbench shows.
-- **Checks**: how many checks pass, over a bar with one mark per check, then what the build changed
-  in words and its files as one line that opens to each file; click a file to open it in the diff.
-  Then the checks, problems first, each with its proof under it: the frame rate through the play
-  with its 1% low, and the draw calls, triangles and download size with how each moved since the
-  build before; the controls as their keys with what each did (amber when the check finds one
-  does nothing; "try it yourself" when the game read it but the play saw nothing change); the
-  phone and widescreen pictures with **Open in responsive view**; the harness's own play to watch;
-  your saved test plays with **Replay**; the errors. Passing checks with nothing to show share one
-  line. When the game logged errors or warnings, its **Console** follows, and the Checks button
+- **Checks**: what the build changed in words, and its files as one line that opens to each file;
+  click a file to open it in the diff. Then its checks: each problem with its proof under it, the
+  controls that are yours to try (the game read the key but the play saw nothing change), and one
+  line for the checks that pass. Open that line, or any check in it, for its proof: the frame
+  rate through the play with its 1% low, and the draw calls, triangles and download size with how
+  each moved since the build before; the controls as their keys with what each did; the phone
+  and widescreen pictures with **Open in responsive view**; the harness's own play to watch; your
+  saved test plays with **Replay**. Checks not measured are one line that opens to each one's
+  reason. When the game logged errors or warnings, its **Console** follows, and the Checks button
   counts the errors. Last come the game's **Decisions**. A build's checks in
   the chat open here. Opening a diff on a narrow window closes the Workbench to give the game room;
   open it again to see both.
@@ -496,7 +508,7 @@ which open the diff), its videos, and in the **⋯** beside the build's name:
 
 When the game folder has changed since its last build, the tab shows **Now on the Stage** first and
 the checks under **Last measured build**, since they belong to that build, not to what plays now.
-Checks not measured for the same reason are said once; the ⓘ beside them says why. **Compare with** the build
+**Compare with** the build
 before it, or **Compare** in the builds list (or **Compare builds…** in the command palette) to pick
 two pictures, shows them side by side in the game's place, each playable, with their checks in a
 table: ↑ and ↓ show which way a check moved, ≠ that it changed without a direction (an ending that
@@ -540,6 +552,8 @@ so instead of guessing.
 
 **Can it be won** is measured only when you ask: ask your agent to prove the game can be won, and
 it writes a play bot for it and has Kurambit play it; after that, **Measure again** plays it too.
+A game with no ending is never held to one: when the play goes on without ending, this is not one
+of its checks.
 Opening or playing a build that was never measured measures it, one build at a time, and a
 three.js game measures each turn's build in the background when the turn ends. A check Kurambit
 could not measure says **Not measured** and why, and never counts as a result: if a tool failed,
