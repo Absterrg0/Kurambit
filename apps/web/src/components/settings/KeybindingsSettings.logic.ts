@@ -408,7 +408,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "game.keepGoing.stop": "Stop Keep going",
   "game.runInCopy": "Run the waiting message in a copy",
   "composer.tryWays": "Try the next message several ways",
-  "chat.new": "New game",
+  "chat.new": "New chat in the open game, or a new game",
   "chat.newLocal": "New chat",
   "chat.newWithoutProject": "New chat without a game",
   "chat.find": "Find in chat",

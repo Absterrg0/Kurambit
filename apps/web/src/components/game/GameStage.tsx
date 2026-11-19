@@ -6,8 +6,10 @@ import { useArrivalDot } from "../../gameArrivalStore";
 import { useGameArrivals } from "./useGameArrivals";
 import { GameStageBar } from "./GameStageControls";
 import {
+  ArchiveIcon,
   CircleStopIcon,
   ChevronDownIcon,
+  CopyIcon,
   PaletteIcon,
   DownloadIcon,
   FilmIcon,
@@ -19,6 +21,8 @@ import {
   PencilIcon,
   PlayIcon,
   RefreshCwIcon,
+  SquarePenIcon,
+  Trash2Icon,
   TriangleAlertIcon,
   WrenchIcon,
   XIcon,
@@ -47,7 +51,7 @@ import {
 } from "../../state/game";
 import { useQuietThreadShell } from "../../state/entities";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
-import { shortcutLabelForCommand } from "../../keybindings";
+import { shortcutLabelForCommand, simplestShortcutLabelForCommand } from "../../keybindings";
 import { shellEnvironment } from "../../state/shell";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentQuerySelector } from "../../state/query";
@@ -92,6 +96,7 @@ import { GameHistory, type GameBuildSlot, type GameStripRequest } from "./GameHi
 import { GameExports } from "./GameExports";
 import { GameChatMenu } from "./GameChatMenu";
 import { GameNameInput, useGameName, useRenameGame } from "./GameName";
+import { useGameActions } from "./useGameActions";
 import { GameStageOverlay } from "./GameStageOverlay";
 import { CODE_MODEL_PREFIX } from "./gameArt.logic";
 import {
@@ -719,6 +724,18 @@ function ThreadGameStage({
   );
   const renameGame = useRenameGame(threadRef.environmentId);
   const [renamingGame, setRenamingGame] = useState(false);
+  // The game as a whole, for what its menu does to it: a new chat, archive, delete.
+  const gameActions = useGameActions();
+  const game =
+    quietShell === null || data === null || data === undefined
+      ? null
+      : {
+          environmentId: threadRef.environmentId,
+          projectId: quietShell.projectId,
+          root: data.root,
+          name: gameName,
+        };
+  const newChatKey = simplestShortcutLabelForCommand(keybindings, "chat.new");
   // The Stage takes the game's own shape: as tall as the column leaves after the
   // top bar, any banner and the builds strip, as wide as that height allows, so
   // the game fills its frame with no letterbox and the strip sits right under it.
@@ -1414,6 +1431,28 @@ function ThreadGameStage({
                 <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
               </MenuTrigger>
               <MenuPopup align="start">
+                {game === null ? null : (
+                  <>
+                    <MenuItem
+                      disabled={!gameActions.canOperate(game)}
+                      onClick={() => gameActions.newChat(game)}
+                    >
+                      <SquarePenIcon />
+                      New chat
+                      {newChatKey === null ? null : <MenuShortcut>{newChatKey}</MenuShortcut>}
+                    </MenuItem>
+                    {gameActions.offersCopy ? (
+                      <MenuItem
+                        disabled={!gameActions.canOperate(game)}
+                        onClick={() => gameActions.newChat(game, { inCopy: true })}
+                      >
+                        <CopyIcon />
+                        New chat in a copy
+                      </MenuItem>
+                    ) : null}
+                    <MenuSeparator />
+                  </>
+                )}
                 <MenuItem disabled={quietShell === null} onClick={() => setRenamingGame(true)}>
                   <PencilIcon />
                   Rename
@@ -1432,6 +1471,26 @@ function ThreadGameStage({
                   <WrenchIcon />
                   Game tools…
                 </MenuItem>
+                {game === null ? null : (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      disabled={!gameActions.canOperate(game) || !gameActions.canArchive(game)}
+                      onClick={() => void gameActions.archive(game)}
+                    >
+                      <ArchiveIcon />
+                      Archive
+                    </MenuItem>
+                    <MenuItem
+                      variant="destructive"
+                      disabled={!gameActions.canOperate(game)}
+                      onClick={() => void gameActions.remove(game)}
+                    >
+                      <Trash2Icon />
+                      Delete…
+                    </MenuItem>
+                  </>
+                )}
               </MenuPopup>
             </Menu>
           )}

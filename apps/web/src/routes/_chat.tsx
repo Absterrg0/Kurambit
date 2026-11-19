@@ -135,8 +135,16 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // A game starts in Home's brief box.
-        newGame();
+        // On a game's screen, a new chat for that game; anywhere else a new game, which starts
+        // in Home's brief box.
+        if (activeThread !== null)
+          void startNewThreadFromContext({
+            activeDraftThread,
+            activeThread,
+            defaultProjectRef,
+            handleNewThread,
+          });
+        else newGame();
         return;
       }
 
