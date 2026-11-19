@@ -70,6 +70,93 @@ export const entryKey = (entry: GameArtEntry) =>
 
 export const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
+/**
+ * PURE. A file as a person names it: no folder, no extension, its words apart and its first
+ * letter raised. "assets/sfx/step-grass.wav" reads "Step grass".
+ */
+export const assetName = (path: string) => {
+  const file = fileName(path);
+  const dot = file.lastIndexOf(".");
+  const words = (dot <= 0 ? file : file.slice(0, dot))
+    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replace(/[-_.\s]+/g, " ")
+    .trim()
+    .toLowerCase();
+  return words === "" ? file : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+};
+
+/** What a sound is for in the game, in the order the list groups them. */
+export const SOUND_PURPOSES = [
+  { id: "music", label: "Music" },
+  { id: "ambience", label: "Ambience" },
+  { id: "steps", label: "Footsteps" },
+  { id: "interface", label: "Interface" },
+  { id: "effects", label: "Effects" },
+] as const;
+export type SoundPurpose = (typeof SOUND_PURPOSES)[number]["id"];
+
+// The words makers and sound packs name each kind by, in a folder or in the file's own name.
+const PURPOSE_WORDS: ReadonlyArray<readonly [SoundPurpose, ReadonlySet<string>]> = [
+  ["music", new Set(["music", "bgm", "soundtrack", "ost", "theme", "song", "jingle", "stinger"])],
+  [
+    "ambience",
+    new Set(["ambience", "ambient", "ambiance", "atmosphere", "atmos", "background", "drone"]),
+  ],
+  ["steps", new Set(["step", "steps", "footstep", "footsteps", "walk", "walking"])],
+  [
+    "interface",
+    new Set([
+      "ui",
+      "interface",
+      "menu",
+      "button",
+      "click",
+      "select",
+      "hover",
+      "confirm",
+      "cancel",
+      "back",
+      "page",
+      "tab",
+      "toggle",
+      "notification",
+      "notify",
+      "popup",
+    ]),
+  ],
+];
+
+/**
+ * PURE. What a sound is for, read from where it is kept and what it is called: a `music/`
+ * folder or "footstep-wood" in its name. A folder says more than a name ("music/night-theme"
+ * is music); anything that says nothing is an effect, as a splash or a hit is.
+ */
+export const soundPurpose = (path: string): SoundPurpose => {
+  const parts = path.toLowerCase().split("/");
+  const wordsOf = (text: string) =>
+    text
+      .replace(/\.[a-z\d]+$/, "")
+      .split(/[^a-z]+/)
+      .filter(Boolean);
+  const folders = parts.slice(0, -1).flatMap(wordsOf);
+  const name = wordsOf(parts.at(-1) ?? "");
+  for (const words of [folders, name])
+    for (const [purpose, known] of PURPOSE_WORDS)
+      if (words.some((word) => known.has(word))) return purpose;
+  return "effects";
+};
+
+/** PURE. Sounds grouped by what they are for, each group by name; a group with none is left out. */
+export const soundGroups = <A extends { readonly path: string }>(sounds: ReadonlyArray<A>) =>
+  SOUND_PURPOSES.map((purpose) => ({
+    ...purpose,
+    sounds: sounds
+      .filter((sound) => soundPurpose(sound.path) === purpose.id)
+      .toSorted((left, right) =>
+        assetName(left.path).localeCompare(assetName(right.path), undefined, { numeric: true }),
+      ),
+  })).filter((group) => group.sounds.length > 0);
+
 export const ROUTE_WORDS: Record<GameArtAssetRoute, string> = {
   code: "Code",
   blender: "Blender",

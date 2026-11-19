@@ -77,7 +77,9 @@ import {
   codeModels,
   countWords,
   entryKey,
+  assetName,
   fileName,
+  soundGroups,
   inPlayWords,
   isUnused,
   modelName,
@@ -408,18 +410,13 @@ function ArtList({
             </section>
           ))}
           {shown.sounds.length === 0 || root === null ? null : (
-            <ArtGroup label="Sounds" count={shown.sounds.length}>
-              {shown.sounds.map((asset) => (
-                <SoundRow
-                  key={asset.path}
-                  threadRef={threadRef}
-                  root={root}
-                  asset={asset}
-                  unused={isUnused(asset, use)}
-                  onOpen={() => onOpen({ kind: "file", asset })}
-                />
-              ))}
-            </ArtGroup>
+            <SoundsSection
+              threadRef={threadRef}
+              root={root}
+              sounds={shown.sounds}
+              use={use}
+              onOpen={(asset) => onOpen({ kind: "file", asset })}
+            />
           )}
           {shown.fonts.length === 0 || root === null ? null : (
             <ArtGroup label="Fonts" count={shown.fonts.length}>
@@ -449,21 +446,26 @@ function ArtList({
 function ArtGroup({
   label,
   count,
+  aside,
   children,
 }: {
   label: string;
   count: number;
+  /** One control at the heading's end. */
+  aside?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section aria-label={label} className="flex flex-col">
-      <div className="flex h-7 items-center gap-2 px-4">
+      <div className="flex h-7 items-center gap-2 ps-4 pe-3">
         <Text variant="meta" tone="muted">
           {label}
         </Text>
         <Text variant="caption" tone="dim" numeric>
           {count}
         </Text>
+        <span className="flex-1" />
+        {aside}
       </div>
       {children}
     </section>
@@ -559,7 +561,7 @@ function ArtTile({
   const [pixels, setPixels] = useState<string | null>(null);
   const facts = useThingFacts(threadRef, build, entry.kind === "code-model" ? entry.id : "");
   const unused = entry.kind === "file" && isUnused(entry.asset, use);
-  const name = entry.kind === "file" ? fileName(entry.asset.path) : modelName(entry);
+  const name = entry.kind === "file" ? assetName(entry.asset.path) : modelName(entry);
   const fact = unused
     ? "Unused"
     : entry.kind === "code-model"
@@ -689,22 +691,90 @@ function TexturePicture({
   );
 }
 
-const WAVE_W = 120;
-const WAVE_H = 20;
-const WAVE_BARS = 40;
+/**
+ * The game's sounds, grouped by what they are for: each group named once beside its first
+ * sound. How many of them the build's plays never played is one count at the heading, which
+ * narrows the list to those; no row says it.
+ */
+function SoundsSection({
+  threadRef,
+  root,
+  sounds,
+  use,
+  onOpen,
+}: {
+  threadRef: ScopedThreadRef;
+  root: string;
+  sounds: ReadonlyArray<GameArtAsset>;
+  use: GameAssetUse | null;
+  onOpen: (asset: GameArtAsset) => void;
+}) {
+  const [unplayedOnly, setUnplayedOnly] = useState(false);
+  const unplayed = sounds.filter((asset) => isUnused(asset, use));
+  const narrowed = unplayedOnly && unplayed.length > 0;
+  const groups = soundGroups(narrowed ? unplayed : sounds);
+  return (
+    <ArtGroup
+      label="Sounds"
+      count={sounds.length}
+      aside={
+        unplayed.length === 0 ? undefined : (
+          <Toggle
+            size="segmented"
+            variant="outline"
+            data-sounds-unplayed=""
+            pressed={narrowed}
+            onPressedChange={setUnplayedOnly}
+          >
+            {/* Pressed, it says the way back: the two states never look alike. */}
+            {narrowed ? `Show all ${sounds.length}` : `${unplayed.length} not played yet`}
+          </Toggle>
+        )
+      }
+    >
+      <ul className="flex flex-col">
+        {groups.map((group, groupIndex) =>
+          group.sounds.map((asset, index) => (
+            // A group's first row stands a little off the group before it.
+            <li
+              key={asset.path}
+              className={cn("list-none", index === 0 && groupIndex > 0 && "mt-1.5")}
+            >
+              <SoundRow
+                threadRef={threadRef}
+                root={root}
+                asset={asset}
+                // Its group, said once: beside the group's first sound.
+                group={index === 0 ? group.label : null}
+                onOpen={() => onOpen(asset)}
+              />
+            </li>
+          )),
+        )}
+      </ul>
+    </ArtGroup>
+  );
+}
 
-/** One sound: play, its name and length, its waveform, and "Unused" when no play used it. */
+const WAVE_W = 72;
+const WAVE_H = 16;
+const WAVE_BARS = 24;
+
+/**
+ * One sound: what it is for (on its group's first row), play, its name, its waveform drawn
+ * quietly, and its length.
+ */
 function SoundRow({
   threadRef,
   root,
   asset,
-  unused,
+  group,
   onOpen,
 }: {
   threadRef: ScopedThreadRef;
   root: string;
   asset: GameArtAsset;
-  unused: boolean;
+  group: string | null;
   onOpen: () => void;
 }) {
   const state = useAssetUrlState(threadRef.environmentId, {
@@ -716,21 +786,25 @@ function SoundRow({
   const wave = useSoundPeaks(url, asset.sha256);
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  const name = assetName(asset.path);
   const peaks =
     wave === null || wave === "failed"
       ? []
       : Array.from({ length: WAVE_BARS }, (_, bar) => {
           const from = Math.floor((bar / WAVE_BARS) * wave.peaks.length);
           const to = Math.max(from + 1, Math.floor(((bar + 1) / WAVE_BARS) * wave.peaks.length));
-          return Math.max(...wave.peaks.slice(from, to), 0.02);
+          return Math.max(...wave.peaks.slice(from, to), 0.04);
         });
   return (
-    <div className={cn("flex h-9 min-w-0 items-center gap-2 ps-2 pe-4", unused && "opacity-55")}>
+    <div className="flex h-8 min-w-0 items-center gap-1 ps-4 pe-4">
+      <Text variant="caption" tone="muted" truncate render={<span className="w-16 shrink-0" />}>
+        {group}
+      </Text>
       <Button
         size="icon-sm"
         variant="ghost"
         disabled={url === null}
-        aria-label={playing ? `Pause ${fileName(asset.path)}` : `Play ${fileName(asset.path)}`}
+        aria-label={playing ? `Pause ${name}` : `Play ${name}`}
         onClick={() => {
           if (audio.current === null) return;
           if (playing) audio.current.pause();
@@ -742,13 +816,10 @@ function SoundRow({
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md ps-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         <Text variant="meta" tone="default" truncate render={<span className="flex-1" />}>
-          {fileName(asset.path)}
-        </Text>
-        <Text variant="caption" tone="muted" numeric render={<span className="shrink-0" />}>
-          {wave === null || wave === "failed" ? "" : clipTime(wave.seconds)}
+          {name}
         </Text>
         <svg
           viewBox={`0 0 ${WAVE_W} ${WAVE_H}`}
@@ -766,17 +837,18 @@ function SoundRow({
               y={(WAVE_H - peak * WAVE_H) / 2}
               height={Math.max(1, peak * WAVE_H)}
               rx={0.5}
-              className="fill-muted-foreground"
+              className="fill-dim-foreground"
             />
           ))}
         </svg>
-        {unused ? (
-          <Text variant="caption" tone="muted" render={<span className="w-11 shrink-0" />}>
-            Unused
-          </Text>
-        ) : (
-          <span className="w-11 shrink-0" />
-        )}
+        <Text
+          variant="caption"
+          tone="muted"
+          numeric
+          render={<span className="w-10 shrink-0 text-end" />}
+        >
+          {wave === null || wave === "failed" ? "" : clipTime(wave.seconds)}
+        </Text>
       </button>
       {url === null ? null : (
         <audio
