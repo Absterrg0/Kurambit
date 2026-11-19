@@ -533,12 +533,17 @@ function StyleRow({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
   const style = file.data == null ? null : Option.getOrNull(decodeStyle(file.data.contents));
   if (style === null) return null;
-  const swatches = Array.isArray(style.palette) ? style.palette : [];
+  // A made look with no palette (a painted or real finish) is seen by its roles' colours.
+  const swatches = Array.isArray(style.palette)
+    ? style.palette
+    : [...new Set(Object.values(style.roles ?? {}))];
   const name =
     style.family === undefined || style.family === null
       ? typeof style.palette === "string"
         ? style.palette
-        : null
+        : style.finish === undefined
+          ? null
+          : `${style.finish.charAt(0).toUpperCase()}${style.finish.slice(1)}`
       : styleFamilyWords(style.family);
   if (swatches.length === 0 && name === null) return null;
   return (
