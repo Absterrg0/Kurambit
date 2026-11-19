@@ -189,7 +189,7 @@ critique beside the sheet, quoting those numbers; the agent's final check lists 
 and anything still open. The gates are numbers, not taste: its height within the range the brief
 means (an adult 1.5 to 2 m unless the brief says a child, a chibi or a cat), no part torn or
 crushed in any move, clothes staying outside the body, feet planted without sliding on its walk
-and run, and its triangles, materials and textures within budget. Open the model in **Art** to see
+and run, and its triangles and textures within budget. Open the model in **Art** to see
 the sheet and the critique.
 
 Before a character or prop made in Blender reaches the game, the agent reviews it: one image with a

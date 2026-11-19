@@ -29,6 +29,9 @@ export const packGlb = Effect.fn("glbPack.pack")(function* <E>(
           "-ke",
           "-af",
           "0",
+          // Colours at 12 bits: the default 8, taken of linear values, moves a dark flat colour by several levels.
+          "-vc",
+          "12",
           ...(options.meshopt ? ["-cc"] : []),
           ...(options.simplify === undefined ? [] : ["-si", options.simplify.ratio.toFixed(4)]),
         ],

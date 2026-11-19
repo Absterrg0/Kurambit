@@ -100,7 +100,7 @@ class Gates(unittest.TestCase):
     def test_height_and_budget(self):
         self.assertTrue(gates.height(1.72, 1.5, 2.0)["pass"])
         self.assertFalse(gates.height(2.63, 1.5, 2.0)["pass"])
-        b = gates.budget(25000, 3, [{"width": 2048, "height": 1024}], {"triangles": 20000, "materials": 8, "texture": 1024})
+        b = gates.budget(25000, 3, [{"width": 2048, "height": 1024}], {"triangles": 20000, "texture": 1024})
         self.assertFalse(b["pass"])
         self.assertIn("25000 triangles over 20000", b["text"])
 

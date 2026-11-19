@@ -149,13 +149,13 @@ def feet(track, rest_z, planted, ground_speed, fps, forward=(0.0, -1.0, 0.0)):
 
 
 def budget(triangles, materials, textures, limits):
-    """limits: {"triangles", "materials", "texture"} (a texture's longest side, px)."""
+    """limits: {"triangles", "texture"} (a texture's longest side, px). Materials are counted, never
+    limited: the style pass folds flat colours into one, and what is left (a texture, a glow, a
+    metal) is each a draw call the game's Performance row already counts."""
     side = max([max(t["width"], t["height"]) for t in textures] or [0])
     over = []
     if triangles > limits["triangles"]:
         over.append(f"{triangles} triangles over {limits['triangles']}")
-    if materials > limits["materials"]:
-        over.append(f"{materials} materials over {limits['materials']}")
     if side > limits["texture"]:
         over.append(f"a {side} px texture over {limits['texture']} px")
     return gate("budget", not over, int(triangles), limits,

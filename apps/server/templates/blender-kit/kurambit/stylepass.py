@@ -7,7 +7,9 @@ agent's materials and modifiers. From STYLE.json:
            one small atlas of vertical-gradient swatches (shading.gradient); each face samples its
            swatch by height in the model, so every part gets the same soft top light. Two
            materials result, Palette and Glow (shading.glow), on the one atlas. Without a hex list
-           the materials are kept, their textures scaled down to budget.texture.
+           the materials are kept, their textures scaled down to budget.texture, and the flat
+           colours that share a finish become one material painted per vertex (fold_flat), so a
+           colour costs no draw call.
   scale    scale.character: a character is scaled to that standing height on its armature's
            object, so clip units are unchanged. Props, models on their own rig (kurambit_rig: a
            creature, a vehicle) and characters with a declared height keep their modelled metres.
@@ -297,6 +299,90 @@ def snap_palette(meshes, hexes, shading, out_dir):
     return [hexes[k] for k in sorted(used)]
 
 
+# What makes two flat materials one finish: every Principled input the glTF export writes, but the colour.
+_FINISH = ("Roughness", "Metallic", "IOR", "Specular IOR Level", "Transmission Weight", "Coat Weight", "Coat Roughness", "Sheen Weight")
+PAINT = "Col"
+MAX_PAINTS = 64
+
+
+def _flat(m):
+    """(sRGB colour, finish) of a material that is one flat opaque colour with nothing plugged in,
+    or None: a textured, glowing or see-through one keeps its own material."""
+    if m is None or m.node_tree is None:
+        return None
+    bsdfs = [n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"]
+    if len(bsdfs) != 1 or any(i.is_linked for i in bsdfs[0].inputs):
+        return None
+    b = bsdfs[0].inputs
+    if b["Alpha"].default_value < 0.999:
+        return None
+    if b["Emission Strength"].default_value > 0.01 and max(b["Emission Color"].default_value[:3]) > 0.01:
+        return None
+    finish = tuple(round(float(b[k].default_value), 2) for k in _FINISH if k in b) + (bool(m.use_backface_culling),)
+    return [_srgb(x) for x in b["Base Color"].default_value[:3]], finish
+
+
+def fold_flat(meshes):
+    """Flat-colour materials that share a finish become one material, Paint, each colour painted
+    per vertex: a hero in twenty colours draws as one mesh in one call, so a colour is free. A
+    finish only one material has, and a mesh that already carries vertex colours, stay as they
+    are. Returns [{"colour": "#rrggbb", "name": the material it was}] for the sidecar, so Art names
+    each colour as its maker did."""
+    flats = {}
+    for o in meshes:
+        if len(o.data.color_attributes) > 0:
+            continue
+        for s in o.material_slots:
+            f = _flat(s.material)
+            if f is not None:
+                flats[s.material] = f
+    groups = {}
+    for m, (_, finish) in flats.items():
+        groups.setdefault(finish, []).append(m)
+    into, paints = {}, {}
+    for n, mats in enumerate(g for g in groups.values() if len(g) > 1):
+        paint = sorted(mats, key=lambda m: m.name)[0].copy()
+        paint.name = "Paint" if n == 0 else f"Paint {n + 1}"
+        nt = paint.node_tree
+        bsdf = next(nd for nd in nt.nodes if nd.type == "BSDF_PRINCIPLED")
+        bsdf.inputs["Base Color"].default_value = (1, 1, 1, 1)
+        col = nt.nodes.new("ShaderNodeVertexColor")
+        col.layer_name = PAINT
+        nt.links.new(col.outputs["Color"], bsdf.inputs["Base Color"])
+        for m in mats:
+            into[m] = paint
+            hexed = "#%02x%02x%02x" % tuple(round(max(0.0, min(1.0, c)) * 255) for c in flats[m][0])
+            paints.setdefault(hexed, m.name)
+    if not into:
+        return []
+    for o in meshes:
+        me = o.data
+        if len(me.color_attributes) > 0 or not any(s.material in into for s in o.material_slots):
+            continue
+        slots = [s.material for s in o.material_slots]
+        mat_index = np.empty(len(me.polygons), np.int32)
+        me.polygons.foreach_get("material_index", mat_index)
+        mat_index = np.minimum(mat_index, len(slots) - 1)
+        # glTF's COLOR_0 is linear; a face of a material that keeps its own stays white under it.
+        colour = np.array([[_lin(c) for c in flats[m][0]] + [1.0] if m in into else [1.0] * 4 for m in slots])
+        loop_poly = np.repeat(np.arange(len(me.polygons)), [p.loop_total for p in me.polygons])
+        attr = me.color_attributes.new(PAINT, "FLOAT_COLOR", "CORNER")
+        attr.data.foreach_set("color", colour[mat_index][loop_poly].ravel().astype(np.float32))
+        me.color_attributes.active_color = attr
+        me.color_attributes.render_color_index = 0
+        kept = []
+        for m in slots:
+            m = into.get(m, m)
+            if m not in kept:
+                kept.append(m)
+        remap = np.array([kept.index(into.get(m, m)) for m in slots], np.int32)
+        me.materials.clear()  # this resets every face's material index: set them again below
+        for m in kept:
+            me.materials.append(m)
+        me.polygons.foreach_set("material_index", remap[mat_index])
+    return [{"colour": c, "name": n[:64]} for c, n in list(paints.items())[:MAX_PAINTS]]
+
+
 def fit_textures(meshes, side):
     """Every texture the meshes use, at most side px on its longer side: one over it is scaled down
     (Blender's image scale, aspect kept) into a new packed image, so the source file is never
@@ -365,7 +451,7 @@ def character_scale(arms, meshes, style):
 
 def style_pass(objects, style, out_dir, texture_side):
     """Runs the pass on objects (the resolved candidate, in this one-shot copy). Returns
-    {kind, meshes, armatures, usedPalette, scaled, notes}."""
+    {kind, meshes, armatures, usedPalette, scaled, notes, paints}."""
     style = style or {}
     objects = [realize(o) if o.type in helpers.GEOMETRY else o for o in objects]
     arms = [o for o in objects if o.type == "ARMATURE"]
@@ -374,12 +460,13 @@ def style_pass(objects, style, out_dir, texture_side):
         meshes = join_character(arm, meshes)
     shading = {**DEFAULT_SHADING, **(style.get("shading") or {})}
     palette = style.get("palette")
-    notes = []
+    notes, paints = [], []
     if isinstance(palette, list) and palette:
         used = snap_palette(meshes, palette, shading, out_dir)
     else:
         used = []
         notes = fit_textures(meshes, texture_side)
+        paints = fold_flat(meshes)
     scaled = character_scale(arms, meshes, style)
     if scaled is not None:
         for arm in arms:
@@ -388,4 +475,4 @@ def style_pass(objects, style, out_dir, texture_side):
     for o in meshes:
         o.data.validate()
     return {"kind": "character" if arms else "prop", "meshes": meshes, "armatures": arms, "usedPalette": used,
-            "scaled": scaled, "notes": notes}
+            "scaled": scaled, "notes": notes, "paints": paints}

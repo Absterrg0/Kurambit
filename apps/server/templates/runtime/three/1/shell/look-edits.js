@@ -205,7 +205,7 @@ const familyOf = (material) =>
 // ─── Vertex colours ─────────────────────────────────────────────────────────────
 
 /** How many of a material's vertex colours are values of its look: a palette, not a gradient. */
-const MAX_PAINTS = 12;
+const MAX_PAINTS = 32;
 /** A mesh past this many vertices is not read for its colours. */
 const MAX_PAINT_VERTICES = 2_000_000;
 const PAINT = "/paint:";
@@ -265,9 +265,30 @@ const repaintable = (own) => {
   geometryOwners.set(copy, own);
   return copy;
 };
+// An exported model's sidecar names the colours its flat materials were folded into
+// (`paints`: the colour and the material it was): [[0xRRGGBB, name]], from the model the node is in.
+const sidecarPaints = (node) => {
+  for (let at = node; at != null; at = at.parent) {
+    const paints = at.userData?.asset?.paints;
+    if (Array.isArray(paints))
+      return paints.flatMap((paint) =>
+        typeof paint?.colour === "string" && human(paint.name) !== null
+          ? [[parseInt(paint.colour.slice(1), 16), human(paint.name)]]
+          : [],
+      );
+  }
+  return [];
+};
+// The export's packer quantises colours, so a vertex reads a level or two off what was written.
+const NEAR = 3;
+const near = (a, b) =>
+  Math.abs((a >> 16) - (b >> 16)) <= NEAR &&
+  Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) <= NEAR &&
+  Math.abs((a & 255) - (b & 255)) <= NEAR;
 /**
  * The colours a material's meshes are painted with per vertex, most used first: up to MAX_PAINTS
- * as `listed` ({ hex, key, word }), and how many `more` there are. Null when it paints none.
+ * as `listed` ({ hex, key, word }), and how many `more` there are. Null when it paints none. A
+ * colour is called what its model's sidecar calls it ("Sweater"), else by its family ("orange").
  */
 const entryPaints = (entry) => {
   if (entry.paints !== undefined) return entry.paints;
@@ -283,9 +304,12 @@ const entryPaints = (entry) => {
   if (counts.size === 0) return null;
   const most = [...counts].sort((a, b) => b[1] - a[1]).slice(0, MAX_PAINTS);
   const said = new Map();
+  const named = entry.nodes.length > 0 ? sidecarPaints(entry.nodes[0]) : [];
   entry.paints = {
     listed: most.map(([hex]) => {
-      const family = familyOfColour(SHADE.setHex(hex)).toLowerCase();
+      const family =
+        named.find(([colour]) => near(colour, hex))?.[1] ??
+        familyOfColour(SHADE.setHex(hex)).toLowerCase();
       const count = (said.get(family) ?? 0) + 1;
       said.set(family, count);
       return { hex, key: paintKey(entry, hex), word: count === 1 ? family : `${family} ${count}` };

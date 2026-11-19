@@ -165,7 +165,9 @@ check that matters.
   separate one-shot Blender on a saved copy of the live scene, and `game_blender` op `export` writes
   exactly that candidate or refuses when the scene changed since; a refusal is only for what the
   agent or person must change, while the pass fixes what it can (it scales over-budget textures
-  and says so). Where the player downloads the GLB itself (three.js, `compressedModels` in the
+  and says so). With no palette lock it also folds a model's flat colours that share a finish into
+  one material painted per vertex, and the sidecar keeps each colour's material name (`paints`)
+  for Art: a colour must cost nothing, or a material count becomes a reason to drop a detail. Where the player downloads the GLB itself (three.js, `compressedModels` in the
   profile) the pass writes WebP images and the export then meshopt-compresses the geometry with
   gltfpack: Blender cannot import meshopt, so the review measures the uncompressed candidate and
   the sidecar names the shipped bytes and triangles, which keeps the asset fact valid. The asset is its sidecar `<name>.asset.json` (skeleton, clips with ground speed,

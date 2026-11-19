@@ -124,7 +124,9 @@ true` swings arms out of the torso, `calm` (0..1) calms a waddle or a
    rolling head on a wide or big-headed body.
 3. **Parts** with `game_blender` op `code`, in world space at the rest pose.
    `import kurambit` first in each call (every call starts afresh):
-   - `kurambit.material("#RRGGBB", glow=0)`: a colour by palette role;
+   - `kurambit.material("#RRGGBB", glow=0, name="Brass")`: a colour by
+     palette role. Use as many as the concept has: the export folds flat
+     colours into one material, and Art lists each by its name;
    - `kurambit.skin_rigid(obj, "Head")`, or a `{bone: weight}` dict, or a
      function of a vertex's world position (with `armature=`): binds a part;
    - `kurambit.place_on_surface(obj, target, (0, 1, 0), offset=0.002)`:

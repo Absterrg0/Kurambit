@@ -20,7 +20,6 @@ from .skeleton import assign_action
 DEFORM_FRAMES = 8
 LOCOMOTION = ("walk", "run", "jog", "sprint", "trot", "gallop", "canter", "hop")
 STANDARD_FEET = ("ball_l", "ball_r")
-MATERIALS_MAX = 8
 
 
 def _clip_name(a):
@@ -316,8 +315,7 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
     tris = sum(len(p.vertices) - 2 for o in meshes for p in o.data.polygons)
     mats = len({s.material.name for o in meshes for s in o.material_slots if s.material})
     textures = [{"width": i.size[0], "height": i.size[1]} for i in bpy.data.images if i.size[0] > 0 and i.users > 0]
-    out.append(gates.budget(tris, mats, textures, {"triangles": budgets["character"], "materials": budgets.get("materials", MATERIALS_MAX),
-                                                   "texture": budgets["texture"]}))
+    out.append(gates.budget(tris, mats, textures, {"triangles": budgets["character"], "texture": budgets["texture"]}))
     return out
 
 

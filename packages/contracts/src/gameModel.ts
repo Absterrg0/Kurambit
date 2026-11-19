@@ -147,6 +147,15 @@ export const GameModelMeasure = Schema.Struct({
   /** Share of the skin's area passing through other skin, %: at rest, and on one fixed bent pose (null off the standard skeleton). */
   skinThrough: Schema.optionalKey(Schema.Struct({ rest: Percent, bent: Schema.NullOr(Percent) })),
   face: Schema.optionalKey(GameModelFace),
+  /** The flat colours the pass folded into one material painted per vertex, each with the name of the material it was. */
+  paints: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        colour: Schema.String.check(Schema.isPattern(/^#[0-9a-f]{6}$/)),
+        name: Schema.String.check(Schema.isMaxLength(64)),
+      }),
+    ).check(Schema.isMaxLength(64)),
+  ),
   /** A character's gates, measured on its clips before the style pass joins its meshes. */
   gates: Schema.optionalKey(Schema.Array(GameModelGate).check(Schema.isMaxLength(8))),
 });
@@ -184,7 +193,7 @@ export const GameModelRefusalCode = Schema.Literals([
   "hero-deformation", // edges torn past the deformation gate on a clip
   "hero-cloth", // clothing sunk into the body on a clip
   "hero-feet", // planted feet off the ground or skating on a walk or run
-  "hero-budget", // over the triangles, materials or texture size a hero may have
+  "hero-budget", // over the triangles or texture size a hero may have
 ]);
 export const GameModelRefusal = Schema.Struct({
   code: GameModelRefusalCode,
