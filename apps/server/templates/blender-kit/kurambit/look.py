@@ -10,18 +10,19 @@ hand-painted surfaces) or "real" (full grain and relief); flat under a hex palet
 facets: flat faces and hard edges (shape.edges "faceted", the default under a hex palette). bevel:
 metres an edge is rounded by. chunky: 0 true to life, 1 thick trunks, big crowns and roofs. detail:
 0 bare forms, 1 every beam, sill and tuft. surfaces: the made surface each role wears where the
-finish is not flat, the lock's over SURFACES."""
+finish is not flat, the lock's over SURFACES. character: a character's height in metres, which a
+doorway is cut to fit."""
 import json
 
 # Each role's own colour when the lock names none: packages/contracts GAME_STYLE_ROLES holds the same.
 ROLES = {"bark": "#6b4a32", "leaf": "#4f8a3c", "leaf2": "#6fa84a", "stone": "#8a8780", "stone2": "#6f6c66", "moss": "#5f7a3a",
          "grass": "#6a9a48", "grass2": "#8aae52", "soil": "#7a5c3c", "path": "#b89a6a", "sand": "#d8c690", "water": "#4a86a8",
-         "wall": "#d9cdb4", "roof": "#a2523a", "trim": "#5a4030", "floor": "#9a7650", "door": "#6a4a2e", "glass": "#9fc4d6", "metal": "#8a8f96"}
+         "wall": "#d9cdb4", "roof": "#a2523a", "trim": "#5a4030", "floor": "#9a7650", "door": "#6a4a2e", "glass": "#9fc4d6", "metal": "#8a8f96", "cloth": "#b5483a"}
 # The surface each role wears when the finish is not flat and the lock names none.
 SURFACES = {"wall": {"kind": "painted", "metres": 3.0, "wear": 0.3}, "roof": {"kind": "painted", "pattern": "tiles", "metres": 1.6, "wear": 0.35},
             "floor": {"kind": "wood", "pattern": "planks", "metres": 2.0}, "door": {"kind": "wood", "pattern": "boards", "metres": 1.0, "wear": 0.4},
             "trim": {"kind": "wood", "metres": 1.2, "wear": 0.4}, "bark": {"kind": "bark", "metres": 1.5},
-            "stone": {"kind": "stone", "metres": 2.5, "wear": 0.4}, "path": {"kind": "ground", "metres": 2.0}}
+            "stone": {"kind": "stone", "metres": 2.5, "wear": 0.4}, "stone2": {"kind": "stone", "metres": 2.5, "wear": 0.4}, "path": {"kind": "ground", "metres": 2.0}}
 
 
 def read():
@@ -36,7 +37,8 @@ def read():
             "finish": style.get("finish") or ("flat" if palette else "real"),
             "facets": (shape.get("edges") or ("faceted" if palette else "soft")) == "faceted",
             "bevel": shape.get("bevel", 0.025), "chunky": shape.get("chunky", 0.3 if palette else 0.0), "detail": shape.get("detail", 0.6),
-            "surfaces": {**SURFACES, **(style.get("surfaces") or {})}, "budget": style.get("budget") or {}}
+            "surfaces": {**SURFACES, **(style.get("surfaces") or {})}, "budget": style.get("budget") or {},
+            "character": (style.get("scale") or {}).get("character") or 1.8}
 
 
 def colour(role, lk=None):

@@ -360,6 +360,9 @@ def surface(name, kind=None, colour=None, *, metres=None, wear=None, pattern=Non
     height, rough, metal = data[:, :, 0], np.clip(data[:, :, 1], 0.04, 1), np.clip(data[:, :, 2], 0, 1)
     tone = np.clip(tone, 0, 1)
     tone = tone / max(1e-6, float(np.percentile(tone, 99.5)))  # the lightest of the pattern is the colour itself
+    # ... and the whole of it reads as that colour: a pattern that is mostly dark is lifted, so a
+    # role's surface comes out the colour the look names and not a shade of it.
+    tone = 1.0 - (1.0 - tone) * min(1.0, 0.2 / max(1e-6, 1.0 - float(tone.mean())))
     base = _hex(colour)
     if finish == "flat":
         # Two flat tones. Under a hex palette they are the palette's own: the colour nearest the

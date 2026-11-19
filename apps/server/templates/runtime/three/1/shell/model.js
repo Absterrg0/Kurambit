@@ -39,6 +39,10 @@
 //   M.stats(merged);              // { triangles, drawCalls, size: [x, y, z] in metres }
 //   M.scatter(M.merge(tree), 400, (i, rand) => ({ at: [x, 0, z], turn, scale }), 7);
 //     // repeats as instances, one draw per material, seeded; M.seeded(7) gives 0..1 numbers
+//   const land = M.ground({ size: 160, height: (x, z) => 2 * Math.sin(x / 19),
+//     paths: [[[-30, 4], [0, 0], [22, -9]]], pathWidth: 2.4 });
+//     // the ground, in the look's roles: grass in two tones, soil where it is steep, worn
+//     // paths. land.height(x, z) is the ground under a foot; scatter tufts and stones on it.
 //
 // A model whose numbers the person tunes on the Stage, rebuilt whenever one changes (also while
 // the Stage has play frozen), and named so they can select it:
@@ -744,6 +748,105 @@ export function scatter(model, count, place, seed = 1) {
     group.add(instanced);
   });
   return group;
+}
+
+/** Smooth noise in -1..1 over the plane, the same for the same seed: three octaves of value noise. */
+function fieldNoise(seed) {
+  const hash = (x, z) => {
+    const h = Math.sin(x * 127.1 + z * 311.7 + seed * 74.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const smooth = (t) => t * t * (3 - 2 * t);
+  const value = (x, z) => {
+    const x0 = Math.floor(x);
+    const z0 = Math.floor(z);
+    const u = smooth(x - x0);
+    const v = smooth(z - z0);
+    const a = hash(x0, z0) * (1 - u) + hash(x0 + 1, z0) * u;
+    const b = hash(x0, z0 + 1) * (1 - u) + hash(x0 + 1, z0 + 1) * u;
+    return a * (1 - v) + b * v;
+  };
+  return (x, z) =>
+    (value(x, z) * 0.57 + value(x * 2.1, z * 2.1) * 0.29 + value(x * 4.3, z * 4.3) * 0.14) * 2 - 1;
+}
+
+/**
+ * The ground a game stands on, built in code because the game needs its height under every foot:
+ * `height(x, z)` (flat without one) over a square of `size` metres in `step`-metre cells. It is
+ * coloured per vertex by the look's roles: `grass` and `grass2` in broad patches, `soil` where it
+ * is steeper than `steep` (rise over run), and `path` along each of `paths` (lists of [x, z]),
+ * `pathWidth` metres wide with a ragged edge. Returns the mesh, named Ground, which receives
+ * shadows; `mesh.height(x, z)` is the ground under a point.
+ */
+export function ground({
+  size = 120,
+  step = 1.5,
+  height = () => 0,
+  paths = [],
+  pathWidth = 2.2,
+  steep = 0.55,
+  patch = 14,
+  seed = 1,
+  colours = {},
+} = {}) {
+  const cells = Math.max(2, Math.min(256, Math.round(size / step)));
+  const geometry = new THREE.PlaneGeometry(size, size, cells, cells).rotateX(-Math.PI / 2);
+  const position = geometry.attributes.position;
+  const tone = Object.fromEntries(
+    ["grass", "grass2", "soil", "path"].map((name) => [name, colour(colours[name] ?? name)]),
+  );
+  const noise = fieldNoise(seed);
+  const segments = paths.flatMap((points) => points.slice(1).map((to, i) => [points[i], to]));
+  const toPath = (x, z) => {
+    let nearest = Infinity;
+    for (const [[ax, az], [bx, bz]] of segments) {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = Math.max(
+        0,
+        Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)),
+      );
+      nearest = Math.min(nearest, Math.hypot(x - ax - dx * t, z - az - dz * t));
+    }
+    return nearest;
+  };
+  const colours3 = new Float32Array(position.count * 3);
+  const mixed = new THREE.Color();
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    const z = position.getZ(i);
+    position.setY(i, height(x, z));
+    const slope = Math.hypot(
+      height(x + 0.5, z) - height(x - 0.5, z),
+      height(x, z + 0.5) - height(x, z - 0.5),
+    );
+    const patches = Math.min(1, Math.max(0, 0.5 + noise(x / patch, z / patch) * 1.4));
+    mixed.copy(tone.grass).lerp(tone.grass2, patches);
+    mixed.lerp(tone.soil, Math.min(1, Math.max(0, (slope - steep) / 0.25)));
+    const edge = pathWidth / 2 + noise(x / 2.3 + 40, z / 2.3) * pathWidth * 0.3;
+    mixed.lerp(
+      tone.path,
+      Math.min(1, Math.max(0, (edge - toPath(x, z)) / (pathWidth * 0.35) + 0.5)),
+    );
+    colours3[i * 3] = mixed.r;
+    colours3[i * 3 + 1] = mixed.g;
+    colours3[i * 3 + 2] = mixed.b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colours3, 3));
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 1,
+      flatShading: look?.shape?.edges === "faceted",
+    }),
+  );
+  mesh.material.name = "Ground";
+  mesh.name = "Ground";
+  mesh.receiveShadow = true;
+  mesh.height = height;
+  return mesh;
 }
 
 /** 0..1 numbers from a seed: the same seed gives the same model. */
