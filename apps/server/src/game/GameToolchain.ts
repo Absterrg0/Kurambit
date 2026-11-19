@@ -76,11 +76,11 @@ export const BLENDER_ADDONS: ReadonlyArray<BlenderAddon> = [
  * under 4 MB (Sapling 36 KB, Extra Mesh Objects 133 KB, Archimesh 323 KB, Modular Tree 3.8 MB),
  * MPFB2 is 46 MB.
  */
-export const ADDON_ASK_BYTES = 8_000_000;
+const ADDON_ASK_BYTES = 8_000_000;
 /** The person is asked first for a large download, or for anything not from Blender's own platform. */
 export const addonAsksFirst = (addon: Pick<BlenderAddon, "official" | "bytes">): boolean =>
   !addon.official || addon.bytes > ADDON_ASK_BYTES;
-export const megabytes = (bytes: number): string =>
+const megabytes = (bytes: number): string =>
   bytes >= 1_000_000
     ? `${Math.round(bytes / 1_000_000)} MB`
     : `${Math.max(1, Math.round(bytes / 1000))} KB`;
@@ -88,7 +88,7 @@ export const megabytes = (bytes: number): string =>
 export const addonAbout = (addon: BlenderAddon): string =>
   `${addon.name} ${addon.version}: ${addon.purpose.replace(/\.$/, "").toLowerCase()}. ${addon.licence}; downloaded from ${addon.source} into Kurambit's own Blender folder (${megabytes(addon.bytes)}).`;
 /** The list's entry as clients and agents read it. */
-export const addonEntry = (addon: BlenderAddon): GameAddon => ({
+const addonEntry = (addon: BlenderAddon): GameAddon => ({
   id: addon.id,
   name: addon.name,
   makes: addon.makes,

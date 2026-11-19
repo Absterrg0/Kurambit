@@ -413,7 +413,7 @@ const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", f
  * the agent's own (its question tool where it has one, its reply otherwise), and the install is
  * one op, so a provider that asks before tool calls names exactly it.
  */
-export const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
+const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
   `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}"} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
 /**
  * The person's choice refuses a Blender-made character on code with the library off (and on
