@@ -1149,14 +1149,17 @@ export async function createLook(canvas, options = {}) {
     /** Times the frame's GPU work and keeps the render scale on budget. The shell wraps every draw. */
     frame(work, { playing = false, realMs = 0 } = {}) {
       renderer.info.reset();
+      // The scale steps before the draw, never after it: a step resizes the canvas, which clears
+      // it, and a canvas cleared after its frame was drawn is what the screen shows until the
+      // next draw (a blank frame on a GPU, seconds of blank where a frame takes that long).
+      const gpuMs = timer.poll();
+      scale.update(gpuMs, realMs);
       timer.begin();
       try {
         work();
       } finally {
         timer.end();
       }
-      const gpuMs = timer.poll();
-      scale.update(gpuMs, realMs);
       if (playing) {
         stats.add(realMs, gpuMs, scale.value);
         stats.draws(renderer.info.render.calls, renderer.info.render.triangles);
