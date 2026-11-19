@@ -894,20 +894,52 @@ def _inset(ring, d):
     return out
 
 
-def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="gable", pitch=40.0, overhang=0.4, sides=None, openings=(),
-             parapet=0, interior=True, colours=None, facets=None):
-    """A building you can walk into. plan: (wide, deep) metres, a radius with `sides` (a round
-    tower of that many sides), or a convex ring of (x, y) points; floors of storey metres; wall
-    thickness; roof: "gable", "hip", "cone", "shed" or "flat" at pitch degrees with an overhang;
-    parapet: that many battlements round a flat roof. openings: [{"side": 0.., "at": 0..1 along
-    that wall, "kind": "door"|"window", "width", "height", "sill", "floor": 0..}], side 0 the
-    front (-Y) on a rectangle and counted counter-clockwise from above; each is cut through the
-    wall and framed, a window glazed, a door hung as its own named part (<name>_door_N, hinged
-    at its edge, for the game to swing). interior: a floor in every storey. Colours by role:
-    wall, roof, trim, floor, glass, door. Returns the building's object."""
+def _slab(name, origin, turn, lo, hi, mat, lean=0.0, tip=0.0):
+    """A box in a wall's own frame: x along the wall from `origin`, y into the building (outside is
+    negative), z up. lean: radians it turns in the wall's plane about its low corner; tip: radians
+    it tips outward about its top inner edge (an awning)."""
+    from mathutils import Matrix
+
+    o = _box(name, (0.0, lo[1], 0.0), (hi[0] - lo[0], hi[1], hi[2] - lo[2]), mat)
+    local = Matrix.Translation((lo[0], 0.0, lo[2])) @ Matrix.Rotation(-lean, 4, "Y") @ Matrix.Rotation(tip, 4, "X")
+    o.matrix_world = Matrix.Translation((origin[0], origin[1], 0.0)) @ Matrix.Rotation(turn, 4, "Z") @ local
+    return o
+
+
+def _cut(target, cutters):
+    for c in cutters:
+        m = target.modifiers.new("cut", "BOOLEAN")
+        m.operation, m.solver, m.object = "DIFFERENCE", "EXACT", c
+    return _apply(target)
+
+
+def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="gable", pitch=None, overhang=None, sides=None, openings=(),
+             parapet=0, interior=True, frame=None, footing=None, chimney=None, batter=0.0, ruin=0.0, roof_part=False, seed=1, colours=None, facets=None):
+    """A building you can walk into, standing at the origin, its front (side 0) facing -Y. plan:
+    (wide, deep) metres, a radius with `sides` (a round tower of that many sides), or a convex
+    ring of (x, y) points; floors of storey metres; wall thickness. roof: "gable", "hip", "cone",
+    "shed" or "flat" at pitch degrees with an overhang; parapet: that many battlements round a
+    flat roof, on a corbelled course. What shows it was built, each on by default where it suits
+    and off with False: frame (a timber frame on the walls: posts, plates, studs and braces),
+    footing (metres of stone under the walls), chimney (a stone stack through the roof), eaves
+    with bargeboards and a ridge, a sill and lintel at every window, a stone step at every door.
+    batter: metres a tower's foot is wider than its top. ruin: 0..1 how much of the walls has
+    fallen (no roof, broken tops, rubble). openings: [{"side": 0.., "at": 0..1 along that wall,
+    "kind": "door"|"window"|"shop", "width", "height", "sill", "floor": 0.., "shutters": True,
+    "porch": True}], sides counted counter-clockwise from above; each is cut through the wall and
+    framed, a window glazed, a shop a wide counter under an awning with a hanging sign, a door
+    hung as its own named part (<name>_door_N, hinged at its edge, for the game to swing).
+    interior: a floor in every storey; roof_part: the roof as its own part (<name>_roof) for a
+    game that lifts it when the player goes in. A doorway fits the look's character height. Colour
+    roles: wall, roof, trim, floor, door, glass, stone, cloth; a role may take another's
+    (colours={"wall": "stone"})."""
     lk = look.read()
-    facets = lk["facets"] if facets is None else facets
-    mat = {r: _material(r, colours, lk) for r in ("wall", "roof", "trim", "floor", "glass", "door")}
+    if facets is not None:
+        lk["facets"] = facets
+    facets, chunky, detail = lk["facets"], lk["chunky"], lk["detail"]
+    rng = np.random.default_rng(seed)
+    mat = {r: _material(r, colours, lk) for r in ("wall", "roof", "trim", "floor", "glass", "door", "stone", "cloth")}
+    round_plan = bool(sides)
     if sides:
         r = plan if isinstance(plan, (int, float)) else plan[0] / 2
         ring = [(r * math.sin(2 * math.pi * (k + 0.5) / sides), -r * math.cos(2 * math.pi * (k + 0.5) / sides)) for k in range(sides)]
@@ -916,164 +948,351 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
         ring = [(-w / 2, -d / 2), (w / 2, -d / 2), (w / 2, d / 2), (-w / 2, d / 2)]
     else:
         ring = [tuple(p) for p in plan]
+    square = len(ring) == 4 and not round_plan
+    pitch = (38.0 + 14.0 * chunky) if pitch is None else pitch
+    overhang = (0.35 + 0.3 * chunky) if overhang is None else overhang
+    frame = (square and roof != "flat" and detail >= 0.3) if frame is None else frame
+    footing = (0.0 if round_plan else 0.55) if footing is None else (footing or 0.0)
+    chimney = (roof in ("gable", "hip") and square and detail >= 0.4) if chimney is None else chimney
+    ruined = ruin > 0.05
     top = floors * storey
-    outer = _prism(name + "_walls", ring, 0.0, top, mat["wall"])
-    inner = _prism(name + "_inner", _inset(ring, wall), -0.5, top + 0.5, mat["wall"])
-    cut = outer.modifiers.new("room", "BOOLEAN")
-    cut.operation = "DIFFERENCE"
-    cut.solver = "EXACT"
-    cut.object = inner
-    parts, doors, cutters = [], [], [inner]
     pts = np.array(ring, dtype=float)
-    for k, op in enumerate(openings):
-        a, b = pts[op.get("side", 0) % len(pts)], pts[(op.get("side", 0) + 1) % len(pts)]
+    centre = pts.mean(axis=0)
+    n = len(ring)
+    tall_door = max(2.05, 1.16 * lk["character"])
+
+    def side_of(k):
+        a, b = pts[k % n], pts[(k + 1) % n]
         along = (b - a) / np.linalg.norm(b - a)
         outward = np.array([along[1], -along[0]])
-        if outward @ (a - pts.mean(axis=0)) < 0:
+        if outward @ (a - centre) < 0:
             outward = -outward
+        return a, b, along, outward, float(np.linalg.norm(b - a)), math.atan2(along[1], along[0])
+
+    # Walls: the plan's ring, wider at the foot by the batter, hollowed, then cut by every opening.
+    foot = _inset(ring, -batter) if batter else ring
+    outer = _prism(name + "_walls", foot, 0.0, top, mat["wall"], top=ring)
+    inner = _prism(name + "_inner", _inset(ring, wall), -0.5, top + 0.5, None)
+    cutters, door_cutters, parts, doors, spans = [inner], [], [], [], {}
+    for k, op in enumerate(openings):
+        a, b, along, outward, length, rot = side_of(op.get("side", 0))
         kind = op.get("kind", "window")
-        ow = op.get("width", 1.0 if kind == "door" else 1.1)
-        oh = op.get("height", 2.1 if kind == "door" else 1.2)
+        ow = op.get("width", {"door": max(0.95, 0.56 * lk["character"]), "shop": min(2.4, length * 0.5)}.get(kind, 1.05))
+        oh = op.get("height", {"door": tall_door, "shop": 1.45}.get(kind, 1.2))
         sill = op.get("floor", 0) * storey + (0.0 if kind == "door" else op.get("sill", 0.95))
-        mid = a + (b - a) * op.get("at", 0.5) - outward * wall / 2
-        rot = math.atan2(along[1], along[0])
+        x0 = length * op.get("at", 0.5) - ow / 2
+        spans.setdefault(op.get("side", 0) % n, []).append((x0, x0 + ow, sill, sill + oh))
+        lean_out = batter * (1 - sill / max(top, 1e-6))  # how far the battered face stands out here
 
-        def piece(nm, lo, hi, m, _mid=mid, _rot=rot):
-            o = _box(nm, lo, hi, m)
-            o.rotation_euler = (0, 0, _rot)
-            o.location = (_mid[0], _mid[1], 0)
-            return o
+        def piece(nm, lo, hi, m, _a=a, _rot=rot, **kw):
+            return _slab(nm, _a, _rot, lo, hi, m, **kw)
 
-        hole = piece(f"{name}_hole_{k}", (-ow / 2, -wall, sill + (0.0 if kind == "window" else -0.01)), (ow / 2, wall, sill + oh), None)
-        m = outer.modifiers.new(f"hole{k}", "BOOLEAN")
-        m.operation = "DIFFERENCE"
-        m.solver = "EXACT"
-        m.object = hole
+        hole = piece(f"{name}_hole_{k}", (x0, -wall - batter - 0.3, sill - (0.01 if kind == "door" else 0.0)), (x0 + ow, wall * 2, sill + oh), None)
         cutters.append(hole)
-        f, depth = 0.09, wall / 2 + 0.04
-        frame = [((-ow / 2 - f, -depth, sill + oh), (ow / 2 + f, depth, sill + oh + f)), ((-ow / 2 - f, -depth, sill), (-ow / 2, depth, sill + oh)),
-                 ((ow / 2, -depth, sill), (ow / 2 + f, depth, sill + oh))]
-        if kind == "window":
-            frame.append(((-ow / 2 - f - 0.04, -depth - 0.05, sill - f), (ow / 2 + f + 0.04, depth, sill)))
-            frame += [((-0.025, -0.03, sill), (0.025, 0.03, sill + oh)), ((-ow / 2, -0.03, sill + oh / 2 - 0.025), (ow / 2, 0.03, sill + oh / 2 + 0.025))]
-            parts.append(piece(f"{name}_glass_{k}", (-ow / 2, -0.012, sill), (ow / 2, 0.012, sill + oh), mat["glass"]))
-        for i, (lo, hi) in enumerate(frame):
-            parts.append(piece(f"{name}_frame_{k}_{i}", lo, hi, mat["trim"]))
         if kind == "door":
-            leaf = piece(f"{name}_door_{len(doors) + 1}", (0.0, -0.03, sill + 0.02), (ow - 0.04, 0.03, sill + oh - 0.02), mat["door"])
-            hinge = mid - along * (ow / 2 - 0.02)
-            leaf.location = (hinge[0], hinge[1], 0)
-            knob = piece(f"{name}_knob_{k}", (ow - 0.2, -0.07, sill + 1.0), (ow - 0.12, 0.07, sill + 1.08), mat["trim"])
-            knob.location = leaf.location
-            doors.append(_join(leaf.name, [leaf, knob]))
-    walls = _apply(outer)
-    for c in cutters:
-        bpy.data.objects.remove(c, do_unlink=True)
+            door_cutters.append(hole)
+        if ruined and (kind != "door" or ruin > 0.45):
+            continue  # a ruin keeps its holes and loses what hung in them
+        f, out, back = 0.1, -0.045 - lean_out, wall * 0.55
+        # The frame: lintel, jambs, and under a window a sill that stands proud.
+        parts.append(piece(f"{name}_lintel_{k}", (x0 - f - 0.06, out - 0.02, sill + oh), (x0 + ow + f + 0.06, back, sill + oh + f * 1.4), mat["trim"]))
+        parts.append(piece(f"{name}_jamb_{k}_l", (x0 - f, out, sill), (x0, back, sill + oh), mat["trim"]))
+        parts.append(piece(f"{name}_jamb_{k}_r", (x0 + ow, out, sill), (x0 + ow + f, back, sill + oh), mat["trim"]))
+        if kind == "window":
+            parts.append(piece(f"{name}_sill_{k}", (x0 - f - 0.08, out - 0.09, sill - f), (x0 + ow + f + 0.08, back, sill), mat["trim" if not round_plan else "stone"]))
+            parts.append(piece(f"{name}_glass_{k}", (x0, wall * 0.5 - 0.012, sill), (x0 + ow, wall * 0.5 + 0.012, sill + oh), mat["glass"]))
+            bars = max(1, int(round(ow / 0.55)) - 1)
+            for q in range(bars):
+                xq = x0 + ow * (q + 1) / (bars + 1)
+                parts.append(piece(f"{name}_bar_{k}_{q}", (xq - 0.022, wall * 0.5 - 0.03, sill), (xq + 0.022, wall * 0.5 + 0.03, sill + oh), mat["trim"]))
+            parts.append(piece(f"{name}_bar_{k}_h", (x0, wall * 0.5 - 0.03, sill + oh * 0.55 - 0.022), (x0 + ow, wall * 0.5 + 0.03, sill + oh * 0.55 + 0.022), mat["trim"]))
+            if op.get("shutters", detail >= 0.75 and not round_plan):
+                for sgn, xs in ((-1, x0 - f - ow * 0.5), (1, x0 + ow + f)):
+                    parts.append(piece(f"{name}_shutter_{k}_{sgn}", (xs, out - 0.05, sill), (xs + ow * 0.5, out, sill + oh), mat["door"]))
+                    for zz in (0.18, 0.78):
+                        parts.append(piece(f"{name}_shutter_{k}_{sgn}_{zz}", (xs + 0.02, out - 0.075, sill + oh * zz), (xs + ow * 0.5 - 0.02, out - 0.05, sill + oh * zz + 0.07), mat["trim"]))
+        elif kind == "shop":
+            # A counter on the sill, an awning over it on two brackets, and a sign hung beside it.
+            parts.append(piece(f"{name}_counter_{k}", (x0 - 0.12, out - 0.32, sill - 0.07), (x0 + ow + 0.12, back, sill), mat["floor"]))
+            for xs in (x0 + 0.05, x0 + ow - 0.13):
+                parts.append(piece(f"{name}_bracket_{k}_{xs:.1f}", (xs, out - 0.3, sill - 0.5), (xs + 0.08, out, sill - 0.07), mat["trim"]))
+            reach = 1.15
+            parts.append(piece(f"{name}_awning_{k}", (x0 - 0.25, -reach, sill + oh + 0.32), (x0 + ow + 0.25, 0.0, sill + oh + 0.37), mat["cloth"], tip=math.radians(24)))
+            parts.append(piece(f"{name}_valance_{k}", (x0 - 0.25, -reach * 0.93 - 0.02, sill + oh + 0.32 - reach * 0.42 - 0.2), (x0 + ow + 0.25, -reach * 0.93, sill + oh + 0.32 - reach * 0.4), mat["cloth"]))
+            for xs in (x0 - 0.2, x0 + ow + 0.12):
+                parts.append(piece(f"{name}_strut_{k}_{xs:.1f}", (xs, -reach * 0.9, sill + oh - 0.15), (xs + 0.06, out, sill + oh - 0.09), mat["trim"]))
+            sx = min(length - 0.9, x0 + ow + 0.45)
+            parts.append(piece(f"{name}_signarm_{k}", (sx, out - 0.75, sill + oh + 0.2), (sx + 0.07, out, sill + oh + 0.27), mat["trim"]))
+            parts.append(piece(f"{name}_sign_{k}", (sx - 0.02, out - 0.7, sill + oh - 0.42), (sx + 0.09, out - 0.14, sill + oh + 0.1), mat["floor"]))
+        if kind == "door":
+            if ruin <= 0.45:
+                leaf = piece(f"{name}_door_{len(doors) + 1}", (x0 + 0.02, wall * 0.3, sill + 0.02), (x0 + ow - 0.02, wall * 0.3 + 0.06, sill + oh - 0.02), mat["door"])
+                extra = [piece(f"{name}_ledge_{k}_{zz}", (x0 + 0.05, wall * 0.3 - 0.03, sill + oh * zz), (x0 + ow - 0.05, wall * 0.3, sill + oh * zz + 0.12), mat["trim"]) for zz in (0.14, 0.76)]
+                extra.append(piece(f"{name}_knob_{k}", (x0 + ow - 0.2, wall * 0.3 - 0.1, sill + 1.0), (x0 + ow - 0.13, wall * 0.3, sill + 1.08), mat["trim"]))
+                leaf = _join(leaf.name, [leaf] + extra)
+                hinge = a + along * (x0 + 0.02) - outward * (-wall * 0.3)
+                doors.append((leaf, (hinge[0], hinge[1], 0.0)))
+            if sill < 0.1:
+                parts.append(piece(f"{name}_step_{k}", (x0 - 0.3, -0.75 - batter, -0.2), (x0 + ow + 0.3, 0.02, 0.14), mat["stone"]))
+            if op.get("porch"):
+                # A small roof over the door on two posts.
+                for xs in (x0 - 0.42, x0 + ow + 0.3):
+                    parts.append(piece(f"{name}_post_{k}_{xs:.1f}", (xs, -1.25, 0.0), (xs + 0.12, -1.13, sill + oh + 0.25), mat["trim"]))
+                parts.append(piece(f"{name}_porchbeam_{k}", (x0 - 0.5, -1.28, sill + oh + 0.25), (x0 + ow + 0.5, -1.1, sill + oh + 0.37), mat["trim"]))
+                parts.append(piece(f"{name}_porch_{k}", (x0 - 0.65, -1.55, sill + oh + 0.92), (x0 + ow + 0.65, 0.0, sill + oh + 1.0), mat["roof"], tip=math.radians(22)))
+    walls = _cut(outer, cutters)
     solid = [walls]
+    if footing > 0:
+        base = _prism(name + "_footing", _inset(ring, -0.07 - batter), -0.3, footing, mat["stone"], top=_inset(ring, -0.055))
+        base_in = _prism(name + "_footing_in", _inset(ring, wall * 0.5), -0.5, footing + 0.5, None)
+        solid.append(_cut(base, [base_in] + door_cutters))
+        bpy.data.objects.remove(base_in, do_unlink=True)
+    else:
+        solid.append(_prism(name + "_base", _inset(ring, -0.08 - batter), -0.3, 0.16, mat["stone" if round_plan else "trim"]))
     if interior:
         for fl in range(floors):
-            solid.append(_prism(f"{name}_floor_{fl}", _inset(ring, wall * 0.5), fl * storey - (0.12 if fl else 0.0), fl * storey + (0.0 if fl else 0.06) + (0.0 if fl else 0), mat["floor"]))
-    base = _prism(name + "_base", _inset(ring, -0.08), -0.25, 0.18, mat["trim"])
-    solid.append(base)
+            if fl and ruin > 0.5:
+                continue
+            solid.append(_prism(f"{name}_floor_{fl}", _inset(ring, wall * 0.5), fl * storey - (0.12 if fl else 0.3), fl * storey + (0.0 if fl else 0.06), mat["floor"]))
+
+    def clear(side, x0, x1, z0=0.0, z1=None):
+        return not any(x0 < b + 0.12 and x1 > a - 0.12 and z0 < d + 0.1 and (z1 is None or z1 > c - 0.1) for a, b, c, d in spans.get(side, []))
+
+    if frame:
+        # A timber frame standing proud of the plaster: posts at the corners, a sill beam, a plate
+        # at every storey, studs between the openings and a brace in each clear end bay.
+        post, proud = 0.17 * (1 + 0.5 * chunky), 0.05
+        for k in range(n):
+            a, b, along, outward, length, rot = side_of(k)
+            beam = lambda nm, lo, hi, **kw: parts.append(_slab(f"{name}_{nm}_{k}", a, rot, lo, hi, mat["trim"], **kw))
+            for x in (0.0, length - post):
+                beam(f"post{x:.0f}", (x - proud if x == 0 else x, -proud, footing), (x + post + (proud if x else 0), post, top))
+            for fl in range(floors + 1):
+                z = footing if fl == 0 else fl * storey - post * 0.9
+                beam(f"plate{fl}", (-proud, -proud - 0.01, z), (length + proud, post * 0.6, z + post * 0.9))
+            for fl in range(floors):
+                z0, z1 = (footing + post * 0.9 if fl == 0 else fl * storey), (fl + 1) * storey - post * 0.9
+                bays = max(2, int(round(length / (1.25 + 0.5 * chunky))))
+                for j in range(1, bays):
+                    x = length * j / bays - post * 0.35 + rng.normal(0, 0.03 * chunky)
+                    if clear(k, x, x + post * 0.7, z0, z1):
+                        beam(f"stud{fl}_{j}", (x, -proud + 0.01, z0), (x + post * 0.7, post * 0.5, z1))
+                bay = length / bays
+                for end, sgn in ((0.0, 1), (length, -1)):
+                    x0, x1 = sorted((end + sgn * post, end + sgn * (bay - post * 0.4)))
+                    if detail >= 0.5 and clear(k, x0, x1, z0, z1) and bay > 0.8:
+                        run, rise = x1 - x0, (z1 - z0) * 0.86
+                        ang = math.atan2(rise, run)
+                        beam(f"brace{fl}_{sgn}", (x0 if sgn > 0 else x1, -proud + 0.02, z0 + 0.02), ((x0 if sgn > 0 else x1) + math.hypot(run, rise), post * 0.4, z0 + 0.02 + post * 0.55),
+                             lean=ang if sgn > 0 else math.pi - ang)
+    if round_plan and floors > 1 and detail >= 0.3:
+        # A tower's string courses: a band of stone at every floor.
+        for fl in range(1, floors):
+            share = 1 - fl * storey / top
+            solid.append(_prism(f"{name}_course_{fl}", _inset(ring, -0.07 - batter * share), fl * storey - 0.1, fl * storey + 0.08, mat["stone"]))
+
     # The roof.
-    c = pts.mean(axis=0)
+    roof_parts = []
     eave = _inset(ring, -overhang)
     ep = np.array(eave)
-    if roof == "flat":
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    long_x = (hi[0] - lo[0]) >= (hi[1] - lo[1])
+    half_w = ((hi[1] - lo[1]) if long_x else (hi[0] - lo[0])) / 2
+    ridge_h = half_w * math.tan(math.radians(pitch))
+    thick = 0.14 + 0.08 * chunky
+    if ruined:
+        pass
+    elif roof == "flat":
         solid.append(_prism(name + "_roof", _inset(ring, wall * 0.5), top - 0.15, top, mat["floor"]))
         if parapet:
-            ext = _inset(ring, -0.12)
-            n = len(ring)
+            ext = _inset(ring, -0.22)
+            # A corbelled course carries the parapet out past the wall.
+            solid.append(_prism(name + "_corbel", ext, top - 0.42, top + 0.02, mat["wall"], top=None))
+            solid.append(_prism(name + "_corbel_low", _inset(ring, -0.1), top - 0.7, top - 0.42, mat["stone"]))
             per = [np.linalg.norm(np.array(ext[(i + 1) % n]) - np.array(ext[i])) for i in range(n)]
-            total, step = sum(per), sum(per) / parapet
+            step = sum(per) / parapet
             walk = 0.0
             for i in range(n):
                 p0, p1 = np.array(ext[i]), np.array(ext[(i + 1) % n])
                 e = (p1 - p0) / per[i]
                 inward = np.array([-e[1], e[0]])
-                if inward @ (c - p0) < 0:
+                if inward @ (centre - p0) < 0:
                     inward = -inward
-                solid.append(_prism(f"{name}_curb_{i}", [tuple(p0), tuple(p1), tuple(p1 + inward * (wall + 0.12)), tuple(p0 + inward * (wall + 0.12))], top, top + 0.45, mat["wall"]))
-                s = (-walk) % step
-                while s + step * 0.5 <= per[i] + 1e-6:
-                    q0, q1 = p0 + e * s, p0 + e * min(per[i], s + step * 0.5)
-                    solid.append(_prism(f"{name}_merlon_{i}_{int(s * 100)}", [tuple(q0), tuple(q1), tuple(q1 + inward * (wall + 0.12)), tuple(q0 + inward * (wall + 0.12))], top + 0.45, top + 1.0, mat["wall"]))
-                    s += step
+                deep = wall + 0.2
+                solid.append(_prism(f"{name}_curb_{i}", [tuple(p0), tuple(p1), tuple(p1 + inward * deep), tuple(p0 + inward * deep)], top, top + 0.5, mat["wall"]))
+                s_ = (-walk) % step
+                while s_ + step * 0.5 <= per[i] + 1e-6:
+                    q0, q1 = p0 + e * s_, p0 + e * min(per[i], s_ + step * 0.5)
+                    solid.append(_prism(f"{name}_merlon_{i}_{int(s_ * 100)}", [tuple(q0), tuple(q1), tuple(q1 + inward * deep), tuple(q0 + inward * deep)], top + 0.5, top + 1.1, mat["wall"]))
+                    s_ += step
                 walk += per[i]
+    elif roof == "cone" or (roof == "hip" and not square):
+        reach = float(np.max(np.linalg.norm(ep - centre, axis=1)))
+        apex_h = reach * math.tan(math.radians(pitch))
+        # A kick at the eaves: the lowest part of the roof flares out flatter, as a tower's cap does.
+        kick = [(x + (x - centre[0]) * 0.0, y, top - 0.02) for x, y in eave]
+        mid = [(centre[0] + (x - centre[0]) * 0.72, centre[1] + (y - centre[1]) * 0.72, top + apex_h * (0.16 + 0.1 * (1 - chunky))) for x, y in eave]
+        m = len(eave)
+        verts = kick + mid + [(centre[0], centre[1], top + apex_h)] + [(x, y, top - thick) for x, y in eave]
+        faces = [(i, (i + 1) % m, m + (i + 1) % m, m + i) for i in range(m)] + [(m + i, m + (i + 1) % m, 2 * m) for i in range(m)]
+        faces += [(2 * m + 1 + (i + 1) % m, 2 * m + 1 + i, i, (i + 1) % m) for i in range(m)] + [tuple(2 * m + 1 + i for i in range(m))]
+        roof_parts.append(_mesh_object(name + "_roof", verts, faces))
+        roof_parts[-1].data.materials.append(mat["roof"])
     else:
-        if roof == "cone" or (roof == "hip" and len(ring) != 4):
-            apex_h = float(np.max(np.linalg.norm(ep - c, axis=1))) * math.tan(math.radians(pitch))
-            verts = [(x, y, top) for x, y in eave] + [(c[0], c[1], top + apex_h)] + [(x, y, top - 0.12) for x, y in eave]
-            n = len(eave)
-            faces = [(i, (i + 1) % n, n) for i in range(n)] + [(n + 1 + (i + 1) % n, n + 1 + i, i, (i + 1) % n) for i in range(n)] + [tuple(n + 1 + i for i in range(n))]
-        else:
-            # A rectangle's roof: the ridge along its longer side.
-            lo, hi = ep.min(axis=0), ep.max(axis=0)
-            long_x = (hi[0] - lo[0]) >= (hi[1] - lo[1])
-            half = ((hi[1] - lo[1]) if long_x else (hi[0] - lo[0])) / 2
-            rise = half * math.tan(math.radians(pitch)) if roof != "shed" else half * 2 * math.tan(math.radians(pitch))
-            run_in = half if roof == "hip" else 0.0
-            cx, cy = (lo + hi) / 2
-            if roof == "shed":
-                verts = [(lo[0], lo[1], top), (hi[0], lo[1], top), (hi[0], hi[1], top + rise), (lo[0], hi[1], top + rise),
-                         (lo[0], lo[1], top - 0.12), (hi[0], lo[1], top - 0.12), (hi[0], hi[1], top - 0.12), (lo[0], hi[1], top - 0.12)]
-                faces = [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]
-            else:
-                r0, r1 = ((lo[0] + run_in, cy), (hi[0] - run_in, cy)) if long_x else ((cx, lo[1] + run_in), (cx, hi[1] - run_in))
-                base4 = [(lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])]
-                verts = [(x, y, top) for x, y in base4] + [(r0[0], r0[1], top + rise), (r1[0], r1[1], top + rise)] + [(x, y, top - 0.12) for x, y in base4]
-                faces = ([(0, 1, 5, 4), (2, 3, 4, 5), (1, 2, 5), (3, 0, 4)] if long_x else [(1, 2, 5, 4), (3, 0, 4, 5), (0, 1, 4), (2, 3, 5)])
-                faces += [(6, 9, 8, 7), (0, 6, 7, 1), (1, 7, 8, 2), (2, 8, 9, 3), (3, 9, 6, 0)]
-        me = bpy.data.meshes.new(name + "_roof")
-        me.from_pydata(verts, [], faces)
-        me.update()
-        rf = bpy.data.objects.new(name + "_roof", me)
-        bpy.context.scene.collection.objects.link(rf)
-        me.materials.append(mat["roof"])
-        solid.append(rf)
+        e_lo, e_hi = ep.min(axis=0), ep.max(axis=0)
+        # Along the ridge (u) and across it (v): a gable or hip roof lofted over three sections, so
+        # the ridge can sag and the eaves kick out, as an old roof's do.
+        u0, u1 = (e_lo[0], e_hi[0]) if long_x else (e_lo[1], e_hi[1])
+        v0, v1 = (e_lo[1], e_hi[1]) if long_x else (e_lo[0], e_hi[0])
+        vc, half = (v0 + v1) / 2, (v1 - v0) / 2
+        rise = half * math.tan(math.radians(pitch)) * (2 if roof == "shed" else 1)
+        sag = 0.035 * chunky * (u1 - u0)
+        kick = 0.22 if roof != "shed" else 0.0
+        run_in = half if roof == "hip" else 0.0
+        to_xyz = (lambda u, v, z: (u, v, z)) if long_x else (lambda u, v, z: (v, u, z))
+        sections = [u0, (u0 + u1) / 2, u1]
+        prof = [(-1.0, 0.0), (-1.0 + kick, kick * 0.55), (0.0, 1.0), (1.0 - kick, kick * 0.55), (1.0, 0.0)] if roof != "shed" else [(-1.0, 0.0), (1.0, 1.0)]
+        verts, faces = [], []
+        for si, u in enumerate(sections):
+            dip = sag if si == 1 else 0.0
+            for pv, pz in prof:
+                uu = u
+                if roof == "hip" and si != 1:
+                    uu = u + (run_in * pz if si == 0 else -run_in * pz)
+                verts.append(to_xyz(uu, vc + pv * half, top - 0.02 + pz * rise - dip * pz))
+        m = len(prof)
+        for si in range(2):
+            for j in range(m - 1):
+                a0, b0 = si * m + j, si * m + j + 1
+                faces.append((a0, b0, b0 + m, a0 + m) if long_x else (a0, a0 + m, b0 + m, b0))
+        under = len(verts)
+        verts += [to_xyz(u0, v0, top - thick), to_xyz(u1, v0, top - thick), to_xyz(u1, v1, top - thick), to_xyz(u0, v1, top - thick)]
+        faces.append((under, under + 3, under + 2, under + 1) if long_x else (under, under + 1, under + 2, under + 3))
+        # Close the ends and the eaves between the lofted top and the flat underside.
+        faces.append(tuple([under] + list(range(0, m)) + [under + 3]) if long_x else tuple([under + 3] + list(range(m - 1, -1, -1)) + [under]))
+        faces.append(tuple([under + 2] + list(range(3 * m - 1, 2 * m - 1, -1)) + [under + 1]) if long_x else tuple([under + 1] + list(range(2 * m, 3 * m)) + [under + 2]))
+        faces.append((under, under + 1, 2 * m, m, 0) if long_x else (0, m, 2 * m, under + 1, under))
+        faces.append((under + 2, under + 3, m - 1, 2 * m - 1, 3 * m - 1) if long_x else (3 * m - 1, 2 * m - 1, m - 1, under + 3, under + 2))
+        rf = _mesh_object(name + "_roof", verts, faces)
+        bm = bmesh.new()
+        bm.from_mesh(rf.data)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(rf.data)
+        bm.free()
+        rf.data.materials.append(mat["roof"])
+        roof_parts.append(rf)
         if roof == "gable":
-            # The gable ends: the wall carried up under the ridge.
-            lo, hi = pts.min(axis=0), pts.max(axis=0)
-            long_x = (hi[0] - lo[0]) >= (hi[1] - lo[1])
-            half_w = ((hi[1] - lo[1]) if long_x else (hi[0] - lo[0])) / 2
-            gh = half_w * math.tan(math.radians(pitch))
+            gh = ridge_h
             for end in (0, 1):
                 if long_x:
                     x = lo[0] if end == 0 else hi[0] - wall
                     tri = [(x, lo[1], top), (x, hi[1], top), (x, (lo[1] + hi[1]) / 2, top + gh)]
-                    tri2 = [(x + wall, p[1], p[2]) for p in tri]
+                    tri2 = [(x + wall, q[1], q[2]) for q in tri]
                 else:
                     y = lo[1] if end == 0 else hi[1] - wall
                     tri = [(lo[0], y, top), (hi[0], y, top), ((lo[0] + hi[0]) / 2, y, top + gh)]
-                    tri2 = [(p[0], y + wall, p[2]) for p in tri]
-                gm = bpy.data.meshes.new(name + "_gable")
-                gm.from_pydata(tri + tri2, [], [(0, 1, 2), (5, 4, 3), (0, 3, 4, 1), (1, 4, 5, 2), (2, 5, 3, 0)])
-                bm = bmesh.new()
-                bm.from_mesh(gm)
-                bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-                bm.to_mesh(gm)
-                bm.free()
-                g = bpy.data.objects.new(name + "_gable", gm)
-                bpy.context.scene.collection.objects.link(g)
-                gm.materials.append(mat["wall"])
+                    tri2 = [(q[0], y + wall, q[2]) for q in tri]
+                g = _mesh_object(name + "_gable", tri + tri2, [(0, 1, 2), (5, 4, 3), (0, 3, 4, 1), (1, 4, 5, 2), (2, 5, 3, 0)])
+                g.data.materials.append(mat["wall"])
                 solid.append(g)
-    out = _join(name, solid + parts)
-    bm = bmesh.new()
-    bm.from_mesh(out.data)
-    bmesh.ops.recalc_face_normals(bm, faces=[f for f in bm.faces])
-    bm.to_mesh(out.data)
-    bm.free()
-    bev = out.modifiers.new("bevel", "BEVEL")
-    bev.width = 0.025
-    bev.segments = 1 if facets else 2
-    bev.limit_method = "ANGLE"
-    bev.angle_limit = math.radians(50)
-    out = _apply(out)
-    _shade(out, True if facets else False, 30)
-    _wrap(out)
-    for d in doors:
-        _wrap(d)
-    for d in doors:
-        helpers.pivot(d, d.matrix_world.translation, parent=out)
-    out["kurambit_world"] = json.dumps({"kind": "building", "floors": floors, "doors": [d.name for d in doors]})
+                if frame:
+                    # The gable's own timbers: a tie beam, a king post, and two struts.
+                    k_side = (3 if end == 0 else 1) if long_x else (0 if end == 0 else 2)
+                    a, b, along, outward, length, rot = side_of(k_side)
+                    post = 0.17 * (1 + 0.5 * chunky)
+                    parts.append(_slab(f"{name}_tie_{end}", a, rot, (-0.05, -0.06, top - post * 0.5), (length + 0.05, post * 0.5, top + post * 0.4), mat["trim"]))
+                    parts.append(_slab(f"{name}_king_{end}", a, rot, (length / 2 - post * 0.35, -0.05, top + post * 0.4), (length / 2 + post * 0.35, post * 0.5, top + gh - 0.15), mat["trim"]))
+                    if detail >= 0.5:
+                        for sgn in (1, -1):
+                            run = length * 0.24
+                            ang = math.atan2(gh * 0.45, run)
+                            x = length / 2 - sgn * (run + post * 0.3)
+                            parts.append(_slab(f"{name}_strut_{end}_{sgn}", a, rot, (x, -0.04, top + post * 0.4), (x + math.hypot(run, gh * 0.45), post * 0.4, top + post * 0.4 + post * 0.5), mat["trim"],
+                                               lean=ang if sgn > 0 else math.pi - ang))
+            # Bargeboards along the gable's edges and a ridge beam: the roof has an edge you can see.
+            if detail >= 0.3:
+                slope = math.hypot(half, rise)
+                ang = math.atan2(rise, half)
+                for u in (u0, u1 - 0.07):
+                    for sgn in (1, -1):
+                        origin = to_xyz(u, vc - sgn * half, 0)[:2]
+                        turn = (math.pi / 2 if long_x else 0.0) + (0.0 if sgn > 0 else math.pi)
+                        board = _slab(f"{name}_barge_{u:.1f}_{sgn}", origin, turn, (0.0, -0.035 if sgn > 0 else -0.035, top - 0.2), (slope * 1.0, 0.035, top - 0.02), mat["trim"], lean=ang)
+                        roof_parts.append(board)
+                ridge = _mesh_object(name + "_ridge", [to_xyz(u, vc + dv, top + rise + dz - (sag if q == 1 else 0)) for q, u in enumerate(sections) for dv, dz in ((-0.09, -0.07), (0.09, -0.07), (0.09, 0.05), (-0.09, 0.05))],
+                                     [(4 * q + j, 4 * q + (j + 1) % 4, 4 * q + 4 + (j + 1) % 4, 4 * q + 4 + j) for q in range(2) for j in range(4)] + [(3, 2, 1, 0), (8, 9, 10, 11)])
+                bm = bmesh.new()
+                bm.from_mesh(ridge.data)
+                bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+                bm.to_mesh(ridge.data)
+                bm.free()
+                ridge.data.materials.append(mat["trim"])
+                roof_parts.append(ridge)
+        if chimney:
+            # A stone stack through the roof, a third of the way along the ridge, capped, with a pot.
+            cu, cv = u0 + (u1 - u0) * 0.3, vc + half * 0.28
+            w_, base_z = 0.62 * (1 + 0.3 * chunky), top - 0.1
+            tip_z = top + rise + 0.55 + 0.3 * chunky
+            cx, cy = to_xyz(cu, cv, 0)[:2]
+            lean = rng.normal(0, 0.02 * chunky, 2)
+            stack = _prism(name + "_chimney", [(cx - w_ / 2, cy - w_ / 2), (cx + w_ / 2, cy - w_ / 2), (cx + w_ / 2, cy + w_ / 2), (cx - w_ / 2, cy + w_ / 2)], base_z, tip_z, mat["stone"],
+                           top=[(cx - w_ * 0.42 + lean[0], cy - w_ * 0.42 + lean[1]), (cx + w_ * 0.42 + lean[0], cy - w_ * 0.42 + lean[1]), (cx + w_ * 0.42 + lean[0], cy + w_ * 0.42 + lean[1]), (cx - w_ * 0.42 + lean[0], cy + w_ * 0.42 + lean[1])])
+            cap = _box(name + "_chimney_cap", (cx - w_ * 0.5 + lean[0], cy - w_ * 0.5 + lean[1], tip_z), (cx + w_ * 0.5 + lean[0], cy + w_ * 0.5 + lean[1], tip_z + 0.1), mat["stone"])
+            pot = _prism(name + "_chimney_pot", [(cx + lean[0] + 0.13 * math.cos(q * math.tau / 6), cy + lean[1] + 0.13 * math.sin(q * math.tau / 6)) for q in range(6)], tip_z + 0.1, tip_z + 0.42, mat["roof"])
+            roof_parts += [stack, cap, pot]
+    if ruined:
+        # Fallen walls: every stretch of wall is broken off at its own height, lower with more
+        # ruin, and the stones lie at its foot.
+        breakers = []
+        for k in range(n):
+            a, b, along, outward, length, rot = side_of(k)
+            chunks = max(2, int(round(length / 1.1)))
+            level = top * (1 - ruin * rng.uniform(0.25, 0.95))
+            for j in range(chunks):
+                level = float(np.clip(level + rng.normal(0, top * 0.16), top * (1 - ruin) * 0.35 + 0.4, top + 0.3))
+                if level >= top:
+                    continue
+                x0, x1 = length * j / chunks - 0.01, length * (j + 1) / chunks + 0.01
+                breakers.append(_slab(f"{name}_break_{k}_{j}", a, rot, (x0, -wall - 0.6, level), (x1, wall * 2 + 0.4, top + 3.0), None, lean=rng.normal(0, 0.07)))
+        walls = _cut(walls, breakers)
+        if frame or footing:
+            pieces = _cut(_join(name + "_timbers", [p for p in parts]), breakers) if parts else None
+            parts = [pieces] if pieces is not None else []
+        for bk in breakers:
+            bpy.data.objects.remove(bk, do_unlink=True)
+        solid[0] = walls
+        for j in range(int(round(4 + 8 * ruin))):
+            k = int(rng.integers(0, n))
+            a, b, along, outward, length, rot = side_of(k)
+            at = a + along * rng.uniform(0.1, 0.9) * length + outward * rng.uniform(-1.2, 1.4)
+            size = rng.uniform(0.25, 0.6)
+            block = _box(f"{name}_rubble_{j}", (-size / 2, -size * 0.35, -0.05), (size / 2, size * 0.35, size * rng.uniform(0.3, 0.6)), mat["wall" if rng.uniform() < 0.6 else "stone"])
+            block.location = (at[0], at[1], 0.0)
+            block.rotation_euler = (rng.normal(0, 0.25), rng.normal(0, 0.25), rng.uniform(0, math.tau))
+            solid.append(block)
+    for c in cutters:
+        bpy.data.objects.remove(c, do_unlink=True)
+    body = solid + parts + ([] if roof_part else roof_parts)
+    out = _join(name, body)
+    done = [out] + ([_join(name + "_roof", roof_parts)] if roof_part and roof_parts else []) + [d for d, _ in doors]
+    for i, o in enumerate(done):
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(o.data)
+        bm.free()
+        if lk["bevel"] > 0:
+            bev = o.modifiers.new("bevel", "BEVEL")
+            bev.width = lk["bevel"]
+            bev.segments = 1  # one cut: a building is hundreds of timbers, and a rounder edge triples its triangles
+            bev.limit_method = "ANGLE"
+            bev.angle_limit = math.radians(50)
+            o = done[i] = _apply(o)
+        _shade(o, facets, 30)
+        _wrap(o)
+    out = done[0]
+    for o in done[1:]:
+        at = next((h for d, h in doors if d.name == o.name), None)
+        helpers.pivot(o, at if at is not None else out.matrix_world.translation, parent=out)
+    out["kurambit_world"] = json.dumps({"kind": "building", "floors": floors, "doors": [d.name for d, _ in doors], "roof": name + "_roof" if roof_part and roof_parts else None})
     return out

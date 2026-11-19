@@ -522,34 +522,43 @@ A CC BY entry is credited by the add; keep its line in the credits file.
 ### The world: trees, rocks, buildings
 
 One call each in op `code` (`from kurambit import world`), then review and
-export as any prop. Each stands on the ground at the origin, coloured by role:
+export as any prop. Each stands on the ground at the origin and takes its
+colours, shapes and surfaces from the lock, so name none:
 
 - `world.tree("pine", height=7, crown="cone", seed=1)`: `crown` `"cone"`,
-  `"round"` or `"weeping"`;
-- `world.rock("cliff", size=(9, 3, 6), sharp=0.9, strata=1)`: wide, deep,
-  tall; `moss` its top;
-- `world.building("inn", plan=(6.5, 5), roof="gable", openings=[{"side": 0,
-"at": 0.3, "kind": "door"}])`: `sides=10` a round tower, `floors`,
-  `parapet`; walls are cut through, floors are inside, and each door is its
-  own part (`inn_door_1`) the game turns.
+  `"round"`, `"weeping"`, `"bush"`, `"palm"` or `"bare"`;
+  `world.plants("tuft", "grass")`: or `"reeds"`, `"fern"`, `"flowers"`;
+- `world.rock("boulder", size=(2, 1.6, 1.2), sharp=0.5, moss=0.4)`;
+  `world.cliff("crag", size=(9, 3, 6))`: wide, deep, tall, flat on top and
+  at its ends, so pieces butt into a wall a level is built against;
+- `world.building("inn", plan=(6.5, 5), floors=2, openings=[{"side": 0,
+"at": 0.3, "kind": "door", "porch": True}, {"side": 0, "at": 0.7, "kind":
+"shop"}, {"side": 1}])`: its timber frame, stone footing, chimney, eaves,
+  sills and steps come by default. `sides=10, batter=0.3, roof="cone"` (or
+  `"flat", parapet=10`) a tower, `ruin=0.6` a ruin, `roof_part=True` a roof
+  the game lifts. Walls are cut through, floors are inside, and each door
+  is its own part (`inn_door_1`) the game turns.
 
-`colours={"leaf": "#5a8f3c"}` sets a role; `help(world.tree)` lists the
-rest. What repeats is drawn as instances: export two or three `seed`s with
-`density=0.5` and `M.scatter(ctx.assets.model("pine_1"), 40, place)` each
-(shell/model.js): a forest in three draws.
+`colours={"wall": "stone"}` gives a role another's look, `{"leaf":
+"#5a8f3c"}` a colour; `help(world.building)` lists the rest. What repeats
+is drawn as instances: export two or three `seed`s with `density=0.5` and
+`M.scatter(ctx.assets.model("pine_1"), 40, place)` each (shell/model.js): a
+forest in three draws. The ground is code: `M.ground` (shell/model.js).
 
 ### Surfaces
 
 With the library off a game makes its textures. In op `code`,
+`kurambit.surface("wall")` bakes a role's surface from the lock, and
 `kurambit.surface("oak", "wood", "#9a6b3f", metres=1.5, wear=0.3,
-pattern="planks")` bakes a tiling colour, normal and roughness set into
-`<assets>/textures/` and returns its material. Kinds: wood, bark, stone,
-metal, cloth, ground, worn, painted; `pattern` planks, bricks or tiles.
-Pass it as a `world` colour (`colours={"wall": m}`), or put it on your own
-mesh with `kurambit.wrap(obj, m)`. In the game's code: `ASSETS = { oak:
-"assets/textures/oak.surface.json" }`, then `ctx.assets.surface("oak", {
-size: [8, 6] })` is a material tiled over 8 by 6 metres. Its colour stays
-one value Art edits. A hex palette draws it flat in the palette's colours.
+pattern="planks")` any other: a tiling colour, normal and roughness set in
+`<assets>/textures/`, returned as a material. Kinds: wood, bark, stone,
+metal, cloth, ground, worn, painted; `pattern` planks, boards, bricks or
+tiles. Pass it as a `world` colour (`colours={"wall": m}`), or put it on
+your own mesh with `kurambit.wrap(obj, m)`. In the game's code: `ASSETS = {
+oak: "assets/textures/oak.surface.json" }`, then
+`ctx.assets.surface("oak", { size: [8, 6] })` is a material tiled over 8 by
+6 metres. Its colour stays one value Art edits. The lock's `finish` draws
+it flat, painted or real.
 
 ## Key art
 

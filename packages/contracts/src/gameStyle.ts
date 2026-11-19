@@ -54,6 +54,7 @@ export const GAME_STYLE_ROLES = {
   door: "#6a4a2e",
   glass: "#9fc4d6",
   metal: "#8a8f96",
+  cloth: "#b5483a",
 } as const;
 
 /** How made things are shaped: read by the kit's world helpers and shell/model.js. */
