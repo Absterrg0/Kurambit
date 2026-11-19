@@ -146,6 +146,8 @@ const GameTreeSortSchema = Schema.Literals(["recent", "name"]);
 const SHOW_ARCHIVED_KEY = "kurambit:sidebar:show-archived";
 const ARCHIVED_OPEN_KEY = "kurambit:sidebar:archived-expanded";
 const SETTLED_OPEN_KEY = "kurambit:sidebar:settled-expanded";
+const GROUP_KEY = "kurambit:sidebar:group-by-game";
+const WORKING_OPEN_KEY = "kurambit:sidebar:working-expanded";
 /** The Settled shelf's header, as a place to drop a chat; a chat's own id while it is dragged. */
 const SETTLED_DROP_ID = "shelf:settled";
 const chatDragId = (chatKey: string) => `chat:${chatKey}`;
@@ -220,6 +222,8 @@ export default function Sidebar() {
   const [archivedOpen, setArchivedOpen] = useLocalStorage(ARCHIVED_OPEN_KEY, false, Schema.Boolean);
   const [settledOpen, setSettledOpen] = useLocalStorage(SETTLED_OPEN_KEY, false, Schema.Boolean);
   const [settledShown, setSettledShown] = useState(SETTLED_SHELF_PAGE);
+  const [grouped, setGrouped] = useLocalStorage(GROUP_KEY, true, Schema.Boolean);
+  const [workingOpen, setWorkingOpen] = useLocalStorage(WORKING_OPEN_KEY, false, Schema.Boolean);
   const expandedById = useUiStateStore((state) => state.projectExpandedById);
   const setExpanded = useUiStateStore((state) => state.setProjectExpanded);
   const newGame = useNewGame();
@@ -682,10 +686,22 @@ export default function Sidebar() {
   const loading = gameLibrary.isLoading || !shellsLive;
   const empty = tree.live.length + tree.archived.length === 0;
   const draggingChat = dragging?.startsWith("chat:") === true;
-  const renderChat = (node: Node, chat: SidebarThreadSummary, place: "game" | "shelf") => {
+  // Ungrouped, T3's list: every chat at work is a row that leads with its game's picture, the
+  // pinned games' first, then by activity; the ones an agent is working in fold into Working.
+  const flat = tree.live.flatMap((node) =>
+    [...(node.main === null ? [] : [node.main]), ...node.open].map((chat) => ({ chat, node })),
+  );
+  const flatBy = (left: (typeof flat)[number], right: (typeof flat)[number]) =>
+    Number(right.node.pinned) - Number(left.node.pinned) ||
+    Date.parse(right.chat.latestUserMessageAt ?? right.chat.updatedAt) -
+      Date.parse(left.chat.latestUserMessageAt ?? left.chat.updatedAt);
+  const flatWorking = flat.filter(({ chat }) => chatMark(chat, false) === "working");
+  const flatActive = flat.filter((row) => !flatWorking.includes(row)).toSorted(flatBy);
+  const renderChat = (node: Node, chat: SidebarThreadSummary, place: "game" | "shelf" | "list") => {
     const chatKey = chatKeyOf(chat);
     const ref = scopeThreadRef(chat.environmentId, chat.id);
-    const operate = canOperate(node);
+    const own = node.main?.id === chat.id;
+    const operate = canOperate(node) && !own;
     return (
       <DraggableChat
         key={chatKey}
@@ -707,15 +723,17 @@ export default function Sidebar() {
               node={node}
               chat={chat}
               place={place}
+              own={node.main?.id === chat.id}
               active={routeThreadKey === chatKey}
               action={!operate ? null : place === "shelf" ? "unsettle" : "settle"}
+              onGameMenu={own ? (position) => void showGameMenu(node, position) : null}
               // Carried over where a drop changes it: the row says what the drop does.
               dropping={
                 dragging !== chatDragId(chatKey) || overShelf === null
                   ? dragging === chatDragId(chatKey)
                     ? "carried"
                     : null
-                  : place === "game" && overShelf
+                  : place !== "shelf" && overShelf
                     ? "settle"
                     : place === "shelf" && !overShelf
                       ? "unsettle"
@@ -802,6 +820,9 @@ export default function Sidebar() {
                     </MenuRadioGroup>
                   </MenuGroup>
                   <MenuSeparator />
+                  <MenuCheckboxItem checked={grouped} onCheckedChange={(on) => setGrouped(on)}>
+                    Group by game
+                  </MenuCheckboxItem>
                   <MenuCheckboxItem
                     checked={showArchived}
                     onCheckedChange={(checked) => setShowArchived(checked)}
@@ -829,7 +850,29 @@ export default function Sidebar() {
                   onKeyDown={onTreeKeyDown}
                   className="flex flex-col gap-px"
                 >
-                  {tree.live.map((node) => (
+                  {grouped ? null : (
+                    <>
+                      {flatActive.map(({ chat, node }) => renderChat(node, chat, "list"))}
+                      {flatWorking.length === 0 ? null : (
+                        <li className="mt-2 list-none">
+                          <div className="-mx-1">
+                            <SidebarShelfHeader
+                              label="Working"
+                              count={flatWorking.length}
+                              expanded={workingOpen}
+                              onToggle={() => setWorkingOpen((open) => !open)}
+                            />
+                          </div>
+                          {workingOpen ? (
+                            <ul role="group" className="flex flex-col gap-px">
+                              {flatWorking.map(({ chat, node }) => renderChat(node, chat, "list"))}
+                            </ul>
+                          ) : null}
+                        </li>
+                      )}
+                    </>
+                  )}
+                  {(grouped ? tree.live : []).map((node) => (
                     <SortableGame key={node.key} id={node.key} dragging={dragging === node.key}>
                       {(rowProps) => (
                         <>
@@ -1146,27 +1189,42 @@ function GameChatRow({
   node,
   chat,
   place,
+  own,
   active,
   action,
   dropping,
   onAction,
   onOpen,
   onContextMenu,
+  onGameMenu,
   rowProps,
 }: {
   node: Node;
   chat: SidebarThreadSummary;
-  place: "game" | "shelf";
+  /** Under its game, on the Settled shelf, or in the ungrouped list. */
+  place: "game" | "shelf" | "list";
+  /** The game's own chat: in the ungrouped list its row is the game. */
+  own: boolean;
   active: boolean;
   action: ChatRowAction | null;
   dropping: ChatRowAction | "carried" | null;
   onAction: () => void;
   onOpen: () => void;
   onContextMenu: (position: { x: number; y: number }) => void;
+  onGameMenu: ((position: { x: number; y: number }) => void) | null;
   rowProps?: Record<string, unknown>;
 }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(active);
   const name = useGameName(node.game.environmentId, node.game.projectId, node.game.name);
+  const time = (
+    <ChatTime
+      at={
+        place === "shelf"
+          ? (chat.settledAt ?? chat.updatedAt)
+          : (chat.latestUserMessageAt ?? chat.updatedAt)
+      }
+    />
+  );
   const picking = useEnvironmentQuerySelector(
     node.main === null || node.archived || place === "shelf"
       ? null
@@ -1186,21 +1244,23 @@ function GameChatRow({
   return (
     <div ref={rowRef}>
       <SidebarChatRow
-        title={chat.title}
-        time={
-          <ChatTime
-            at={
-              place === "shelf"
-                ? (chat.settledAt ?? chat.updatedAt)
-                : (chat.latestUserMessageAt ?? chat.updatedAt)
-            }
-          />
+        title={own && place === "list" ? name : chat.title}
+        time={place === "list" ? null : time}
+        // Ungrouped, the row says its game under its title: a game's own chat is the game.
+        caption={
+          place !== "list" ? null : own ? (
+            time
+          ) : (
+            <>
+              {name} · {time}
+            </>
+          )
         }
         active={active}
         copy={chat.worktreePath !== null}
         mark={mark}
         picture={
-          place === "shelf" ? (
+          place !== "game" ? (
             <GameLibraryPicture
               game={node.game}
               main={node.main}
@@ -1211,12 +1271,12 @@ function GameChatRow({
             />
           ) : null
         }
-        game={place === "shelf" ? name : null}
+        game={place !== "game" ? name : null}
         action={action}
         dropping={dropping}
         onAction={onAction}
         onOpen={onOpen}
-        onContextMenu={onContextMenu}
+        onContextMenu={onGameMenu ?? onContextMenu}
         {...(rowProps === undefined ? {} : { rowProps })}
       />
     </div>

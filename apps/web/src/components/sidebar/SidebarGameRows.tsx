@@ -294,6 +294,7 @@ export function SidebarChatRow({
   mark,
   picture = null,
   game = null,
+  caption = null,
   action = null,
   dropping = null,
   onAction,
@@ -311,6 +312,8 @@ export function SidebarChatRow({
   picture?: ReactNode;
   /** Its game's name, said on its picture where the row is not under its game. */
   game?: string | null;
+  /** A second line under the title: the row is then two lines tall. */
+  caption?: ReactNode;
   action?: ChatRowAction | null;
   /** While it is carried: what dropping it here does, or "carried" where a drop changes nothing. */
   dropping?: ChatRowAction | "carried" | null;
@@ -326,7 +329,11 @@ export function SidebarChatRow({
         data-tree-row="chat"
         data-active={active}
         aria-current={active ? "page" : undefined}
-        className={cn(SIDEBAR_TREE_ROW, picture === null ? "ps-8 pe-2" : "pe-2")}
+        className={cn(
+          SIDEBAR_TREE_ROW,
+          picture === null ? "ps-8 pe-2" : "pe-2",
+          caption !== null && "h-10",
+        )}
         onClick={(event) => {
           if (event.detail > 1) return;
           onOpen();
@@ -345,14 +352,16 @@ export function SidebarChatRow({
             {game === null ? null : <TooltipPopup side="top">{game}</TooltipPopup>}
           </Tooltip>
         )}
-        <Text
-          variant="label"
-          tone={active ? "default" : "muted"}
-          truncate
-          render={<span className="min-w-0 flex-1" />}
-        >
-          {title}
-        </Text>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <Text variant="label" tone={active || caption !== null ? "default" : "muted"} truncate>
+            {title}
+          </Text>
+          {caption === null ? null : (
+            <Text variant="caption" tone="dim" truncate>
+              {caption}
+            </Text>
+          )}
+        </span>
         {copy ? (
           <CopyIcon
             aria-label="Works in a copy"
