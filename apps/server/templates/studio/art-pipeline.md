@@ -31,7 +31,7 @@ ones and whatever you add beyond the family on purpose (a source such as
   `scale.character` (metres; KayKit heroes are about 2.1) and `budget`
   (triangles and texture size). A made character's `rig` is
   `standard-humanoid`.
-- `audio.packs`: one effects family and one music source.
+- `audio.packs`: the effects families and music sources.
 
 The art tools fill their defaults from it and search ranks its packs first.
 Changing direction is a change to STYLE.json made on purpose, never a drift: change
