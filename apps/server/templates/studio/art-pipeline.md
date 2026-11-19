@@ -69,7 +69,7 @@ model is a prop on every route.
   Blender: a humanoid on the standard skeleton with the library's clips
   (Made characters), a creature sculpted on its own rig with its own clips
   (Made from scratch). Props, buildings, terrain and anything repeated are
-  built in code. With no Blender (`game_check` op `status`), characters are
+  built in code; the prop the game is about (its sword, its car) in Blender. With no Blender (`game_check` op `status`), characters are
   built in code too, and the reply says Settings → Game tools takes one.
 - `generated`: from generators (Generated art, below): a humanoid is
   conformed to `standard-humanoid` and plays the clip library, a creature
@@ -145,7 +145,7 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
      (painted eyes): eyes that blink in the game on their own.
 
    Model shapes, not boxes: bevels, subdivided spheres, boolean openings.
-   One glow accent per character. The craft that separates a made character
+   Glow is an accent, never a fill. The craft that separates a made character
    from a cheap one:
    - **Hair**: a thin cap ending low at the nape, then about 20 to 25 chunky
      locks lifting toward flicked tips, one signature lock, the under-locks a

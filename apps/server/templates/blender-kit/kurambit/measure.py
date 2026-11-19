@@ -27,6 +27,8 @@ from mathutils import Matrix, Vector
 from . import contact, face, skeleton
 
 LOCOMOTION = ("walk", "run", "jog", "sprint", "trot", "gallop", "canter")
+# The most spring chains a sidecar holds (GameModelSidecar).
+MAX_SPRINGS = 32
 SUB = 4  # samples per frame: a sprint's foot contact lasts only a few frames
 KNEE_POP = 8.0
 STILL_METRES = 1e-4
@@ -275,7 +277,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
         "materials": len({s.material.name for o in meshes for s in o.material_slots if s.material}),
         "textures": textures[:32],
         "clips": clips[:128],
-        "springs": springs[:8],
+        "springs": springs[:MAX_SPRINGS],
     }
     if through is not None:
         measured["skinThrough"] = through

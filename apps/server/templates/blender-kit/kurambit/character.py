@@ -179,7 +179,7 @@ def _game_source(path):
 # The most a clip's skeleton may differ from the standard's rest frames, as the export allows.
 MAX_REST_DEVIATION = 2.0
 # The most spring chains a model's sidecar holds (GameModelSpring).
-MAX_SPRINGS = 8
+MAX_SPRINGS = 32
 
 
 def _height(arm, name_map):

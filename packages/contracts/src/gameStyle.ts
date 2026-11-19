@@ -167,4 +167,13 @@ export const gameModelChoice = (manifest: {
       : manifest.characters,
   library: manifest.library ?? true,
 });
-export const GAME_STYLE_DEFAULT_BUDGET = { character: 20_000, prop: 8_000, texture: 1024 } as const;
+/**
+ * What a model may weigh when STYLE.json names no budget. A default has to hold what the kit
+ * itself makes at full quality (an MPFB2 body is 26,756 triangles before its clothes, hair and
+ * prop), or it reads as an order to cut detail; a game with a crowd sets its own lower.
+ */
+export const GAME_STYLE_DEFAULT_BUDGET = {
+  character: 50_000,
+  prop: 15_000,
+  texture: 1024,
+} as const;

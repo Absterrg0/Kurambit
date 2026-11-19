@@ -141,7 +141,7 @@ export const GameModelMeasure = Schema.Struct({
     Schema.isMaxLength(32),
   ),
   clips: Schema.Array(GameModelClip).check(Schema.isMaxLength(128)),
-  springs: Schema.Array(GameModelSpring).check(Schema.isMaxLength(8)),
+  springs: Schema.Array(GameModelSpring).check(Schema.isMaxLength(32)),
   /** Separate parts not touching the rest, over 0.5 mm away; omitted on a single mesh. */
   floating: Schema.optionalKey(Schema.Array(GameModelFloating).check(Schema.isMaxLength(32))),
   /** Share of the skin's area passing through other skin, %: at rest, and on one fixed bent pose (null off the standard skeleton). */

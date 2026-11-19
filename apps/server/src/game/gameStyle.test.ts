@@ -160,9 +160,9 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
   expect(styleHash(kaykit)).toMatch(/^[0-9a-f]{64}$/);
   expect(styleHash({ ...kaykit, view: "side" })).not.toBe(styleHash(kaykit));
   expect(styleHash(null)).toBe("none");
-  expect(styleBudgets(null)).toEqual({ character: 20_000, prop: 8_000, texture: 1024 });
+  expect(styleBudgets(null)).toEqual({ character: 50_000, prop: 15_000, texture: 1024 });
   expect(styleBudgets({ ...kaykit, budget: { prop: 500 } })).toEqual({
-    character: 20_000,
+    character: 50_000,
     prop: 500,
     texture: 1024,
   });

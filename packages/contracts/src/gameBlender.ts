@@ -207,7 +207,7 @@ export const GameBlenderCharacterInput = Schema.Struct({
       Schema.isMaxLength(48),
     ),
   ),
-  chains: Schema.optionalKey(Schema.Array(GameBlenderChain).check(Schema.isMaxLength(6))),
+  chains: Schema.optionalKey(Schema.Array(GameBlenderChain).check(Schema.isMaxLength(16))),
   /** Rebuild the body and armature of an existing <name>, re-binding its other objects by parent bone. */
   replace: Schema.optionalKey(Schema.Boolean),
   /**
