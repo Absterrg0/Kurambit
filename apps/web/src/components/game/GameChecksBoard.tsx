@@ -514,7 +514,7 @@ interface ControlRow {
  * the game's state a press changed, by the code's own name ("changed viewYaw"): said only when
  * nothing else answered, and then in words ("view yaw changed"), never as the code names it.
  */
-export const controlAnswerWords = (answers: ReadonlyArray<string>): ReadonlyArray<string> => {
+const controlAnswerWords = (answers: ReadonlyArray<string>): ReadonlyArray<string> => {
   const unique = [...new Set(answers)];
   const seen = unique.filter((answer) => !answer.startsWith("changed "));
   if (seen.length > 0) return seen;

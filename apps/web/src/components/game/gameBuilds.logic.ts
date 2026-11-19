@@ -159,18 +159,6 @@ export const qaLines = (facts: GameBuildFacts, id: GameFactId): ReadonlyArray<st
   }
 };
 
-/**
- * Controls the game reads that showed no answer on a fresh run: context, never a finding, since
- * a control that works only in some places looks the same.
- */
-export const silentControlsNote = (facts: GameBuildFacts): string | null => {
-  if (facts.qa.status !== "measured") return null;
-  const silent = gameQaFindings(facts.qa.value).silent;
-  return silent.length === 0
-    ? null
-    : `The QA play pressed ${silent.join(", ")} on a fresh run and saw no answer. A control that works only in some places looks the same, so try them yourself.`;
-};
-
 export interface DeltaLine {
   readonly label: string;
   readonly a: string;

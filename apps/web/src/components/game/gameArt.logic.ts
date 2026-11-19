@@ -86,14 +86,14 @@ export const assetName = (path: string) => {
 };
 
 /** What a sound is for in the game, in the order the list groups them. */
-export const SOUND_PURPOSES = [
+const SOUND_PURPOSES = [
   { id: "music", label: "Music" },
   { id: "ambience", label: "Ambience" },
   { id: "steps", label: "Footsteps" },
   { id: "interface", label: "Interface" },
   { id: "effects", label: "Effects" },
 ] as const;
-export type SoundPurpose = (typeof SOUND_PURPOSES)[number]["id"];
+type SoundPurpose = (typeof SOUND_PURPOSES)[number]["id"];
 
 // The words makers and sound packs name each kind by, in a folder or in the file's own name.
 const PURPOSE_WORDS: ReadonlyArray<readonly [SoundPurpose, ReadonlySet<string>]> = [
