@@ -35,9 +35,9 @@ import {
   type GameSummary,
   type GameViewport,
   manifestProject,
-  partitionGameChats,
 } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
+import { truncate } from "@kurambit/shared/String";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
 import * as GameOperations from "./GameOperations.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -159,12 +159,6 @@ export class GameProjectService extends Context.Service<
       GameOperationError
     >;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
-    /**
-     * Whether the thread is its game's own chat, by the rule the sidebar draws the game's row with
-     * (partitionGameChats). It never settles (settling would also drop the game's pin);
-     * archiving the game puts it away. False for any other chat and outside a game.
-     */
-    readonly isOwnChat: (threadId: ThreadId) => Effect.Effect<boolean>;
     /**
      * `work` on the thread's game folder as the game's one operation
      * (GameOperations.exclusive), owned by the thread unless `owner` names
@@ -480,7 +474,15 @@ const make = Effect.gen(function* () {
         commandId: CommandId.make(NodeCrypto.randomUUID()),
         projectId: project.id,
         ...(first?.threadId === undefined ? {} : { threadId: first.threadId }),
-        title: manifest.name,
+        // A chat is never titled with its game's name: every row already says the game. The
+        // chat a game is made in is titled from its brief, as T3 titles a thread from its first
+        // message (the brief's opening until the model's title lands); an empty one is a new chat.
+        ...(first === null
+          ? { title: "New chat" }
+          : {
+              title: truncate(manifest.brief.trim().split("\n")[0] ?? "") || "New chat",
+              generateTitle: true,
+            }),
         modelSelection: input.modelSelection,
         runtimeMode: input.runtimeMode ?? "full-access",
         interactionMode: "default",
@@ -746,27 +748,9 @@ const make = Effect.gen(function* () {
   const resolve = (threadId: ThreadId, options: { readonly deleted?: "allowed" } = {}) =>
     Effect.map(place(threadId, options), (placed) => placed.root);
   const home = (threadId: ThreadId) => place(threadId, { home: true });
-  const isOwnChat = Effect.fn("GameProjectService.isOwnChat")(
-    function* (threadId: ThreadId) {
-      const game = yield* home(threadId);
-      // Only a folder with a game.json is a game; any other project's chats settle as T3's do.
-      yield* read(game.root);
-      // Subagent threads too: the shared rule tells a chat from one nested under a live parent.
-      const all = yield* threads.listProjectThreads({
-        projectId: game.projectId,
-        includeSubagents: true,
-      });
-      const live = new Set(all.filter((chat) => chat.deletedAt === null).map((chat) => chat.id));
-      const own = partitionGameChats(all, live).main;
-      return own?.id === threadId;
-    },
-    Effect.orElseSucceed(() => false),
-  );
-
   return GameProjectService.of({
     create,
     home,
-    isOwnChat,
     seatWorktreesOnFiles,
     list: Effect.fn("GameProjectService.list")(function* () {
       const [projectSnapshot, threadSnapshot] = yield* Effect.all(
