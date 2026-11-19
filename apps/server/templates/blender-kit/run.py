@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 from mathutils import Matrix  # noqa: E402
 
-from kurambit import contact, deform, measure, skeleton, stylepass  # noqa: E402
+from kurambit import cloth, contact, deform, measure, skeleton, stylepass  # noqa: E402
 from kurambit import gates as gates_rules  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
@@ -209,6 +209,9 @@ def run_pass(params):
     # Before the style pass, which joins a character's meshes into one.
     gaps = contact.floating(objects)
     gates = hero_gates(objects, params)
+    # Skin a garment covers does not ship (cloth.dress marks it). The gates read the whole body and
+    # leave that skin out of what can show.
+    cloth.drop_under(objects)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
     candidate = params.get("glb") or os.path.join(out, "candidate.glb")

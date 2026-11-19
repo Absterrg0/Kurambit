@@ -171,8 +171,8 @@ length=...)` or `points=[...]`: moves a chain onto the parts you
      with an iris and a highlight; lids sit high (low lids read grumpy).
    - **Hands**: a human body's own hands, five fingers, hold through every
      library clip: keep them, glove them with `hero.dress`. Paws get pads.
-   - **Clothes** are projected onto the skin and lifted a few millimetres; a
-     part across a joint takes weights over its region's bones, never one.
+   - **Clothes**: `hero.garment` (Heroes 2); by hand, a part across a joint
+     takes weights over its region's bones, never one.
    - **Joins**: a part that meets another enters it. Nothing floats or pokes
      through, on the back and from the side too.
    - **Accessories** read at game distance; a strap that reads as a line is
@@ -278,11 +278,13 @@ head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
 radius=, amount=)` (a round belly, a mouth line, toes) and
    `hero.decimate(body, 15000)` (it keeps a body skinned, its hands and
    head densest).
-2. **Clothes.** Model each garment over the body at rest as its own mesh,
-   then `hero.dress(coat, "fisher", hang=<hip height>, chains=6)`: it is
-   pushed outside the skin, takes the skin's weights, and below `hang` hangs
-   on `spring_` hem chains instead of the legs, so it swings rather than
-   flaring as a cone. A cape: `hang` at the shoulders. A scarf's end, a
+2. **Clothes**, innermost first: `hero.garment("fisher", "top"|"trousers"|
+"boots"|"gloves"|"skirt", colour=, sleeves="long"|"short"|"none", hem=<a
+height: a coat's or dress's skirt>, fit=1.5)` cuts each from the body's
+   own surface with clean edges, fits it and hangs a skirt on `spring_` hem
+   chains; the skin under it does not ship. A shape it lacks (a cape,
+   armour): model it over the body at rest, then `hero.dress(cape, "fisher",
+hang=<shoulder height>, chains=6)`. A scarf's end, a
    strap: `hero.dangle(part, "fisher", start, end)`. A hat or helmet:
    `hero.wear(hat, "fisher")` sizes it to the head and its hair. Bags:
    `kurambit.skin_rigid(bag, "spine_03")`. What a hand holds:
@@ -316,7 +318,7 @@ on=False)`.
    failing one: height in its range (a human 1.5-2.0 m unless `height` or
    `heightRange` says otherwise; a creature's `height=` range), edges
    stretched or squashed on every clip (named by clip, frame and part),
-   clothing sunk into the body, feet planted and not sliding on walk and
+   clothing sunk into the body or the body through it, feet planted and not sliding on walk and
    run, and the budget. `hero.gates("cat")` reads them between reviews.
    Quote the numbers in the hero sheet's critique.
 

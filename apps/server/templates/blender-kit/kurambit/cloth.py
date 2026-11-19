@@ -25,6 +25,8 @@ SOFTEN = 2
 # The most of a thigh's swing a hem chain takes where the leg pushes into it: all of it folds the
 # hem's front panel like a second leg (run 1's fisherman); this keeps it a panel the leg carries.
 PUSHED = 0.8
+# The share of a hem chain's lift over a leg that the chain either side of it takes too.
+SHARED = 0.3
 
 
 def _obj(x):
@@ -122,7 +124,7 @@ def _soften(o, rounds=SOFTEN):
             vg.add([int(i)], float(w[i, j]), "REPLACE")
 
 
-def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, chains=6, bones=3, name=None):
+def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, chains=6, bones=3, name=None, rim=None, weights="skin"):
     """Fits garment (a mesh you modelled over the character at rest) and binds it.
 
     1. Shrinkwrap, outside only: every vertex inside the body moves out to offset metres above it;
@@ -132,6 +134,11 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
        it, the garment hangs on chains of spring_<name>_<i>_NN bones (bones each) around the hem,
        placed where the garment is, parented to the bone nearest the hang line's centre. 0 chains
        keeps the body's weights everywhere.
+    4. Edges: every open edge (a collar, a cuff, a hem) is turned in by rim metres (default by the
+       body's size; 0 leaves them), so cloth has a thickness where it ends.
+    5. The skin well under it is marked (kurambit_under) and left out of the export: skin that is
+       not there cannot show through. Skin near an opening and under a hanging part stays.
+    weights="keep" leaves the weights the garment came with (one cut from the body's own mesh).
     Marks the garment as clothing (kurambit_cloth) for the gates. Returns {chain: [bones]}."""
     g = _obj(garment)
     arm = _obj(armature)
@@ -170,11 +177,18 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
         sw.wrap_mode = "OUTSIDE"
         sw.offset = float(offset)
         _apply(g, sw)
-        _unweight(g)
+        if weights == "keep":
+            # Cut from the body's own surface with its weights (hero.garment): they are the skin's
+            # already, vertex for vertex, and a transfer by nearest skin can only pick a wrong one
+            # (the other thigh's, between two legs that touch).
+            return_early = True
+        else:
+            return_early = False
+            _unweight(g)
         # The nearest skin first, then the skin straight under each vertex where there is some
         # within reach: in an armpit the nearest skin to a sleeve is the ribs, and a sleeve
         # weighted to the ribs tears when the arm comes down.
-        for mapping in ("POLYINTERP_NEAREST", "POLYINTERP_VNORPROJ"):
+        for mapping in (() if return_early else ("POLYINTERP_NEAREST", "POLYINTERP_VNORPROJ")):
             dt = g.modifiers.new("weights", "DATA_TRANSFER")
             dt.object = target
             dt.use_vert_data = True
@@ -195,8 +209,11 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
     for vg in list(g.vertex_groups):
         if vg.name not in arm.data.bones:
             g.vertex_groups.remove(vg)
-    _soften(g)
+    if weights != "keep":
+        _soften(g)
     _unsleeved(g, arm)
+    size = _size(bodies)
+    _turn_in(g, (0.007 * size if rim is None else float(rim)))
     made = {}
     if hang is not None and chains > 0:
         made = _hem(g, arm, float(hang), int(chains), int(bones), name)
@@ -208,6 +225,7 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
         g.parent = arm
         g.matrix_world = mw
     g["kurambit_cloth"] = True
+    _mark_under(g, arm, bodies, reach=max(3 * float(offset), 0.012 * size), margin=0.018 * size)
     if made:
         stored = json.loads(arm.get("kurambit_chains", "{}") or "{}")
         stored.update(made)
@@ -216,6 +234,138 @@ def dress(garment, armature, *, body=None, offset=GARMENT_OFFSET, hang=None, cha
         hems.update({k: v[0] for k, v in made.items()})
         arm["kurambit_hems"] = json.dumps(hems)
     return made
+
+
+UNDER_GROUP = "kurambit_under"
+
+
+def _size(bodies):
+    """The body's height at rest, metres: what a seam's width and a margin scale by."""
+    zs = np.concatenate([helpers.rest_coords(b)[0][:, 2] for b in bodies])
+    return float(zs.max() - zs.min()) if len(zs) else 1.75
+
+
+def _turn_in(g, rim):
+    """Every open edge of the garment turned in toward the body by rim: an edge with a thickness."""
+    import bmesh
+
+    if rim <= 0:
+        return
+    bm = bmesh.new()
+    bm.from_mesh(g.data)
+    bm.normal_update()
+    edges = [e for e in bm.edges if len(e.link_faces) == 1]
+    if edges:
+        normal = {v: v.normal.copy() for e in edges for v in e.verts}
+        out = bmesh.ops.extrude_edge_only(bm, edges=edges)
+        new = [x for x in out["geom"] if isinstance(x, bmesh.types.BMVert)]
+        # Each new vertex sits on the one it was extruded from: in along that one's normal.
+        old = {}
+        for v in new:
+            for e in v.link_edges:
+                o = e.other_vert(v)
+                if o in normal:
+                    old[v] = o
+        for v in new:
+            if v in old:
+                v.co = old[v].co - normal[old[v]] * rim
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(g.data)
+        g.data.update()
+    bm.free()
+
+
+def _boundary_distance(co, edges, boundary):
+    """How far each vertex is from the mesh's open edges, along its edges (metres)."""
+    import heapq
+
+    n = len(co)
+    dist = np.full(n, np.inf)
+    near = [[] for _ in range(n)]
+    for a, b in edges:
+        w = float(np.linalg.norm(co[a] - co[b]))
+        near[a].append((b, w))
+        near[b].append((a, w))
+    heap = [(0.0, int(i)) for i in boundary]
+    for _, i in heap:
+        dist[i] = 0.0
+    heapq.heapify(heap)
+    while heap:
+        d, i = heapq.heappop(heap)
+        if d > dist[i]:
+            continue
+        for j, w in near[i]:
+            if d + w < dist[j]:
+                dist[j] = d + w
+                heapq.heappush(heap, (d + w, j))
+    return dist
+
+
+def _mark_under(g, arm, bodies, reach, margin):
+    """Marks the body's vertices that lie well under garment g at rest in the body's UNDER_GROUP:
+    within reach of it, more than margin from any opening of it, and under a part that moves with
+    the skin (not a hanging one, which swings clear of what is under it)."""
+    from mathutils.bvhtree import BVHTree
+
+    co, faces = helpers.rest_coords(g)
+    me = g.data
+    if len(co) != len(me.vertices) or not len(faces):
+        return 0
+    edges = np.empty(len(me.edges) * 2, np.int64)
+    me.edges.foreach_get("vertices", edges)
+    edges = edges.reshape(-1, 2)
+    count = np.zeros(len(me.edges), np.int64)
+    keys = {(int(min(a, b)), int(max(a, b))): i for i, (a, b) in enumerate(edges)}
+    for f in faces:
+        for a, b in zip(f, f[1:] + f[:1]):
+            count[keys[(min(a, b), max(a, b))]] += 1
+    boundary = np.unique(edges[count == 1])
+    depth = _boundary_distance(co, edges, boundary) if len(boundary) else np.full(len(co), np.inf)
+    swings = np.zeros(len(co), bool)
+    spring = {vg.index for vg in g.vertex_groups if vg.name.startswith("spring_")}
+    for v in me.vertices:
+        swings[v.index] = any(e.group in spring and e.weight > 0.05 for e in v.groups)
+    ok = np.array([all(depth[i] > margin and not swings[i] for i in f) for f in faces])
+    tree = BVHTree.FromPolygons([Vector(c) for c in co], faces)
+    marked = 0
+    for b in bodies:
+        bco, _ = helpers.rest_coords(b)
+        if len(bco) != len(b.data.vertices):
+            continue
+        group = b.vertex_groups.get(UNDER_GROUP) or b.vertex_groups.new(name=UNDER_GROUP)
+        idx = []
+        for i, p in enumerate(bco):
+            hit = tree.find_nearest(Vector(p), reach)
+            if hit[0] is not None and ok[hit[2]]:
+                idx.append(i)
+        group.add(idx, 1.0, "REPLACE")
+        marked += len(idx)
+    return marked
+
+
+def drop_under(meshes):
+    """Removes the faces of each body whose every vertex is marked as under a garment (the export's
+    pass runs this on its own copy of the scene, so the live body stays whole for the next fitting).
+    Returns how many faces went."""
+    import bmesh
+
+    gone = 0
+    for o in meshes:
+        group = o.vertex_groups.get(UNDER_GROUP) if o.type == "MESH" else None
+        if group is None:
+            continue
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        layer = bm.verts.layers.deform.active
+        if layer is not None:
+            faces = [f for f in bm.faces if all(v[layer].get(group.index, 0.0) > 0.5 for v in f.verts)]
+            gone += len(faces)
+            bmesh.ops.delete(bm, geom=faces, context="FACES")
+            bm.to_mesh(o.data)
+            o.data.update()
+        bm.free()
+        o.vertex_groups.remove(group)
+    return gone
 
 
 def _arm_bones(arm, side):
@@ -377,7 +527,9 @@ def dangle(part, armature, start, end, *, bones=3, parent=None, name=None):
 def follow_hem(armature, follow=0.5):
     """Keys every hem chain's root, in every clip of the armature, to follow the thigh on its side
     (both thighs for a chain in front or behind, by how far round it is) by follow (0..1) of the
-    thigh's swing, and up to PUSHED of it where the leg pushes into that part of the hem, so a coat's hem steps with the legs and the game's springs swing it from there.
+    thigh's swing, and up to PUSHED of it where the leg pushes into that part of the hem; and never
+    less than keeps that chain outside both legs, so a knee coming up lifts the cloth over it
+    instead of coming through. The game's springs swing it from there.
     Run it again after adding clips. Returns how many clips it keyed."""
     from .digest import exported_actions
     from .skeleton import assign_action
@@ -399,6 +551,21 @@ def follow_hem(armature, follow=0.5):
         v = arm.data.bones[root].head_local - arm.data.bones["pelvis"].head_local
         v.z = 0
         dirs[root] = v.normalized() if v.length > 1e-6 else Vector((0, -1, 0))
+    # What the hem must stay outside of: each leg as a run of balls down its bones, as thick as the
+    # body is there, seen from each chain.
+    chains_of = json.loads(arm.get("kurambit_chains", "{}") or "{}")
+    limbs = _limbs(arm)
+    clear = GARMENT_OFFSET + 0.006 * _size(_bodies(arm))
+    reach = {}
+    for lab, root in hems.items():
+        bones = chains_of.get(lab, [root])
+        d0 = arm.data.bones[bones[-1]].tail_local - arm.data.bones[root].head_local
+        out0 = dirs[root]
+        spacing = 2 * math.pi * max(0.05, (arm.data.bones[root].head_local - arm.data.bones["pelvis"].head_local).to_2d().length) / max(1, len(hems))
+        reach[root] = (d0, d0.length, out0, Vector((0, 0, -1)).cross(out0), spacing)
+    from mathutils import Quaternion
+
+    closed_ring = len(hems) >= 5
     count = 0
     for act in exported_actions(arm):
         assign_action(arm, act)
@@ -419,6 +586,7 @@ def follow_hem(armature, follow=0.5):
                 k = d @ down - down
                 k.z = 0
                 push[s] = k.normalized() if k.length > 1e-4 else None
+            turns, lifts = {}, {}
             for root, wl in side.items():
                 out_dir = Vector((dirs[root][0], dirs[root][1], 0))
                 qs = {}
@@ -426,7 +594,18 @@ def follow_hem(armature, follow=0.5):
                     # A leg pushing into this part of the hem carries it all the way; elsewhere part way.
                     into = max(0.0, push[s].dot(out_dir)) if push[s] is not None else 0.0
                     qs[s] = _toward(swing[s], follow + (PUSHED - follow) * into)
-                q = qs["l"].slerp(qs["r"], 1 - wl)
+                turns[root] = qs["l"].slerp(qs["r"], 1 - wl)
+                lifts[root] = _clear_of_legs(arm, root, turns[root], reach[root], limbs, clear)
+            # A chain lifted over a knee takes its neighbours part of the way: cloth between a
+            # chain at a knee's height and one hanging straight would stretch like a web.
+            order = list(side)
+            for _ in range(2):
+                was = dict(lifts)
+                for i, root in enumerate(order):
+                    near = [was[order[j]] for j in ((i - 1) % len(order) if closed_ring else i - 1, (i + 1) % len(order) if closed_ring else i + 1) if 0 <= j < len(order)]
+                    lifts[root] = max(was[root], SHARED * max(near, default=0.0))
+            for root in order:
+                q = Quaternion(reach[root][3], lifts[root]) @ turns[root] if lifts[root] > 1e-4 else turns[root]
                 # Its turn in armature axes, as the bone's own basis (it hangs from the hips).
                 R = rest[root].inverted() @ q.to_matrix() @ rest[root]
                 pb = arm.pose.bones[root]
@@ -436,6 +615,78 @@ def follow_hem(armature, follow=0.5):
     assign_action(arm, keep[0])
     sc.frame_set(keep[1])
     return count
+
+
+LEG = (("thigh", "calf"), ("calf", "foot"))
+
+
+def _limbs(arm):
+    """[(bone, the bone its far end is at, how thick the body is round it)] for both legs."""
+    from . import deform
+
+    out = []
+    bodies = _bodies(arm)
+    for s in ("l", "r"):
+        for a, b in LEG:
+            if f"{a}_{s}" not in arm.data.bones or f"{b}_{s}" not in arm.data.bones:
+                continue
+            h, t = np.array(arm.matrix_world @ arm.data.bones[f"{a}_{s}"].head_local), np.array(arm.matrix_world @ arm.data.bones[f"{b}_{s}"].head_local)
+            seg = t - h
+            radii = []
+            for body in bodies:
+                co, _ = helpers.rest_coords(body)
+                if len(co) != len(body.data.vertices):
+                    continue
+                mine = co[np.array([l == f"{a}_{s}" for l in deform._dominant(body, arm)])]
+                if len(mine):
+                    u = np.clip((mine - h) @ seg / max(1e-12, seg @ seg), 0, 1)
+                    radii.append(np.linalg.norm(mine - (h + np.outer(u, seg)), axis=1))
+            thick = float(np.percentile(np.concatenate(radii), 75)) if radii else 0.08 * float(np.linalg.norm(seg))
+            out.append((f"{a}_{s}", f"{b}_{s}", thick))
+    return out
+
+
+def _swing_needed(points, length, out0, axis0, spacing, clear):
+    """The least angle from straight down, toward out0, a chain of that length must hang at to
+    pass outside every ball in points ([(offset from the chain's hinge, radius)]); None when no
+    ball is in front of it."""
+    down = Vector((0, 0, -1))
+    need = None
+    for u, thick in points:
+        along, below, across = u.dot(out0), u.dot(down), u.dot(axis0)
+        far = math.hypot(along, below)
+        if below < 0.05 * length or far > 1.15 * length or abs(across) > 0.9 * spacing + 0.5 * thick:
+            continue
+        # The chain's point as far from the hinge as the ball's centre is clears it by its radius.
+        angle = math.atan2(along, below) + 2 * math.asin(min(0.95, (thick + clear) / (2 * max(far, 1e-6))))
+        need = angle if need is None else max(need, angle)
+    return need
+
+
+def _clear_of_legs(arm, root, q, reach, limbs, clear):
+    """How much further out (radians) the hem chain at root must turn, past q, to hang outside both
+    legs: seen along the chain's own hinge, the chain swings no less than the widest ball of a leg
+    in front of it. Part of a stride is not enough when a knee comes up into the cloth. The garment
+    was made round the legs at rest, so whatever the measure says it lacks there is its slack."""
+    d0, length, out0, axis0, spacing = reach
+    pb = arm.pose.bones[root]
+    parent = pb.parent
+    if parent is None or length < 1e-6:
+        return 0.0
+    down = Vector((0, 0, -1))
+    hinge0 = arm.data.bones[root].head_local
+    at_rest = [(arm.data.bones[a].head_local.lerp(arm.data.bones[b].head_local, k / 6) - hinge0, thick) for a, b, thick in limbs for k in range(1, 7)]
+    have0 = math.atan2(d0.dot(out0), d0.dot(down))
+    need0 = _swing_needed(at_rest, length, out0, axis0, spacing, clear)
+    slack = max(0.0, need0 - have0) if need0 is not None else 0.0
+    carried = (parent.matrix.to_3x3() @ arm.data.bones[parent.name].matrix_local.to_3x3().inverted()).inverted()
+    posed = [(carried @ (arm.pose.bones[a].head.lerp(arm.pose.bones[b].head, k / 6) - pb.head), thick) for a, b, thick in limbs for k in range(1, 7)]
+    need = _swing_needed(posed, length, out0, axis0, spacing, clear)
+    if need is None:
+        return 0.0
+    now = q @ d0
+    have = math.atan2(now.dot(out0), now.dot(down))
+    return max(0.0, min(need - slack, math.radians(95)) - have)
 
 
 def _toward(q, k):
