@@ -340,31 +340,37 @@ function ArtList({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <StyleRow threadRef={threadRef} />
-      <div className="flex flex-col gap-2 px-4 pt-3 pb-2">
-        <Input
-          size="sm"
-          type="search"
-          value={search}
-          placeholder="Search"
-          aria-label="Search the game's art"
-          onChange={(event) => setSearch(event.currentTarget.value)}
-        />
-        <ToggleGroup
-          aria-label="Show"
-          variant="segmented"
-          value={[filter]}
-          onValueChange={(next) => {
-            const picked = FILTERS.find((each) => each.value === next[0]);
-            if (picked !== undefined) setFilter(picked.value);
-          }}
-        >
-          {FILTERS.map((each) => (
-            <Toggle key={each.value} value={each.value}>
-              {each.label}
-            </Toggle>
-          ))}
-        </ToggleGroup>
-      </div>
+      {/* An empty tab has nothing to filter or search. The filter leads and the search takes the
+          rest of the line; they wrap only when the Workbench is too narrow for both. */}
+      {assets.length === 0 && code.length === 0 ? null : (
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2">
+          <ToggleGroup
+            aria-label="Show"
+            variant="segmented"
+            value={[filter]}
+            onValueChange={(next) => {
+              const picked = FILTERS.find((each) => each.value === next[0]);
+              if (picked !== undefined) setFilter(picked.value);
+            }}
+          >
+            {FILTERS.map((each) => (
+              <Toggle key={each.value} value={each.value}>
+                {each.label}
+              </Toggle>
+            ))}
+          </ToggleGroup>
+          <div className="min-w-24 flex-1">
+            <Input
+              size="sm"
+              type="search"
+              value={search}
+              placeholder="Search"
+              aria-label="Search the game's art"
+              onChange={(event) => setSearch(event.currentTarget.value)}
+            />
+          </div>
+        </div>
+      )}
       {!loading && assets.length === 0 && code.length === 0 ? (
         <Workbench.Empty
           icon={<ImageIcon />}
