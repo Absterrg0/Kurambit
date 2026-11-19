@@ -30,7 +30,7 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
   {
     route: "blender",
     label: "Blender",
-    description: "Characters and creatures in Blender, the rest in code",
+    description: "Characters, creatures, trees, rocks and buildings in Blender; the rest in code",
   },
   {
     route: "generated",

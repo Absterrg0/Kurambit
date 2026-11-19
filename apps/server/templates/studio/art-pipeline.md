@@ -68,8 +68,8 @@ model is a prop on every route.
 - `blender`: by kind. The player, characters and creatures are made in
   Blender: a humanoid on the standard skeleton with the library's clips
   (Made characters), a creature sculpted on its own rig with its own clips
-  (Made from scratch). Props, buildings, terrain and anything repeated are
-  built in code; the prop the game is about (its sword, its car) in Blender. With no Blender (`game_check` op `status`), characters are
+  (Made from scratch). So are trees, rocks and buildings (The world, below)
+  and the prop the game is about (its sword); the rest is code. With no Blender (`game_check` op `status`), characters are
   built in code too, and the reply says Settings → Game tools takes one.
 - `generated`: from generators (Generated art, below): a humanoid is
   conformed to `standard-humanoid` and plays the clip library, a creature
@@ -505,6 +505,25 @@ and ambientCG in `game_assets` op `search`; Sketchfab in
 `game_blender` op `asset_search` with the person's key) belong only in a
 realistic lock; an HDR sky that only lights the scene suits any 3D look.
 A CC BY entry is credited by the add; keep its line in the credits file.
+
+### The world: trees, rocks, buildings
+
+One call each in op `code` (`from kurambit import world`), then review and
+export as any prop. Each stands on the ground at the origin, coloured by role:
+
+- `world.tree("pine", height=7, crown="cone", seed=1)`: `crown` `"cone"`,
+  `"round"` or `"weeping"`;
+- `world.rock("cliff", size=(9, 3, 6), sharp=0.9, strata=1)`: wide, deep,
+  tall; `moss` its top;
+- `world.building("inn", plan=(6.5, 5), roof="gable", openings=[{"side": 0,
+"at": 0.3, "kind": "door"}])`: `sides=10` a round tower, `floors`,
+  `parapet`; walls are cut through, floors are inside, and each door is its
+  own part (`inn_door_1`) the game turns.
+
+`colours={"leaf": "#5a8f3c"}` sets a role; `help(world.tree)` lists the
+rest. What repeats is drawn as instances: export two or three `seed`s with
+`density=0.5` and `M.scatter(ctx.assets.model("pine_1"), 40, place)` each
+(shell/model.js): a forest in three draws.
 
 ## Key art
 

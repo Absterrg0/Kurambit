@@ -161,8 +161,8 @@ also ask your agent in chat to switch; it never switches on its own.
   Give it a picture to aim for and it compares its work against it, the model from the picture's
   angle and the game's frame beside the picture at the same size: the key art you picked, or any
   picture you attach, which it saves as `art/reference.png`.
-- **Blender**: it makes the player, characters and creatures in Blender, and builds props,
-  buildings and terrain in code. A person is a body on the shared skeleton, then the head, clothes
+- **Blender**: it makes the player, characters, creatures, trees, rocks and buildings in Blender,
+  and builds the ground, furniture and small props in code. A person is a body on the shared skeleton, then the head, clothes
   and props it models itself, with the library's animations already fitted; an animal is sculpted
   with its own skeleton and moves. Without Blender installed, it builds the characters in code
   and tells you.
