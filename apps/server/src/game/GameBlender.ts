@@ -70,7 +70,9 @@ import {
   PIPELINE_DIR,
   PassResult,
   type PassRecord,
+  REVIEW_PNG,
   candidateJsonPath,
+  exportedMarkPath,
   conceptOf,
   encodeCandidate,
   encodePassRecord,
@@ -1828,7 +1830,7 @@ const make = Effect.gen(function* () {
       // The concept is read at every review, so one added since is beside the next render.
       const concept = yield* Effect.promise(() => conceptOf(realRoot, passed.subject));
       const candidate: Candidate = { ...passed, parts: ledger.parts, concept: concept.ref };
-      const image = NodePath.join(out, "review.png");
+      const image = NodePath.join(out, REVIEW_PNG);
       const view = style?.view ?? "perspective";
       const rendered = yield* kitCall(
         root,
@@ -2876,10 +2878,12 @@ const make = Effect.gen(function* () {
                   keepHeroSheet(
                     realRoot,
                     NodePath.posix.basename(file, ".glb"),
-                    NodePath.join(out, "review.png"),
+                    NodePath.join(out, REVIEW_PNG),
                   ),
                 catch: (cause) => opError("blender-export", file, "io", undefined, cause),
               });
+            // Shipped: Art stops listing this review as a model still being made.
+            yield* writeText(exportedMarkPath(out), `${file}\n`, "blender-export");
             const credited = yield* recordProvenance(
               realRoot,
               [{ first: file, line: ledgerLine(file, candidate) }],

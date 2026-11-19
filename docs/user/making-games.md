@@ -340,7 +340,8 @@ the command palette reach each one before then.
 The bar's buttons stay put while you play,
 pause or rewind: **Pause** (or **Play**) and **Restart**, then the speed (1×, ½×, ¼×), **Can't
 lose**, sound, **Fullscreen**, and a **⋯** menu. **Can't lose** is there only for a game whose code
-can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". Paused, or once a run ends, the run's timeline and
+can lose a run; while it is on, a loss doesn't end the run and the bar says "Can't lose". While a
+game has no sound files, the sound button is dimmed and reads **No sound yet**. Paused, or once a run ends, the run's timeline and
 its time fill the middle. The **⋯** menu has the run (tell the agent about it, save it as a test
 play), what you see (the game's controls and the dev views) and the Stage (pause when you click
 away, hide the game, stop it). Hover a control for its key. Hidden, the game folds into the top bar
@@ -382,7 +383,9 @@ what fills it:
   show a line set in them. A model or texture the last measured play never used is dimmed, and
   the count beside **Sounds** narrows the list to the sounds it never played. A model
   built from named parts (an island's cabin, dock and trees) is followed by its parts, each with
-  its own picture. Open a model to inspect it: it turns as you drag it, and under it are its
+  its own picture. A model your agent is making in Blender is listed from its first review, as
+  its sheet, marked **Being made**, and becomes the model when it is exported; a model in code
+  that holds its place until then is marked **Stand-in**. Open a model to inspect it: it turns as you drag it, and under it are its
   parts, its **Transform** (scale on each axis, together while the lock is on, its turn, and its
   size), its **Materials** (colour and opacity, an eye to hide one, and glow, roughness, metalness,
   flat shading and its texture behind **⋯**), its **Shadows** and its tuned **Values**. A model file the game uses shows that thing's changes in its view too.

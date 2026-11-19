@@ -1,6 +1,7 @@
 import type {
   GameArtAsset,
   GameArtAssetKind,
+  GameArtMaking,
   GameArtAssetRoute,
   GameAssetUse,
   GameThing,
@@ -59,14 +60,23 @@ export const viewerLooks = (
 export const modelName = (model: GameArtCodeModel) =>
   model.copies === null ? model.name : `${model.name} × ${model.copies.toLocaleString("en-US")}`;
 
-/** One row of the Art list: a file of the game, or a model made in code. */
+/**
+ * One row of the Art list: a file of the game, a model made in code, or a model being made in
+ * Blender, listed by the file it becomes.
+ */
 export type GameArtEntry =
   | { readonly kind: "file"; readonly asset: GameArtAsset }
+  | { readonly kind: "making"; readonly making: GameArtMaking }
   | GameArtCodeModel;
 
 export const CODE_MODEL_PREFIX = "thing:";
+/** A model being made has its file's key, so its tile and an open view of it become the file's. */
 export const entryKey = (entry: GameArtEntry) =>
-  entry.kind === "file" ? entry.asset.path : `${CODE_MODEL_PREFIX}${entry.id}`;
+  entry.kind === "file"
+    ? entry.asset.path
+    : entry.kind === "making"
+      ? entry.making.path
+      : `${CODE_MODEL_PREFIX}${entry.id}`;
 
 export const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
@@ -232,12 +242,27 @@ const matches = (words: ReadonlyArray<string>, haystack: string) =>
   words.every((word) => haystack.includes(word));
 
 /**
+ * PURE. The model being made that a code model stands in for: the one of its name ("Fisher" and
+ * `fisher.glb`), or null. Only a thing of its own, never a part.
+ */
+export const standsInFor = (
+  model: GameArtCodeModel,
+  making: ReadonlyArray<GameArtMaking>,
+): GameArtMaking | null => {
+  if (model.parent !== null) return null;
+  const name = assetName(model.name);
+  return making.find((each) => assetName(each.path) === name) ?? null;
+};
+
+/**
  * What the list shows under a filter and a search (every word must match): the pictures (models,
- * the code's first, then textures) as a grid, the sounds and the fonts as lists.
+ * the code's first, then textures) as a grid, the sounds and the fonts as lists. A model being
+ * made sits among the model files where its own will.
  */
 export const artSections = (
   assets: ReadonlyArray<GameArtAsset>,
   code: ReadonlyArray<GameArtCodeModel>,
+  making: ReadonlyArray<GameArtMaking>,
   search: string,
   filter: ArtFilter,
 ) => {
@@ -274,12 +299,23 @@ export const artSections = (
     if (!holders.has(root)) loose.push(model);
     else grouped.set(root, [...(grouped.get(root) ?? []), model]);
   }
+  const models: GameArtEntry[] = [
+    ...files("model").map((asset) => ({ kind: "file" as const, asset })),
+    ...(filter === "all" || filter === "model" ? making : [])
+      // Its file has landed: the list is a moment behind the review's record.
+      .filter((each) => !assets.some((asset) => asset.path === each.path))
+      .filter((each) => matches(words, `${each.path} blender`.toLowerCase()))
+      .map((each) => ({ kind: "making" as const, making: each })),
+    // By path, as the server lists files.
+  ].toSorted((left, right) =>
+    entryKey(left) < entryKey(right) ? -1 : entryKey(left) > entryKey(right) ? 1 : 0,
+  );
   const pictures: ReadonlyArray<ArtPictureGroup> = [
     {
       title: null,
       entries: [
         ...loose,
-        ...files("model").map((asset) => ({ kind: "file" as const, asset })),
+        ...models,
         ...files("texture").map((asset) => ({ kind: "file" as const, asset })),
       ],
     },

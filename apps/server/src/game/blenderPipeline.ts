@@ -31,6 +31,8 @@ export const CANDIDATE_GLB = "candidate.glb";
 /** GameAssetSource's limit on a sidecar's parts. */
 const LEDGER_PARTS = 16;
 const MAX_CANDIDATE_BYTES = 4 * 1024 * 1024;
+/** Candidate folders one listing reads. */
+const MAX_REVIEWS = 200;
 
 /**
  * The kit's version: every kit file's path and bytes, so a changed kit makes every review
@@ -192,6 +194,45 @@ export const readCandidate = (dir: string) => readRecord(dir, CANDIDATE_JSON, de
 /** The pass a review of this key already ran, rendered or not. */
 export const readPassRecord = (dir: string) => readRecord(dir, PASS_JSON, decodePassRecord);
 export const candidateJsonPath = (dir: string) => NodePath.join(dir, CANDIDATE_JSON);
+/** The sheet a rendered review drew, in its candidate's folder. */
+export const REVIEW_PNG = "review.png";
+const EXPORTED = "exported";
+/** Marks a candidate as shipped: written by the export that promoted it. */
+export const exportedMarkPath = (dir: string) => NodePath.join(dir, EXPORTED);
+
+/**
+ * The models a review rendered and no export has shipped, newest review per subject: what is
+ * being made in Blender, for Art. `shipped` says whether a subject's file is already in the game
+ * (an export made before the mark existed, or one under the subject's own name).
+ */
+export const reviewedNotExported = async (
+  root: string,
+  shipped: (subject: string) => boolean,
+): Promise<ReadonlyArray<{ readonly subject: string; readonly sheet: string }>> => {
+  const folder = NodePath.join(root, PIPELINE_DIR);
+  const keys = (await NodeFSP.readdir(folder).catch(() => [])).slice(0, MAX_REVIEWS);
+  const newest = new Map<string, { readonly at: string; readonly sheet: string | null }>();
+  for (const key of keys) {
+    const dir = NodePath.join(folder, key);
+    const candidate = await readCandidate(dir);
+    if (candidate === null) continue;
+    const known = newest.get(candidate.subject);
+    if (known !== undefined && known.at >= candidate.at) continue;
+    const open =
+      (await NodeFSP.lstat(exportedMarkPath(dir)).catch(() => null)) === null &&
+      (await NodeFSP.lstat(NodePath.join(dir, REVIEW_PNG)).catch(() => null))?.isFile() === true;
+    // A subject's latest review decides: one already shipped is not being made again.
+    newest.set(candidate.subject, {
+      at: candidate.at,
+      sheet: open ? `${PIPELINE_DIR}/${key}/${REVIEW_PNG}` : null,
+    });
+  }
+  return [...newest]
+    .flatMap(([subject, { sheet }]) =>
+      sheet === null || shipped(subject) ? [] : [{ subject, sheet }],
+    )
+    .toSorted((left, right) => left.subject.localeCompare(right.subject));
+};
 export const passJsonPath = (dir: string) => NodePath.join(dir, PASS_JSON);
 
 const sameStamp = (a: GameAssetPart, b: GameAssetPart) =>

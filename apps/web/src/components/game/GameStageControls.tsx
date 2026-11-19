@@ -8,12 +8,15 @@ import {
   RotateCcwIcon,
   ShieldIcon,
   Volume2Icon,
+  VolumeIcon,
   VolumeXIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
 import { shortcutLabelForCommand } from "../../keybindings";
+import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuery } from "../../state/query";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
@@ -120,6 +123,19 @@ export function GameStageBar({
   const paused = useThreadStageBridge(threadKey, (state) => state.frozen, false);
   const speed = useThreadStageBridge(threadKey, (state) => state.speed, 1);
   const muted = useThreadStageBridge(threadKey, (state) => state.muted, false);
+  // A game with no sound file has nothing to hear yet: said on the control, so a silent game
+  // that is still being made is not taken for a broken one. Unknown until its files are read.
+  const art = useEnvironmentQuery(
+    gameEnvironment.artAssets({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    }),
+  ).data;
+  const silent =
+    art !== null &&
+    art !== undefined &&
+    art.more === 0 &&
+    !art.assets.some((asset) => asset.kind === "audio");
   const cannotLose = useStageCannotLose(threadKey);
   const freezeKey = useGameKey("game.freeze");
   const cannotLoseKey = useGameKey("game.cannotLose.toggle");
@@ -236,17 +252,23 @@ export function GameStageBar({
           </TooltipPopup>
         </Tooltip>
       ) : null}
-      <Control
-        label={muted ? "Sound on" : "Mute"}
-        pressed={muted}
-        disabled={!can("mute")}
-        onClick={() => {
-          setStageMuted(!muted);
-          onFocus();
-        }}
-      >
-        {muted ? <VolumeXIcon aria-hidden="true" /> : <Volume2Icon aria-hidden="true" />}
-      </Control>
+      {silent ? (
+        <Control label="No sound yet" unavailable onClick={onFocus}>
+          <VolumeIcon aria-hidden="true" />
+        </Control>
+      ) : (
+        <Control
+          label={muted ? "Sound on" : "Mute"}
+          pressed={muted}
+          disabled={!can("mute")}
+          onClick={() => {
+            setStageMuted(!muted);
+            onFocus();
+          }}
+        >
+          {muted ? <VolumeXIcon aria-hidden="true" /> : <Volume2Icon aria-hidden="true" />}
+        </Control>
+      )}
       <Control
         label="Fullscreen"
         shortcut={fullscreenKey}
@@ -277,6 +299,7 @@ function Control({
   shortcut = null,
   pressed,
   disabled = false,
+  unavailable = false,
   onClick,
   children,
 }: {
@@ -286,6 +309,8 @@ function Control({
   shortcut?: string | null;
   pressed?: boolean;
   disabled?: boolean;
+  /** Dimmed like a disabled control, but it still says its name on hover: a state, not an action. */
+  unavailable?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -298,6 +323,7 @@ function Control({
             variant="ghost"
             aria-label={label}
             {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
+            {...(unavailable ? { "aria-disabled": true } : {})}
             disabled={disabled}
             onClick={onClick}
           />

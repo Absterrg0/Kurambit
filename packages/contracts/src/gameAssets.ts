@@ -163,6 +163,18 @@ export type GameHeroSheet = typeof GameHeroSheet.Type;
 export const gameHeroSheetName = (name: string) =>
   name.replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 60) || "hero";
 
+/**
+ * A model being made in Blender: reviewed there (a sheet was drawn of it) and not exported yet.
+ * `path` is where its export lands, so Art shows it where its file will be.
+ */
+export const GameArtMaking = Schema.Struct({
+  /** Game-relative: the model file it becomes. */
+  path: AssetPathText,
+  /** Its review's sheet, game-relative. */
+  sheet: AssetPathText,
+});
+export type GameArtMaking = typeof GameArtMaking.Type;
+
 export const GameArtAssetsInput = Schema.Struct({ threadId: ThreadId });
 export type GameArtAssetsInput = typeof GameArtAssetsInput.Type;
 export const GameArtAssetsResult = Schema.Struct({
@@ -172,6 +184,8 @@ export const GameArtAssetsResult = Schema.Struct({
   /** The game's Blender source, game-relative, when it has one. */
   blend: Schema.optionalKey(AssetPathText),
   heroSheets: Schema.optionalKey(Schema.Array(GameHeroSheet)),
+  /** Models reviewed in Blender whose files are not in the game yet. */
+  making: Schema.optionalKey(Schema.Array(GameArtMaking)),
 });
 export type GameArtAssetsResult = typeof GameArtAssetsResult.Type;
 

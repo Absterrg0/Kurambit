@@ -7,7 +7,9 @@ import {
   gameHeroSheetName,
   gameLookId,
   manifestRuntime,
+  type EnvironmentId,
   type GameArtAsset,
+  type GameArtMaking,
   type GameAssetUse,
   type GameHeroSheet,
   type GameThing,
@@ -84,6 +86,7 @@ import {
   isUnused,
   modelName,
   ROUTE_WORDS,
+  standsInFor,
   thingOfAsset,
   viewerLooks,
   type ArtFilter,
@@ -106,6 +109,7 @@ const NO_IDS: ReadonlyArray<string> = [];
 const NO_LOOKS: ReturnType<typeof useStageBridge.getState>["looks"] = {};
 const NO_ASSETS: ReadonlyArray<GameArtAsset> = [];
 const NO_SHEETS: ReadonlyArray<GameHeroSheet> = [];
+const NO_MAKING: ReadonlyArray<GameArtMaking> = [];
 
 /** The runtime's model viewer page on the game's own server; null when the game has none. */
 function useViewerUrl(threadRef: ScopedThreadRef): string | null {
@@ -171,6 +175,7 @@ export function GameArtPanel({
     }),
   );
   const assets = read.data?.assets ?? NO_ASSETS;
+  const making = read.data?.making ?? NO_MAKING;
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
   const pointed = useThreadStageBridge(threadKey, (state) => state.selected?.thing ?? null, null);
   const code = codeModels(things);
@@ -195,7 +200,10 @@ export function GameArtPanel({
           copyModel(code, things, selected.slice(CODE_MODEL_PREFIX.length)))
         : (() => {
             const asset = assets.find((each) => each.path === selected);
-            return asset === undefined ? null : { kind: "file" as const, asset };
+            if (asset !== undefined) return { kind: "file" as const, asset };
+            // A model being made is open by the file it becomes: when that lands, this is it.
+            const made = making.find((each) => each.path === selected);
+            return made === undefined ? null : { kind: "making" as const, making: made };
           })();
   // A new run names the game's things again: for that moment the open one is not listed, and
   // its detail (with its unsaved session) stays open on it as last seen.
@@ -244,6 +252,7 @@ export function GameArtPanel({
           build={build}
           assets={assets}
           code={code}
+          making={making}
           use={use}
           drawn={drawn}
           loading={read.data === null || read.data === undefined}
@@ -259,6 +268,13 @@ export function GameArtPanel({
             </Button>
           }
         />
+      ) : entry.kind === "making" ? (
+        <MakingDetail
+          environmentId={threadRef.environmentId}
+          root={root}
+          making={entry.making}
+          onBack={() => setSelected(null)}
+        />
       ) : (
         <ArtDetail
           key={entryKey(entry)}
@@ -268,6 +284,7 @@ export function GameArtPanel({
           entry={entry}
           things={things}
           code={code}
+          standIn={entry.kind === "code-model" && standsInFor(entry, making) !== null}
           use={use}
           viewerUrl={viewerUrl}
           heroSheets={read.data?.heroSheets ?? NO_SHEETS}
@@ -312,6 +329,7 @@ function ArtList({
   build,
   assets,
   code,
+  making,
   use,
   drawn,
   loading,
@@ -324,6 +342,7 @@ function ArtList({
   build: string | null;
   assets: ReadonlyArray<GameArtAsset>;
   code: ReadonlyArray<GameArtCodeModel>;
+  making: ReadonlyArray<GameArtMaking>;
   use: GameAssetUse | null;
   drawn: ReadonlyMap<string, string | null>;
   loading: boolean;
@@ -334,7 +353,8 @@ function ArtList({
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ArtFilter>("all");
-  const shown = artSections(assets, code, search, filter);
+  const shown = artSections(assets, code, making, search, filter);
+  const empty = assets.length === 0 && code.length === 0 && making.length === 0;
   const nothing =
     shown.pictures.length === 0 && shown.sounds.length === 0 && shown.fonts.length === 0;
   return (
@@ -342,7 +362,7 @@ function ArtList({
       <StyleRow threadRef={threadRef} />
       {/* An empty tab has nothing to filter or search. The filter leads and the search takes the
           rest of the line; they wrap only when the Workbench is too narrow for both. */}
-      {assets.length === 0 && code.length === 0 ? null : (
+      {empty ? null : (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2">
           <ToggleGroup
             aria-label="Show"
@@ -371,7 +391,7 @@ function ArtList({
           </div>
         </div>
       )}
-      {!loading && assets.length === 0 && code.length === 0 ? (
+      {!loading && empty ? (
         <Workbench.Empty
           icon={<ImageIcon />}
           body="Models, textures and sounds appear here."
@@ -410,6 +430,7 @@ function ArtList({
                       root={root}
                       build={build}
                       entry={entry}
+                      standIn={entry.kind === "code-model" && standsInFor(entry, making) !== null}
                       use={use}
                       drawn={drawn}
                       onOpen={onOpen}
@@ -543,8 +564,11 @@ function StyleRow({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
+/** An entry that is in the game: a file or a code model, never one still being made. */
+type GameArtMadeEntry = Exclude<GameArtEntry, { readonly kind: "making" }>;
+
 /** Points the frozen Stage at what an asset is in the game, if it is there: the Tune list's hover. */
-const stageThingOf = (entry: GameArtEntry, things: ReadonlyArray<GameThing>) =>
+const stageThingOf = (entry: GameArtMadeEntry, things: ReadonlyArray<GameThing>) =>
   entry.kind === "code-model" ? entry.id : (thingOfAsset(things, entry.asset)?.id ?? null);
 
 /**
@@ -556,6 +580,7 @@ function ArtTile({
   root,
   build,
   entry,
+  standIn,
   use,
   drawn,
   onOpen,
@@ -564,6 +589,8 @@ function ArtTile({
   root: string | null;
   build: string | null;
   entry: GameArtEntry;
+  /** A code model of the name of a model being made: it holds that model's place. */
+  standIn: boolean;
   use: GameAssetUse | null;
   drawn: ReadonlyMap<string, string | null>;
   onOpen: (entry: GameArtEntry) => void;
@@ -571,18 +598,23 @@ function ArtTile({
   const [pixels, setPixels] = useState<string | null>(null);
   const facts = useThingFacts(threadRef, build, entry.kind === "code-model" ? entry.id : "");
   const unused = entry.kind === "file" && isUnused(entry.asset, use);
-  const name = entry.kind === "file" ? assetName(entry.asset.path) : modelName(entry);
+  const name = entry.kind === "code-model" ? modelName(entry) : assetName(entryKey(entry));
+  // One line under the name: what an unfinished thing is comes before what it is made of.
   const fact = unused
     ? "Unused"
-    : entry.kind === "code-model"
-      ? facts === null || facts.triangles === 0
-        ? (entry.kindWord ?? KIND_WORDS[entry.thingKind])
-        : countWords(facts.triangles, "triangle", "triangles")
-      : entry.asset.kind === "model"
-        ? entry.asset.triangles === undefined
-          ? bytesWords(entry.asset.bytes)
-          : countWords(entry.asset.triangles, "triangle", "triangles")
-        : (pixels ?? bytesWords(entry.asset.bytes));
+    : entry.kind === "making"
+      ? "Being made"
+      : standIn
+        ? "Stand-in"
+        : entry.kind === "code-model"
+          ? facts === null || facts.triangles === 0
+            ? (entry.kindWord ?? KIND_WORDS[entry.thingKind])
+            : countWords(facts.triangles, "triangle", "triangles")
+          : entry.asset.kind === "model"
+            ? entry.asset.triangles === undefined
+              ? bytesWords(entry.asset.bytes)
+              : countWords(entry.asset.triangles, "triangle", "triangles")
+            : (pixels ?? bytesWords(entry.asset.bytes));
   return (
     <button
       type="button"
@@ -604,6 +636,14 @@ function ArtTile({
             build={build}
             className="absolute inset-0 rounded-none bg-transparent"
           />
+        ) : entry.kind === "making" ? (
+          root === null ? null : (
+            <SheetPicture
+              environmentId={threadRef.environmentId}
+              root={root}
+              sheet={entry.making.sheet}
+            />
+          )
         ) : (
           <FilePicture
             threadRef={threadRef}
@@ -623,6 +663,96 @@ function ArtTile({
         </Text>
       </span>
     </button>
+  );
+}
+
+/** How much of a review sheet a tile shows, in the sheet's own pixels, and how far down it starts. */
+const SHEET_VIEW_PX = 360;
+const SHEET_VIEW_TOP_PX = 36;
+
+/**
+ * A model being made, as its review sheet shows it first: the sheet's opening view (its front
+ * turnaround, or the concept it is made from), at the size a tile is.
+ */
+function SheetPicture({
+  environmentId,
+  root,
+  sheet,
+}: {
+  environmentId: EnvironmentId;
+  root: string;
+  sheet: string;
+}) {
+  const state = useAssetUrlState(environmentId, {
+    _tag: "draft-workspace-file",
+    cwd: root,
+    path: sheet,
+  });
+  const [wide, setWide] = useState<number | null>(null);
+  if (state._tag !== "Success") return null;
+  return (
+    <img
+      src={state.url}
+      alt=""
+      decoding="async"
+      className={cn("absolute left-0 max-w-none", wide === null && "invisible")}
+      style={
+        wide === null
+          ? undefined
+          : {
+              width: `${(wide / SHEET_VIEW_PX) * 100}%`,
+              top: `${(-SHEET_VIEW_TOP_PX / SHEET_VIEW_PX) * 100}%`,
+            }
+      }
+      onLoad={(event) => setWide(event.currentTarget.naturalWidth)}
+    />
+  );
+}
+
+/** A model being made, opened: its whole review sheet, until its file takes this place. */
+function MakingDetail({
+  environmentId,
+  root,
+  making,
+  onBack,
+}: {
+  environmentId: EnvironmentId;
+  root: string;
+  making: GameArtMaking;
+  onBack: () => void;
+}) {
+  const state = useAssetUrlState(environmentId, {
+    _tag: "draft-workspace-file",
+    cwd: root,
+    path: making.sheet,
+  });
+  const name = assetName(making.path);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      <div className="flex h-14 shrink-0 items-center gap-1 ps-2 pe-2">
+        <Tooltip>
+          <TooltipTrigger
+            render={<Button size="icon-sm" variant="ghost" aria-label="All art" onClick={onBack} />}
+          >
+            <ChevronLeftIcon aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">All art</TooltipPopup>
+        </Tooltip>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <Text variant="label" tone="strong" truncate render={<h3 />}>
+            {name}
+          </Text>
+          <Text variant="caption" tone="muted" truncate>
+            Model · being made in Blender
+          </Text>
+        </span>
+      </div>
+      {state._tag !== "Success" ? null : (
+        <a href={state.url} target="_blank" rel="noreferrer">
+          <img src={state.url} alt={`${name}'s sheet`} className="w-full" />
+        </a>
+      )}
+    </div>
   );
 }
 
@@ -917,7 +1047,7 @@ function FontRow({
 
 /** What the agent is told about an asset with the chip. */
 const assetContext = (
-  entry: GameArtEntry,
+  entry: GameArtMadeEntry,
   info: ViewerModelInfo | null,
   facts: GameThingFacts | null,
 ) => {
@@ -974,6 +1104,7 @@ function ArtDetail({
   entry,
   things,
   code,
+  standIn,
   use,
   viewerUrl,
   heroSheets,
@@ -984,9 +1115,11 @@ function ArtDetail({
   threadRef: ScopedThreadRef;
   root: string;
   build: string | null;
-  entry: GameArtEntry;
+  entry: GameArtMadeEntry;
   things: ReadonlyArray<GameThing>;
   code: ReadonlyArray<GameArtCodeModel>;
+  /** The code model holds the place of a model being made. */
+  standIn: boolean;
   use: GameAssetUse | null;
   viewerUrl: string | null;
   heroSheets: ReadonlyArray<GameHeroSheet>;
@@ -1050,6 +1183,7 @@ function ArtDetail({
           entry.path === null
             ? (entry.kindWord ?? KIND_WORDS[entry.thingKind])
             : `part of ${entry.path.slice(0, entry.path.lastIndexOf(" › "))}`,
+          standIn ? "stand-in" : null,
           facts === null ? null : `${facts.triangles.toLocaleString("en-US")} tris`,
           facts === null ? null : countWords(facts.materials, "material", "materials"),
         ]

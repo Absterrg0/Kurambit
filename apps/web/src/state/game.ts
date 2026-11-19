@@ -483,13 +483,14 @@ export const gameEnvironment = {
     label: "game:cancelGeneration",
     tag: WS_METHODS.gameCancelGeneration,
   }),
-  // The game's art files for the Workbench's Art tab: reread when a build lands or art arrives.
+  // The game's art files for the Workbench's Art tab: reread when a build lands, art arrives, or
+  // an operation moves (a Blender review or export is one, and changes what is being made).
   artAssets: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:artAssets",
     tag: WS_METHODS.gameArtAssets,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("builds", "art"),
+    refreshTrigger: threadSignal("builds", "art", "operation"),
   }),
   // A model's thumbnail, drawn once by the Art tab's viewer and kept by its content.
   artThumbnail: createEnvironmentRpcCommand(connectionAtomRuntime, {

@@ -19,6 +19,7 @@ import {
   type GameEngineId,
 } from "@kurambit/contracts";
 import { creditedLibraryFiles, gltfTriangles } from "./assetFacts.ts";
+import { reviewedNotExported } from "./blenderPipeline.ts";
 import { gamePaths } from "./engineProfile.ts";
 import { fileSha256 } from "./fileHash.ts";
 import { GENERATED_DIR } from "./generatedSource.ts";
@@ -231,11 +232,19 @@ export const listArtAssets = async (
   }
   const blend = (await exists(NodePath.join(root, BLEND_SOURCE))) ? BLEND_SOURCE : null;
   const heroSheets = await listHeroSheets(root);
+  // Reviewed in Blender and not in the game yet: listed where its export will land.
+  const stems = new Set(
+    found.flatMap((path) => (/\.glb$/i.test(path) ? [NodePath.posix.basename(path, ".glb")] : [])),
+  );
+  const making = (await reviewedNotExported(root, (subject) => stems.has(subject))).map(
+    ({ subject, sheet }) => ({ path: `${slash(paths.blender)}/${subject}.glb`, sheet }),
+  );
   return {
     assets,
     more: Math.max(0, found.length - listed.length),
     ...(blend === null ? {} : { blend }),
     ...(heroSheets.length === 0 ? {} : { heroSheets }),
+    ...(making.length === 0 ? {} : { making }),
   };
 };
 
