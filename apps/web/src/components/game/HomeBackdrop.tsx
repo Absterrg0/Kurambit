@@ -14,13 +14,23 @@ const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
 /** CSS pixels per dither cell. */
 const CELL = 4;
-/** The page's content column, kept clear so its words never sit on the art. */
-const CONTENT_HALF_WIDTH = 420;
+/**
+ * Half of Home's content column (its `max-w-200`). The art is clipped to the margins beside it:
+ * nothing a person reads or presses ever has the fox or its glow behind it.
+ */
+const CONTENT_HALF_WIDTH = 400;
+/** The air between the column and the art's first cell, then the dither's run-in to full. */
+const CLEAR_GAP = 12;
+const CLEAR_RAMP = 72;
+const CLEAR_FROM = CONTENT_HALF_WIDTH + CLEAR_GAP;
+const CLEAR_TO = CLEAR_FROM + CLEAR_RAMP;
+// The bloom is clipped to the same margins as the dither over it.
+const BLOOM_MASK = `linear-gradient(to right, #000 calc(50% - ${CLEAR_TO}px), transparent calc(50% - ${CLEAR_FROM}px), transparent calc(50% + ${CLEAR_FROM}px), #000 calc(50% + ${CLEAR_TO}px))`;
 
 /**
  * Home's ground: the fox, large and dithered in vermilion, rising out of a warm glow in the
- * lower right, the way the brand's artwork is drawn on kurambit.com. Drawn once per size,
- * never animated, and behind everything, so the page stays still and cheap.
+ * lower right, the way the brand's artwork is drawn on kurambit.com. It lives in the page's
+ * margins, never behind the content column. Drawn once per size, never animated.
  */
 export function HomeBackdrop() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -72,8 +82,8 @@ export function HomeBackdrop() {
           const dy = (y - glowY) / glowR;
           const px = x * CELL;
           const py = y * CELL;
-          // Quiet under the page's content: it fades out toward the middle column.
-          const clear = clamp((Math.abs(px - middle) - CONTENT_HALF_WIDTH * 0.55) / 160);
+          // Nothing under the page's content: the art starts beside the column, at full strength.
+          const clear = clamp((Math.abs(px - middle) - CLEAR_FROM) / CLEAR_RAMP);
           const glow = clamp(1 - Math.sqrt(dx * dx + dy * dy)) ** 2.4 * clear;
           const strokes = ink === null ? 0 : (ink[(y * cols + x) * 4 + 3]! / 255) * clear;
           const threshold = bayer(x, y);
@@ -114,7 +124,10 @@ export function HomeBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
       {/* The light the dither is lit by: a soft vermilion bloom from the lower right. */}
-      <div className="home-backdrop-bloom absolute inset-0" />
+      <div
+        className="home-backdrop-bloom absolute inset-0"
+        style={{ maskImage: BLOOM_MASK, WebkitMaskImage: BLOOM_MASK }}
+      />
       <canvas
         ref={canvasRef}
         className="absolute inset-0 size-full [--home-backdrop-grid:#ececee] [--home-backdrop-hot:#d14b1f] [--home-backdrop-mid:#e9a184] [--home-backdrop-warm:#f3cbb9] dark:[--home-backdrop-grid:#141414] dark:[--home-backdrop-hot:#ef6a3a] dark:[--home-backdrop-mid:#9a3b1b] dark:[--home-backdrop-warm:#3a180c]"

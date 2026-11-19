@@ -683,14 +683,16 @@ function ContinueShelf({
 
 function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
-  const { status, build } = useGameLibraryLine({
+  const { status, build, still } = useGameLibraryLine({
     game: cover.game,
     main: cover.main,
     chats: cover.chats,
     read: leaseLiveStatus,
   });
   const name = useGameName(cover.game.environmentId, cover.game.projectId, cover.game.name);
-  const picture = build?.still ?? cover.game.keyArt;
+  // The newest picture any build has, as the sidebar shows: a build being made, or one not
+  // pictured yet, never turns the card back into an empty frame.
+  const picture = still ?? cover.game.keyArt;
   // Before any build has a still, the frame the Stage last showed of this game, when it
   // played in this session: the game's own title, not a stand-in.
   const shown = useStageStill(
@@ -698,6 +700,8 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
       ? ""
       : scopedThreadKey(scopeThreadRef(cover.main.environmentId, cover.main.id)),
   );
+  // A game at work with no picture to show says so in the frame, and only there.
+  const making = picture === null && shown === null && status.tone === "live";
   return (
     <li className="min-w-0">
       <button
@@ -715,16 +719,21 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           mark="none"
           className="aspect-video w-full rounded-lg ring-1 ring-border ring-inset transition-shadow duration-150 group-hover:ring-foreground/30 group-focus-visible:ring-2 group-focus-visible:ring-ring motion-reduce:transition-none"
         >
-          {/* Without a picture yet, the Stage's last frame, else the game's own colour. */}
-          {picture === null && shown !== null ? (
+          {/* Without a picture yet: the Stage's last frame, else what is being made, said where
+              its picture will be, else the game's own colour. */}
+          {picture !== null ? null : shown !== null ? (
             <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
+          ) : making ? (
+            <span className="absolute inset-0 flex items-center justify-center px-3">
+              <GameLibraryStatusText status={status} />
+            </span>
           ) : null}
         </GamePicture>
         <span className="flex min-w-0 flex-col gap-0.5">
           <Text variant="label" tone="strong" truncate>
             {name}
           </Text>
-          <GameLibraryStatusText status={status} />
+          {making ? null : <GameLibraryStatusText status={status} />}
           <CoverSummary build={build} status={status.text} />
         </span>
       </button>

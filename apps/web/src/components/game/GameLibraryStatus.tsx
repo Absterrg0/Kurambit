@@ -1,4 +1,4 @@
-import type { GameBuild, GameBuildsResult, ScopedThreadRef } from "@kurambit/contracts";
+import type { GameBuild, GameBuildsResult } from "@kurambit/contracts";
 import { TriangleAlertIcon } from "lucide-react";
 import { scopeThreadRef } from "@kurambit/client-runtime/environment";
 import { AsyncResult } from "effect/reactivity";
@@ -56,25 +56,9 @@ const latestStillOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown
 };
 
 /**
- * A game's latest build, from the same first page of its Builds list the game
- * screen reads, so an open game and its library row share one read. Pass null
- * to read nothing (a row scrolled out of view).
- */
-function useGameLatestBuild(threadRef: ScopedThreadRef | null): GameBuild | null | undefined {
-  return useEnvironmentQuerySelector(
-    threadRef === null
-      ? null
-      : gameEnvironment.builds({
-          environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId },
-        }),
-    latestBuildOf,
-  );
-}
-
-/**
- * A game's library line and latest build, for its sidebar row and Home card.
- * `read` false reads no builds (a row out of view) and keeps the rest.
+ * A game's library line, latest build and picture, for its sidebar row and Home card, from the
+ * same first page of its Builds list the game screen reads, so an open game and its library row
+ * share one read. `read` false reads no builds (a row out of view) and keeps the rest.
  */
 export function useGameLibraryLine(input: {
   readonly game: GameLibraryEntry;
@@ -86,21 +70,23 @@ export function useGameLibraryLine(input: {
 }): {
   readonly status: GameLibraryStatus;
   readonly build: GameBuild | null;
+  /** The latest picture any build of the game has (latestStillOf); null with none. */
+  readonly still: string | null;
   /** The builds are still being read: the picture and the line wait rather than guess. */
   readonly pending: boolean;
 } {
   const { game, main, chats } = input;
   const mainRef = input.read && main !== null ? scopeThreadRef(game.environmentId, main.id) : null;
-  const build = useGameLatestBuild(mainRef);
-  const nextBuild = useEnvironmentQuerySelector(
+  const builds =
     mainRef === null
       ? null
       : gameEnvironment.builds({
           environmentId: mainRef.environmentId,
           input: { threadId: mainRef.threadId },
-        }),
-    nextBuildOf,
-  );
+        });
+  const build = useEnvironmentQuerySelector(builds, latestBuildOf);
+  const nextBuild = useEnvironmentQuerySelector(builds, nextBuildOf);
+  const still = useEnvironmentQuerySelector(builds, latestStillOf) ?? null;
   // Between a turn's end and its build being listed, as the game screen says it.
   const saving = useTurnLanding(mainRef, derivePhase(main?.runtime ?? null) === "running");
   // A game Keep going runs on reads its run, so a step that only waits shows no working dot.
@@ -124,7 +110,7 @@ export function useGameLibraryLine(input: {
     // A game with no chat has no builds to read; any other waits for its read.
     known: main === null || build !== undefined,
   });
-  return { status, build: build ?? null, pending: main !== null && build === undefined };
+  return { status, build: build ?? null, still, pending: main !== null && build === undefined };
 }
 
 /** A game's one status line: a dot for live work or a failure, the words, then its time. */
@@ -190,21 +176,12 @@ export function GameLibraryPicture(props: {
   readonly read?: boolean;
 }) {
   const read = props.read !== false;
-  const { build, pending } = useGameLibraryLine({
+  const { build, still, pending } = useGameLibraryLine({
     game: props.game,
     main: props.main,
     chats: props.chats,
     read,
   });
-  const still = useEnvironmentQuerySelector(
-    props.main === null || !read
-      ? null
-      : gameEnvironment.builds({
-          environmentId: props.game.environmentId,
-          input: { threadId: props.main.id },
-        }),
-    latestStillOf,
-  );
   // The Stage's frame of the latest build, once taken, as its card and the Inspector show.
   const frame = useBuildFrame(build?.id ?? null);
   if (pending) return <Skeleton shape="card" className={props.className} />;
