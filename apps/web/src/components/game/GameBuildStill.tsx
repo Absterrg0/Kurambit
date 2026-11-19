@@ -3,7 +3,9 @@ import type { EnvironmentId, GameBuild, ScopedThreadRef } from "@kurambit/contra
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { cn } from "../../lib/utils";
+import { deriveProjectIdentity } from "../../projectIdentity";
 import { useProject, useQuietThreadShell } from "../../state/entities";
+import { ProjectMonogram } from "../ProjectMonogram";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameKeyArt } from "./GameKeyArt";
 import { useBuildFrame } from "./gameStageBridge";
@@ -75,8 +77,9 @@ export function GameBuildStill({
 export type GamePictureMark = "name" | "initial" | "absent" | "blank" | "none";
 
 /**
- * A game with no picture: its own pigment with its name as a title card, or its initial at icon
- * size, so it is never a blank box nor mistaken for a picture still loading.
+ * A game with no picture: its own pigment with its name as a title card, or T3's project tile
+ * (two letters of its name) at icon size, so it is never a blank box nor mistaken for a picture
+ * still loading.
  */
 function GameTitleMark({
   gameName,
@@ -101,23 +104,28 @@ function GameTitleMark({
         </span>
       </span>
     );
+  // At icon size a game is T3's project tile: two letters fitted to the square, in the colour
+  // its name picks. A letter of our own did not fit a 16 px icon.
+  if (mark === "initial" && name !== "") {
+    const identity = deriveProjectIdentity(name);
+    return (
+      <ProjectMonogram
+        text={identity.monogram}
+        color={identity.color}
+        className="absolute inset-0 size-full"
+      />
+    );
+  }
   return (
     <span
       aria-hidden="true"
       className="absolute inset-0 grid place-items-center p-3 text-center"
       style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
     >
-      {mark === "none" || name === "" ? null : mark === "name" ? (
+      {mark !== "name" || name === "" ? null : (
         <span className="line-clamp-2 font-display text-sm/tight text-balance text-white/85 @[7rem]:text-xl/tight @3xs:text-2xl/tight @sm:text-3xl/tight">
           {name}
         </span>
-      ) : (
-        // An SVG letter scales with its icon, from the palette's 20px to the sidebar's 30px.
-        <svg viewBox="0 0 10 10" className="absolute inset-0 size-full">
-          <text x="5" y="7.4" textAnchor="middle" className="fill-white/80 font-display text-5xs">
-            {name.charAt(0).toUpperCase()}
-          </text>
-        </svg>
       )}
     </span>
   );
