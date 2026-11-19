@@ -98,6 +98,7 @@ import {
   type SourceControlRepositoryInfo,
   type ThreadId,
   resolveEnvironmentMachineKind,
+  partitionGameChats,
 } from "@kurambit/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -301,7 +302,6 @@ import {
 } from "./CommandPalette.logic";
 import {
   orderItemsByPreferredIds,
-  partitionGameChats,
   resolveGameSidebarStatus,
   sortLogicalProjectsForSidebar,
 } from "./Sidebar.logic";

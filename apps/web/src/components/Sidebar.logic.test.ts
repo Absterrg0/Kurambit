@@ -29,12 +29,17 @@ import {
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   sortSidebarV2ProjectGroups,
-  gameMainThread,
-  partitionGameChats,
   resolveGameSidebarStatus,
 } from "./Sidebar.logic";
 
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kurambit/contracts";
+import {
+  EnvironmentId,
+  gameMainThread,
+  partitionGameChats,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@kurambit/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,

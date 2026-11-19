@@ -64,6 +64,7 @@ export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./game.ts";
+export * from "./gameChats.ts";
 export * from "./gameAssets.ts";
 export * from "./gameExplore.ts";
 export * from "./gamePlaySession.ts";

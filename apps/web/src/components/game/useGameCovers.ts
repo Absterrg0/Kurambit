@@ -1,13 +1,8 @@
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
-import { isNestedUnderLiveParent } from "@kurambit/contracts";
+import { gameMainThread, isNestedUnderLiveParent, partitionGameChats } from "@kurambit/contracts";
 
 import { useThreadShells } from "../../state/entities";
-import {
-  gameMainThread,
-  partitionGameChats,
-  resolveGameSidebarStatus,
-  type SidebarThreadStatus,
-} from "../Sidebar.logic";
+import { resolveGameSidebarStatus, type SidebarThreadStatus } from "../Sidebar.logic";
 import { sortGameThreadsByActivity } from "./gameLibrary.logic";
 import { useGameLibrary, type GameLibraryEntry } from "./useGameLibrary";
 

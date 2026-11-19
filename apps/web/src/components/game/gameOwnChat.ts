@@ -1,13 +1,12 @@
 import { scopeProjectRef } from "@kurambit/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@kurambit/client-runtime/state/models";
-import type { ScopedThreadRef } from "@kurambit/contracts";
+import { partitionGameChats, type ScopedThreadRef } from "@kurambit/contracts";
 
 import {
   readThreadShells,
   useQuietThreadShell,
   useThreadShellsForProjectRefs,
 } from "../../state/entities";
-import { partitionGameChats } from "../Sidebar.logic";
 
 /**
  * A game's own chat is the one it was made in: the game's row in the sidebar. It never settles,

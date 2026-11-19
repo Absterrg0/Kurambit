@@ -1,11 +1,8 @@
 import { sortSettledThreads } from "@kurambit/client-runtime/state/thread-sort";
+import { partitionGameChats } from "@kurambit/contracts";
 
 import type { SidebarThreadSummary } from "../../types";
-import {
-  partitionGameChats,
-  resolveSidebarThreadStatus,
-  sortPinnedThreadsForSidebar,
-} from "../Sidebar.logic";
+import { resolveSidebarThreadStatus, sortPinnedThreadsForSidebar } from "../Sidebar.logic";
 
 /** The fields of a thread shell the tree reads. */
 export type GameTreeChat = Pick<

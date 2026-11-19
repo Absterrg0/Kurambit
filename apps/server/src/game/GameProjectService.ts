@@ -35,6 +35,7 @@ import {
   type GameSummary,
   type GameViewport,
   manifestProject,
+  partitionGameChats,
 } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
@@ -159,9 +160,9 @@ export class GameProjectService extends Context.Service<
     >;
     readonly read: (root: string) => Effect.Effect<GameManifest, GameOperationError>;
     /**
-     * Whether the thread is its game's own chat: the game's oldest live top-level chat, which the
-     * sidebar shows as the game's row. It never settles (settling would also drop the game's
-     * pin); archiving the game puts it away. False for any other chat and outside a game.
+     * Whether the thread is its game's own chat, by the rule the sidebar draws the game's row with
+     * (partitionGameChats). It never settles (settling would also drop the game's pin);
+     * archiving the game puts it away. False for any other chat and outside a game.
      */
     readonly isOwnChat: (threadId: ThreadId) => Effect.Effect<boolean>;
     /**
@@ -779,16 +780,13 @@ const make = Effect.gen(function* () {
       const game = yield* home(threadId);
       // Only a folder with a game.json is a game; any other project's chats settle as T3's do.
       yield* read(game.root);
-      const chats = yield* threads.listProjectThreads({
+      // Subagent threads too: the shared rule tells a chat from one nested under a live parent.
+      const all = yield* threads.listProjectThreads({
         projectId: game.projectId,
-        includeSubagents: false,
+        includeSubagents: true,
       });
-      const own = chats
-        .filter((chat) => chat.deletedAt === null && chat.archivedAt === null)
-        .toSorted(
-          (left, right) =>
-            DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt),
-        )[0];
+      const live = new Set(all.filter((chat) => chat.deletedAt === null).map((chat) => chat.id));
+      const own = partitionGameChats(all, live).main;
       return own?.id === threadId;
     },
     Effect.orElseSucceed(() => false),

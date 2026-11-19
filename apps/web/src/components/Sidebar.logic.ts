@@ -5,7 +5,7 @@ import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
 } from "@kurambit/client-runtime/state/runtime";
-import { isNestedUnderLiveParent, type ContextMenuItem } from "@kurambit/contracts";
+import { isNestedUnderLiveParent, type ContextMenuItem, type GameChats } from "@kurambit/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kurambit/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
 import {
@@ -721,55 +721,6 @@ export function sortScopedProjectsForSidebar<
       left.environmentId.localeCompare(right.environmentId) ||
       left.id.localeCompare(right.id),
   );
-}
-
-type GameChatShell = Pick<
-  SidebarThreadSummary,
-  "id" | "lineage" | "createdAt" | "updatedAt" | "archivedAt" | "deletedAt"
->;
-
-/**
- * A game's main chat: its oldest live top-level chat. A game's create
- * launches exactly this thread with the brief; archiving it promotes the next.
- */
-export function gameMainThread<T extends GameChatShell>(threads: readonly T[]): T | null {
-  let main: T | null = null;
-  for (const thread of threads) {
-    if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
-    if (thread.lineage.relationshipToParent !== null) continue;
-    if (main === null || Date.parse(thread.createdAt) < Date.parse(main.createdAt)) main = thread;
-  }
-  return main;
-}
-
-export interface GameChats<T> {
-  /** The main chat; when the game has no top-level chat left, its newest other chat. */
-  readonly main: T | null;
-  /** Every other chat of the game, newest first. */
-  readonly others: readonly T[];
-}
-
-const byNewest = <T extends { readonly updatedAt: string }>(left: T, right: T) =>
-  Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
-
-/**
- * One game's live threads, by lineage alone. A `role` thread is one an earlier
- * Kurambit's production run launched: it never lists as a chat. A subagent
- * under a listed parent stays nested there, as everywhere in the sidebar.
- */
-export function partitionGameChats<T extends GameChatShell>(
-  threads: readonly T[],
-  liveThreadIds: ReadonlySet<string>,
-): GameChats<T> {
-  const chats: T[] = [];
-  for (const thread of threads) {
-    if (thread.deletedAt !== null || thread.archivedAt !== null) continue;
-    if (thread.lineage.relationshipToParent === "role") continue;
-    if (!isNestedUnderLiveParent(thread, liveThreadIds)) chats.push(thread);
-  }
-  chats.sort(byNewest);
-  const main = gameMainThread(chats) ?? chats[0] ?? null;
-  return { main, others: chats.filter((thread) => thread !== main) };
 }
 
 // The sidebar's precedence for one thread (resolveSidebarThreadStatus), most urgent first.
