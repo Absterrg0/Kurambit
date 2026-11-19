@@ -266,8 +266,44 @@ def _on_open_edge(p, co, edges, tol=0.0015):
     return False
 
 
-def _shown(cover, garment, body_co):
-    """How far outside the garment each covered body vertex is now (0 for one still under it)."""
+def _lies_over(cover, garment, under_co, height, rings=3):
+    """The garment's faces that lie over what cover says is under it at rest, and rings of faces
+    round them. A thigh under a skirt is under the skirt; when a sleeve swings past it the sleeve
+    is nearer, and which side of a sleeve a thigh is on says nothing."""
+    gco, gpolys = garment[0], garment[1]
+    tree = BVHTree.FromPolygons([Vector(c) for c in gco.tolist()], gpolys)
+    over = np.zeros(len(gpolys), bool)
+    for i in cover[0]:
+        hit = tree.find_nearest(Vector(under_co[i]))
+        if hit[0] is not None:
+            over[hit[2]] = True
+    corner = np.array([v for f in gpolys for v in f], np.int64)
+    face = np.repeat(np.arange(len(gpolys)), [len(f) for f in gpolys])
+    for _ in range(rings):
+        touched = np.zeros(len(gco), bool)
+        touched[corner[over[face]]] = True
+        grown = np.zeros(len(gpolys), bool)
+        np.logical_or.at(grown, face, touched[corner])
+        over |= grown
+    # Not its rims: once a hem lifts past a leg the leg's nearest cloth is the hem's turned-in
+    # edge, and the leg is past the cloth, not through it.
+    from .cloth import _boundary_distance
+
+    count = {}
+    for f in gpolys:
+        for a, b in zip(f, f[1:] + f[:1]):
+            k = (min(a, b), max(a, b))
+            count[k] = count.get(k, 0) + 1
+    rim = np.unique(np.array([k for k, c in count.items() if c == 1], np.int64).reshape(-1, 2))
+    if len(rim):
+        depth = _boundary_distance(gco, np.array(sorted(count), np.int64).reshape(-1, 2), rim)
+        over &= np.array([min(depth[i] for i in f) > EDGE_MARGIN * height for f in gpolys], bool)
+    return over
+
+
+def _shown(cover, garment, body_co, over=None):
+    """How far outside the garment each covered body vertex is now (0 for one still under it);
+    over: the only faces of the garment a vertex is read against."""
     idx, sign, open_edges = cover
     gco, gpolys = garment[0], garment[1]
     tree = BVHTree.FromPolygons([Vector(c) for c in gco.tolist()], gpolys)
@@ -278,7 +314,7 @@ def _shown(cover, garment, body_co):
         if hit[0] is None:
             continue
         near = np.array(hit[0])
-        if _on_open_edge(near, gco, open_edges[hit[2]]):
+        if (over is not None and not over[hit[2]]) or _on_open_edge(near, gco, open_edges[hit[2]]):
             continue
         f = gpolys[hit[2]]
         n = np.cross(gco[f[1]] - gco[f[0]], gco[f[2]] - gco[f[0]])
@@ -358,7 +394,20 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
     cover = {}
     if body_rest is not None:
         for o in cloth:
-            cover[o.name] = _cover_rest(rest[o.name], body_rest, height / max(scale, 1e-9), gone_verts)
+            c = _cover_rest(rest[o.name], body_rest, height / max(scale, 1e-9), gone_verts)
+            # Read against the cloth that lies over that skin: a forearm swinging past a skirt is
+            # nearer the skirt than its own sleeve, and is not under the skirt.
+            cover[o.name] = None if c is None else (c, _lies_over(c, rest[o.name], body_rest[0], height / max(scale, 1e-9)))
+    # Cloth under cloth, read the same way: what of one garment another lies over at rest.
+    layered = {}
+    for under in cloth:
+        for over in cloth:
+            if under is over or not len(rest[under.name][1]) or not len(rest[over.name][1]):
+                continue
+            c = _cover_rest(rest[over.name], (rest[under.name][0], rest[under.name][1]), height / max(scale, 1e-9))
+            if c is not None and len(c[0]) >= COVER_PART_MIN:
+                layered[(under.name, over.name)] = (c, _lies_over(c, rest[over.name], rest[under.name][0], height / max(scale, 1e-9)))
+    worst_layer = (0.0, None, 0.0)
     body_lead = [l for o in body for l in _dominant(o, arm)] if body else []
     worst_shown = (0.0, None, 0.0)
     leads = {o.name: _dominant(o, arm) for o in skin}
@@ -411,10 +460,10 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
                             worst_cloth = (depth, (name, f, o.name, leads[o.name][i] if i is not None else None), share)
                         elif worst_cloth[1] is None and depth > worst_cloth[0]:
                             worst_cloth = (depth, (name, f, o.name, leads[o.name][i] if i is not None else None), share)
-                        c = cover.get(o.name)
+                        c, faces = cover.get(o.name) or (None, None)
                         if c is None or not len(c[0]):
                             continue
-                        shown = _shown(c, posed[o.name], merged[0])
+                        shown = _shown(c, posed[o.name], merged[0], faces)
                         # By body part: a hole is as big as it is, however much else the garment covers.
                         through, part, at = float(shown.max()), float(np.mean(shown > gates.CLOTH_DEPTH_MAX)), None
                         if body_lead:
@@ -429,6 +478,19 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
                         if (part > gates.CLOTH_SHARE_MAX) > (worst_shown[2] > gates.CLOTH_SHARE_MAX) or (
                                 (part > gates.CLOTH_SHARE_MAX) == (worst_shown[2] > gates.CLOTH_SHARE_MAX) and through > worst_shown[0]):
                             worst_shown = (through, (name, f, o.name, at), part)
+                for (under, over), (c, faces) in layered.items():
+                    if len(posed[under][0]) != len(rest[under][0]) or len(posed[over][0]) != len(rest[over][0]):
+                        continue
+                    shown = _shown(c, posed[over], posed[under][0], faces)
+                    bones = np.array([leads[under][int(i)] or "" for i in c[0]])
+                    for bone in set(bones.tolist()):
+                        mine = bones == bone
+                        if mine.sum() < COVER_PART_MIN:
+                            continue
+                        share, through = float(np.mean(shown[mine] > gates.CLOTH_DEPTH_MAX)), float(shown[mine].max())
+                        if (share > gates.CLOTH_SHARE_MAX) > (worst_layer[2] > gates.CLOTH_SHARE_MAX) or (
+                                (share > gates.CLOTH_SHARE_MAX) == (worst_layer[2] > gates.CLOTH_SHARE_MAX) and through > worst_layer[0]):
+                            worst_layer = (through, (name, f, f"{under} through {over}", bone), share)
             if feet and any(w in name.lower() for w in LOCOMOTION) and "idle" not in name.lower():
                 a, b = int(act.frame_range[0]), int(act.frame_range[1])
                 tracks = {fb: [] for fb, _ in feet}
@@ -474,12 +536,16 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
         # The same limits read from the skin's side: a thigh through a skirt between the skirt's
         # own vertices sinks none of them, and is the hole a person sees.
         shown_ok = not (worst_shown[0] > gates.CLOTH_DEPTH_MAX and worst_shown[2] > gates.CLOTH_SHARE_MAX)
-        ok = sunk_ok and shown_ok
-        through = worst_shown[0] * scale
-        out.append(gates.gate("cloth", ok, round(max(depth, through) * 1000, 1), gates.CLOTH_DEPTH_MAX * 1000,
+        # And between garments: trousers through the coat over them is a hole in the coat.
+        layer_ok = not (worst_layer[0] > gates.CLOTH_DEPTH_MAX and worst_layer[2] > gates.CLOTH_SHARE_MAX)
+        ok = sunk_ok and shown_ok and layer_ok
+        through, between = worst_shown[0] * scale, worst_layer[0] * scale
+        out.append(gates.gate("cloth", ok, round(max(depth, through, between) * 1000, 1), gates.CLOTH_DEPTH_MAX * 1000,
                               f"clothing sinks at most {depth * 1000:.0f} mm into the body{where(worst_cloth[1])}, {worst_cloth[2] * 100:.1f}% of its vertices past {gates.CLOTH_DEPTH_MAX * 1000:.0f} mm; "
                               f"the body comes at most {through * 1000:.0f} mm through it{where(worst_shown[1])}, {worst_shown[2] * 100:.1f}% of that part's skin under it past {gates.CLOTH_DEPTH_MAX * 1000:.0f} mm"
+                              + (f"; one garment comes at most {between * 1000:.0f} mm through another{where(worst_layer[1])}, {worst_layer[2] * 100:.1f}% of what is under it there past {gates.CLOTH_DEPTH_MAX * 1000:.0f} mm" if layered else "")
                               + ("" if sunk_ok else ": lift it (hero.dress offset), weight it like the body under it, or hang the hem on chains")
+                              + ("" if layer_ok else ": what is worn under shows through what is worn over it. Make the under garment first so the outer one is made round it, run hero.follow_hem after adding clips, or end the outer one higher: a closed skirt past mid-thigh over trousers does not clear a lunge")
                               + ("" if shown_ok else ": the body shows through the cloth. Make the garment with hero.garment (it goes round everything under it), run hero.follow_hem after adding clips, or widen it there")))
     if feet and any(any(w in _clip_name(a).lower() for w in LOCOMOTION) for a in clips):
         c, s = worst_contact[0] * scale, worst_slide[0] * scale

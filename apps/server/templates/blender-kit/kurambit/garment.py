@@ -19,9 +19,12 @@ from mathutils import Vector
 
 from . import cloth, helpers
 
-KINDS = ("top", "trousers", "boots", "gloves", "skirt")
+KINDS = ("top", "trousers", "boots", "shoes", "gloves", "skirt")
 LIFT = "kurambit_lift"
 SIDES = ("l", "r")
+CREASE = 0.7
+STRIDE = 24.0
+STRIDE_DEPTH = 0.5
 FINGERS = ("thumb", "index", "middle", "ring", "pinky")
 
 
@@ -70,8 +73,8 @@ def _plan(arm, kind, size, sleeves, length, collar, top, waist, fork):
                 p, d = _along(arm, f"upperarm_{s}", f"lowerarm_{s}", 0.1)
                 keep += [f"upperarm_{s}"]
             cuts.append((p, -d, limb[1:]))
-        # Never below the fork of the legs: cut lower, a top closes under the body like a leotard,
-        # and what hangs lower than that is a skirt's to do (hem=).
+        # Never below the crease of the hips (_fork): cut lower, a top closes under the body like
+        # a leotard and a raised thigh comes through it; what hangs lower is a skirt's to do (hem=).
         z = max(float(length), fork) if length is not None else fork
         cuts.append((np.array([0.0, 0.0, z]), up, ["pelvis", "spine_01", "spine_02"] + _leg_of("l") + _leg_of("r")))
         keep += ["thigh_l", "thigh_r"]
@@ -124,7 +127,11 @@ def _fork(arm, bodies, size):
         if mid.any():
             low.append(float(np.median(co[mid][:, 2])))
     hip = float(_bone(arm, "thigh_l")[2])
-    return (max(low) if low else hip - 0.05 * size) + 0.012 * size
+    fork = (max(low) if low else hip - 0.05 * size) + 0.012 * size
+    # And never below the crease of the hip: a thigh raised level is as high there as its joint
+    # plus its own thickness, and whatever is fixed to the trunk below that it comes through.
+    thick = max((t for a, _, t in cloth._limbs(arm) if a.startswith("thigh")), default=0.0)
+    return max(fork, hip + CREASE * thick)
 
 
 def _shell(arm, bodies, keep, cuts, lift, ease, name, box=()):
@@ -278,15 +285,33 @@ def _skirt(arm, bodies, top_z, hem_z, flare, gap, name, segs=40, rings=11):
     widening to flare times that at the hem."""
     from . import deform
 
-    pts = []
-    for body in bodies:
+    pts, legs = [], {s: [] for s in SIDES}
+    # Round what is worn there too: a coat made over trousers is made round the trousers.
+    for body in [*bodies, *[o for o in bpy.data.objects if o.get("kurambit_cloth") and arm in helpers._deforming(o)]]:
         co, _ = helpers.rest_coords(body)
         if len(co) != len(body.data.vertices):
             continue
         lead = deform._dominant(body, arm)
         under = np.array([l is not None and l.startswith(("pelvis", "spine", "thigh", "calf", "foot", "ball")) for l in lead])
         pts.append(co[under])
+        for s in SIDES:
+            legs[s].append(co[np.array([l is not None and l in (f"thigh_{s}", f"calf_{s}") for l in lead])])
     pts = np.concatenate(pts) if pts else np.zeros((0, 3))
+    # Room for a stride at the hips: the top of a skirt hangs from the pelvis and cannot lift, so
+    # there it goes round each thigh swung STRIDE forward and back about its hip, fading out by
+    # STRIDE_DEPTH of the way down, where the hem chains lift the cloth instead.
+    swung = []
+    for s in SIDES:
+        leg = np.concatenate(legs[s]) if legs[s] else np.zeros((0, 3))
+        if not len(leg) or f"thigh_{s}" not in arm.data.bones:
+            continue
+        hip = _bone(arm, f"thigh_{s}")
+        for sign in (1, -1):
+            a = sign * math.radians(STRIDE)
+            rel = leg - hip
+            turned = np.stack([rel[:, 0], rel[:, 1] * math.cos(a) - rel[:, 2] * math.sin(a), rel[:, 1] * math.sin(a) + rel[:, 2] * math.cos(a)], axis=1) + hip
+            swung.append(turned)
+    swung = np.concatenate(swung) if swung else np.zeros((0, 3))
     span = top_z - hem_z
     if span <= 1e-4 or not len(pts):
         raise ValueError(f"nothing hangs between {top_z:.2f} m and {hem_z:.2f} m: hem must be below the hips")
@@ -300,6 +325,10 @@ def _skirt(arm, bodies, top_z, hem_z, flare, gap, name, segs=40, rings=11):
         z = top_z + 0.015 - (span + 0.015) * t
         here = pts[np.abs(pts[:, 2] - z) < slab]
         reach = np.maximum(reach, _outline(here, centre, segs))
+        room = max(0.0, 1 - t / STRIDE_DEPTH)
+        if room > 0 and len(swung):
+            stride = _outline(swung[np.abs(swung[:, 2] - z) < slab], centre, segs)
+            reach = np.maximum(reach, reach + (stride - reach) * room)
         # An outline with a waist in it (between two legs) is rounded off by its neighbours.
         r = np.maximum(reach, (np.roll(reach, 1) + np.roll(reach, -1)) / 2)
         r = (r + gap) * (1 + (flare - 1) * t ** 1.3)
@@ -323,12 +352,13 @@ def garment(armature, kind, *, colour=None, material=None, name=None, sleeves="l
     """Makes and dresses a garment on armature's body (a human on the standard skeleton), in one of
     KINDS:
       top       shirt, tunic, coat, dress: the trunk from the collar (collar: 0 at the neck's base
-                .. 1 under the jaw) down to length (a height, m; default and lowest where the legs part), with
+                .. 1 under the jaw) down to length (a height, m; default and lowest the crease of the hips), with
                 sleeves "long", "short" or "none"; hem (a height, m) hangs a skirt on from there
                 down, flare times as wide at its hem (a coat to the knees, a dress, a robe)
       trousers  from waist (a height; default the waist) down length of the leg (0..1, default the
                 ankle; 0.45 is shorts)
-      boots     the feet and up top of the shin (0..1, default 0.45)
+      boots     made footwear with a sole, up top of the shin (0..1, default 0.45); "shoes" end at
+                the ankle. hero.footwear has their toe shape and sole colour
       gloves    the hands and up top of the forearm (0..1, default 0.2)
       skirt     from waist down to hem, flare times as wide there
     colour (hex) or material; fit scales how loose it sits (1 a shirt, 1.6 a padded coat). Every
@@ -336,6 +366,11 @@ def garment(armature, kind, *, colour=None, material=None, name=None, sleeves="l
     lies outside the ones already on. Returns {"object", "chains", "triangles"}."""
     if kind not in KINDS:
         raise ValueError(f"garment kind {kind!r}: one of {', '.join(KINDS)}")
+    if kind in ("boots", "shoes"):
+        # Footwear is its own shape with a sole, not the foot's skin lifted (footwear.py).
+        from .footwear import footwear
+
+        return footwear(armature, kind, colour=colour or "#4a3324", material=material, name=name, top=0.45 if top is None else top, fit=fit)
     arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
     bodies = cloth._bodies(arm)
     if not bodies:

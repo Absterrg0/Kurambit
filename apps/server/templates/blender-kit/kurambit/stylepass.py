@@ -23,7 +23,7 @@ import numpy as np
 from . import helpers, skeleton
 
 # depth: how strongly a made model is shaded into its vertex colours (shade); 0 leaves it flat.
-DEFAULT_SHADING = {"gradient": 0.16, "roughness": 0.62, "glow": 2.5, "depth": 0.8}
+DEFAULT_SHADING = {"gradient": 0.16, "roughness": 0.62, "glow": 2.5, "depth": 0.6}
 COLS, SWATCH_W, SWATCH_H = 8, 8, 32
 
 
@@ -386,8 +386,12 @@ def fold_flat(meshes, single=False):
 
 # The least a vertex is shaded to at full depth, and how far a shading ray looks, as a share of the
 # model's height.
-SHADE_FLOOR = 0.42
-SHADE_REACH = 0.07
+SHADE_FLOOR = 0.55
+SHADE_REACH = 0.05
+# A colour darker than this (linear luminance, mid grey) has little room below it: its shade is
+# eased toward SHADE_DARK of its strength, so a dark cloth stays its colour and does not go black.
+SHADE_MID = 0.18
+SHADE_DARK = 0.4
 _RAYS = [(math.sin(a) * math.cos(b), math.sin(a) * math.sin(b), math.cos(a))
          for a, n in ((math.radians(25), 4), (math.radians(60), 7)) for b in [2 * math.pi * (k + 0.5 * (n == 7)) / n for k in range(n)]]
 
@@ -433,7 +437,7 @@ def shade(meshes, depth):
                 d = x * a + y * b + z * c
                 got = tree.ray_cast(start, d, reach)
                 if got[0] is not None:
-                    hit += 1 - got[3] / reach
+                    hit += (1 - got[3] / reach) ** 2  # a crease, not a brim a hand away
             near[i] = hit / len(_RAYS)
         edges = np.empty(len(me.edges) * 2, np.int64)
         me.edges.foreach_get("vertices", edges)
@@ -448,18 +452,21 @@ def shade(meshes, depth):
         proud = np.clip(proud / count * 3.0, -1.0, 1.0)
         height = (tall - tall.min()) / size
         facing = nrm @ up
-        s = (1 - 0.8 * np.clip(near * 2.4, 0, 1)) * (0.72 + 0.28 * height) * (1 - 0.34 * np.clip(-facing, 0, 1)) * (0.9 + 0.1 * np.clip(proud, 0, 1)) * (1 - 0.2 * np.clip(-proud, 0, 1))
+        s = (1 - 0.6 * np.clip(near * 2.4, 0, 1)) * (0.82 + 0.18 * height) * (1 - 0.26 * np.clip(-facing, 0, 1)) * (0.9 + 0.1 * np.clip(proud, 0, 1)) * (1 - 0.2 * np.clip(-proud, 0, 1))
         for _ in range(2):  # soft, never speckled
             mean = np.zeros(n)
             np.add.at(mean, a, s[b])
             np.add.at(mean, b, s[a])
             s = 0.5 * s + 0.5 * mean / count
-        s = np.clip(1 - float(depth) * (1 - s / max(1e-9, float(np.percentile(s, 98)))), SHADE_FLOOR, 1.0)
+        s = np.clip(s / max(1e-9, float(np.percentile(s, 98))), 0.0, 1.0)
         corner = np.empty(len(me.loops), np.int64)
         me.loops.foreach_get("vertex_index", corner)
         colour = np.empty(len(me.loops) * 4, np.float32)
         attr.data.foreach_get("color", colour)
         colour = colour.reshape(-1, 4)
+        light = colour[:, :3] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+        ease = SHADE_DARK + (1 - SHADE_DARK) * np.clip(light / SHADE_MID, 0, 1)
+        s = np.clip(1 - float(depth) * ease * (1 - s[corner]), SHADE_FLOOR, 1.0)
         painted = np.zeros(len(me.polygons), bool)
         slots = [sl.material for sl in o.material_slots]
         mat_index = np.empty(len(me.polygons), np.int32)
@@ -468,7 +475,7 @@ def shade(meshes, depth):
             if m is not None and m.name.split(".")[0].startswith("Paint"):
                 painted |= mat_index == k
         loop_poly = np.repeat(np.arange(len(me.polygons)), [p.loop_total for p in me.polygons])
-        colour[:, 3] = np.where(painted[loop_poly], s[corner], 1.0)
+        colour[:, 3] = np.where(painted[loop_poly], s, 1.0)
         attr.data.foreach_set("color", colour.ravel())
         for m in slots:
             if m is not None and m.name.split(".")[0].startswith("Paint"):

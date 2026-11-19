@@ -7,8 +7,10 @@ Face:    hero.face(armature, iris="#4f7396", brows="#3a2a20"): eyes that blink, 
 Head:    hero.hair(armature, "short"|"long"|"tied"|"curly", colour=): a cap and chunky locks on the
          head it finds; hero.beard(armature, colour=), hero.glasses(armature, shape=), and
          hero.wear(hat, armature): a hat or helmet you modelled, sized to the head and its hair
-Clothes: hero.garment(armature, "top"|"trousers"|"boots"|"gloves"|"skirt", colour=, ...): a whole
-         garment made from the body's own surface between clean cuts, fitted and bound; by hand,
+Clothes: hero.garment(armature, "top"|"trousers"|"gloves"|"skirt", colour=, ...): a whole
+         garment made from the body's own surface between clean cuts, fitted and bound;
+         hero.footwear(armature, "boots"|"shoes", colour=, sole=, toe="round"|"pointed"|"square"):
+         footwear with a sole and one toe, made for the feet it is on; by hand,
          hero.dress(garment, armature, hang=..., chains=6), hero.dangle(part, armature, start, end),
          hero.follow_hem(armature)
 Animal:  hero.creature_face(armature, eyes=, set="side"|"front"|"top"): eyes that blink, nostrils,
@@ -28,6 +30,7 @@ Gates:   hero.gates(armature): the review's gate numbers now, in the live scene
 from .anatomy import creature_face, feathers, feet, fur, wing
 from .cloth import dangle, dress, follow_hem
 from .face import face
+from .footwear import footwear
 from .garment import garment
 from .hair import beard, glasses, hair, wear
 from .creature import bake_controls, bind, controls, creature_body, creature_clips, creature_rig, decimate, hinge_clips, hinge_rig, membrane, sculpt

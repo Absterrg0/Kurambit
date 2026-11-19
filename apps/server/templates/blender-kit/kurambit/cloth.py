@@ -540,7 +540,9 @@ def follow_hem(armature, follow=0.5):
         return 0
     sc = bpy.context.scene
     keep = (arm.animation_data.action if arm.animation_data else None, sc.frame_current)
-    rest = {n: arm.data.bones[n].matrix_local.to_3x3() for n in ["pelvis", "thigh_l", "thigh_r", *hems.values()]}
+    chains_of = json.loads(arm.get("kurambit_chains", "{}") or "{}")
+    lower = {root: [b for b in chains_of.get(lab, [root])[1:] if b in arm.data.bones] for lab, root in hems.items()}
+    rest = {n: arm.data.bones[n].matrix_local.to_3x3() for n in ["pelvis", "thigh_l", "thigh_r", *hems.values(), *[b for bs in lower.values() for b in bs]]}
     side = {}
     for lab, root in hems.items():
         x = (arm.data.bones[root].head_local - arm.data.bones["pelvis"].head_local).x
@@ -553,7 +555,6 @@ def follow_hem(armature, follow=0.5):
         dirs[root] = v.normalized() if v.length > 1e-6 else Vector((0, -1, 0))
     # What the hem must stay outside of: each leg as a run of balls down its bones, as thick as the
     # body is there, seen from each chain.
-    chains_of = json.loads(arm.get("kurambit_chains", "{}") or "{}")
     limbs = _limbs(arm)
     clear = GARMENT_OFFSET + 0.006 * _size(_bodies(arm))
     reach = {}
@@ -571,8 +572,9 @@ def follow_hem(armature, follow=0.5):
         assign_action(arm, act)
         a, b = int(act.frame_range[0]), int(act.frame_range[1])
         for root in hems.values():
-            arm.pose.bones[root].rotation_mode = "QUATERNION"
-            arm.pose.bones[root].rotation_quaternion = (1, 0, 0, 0)
+            for link in [root, *lower[root]]:
+                arm.pose.bones[link].rotation_mode = "QUATERNION"
+                arm.pose.bones[link].rotation_quaternion = (1, 0, 0, 0)
         for f in range(a, b + 1):
             sc.frame_set(f)
             pel = arm.pose.bones["pelvis"].matrix.to_3x3()
@@ -611,6 +613,13 @@ def follow_hem(armature, follow=0.5):
                 pb = arm.pose.bones[root]
                 pb.rotation_quaternion = R.to_quaternion()
                 pb.keyframe_insert("rotation_quaternion", frame=f)
+                # Below the bone a leg lifts, cloth hangs: each lower bone falls back toward how it
+                # hangs at rest, as far as still clears the leg beside it. Keyed stiff, the whole
+                # chain turns as one stick and a skirt over a wide stance opens into a cone.
+                for link, back in zip(lower[root], _drape(arm, root, lower[root], q, reach[root], limbs, clear)):
+                    cb = arm.pose.bones[link]
+                    cb.rotation_quaternion = (rest[link].inverted() @ Quaternion(reach[root][3], -back).to_matrix() @ rest[link]).to_quaternion()
+                    cb.keyframe_insert("rotation_quaternion", frame=f)
         count += 1
     assign_action(arm, keep[0])
     sc.frame_set(keep[1])
@@ -625,7 +634,8 @@ def _limbs(arm):
     from . import deform
 
     out = []
-    bodies = _bodies(arm)
+    # As thick as the leg is with what it wears: a hem clears the trousers, not the skin under them.
+    bodies = [*_bodies(arm), *[o for o in bpy.data.objects if o.get("kurambit_cloth") and arm in helpers._deforming(o)]]
     for s in ("l", "r"):
         for a, b in LEG:
             if f"{a}_{s}" not in arm.data.bones or f"{b}_{s}" not in arm.data.bones:
@@ -687,6 +697,49 @@ def _clear_of_legs(arm, root, q, reach, limbs, clear):
     now = q @ d0
     have = math.atan2(now.dot(out0), now.dot(down))
     return max(0.0, min(need - slack, math.radians(95)) - have)
+
+
+def _drape(arm, root, lower, q, reach, limbs, clear):
+    """How far back toward straight down (radians, about the chain's hinge) each bone below a hem
+    chain's root turns when the root is turned by q: all of the way back to its own rest angle,
+    less whatever the leg beside that bone still needs."""
+    _, _, out0, axis0, spacing = reach
+    down = Vector((0, 0, -1))
+    pb = arm.pose.bones[root]
+    parent = pb.parent
+    if parent is None or not lower:
+        return [0.0] * len(lower)
+
+    def angle(v):
+        return math.atan2(v.dot(out0), v.dot(down))
+
+    bones = [arm.data.bones[b] for b in [root, *lower]]
+    vecs = [b.tail_local - b.head_local for b in bones]
+    turned = angle(q @ vecs[0]) - angle(vecs[0])
+    if turned < math.radians(2):
+        return [0.0] * len(lower)
+    carried = (parent.matrix.to_3x3() @ arm.data.bones[parent.name].matrix_local.to_3x3().inverted()).inverted()
+    posed = [(carried @ (arm.pose.bones[a].head.lerp(arm.pose.bones[b].head, k / 6) - pb.head), thick) for a, b, thick in limbs for k in range(1, 7)]
+    head = (q @ vecs[0]).dot(out0) * out0 + (q @ vecs[0]).dot(down) * down
+    out, undone = [], 0.0
+    for v in vecs[1:]:
+        # Any of the leg ahead of this bone, level with it or below: it falls back only past that.
+        need = None
+        for u, thick in posed:
+            u = u - head
+            along, below, far = u.dot(out0), u.dot(down), math.hypot(u.dot(out0), u.dot(down))
+            if along < -thick or far > 1.15 * v.length + thick or abs(u.dot(axis0)) > 0.9 * spacing + 0.5 * thick:
+                continue
+            a = math.atan2(along, below) + 2 * math.asin(min(0.95, (thick + clear) / (2 * max(far, 1e-6))))
+            need = a if need is None else max(need, a)
+        want = max(angle(v), need if need is not None else -math.pi)
+        stiff = angle(v) + turned
+        back = max(0.0, min(stiff - want, turned) - undone)
+        out.append(back)
+        undone += back
+        hangs = stiff - undone
+        head = head + (math.sin(hangs) * out0 + math.cos(hangs) * down) * v.length
+    return out
 
 
 def _toward(q, k):
