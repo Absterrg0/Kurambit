@@ -358,7 +358,7 @@ right is the Workbench button.
 If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
 it** and **Undo**. An error while you play shows as one small line in the game's corner.
 
-The **Workbench** is a panel beside the game (`mod+Alt+C`, or **Workbench** in the command palette,
+The **Workbench** is a panel beside the game (`mod+Alt+B`, or **Workbench** in the command palette,
 which also opens each section directly). The same key or the header's Workbench button closes it.
 Drag its edge to resize it. Its three sections are always there, and one with nothing yet says
 what fills it:

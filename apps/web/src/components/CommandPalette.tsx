@@ -1809,7 +1809,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Show or hide the Workbench",
       searchTerms: ["workbench", "panel", "inspector", "hide", "show", "game"],
       icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
-      shortcutCommand: "game.workbench.toggle",
+      shortcutCommand: "rightPanel.toggle",
       run: async () => toggleWorkbench(),
     });
     for (const tab of WORKBENCH_PALETTE) {

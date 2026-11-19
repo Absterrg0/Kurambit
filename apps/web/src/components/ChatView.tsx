@@ -3647,6 +3647,12 @@ export default function ChatView(props: ChatViewProps) {
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
   };
   const toggleRightPanelStable = useStableCallback(toggleRightPanel);
+  // A game chat's right side is its Workbench, so the right panel's chord opens that. A T3 panel
+  // already open there (a diff) closes first, as it would in any chat.
+  const toggleRightSideStable = useStableCallback(() => {
+    if (isGameThread && activeThreadRef !== null && !rightPanelOpen) toggleWorkbench();
+    else toggleRightPanel();
+  });
   const toggleThreadPanel = () => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
@@ -5380,7 +5386,7 @@ export default function ChatView(props: ChatViewProps) {
         if (!isServerThread || serverConfig?.threadFind !== true) return false;
         openThreadFindStable();
       },
-      "rightPanel.toggle": () => toggleRightPanelStable(),
+      "rightPanel.toggle": () => toggleRightSideStable(),
       "game.workbench.toggle": () => {
         // Only a game thread has a Workbench.
         if (!isGameThread || activeThreadRef === null) return false;
@@ -5527,10 +5533,10 @@ export default function ChatView(props: ChatViewProps) {
   // A focused desktop browser page forwards these chords as menu actions.
   useEffect(() => {
     return window.desktopBridge?.onMenuAction((action) => {
-      if (action === "rightPanel.toggle") toggleRightPanelStable();
+      if (action === "rightPanel.toggle") toggleRightSideStable();
       else if (action === "rightPanel.toggleMaximized") toggleRightPanelMaximizedStable();
     });
-  }, [toggleRightPanelStable, toggleRightPanelMaximizedStable]);
+  }, [toggleRightSideStable, toggleRightPanelMaximizedStable]);
 
   // Paste-to-focus: the resting composer blurs on a click into the timeline,
   // so a paste that follows has no editable target and would be dropped.

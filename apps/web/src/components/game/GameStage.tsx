@@ -1232,7 +1232,8 @@ function ThreadGameStage({
     data.previewUrl !== null ||
     playTarget !== null ||
     (buildPlays?.length ?? 0) > 0;
-  const inspectorKey = shortcutLabelForCommand(keybindings, "game.workbench.toggle", {
+  // The right panel's chord: in a game chat it opens the Workbench (ChatView).
+  const inspectorKey = shortcutLabelForCommand(keybindings, "rightPanel.toggle", {
     context: { gameThread: true },
   });
   const devKey = (
