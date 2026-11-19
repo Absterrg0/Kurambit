@@ -223,8 +223,8 @@ const CAUSE_WORDS: Readonly<Record<GameFactNotMeasuredCause, string>> = {
   busy: "this computer was busy with other work, so the reading says nothing about the game; the next measure takes it again",
   slow: "the game ran slower than real time on this computer, too slowly to play through in time",
   "old-shell": "the game was made before Kurambit measured this; a new build adds it",
-  "no-play-bot": "no play bot yet; Keep going writes one, or ask your agent for one",
-  deferred: "the play bot plays a build when Keep going judges it or when you measure it",
+  "no-play-bot": "no play bot yet; ask your agent for one",
+  deferred: "the play bot plays a build when you measure it",
   "no-saved-plays": "no test play is saved yet: save a run from the Stage's menu",
   "no-win": "the game has no ending to win",
 };
