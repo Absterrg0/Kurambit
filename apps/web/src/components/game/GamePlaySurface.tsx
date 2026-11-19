@@ -83,6 +83,7 @@ export function GamePlaySurface({
   gameName,
   previewUrl,
   frameKey,
+  follow = false,
   hidden,
   canOperate,
   operation,
@@ -107,6 +108,12 @@ export function GamePlaySurface({
   previewUrl: string | null;
   /** Changes when a new web build appears, which reloads a playing game. */
   frameKey: string;
+  /**
+   * The turn making the game's first build: every save's frame loads unseen and takes the Stage
+   * only once it has drawn, so the person sees the game from its first frame and never a blank or
+   * broken save in between. The frame that last drew stays until then.
+   */
+  follow?: boolean;
   /** The play tab is not open, so the game should pause and mute itself. */
   hidden: boolean;
   canOperate: boolean;
@@ -139,12 +146,36 @@ export function GamePlaySurface({
   } | null;
 }) {
   const playing = phase.kind === "playing" && previewUrl !== null;
+  // Under the first build's card the game's frame already loads, to say when it draws.
+  const probing = follow && phase.kind === "first-build" && previewUrl !== null;
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   const onBridgeMessage = useStageBridgeFrame(
     `${bridge.threadKey}\0${frameKey}`,
-    playing ? frame : null,
+    playing || probing ? frame : null,
     bridge.enabled,
   );
+  // While following, the frame that last drew: it stays on the Stage until a later save's has.
+  const [drawn, setDrawn] = useState<{ readonly key: string; readonly url: string } | null>(null);
+  const kept = follow && playing && drawn !== null && drawn.key !== frameKey ? drawn : null;
+  // Unseen only behind something: the card, or the kept frame. With neither, it starts as any game does.
+  const unseen = follow && drawn?.key !== frameKey && (probing || kept !== null);
+  const frames = [
+    ...(kept === null ? [] : [{ ...kept, role: "kept" as const }]),
+    ...((playing || probing) && previewUrl !== null
+      ? [
+          {
+            key: frameKey,
+            url: previewUrl,
+            role: unseen ? ("unseen" as const) : ("shown" as const),
+          },
+        ]
+      : []),
+  ];
+  const onFrameMessage = (message: StudioMessage) => {
+    if (follow && message.type === "studio-ready" && previewUrl !== null)
+      setDrawn({ key: frameKey, url: previewUrl });
+    onStudioMessage(message);
+  };
   const { setWell, shown, scale, frameStyle, handles } = useStageDeviceLayout(
     device?.value ?? null,
     (next) => device?.onChange(next),
@@ -180,20 +211,32 @@ export function GamePlaySurface({
             gameName={gameName}
             playing={playing}
           >
-            {playing ? (
-              <GameFrame
-                key={frameKey}
-                url={previewUrl}
-                title={`${gameName} on the Stage`}
-                gameName={gameName}
-                hidden={hidden}
-                drawsReady={bridge.enabled}
-                onStudioMessage={onStudioMessage}
-                onBridgeMessage={onBridgeMessage}
-                focusRequest={focusRequest}
-                onFrame={setFrame}
-              />
-            ) : (
+            {/* Keyed siblings in one place: a frame keeps its page as it goes from unseen to shown
+                to kept, and only the newest one talks to the Stage. */}
+            {frames.map((each) => (
+              <div
+                key={each.key}
+                inert={each.role === "unseen"}
+                className={
+                  each.role === "unseen"
+                    ? "pointer-events-none absolute inset-0 opacity-0"
+                    : "contents"
+                }
+              >
+                <GameFrame
+                  url={each.url}
+                  title={`${gameName} on the Stage`}
+                  gameName={gameName}
+                  hidden={hidden}
+                  drawsReady={bridge.enabled}
+                  onStudioMessage={each.role === "kept" ? undefined : onFrameMessage}
+                  onBridgeMessage={each.role === "kept" ? undefined : onBridgeMessage}
+                  focusRequest={each.role === "kept" ? 0 : focusRequest}
+                  onFrame={each.role === "kept" ? undefined : setFrame}
+                />
+              </div>
+            ))}
+            {playing ? null : (
               <StageStateCard
                 gameName={gameName}
                 phase={phase}

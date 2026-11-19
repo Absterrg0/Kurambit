@@ -347,9 +347,14 @@ it("lands a live remount in play, and a first load, new session or Reload on the
 
 // The Stage plays the build its labels name: the agent's saves wait for the turn's end.
 it("holds live changes while the turn runs, and applies the latest when it ends", () => {
-  expect(liveToShow({ latest: 1, shown: null, turnRunning: true })).toBe(1);
-  expect(liveToShow({ latest: 5, shown: 1, turnRunning: true })).toBe(1);
-  expect(liveToShow({ latest: 5, shown: 1, turnRunning: false })).toBe(5);
+  expect(liveToShow({ latest: 1, shown: null, turnRunning: true, firstBuild: false })).toBe(1);
+  expect(liveToShow({ latest: 5, shown: 1, turnRunning: true, firstBuild: false })).toBe(1);
+  expect(liveToShow({ latest: 5, shown: 1, turnRunning: false, firstBuild: false })).toBe(5);
+});
+
+// With no build yet there is no game to hold: the person watches the first one come together.
+it("follows live changes through the turn making the first build", () => {
+  expect(liveToShow({ latest: 5, shown: 1, turnRunning: true, firstBuild: true })).toBe(5);
 });
 
 it("describes unknown source freshness and preserves selected Play", () => {

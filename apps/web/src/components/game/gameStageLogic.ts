@@ -292,14 +292,19 @@ export const LIVE_PLAY_HASH = "#kurambit-play";
  * PURE. Which live change (the server's push count) the frame shows. While this chat's turn
  * runs the Stage holds the game it had, the build its labels name: the agent's half-made saves
  * never play under another build's name. With no turn running, the latest at once, so a turn's
- * end applies its last change.
+ * end applies its last change. The turn making the first build has no game to hold and no build
+ * to mislabel: the Stage follows its saves, so the person watches the game come together.
  */
 export function liveToShow(input: {
   readonly latest: number;
   readonly shown: number | null;
   readonly turnRunning: boolean;
+  /** This turn is making the game's first build. */
+  readonly firstBuild: boolean;
 }): number {
-  return input.shown === null || !input.turnRunning ? input.latest : input.shown;
+  return input.shown === null || !input.turnRunning || input.firstBuild
+    ? input.latest
+    : input.shown;
 }
 
 export function gameSourceFreshnessLabel(value: GameStatus["sourcesDifferFromPlay"]): string {

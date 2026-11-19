@@ -646,6 +646,10 @@ function ThreadGameStage({
   const nextBuildNumber = useEnvironmentQuerySelector(buildsAtom, nextBuildOf);
   const hasSteps = useEnvironmentQuerySelector(buildsAtom, hasStepsOf);
   const buildsRead = useEnvironmentQuerySelector(buildsAtom, AsyncResult.isSuccess);
+  // The turn making the game's first build. Nothing plays yet, so the Stage follows the agent's
+  // saves: each one's frame loads unseen, and the first that draws takes the Stage (GamePlaySurface
+  // `follow`). The person watches the game come together instead of a card for the whole turn.
+  const makingFirstBuild = buildsRead && !hasBuild && turnRunning && turnStartedAt !== null;
   // Which live change the frame shows: held while this chat's turn runs, the latest once it ends.
   // The game plays as soon as the turn ends; saving its build is the server's work, and the
   // header names the build meanwhile (`historyLabel`).
@@ -653,29 +657,24 @@ function ThreadGameStage({
     latest: live.revision,
     shown: liveShown,
     turnRunning,
+    firstBuild: makingFirstBuild,
   });
   if (liveRevision !== liveShown) setLiveShown(liveRevision);
   // Changes held back through a turn are its build: the remount that applies them is a new one.
   const [heldBuild, setHeldBuild] = useState(false);
-  if ((turnRunning || landing) && liveShown !== null && live.revision !== liveShown && !heldBuild)
+  if (
+    (turnRunning || landing) &&
+    !makingFirstBuild &&
+    liveShown !== null &&
+    live.revision !== liveShown &&
+    !heldBuild
+  )
     setHeldBuild(true);
   // An Undo or Redo is a new build too, though its build list may update after the folder does.
   if (turnUndo.restoring && !heldBuild) setHeldBuild(true);
-  // The turn making the first build passed a clean check: from then its game plays here while
-  // the turn goes on, said "First playable"; the turn's end swaps build 1 in like any new build.
-  const cleanCheckAt = query.data?.cleanCheckAt ?? null;
+  // That turn's game has drawn a frame on this Stage: from then it plays here while the turn goes
+  // on, and the turn's end names it build 1.
   const [firstPlayableTurn, setFirstPlayableTurn] = useState<string | null>(null);
-  const firstPlayableReady =
-    buildsRead &&
-    !hasBuild &&
-    turnRunning &&
-    turnStartedAt !== null &&
-    cleanCheckAt !== null &&
-    Date.parse(cleanCheckAt) >= Date.parse(turnStartedAt);
-  if (firstPlayableReady && firstPlayableTurn !== turnStartedAt) {
-    setFirstPlayableTurn(turnStartedAt);
-    setLiveShown(live.revision);
-  }
   const firstPlayable =
     firstPlayableTurn !== null && firstPlayableTurn === turnStartedAt && buildsRead && !hasBuild;
   const stageStill = useStageStill(threadKey);
@@ -984,6 +983,14 @@ function ThreadGameStage({
       rewind.receive(studio);
       return;
     }
+    if (studio.type === "studio-ready") {
+      if (makingFirstBuild && firstPlayableTurn !== turnStartedAt)
+        setFirstPlayableTurn(turnStartedAt);
+      return;
+    }
+    // A game that has drawn nothing yet is under the card: what its half-written page throws is
+    // the agent's work in progress, and there is nothing on the Stage for an error to be about.
+    if (makingFirstBuild && !firstPlayable) return;
     const key = frameFold?.key ?? "";
     // Only an error sets it: the page's ready can follow an error its own start threw, and a
     // reload clears it by its frame key.
@@ -1289,9 +1296,10 @@ function ThreadGameStage({
         </Button>
       </StageToast>
     ) : null;
-  // A live game's folder plays an empty page until the turn making the first build ends; the
-  // Stage says what is being made instead, from the moment the game opens, rather than opening,
-  // stopping and playing nothing on the way. Once the turn ends it plays as soon as it is served.
+  // A live game's folder plays an empty page until the agent has written a game that draws; the
+  // Stage says what is being made until then, from the moment the game opens, rather than
+  // opening, stopping and playing nothing on the way. The card comes down at the first frame the
+  // game draws (`firstPlayable`), or when the turn ends.
   const shownPhase: typeof phase =
     stageKind === "live" &&
     buildsRead &&
@@ -1733,6 +1741,7 @@ function ThreadGameStage({
                 : data.previewUrl
             }
             frameKey={frameKey}
+            follow={stageKind === "live" && makingFirstBuild}
             hidden={frameHidden}
             canOperate={canAct}
             operation={

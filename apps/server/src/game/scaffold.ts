@@ -136,6 +136,13 @@ const FIRST_TURN_GOAL =
   "Goal: the person plays the game the brief describes on the Stage, made as well as you can make it: every part a player sees is yours to design.";
 const READ_LINE =
   "Read `BRIEF.md` and the bridge contract in `TEMPLATE.md` (what the harness needs from the game, nothing about how it looks), then build the game in `web/`. Write no plan or design document.";
+/**
+ * The Stage follows the first turn's saves from the first frame the game draws (GameStage
+ * `makingFirstBuild`). Left alone, an agent writes every module and wires main.js last, and the
+ * person looks at a card for the whole turn.
+ */
+const WATCHED_LINE =
+  "The person watches the Stage while you work: it shows the game from the first frame it draws and follows every save. Get a scene they can see running first, then grow the game in place.";
 /** The person's model route and library choice, said once: how the game's models are made. */
 const routeLine = (route: GameCharacterRoute, library: boolean): string => {
   if (route === "blender" && !library) return BLENDER_ROUTE_LINE;
@@ -168,6 +175,7 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
     FIRST_TURN_GOAL,
     ...(route === "generated" ? [GENERATED_LINE] : []),
     READ_LINE,
+    WATCHED_LINE,
     routeLine(route, library),
   ].join("\n\n");
 };
