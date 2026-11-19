@@ -474,6 +474,11 @@ export const GameLookMaterial = Schema.Struct({
   named: Schema.optionalKey(Schema.Boolean),
   /** Its colour texture, small. */
   map: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^data:image\/png;base64,/))),
+  /**
+   * Its meshes are painted per vertex with this many more colours than its values list
+   * (`${key}/paint:rrggbb`, one per colour, most used first).
+   */
+  moreColours: Schema.optionalKey(Schema.Number),
 });
 export type GameLookMaterial = typeof GameLookMaterial.Type;
 

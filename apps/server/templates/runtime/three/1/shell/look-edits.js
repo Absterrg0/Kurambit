@@ -9,6 +9,11 @@
 // edited material is cloned for this thing alone; one put back gets its own material again. A
 // thing and its parts each have a look: they are put on together, the game's own first, then the
 // thing's and each part's in turn, so where both edit one material the part's (nearer) one shows.
+//
+// A mesh painted per vertex under one white material (a merged model) has its colours there, not
+// on the material: each distinct one is a value of that material too (`2:hull/paint:e5b04c`,
+// keyed by the colour the game gave), and an edit repaints those vertices on this thing's own
+// copy of the geometry's colours.
 import * as THREE from "../vendor/three.module.js";
 
 export const LOOK = "look:";
@@ -172,18 +177,20 @@ const shapeOf = (node) =>
         ? "line"
         : (SHAPES[node.geometry?.type] ?? null);
 const HSL = { h: 0, s: 0, l: 0 };
-/** A colour's family as a word ("Red", "Teal", "Grey"); a texture under white is "Textured". */
-const familyOf = (material) => {
-  const color = material.color;
-  if (color?.isColor !== true) return null;
+/** A colour's family as a word ("Red", "Teal", "Grey"). */
+const familyOfColour = (color, textured = false) => {
   color.getHSL(HSL, THREE.SRGBColorSpace);
   const { s, l } = HSL;
   const h = HSL.h * 360;
-  if (material.map != null && s < 0.1 && l > 0.85) return "Textured";
+  if (textured && s < 0.1 && l > 0.85) return "Textured";
   if (l < 0.1) return "Black";
   if (s < 0.15) return l > 0.85 ? "White" : "Grey";
   if (h < 15 || h >= 345) return l > 0.75 ? "Pink" : "Red";
-  if (h < 45) return l < 0.35 ? "Brown" : "Orange";
+  // Wood, leather and skin sit in orange's hue: dark or dull is brown, pale is cream.
+  if (h < 45) {
+    if (l >= 0.75) return "Cream";
+    return l < 0.45 || (s < 0.5 && l < 0.7) ? "Brown" : "Orange";
+  }
   if (h < 70) return "Yellow";
   if (h < 160) return "Green";
   if (h < 195) return "Teal";
@@ -191,6 +198,104 @@ const familyOf = (material) => {
   if (h < 290) return "Purple";
   return "Pink";
 };
+/** A material's colour family; a texture under white is "Textured". */
+const familyOf = (material) =>
+  material.color?.isColor === true ? familyOfColour(material.color, material.map != null) : null;
+
+// ─── Vertex colours ─────────────────────────────────────────────────────────────
+
+/** How many of a material's vertex colours are values of its look: a palette, not a gradient. */
+const MAX_PAINTS = 12;
+/** A mesh past this many vertices is not read for its colours. */
+const MAX_PAINT_VERTICES = 2_000_000;
+const PAINT = "/paint:";
+const paintKey = (entry, hex) => `${entry.key}${PAINT}${hex.toString(16).padStart(6, "0")}`;
+const SHADE = new THREE.Color();
+// A geometry's vertex colours as the game made them, read once: each vertex's colour as
+// 0xRRGGBB, and how many vertices each colour paints.
+const paintsRead = new WeakMap();
+const paintsOf = (geometry) => {
+  const attribute = geometry?.attributes?.color;
+  if (attribute == null || attribute.count > MAX_PAINT_VERTICES) return null;
+  let read = paintsRead.get(geometry);
+  if (read !== undefined) return read;
+  const hexes = new Uint32Array(attribute.count);
+  const counts = new Map();
+  let r = NaN;
+  let g = NaN;
+  let b = NaN;
+  let hex = 0;
+  for (let i = 0; i < attribute.count; i += 1) {
+    const x = attribute.getX(i);
+    const y = attribute.getY(i);
+    const z = attribute.getZ(i);
+    // A merged model's vertices come in runs of one colour.
+    if (x !== r || y !== g || z !== b) {
+      r = x;
+      g = y;
+      b = z;
+      hex = SHADE.setRGB(x, y, z).getHex();
+    }
+    hexes[i] = hex;
+    counts.set(hex, (counts.get(hex) ?? 0) + 1);
+  }
+  read = { hexes, counts };
+  paintsRead.set(geometry, read);
+  return read;
+};
+// A look's own copy of a geometry it repaints (its colours alone are copied), by that copy.
+const geometryOwners = new WeakMap();
+const ownGeometryOf = (geometry) => geometryOwners.get(geometry) ?? geometry;
+const repaintable = (own) => {
+  const copy = new THREE.BufferGeometry();
+  copy.name = own.name;
+  copy.setIndex(own.index);
+  for (const [name, attribute] of Object.entries(own.attributes))
+    copy.setAttribute(name, name === "color" ? attribute.clone() : attribute);
+  copy.morphAttributes = own.morphAttributes;
+  copy.morphTargetsRelative = own.morphTargetsRelative;
+  for (const group of own.groups) copy.addGroup(group.start, group.count, group.materialIndex);
+  copy.boundingBox = own.boundingBox;
+  copy.boundingSphere = own.boundingSphere;
+  copy.drawRange.start = own.drawRange.start;
+  copy.drawRange.count = own.drawRange.count;
+  copy.userData = own.userData;
+  // An acceleration structure a game hung on it (three-mesh-bvh) answers for the copy too.
+  if (own.boundsTree !== undefined) copy.boundsTree = own.boundsTree;
+  geometryOwners.set(copy, own);
+  return copy;
+};
+/**
+ * The colours a material's meshes are painted with per vertex, most used first: up to MAX_PAINTS
+ * as `listed` ({ hex, key, word }), and how many `more` there are. Null when it paints none.
+ */
+const entryPaints = (entry) => {
+  if (entry.paints !== undefined) return entry.paints;
+  entry.paints = null;
+  if (entry.own.vertexColors !== true || propsOf(entry.own).length === 0) return null;
+  const counts = new Map();
+  for (const node of entry.nodes) {
+    if (!node.isMesh) continue;
+    const read = paintsOf(ownGeometryOf(node.geometry));
+    if (read === null) continue;
+    for (const [hex, count] of read.counts) counts.set(hex, (counts.get(hex) ?? 0) + count);
+  }
+  if (counts.size === 0) return null;
+  const most = [...counts].sort((a, b) => b[1] - a[1]).slice(0, MAX_PAINTS);
+  const said = new Map();
+  entry.paints = {
+    listed: most.map(([hex]) => {
+      const family = familyOfColour(SHADE.setHex(hex)).toLowerCase();
+      const count = (said.get(family) ?? 0) + 1;
+      said.set(family, count);
+      return { hex, key: paintKey(entry, hex), word: count === 1 ? family : `${family} ${count}` };
+    }),
+    more: counts.size - most.length,
+  };
+  return entry.paints;
+};
+/** How many more colours a material's meshes are painted with than its look lists. */
+export const morePaints = (entry) => entryPaints(entry)?.more ?? 0;
 
 /**
  * A material's label for a person, from what the game gave it: the material's own name (a glb's
@@ -284,12 +389,15 @@ export function lookDefaults(bodies, materials, { scale = true } = {}) {
     add("castShadow", casts, { label: "Casts shadows" });
     add("receiveShadow", takes, { label: "Takes shadows" });
   }
-  for (const entry of materials)
+  for (const entry of materials) {
     for (const [prop, , range] of propsOf(entry.own))
       add(`${entry.key}/${prop}`, read(entry.own, prop), {
         ...range,
         label: `${entry.label} ${range.label}`,
       });
+    for (const paint of entryPaints(entry)?.listed ?? [])
+      add(paint.key, paint.hex, { colour: true, label: `${entry.label} ${paint.word}` });
+  }
   return { defaults, ranges };
 }
 
@@ -299,6 +407,7 @@ export function resetLook(bodies) {
     body.traverse((node) => {
       if (Array.isArray(node.material)) node.material = node.material.map(ownOf);
       else if (node.material != null) node.material = ownOf(node.material);
+      if (node.geometry != null) node.geometry = ownGeometryOf(node.geometry);
       const own = ownShadows.get(node);
       if (own !== undefined) [node.castShadow, node.receiveShadow] = own;
     });
@@ -314,6 +423,29 @@ export function applyLook(bodies, materials, live, defaults) {
   let clones = clonesOf.get(bodies[0]);
   if (clones === undefined) clonesOf.set(bodies[0], (clones = new Map()));
   for (const entry of materials) {
+    // Its vertex colours first: repainted on this look's own copy of each mesh's colours.
+    const repaint = new Map();
+    for (const paint of entryPaints(entry)?.listed ?? [])
+      if (paint.key in live && live[paint.key] !== paint.hex)
+        repaint.set(paint.hex, live[paint.key]);
+    if (repaint.size > 0)
+      for (const node of entry.nodes) {
+        if (!node.isMesh) continue;
+        const own = ownGeometryOf(node.geometry);
+        const read = paintsOf(own);
+        if (read === null) continue;
+        let copy = clones.get(own);
+        if (copy === undefined) clones.set(own, (copy = repaintable(own)));
+        const colours = copy.attributes.color;
+        colours.array.set(own.attributes.color.array);
+        for (const [from, to] of repaint) {
+          SHADE.setHex(to);
+          for (let i = 0; i < read.hexes.length; i += 1)
+            if (read.hexes[i] === from) colours.setXYZ(i, SHADE.r, SHADE.g, SHADE.b);
+        }
+        colours.needsUpdate = true;
+        node.geometry = copy;
+      }
     const props = propsOf(entry.own);
     const edited = props.some(([prop]) => {
       const key = `${entry.key}/${prop}`;

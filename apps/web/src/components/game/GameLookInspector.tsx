@@ -52,6 +52,8 @@ const materialOf = (key: string) => {
   const slash = key.lastIndexOf("/");
   return slash === -1 ? null : key.slice(0, slash);
 };
+/** A colour a material's meshes are painted with per vertex ("2:hull/paint:e5b04c"). */
+const isPaint = (key: string) => key.slice(key.lastIndexOf("/") + 1).startsWith("paint:");
 /** A material's value as its row says it: "Colour", not "Roof colour". */
 const fieldLabel = (value: GameThingValue, material: GameLookMaterial) => {
   const label = valueLabel(value);
@@ -383,8 +385,11 @@ export function GameLookInspector({
             const colour = at("color");
             const opacity = at("opacity");
             const shown = at("visible");
+            // A mesh painted per vertex has its colours under its material, each a fill row.
+            const paints = fields.filter((value) => isPaint(value.key));
             const advanced = fields.filter(
-              (value) => value !== colour && value !== opacity && value !== shown,
+              (value) =>
+                value !== colour && value !== opacity && value !== shown && !isPaint(value.key),
             );
             const edited = fields.filter(isChanged);
             const label =
@@ -497,6 +502,42 @@ export function GameLookInspector({
                     </span>
                   )}
                 </PropertyRow>
+                {paints.map((paint) =>
+                  typeof paint.value !== "number" ? null : (
+                    <PropertyRow
+                      key={paint.key}
+                      nested
+                      label={fieldLabel(paint, material)}
+                      end={
+                        isChanged(paint) ? (
+                          <IconAction
+                            label={`Put ${valueLabel(paint)} back`}
+                            onClick={() => putBack(paint)}
+                          >
+                            <RotateCcwIcon aria-hidden="true" />
+                          </IconAction>
+                        ) : undefined
+                      }
+                    >
+                      <PropertyColourField
+                        label={valueLabel(paint)}
+                        value={paint.value}
+                        tuned={isChanged(paint)}
+                        disabled={disabled}
+                        onChange={(next) => edit(lookId, paint, next)}
+                        onCommit={(next) => commit(paint, next, "pointer")}
+                      />
+                    </PropertyRow>
+                  ),
+                )}
+                {material.moreColours === undefined ? null : (
+                  <PropertyRow nested label="">
+                    <Text variant="caption" tone="muted" numeric>
+                      {material.moreColours.toLocaleString("en-US")} more{" "}
+                      {material.moreColours === 1 ? "colour" : "colours"}
+                    </Text>
+                  </PropertyRow>
+                )}
                 {expanded ? (
                   <div className="flex flex-col pb-1">
                     {advanced.map((value) => field(value, fieldLabel(value, material)))}

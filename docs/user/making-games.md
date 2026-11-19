@@ -388,7 +388,8 @@ what fills it:
   that holds its place until then is marked **Stand-in**. Open a model to inspect it: it turns as you drag it, and under it are its
   parts, its **Transform** (scale on each axis, together while the lock is on, its turn, and its
   size), its **Materials** (colour and opacity, an eye to hide one, and glow, roughness, metalness,
-  flat shading and its texture behind **⋯**), its **Shadows** and its tuned **Values**. A model file the game uses shows that thing's changes in its view too.
+  flat shading and its texture behind **⋯**; a model painted in several colours under one
+  material lists each colour under it, to change on its own), its **Shadows** and its tuned **Values**. A model file the game uses shows that thing's changes in its view too.
   Double-click a part's name or a material's to rename it; an empty name gives back the game's
   own. Every change shows at once in the view and in the game, and saves as a build
   like Tune's values: **Keep as a build**, **Put all back**, and Undo work the same. **Bake into
