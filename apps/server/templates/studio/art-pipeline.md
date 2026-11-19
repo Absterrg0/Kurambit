@@ -525,6 +525,19 @@ rest. What repeats is drawn as instances: export two or three `seed`s with
 `density=0.5` and `M.scatter(ctx.assets.model("pine_1"), 40, place)` each
 (shell/model.js): a forest in three draws.
 
+### Surfaces
+
+With the library off a game makes its textures. In op `code`,
+`kurambit.surface("oak", "wood", "#9a6b3f", metres=1.5, wear=0.3,
+pattern="planks")` bakes a tiling colour, normal and roughness set into
+`<assets>/textures/` and returns its material. Kinds: wood, bark, stone,
+metal, cloth, ground, worn, painted; `pattern` planks, bricks or tiles.
+Pass it as a `world` colour (`colours={"wall": m}`), or put it on your own
+mesh with `kurambit.wrap(obj, m)`. In the game's code: `ASSETS = { oak:
+"assets/textures/oak.surface.json" }`, then `ctx.assets.surface("oak", {
+size: [8, 6] })` is a material tiled over 8 by 6 metres. Its colour stays
+one value Art edits. A hex palette draws it flat in the palette's colours.
+
 ## Key art
 
 On the `generated` route the key art is generated (above). Otherwise, a

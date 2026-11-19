@@ -52,8 +52,10 @@ def _material(role, colours, palette, rough=None):
         return given
     h = given or ROLES[role]
     if palette and not given:
-        want = _rgb(h)
-        h = min(palette, key=lambda p: float(np.sum((_rgb(p) - want) ** 2)))
+        from .stylepass import _lab  # nearest as the style pass snaps: in Lab
+
+        want = _lab(list(_rgb(h)))
+        h = min(palette, key=lambda p: sum((a - b) ** 2 for a, b in zip(_lab(list(_rgb(p))), want)))
     return helpers.material(h, name=role.capitalize(), roughness=rough if rough is not None else (0.35 if role == "glass" else 0.8))
 
 
