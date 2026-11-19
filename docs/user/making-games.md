@@ -62,10 +62,11 @@ Describe the game in the box on the home screen, including the look you want. To
 picture (a screenshot, concept art, a photo), attach it with the picture button or paste it into
 the box: the game keeps it as `art/reference.png`, and the agent works until its game looks like
 it. **New game** in the
-sidebar, `mod+N` and the command palette all bring you back to that box. Under it are the agent and
+sidebar and the command palette bring you back to that box, and so does `mod+N` from anywhere but
+a game's screen. The box grows with what you write. Under it are the agent and
 model (your last game's, else Claude) and one options button for how characters are made. New games
 are saved in `~/Games`. Kurambit names the game from your brief; rename it any time from the game's
-name above the stage, or by double-clicking or right-clicking it in the sidebar. **Start building**
+name above the stage, or from its card's menu on the home screen. **Start building**
 creates the folder and opens the game while its first build is being made, with your brief sent as
 the first message, so you see exactly what the agent was told. Your game is playable on the stage within a few minutes, on models
 from the asset library; when the library has no model of your hero or its main threat, the agent
@@ -84,35 +85,41 @@ stage names the error: quietly while the turn runs, since the agent may be mid-c
 A game is a static three.js browser game (no install step), played in real time through the same
 tools, with a Web export.
 
-Your games are listed in the sidebar under **Games**, pinned ones first, then the most recently
-worked on (or by name, from the **⋯** beside **Games**). Each row shows its latest build's picture
-and, at its end, a spinner while an agent works, an amber dot when a chat waits for your answer or
-for you to keep one of several tries, or a red triangle when its build does not start. A game's row
-is its own chat, the one it was made in. Its other chats still at work are listed under it, each
-with when it last moved; fold them with the left arrow, or a click on the game while its own chat
-is open. Hover a game
-for **+** (a new chat) and **⋯** (rename, open its folder, pin, archive, delete). Drag a game onto
-the pinned ones to pin it. Archived games wait under **Archived** at the bottom, and **Unarchive**
-in their menu brings them back; **Delete…** removes a game from Kurambit and leaves its folder on
-disk. Home's cards show the same games.
+The sidebar lists your chats, every one on its own row: its game's picture and name, when you
+last wrote in it, and under them the chat's title. Two chats of one game are two rows. Pinned chats
+come first, then the rest with the latest on top. A row ends in a spinner while an agent works, an
+amber dot when the chat waits for your answer or for you to keep one of several tries, or a red
+triangle when the game's build does not start. A third line appears only when there is something to
+say: the chat works in a copy, or its message waits for another chat to finish in the game. Up and
+down arrows move through the rows.
 
-When a chat's work is done, **Settle** it: hover it in the sidebar and press the tick, right-click
-it, drag it onto **Settled**, press `mod+shift+S`, or use the chat's menu beside the game's name
-above the stage. It leaves the game's list for the **Settled** shelf at the bottom of the sidebar;
-its builds stay in the game's History. A notice offers **Undo** for five seconds (`mod+Z`).
-**Un-settle** brings it back the same ways, and so does sending it a message. A chat that is still
-working, has a message queued, or waits on your answer can't be settled until that is done.
+Right-click a row to rename the chat, pin it, settle it or delete it, and to start a **New chat**
+in its game. On a game's screen the game's name above the stage is its menu: a new chat, rename,
+its folder, export, **Archive** and **Delete…**; the chat's title beside it is the chat's menu.
+`mod+N` on a game's screen starts a new chat in that game (`mod+shift+O` in a browser). Each card
+under **Your games** on the home screen has the same game menu on its picture.
+
+When a chat's work is done, **Settle** it: hover its row and press **Settle**, right-click it, drag
+it onto **Settled**, press `mod+shift+S`, or use the chat's menu above the stage. It leaves the
+list for the **Settled** shelf at the bottom of the sidebar; its builds stay in the game's History.
+Settling the chat you are in moves you to the next one in the list. A notice offers **Undo** for
+five seconds (`mod+Z`). **Un-settle** brings it back the same ways, and so does sending it a
+message. A chat that is still working, has a message queued, or waits on your answer can't be
+settled until that is done.
 
 Chats left alone settle on their own after seven days; change that in **Settings → General →
 Advanced**. One you un-settle stays in the list until you work in it again, and changing the days
 does not bring settled chats back. Your agent can settle a chat as well, when you ask it to.
 
-A game's own chat never settles: archive the game to put it away. On it the settle key and the
-command palette's **Settle chat** are disabled and say so, and an agent that tries is told the same.
+A game whose chats are all settled has no row in the sidebar. It is still under **Your games** on
+the home screen and in the command palette, and it opens on the chat you last worked in.
+**Archive** in a game's menu puts the whole game away: its chats move to the **Archived** shelf at
+the bottom of the sidebar, where **Unarchive** on a row brings that chat, and with it the game,
+back. **Delete…** removes a game from Kurambit and leaves its folder on disk.
 
-To continue a game, choose its row or its card under **Your games**, or use **Open a game** (on the
-home screen or in the command palette) and pick a folder that contains `game.json`. A game opens on
-its main chat: the first chat it was made in, or the next oldest if you archive that one. A **New
+To continue a game, choose one of its rows or its card under **Your games**, or use **Open a game**
+(on the home screen or in the command palette) and pick a folder that contains `game.json`. A game
+opens on the chat you last worked in. A **New
 chat** opens the game's screen with an empty chat: the game fills the screen above the box, which
 offers your agent's latest suggestion (Tab takes it), and the game settles into the column once you
 send. A game keeps one empty chat, so asking again opens that one.
@@ -572,7 +579,7 @@ A game can have many chats, and the game folder takes one chat's turn at a time.
 message while another chat works in the game, it waits above the composer ("Waits for _Rain_ to
 finish in the game") and starts by itself when that turn ends. **Run in a copy** beside it (its key
 is in the tooltip) starts it now instead, in a copy of the game's newest build. Once your game has
-had a copy, **+** beside the game in the sidebar and the command palette also offer **New chat in a
+had a copy, the game's menu, a row's menu and the command palette also offer **New chat in a
 copy**.
 
 A chat in a copy stays there: its later turns work in the copy, its Stage plays the copy, and
