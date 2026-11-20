@@ -500,8 +500,9 @@ delivered>"}` and the clips;
 
 ## 2D sprites from 3D
 
-Render every sprite, strip and icon with `game_blender` op `sprites`, never
-your own render code, and look at its contact sheet. To render a library character, import its GLB into the live
+Render every sprite and strip of a model with `game_blender` op `sprites`,
+never your own render code, and look at its contact sheet; the game plays its
+`.sheet.json` (`pictures.md`). To render a library character, import its GLB into the live
 Blender, list its clips (`[a.name for a in bpy.data.actions]`), hide what it
 should not carry (`ob.hide_render = True`), then render with `"objects":
 ["<rig name>"], "action": "Walking_A"`, once per clip.
@@ -576,7 +577,7 @@ it flat, painted or real.
 ## Other kinds of art
 
 Read the one this game needs: `voxels.md` (a blocky world, chunky
-characters, .vox files), `pictures.md` (cards, tiles, tokens, icons, UI art).
+characters, .vox files), `pictures.md` (cards, tiles, tokens, icons, UI art, effects, 2D characters).
 
 ## Key art
 

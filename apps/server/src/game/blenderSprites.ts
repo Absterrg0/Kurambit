@@ -555,45 +555,54 @@ export const renderSprites = (
           });
       }
     }
-    let sheetRel: string | undefined;
-    if (input.sheet === true) {
-      sheetRel = `${dirRel}/${base}_sheet.png`;
-      yield* Effect.tryPromise({
-        try: () => writeOwn(NodePath.join(outDir, `${base}_sheet.png`), encodePng(sheet(rows))),
-        catch: io(sheetRel),
-      });
-    }
+    // Every strip is one sheet: its frames in a row per view, mapped by <base>.sheet.json, the
+    // format game_assets op pictures writes and shell/sheets.js plays.
+    const sheetRel = `${dirRel}/${base}_sheet.png`;
+    yield* Effect.tryPromise({
+      try: () => writeOwn(NodePath.join(outDir, `${base}_sheet.png`), encodePng(sheet(rows))),
+      catch: io(sheetRel),
+    });
     // The outline grows the silhouette by a pixel, so the feet's outline row is the ground.
     const groundOf = (a: { y: number }) => a.y + (outlined ? 1 : 0);
-    // The engine-facing facts in one file the templates' strip loaders read, so frame rate and
-    // anchor never get retyped from prose.
     const step = frames.length > 1 ? (frames.at(-1)! - frames[0]!) / (frames.length - 1) : 0;
-    const manifestRel = `${dirRel}/${base}.sprite.json`;
-    const spriteManifest = {
-      frameWidth: width,
-      frameHeight: height,
-      fps: step > 0 ? Math.round((fit.fps / step) * 100) / 100 : 0,
-      loop: input.loop ?? true,
-      views: Object.fromEntries(
-        views.map((view, vi) => {
-          const a = framing.anchors[vi]!;
-          return [
-            view.name,
-            {
-              frames: files
-                .slice(vi * frames.length, (vi + 1) * frames.length)
-                .map((file) => NodePath.posix.basename(file)),
-              anchor: { kind: a.kind, x: a.x, y: a.kind === "feet" ? groundOf(a) : a.y },
-            },
-          ];
-        }),
+    const fps = step > 0 ? Math.round((fit.fps / step) * 100) / 100 : 0;
+    const loop = input.loop ?? true;
+    const manifestRel = `${dirRel}/${base}.sheet.json`;
+    const pivotOf = (vi: number) => {
+      const a = framing.anchors[vi]!;
+      return [a.x / width, 1 - (a.kind === "feet" ? groundOf(a) : a.y) / height];
+    };
+    const sheetMap = {
+      version: 1,
+      frame: [width, height],
+      pivot: pivotOf(0),
+      filter: pixel === undefined ? "linear" : "nearest",
+      images: [`${base}_sheet.png`],
+      frames: views.flatMap((_, vi) =>
+        files.slice(vi * frames.length, (vi + 1) * frames.length).map((file, fi) => ({
+          name: NodePath.posix.basename(file).replace(/\.png$/, ""),
+          image: 0,
+          x: fi * width,
+          y: vi * height,
+          pivot: pivotOf(vi),
+        })),
+      ),
+      clips: Object.fromEntries(
+        views.map((view, vi) => [
+          view.name,
+          {
+            frames: Array.from({ length: frames.length }, (_, fi) => vi * frames.length + fi),
+            fps: fps || 12,
+            loop,
+          },
+        ]),
       ),
     };
     yield* Effect.tryPromise({
       try: () =>
         writeOwn(
-          NodePath.join(outDir, `${base}.sprite.json`),
-          Buffer.from(`${JSON.stringify(spriteManifest, null, 2)}\n`),
+          NodePath.join(outDir, `${base}.sheet.json`),
+          Buffer.from(`${JSON.stringify(sheetMap, null, 1)}\n`),
         ),
       catch: io(manifestRel),
     });
@@ -655,14 +664,10 @@ export const renderSprites = (
           line: `- \`${spanText(strip)}\` — ${frames.length === 1 ? "sprite" : `${frames.length}-frame strip`}, view ${view.name}, ${anchor.kind === "feet" ? `ground line y=${groundOf(anchor)} at x=${anchor.x}` : `centred at ${anchor.x},${anchor.y}`}; rendered by ${TOOL} from ${BLEND_REL} (${describe}). Licence: that of the models rendered. Depicts / loaded by: (fill in).`,
         };
       }),
-      ...(sheetRel === undefined
-        ? []
-        : [
-            {
-              first: sheetRel,
-              line: `- \`${sheetRel}\` — sheet of the strips above, ${frames.length} columns (frames) x ${views.length} rows (${views.map((v) => v.name).join(", ")}) of ${width}x${height}; rendered by ${TOOL} from ${BLEND_REL}. Licence: that of the models rendered. Loaded by: (fill in).`,
-            },
-          ]),
+      {
+        first: sheetRel,
+        line: `- \`${sheetRel}\` and \`${manifestRel}\` — sheet of the strips above, ${frames.length} columns (frames) x ${views.length} rows (${views.map((v) => v.name).join(", ")}) of ${width}x${height}; rendered by ${TOOL} from ${BLEND_REL}. Licence: that of the models rendered. Loaded by: (fill in).`,
+      },
     ]);
 
     const text = [
@@ -670,12 +675,7 @@ export const renderSprites = (
       ...views.map(
         (_, vi) => `- ${spanText(files.slice(vi * frames.length, (vi + 1) * frames.length))}`,
       ),
-      `Manifest: ${manifestRel} (frame size, ${spriteManifest.fps} fps, ${spriteManifest.loop ? "loop" : "once"}, anchor per view): read it for the frame rate and anchor.`,
-      ...(sheetRel === undefined
-        ? []
-        : [
-            `Sheet: ${sheetRel} (${frames.length} columns x ${views.length} rows of ${width}x${height}).`,
-          ]),
+      `Sheet: ${manifestRel} (${frames.length} frames x ${views.length} views of ${width}x${height}, a clip per view, ${fps} fps, ${loop ? "loop" : "once"}, the anchor as each frame's pivot): ASSETS names it and ctx.assets.sheet plays it (shell/sheets.js).`,
       ...(stale.length > 0
         ? [`Removed stale frames from an earlier render: ${stale.join(", ")}.`]
         : []),
@@ -698,7 +698,7 @@ export const renderSprites = (
     return {
       text,
       files,
-      ...(sheetRel === undefined ? {} : { sheet: sheetRel }),
+      sheet: sheetRel,
       contactSheet: contactRel,
       screenshot: {
         mimeType: "image/png" as const,

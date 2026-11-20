@@ -435,7 +435,7 @@ export const GameBlenderRenderSpritesInput = Schema.Struct({
       ),
     }),
   ),
-  /** Also write `<output>_sheet.png`: frames in a row, one row per view. */
+  /** Ignored: every render writes `<output>_sheet.png` and `<output>.sheet.json`. Kept so older calls decode. */
   sheet: Schema.optionalKey(Schema.Boolean),
 });
 export type GameBlenderRenderSpritesInput = typeof GameBlenderRenderSpritesInput.Type;

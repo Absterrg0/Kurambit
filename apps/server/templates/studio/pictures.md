@@ -51,3 +51,27 @@ as it covers on screen at the closest the camera brings it:
 0.63 m card seen from 1.2 m with a 45° camera on a 1080-pixel screen covers
 about 680 pixels, so render it about 700 wide. A pixel or voxel lock draws
 the sheet's texels square; render at the art's own pixel size there.
+
+## Animations: effects and 2D characters
+
+`frames` (with `fps`, `loop`) draws each row as an animation: frame `i` is
+drawn at `i / fps` seconds, with every CSS and SVG animation on the page set
+to that moment and `window.frame(seconds, i)` called if the template defines
+it, so a canvas or SVG can be drawn in code. Draw from a seeded random, so
+the same call gives the same frames.
+
+- **Effects** (smoke, a burst, a magic ring): a canvas drawing many soft
+  particles, sparks or glowing lines over time reads as drawn, not as a few
+  circles. Play them with
+  `ctx.assets.sheet("fx").play("burst", { width: 3, blending: "additive", once: true })`
+  (light: additive; smoke and dust: the default blending); `sprite: true`
+  faces the camera; `object.flipbook.restart()` plays it again.
+- **A character drawn in 2D** is cut out: rigid SVG parts (a body, arms,
+  legs, a head) turned about their joints in `window.frame`, one row per
+  clip (`walk`, `idle`) and `pivot` at its feet. Its shape holds in every
+  frame because the parts do not change; a character redrawn frame by frame
+  does not hold its shape, so draw it that way, or render a model with
+  `game_blender` op `sprites`, which writes the same kind of sheet.
+
+Every strip and sheet, made here or by op `sprites`, is a `.sheet.json` the
+game plays with `ctx.assets.sheet`.
