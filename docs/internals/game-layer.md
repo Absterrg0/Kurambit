@@ -212,29 +212,27 @@ check that matters.
   Blender's procedural nodes on a flat torus (no seam), and the colour map holds only the
   pattern's light and dark, multiplied by the material's colour, so Art's one colour field
   recolours a whole surface on a model and on what the game's code tiles it over.
-- A hero is made, not picked, through one recipe (the art skill's Heroes): a body, clothes, the
-  rig, motion, springs and the gates. A human body is restyled (`proportions.py`: per-region maps
-  that agree at the joints, blended by the skin's own weights) and sized before the conform, so the
-  standard skeleton still lands on its joints. Humans use no Rigify: the conform already is the
-  game rig, deform bones under standard names whose rest frames are the library's, so its clips
-  play with no retarget loss, which a Rigify rig retargeted onto would add. A clip's hips travel
-  by the body's leg length, not its height, and on legs short for the body its gaits are strode
-  out (`fit.py`): scaled by height, a chibi's hips bob further than its legs reach and its feet
-  leave the ground. A face is built in the body's style from the body's own landmarks (`face.py`:
-  an MPFB2 base mesh's eye helpers and lips ride through the restyle and the conform), so an
-  agent does not model eyes by hand on whatever head the body has. A machine's moving parts
-  ride bones laid along their hinge lines (`hero.hinge_rig`), because an export carries only an
-  armature's clips; a vehicle's wheels stay plain nodes with their origins at the hubs
-  (`kurambit.pivot`), since the game turns them by its own speed and a skeleton there would cost
-  a skinned draw for nothing. A creature's body and
-  rig come from one sketch of joint chains (`creature.py`), so its joints sit inside its body by
-  construction, and its clips come from a gait generator (`gait.py`) rather than keys by hand. The
-  same rig types its chains for Rigify, which generates a control rig only for posing by hand
-  (`hero.controls`); the game rig copies it and bakes keys from it, so Rigify's bones never ship.
-  Clothes are weighted by the skin under them and, below a hang line, hung on `spring_` hem chains
-  (`cloth.py`): automatic weights split a coat between the legs, which is the stiff flaring cone.
-  Any bone named `spring_` swings in the three.js runtime under the fixed step, so it replays, its
-  cost is part of play's stats, and the Stage tunes it as two values of the model.
+- Made art follows the CC0 packs' method rather than a hand-written craft kit: one material on a
+  gradient-swatch atlas (`stylepass.py`), budgets by role taken from the packs, and the review's
+  numbers (`review.py`, `compare.py`: silhouette overlap against a reference picture or a library
+  model, width by tenths of height, thin parts at game distance) as the loop's eyes. The craft
+  modules (`world`, `creature`, `anatomy`, `face`, `hair`, `garment`, `cloth`, `footwear`, `trim`,
+  `zones`, `proportions`, `carve`, `fit`) are no longer named by the skill or the tools while a
+  measured side-by-side decides whether they go.
+- Humans use no Rigify: op `character`'s conform already is the game rig, deform bones under
+  standard names whose rest frames are the library's, so its clips play with no retarget loss.
+  A creature rigged with Rigify (`kurambit.blender`) does not ship Rigify's rig: its DEF bones are
+  parented under ORG and MCH bones, so `game_rig` copies them into a plain armature (each under its
+  nearest DEF ancestor), bakes every clip keyed on the controls onto it and moves the weights; the
+  controls' clips stay owned by the control rig so they never ride along. Blender 4.5 bundles only
+  Smooth by Angle and the hair groups as node assets (Scatter on Surface and Curve to Tube came
+  with 5.x Essentials), so `scatter` and `tube` build those few nodes themselves.
+  A machine's moving parts ride bones laid along their hinge lines, because an export carries only
+  an armature's clips; a vehicle's wheels stay plain nodes with their origins at the hubs
+  (`kurambit.pivot`), since the game turns them by its own speed and a skeleton there would cost a
+  skinned draw for nothing. Any bone named `spring_` swings in the three.js runtime under the fixed
+  step, so it replays, its cost is part of play's stats, and the Stage tunes it as two values of
+  the model.
 - A hero's gates are measured numbers (`gates.py`, `deform.py`), taken in the one-shot pass before
   the style pass joins the meshes (clothing and body must still be told apart) and scaled to the
   shipped size; a failing one is a refusal, and the sidecar and `game_check` op `final` carry them.

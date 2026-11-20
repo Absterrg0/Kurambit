@@ -290,6 +290,7 @@ def place_on_surface(obj, target, direction, *, offset=0.0):
     then call this with the direction you would look along to see it (an eye on a face that looks
     toward -Y: (0, 1, 0)). offset lifts it off the surface along the normal. Returns (point, normal)."""
     d = Vector(direction).normalized()
+    bpy.context.view_layer.update()  # a location set just now reaches matrix_world only here
     centre = sum((obj.matrix_world @ Vector(c) for c in obj.bound_box), Vector()) / 8  # applied transforms leave the origin anywhere
     hit = surface_hit(target, centre - d * 5.0, d, 10.0)
     if hit is None:

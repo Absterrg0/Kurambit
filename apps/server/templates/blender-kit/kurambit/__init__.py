@@ -4,8 +4,8 @@ Entry points (each prints one KURAMBIT_RESULT line, or KURAMBIT_REFUSED): animat
 generated, model_views, motion_strip and review; paint.paint and carve.carve run in the one-shot pass, and
 paint.adopt and carve.adopt take their results into the live scene. resolve returns names. The helpers model parts and key clips on a conformed character;
 hero is the hero kit (made creatures, clothing on hem chains, procedural gaits and the gates); world is the
-world kit (trees, plants, rocks, buildings); voxels makes a voxel model from a grid or a .vox; look is the game's lock as made things read it; surface bakes a tiling material and wrap maps it in metres."""
-from . import hero, look, world
+world kit (trees, plants, rocks, buildings); voxels makes a voxel model from a grid or a .vox; look is the game's lock as made things read it; blender puts Rigify's meta-rigs and Blender's bundled node groups in reach; surface bakes a tiling material and wrap maps it in metres."""
+from . import blender, hero, look, world
 from .animate import animate
 from .character import character
 from .digest import digest, resolve
@@ -17,5 +17,5 @@ from .review import model_views, motion_strip, review
 from .surfaces import surface, wrap
 from .voxels import voxels
 
-__all__ = ["aim", "animate", "hero", "character", "digest", "eye_lid", "eye_squash", "generated", "grid", "hold", "key_pose", "look", "material", "mirror_pose", "model_views", "motion_strip", "palette_of", "pivot",
+__all__ = ["aim", "animate", "blender", "hero", "character", "digest", "eye_lid", "eye_squash", "generated", "grid", "hold", "key_pose", "look", "material", "mirror_pose", "model_views", "motion_strip", "palette_of", "pivot",
            "place_chain", "place_on_surface", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "voxels", "world", "wrap"]
