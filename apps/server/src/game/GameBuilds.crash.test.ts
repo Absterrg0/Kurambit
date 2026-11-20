@@ -2,7 +2,9 @@
 // Data safety: the server dies between a restore's commit and its move, between the move and
 // its settle, and after the settle before its effect is marked done. After each restart nothing
 // is lost or doubled: the folder holds the restore's target once, the person's build is listed
-// once with its number, and the list reads the same.
+// once with its number, and the list reads the same. The same holds for an old game's one-time
+// read-in.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -11,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { ProjectId } from "@kurambit/contracts";
+import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import { layerFor, memoryBuildRecords, repo, THREAD, tuneOf } from "./gameBuildsTestkit.ts";
@@ -171,6 +174,44 @@ it.effect("an Undo's landing the server died before moving lands once on restart
     const again = yield* life((builds) => builds.undo(THREAD, kept.build, "undo-1"));
     assert.strictEqual(again._tag === "undone" ? again.build : null, undo[0]!.id);
     assert.strictEqual(records.builds().filter((each) => each.kind === "undo").length, 1);
+  }).pipe(
+    Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
+  );
+});
+
+it.effect("an old game's read-in that died before its commit reads it in once on restart", () => {
+  const root = repo();
+  const records = memoryBuildRecords();
+  const life = lifeOf(root, records);
+  return Effect.gen(function* () {
+    // A build an earlier Kurambit kept by its suffix refs: `edits/<request>-values` and `-from`.
+    const git = (...args: string[]) =>
+      NodeChildProcess.execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        cwd: root,
+        encoding: "utf8",
+      }).trim();
+    const from = git("rev-parse", "HEAD");
+    NodeFS.writeFileSync(`${root}/web/tune.json`, '{ "Rover": { "speed": 9 } }\n');
+    git("add", "-A");
+    const tuned = git("commit-tree", git("write-tree"), "-p", from, "-m", "Tuned");
+    git("reset", "-q", "--hard", tuned);
+    git("update-ref", checkpointRefForGameRun("game-builds", "edits/r1-from"), from);
+    git("update-ref", checkpointRefForGameRun("game-builds", "edits/r1-values"), tuned);
+
+    records.control.lose.add("game-build.migrate");
+    const died = yield* life((builds) => builds.list(THREAD, {}).pipe(Effect.exit));
+    assert.isTrue(died._tag === "Failure");
+    assert.strictEqual(records.builds().length, 0);
+
+    const listed = yield* life((builds) => builds.list(THREAD, {}));
+    const again = yield* life((builds) => builds.list(THREAD, {}));
+    assert.deepStrictEqual(
+      listed.builds.map((build) => [build.id, build.name, build.base]),
+      [[tuned, "Build 1 · tuned", from]],
+    );
+    assert.deepStrictEqual(again.builds, listed.builds);
+    assert.strictEqual(records.builds().length, 1);
+    assert.strictEqual(folder(records, root)?.migrated, true);
   }).pipe(
     Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
   );
