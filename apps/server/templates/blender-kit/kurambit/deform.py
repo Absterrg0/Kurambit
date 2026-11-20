@@ -540,13 +540,19 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
         layer_ok = not (worst_layer[0] > gates.CLOTH_DEPTH_MAX and worst_layer[2] > gates.CLOTH_SHARE_MAX)
         ok = sunk_ok and shown_ok and layer_ok
         through, between = worst_shown[0] * scale, worst_layer[0] * scale
+        limit = f"{gates.CLOTH_DEPTH_MAX * 1000:.0f} mm"
+        sunk = (f"clothing sinks at most {depth * 1000:.0f} mm into the body{where(worst_cloth[1])}, "
+                f"{worst_cloth[2] * 100:.1f}% of its vertices past {limit}")
+        shown = (f"the body comes at most {through * 1000:.0f} mm through it{where(worst_shown[1])}, "
+                 f"{worst_shown[2] * 100:.1f}% of that part's skin under it past {limit}")
+        layer = (f"one garment comes at most {between * 1000:.0f} mm through another{where(worst_layer[1])}, "
+                 f"{worst_layer[2] * 100:.1f}% of what is under it there past {limit}")
+        # A refusal names only what failed, each with its fix, so the text stays inside the protocol.
+        failed = ([sunk + ": lift it (hero.dress offset), weight it like the body under it, or hang the hem on chains"] if not sunk_ok else []) + \
+                 ([shown + ": the body shows through. Make it with hero.garment, run hero.follow_hem after adding clips, or widen it there"] if not shown_ok else []) + \
+                 ([layer + ": the under garment shows through. Make it first, run hero.follow_hem after adding clips, or end the outer one higher (a closed skirt past mid-thigh does not clear a lunge)"] if not layer_ok else [])
         out.append(gates.gate("cloth", ok, round(max(depth, through, between) * 1000, 1), gates.CLOTH_DEPTH_MAX * 1000,
-                              f"clothing sinks at most {depth * 1000:.0f} mm into the body{where(worst_cloth[1])}, {worst_cloth[2] * 100:.1f}% of its vertices past {gates.CLOTH_DEPTH_MAX * 1000:.0f} mm; "
-                              f"the body comes at most {through * 1000:.0f} mm through it{where(worst_shown[1])}, {worst_shown[2] * 100:.1f}% of that part's skin under it past {gates.CLOTH_DEPTH_MAX * 1000:.0f} mm"
-                              + (f"; one garment comes at most {between * 1000:.0f} mm through another{where(worst_layer[1])}, {worst_layer[2] * 100:.1f}% of what is under it there past {gates.CLOTH_DEPTH_MAX * 1000:.0f} mm" if layered else "")
-                              + ("" if sunk_ok else ": lift it (hero.dress offset), weight it like the body under it, or hang the hem on chains")
-                              + ("" if layer_ok else ": what is worn under shows through what is worn over it. Make the under garment first so the outer one is made round it, run hero.follow_hem after adding clips, or end the outer one higher: a closed skirt past mid-thigh over trousers does not clear a lunge")
-                              + ("" if shown_ok else ": the body shows through the cloth. Make the garment with hero.garment (it goes round everything under it), run hero.follow_hem after adding clips, or widen it there")))
+                              "; ".join(failed) if failed else "; ".join([sunk, shown] + ([layer] if layered else []))))
     if feet and any(any(w in _clip_name(a).lower() for w in LOCOMOTION) for a in clips):
         c, s = worst_contact[0] * scale, worst_slide[0] * scale
         ok = worst_contact[0] <= contact_max and worst_slide[0] <= slide_max

@@ -283,7 +283,6 @@ def _concept(path, height):
     return np.flipud(px.reshape(h, w, 4))
 
 
-@entry
 def _stand(arm):
     """A person's neutral stand for the still tiles: the rest pose with the arms let down, so the
     face and the outfit show as made. A clip's own pose (a crouched guard, a head down) is in its
@@ -304,6 +303,7 @@ def _stand(arm):
     return True
 
 
+@entry
 def review(params):
     out = params["out"]
     folder = os.path.join(os.path.dirname(out), "review-frames")

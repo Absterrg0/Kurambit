@@ -81,6 +81,23 @@ export const kitOutput = (stdout: string): KitOutput => {
   return { kind: "none" };
 };
 
+/**
+ * A kit refusal raised inside the agent's own code in the live session: its message, without the
+ * traceback the session wraps every exception in, so it reads as the refusal it is.
+ */
+export const liveRefusal = (text: string): string | null => {
+  const at = text.indexOf('{"exception_type"');
+  if (at < 0) return null;
+  try {
+    const raised = JSON.parse(text.slice(at)) as { exception_type?: unknown; message?: unknown };
+    return raised.exception_type === "Refused" && typeof raised.message === "string"
+      ? raised.message
+      : null;
+  } catch {
+    return null;
+  }
+};
+
 export const KitDigest = Schema.Struct({
   objects: Schema.Array(Schema.String),
   perObject: Schema.Record(Schema.String, Schema.String),

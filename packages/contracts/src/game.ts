@@ -298,11 +298,11 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       symlink:
         "A symbolic link is on the way to this path. Game tools write only real files and folders inside the game and never follow a link; replace the link with a real folder or file and retry.",
       "tool-missing":
-        "A program this needs is not installed, or its path is wrong. Ask the user to install it from the download page in the detail below (or fix its path in Settings > General > Game tools), then press Check again there.",
+        "A program or add-on this needs is not installed, or its path is wrong. Do what the detail below says: an add-on is added by the op it names once the person agrees; a program the person installs from the download page it names (or fixes its path in Settings > Game tools), then presses Check again there.",
       "wrong-version":
-        "The installed version is not one Kurambit can use: Blender 4.2 or later. Ask the user to install a supported version from the download page in the detail below, or point Settings > General > Game tools at one.",
+        "The installed version is not one Kurambit can use: Blender 4.2 or later. Ask the user to install a supported version from the download page in the detail below, or point Settings > Game tools at one.",
       "templates-missing":
-        "The engine's export templates for this exact version are missing. Ask the user to install them, then press Check again in Settings > General > Game tools.",
+        "The engine's export templates for this exact version are missing. Ask the user to install them, then press Check again in Settings > Game tools.",
       "unknown-template": "Pick a starter template from the New game dialog.",
       "starter-templates-missing":
         "Kurambit's starter template files are missing. Reinstall or update the app.",

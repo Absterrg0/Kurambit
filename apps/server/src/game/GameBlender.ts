@@ -77,6 +77,7 @@ import {
   encodeCandidate,
   encodePassRecord,
   kitOutput,
+  liveRefusal,
   kitVersion,
   ledgerLine,
   ledgerParts,
@@ -954,11 +955,18 @@ const make = Effect.gen(function* () {
       // write the old scene over the restored one, so it reopens the file.
       const stale =
         existing === undefined ? null : yield* Effect.promise(() => existing.blend.changed());
+      // An add-on removed in Settings since it opened is still loaded in it: reopen without it.
+      const removed =
+        existing !== undefined &&
+        (yield* tools.addons).some(
+          ({ entry, zip }) => zip === null && existing.addons.has(entry.id),
+        );
       if (
         existing !== undefined &&
         existing.blender.running() &&
         existing.broken === null &&
         stale === null &&
+        !removed &&
         now - existing.lastActive < LIVE_IDLE_MS
       ) {
         existing.lastActive = now;
@@ -1367,6 +1375,8 @@ const make = Effect.gen(function* () {
       })) as McpContent;
       session.lastActive = yield* Clock.currentTimeMillis;
       const text = textOf(result);
+      const refused = liveRefusal(text);
+      if (refused !== null) return yield* opError("blender-live", name, "invalid-input", refused);
       if (result.isError === true || /^\s*error\b/i.test(text))
         return yield* opError(
           "blender-live",

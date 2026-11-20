@@ -38,7 +38,13 @@ def feet_limits(hero_height):
     return max(CONTACT_FLOOR, CONTACT_SHARE * hero_height), max(SLIDE_FLOOR, SLIDE_SHARE * hero_height)
 
 
+# The server's protocol holds a gate's text to this many characters; past it the review would fail.
+TEXT_MAX = 600
+
+
 def gate(name, ok, value, limit, text):
+    if len(text) > TEXT_MAX:
+        text = text[:TEXT_MAX - 1].rstrip() + "\u2026"
     return {"name": name, "pass": bool(ok), "value": value, "limit": limit, "text": text}
 
 

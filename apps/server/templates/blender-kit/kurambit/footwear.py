@@ -55,14 +55,25 @@ def _tube(rings, cap_first, cap_last):
     return verts, faces
 
 
-def _one(arm, bodies, s, kind, size, ease, top, toe, sole_t, welt):
+def _weights(o, indices):
+    """Each listed vertex's deforming weights, normalised: {bone: weight}."""
+    names = {g.index: g.name for g in o.vertex_groups}
+    out = []
+    for i in indices:
+        w = {names[g.group]: g.weight for g in o.data.vertices[int(i)].groups if g.weight > 1e-4 and g.group in names}
+        total = sum(w.values()) or 1.0
+        out.append({b: x / total for b, x in w.items()})
+    return out
+
+
+def _one(arm, bodies, worn, s, kind, size, ease, top, toe, sole_t, welt):
     """([(verts, faces, material slot, weights(vertex) -> {bone: w})], the skin's vertex mask per body)."""
     from . import deform
     from .garment import _bone, _outline
 
     ankle, ball = _bone(arm, f"foot_{s}"), _bone(arm, f"ball_{s}")
     knee = _bone(arm, f"calf_{s}")
-    foot_pts, calf_pts, inside = [], [], []
+    foot_pts, calf_pts, calf_w, inside = [], [], [], []
     for body in bodies:
         co, _ = helpers.rest_coords(body)
         if len(co) != len(body.data.vertices):
@@ -72,7 +83,15 @@ def _one(arm, bodies, s, kind, size, ease, top, toe, sole_t, welt):
         on_foot = np.isin(lead, [f"foot_{s}", f"ball_{s}", f"ball_leaf_{s}"])
         foot_pts.append(co[on_foot])
         calf_pts.append(co[lead == f"calf_{s}"])
+        calf_w.extend(_weights(body, np.flatnonzero(lead == f"calf_{s}")))
         inside.append((on_foot, lead == f"calf_{s}", co))
+    # The shaft goes round what is worn on the shin too: boots made over trousers are made round them.
+    for o in worn:
+        co, _ = helpers.rest_coords(o)
+        if len(co) == len(o.data.vertices):
+            on = np.flatnonzero(np.array([l == f"calf_{s}" for l in deform._dominant(o, arm)], bool))
+            calf_pts.append(co[on])
+            calf_w.extend(_weights(o, on))
     foot = np.concatenate(foot_pts) if foot_pts else np.zeros((0, 3))
     calf = np.concatenate(calf_pts) if calf_pts else np.zeros((0, 3))
     if len(foot) < 12:
@@ -157,7 +176,13 @@ def _one(arm, bodies, s, kind, size, ease, top, toe, sole_t, welt):
         def shin_weight(p):
             k = min(1.0, max(0.0, (float(p[2]) - (ankle[2] - soft)) / soft))  # the shin's by the joint, as its skin is
             k = k * k * (3 - 2 * k)
-            return {f"foot_{s}": 1 - k, f"calf_{s}": k} if 0 < k < 1 else ({f"calf_{s}": 1.0} if k >= 1 else {f"foot_{s}": 1.0})
+            # Above the ankle it bends as what it goes round does (the trousers, or the skin), so
+            # nothing under it comes through when the knee bends.
+            near = calf_w[int(np.argmin(np.sum((calf - np.asarray(p)) ** 2, 1)))] if len(calf_w) == len(calf) and len(calf) else {f"calf_{s}": 1.0}
+            out = {b: w * k for b, w in near.items() if b in arm.data.bones} or {f"calf_{s}": k}
+            if k < 1:
+                out[f"foot_{s}"] = out.get(f"foot_{s}", 0.0) + 1 - k
+            return out
 
         parts.append((*_tube(shaft, False, False), 0, shin_weight))
     hidden = []
@@ -188,13 +213,14 @@ def footwear(armature, kind="boots", *, colour="#4a3324", sole=None, material=No
     label = name.split("_", 1)[-1].capitalize()
     upper = material or helpers.material(colour, name=label)
     under = helpers.material(sole or _darker(colour, 0.55), name=f"{label} sole")
+    worn = [o for o in bpy.data.objects if o.get("kurambit_cloth") and o.name != name and arm in helpers._deforming(o)]
     posed = arm.data.pose_position
     arm.data.pose_position = "REST"
     bpy.context.view_layer.update()
     try:
         verts, faces, slots, weights, hidden = [], [], [], [], [None] * len(bodies)
         for s in SIDES:
-            parts, skin = _one(arm, bodies, s, kind, size, 0.011 * size * float(fit), top, toe, 0.02 * size, 0.09)
+            parts, skin = _one(arm, bodies, worn, s, kind, size, 0.011 * size * float(fit), top, toe, 0.02 * size, 0.09)
             for pv, pf, slot, weigh in parts:
                 start = len(verts)
                 verts += [tuple(float(x) for x in p) for p in pv]
