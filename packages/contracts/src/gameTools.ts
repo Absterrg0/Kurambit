@@ -116,7 +116,13 @@ export const GameBlenderToolInput = Schema.Struct({
   animate: op(GameAnimateInput),
   asset_search: op(GameBlenderAssetsSearchInput),
   asset_import: op(GameBlenderAssetsImportInput),
-  addon: op(Schema.Struct({ install: GameAddonId })),
+  addon: op(
+    Schema.Struct({
+      install: GameAddonId,
+      /** The person said yes in the chat: required for an add-on that asks first or that they removed. */
+      asked: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
 });
 export type GameBlenderToolInput = typeof GameBlenderToolInput.Type;
 

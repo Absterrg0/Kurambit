@@ -239,9 +239,12 @@ function GameToolRow({
   // One that is not installed cannot be installed into a missing Blender: it waits instead
   // of offering a button that cannot work. An installed one can still be removed.
   const waitsOnBlender = needsBlender && !tool.installed;
+  // An add-on is optional: not having one is a choice, not something to fix.
   const status = needsBlender
     ? ({ tone: "neutral", label: "Needs Blender" } as const)
-    : STATUS_LABELS[tool.status];
+    : tool.tool === "addon" && !tool.installed && tool.status === "warning"
+      ? ({ tone: "neutral", label: "Not installed" } as const)
+      : STATUS_LABELS[tool.status];
   const ToolIcon = TOOL_ICONS[tool.tool];
   const where =
     [tool.version, tool.source === null ? null : SOURCE_LABELS[tool.source]]

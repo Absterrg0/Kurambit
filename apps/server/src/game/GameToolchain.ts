@@ -235,10 +235,12 @@ export class GameToolchain extends Context.Service<
     /** An add-on of the list, fetched into Kurambit's own folder or taken out of it; never the person's Blender config. */
     readonly install: (id: string) => Effect.Effect<GameToolchainStatus, GameOperationError>;
     readonly remove: (id: string) => Effect.Effect<GameToolchainStatus, GameOperationError>;
-    /** The list's entry and its verified zip (null while it is not installed), or null for an id not on the list. */
-    readonly addon: (
-      id: string,
-    ) => Effect.Effect<{ readonly entry: BlenderAddon; readonly zip: string | null } | null>;
+    /** The list's entry, its verified zip (null while it is not installed) and whether the person removed it, or null for an id not on the list. */
+    readonly addon: (id: string) => Effect.Effect<{
+      readonly entry: BlenderAddon;
+      readonly zip: string | null;
+      readonly removed: boolean;
+    } | null>;
     /** Every entry of the list with its verified zip, for a live Blender to install or take out. */
     readonly addons: Effect.Effect<
       ReadonlyArray<{ readonly entry: BlenderAddon; readonly zip: string | null }>
@@ -599,6 +601,16 @@ const make = Effect.gen(function* () {
   );
   const addonFile = (addon: BlenderAddon) =>
     NodePath.join(directory, "blender-extensions", `${addon.id}-${addon.version}.zip`);
+  // The person's Remove is remembered (any version), so an agent asks before adding it back.
+  const removedMark = (addon: BlenderAddon) =>
+    NodePath.join(directory, "blender-extensions", `${addon.id}.removed`);
+  const removedByPerson = (addon: BlenderAddon) =>
+    Effect.promise(() =>
+      NodeFSP.access(removedMark(addon)).then(
+        () => true,
+        () => false,
+      ),
+    );
   // The entry's env variable names a copy of the same pinned zip placed by hand (a shared tools
   // folder, a machine with no network), as KURAMBIT_BLENDER names a Blender; only the pin's bytes count.
   const addonFound = (addon: BlenderAddon) =>
@@ -732,6 +744,7 @@ const make = Effect.gen(function* () {
             try: async () => {
               await NodeFSP.mkdir(NodePath.dirname(file), { recursive: true });
               await NodeFSP.rename(staged, file);
+              await NodeFSP.rm(removedMark(addon), { force: true });
             },
             catch: (cause) =>
               new GameOperationError({ operation, path: file, reason: "io", cause }),
@@ -742,7 +755,11 @@ const make = Effect.gen(function* () {
   const removeAddon = (addon: BlenderAddon) =>
     fetchLock.withPermits(1)(
       Effect.tryPromise({
-        try: () => NodeFSP.rm(addonFile(addon), { force: true }),
+        try: async () => {
+          await NodeFSP.rm(addonFile(addon), { force: true });
+          await NodeFSP.mkdir(NodePath.dirname(removedMark(addon)), { recursive: true });
+          await NodeFSP.writeFile(removedMark(addon), "");
+        },
         catch: (cause) =>
           new GameOperationError({
             operation: `remove-${addon.id}`,
@@ -784,7 +801,9 @@ const make = Effect.gen(function* () {
       const entry = BLENDER_ADDONS.find((each) => each.id === id);
       return entry === undefined
         ? Effect.succeed(null)
-        : Effect.map(addonFound(entry), (found) => ({ entry, zip: found?.path ?? null }));
+        : Effect.all({ found: addonFound(entry), removed: removedByPerson(entry) }).pipe(
+            Effect.map(({ found, removed }) => ({ entry, zip: found?.path ?? null, removed })),
+          );
     },
     addons: Effect.forEach(BLENDER_ADDONS, (entry) =>
       Effect.map(addonFound(entry), (found) => ({ entry, zip: found?.path ?? null })),

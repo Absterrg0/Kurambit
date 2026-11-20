@@ -416,7 +416,7 @@ const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", f
  * one op, so a provider that asks before tool calls names exactly it.
  */
 const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
-  `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}"} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
+  `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}", "asked": true} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
 /**
  * The person's choice refuses a Blender-made character on code with the library off (and on
  * generated): an MPFB2 body, or a mesh no library
@@ -713,7 +713,7 @@ export class GameBlender extends Context.Service<
     /** Installs an add-on of the list, as Settings → Game tools does, and reopens this game's Blender with it. */
     readonly addon: (
       threadId: ThreadId,
-      input: { readonly install: string },
+      input: { readonly install: string; readonly asked?: boolean },
     ) => Effect.Effect<{ readonly text: string }, GameOperationError>;
     /** Stop one game's live session by root; game_builds op stop calls this. */
     readonly stop: (root: string) => Effect.Effect<void>;
@@ -2461,8 +2461,9 @@ const make = Effect.gen(function* () {
               if (!drawn) {
                 const mpfb = (yield* tools.addon("mpfb"))!;
                 if (mpfb.zip === null) {
-                  // A small official add-on a route needs installs on first need; the rest ask first.
-                  if (GameToolchain.addonAsksFirst(mpfb.entry))
+                  // A small official add-on a route needs installs on first need; the rest ask
+                  // first, as does one the person removed.
+                  if (GameToolchain.addonAsksFirst(mpfb.entry) || mpfb.removed)
                     return yield* fail(
                       "tool-missing",
                       addonAsk(
@@ -2998,6 +2999,18 @@ const make = Effect.gen(function* () {
               `${input.install} is not on the add-ons list; game_check op status lists it.`,
             );
           const had = found.zip !== null;
+          // The person's yes is needed for a large or unofficial add-on, and to undo their Remove.
+          if (
+            !had &&
+            input.asked !== true &&
+            (GameToolchain.addonAsksFirst(found.entry) || found.removed)
+          )
+            return yield* opError(
+              "blender-addon",
+              input.install,
+              "tool-missing",
+              `${found.removed ? `The person removed ${found.entry.name} in Settings → Game tools.` : `${found.entry.name} is a download the person agrees to first.`} ${GameToolchain.addonAbout(found.entry)} Ask them whether to add it${found.removed ? " back" : ""}; on their yes, call game_blender op addon {"install": "${found.entry.id}", "asked": true}.`,
+            );
           if (!had) yield* tools.install(found.entry.id);
           // The scene is saved after every change, so the next call opens a Blender that has it.
           yield* drop(root);
