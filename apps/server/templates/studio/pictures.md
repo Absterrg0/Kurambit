@@ -60,9 +60,10 @@ to that moment and `window.frame(seconds, i)` called if the template defines
 it, so a canvas or SVG can be drawn in code. Draw from a seeded random, so
 the same call gives the same frames.
 
-- **Effects** (smoke, a burst, a magic ring): a canvas drawing many soft
-  particles, sparks or glowing lines over time reads as drawn, not as a few
-  circles. Play them with
+- **Effects** (smoke, a burst, a magic ring): smoke and dust are billows,
+  each puff a cluster of round lobes lit on top and darker under, with fine
+  noise inside and soft only at its rim (soft round gradients draw a blur);
+  a burst is many sparks or glowing lines over time. Play them with
   `ctx.assets.sheet("fx").play("burst", { width: 3, blending: "additive", once: true })`
   (light: additive; smoke and dust: the default blending); `sprite: true`
   faces the camera; `object.flipbook.restart()` plays it again.
