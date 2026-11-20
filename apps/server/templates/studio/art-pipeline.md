@@ -76,19 +76,20 @@ sidecar; name it in the game by its sidecar (TEMPLATE.md).
 ## Making in Blender
 
 Model with Blender's own tools in op `code`: primitives, bevel, mirror,
-array, boolean, skin and subdivision modifiers for organic masses, a voxel
-remesh to fuse them, decimate to the role's budget. Apply modifiers
-before export (`bpy.ops.object.convert(target="MESH")`). Place features by
+array, boolean, decimate to the role's budget. Apply modifiers before
+export (`bpy.ops.object.convert(target="MESH")`). Place features by
 raycast, never guessed coordinates: `kurambit.place_on_surface(obj, target,
 (0, 1, 0))`. Models face -Y, +X is their left.
 
-Blender's bundled node groups load by name with
-`kurambit.blender.node_group("Smooth by Angle")` (and the hair curve
-groups); `kurambit.blender.scatter(obj, on=ground, density=2, seed=1)`
-scatters instances, `kurambit.blender.tube(curve, radius)` sweeps a curve:
-both are plain Geometry Nodes on the live object.
+`kurambit.blender.node_group("Smooth by Angle")` loads a bundled node group;
+`kurambit.blender.scatter(obj, on=ground, density=2, seed=1)` and
+`kurambit.blender.tube(curve, radius)` are Geometry Nodes on the live object.
 
 ## Characters
+
+Organic subjects keep the hero kit (`from kurambit import hero` in op
+`code`; `print(hero.__doc__)` lists it): measured against plain `bpy`, it
+made the better character and animal. Buildings and props stay plain `bpy`.
 
 ### Humanoids
 
@@ -96,31 +97,28 @@ both are plain Geometry Nodes on the live object.
 library's clips play on it unchanged: `height` from the brief, `clips` by
 name (the standard set has no attack: name `Sword_Attack`, `Punch_Jab` or
 `Spell_Simple_Shoot` when it fights). A small or round character takes a child
-body or the chibi style. Model clothes, hair and gear over it at rest in op `code` and bind
-each part with `kurambit.skin_rigid(part, "head")` (or a `{bone: weight}`
-dict); a part across a joint takes Blender's Data Transfer weights from the
-body. Hair is chunky locks, never one smooth shell; `kurambit.eye_lid` makes an
-eye blink. What a hand holds:
-`kurambit.hold(prop, "r", grip=, tip=)`.
-
-A move the library lacks (a combo, a stagger): `game_blender` op `animate`,
-poses on beats from a library pose; read its pictures and numbers, change
-one thing, and animate again until neither improves.
+body or the chibi style. Its body comes painted in the material `<name> skin`;
+recolour that. Then `hero.face`, `hero.hair`, `hero.garment` (innermost
+first), `hero.footwear`, `hero.trim` and `hero.zone`. Gear you model binds with
+`kurambit.skin_rigid(part, "head")`; a hand holds with `kurambit.hold(prop,
+"r", grip=, tip=)`. A move the library lacks: op `animate`, poses on beats
+from a library pose, until its numbers stop improving.
 
 ### Creatures and machines: own rig, own clips
 
-A creature, a machine on hinges or a humanoid that plays only its own clips
-enters on its own rig and never plays library clips. Rig it with Rigify:
-`meta = kurambit.blender.metarig("wolf", height=0.9)` (`basic_human`,
-`human`, `basic_quadruped`, `horse`, `wolf`, `cat`, `bird`, `shark`), move
-its bones onto your body in edit mode, then `rig =
-kurambit.blender.rigify(meta, body)`: Rigify's controls, automatic weights.
-Key each clip on the controls as an action named as the game plays it (an
-idle first: `Idle`, `Walk`, `Attack`), then `kurambit.blender.game_rig(rig,
-"wolf")` bakes them onto a rig of its deform bones alone, marked as the
-creature's own, and that rig and its body are what you review and export. A
-loop's last key equals its first and keeps its travel in place. A vehicle
-needs no rig: `kurambit.pivot(wheel, hub, parent=body)` per moving part.
+An animal is a sketch of point chains `(x, y, z, radius)`, facing -Y, feet on
+z = 0: `spine` rear to front, `neck`, `head`, `leg_front_l`, `leg_hind_l`
+(hip to toe, bent at the knee), `tail`, `ear_l` (`_l` mirrors). Then
+`hero.creature_body`, `hero.creature_rig(body, height=(lo, hi))`,
+`hero.creature_face`, `hero.feet`, `hero.fur`, `hero.zone` and
+`hero.creature_clips(arm, ["idle", "walk", "run"])`: it plays only its own
+clips. A machine or a body the sketch cannot hold rigs with Rigify:
+`kurambit.blender.metarig(kind, height=)` (`basic_quadruped`, `horse`,
+`cat`, `bird`, `shark`, ...), fit its bones, `rig =
+kurambit.blender.rigify(meta, body)`, key actions on the controls (an idle
+first), then `kurambit.blender.game_rig(rig, name)` bakes them onto its
+deform bones for export. A loop's last key equals its first, in place. A
+vehicle needs no rig: `kurambit.pivot(wheel, hub, parent=body)`.
 
 ### The hero sheet
 

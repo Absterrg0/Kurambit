@@ -215,10 +215,15 @@ check that matters.
 - Made art follows the CC0 packs' method rather than a hand-written craft kit: one material on a
   gradient-swatch atlas (`stylepass.py`), budgets by role taken from the packs, and the review's
   numbers (`review.py`, `compare.py`: silhouette overlap against a reference picture or a library
-  model, width by tenths of height, thin parts at game distance) as the loop's eyes. The craft
-  modules (`world`, `creature`, `anatomy`, `face`, `hair`, `garment`, `cloth`, `footwear`, `trim`,
-  `zones`, `proportions`, `carve`, `fit`) are no longer named by the skill or the tools while a
-  measured side-by-side decides whether they go.
+  model, width by tenths of height, thin parts at game distance) as the loop's eyes. Hard-surface
+  subjects (buildings, props) are plain `bpy`: there it beat the craft kit (`world`, `carve`, not
+  named any more). Organic ones keep the hero kit, which beat plain `bpy` on a character and an
+  animal: clothes cut from the body's own surface and weighted by the skin under them (`cloth.py`;
+  automatic weights split a coat between the legs), a face built from the body's own landmarks
+  (`face.py`), and a creature's body and rig from one sketch of joint chains (`creature.py`), so
+  its joints sit inside its body by construction and its gaits come from a generator (`gait.py`).
+  A made body (MPFB2 or the drawn bodies) carries no material, so op `character` paints it
+  `<name> skin`; unpainted, it ships the glTF default white.
 - Humans use no Rigify: op `character`'s conform already is the game rig, deform bones under
   standard names whose rest frames are the library's, so its clips play with no retarget loss.
   A creature rigged with Rigify (`kurambit.blender`) does not ship Rigify's rig: its DEF bones are
