@@ -46,8 +46,9 @@ Rigid parts on the standard skeleton, playing the library's clips:
    `kurambit.voxels("knight_body", slices, palette, size=1/16,
 armature="knight", follow={"a": "upperarm", "G": "hand"})`. Each voxel
    follows the nearest bone; a key in `follow` follows the bone named (its
-   side from where the voxel is), which keeps sleeves off the chest. Parts
-   turn at the joints and never bend.
+   side from where the voxel is), which keeps sleeves off the chest. Head,
+   chest, hips, arms and legs are rigid blocks; a whole arm or leg points
+   along the clip's limb, so no clip folds it.
 3. Review and export it as any character; its strips show where a joint
    splits a part wrongly.
 

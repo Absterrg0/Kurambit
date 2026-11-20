@@ -29,6 +29,7 @@ from kurambit import cloth, contact, deform, measure, skeleton, stylepass  # noq
 from kurambit import gates as gates_rules  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
+from kurambit.voxels import aim_limbs  # noqa: E402
 
 MADE = {"from": "made", "licence": "made in this game", "ai": False, "credits": None}
 MAX_REST_DEVIATION = 2.0
@@ -206,6 +207,10 @@ def run_pass(params):
             notes.append(f"{o.name} was shown in rest position; its clips were exported posed (the live scene is unchanged)")
     out = params["out"]
     os.makedirs(out, exist_ok=True)
+    # A clip given to a voxel character after its voxels were made gets its whole limbs aimed too.
+    for o in arms:
+        if o.get("kurambit_voxel_limbs"):
+            aim_limbs(o)
     # The lock's faceted finish first: the gates below measure the mesh that ships.
     stylepass.facet(objects, params.get("style"))
     # Before the style pass, which joins a character's meshes into one.

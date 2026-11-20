@@ -16,8 +16,14 @@ of palette indices (0 empty) with a list palette. Origin: the bottom centre, on 
 armature: a skeleton standing at the origin (op character's). The grid is read as the character
 standing with its arms down (the review's stand); each voxel follows the nearest of `bones`, each
 part is meshed whole on its own, and is put back to the skeleton's rest, so the parts turn at the
-joints and never bend. follow={"s": "upperarm"} makes a key's voxels follow a bone wherever they
-are (a bone with no side takes the voxel's: +X is the character's left)."""
+joints and never bend. By default a part is a whole block: head, chest, hips, each arm, each leg.
+follow={"s": "upperarm"} makes a key's voxels follow a bone wherever they are (a bone with no side
+takes the voxel's: +X is the character's left); a bone inside a part (a hand) means that part.
+
+A whole arm or leg cannot bend at the elbow or knee, so in every clip of the character it points
+where the clip's limb points, shoulder to wrist, hip to ankle, and the hips rise by what a
+straightened standing leg would push into the ground (aim_limbs). A limb cut at its joints on a
+body two voxels thick folds into a heap the moment a clip bends it."""
 import json
 import os
 import sys
@@ -32,8 +38,9 @@ from .protocol import Refused
 ADDON = "blender_magicavoxel"
 # The bones a voxel character's parts follow by default: one rigid torso (the chest) over the
 # hips, no neck, no fingers or toes. A part nearest a bone not listed follows the nearest listed one.
-BONES = ("pelvis", "spine_03", "Head", "upperarm_l", "lowerarm_l", "hand_l", "upperarm_r", "lowerarm_r", "hand_r",
-         "thigh_l", "calf_l", "foot_l", "thigh_r", "calf_r", "foot_r")
+BONES = ("pelvis", "spine_03", "Head", "upperarm_l", "upperarm_r", "thigh_l", "thigh_r")
+# A part on one of these with no part below it is a whole limb, aimed at the joint named.
+LIMB_ENDS = {"upperarm": "hand", "thigh": "foot"}
 
 
 def _addon():
@@ -177,6 +184,11 @@ def voxels(name, slices=None, palette=None, *, size=0.1, vox=None, model=0, lice
             vg = obj.vertex_groups.new(name=bone)
             vg.add(sorted({i for f, b in zip(faces, part_of) if b == bone for i in f}), 1.0, "REPLACE")
         skeleton.bind(obj, arm)
+        if parts.limbs:
+            arm["kurambit_voxel_limbs"] = json.dumps(parts.limbs)
+            aim_limbs(arm)
+        elif "kurambit_voxel_limbs" in arm:
+            del arm["kurambit_voxel_limbs"]
     w, d, h = ((hi - lo) * size).round(3)
     print(f"{name}: {len(cells)} voxels, {w} x {d} x {h} m (wide, deep, tall), {len(faces)} faces, {len(colours)} colours"
           + (f", parts on {', '.join(parts)}" if arm is not None else "") + (f"; the file holds {models} models" if models > 1 else ""))
@@ -185,6 +197,7 @@ def voxels(name, slices=None, palette=None, *, size=0.1, vox=None, model=0, lice
 
 class _Parts(dict):
     to_rest = {}
+    limbs = {}
 
 
 def _parts(arm, cells, shift, size, bones, follow):
@@ -198,14 +211,28 @@ def _parts(arm, cells, shift, size, bones, follow):
     missing = sorted(b for b in wanted if b not in arm.pose.bones)
     if missing:
         raise ValueError(f"{arm.name} has no bone {', '.join(missing)}")
-    allowed += sorted(wanted - set(allowed))
+    def part_of(b):
+        """The part a bone belongs to: itself, else its nearest ancestor that is a part."""
+        p = arm.data.bones[b]
+        while p is not None and p.name not in allowed:
+            p = p.parent
+        return p.name if p is not None else b
+
+    resolved = {b: part_of(b) for b in wanted}
+    allowed += sorted(set(resolved.values()) - set(allowed))
     if not allowed:
         raise ValueError(f"{arm.name} has none of the bones {', '.join(bones or BONES)}")
+    limbs = {}
+    for b in allowed:
+        end = next((f"{e}{b[len(r):]}" for r, e in LIMB_ENDS.items() if b.startswith(r + "_")), None)
+        if end is not None and end in arm.pose.bones and not any(b in {p.name for p in arm.data.bones[o].parent_recursive} for o in allowed):
+            limbs[b] = end
     try:
         _stand(arm)
         mw = arm.matrix_world
         ends = {b: (np.array(mw @ arm.pose.bones[b].head), np.array(mw @ arm.pose.bones[b].tail)) for b in allowed}
         moved = {b: (mw @ arm.data.bones[b].matrix_local) @ (mw @ arm.pose.bones[b].matrix).inverted() for b in allowed}
+        reach = {b: np.array(mw @ arm.pose.bones[e].head) - ends[b][0] for b, e in limbs.items()}
     finally:
         for pb in arm.pose.bones:
             pb.matrix_basis = Matrix()
@@ -217,7 +244,104 @@ def _parts(arm, cells, shift, size, bones, follow):
     nearest = dist.argmin(1)
     parts = _Parts()
     for k, i, c in zip(keys, nearest, centre):
-        bone = sided(follow[cells[k]], c[0]) if cells[k] in follow else allowed[i]
+        bone = resolved[sided(follow[cells[k]], c[0])] if cells[k] in follow else allowed[i]
         parts.setdefault(bone, {})[k] = cells[k]
     parts.to_rest = {b: moved[b] for b in parts}
+    # A whole limb's own axis: its voxels' long axis, from the joint toward the limb's end, in rest.
+    parts.limbs = {}
+    for b, end in limbs.items():
+        if b not in parts:
+            continue
+        pts = (np.array(list(parts[b]), float) + 0.5 - shift) * size
+        axis = np.linalg.svd(pts - pts.mean(0), full_matrices=False)[2][0]
+        axis = axis if axis @ reach[b] > 0 else -axis
+        if reach[b][2] < -0.5 * np.linalg.norm(reach[b]):
+            # A leg stands on its ankle: it aims the joint's own line so a planted foot lands true.
+            axis = reach[b]
+        rest = (mw.inverted().to_3x3() @ moved[b].to_3x3() @ Vector(axis)).normalized()
+        parts.limbs[b] = {"end": end, "axis": [round(v, 5) for v in rest]}
     return parts
+
+
+def aim_limbs(arm):
+    """Every clip of a voxel character, rewritten so each whole limb points where the clip's limb
+    does (module docstring). Idempotent: a clip already aimed comes out the same, so the review
+    pass runs it again for clips added after the voxels were made."""
+    from .digest import exported_actions
+    from .fit import _keys
+
+    limbs = json.loads(arm.get("kurambit_voxel_limbs", "{}") or "{}")
+    limbs = {b: v for b, v in limbs.items() if b in arm.pose.bones and v["end"] in arm.pose.bones}
+    if not limbs:
+        return 0
+    bones = arm.pose.bones
+    below = {b: [d.name for d in arm.data.bones[b].children_recursive] for b in limbs}
+    legs = [b for b, v in limbs.items() if arm.data.bones[v["end"]].head_local.z < 0.25 * arm.data.bones[b].head_local.z]
+    lift_bone = "pelvis" if "pelvis" in bones else None
+    action = arm.animation_data.action if arm.animation_data else None
+    sc = bpy.context.scene
+    keep = sc.frame_current
+    done = 0
+    for act in exported_actions(arm):
+        skeleton.assign_action(arm, act)
+        f0, f1 = (int(round(f)) for f in act.frame_range)
+        at = list(range(f0, f1 + 1))
+        rots, lifts = {b: [] for b in limbs}, []
+        for f in at:
+            sc.frame_set(f)
+            heads = {b: bones[b].head.copy() for b in limbs}
+            ends = {b: bones[v["end"]].head.copy() for b, v in limbs.items()}
+            # The leg standing lowest keeps its ankle where the clip put it; every other limb keeps
+            # its direction from the joint.
+            planted = min(legs, key=lambda b: ends[b].z) if legs and lift_bone else None
+            for _ in range(6):
+                for b, v in limbs.items():
+                    pb, h = bones[b], bones[b].head.copy()
+                    want = ends[b] - h if b == planted else ends[b] - heads[b]
+                    if want.length < 1e-6:
+                        continue
+                    a = (pb.matrix @ arm.data.bones[b].matrix_local.inverted()).to_3x3() @ Vector(v["axis"])
+                    q = a.rotation_difference(want).to_matrix().to_4x4()
+                    pb.matrix = Matrix.Translation(h) @ q @ Matrix.Translation(-h) @ pb.matrix
+                for b in limbs:
+                    for d in below[b]:
+                        bones[d].matrix_basis = Matrix()
+                bpy.context.view_layer.update()
+                if planted is None:
+                    break
+                # A straight leg is longer than the clip's bent one: the hips rise till it reaches.
+                lift = ends[planted].z - bones[limbs[planted]["end"]].head.z
+                if abs(lift) < 1e-4:
+                    break
+                bones[lift_bone].matrix = Matrix.Translation((0, 0, lift)) @ bones[lift_bone].matrix
+                bpy.context.view_layer.update()
+            lifts.append(bones[lift_bone].matrix_basis.translation.copy() if lift_bone else None)
+            for b in limbs:
+                q = bones[b].matrix_basis.to_quaternion()
+                if rots[b] and q.dot(rots[b][-1]) < 0:
+                    q.negate()
+                rots[b].append(q)
+        fcs = skeleton.action_fcurves(act)
+        quiet = {d for b in limbs for d in below[b]}
+        for fc in list(fcs):
+            bone = fc.data_path.split('"')[1] if '"' in fc.data_path else ""
+            rot = fc.data_path.endswith((".rotation_quaternion", ".rotation_euler", ".rotation_axis_angle"))
+            if (rot and (bone in limbs or bone in quiet)) or (bone == lift_bone and fc.data_path.endswith(".location") and lift_bone):
+                fcs.remove(fc)
+        for b in limbs:
+            bones[b].rotation_mode = "QUATERNION"
+            for i in range(4):
+                _keys(fcs.new(f'pose.bones["{b}"].rotation_quaternion', index=i), at, [q[i] for q in rots[b]])
+        for d in sorted(quiet):
+            bones[d].rotation_mode = "QUATERNION"
+            for i, v in enumerate((1.0, 0.0, 0.0, 0.0)):
+                _keys(fcs.new(f'pose.bones["{d}"].rotation_quaternion', index=i), at[:1], [v])
+        if lift_bone:
+            for i in range(3):
+                _keys(fcs.new(f'pose.bones["{lift_bone}"].location', index=i), at, [float(t[i]) for t in lifts])
+        done += 1
+    for pb in bones:
+        pb.matrix_basis = Matrix()
+    skeleton.assign_action(arm, action)
+    sc.frame_set(keep)
+    return done
