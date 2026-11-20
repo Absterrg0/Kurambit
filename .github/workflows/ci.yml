@@ -439,6 +439,12 @@ jobs:
           path: ${{ runner.temp }}/kurambit-gate/tools
           key: gate-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/server/src/preview/PreviewBrowser.ts') }}
 
+      # Ubuntu 24.04 runners forbid the unprivileged user namespaces Chromium's sandbox needs.
+      # A person's machine gets the AppArmor profile that browser setup installs; the runner,
+      # which is thrown away, just lifts the restriction.
+      - name: Allow the browser's sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Run the gate
         run: |
           git config --global user.name "First-use gate"

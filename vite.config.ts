@@ -101,6 +101,9 @@ export default defineConfig({
       // Third-party three.js, its addons and postprocessing, vendored into the
       // game template as published.
       "apps/server/templates/runtime/*/*/vendor/**",
+      // Written by scripts/runtime-dts.ts as one reference page of tsc's output per shell
+      // module, so each section repeats its own imports.
+      "apps/server/templates/runtime/*/*/runtime.d.ts",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-kurambit/index.ts", "@shadcn/lint"],
