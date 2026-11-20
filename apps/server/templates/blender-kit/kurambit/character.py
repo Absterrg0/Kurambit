@@ -3,7 +3,9 @@
 params (the server resolves every path):
     name      the collection, the armature's name and the export's default stem
     body      {"library": abs, "pack"?: id, "licence"?: str} | {"mpfb": {age, gender, weight, ...}}
-              | {"game": abs, "source"?: {from, licence, ai, credits}} (source: a generated file's
+              | {"game": abs, "source"?: {from, licence, ai, credits}} | "none": the skeleton, its
+              proportions and clips with no body (the drawn body sets the joints, then goes), for
+              parts modelled on the joints. (source: a generated file's
               record, read by the server; without it the sidecar beside the file is the ledger).
               A game body keeps its own clips, and every body its own skinned bone chains (cloth,
               hair) as spring chains.
@@ -434,6 +436,9 @@ def character(params):
         raise Refused("invalid-input", f"{name} is a {old.type.lower()}, not a character's armature: pick another name")
     skeleton.object_mode()
     body_spec = params["body"]
+    bare = body_spec == "none"
+    if bare:
+        body_spec = {"mpfb": {"gender": 0.5}}
     notes = []
     carried = []
 
@@ -470,10 +475,11 @@ def character(params):
             asked_bones |= {f"{label}_{i + 1:02d}" for label in labels for i in range(int(chain["bones"]))}
         taken = _take_clips(params.get("clips", []), standard, std_actions, reference, _height(std_arm, {}))
         preset = (params.get("style") or {}).get("preset")
-        drawn = "mpfb" in body_spec and preset in studio.PRESETS
+        drawn = "mpfb" in body_spec and (preset in studio.PRESETS or bare)
         if drawn:
             body_arm, meshes, name_map = studio.body(body_spec["mpfb"].get("gender", 0.5))
-            studio.soften(meshes[0], preset)
+            if preset in studio.PRESETS:
+                studio.soften(meshes[0], preset)
             body_part = {**MADE_BODY, "from": "blender-studio-human-base-meshes", "licence": studio.LICENCE}
             base = "studio"
         elif "mpfb" in body_spec:
@@ -514,7 +520,7 @@ def character(params):
         skeleton.remove_objects([o for o in [std_arm, body_arm, *meshes] if o is not None and _alive(o)])
         raise
 
-    if "mpfb" in body_spec:
+    if "mpfb" in body_spec and not bare:
         skin = bpy.data.materials.get(f"{name} skin") or helpers.material(SKIN, name=f"{name} skin")
         for o in meshes:
             if not any(s.material for s in o.material_slots):
@@ -647,6 +653,9 @@ def character(params):
     deviation = skeleton.frame_deviation(arm, reference)
     zs = [z for o in meshes for z in helpers.rest_coords(o)[0][:, 2]]
     height = max(zs) - min(zs) if zs else 0.0
+    if bare:
+        skeleton.remove_objects(meshes)
+        meshes = []
     notes.append(f"body {height:.2f} m; clips play with the pelvis translation scaled by {ratio:.3f} and no other bone translation")
     return {
         "armature": arm.name,
@@ -655,5 +664,6 @@ def character(params):
         "chains": chains,
         "restDeviation": round(deviation or 0.0, 2),
         "height": round(height, 3),
+        "joints": helpers.joints(arm),
         "notes": notes,
     }

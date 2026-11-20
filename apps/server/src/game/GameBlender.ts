@@ -350,6 +350,8 @@ const CharacterMade = Schema.Struct({
   chains: Schema.Record(Schema.String, Schema.Array(Schema.String)),
   restDeviation: Schema.Number,
   height: Schema.Number,
+  /** Each joint's world position and axis, and how the rig stands at rest. */
+  joints: Schema.String,
   notes: Schema.Array(Schema.String),
 });
 /** What kurambit.review prints: one JSON result line. */
@@ -2479,8 +2481,9 @@ const make = Effect.gen(function* () {
             const realRoot = yield* realRootOf(root);
             const lock = yield* readGameStyle(realRoot);
             const standardPacks = standardClipPacks(lock);
-            let body: Record<string, unknown>;
-            if ("library" in input.body) {
+            let body: Record<string, unknown> | "none";
+            if (input.body === "none") body = "none";
+            else if ("library" in input.body) {
               const { pack: id, file } = input.body.library;
               const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
               if (pack?.rig !== STANDARD_RIG)
@@ -2632,6 +2635,7 @@ const make = Effect.gen(function* () {
                       `Chains (no clip keys them; the game springs them): ${chains.map(([name, bones]) => `${name} ${bones.join(", ")}`).join("; ")}.`,
                     ]),
                 ...made.notes,
+                `Joints (metres, the axis each bone points along), ${made.joints}`,
                 `Saved .blend source: ${blend}. Model the rest with game_blender op code (import kurambit for the helpers), parented to its bones; then game_blender op look with mode review, then game_blender op export.`,
               ].join("\n"),
               armature: made.armature,

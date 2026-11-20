@@ -1,5 +1,9 @@
 """Blender's own tools, in reach of plain bpy: Rigify's meta-rigs and the bundled node groups.
 
+A game creature uses the meta-rig itself as its skeleton and keys its walk with bake_ik_walk: the
+meta-rig's hierarchy exports intact, legs under the spine. Rigify's generated rig, below, stays for
+the models made with it before.
+
 Rigify generates a control rig of several hundred bones (ORG, MCH, DEF and the controls). A game
 plays the deform bones alone, and Rigify parents those under ORG and MCH bones that do not
 ship, so game_rig bakes each clip keyed on the controls onto a plain armature of the DEF bones,
@@ -10,12 +14,13 @@ Blender 4.5 bundles Smooth by Angle and the hair curve groups as node assets; Sc
 and Curve to Tube arrived with 5.x's Essentials, so scatter and tube build the same few nodes
 here."""
 import importlib
+import json
 import os
 
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
-from . import skeleton
+from . import helpers, skeleton
 
 METARIGS = {
     "human": "rigify.metarigs.human",
@@ -44,7 +49,9 @@ def _active(ob):
 
 def metarig(kind, name=None, height=None):
     """One of Rigify's meta-rigs (METARIGS), standing on the ground facing -Y, scaled to height
-    metres when given. Move its bones onto the body in edit mode, then rigify()."""
+    metres when given, its joint print on stdout. For a game creature the meta-rig itself is the
+    skeleton: fit its bones in edit mode, model the parts on its joints, turn use_deform on and key
+    its clips with bake_ik_walk (rigify() and game_rig() twist a game rig's rest pose)."""
     if kind not in METARIGS:
         raise ValueError(f"no meta-rig {kind!r}: one of {', '.join(METARIGS)}")
     _rigify()
@@ -59,6 +66,7 @@ def metarig(kind, name=None, height=None):
         zs = [z for b in ob.data.bones for z in (b.head_local.z, b.tail_local.z)]
         k = height / max(max(zs) - min(0.0, min(zs)), 1e-6)
         ob.data.transform(Matrix.Scale(k, 4))
+    print(helpers.joints(ob))
     return ob
 
 
@@ -268,3 +276,53 @@ def tube(curve, radius=0.05, sides=6):
         return sweep.outputs["Mesh"]
 
     return _modifier(curve, "tube", build)
+
+
+def bake_ik_walk(arm, feet, step, frames, clip="Walk"):
+    """Keys a clip on a plain armature through IK legs and bakes it to its bones. feet: the foot
+    bones; each one's parent gets a two-bone IK aimed at an empty at the foot. step(foot, frame)
+    gives that empty's offset from rest in metres (Vector((0, 0, 0)) plants it; stance slides back
+    at the walk's speed, swing lifts). Keys already on the action clip (a bob, a breath) bake with
+    it. Constraints and empties go after; the clip is the armature's own, looping over
+    0..frames, and the feet are recorded for the feet gate. Returns the action."""
+    skeleton.object_mode()
+    sc = bpy.context.scene
+    act = bpy.data.actions.get(clip) or bpy.data.actions.new(clip)
+    arm.animation_data_create()
+    arm.animation_data.action = act
+    made = []
+    try:
+        for foot in feet:
+            if foot not in arm.pose.bones or arm.pose.bones[foot].parent is None:
+                raise ValueError(f"{arm.name} has no foot bone {foot} with a parent to bend")
+            e = bpy.data.objects.new(f"ik_{foot}", None)
+            sc.collection.objects.link(e)
+            rest = arm.matrix_world @ arm.data.bones[foot].head_local
+            for f in range(frames + 1):
+                e.location = rest + Vector(step(foot, f))
+                e.keyframe_insert("location", frame=f)
+            c = arm.pose.bones[foot].parent.constraints.new("IK")
+            c.name, c.target, c.chain_count = "kurambit_ik", e, 2
+            made.append((e, arm.pose.bones[foot].parent, c))
+        for pb in arm.pose.bones:
+            pb.rotation_mode = "QUATERNION"
+        _active(arm)
+        bpy.ops.object.mode_set(mode="POSE")
+        bpy.ops.pose.select_all(action="SELECT")
+        bpy.ops.nla.bake(frame_start=0, frame_end=frames, only_selected=False, visual_keying=True,
+                         clear_constraints=False, use_current_action=True, bake_types={"POSE"})
+    finally:
+        skeleton.object_mode()
+        for e, pb, c in made:
+            pb.constraints.remove(c)
+            act_e = e.animation_data.action if e.animation_data else None
+            bpy.data.objects.remove(e)
+            if act_e is not None and act_e.users == 0:
+                bpy.data.actions.remove(act_e)
+    name = arm.get("kurambit_rig") or arm.name
+    arm["kurambit_rig"] = name
+    act.use_fake_user = True
+    act["kurambit_owner"], act["kurambit_clip"] = arm.name, clip
+    arm["kurambit_legs"] = json.dumps([{"foot": f} for f in feet])
+    sc.frame_set(0)
+    return act

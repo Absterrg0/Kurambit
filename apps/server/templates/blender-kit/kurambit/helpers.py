@@ -1,5 +1,5 @@
-"""Helpers for modelling parts and keying clips on a conformed character: skin_rigid, ring_around,
-tube_along_bones, place_on_surface, aim, key_pose and mirror_pose, plus material and place_chain, and the
+"""Helpers for modelling parts and keying clips on a conformed character: loft (a part as rings on
+its joints), skin_rigid with weights_along, ring_around, tube_along_bones, place_on_surface, aim, key_pose and mirror_pose, plus material and place_chain, and the
 eyes that blink by bones: eye_lid and eye_squash.
 
 Every helper works in world space on the character's rest pose (what the export binds to), even
@@ -723,3 +723,115 @@ def grid(objects, cell):
         out.append({"name": o.name, "size": [round(float(v), 3) for v in hi - lo], "low": [round(float(v), 3) for v in lo],
                     "high": [round(float(v), 3) for v in hi], "fits": not why, "why": "; ".join(why)})
     return out
+
+
+def _ring_frame(t, up):
+    t = t.normalized()
+    u = up - t * up.dot(t)
+    if u.length < 1e-4:  # the path runs along up: any side will do
+        u = Vector((1, 0, 0)) - t * t.x
+    u.normalize()
+    return t, u, t.cross(u)
+
+
+def loft(stations, sides=10, up=(0, 0, 1), squircle=2.0, cap=(True, True), *, name="loft", material=None, smooth=True):
+    """A part as a ring loft, one ring per edge loop: stations [(centre, ru, rv)], ru along up (as
+    seen across the path) and rv across both. squircle 2 is an ellipse, 2.4-2.6 a rounded box. A
+    capped end closes with a smaller ring and a pole, so it is round, not flat. Returns the object."""
+    if len(stations) < 2:
+        raise ValueError("loft needs at least two stations")
+    me = bpy.data.meshes.new(name)
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    bm = bmesh.new()
+    pts = [Vector(s[0]) for s in stations]
+    up = Vector(up)
+    e = 2.0 / squircle
+    rings = []
+    for i, (_, ru, rv, *_) in enumerate(stations):
+        t, u, v = _ring_frame(pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)], up)
+        ring = []
+        for k in range(sides):
+            a = 2 * math.pi * k / sides
+            c, s = math.cos(a), math.sin(a)
+            ring.append(bm.verts.new(pts[i] + u * ru * math.copysign(abs(c) ** e, c) + v * rv * math.copysign(abs(s) ** e, s)))
+        rings.append((ring, t, min(ru, rv)))
+    for (r0, *_), (r1, *_) in zip(rings, rings[1:]):
+        for k in range(sides):
+            bm.faces.new((r0[k], r0[(k + 1) % sides], r1[(k + 1) % sides], r1[k]))
+    for end, i, sign in ((0, 0, -1), (1, -1, 1)):
+        if not cap[end]:
+            continue
+        ring, t, r = rings[i]
+        depth = r * 0.45
+        inner = [bm.verts.new(pts[i] + (p.co - pts[i]) * 0.6 + t * sign * depth * 0.7) for p in ring]
+        pole = bm.verts.new(pts[i] + t * sign * depth)
+        for k in range(sides):
+            for f in ((ring[k], ring[(k + 1) % sides], inner[(k + 1) % sides], inner[k]), (inner[k], inner[(k + 1) % sides], pole)):
+                bm.faces.new(f if sign > 0 else f[::-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = smooth
+    if material is not None:
+        me.materials.append(material)
+    return ob
+
+
+def weights_along(armature, chains, power=6.0, keep=3):
+    """A weight function for skin_rigid that keeps a part on its own bones: each vertex follows the
+    nearest of the named bone segments (a name runs head to tail, a (bone, next bone) pair head to
+    head), by inverse distance to the power (soft at a joint, rigid mid-bone), its top keep
+    normalised. A torso given only spine bones can never pull on a thigh."""
+    arm = _armature(armature)
+    mw = arm.matrix_world
+    segs = []
+    for c in chains:
+        bone, nxt = (c, None) if isinstance(c, str) else c
+        if bone not in arm.data.bones or (nxt is not None and nxt not in arm.data.bones):
+            raise ValueError(f"{arm.name} has no bone {bone if bone not in arm.data.bones else nxt}")
+        b = arm.data.bones[bone]
+        a = np.array(mw @ b.head_local)
+        segs.append((bone, a, np.array(mw @ (b.tail_local if nxt is None else arm.data.bones[nxt].head_local))))
+
+    def weights(co):
+        p = np.array(co)
+        near = []
+        for bone, a, b in segs:
+            ab = b - a
+            t = np.clip(np.dot(p - a, ab) / max(np.dot(ab, ab), 1e-9), 0, 1)
+            near.append((float(np.linalg.norm(p - (a + t * ab))) + 1e-4, bone))
+        out = {}
+        for d, bone in sorted(near)[:keep]:
+            out[bone] = out.get(bone, 0.0) + d ** -power
+        total = sum(out.values())
+        return {k: w / total for k, w in out.items() if w / total > 0.02}
+    return weights
+
+
+FINGERS = re.compile(r"(thumb|index|middle|ring|pinky)", re.I)
+_AXES = (("+x", (1, 0, 0)), ("-x", (-1, 0, 0)), ("+y", (0, 1, 0)), ("-y", (0, -1, 0)), ("+z", (0, 0, 1)), ("-z", (0, 0, -1)))
+
+
+def joints(armature, fingers=False):
+    """The joint print to model on: how the rig stands at rest, then each joint's world position in
+    metres and the axis its bone points along. Fingers are left out unless asked."""
+    arm = _armature(armature)
+    mw = arm.matrix_world
+    bones = arm.data.bones
+    upper = next((bones[n] for n in ("upperarm_l", "upper_arm.L", "front_thigh.L") if n in bones), None)
+    stand = "rest: faces -Y, +X is its left, +Z up, feet on z 0"
+    if upper is not None and upper.name == "upperarm_l":
+        d = (mw.to_3x3() @ (upper.tail_local - upper.head_local)).normalized()
+        drop = math.degrees(math.asin(max(-1.0, min(1.0, -d.z))))
+        stand += "; T-pose, arms along +-X" if drop < 15 else f"; A-pose, arms {drop:.0f} deg below level"
+    out = [stand]
+    for b in bones:
+        if not fingers and FINGERS.search(b.name):
+            continue
+        h = mw @ b.head_local
+        d = (mw.to_3x3() @ (b.tail_local - b.head_local)).normalized()
+        axis = max(_AXES, key=lambda a: d.dot(Vector(a[1])))[0]
+        out.append(f"{b.name} ({h.x:.3f}, {h.y:.3f}, {h.z:.3f}) {axis}")
+    return "\n".join(out)

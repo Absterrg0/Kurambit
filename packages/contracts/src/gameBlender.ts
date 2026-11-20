@@ -180,6 +180,8 @@ export const GameBlenderBody = Schema.Union([
   }),
   /** A rigged humanoid in this game: an earlier export, or a generated one under art/generated/ (UE, Mixamo or other common bone names). */
   Schema.Struct({ game: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)) }),
+  /** No body: the skeleton at the style's proportions and height, with its clips, for parts modelled on its joints. */
+  Schema.Literal("none"),
 ]);
 export type GameBlenderBody = typeof GameBlenderBody.Type;
 
