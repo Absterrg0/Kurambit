@@ -28,7 +28,7 @@ describe("game browser backend", () => {
         { args: vulkan!, renderer: null },
       ]),
     ).toEqual({
-      args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+      args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--disable-gpu-compositing"],
       renderer: null,
       software: true,
     });

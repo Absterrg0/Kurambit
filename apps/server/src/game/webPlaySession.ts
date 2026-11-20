@@ -41,6 +41,20 @@ const loadPlaywright = () =>
  * Whether a still is one colour bar a little text: a canvas caught between frames, not a picture of
  * the game. Sampled on a coarse grid, so a page's own text over the canvas does not count.
  */
+/**
+ * Holds or lets go of the shell's run through its visibility bridge (shell/studio.js), resolving
+ * once the shell has heard it; a page without the shell hears nothing and only waits a task.
+ */
+const HOLD_RUN = `(hold) => new Promise((done) => {
+  const heard = (event) => {
+    if (event.data?.type !== "studio-visibility") return;
+    window.removeEventListener("message", heard);
+    setTimeout(done, 0);
+  };
+  window.addEventListener("message", heard);
+  window.postMessage({ type: "studio-visibility", visible: !hold }, "*");
+})`;
+
 const looksFlat = (png: Buffer) => {
   const { width, height, data } = PNG.sync.read(png);
   const counts = new Map<number, number>();
@@ -115,17 +129,29 @@ export type WebPageEvent =
   | { readonly kind: "script-failed"; readonly url: string; readonly status: number };
 
 /** The page never set `window.__studio.ready`: by the deadline, or because it errored first. */
+/** " (at <url>:<line>:<col>)" from a stack's first frame that names a file; "" when none does. */
+const atFrame = (stack: string) => {
+  const frame = /(?:https?|file):\/\/\S+:\d+:\d+/.exec(stack)?.[0];
+  return frame === undefined ? "" : ` (at ${frame})`;
+};
+
 export class WebPageNotReady extends Error {
   readonly timedOut: boolean;
   /** Why the page could not be opened at all, when it could not. */
   readonly navigation: string | null;
-  constructor(timedOut: boolean, bootTimeoutMs: number, navigation: string | null = null) {
+  constructor(
+    timedOut: boolean,
+    bootTimeoutMs: number,
+    navigation: string | null = null,
+    /** The page's first error, so a start that failed says why without another check. */
+    error: { readonly message: string; readonly where: string } | null = null,
+  ) {
     super(
       timedOut
         ? `The page never reported ready (window.__studio.ready stayed false past ${Math.round(bootTimeoutMs / 1000)}s${navigation === null ? "" : `; its navigation failed: ${navigation}`}); no session was opened.`
         : navigation !== null
           ? `The page could not be opened (${navigation}); no session was opened.`
-          : "The page errored before window.__studio appeared; no session was opened.",
+          : `The page errored before window.__studio appeared${error === null ? "" : `: ${error.message}${atFrame(error.where)}`}; no session was opened.`,
     );
     this.timedOut = timedOut;
     this.navigation = navigation;
@@ -505,7 +531,7 @@ export const openWebPlaySession = async (input: {
   /**
    * Ends the boot wait once a page error or a failed script came before the
    * bridge: the check reports that page as broken. A player's page (explore,
-   * bots) waits for ready or the deadline, as a page that recovers would.
+   * bots) gives such a page PLAY_BOUNDS.bootErrorGraceMs to show its bridge.
    */
   readonly stopOnPageError?: boolean | undefined;
   /** Starts the shell's scene report once the page is ready; `scene()` has it after close. */
@@ -706,8 +732,23 @@ export const openWebPlaySession = async (input: {
     // A software GPU that is busy or restarting can hand the compositor an empty canvas although
     // the game drew: a proof picture came back black while its own frame counted 8 draws. A flat
     // still is taken again once the page has drawn twice more (or a quarter second has passed).
+    // The run is held while its frame is taken (the shell's hidden-stage hold): a game that keeps
+    // drawing makes the screenshot wait on its frames, 8 to 12 s in software, while its run moves
+    // on past the moment the act's reading describes. Held, the picture is that moment.
     const shoot = async () => {
-      const first = await page.screenshot({ type: "png" }).catch(() => null);
+      await bounded(
+        page.evaluate(`(${HOLD_RUN})(true)`).catch(() => undefined),
+        PLAY_BOUNDS.webCallMs,
+      );
+      const first = await page
+        .screenshot({ type: "png" })
+        .catch(() => null)
+        .finally(() =>
+          bounded(
+            page.evaluate(`(${HOLD_RUN})(false)`).catch(() => undefined),
+            PLAY_BOUNDS.webCallMs,
+          ),
+        );
       if (first === null || !looksFlat(first)) return first;
       await page
         .evaluate(
@@ -749,8 +790,13 @@ export const openWebPlaySession = async (input: {
           },
         );
       // Top-level await can delay the bridge past load, so only an error and
-      // no bridge together end the wait early, and only for the check.
-      let watchErrors = input.stopOnPageError === true;
+      // no bridge together end the wait early: at once for the check, and for a
+      // player's page once the bridge is still missing PLAY_BOUNDS.bootErrorGraceMs
+      // after the error, as a page that recovers would have shown it by then.
+      // Waiting out the whole boot bound cost an agent 90 s per start on a broken page.
+      let watchErrors = true;
+      const graceMs = input.stopOnPageError === true ? 0 : PLAY_BOUNDS.bootErrorGraceMs;
+      let grace: ReturnType<typeof setTimeout> | undefined;
       for (;;) {
         if (endedWith !== null) throw endError(endedWith);
         const left = bootDeadline - Date.now();
@@ -766,11 +812,18 @@ export const openWebPlaySession = async (input: {
           ),
           ended.then(() => "ended" as const),
           new Promise<"errored">((resolve) => {
-            onPageErrored = () => watchErrors && resolve("errored");
-            if (watchErrors && pageErrored) resolve("errored");
+            const errored = () => {
+              if (!watchErrors || grace !== undefined) return;
+              if (graceMs === 0) resolve("errored");
+              else grace = setTimeout(() => resolve("errored"), graceMs);
+            };
+            onPageErrored = errored;
+            if (pageErrored) errored();
           }),
         ]);
         onPageErrored = () => undefined;
+        clearTimeout(grace);
+        grace = undefined;
         if (outcome === "ready") break;
         if (outcome === "timeout") throw new WebPageNotReady(true, input.bootTimeoutMs, navigation);
         if (outcome === "errored") {
@@ -779,7 +832,12 @@ export const openWebPlaySession = async (input: {
             PLAY_BOUNDS.webCallMs,
           );
           if (bridge === null || bridge === TIMED_OUT)
-            throw new WebPageNotReady(false, input.bootTimeoutMs, navigation);
+            throw new WebPageNotReady(
+              false,
+              input.bootTimeoutMs,
+              navigation,
+              pageErrors[0] ?? null,
+            );
           // The bridge is there and booting: an error after it is the game's to report.
           watchErrors = false;
         }

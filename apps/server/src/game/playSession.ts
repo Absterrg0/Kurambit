@@ -91,6 +91,8 @@ export class PlayClosed extends Error {}
 export const PLAY_BOUNDS = {
   /** From launch to the runner's hello or the page's ready. */
   bootMs: 90_000,
+  /** A player's page that errored with no studio bridge: how long the bridge has to appear. */
+  bootErrorGraceMs: 10_000,
   /** Past the act's own step time, for a page's act. */
   webActGraceMs: 30_000,
   /** One tick of real-time play; misses in a row before the game counts as stopped answering. */

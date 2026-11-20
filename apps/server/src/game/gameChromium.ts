@@ -48,8 +48,17 @@ const BASE_ARGS = [
   "--hide-scrollbars",
   "--disable-dev-shm-usage",
 ] as const;
-/** Chrome's own CPU renderer: works everywhere, and costs several cores on a 3D scene. */
-const SOFTWARE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] as const;
+/**
+ * Chrome's own CPU renderer: works everywhere, and costs several cores on a 3D scene. WebGL draws
+ * in SwiftShader either way; the compositor raster in Skia instead, because compositing a lit
+ * game's canvas through SwiftShader made every screenshot wait 10 to 40 s and every browser close
+ * 13 to 27 s (Round 7A), while the game's own frame rate stayed the same.
+ */
+const SOFTWARE_ARGS = [
+  "--use-angle=swiftshader",
+  "--enable-unsafe-swiftshader",
+  "--disable-gpu-compositing",
+] as const;
 
 /**
  * The hardware backends tried on Linux, in order: EGL on the GPU's render
