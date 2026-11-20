@@ -41,6 +41,51 @@ const readText = (path: string): Promise<string | null> =>
 const writableInGame = (root: string, to: string) =>
   staysInsideGame(root, NodePath.relative(root, to));
 
+/** A module's leading `//` comment block, as text. */
+const commentBlock = (source: string) => {
+  const lines: Array<string> = [];
+  for (const line of source.split("\n")) {
+    if (!line.startsWith("//")) break;
+    lines.push(line.replace(/^\/\/ ?/, ""));
+  }
+  return lines.join("\n").trim();
+};
+
+/**
+ * `studio-skills/runtime.md`: every runtime module's own comment block, each under its import
+ * path, after a contents line per module (its first sentence). Written from the modules, so it
+ * says what the shipped runtime does and never drifts from it.
+ */
+const runtimePage = async (runtime: string): Promise<string> => {
+  const shell = NodePath.join(runtime, "shell");
+  const version = await NodeFSP.readFile(NodePath.join(runtime, "runtime.json"), "utf8")
+    .then((text) => String((JSON.parse(text) as { version?: unknown }).version ?? ""))
+    .catch(() => "");
+  const modules = await Promise.all(
+    (await NodeFSP.readdir(shell))
+      .filter((name) => name.endsWith(".js"))
+      .toSorted()
+      .map(async (name) => ({
+        name: `shell/${name}`,
+        block: commentBlock(await NodeFSP.readFile(NodePath.join(shell, name), "utf8")),
+      })),
+  );
+  const documented = modules.filter((module) => module.block !== "");
+  const first = (block: string) => {
+    const flat = block.replace(/\s+/g, " ");
+    const sentence = /^.*?\.(?=\s|$)/.exec(flat)?.[0] ?? flat;
+    return sentence.length <= 200 ? sentence : `${sentence.slice(0, 199).trimEnd()}…`;
+  };
+  return `# Kurambit's three.js runtime${version === "" ? "" : ` ${version}`}
+
+Each module's own documentation, from the comment at its top. main.js imports one as
+\`./shell/<name>.js\`. Read the list, then the section of the module you use.
+
+${documented.map((module) => `- \`${module.name}\`: ${first(module.block)}`).join("\n")}
+
+${documented.map((module) => `## \`${module.name}\`\n\n${module.block}\n`).join("\n")}`;
+};
+
 const ioError = (operation: string, path: string, cause: unknown) =>
   new GameOperationError({
     operation,
@@ -71,19 +116,21 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
       await Promise.all(
         others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
       );
-      // A game that loads Kurambit's runtime reads its kits' comment blocks here; the game
-      // never loads this copy, so an edit to it changes nothing.
+      // A game that loads Kurambit's runtime reads its modules' comment blocks on one page.
+      // Earlier games got the modules' whole sources (`runtime/`), which agents read through
+      // with sed to learn the API: they go.
       const major = await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")
         .then((text) => manifestRuntime(decodeManifest(text)))
         .catch(() => null);
-      const kits = NodePath.join(skills, "runtime");
-      await NodeFSP.rm(kits, { recursive: true, force: true });
-      if (major !== null)
-        await NodeFSP.cp(
-          NodePath.join(runtimesDirectory(templates), engine, String(major), "shell"),
-          NodePath.join(kits, "shell"),
-          { recursive: true },
+      await NodeFSP.rm(NodePath.join(skills, "runtime"), { recursive: true, force: true });
+      const page = insideGame(root, "studio-skills/runtime.md");
+      if (major === null) await NodeFSP.rm(page, { force: true });
+      else {
+        const text = await runtimePage(
+          NodePath.join(runtimesDirectory(templates), engine, String(major)),
         );
+        if ((await readText(page)) !== text) await NodeFSP.writeFile(page, text);
+      }
       const index = insideGame(root, "studio-skills/AGENTS.md");
       const text = await NodeFSP.readFile(index, "utf8");
       const kept = text
