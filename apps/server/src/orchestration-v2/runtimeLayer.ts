@@ -53,6 +53,7 @@ import * as ThreadLifecycleService from "./ThreadLifecycleService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
 import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
 import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
+import * as GameBuildMoves from "./gameBuilds/GameBuildMoves.ts";
 import * as GameTries from "./gameVersions/GameTries.ts";
 import * as GameRunRecovery from "./gameRun/GameRunRecovery.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
@@ -317,6 +318,8 @@ const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.laye
 // One supervisor for the process: the effect worker hands it steps, the game
 // layer attaches the work, recovery restarts what a restart cut off.
 const layerGameRunJobsProvided = GameRunJobs.layer;
+// The same for a recorded restore's folder move: the game layer attaches the move.
+const layerGameBuildMovesProvided = GameBuildMoves.layer;
 const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
   Layer.provide(layerOrchestratorProvided),
 );
@@ -329,6 +332,7 @@ const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerGameRunJobsProvided,
+      layerGameBuildMovesProvided,
       layerGameRunDecisionsProvided,
       layerRunFinalizationServiceProvided,
       layerCheckpointRollbackServiceProvided,
@@ -371,6 +375,7 @@ export const layer = Layer.mergeAll(
   layerCommandOutputHubProvided,
   layerTurnAdmissionProvided,
   layerGameRunJobsProvided,
+  layerGameBuildMovesProvided,
   layerGameTriesProvided,
   layerGameRunDecisionsProvided,
   layerGameRunRecoveryProvided,

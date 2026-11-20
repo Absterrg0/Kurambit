@@ -20,6 +20,7 @@ import {
   OrchestrationV2Command,
   type OrchestrationV2InternalCommand,
   type OrchestrationV2GameRunCommand,
+  type OrchestrationV2GameBuildCommand,
   GameRunRefusalReason,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2AppThread,
@@ -138,6 +139,7 @@ import {
 import { keptSignal } from "../game/gameTries.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import * as GameRunPlan from "./gameRun/plan.ts";
+import * as GameBuildPlan from "./gameBuilds/plan.ts";
 import type * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -503,6 +505,11 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-version.start":
     case "game-version.kept":
     case "game.notice":
+    case "game-build.record":
+    case "game-build.restore":
+    case "game-build.restore.settle":
+    case "game-build.keep":
+    case "game-build.migrate":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -6594,6 +6601,48 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return planned.success.cancelUnsettledEffects;
     });
 
+  // A game's builds: numbered from the projection, a restore's move enqueued with its record.
+  const dispatchGameBuild = (
+    command: OrchestrationV2GameBuildCommand,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    Effect.gen(function* () {
+      const planned = yield* GameBuildPlan.planGameBuildCommand(
+        {
+          tally: projectionStore.getGameBuildTally,
+          known: (projectId, id) =>
+            projectionStore
+              .getGameBuilds(projectId, [id])
+              .pipe(Effect.map((rows) => rows[0] ?? null)),
+        },
+        command,
+      ).pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+      for (const draft of planned.events) {
+        const id = yield* idAllocator.allocate
+          .event({ threadId: draft.threadId, commandId: command.commandId })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause,
+                }),
+            ),
+          );
+        yield* Ref.update(events, (existing) => [
+          ...existing,
+          { ...draft, id } as OrchestrationV2DomainEvent,
+        ]);
+      }
+      yield* Ref.update(effects, (existing) => [...existing, ...planned.effects]);
+    });
+
   const dispatchGameRoundTaskRequest = (
     command: Extract<OrchestrationV2InternalCommand, { readonly type: "game-round.task.request" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -10982,6 +11031,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-run.decision.expire":
       case "game-run.step.schedule":
         cancelUnsettledEffects = yield* dispatchGameRun(command, events, effects);
+        break;
+      case "game-build.record":
+      case "game-build.restore":
+      case "game-build.restore.settle":
+      case "game-build.keep":
+      case "game-build.migrate":
+        yield* dispatchGameBuild(command, events, effects);
         break;
       default:
         return yield* dispatchUnsupported(command);

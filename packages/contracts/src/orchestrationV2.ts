@@ -69,6 +69,11 @@ import {
   GameRunStepResult,
 } from "./gameRunRecords.ts";
 import {
+  GAME_BUILD_EVENT_TYPES,
+  GameBuildEventPayloads,
+  OrchestrationV2GameBuildCommand,
+} from "./gameBuildRecords.ts";
+import {
   TurnTokenUsage,
   ToolActivitySurface,
   ToolActivityIcon,
@@ -1686,6 +1691,41 @@ export const GAME_RUN_EVENT_TYPES = [
 const gameRunEventTypes: ReadonlySet<string> = new Set(GAME_RUN_EVENT_TYPES);
 /** A game run's records are read from its projection, never from the chat's event stream. */
 export const isGameRunEventType = (type: string): boolean => gameRunEventTypes.has(type);
+const gameBuildEventTypes: ReadonlySet<string> = new Set(GAME_BUILD_EVENT_TYPES);
+/** A game's build records are a project's, read from their projection, never a chat's stream. */
+export const isGameBuildEventType = (type: string): boolean => gameBuildEventTypes.has(type);
+/** Event types no chat's stream carries: they live in projections of their own. */
+export const GAME_RECORD_EVENT_TYPES = [
+  ...GAME_RUN_EVENT_TYPES,
+  ...GAME_BUILD_EVENT_TYPES,
+] as const;
+export const isGameRecordEventType = (type: string): boolean =>
+  gameRunEventTypes.has(type) || gameBuildEventTypes.has(type);
+
+function gameBuildEventMembers<const Base extends Schema.Struct.Fields>(base: Base) {
+  return [
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("game-build.recorded"),
+      payload: GameBuildEventPayloads.recorded,
+    }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("game-build.restored"),
+      payload: GameBuildEventPayloads.restored,
+    }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("game-build.kept"),
+      payload: GameBuildEventPayloads.kept,
+    }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("game-build.migrated"),
+      payload: GameBuildEventPayloads.migrated,
+    }),
+  ] as const;
+}
 
 // A game run's records carry no DateTime fields, so stored and live events share one shape.
 function gameRunEventMembers<const Base extends Schema.Struct.Fields>(base: Base) {
@@ -1845,6 +1885,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
     payload: OrchestrationV2ContextTransfer,
   }),
   ...gameRunEventMembers(OrchestrationV2EventBase.fields),
+  ...gameBuildEventMembers(OrchestrationV2EventBase.fields),
 ]);
 export type OrchestrationV2DomainEvent = typeof OrchestrationV2DomainEvent.Type;
 
@@ -2658,6 +2699,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
     payload: OrchestrationV2ContextTransferJson,
   }),
   ...gameRunEventMembers(OrchestrationV2JsonEventBaseFields),
+  ...gameBuildEventMembers(OrchestrationV2JsonEventBaseFields),
 ]);
 export type OrchestrationV2DomainEventJson = typeof OrchestrationV2DomainEventJson.Type;
 
@@ -3304,6 +3346,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     notice: TrimmedNonEmptyString,
   }),
   ...OrchestrationV2GameRunCommand.members,
+  ...OrchestrationV2GameBuildCommand.members,
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
 

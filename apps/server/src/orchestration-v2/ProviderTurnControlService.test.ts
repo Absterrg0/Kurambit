@@ -209,6 +209,11 @@ it.effect(
         ProjectionStore.ProjectionStoreV2,
         ProjectionStore.ProjectionStoreV2.of({
           apply: () => Effect.void,
+          getGameBuildFolder: () => Effect.die("unused getGameBuildFolder"),
+          listGameBuildFolders: () => Effect.die("unused listGameBuildFolders"),
+          listGameBuilds: () => Effect.die("unused listGameBuilds"),
+          getGameBuilds: () => Effect.die("unused getGameBuilds"),
+          getGameBuildTally: () => Effect.die("unused getGameBuildTally"),
           getLimitRecoveryCandidates: () => Effect.die("unused getLimitRecoveryCandidates"),
           getShellSnapshot: () => Effect.die("unused getShellSnapshot"),
           readShellSnapshot: () => Effect.die("unused readShellSnapshot"),

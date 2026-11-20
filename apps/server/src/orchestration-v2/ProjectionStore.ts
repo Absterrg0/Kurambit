@@ -45,6 +45,10 @@ import type {
 } from "@kurambit/contracts";
 import {
   CheckpointRef,
+  type GameBuildFolder,
+  type GameBuildId,
+  type GameBuildRecord,
+  isGameBuildEventType,
   isGameRunEventType,
   GameRun as GameRunSchema,
   GameRunRound as GameRunRoundSchema,
@@ -92,6 +96,7 @@ import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@kurambit/shared/mcpApp";
 import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
+import * as GameBuildProjection from "./gameBuilds/GameBuildProjection.ts";
 import {
   isThreadHistoryUserTurn,
   isConversationHistoryItem,
@@ -478,6 +483,29 @@ export interface ProjectionStoreV2Shape {
     projectId: ProjectId,
     options: { readonly limit: number; readonly before?: string | undefined },
   ) => Effect.Effect<ReadonlyArray<ProjectTurnCheckpoint>, ProjectionStoreV2Error>;
+
+  /** A game folder's build state: the build it holds, its latest restore, the keeps it holds. */
+  readonly getGameBuildFolder: (
+    projectId: ProjectId,
+    root: string,
+  ) => Effect.Effect<GameBuildFolder | null, ProjectionStoreV2Error>;
+  readonly listGameBuildFolders: () => Effect.Effect<
+    ReadonlyArray<GameBuildFolder>,
+    ProjectionStoreV2Error
+  >;
+  /** A game's builds, newest first. */
+  readonly listGameBuilds: (
+    projectId: ProjectId,
+    options: GameBuildProjection.GameBuildListOptions,
+  ) => Effect.Effect<ReadonlyArray<GameBuildRecord>, ProjectionStoreV2Error>;
+  readonly getGameBuilds: (
+    projectId: ProjectId,
+    ids: ReadonlyArray<GameBuildId>,
+  ) => Effect.Effect<ReadonlyArray<GameBuildRecord>, ProjectionStoreV2Error>;
+  readonly getGameBuildTally: (
+    projectId: ProjectId,
+    root: string,
+  ) => Effect.Effect<GameBuildProjection.GameBuildTally, ProjectionStoreV2Error>;
 
   readonly apply: (
     event: OrchestrationV2DomainEvent,
@@ -981,6 +1009,12 @@ export function applyToProjection(
     case "game-run-step.updated":
     case "game-run-round.recorded":
       return projection;
+    // A game's builds are its project's, in a projection of their own.
+    case "game-build.recorded":
+    case "game-build.restored":
+    case "game-build.kept":
+    case "game-build.migrated":
+      return projection;
   }
 }
 
@@ -1002,6 +1036,10 @@ function applyToGameRunRecords(
 }
 
 const isGameRunEvent = (event: OrchestrationV2DomainEvent) => isGameRunEventType(event.type);
+const isGameBuildEvent = (
+  event: OrchestrationV2DomainEvent,
+): event is Extract<OrchestrationV2DomainEvent, { readonly type: `game-build.${string}` }> =>
+  isGameBuildEventType(event.type);
 
 /**
  * Provider sessions are process-scoped: one session row can be bound to several app
@@ -1012,14 +1050,53 @@ const isGameRunEvent = (event: OrchestrationV2DomainEvent) => isGameRunEventType
 export interface ProjectionReplayState {
   readonly projections: Map<ThreadId, OrchestrationV2ThreadProjection>;
   readonly gameRunRecords: Map<ThreadId, GameRunThreadRecords>;
+  gameBuilds: GameBuildState;
   readonly providerSessionThreadIds: Map<ProviderSessionId, ReadonlySet<ThreadId>>;
   readonly providerThreadInstanceIds: Map<ProviderThreadId, ProviderInstanceId>;
+}
+
+interface GameBuildState {
+  readonly builds: ReadonlyArray<GameBuildRecord>;
+  readonly folders: ReadonlyArray<GameBuildFolder>;
+}
+
+const emptyGameBuildState: GameBuildState = { builds: [], folders: [] };
+
+function applyToGameBuildState(
+  state: GameBuildState,
+  event: Extract<OrchestrationV2DomainEvent, { readonly type: `game-build.${string}` }>,
+): GameBuildState {
+  const builds =
+    event.type === "game-build.recorded" &&
+    !state.builds.some(
+      (each) =>
+        each.projectId === event.payload.build.projectId && each.id === event.payload.build.id,
+    )
+      ? [...state.builds, event.payload.build]
+      : state.builds;
+  const key =
+    event.type === "game-build.recorded"
+      ? { projectId: event.payload.build.projectId, root: event.payload.build.root }
+      : { projectId: event.payload.projectId, root: event.payload.root };
+  const known = state.folders.find(
+    (each) => each.projectId === key.projectId && each.root === key.root,
+  );
+  const next = GameBuildProjection.applyToFolder(
+    known ?? GameBuildProjection.emptyFolder(key.projectId, key.root),
+    event,
+  );
+  return {
+    builds,
+    folders:
+      next === null ? state.folders : [...state.folders.filter((each) => each !== known), next],
+  };
 }
 
 function makeProjectionReplayState(): ProjectionReplayState {
   return {
     projections: new Map(),
     gameRunRecords: new Map(),
+    gameBuilds: emptyGameBuildState,
     providerSessionThreadIds: new Map(),
     providerThreadInstanceIds: new Map(),
   };
@@ -1034,6 +1111,10 @@ function applyToProjectionReplayState(
     return true;
   }
 
+  if (isGameBuildEvent(event)) {
+    state.gameBuilds = applyToGameBuildState(state.gameBuilds, event);
+    return true;
+  }
   const current = state.projections.get(event.threadId);
   if (current === undefined) {
     return false;
@@ -2769,6 +2850,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `;
             break;
           }
+          case "game-build.recorded":
+          case "game-build.restored":
+          case "game-build.kept":
+          case "game-build.migrated":
+            yield* GameBuildProjection.applySql(sql, event);
+            break;
           case "game-run.created":
           case "game-run.updated": {
             const payloadJson = yield* encodeGameRunPayload(event.payload);
@@ -2925,7 +3012,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.interaction-mode-updated" &&
           event.type !== "thread.model-selection-updated" &&
           event.type !== "thread.provider-switched" &&
-          !isGameRunEvent(event)
+          !isGameRunEvent(event) &&
+          !isGameBuildEvent(event)
         ) {
           const updatedAt = yield* encodeThreadUpdatedAt(event.occurredAt);
           yield* sql`
@@ -5163,6 +5251,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.mapError(controlReadError(threadId)),
         );
 
+    const gameBuildReads = GameBuildProjection.reads(sql);
+    const gameBuildReadError = Effect.mapError(
+      (cause: unknown) => new ProjectionStoreSetupError({ cause }),
+    );
+    const getGameBuildFolder: ProjectionStoreV2Shape["getGameBuildFolder"] = (projectId, root) =>
+      gameBuildReads.folder(projectId, root).pipe(gameBuildReadError);
+    const listGameBuildFolders: ProjectionStoreV2Shape["listGameBuildFolders"] = () =>
+      gameBuildReads.folders().pipe(gameBuildReadError);
+    const listGameBuilds: ProjectionStoreV2Shape["listGameBuilds"] = (projectId, options) =>
+      gameBuildReads.list(projectId, options).pipe(gameBuildReadError);
+    const getGameBuilds: ProjectionStoreV2Shape["getGameBuilds"] = (projectId, ids) =>
+      gameBuildReads.get(projectId, ids).pipe(gameBuildReadError);
+    const getGameBuildTally: ProjectionStoreV2Shape["getGameBuildTally"] = (projectId, root) =>
+      gameBuildReads.tally(projectId, root).pipe(gameBuildReadError);
+
     const getProjectGameRun: ProjectionStoreV2Shape["getProjectGameRun"] = (projectId) =>
       sql<PayloadRow & { readonly deleted_at: string | null }>`
         SELECT run.payload_json, thread.deleted_at
@@ -6490,6 +6593,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getTurnItem,
       getThreadRecords,
       getGameRunRecords,
+      getGameBuildFolder,
+      listGameBuildFolders,
+      listGameBuilds,
+      getGameBuilds,
+      getGameBuildTally,
       listGameRunThreadsToRecover,
       listProjectTurnCheckpoints,
       getProjectGameRun,
@@ -6523,6 +6631,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             const next: ProjectionReplayState = {
               projections: new Map(existing.projections),
               gameRunRecords: new Map(existing.gameRunRecords),
+              gameBuilds: existing.gameBuilds,
               providerSessionThreadIds: new Map(existing.providerSessionThreadIds),
               providerThreadInstanceIds: new Map(existing.providerThreadInstanceIds),
             };
@@ -6880,6 +6989,55 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           };
         }),
+      getGameBuildFolder: (projectId, root) =>
+        Ref.get(replayState).pipe(
+          Effect.map(
+            (state) =>
+              state.gameBuilds.folders.find(
+                (each) => each.projectId === projectId && each.root === root,
+              ) ?? null,
+          ),
+        ),
+      listGameBuildFolders: () =>
+        Ref.get(replayState).pipe(Effect.map((state) => state.gameBuilds.folders)),
+      listGameBuilds: (projectId, options) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            state.gameBuilds.builds
+              .map((build, order) => ({ build, order }))
+              .filter(
+                ({ build }) =>
+                  build.projectId === projectId &&
+                  (options.root === undefined || build.root === options.root) &&
+                  (options.before === undefined || build.at < options.before),
+              )
+              .toSorted((a, b) => b.build.at.localeCompare(a.build.at) || b.order - a.order)
+              .slice(0, options.limit)
+              .map(({ build }) => build),
+          ),
+        ),
+      getGameBuilds: (projectId, ids) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            state.gameBuilds.builds.filter(
+              (build) => build.projectId === projectId && ids.includes(build.id),
+            ),
+          ),
+        ),
+      getGameBuildTally: (projectId, root) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) => ({
+            number: Math.max(
+              0,
+              ...state.gameBuilds.builds
+                .filter((build) => build.projectId === projectId && build.root === root)
+                .map((build) => build.number ?? 0),
+            ),
+            parks: state.gameBuilds.builds.filter(
+              (build) => build.projectId === projectId && build.kind === "restore-before",
+            ).length,
+          })),
+        ),
       getProjectGameRun: (projectId) =>
         Ref.get(replayState).pipe(
           Effect.map((state) => {

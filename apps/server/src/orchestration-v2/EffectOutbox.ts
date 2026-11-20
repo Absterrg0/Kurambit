@@ -3,6 +3,7 @@ import {
   CheckpointScopeId,
   CommandId,
   GameRunId,
+  ProjectId,
   GameRunStepId,
   PositiveInt,
   MessageId,
@@ -148,6 +149,13 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     turn: Schema.Literal("retry"),
     n: PositiveInt,
   }),
+  // A game folder's move for a recorded restore; settled with game-build.restore.settle.
+  Schema.Struct({
+    type: Schema.Literal("game-build.move"),
+    projectId: ProjectId,
+    root: Schema.String,
+    requestId: Schema.String,
+  }),
   // A step's work run again later (a tool that failed, recovery), without holding a job meanwhile.
   Schema.Struct({
     type: Schema.Literal("game-run.step.wake"),
@@ -174,6 +182,8 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "game-run.step.deadline",
   "game-run.step.resend",
   "game-run.step.wake",
+  // A move runs again from its park after a restart, and its settle is checked again.
+  "game-build.move",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

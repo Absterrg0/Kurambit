@@ -24,6 +24,7 @@ import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
+import * as GameBuildMoves from "./gameBuilds/GameBuildMoves.ts";
 import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
@@ -152,6 +153,7 @@ function layerExecutorFor(input: {
     ),
     Layer.mock(GameRunJobs.GameRunJobs)({}),
     Layer.mock(GameRunDecisions.GameRunDecisions)({}),
+    Layer.mock(GameBuildMoves.GameBuildMoves)({}),
   );
   return EffectWorker.layerExecutor.pipe(
     Layer.provide(

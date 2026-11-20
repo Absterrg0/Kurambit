@@ -331,6 +331,10 @@ export function applyOrchestrationV2ProjectionEvent(
     case "game-run.updated":
     case "game-run-step.updated":
     case "game-run-round.recorded":
+    case "game-build.recorded":
+    case "game-build.restored":
+    case "game-build.kept":
+    case "game-build.migrated":
       return projection;
   }
 }

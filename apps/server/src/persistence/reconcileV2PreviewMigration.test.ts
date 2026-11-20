@@ -48,6 +48,7 @@ describe("V2 preview upgrade", () => {
         [66, "GameBuildFacts"],
         [67, "GameArtGenerations"],
         [68, "EffectOutboxHoldsThread"],
+        [69, "GameBuildProjections"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -139,6 +140,7 @@ describe("V2 preview upgrade", () => {
         [66, "GameBuildFacts"],
         [67, "GameArtGenerations"],
         [68, "EffectOutboxHoldsThread"],
+        [69, "GameBuildProjections"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

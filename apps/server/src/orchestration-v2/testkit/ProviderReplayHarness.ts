@@ -36,6 +36,7 @@ import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as GameRunDecisions from "../gameRun/GameRunDecisions.ts";
 import * as GameRunJobs from "../gameRun/GameRunJobs.ts";
+import * as GameBuildMoves from "../gameBuilds/GameBuildMoves.ts";
 import * as ProjectStore from "../ProjectStore.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
@@ -491,6 +492,7 @@ export function layerWithRegistry<Error>(
         )
       : Layer.empty;
   const layerGameRunJobsProvided = GameRunJobs.layer;
+  const layerGameBuildMovesProvided = GameBuildMoves.layer;
   const layerGameRunDecisionsProvided = GameRunDecisions.layer.pipe(
     Layer.provide(Layer.mergeAll(layerOrchestratorProvided, layerStores, layerGameRunJobsProvided)),
   );
@@ -498,6 +500,7 @@ export function layerWithRegistry<Error>(
     Layer.provide(
       Layer.mergeAll(
         layerGameRunJobsProvided,
+        layerGameBuildMovesProvided,
         layerGameRunDecisionsProvided,
         layerRunFinalizationServiceProvided,
         layerCheckpointRollbackServiceProvided,

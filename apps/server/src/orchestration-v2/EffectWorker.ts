@@ -29,6 +29,7 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GameRunDecisions from "./gameRun/GameRunDecisions.ts";
 import * as GameRunJobs from "./gameRun/GameRunJobs.ts";
+import * as GameBuildMoves from "./gameBuilds/GameBuildMoves.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
 
 export class OrchestrationEffectExecutionError extends Schema.TaggedError<OrchestrationEffectExecutionError>()(
@@ -87,6 +88,7 @@ export const layerExecutor: Layer.Layer<
   | ServerSettings.ServerSettingsService
   | GameRunJobs.GameRunJobs
   | GameRunDecisions.GameRunDecisions
+  | GameBuildMoves.GameBuildMoves
 > = Layer.effect(
   OrchestrationEffectExecutorV2,
   Effect.gen(function* () {
@@ -103,6 +105,7 @@ export const layerExecutor: Layer.Layer<
     const settings = yield* ServerSettings.ServerSettingsService;
     const gameRunJobs = yield* GameRunJobs.GameRunJobs;
     const gameRunDecisions = yield* GameRunDecisions.GameRunDecisions;
+    const gameBuildMoves = yield* GameBuildMoves.GameBuildMoves;
     return OrchestrationEffectExecutorV2.of({
       execute: (effect, options) => {
         const willRetry = options?.willRetry ?? false;
@@ -570,6 +573,25 @@ export const layerExecutor: Layer.Layer<
               ),
             );
           }
+          // A folder move is short and safe to repeat: done inside its effect.
+          case "game-build.move":
+            return gameBuildMoves
+              .move({
+                effectId: effect.id,
+                projectId: effect.request.projectId,
+                root: effect.request.root,
+                requestId: effect.request.requestId,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: "game-build.move",
+                      cause,
+                    }),
+                ),
+              );
           case "game-run.decision.deadline": {
             const request = effect.request;
             return gameRunDecisions
