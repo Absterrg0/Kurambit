@@ -428,13 +428,21 @@ def _hem(g, arm, hang, n, nb, name):
     below = co[:, 2] < hang
     if below.sum() < 8:
         raise ValueError(f"{g.name}: fewer than 8 vertices below hang {hang:.2f} m: nothing hangs")
-    centre = np.array([*np.median(co[co[:, 2] < hang + 0.05][:, :2], axis=0), hang])
+    # Round the body's axis: the middle of a skirt's ring is, but the middle of a cape's own
+    # vertices lies on the cape, and angles round it scramble which chain each part follows.
+    mid = np.median(co[co[:, 2] < hang + 0.05][:, :2], axis=0)
+    axis = np.array(arm.matrix_world @ arm.data.bones["pelvis"].head_local)[:2] if "pelvis" in arm.data.bones else mid
+    centre = np.array([*axis, hang])
     ang = np.arctan2(co[:, 0] - centre[0], -(co[:, 1] - centre[1]))  # 0 in front (-Y), + toward its left (+X)
     a_below = ang[below]
     # Chains where the garment is: across its whole round, or the arc a cape covers.
     srt = np.sort(a_below)
     gaps = np.diff(np.concatenate([srt, [srt[0] + 2 * math.pi]]))
     k = int(np.argmax(gaps))
+    if gaps[k] <= math.pi / 2:
+        # A ring: round its own middle, as it always was.
+        centre = np.array([*mid, hang])
+        ang = np.arctan2(co[:, 0] - centre[0], -(co[:, 1] - centre[1]))
     if gaps[k] > math.pi / 2:
         lo = srt[(k + 1) % len(srt)]
         span = 2 * math.pi - gaps[k]
@@ -561,6 +569,11 @@ def follow_hem(armature, follow=0.5):
         x = (arm.data.bones[root].head_local - arm.data.bones["pelvis"].head_local).x
         reach = max(1e-6, max(abs((arm.data.bones[r].head_local - arm.data.bones["pelvis"].head_local).x) for r in hems.values()))
         side[root] = 0.5 + 0.5 * max(-1.0, min(1.0, x / reach))  # 1: its left thigh only
+    # A sheet's chains (a cape's) swing as one: each following its own thigh, a narrow sheet behind
+    # the legs splits between them in a lunge.
+    sheet = [r for r in json.loads(arm.get("kurambit_sheets", "[]") or "[]") if r in side]
+    for root in sheet:
+        side[root] = 0.5
     dirs = {}
     for root in hems.values():
         v = arm.data.bones[root].head_local - arm.data.bones["pelvis"].head_local
@@ -619,6 +632,10 @@ def follow_hem(armature, follow=0.5):
                 for i, root in enumerate(order):
                     near = [was[order[j]] for j in ((i - 1) % len(order) if closed_ring else i - 1, (i + 1) % len(order) if closed_ring else i + 1) if 0 <= j < len(order)]
                     lifts[root] = max(was[root], SHARED * max(near, default=0.0))
+            qs, drops = {}, {}
+            if sheet:
+                most = max(lifts[root] for root in sheet)
+                lifts.update({root: most for root in sheet})
             for root in order:
                 q = Quaternion(reach[root][3], lifts[root]) @ turns[root] if lifts[root] > 1e-4 else turns[root]
                 # Its turn in armature axes, as the bone's own basis (it hangs from the hips).
@@ -629,7 +646,9 @@ def follow_hem(armature, follow=0.5):
                 # Below the bone a leg lifts, cloth hangs: each lower bone falls back toward how it
                 # hangs at rest, as far as still clears the leg beside it. Keyed stiff, the whole
                 # chain turns as one stick and a skirt over a wide stance opens into a cone.
-                for link, back in zip(lower[root], _drape(arm, root, lower[root], q, reach[root], limbs, clear)):
+                qs[root], drops[root] = q, list(_drape(arm, root, lower[root], q, reach[root], limbs, clear))
+            for root in order:
+                for link, back in zip(lower[root], drops[root]):
                     cb = arm.pose.bones[link]
                     cb.rotation_quaternion = (rest[link].inverted() @ Quaternion(reach[root][3], -back).to_matrix() @ rest[link]).to_quaternion()
                     cb.keyframe_insert("rotation_quaternion", frame=f)

@@ -8,6 +8,7 @@ the joints under it.
 
 Space: the character at rest, facing -Y, +X its left, metres.
 """
+import json
 import math
 
 import bpy
@@ -266,10 +267,12 @@ def trim(armature, kind, *, colour="#6a4a2c", metal="#c9a44a", name=None, at=Non
             sh_l, sh_r = _joint(arm, "upperarm_l"), _joint(arm, "upperarm_r")
             top_z = float(max(sh_l[2], sh_r[2]) + 0.035 * tall)
             hem_z = float(length) if length is not None else float(_joint(arm, "calf_l")[2])
-            back, _ = _worn(arm, ("pelvis", "spine", "clavicle", "thigh", "calf", "upperarm", "neck"))
+            # Round the back and the shoulders only, never the arms: wrapped round them it is a box
+            # the arms swing in. Behind the shoulder joints, a swinging arm passes beside it.
+            back, _ = _worn(arm, ("pelvis", "spine", "clavicle", "thigh", "calf", "neck"))
             centre = np.array([0.0, float(_joint(arm, "spine_02")[1])])
             rows, seg = 12, 15
-            half = math.radians(118)
+            half = math.radians(70)
             verts, faces, reach = [], [], np.zeros(seg)
             for j in range(rows):
                 t = j / (rows - 1)
@@ -284,13 +287,15 @@ def trim(armature, kind, *, colour="#6a4a2c", metal="#c9a44a", name=None, at=Non
                 r_row[0], r_row[-1] = max(reach[0], reach[1]), max(reach[-1], reach[-2])
                 for k in range(seg):
                     ang = math.pi - half + 2 * half * k / (seg - 1)
-                    rr = (r_row[k] + 0.012 * tall) * (1 + 0.1 * t)
+                    rr = (r_row[k] + 0.012 * tall) * (1 + 0.25 * t)
                     verts.append((centre[0] + rr * math.sin(ang), centre[1] - rr * math.cos(ang), z))
             for j in range(rows - 1):
                 for k in range(seg - 1):
                     faces.append((j * seg + k, j * seg + k + 1, (j + 1) * seg + k + 1, (j + 1) * seg + k))
             sheet = _mesh(name, verts, faces, mat)
             made = cloth.dress(sheet, arm, hang=float(min(sh_l[2], sh_r[2]) - 0.05 * tall), chains=int(chains), name=label.lower()[:12])
+            sheets = json.loads(arm.get("kurambit_sheets", "[]") or "[]")
+            arm["kurambit_sheets"] = json.dumps(sorted(set(sheets) | {bones[0] for bones in made.values()}))
             front = _worn(arm, ("spine_03", "neck", "clavicle"))[0]
             near = front[(np.abs(front[:, 2] - (top_z - 0.03 * tall)) < 0.03 * tall) & (np.abs(front[:, 0]) < 0.04 * tall)]
             y = float(near[:, 1].min()) if len(near) else float(centre[1] - 0.1 * tall)
