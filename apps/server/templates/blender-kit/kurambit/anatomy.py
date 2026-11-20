@@ -43,11 +43,31 @@ def masses(chains):
         if len(spine) >= 3:
             xm, ym, zm, rm = spine[len(spine) // 2]
             out.append(((xm, ym, zm - 0.18 * rm), (1.03 * rm, 1.3 * rm, 1.0 * rm)))  # the belly
+    for name, pts in legs if walker else []:
+        if len(pts) >= 4:
+            # The forearm or gaskin: muscle down the leg's second bone, so it tapers to the cannon and
+            # does not read as a stick.
+            (kx, ky, kz, r1), (ax, ay, az, _) = pts[1], pts[2]
+            seg = math.sqrt((ax - kx) ** 2 + (ay - ky) ** 2 + (az - kz) ** 2)
+            out.append(((kx + (ax - kx) * 0.3, ky + (ay - ky) * 0.3, kz + (az - kz) * 0.3), (1.05 * r1, 1.3 * r1, max(1.1 * r1, 0.32 * seg))))
+    neck = chains.get("neck")
+    if len(legs) == 4 and neck:
+        # A neck's mass: deep where it meets the chest, its crest along the top.
+        (x1, y1, z1, r1) = spine[-1]
+        for k, (nx, ny, nz, nr) in enumerate(neck):
+            t = (k + 0.5) / len(neck)
+            out.append((((x1 + nx) / 2 if k == 0 else nx, (y1 + ny) / 2 if k == 0 else ny, ((z1 + nz) / 2 if k == 0 else nz) - 0.1 * nr),
+                        (1.0 * nr, (1.5 - 0.3 * t) * nr, (1.45 - 0.3 * t) * nr)))
     head = chains.get("head")
     if head and len(head) >= 2:
-        (sx, sy, sz, sr), (mx, my, mz, _) = head[0], head[-1]
+        (sx, sy, sz, sr), (mx, my, mz, mr) = head[0], head[-1]
         # Cheeks and jaw under the skull, toward the muzzle.
         out.append(((sx, sy + (my - sy) * 0.22, sz + (mz - sz) * 0.22 - 0.22 * sr), (0.92 * sr, 1.0 * sr, 0.85 * sr)))
+        long = math.sqrt((mx - sx) ** 2 + (my - sy) ** 2 + (mz - sz) ** 2)
+        if long > 1.6 * sr:
+            # A long head's lower jaw: a line under the muzzle from the cheek nearly to its tip.
+            out.append(((sx + (mx - sx) * 0.55, sy + (my - sy) * 0.55, sz + (mz - sz) * 0.55 - 0.55 * mr),
+                        (0.85 * mr, 0.42 * long, 0.42 * mr)))
     return out
 
 
@@ -107,7 +127,7 @@ def creature_face(armature, *, eyes="#2b1d14", white="#f3efe6", size=0.3, set="s
     Returns {"parts", "blinks"}."""
     from . import face
 
-    arm, sets = _arm(armature), {"side": (72.0, 12.0), "front": (32.0, 16.0), "top": (40.0, 55.0)}
+    arm, sets = _arm(armature), {"side": (72.0, 12.0), "front": (24.0, 12.0), "top": (40.0, 55.0)}
     if set not in sets:
         raise ValueError(f"eyes set {set!r}: one of {', '.join(sets)}")
     body = _body(arm)
@@ -160,6 +180,53 @@ def creature_face(armature, *, eyes="#2b1d14", white="#f3efe6", size=0.3, set="s
         helpers.skin_rigid(o, "Head", armature=arm)
         parts.append(o.name)
     return {"parts": parts, "blinks": blinks}
+
+
+HORNS = ("swept", "straight", "curled")
+
+
+def horns(armature, kind="swept", *, length=None, colour="#e8e0d0", pairs=1, spread=35.0):
+    """Horns on a creature's head: "swept" (back along the skull, curving up at the tip, a dragon's
+    or a goat's), "straight" (up and out) or "curled" (round and forward, a ram's). length metres
+    (default 1.4 skull radii); pairs more than one sets smaller pairs behind. Placed on the skull by
+    rays and bound to the head. Returns the object's name."""
+    if kind not in HORNS:
+        raise ValueError(f"horns kind {kind!r}: one of {', '.join(HORNS)}")
+    arm = _arm(armature)
+    body = _body(arm)
+    tree = _tree(body)
+    skull, sr, axis, tip, tr = _head(arm, body)
+    up = Vector((0, 0, 1))
+    up = (up - axis * up.dot(axis)).normalized()
+    left = up.cross(axis).normalized()
+    if left.x < 0:
+        left = -left
+    b = _Build()
+    for k in range(int(pairs)):
+        size = (float(length) if length is not None else 1.4 * sr) * (0.62 ** k)
+        for sgn in (1, -1):
+            a = math.radians(float(spread))
+            d = (up * math.cos(a) + left * (sgn * math.sin(a)) - axis * (0.35 + 0.35 * k)).normalized()
+            root = _out(tree, skull - axis * (0.25 * sr * k), d, 4 * sr)
+            if root is None:
+                continue
+            path = []
+            for t in np.linspace(0, 1, 9):
+                if kind == "swept":
+                    p = root + (-axis * 0.85 + up * 0.35 + left * (sgn * 0.2)) * (size * t) + up * (0.3 * size * t ** 3)
+                elif kind == "straight":
+                    p = root + (up * 0.85 + left * (sgn * 0.45) - axis * 0.15) * (size * t)
+                else:
+                    ang = 1.6 * math.pi * t
+                    r = 0.45 * size * (1 - 0.35 * t)
+                    p = root + left * (sgn * (0.35 * size * t + 0.1 * size)) + (-axis * math.sin(ang) + up * (1 - math.cos(ang))) * r - up * (0.3 * size * t * t)
+                path.append((p - d * (0.25 * sr * 0.2), d))
+            b.lock(path, 0.42 * size * (1.25 if kind == "curled" else 1.0), 0.42 * size * (1.25 if kind == "curled" else 1.0), sides=8, root=1.0, taper=0.15)
+    if not b.faces:
+        raise ValueError(f"{arm.name}'s skull was not found to put horns on")
+    o = b.object(f"{arm.name}_horns", [helpers.material(colour, name="Horn")])
+    helpers.skin_rigid(o, "Head", armature=arm)
+    return o.name
 
 
 FEET = ("hoof", "paw", "claw")
@@ -317,7 +384,8 @@ def feathers(armature, chain="wing", *, depth, colour="#5a3a2a", cover=None, per
         n = len(bones)
         b = _Build()
         owner = []
-        for row, (share, mat, lift) in enumerate(((1.0, 0, 0.0), (0.45, 1, 1.0))):
+        # Flight feathers, then two rows of coverts over them, each row shorter and on top.
+        for row, (share, mat, lift) in enumerate(((1.0, 0, 0.0), (0.55, 1, 1.0), (0.3, 1, 2.0))):
             for j in range(n):
                 for k in range(per_bone):
                     t = (j + (k + 0.5) / per_bone) / n
@@ -326,11 +394,13 @@ def feathers(armature, chain="wing", *, depth, colour="#5a3a2a", cover=None, per
                     reach = depth * share * (0.55 + 0.45 * math.sin(min(1.0, t / 0.7) * math.pi / 2)) * (1.0 if t < 0.8 else 1.0 - 0.25 * (t - 0.8) / 0.2)
                     fan = max(0.0, (t - 0.55) / 0.45) ** 1.5
                     d = (back * (1 - 0.75 * fan) + out * (0.95 * fan)).normalized()
-                    width = 1.9 * (pts[j + 1] - pts[j]).length / per_bone
-                    start = p + normal * (0.004 + 0.006 * lift + 0.002 * (k % 2))
-                    path = [(start + d * (reach * u), normal) for u in np.linspace(0, 1, 4)]
+                    # Wide enough to overlap the next by half, each one over the one behind it, with
+                    # a round tip: a row of blades reads as ragged spikes.
+                    width = 2.4 * (pts[j + 1] - pts[j]).length / per_bone
+                    start = p + normal * (0.004 + 0.006 * lift + 0.003 * t)
+                    path = [(start + d * (reach * u), normal) for u in np.linspace(0, 1, 6)]
                     before = len(b.verts)
-                    b.lock(path, width, 0.01 * depth + 0.002, mat=mat, sides=4, root=0.8, taper=0.78)
+                    b.lock(path, width, 0.008 * depth + 0.002, mat=mat, sides=6, root=0.9, taper=0.82)
                     owner += [bones[j].name] * (len(b.verts) - before)
         o = b.object(f"{arm.name}_{cname}_feathers", mats)
         for bone in sorted(set(owner)):

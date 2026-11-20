@@ -302,7 +302,8 @@ colour=, metal=)`, and second colours: `hero.zone("fisher_coat", "hems"|
    blink, nostrils, a mouth), `hero.feet(arm, "hoof"|"paw"|"claw")`,
    `hero.fur(arm, "neck"|"tail", side="top"|"end")` (a mane, a tail's tuft),
    `hero.feathers(arm, "wing", depth=)` or `hero.wing(arm, "wing", depth=)`
-   (a ribbed skin); a fin: `hero.membrane(arm, "fin_top", depth)`; markings:
+   (a ribbed skin); a fin: `hero.membrane(arm, "fin_top", depth, shape="sail"|
+"fan"|"round")`; `hero.horns(arm, "swept"|"straight"|"curled")`; markings:
    `hero.zone(body, "belly"|"socks"|"muzzle"|"ears"|"blaze"|"stripes"|"spots"|
 "saddle"|"tip"|"mask", colour)`. To pose a
    move by hand, `hero.controls(arm)`

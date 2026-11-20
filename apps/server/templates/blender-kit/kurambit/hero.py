@@ -21,9 +21,10 @@ Colour:  hero.zone(mesh, kind, colour): a second colour by what the part is. A c
 Animal:  hero.creature_face(armature, eyes=, set="side"|"front"|"top"): eyes that blink, nostrils,
          a mouth; hero.feet(armature, "hoof"|"paw"|"claw"); hero.fur(armature, "neck"|"tail"|chain,
          side="top"|"under"|"end"): a mane, a ruff, a tail's tuft; hero.feathers(armature, "wing",
-         depth=) or hero.wing(armature, "wing", depth=): a wing's feathers, or its ribbed skin
+         depth=) or hero.wing(armature, "wing", depth=): a wing's feathers, or its ribbed skin;
+         hero.horns(armature, "swept"|"straight"|"curled", pairs=)
 Rig:     hero.creature_rig(body, height=(lo, hi)), hero.bind(mesh, armature),
-         hero.membrane(armature, "wing", depth): a wing's or a fin's surface on its chain
+         hero.membrane(armature, "fin_top", depth, shape="sail"|"fan"|"round"): a fin on its chain
 Motion:  hero.creature_clips(armature, ["walk", "trot", "run", "idle", "look", "sit"]), and "swim",
          "slither", "flap", "fly", "hop", "hover"; by hand,
          hero.controls(armature) (a Rigify control rig: IK paws, a torso), pose and key it, then
@@ -32,7 +33,7 @@ Machine: hero.hinge_rig(name, parts, base=[...], height=(lo, hi)), hero.hinge_cl
          {"Open": {"lid": [(0, 0), (0.5, -100)]}}): parts on hinges with their own clips
 Gates:   hero.gates(armature): the review's gate numbers now, in the live scene
 """
-from .anatomy import creature_face, feathers, feet, fur, wing
+from .anatomy import creature_face, feathers, feet, fur, horns, wing
 from .cloth import dangle, dress, follow_hem
 from .face import face
 from .footwear import footwear

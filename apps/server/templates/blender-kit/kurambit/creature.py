@@ -726,11 +726,19 @@ def _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads,
     return act
 
 
-def membrane(armature, chain, depth, *, direction=(0, 1, 0), taper=0.3, thick=0.006, material=None):
+MEMBRANE_SHAPES = ("plain", "sail", "fan", "round")
+
+
+def membrane(armature, chain, depth, *, direction=(0, 1, 0), taper=0.3, thick=0.006, material=None, shape="plain"):
     """A thin surface hanging from a chain of the sketch, each part of it following the bone it
     hangs from: a wing's feathers or skin (chain "wing": both sides; direction back, the default),
     a fish's back fin or tail fluke (direction up or down), a crest. depth metres at the chain's
-    root, taper times that at its tip. A wing is hero.feathers or hero.wing. Returns the objects."""
+    root, taper times that at its tip. shape gives its outline: "plain" (straight edges), "sail" (a
+    back fin: rises from the front, swept back, a curved trailing edge), "fan" (a tail fin: spreads
+    out to a forked edge) or "round" (a pectoral fin, a paddle). A wing is hero.feathers or
+    hero.wing. Returns the objects."""
+    if shape not in MEMBRANE_SHAPES:
+        raise ValueError(f"membrane shape {shape!r}: one of {', '.join(MEMBRANE_SHAPES)}")
     arm = bpy.data.objects[armature] if isinstance(armature, str) else armature
     roles = json.loads(arm["kurambit_creature"])
     names = [c for c in roles if c == chain or c in (f"{chain}_l", f"{chain}_r")]
@@ -740,17 +748,39 @@ def membrane(armature, chain, depth, *, direction=(0, 1, 0), taper=0.3, thick=0.
     made = []
     for cname in names:
         bones = [arm.data.bones[b] for b in roles[cname]]
-        pts = [arm.matrix_world @ b.head_local for b in bones] + [arm.matrix_world @ bones[-1].tail_local]
-        n, rows = len(pts) - 1, 4
-        along = (pts[-1] - pts[0]).normalized()
+        joints = [arm.matrix_world @ b.head_local for b in bones] + [arm.matrix_world @ bones[-1].tail_local]
+        # Columns between the joints too, so an outline can curve; each column follows its bone.
+        sub = 1 if shape == "plain" else 4
+        pts, owner_of = [], []
+        for j in range(len(joints) - 1):
+            for k in range(sub):
+                pts.append(joints[j].lerp(joints[j + 1], k / sub))
+                owner_of.append(j + k / sub)
+        pts.append(joints[-1])
+        owner_of.append(float(len(joints) - 1))
+        n, rows = len(pts) - 1, 4 if shape == "plain" else 6
+        along = (joints[-1] - joints[0]).normalized()
+        span = (joints[-1] - joints[0]).length
         normal = along.cross(d).normalized() * (thick / 2)
         verts, faces, owner = [], [], []
         for layer in (1, -1):
             for i, p in enumerate(pts):
-                reach = depth * (1 - (1 - taper) * (i / n) ** 1.5)
+                t = i / n
+                reach = depth * (1 - (1 - taper) * t ** 1.5)
                 for r in range(rows + 1):
-                    verts.append(p + d * reach * r / rows + normal * layer * (1 - 0.8 * r / rows))
-                    owner.append(i)
+                    u = r / rows
+                    q = p + d * reach * u
+                    if shape == "sail":
+                        # Highest a third of the way back, its edge leaning back over the tail.
+                        q = p + d * (depth * math.sin(math.pi * min(1.0, 0.25 + 0.9 * t)) ** 0.7 * (1 - (1 - taper) * t) * u) + along * (0.35 * span * u * u)
+                    elif shape == "fan":
+                        # Narrow at the root, spreading out and back to a lobe: an upper and a lower
+                        # one make a forked tail.
+                        q = p + d * (depth * (0.55 + 0.45 * t) * u) + along * (depth * u * (0.15 + 0.9 * t))
+                    elif shape == "round":
+                        q = p + d * (depth * math.sin(math.pi * min(1.0, 0.15 + 0.85 * t)) ** 0.5 * u) + along * (0.25 * span * u)
+                    verts.append(q + normal * layer * (1 - 0.8 * u))
+                    owner.append(owner_of[i])
         per = (n + 1) * (rows + 1)
         for layer in (0, 1):
             for i in range(n):
@@ -770,13 +800,16 @@ def membrane(armature, chain, depth, *, direction=(0, 1, 0), taper=0.3, thick=0.
         if material is not None:
             me.materials.append(material)
         groups = [o.vertex_groups.new(name=b.name) for b in bones]
+        last = len(bones)
         for v, i in enumerate(owner):
-            # A joint's column bends half with each of its bones.
-            if 0 < i < n:
-                groups[i - 1].add([v], 0.5, "REPLACE")
-                groups[i].add([v], 0.5, "REPLACE")
+            # A joint's column bends half with each of its bones; one between joints, with its own.
+            if i != int(i):
+                groups[min(int(i), last - 1)].add([v], 1.0, "REPLACE")
+            elif 0 < i < last:
+                groups[int(i) - 1].add([v], 0.5, "REPLACE")
+                groups[int(i)].add([v], 0.5, "REPLACE")
             else:
-                groups[min(i, n - 1)].add([v], 1.0, "REPLACE")
+                groups[min(int(i), last - 1)].add([v], 1.0, "REPLACE")
         skeleton.bind(o, arm)
         made.append(o)
     return made
