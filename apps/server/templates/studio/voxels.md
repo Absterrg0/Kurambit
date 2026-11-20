@@ -28,7 +28,7 @@ colour by its name. Or pass a numpy array `[x, y, z]` of indices into a list
 palette (0 empty): a terrain or a tree is easier to fill in code. `size` is
 metres per voxel; the model stands on the ground at its bottom centre,
 facing -Y, in one material and one draw call. Then review and export it as
-any prop (`art-pipeline.md`, Props). It needs the MagicaVoxel add-on: the
+any prop (`art-pipeline.md`, Making in Blender). It needs the MagicaVoxel add-on: the
 first call says how to install it (`game_blender` op `addon`).
 
 A `.vox` file someone gave the game: `kurambit.voxels("tree", vox="art/tree.vox",

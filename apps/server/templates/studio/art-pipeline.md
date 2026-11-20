@@ -19,45 +19,20 @@ unrigged model is a prop on every route. With the library off its models
 are refused, but its clips and sounds come in, and any library model can be
 your yardstick in the review.
 
-## How the packs are made
+## Art recipes
 
-The best CC0 packs (KayKit, Kenney, Quaternius) win on surface and purpose,
-not geometry. Each rule names the number the review reports for it; quote it
-when you judge a model.
+How the packs build each kind of model, with its numbers and checks: read
+the one or two your model needs from `studio-skills/recipes/`, no more.
 
-1. **One gradient atlas.** Give each part a flat colour
-   (`kurambit.material("#RRGGBB", name="Roof")`); the export packs them into
-   one material on one small atlas of vertical-gradient swatches, lighter on
-   top, and Art lists and edits each swatch by its name. Reported:
-   _materials_ (1, plus Glow if something glows), _textures_, _swatches_.
-2. **Three to five hues per object**, each in a light and a dark value; the
-   atlas warms each swatch's light end and cools its dark end.
-   Reported: _hue families_.
-3. **Silhouette first, at game distance.** Block the big masses and look
-   before any detail: in black at the size it plays, it must read as its
-   subject and show which way it faces. Reported: _overlap_ with your
-   reference per view and its _width by tenths of height_; the
-   game-distance tile.
-4. **Purposeful detail.** Spend triangles where the player looks: a face,
-   hands, the weapon, a door, windows, an awning. A KayKit building is 828
-   triangles with all of that. Name the model's role
-   (`obj["kurambit_role"] = "building"`); budgets are the packs': prop 600,
-   rock 400, plant or tree 1,000, building 2,000, creature 3,000, hero 7,000.
-   Reported: _triangles of the role's budget_.
-5. **Faceted or smooth, on purpose and alike.** Faceted is flat shading.
-   Smooth is smooth by angle with a small bevel. Reported: _flat-shaded share_ against the lock's `shape.edges`.
-6. **Chunky.** Big heads, hands and feet; thick trunks, big crowns and
-   roofs. A part thinner than 3 px at game distance vanishes. Reported:
-   _thin share_ of the game-distance silhouette.
-7. **One family, one scale, one ground line.** Everything stands on z = 0 at
-   the lock's scale. Reported: _height_ and _footprint_.
-8. **Characters from a base** (op `character`), never from scratch.
-   Reported: _rest frames off the standard skeleton_.
-9. **One texel density.** A texture is the exception (a sign, a painted
-   face) and stays within `budget.texture`. Reported: _textures_ by size.
-10. **Nothing floats, nothing pokes through.** Parts that meet enter each
-    other. Reported: _parts over 0.5 mm from every other_, _skin through
-    skin_.
+| Recipe            | When                                                   |
+| ----------------- | ------------------------------------------------------ |
+| `art-silhouette`  | every model: masses first, against a reference         |
+| `art-palette`     | colours, one atlas, faces and emblems as painted cells |
+| `art-humanoid`    | a hero or NPC on the standard skeleton                 |
+| `art-quadruped`   | an animal the library lacks                            |
+| `art-vehicle`     | cars, carts, boats                                     |
+| `art-ruin`        | walls, arches, houses: pieces on the grid              |
+| `art-trees-rocks` | trees, rocks and their scatter                         |
 
 ## The loop
 
@@ -65,79 +40,54 @@ Model, `game_blender` op `look` with `mode: "review"`, read the numbers,
 change one thing, review again. Pass `reference`: the brief's picture, the
 key art, `art/concepts/<name>.png`, or a library model as yardstick
 (`<pack id>:<file>`, a file `game_assets` op `search` lists). The review
-sets it beside the model at the same framing and reports the overlap. Fix
-what the export would refuse first, then silhouette, game distance, colour
-and craft. Write each defect numbered, with its fix, before changing
-anything; "looks good" is not a review. A defect back after two fixes needs
-another method. Stop when nothing blocking is left, or two rounds fixed
-nothing, and name what is left. `game_blender` op `export` writes exactly the reviewed model and its
-sidecar; name it in the game by its sidecar (TEMPLATE.md).
+sets it beside the model at the same framing and reports the overlap, the
+look (materials, hue families, flat share, triangles of the role's budget:
+name it with `obj["kurambit_role"]`), floating and unsupported parts, and a
+character's gates. Fix what the export would refuse first, then silhouette,
+game distance, colour and craft. Write each defect numbered, with its fix,
+before changing anything; "looks good" is not a review. A defect back after
+two fixes needs another method. Stop when nothing blocking is left, or two
+rounds fixed nothing, and name what is left. `game_blender` op `export`
+writes exactly the reviewed model and its sidecar; name it in the game by
+its sidecar (TEMPLATE.md).
 
 ## Making in Blender
 
-Model with Blender's own tools in op `code`: primitives, bevel, mirror,
-array, boolean, decimate to the role's budget. Apply modifiers before
-export (`bpy.ops.object.convert(target="MESH")`). Place features by
-raycast, never guessed coordinates: `kurambit.place_on_surface(obj, target,
-(0, 1, 0))`. Models face -Y, +X is their left.
+Build parts on a structure, never one sculpted blob: a skeleton's joints, a
+side profile, the 4 m grid. Primitives, `kurambit.loft` (rings on joints),
+bevel, mirror, array, boolean; apply modifiers before export
+(`bpy.ops.object.convert(target="MESH")`). Place features by raycast:
+`kurambit.place_on_surface(obj, target, (0, 1, 0))`. Models face -Y, +X is
+their left, feet on z 0.
 
-`kurambit.blender.node_group("Smooth by Angle")` loads a bundled node group;
-`kurambit.blender.scatter(obj, on=ground, density=2, seed=1)` and
-`kurambit.blender.tube(curve, radius)` are Geometry Nodes on the live object.
+A humanoid: `game_blender` op `character` puts the standard skeleton, sized,
+with the library's clips (`clips` by name; the standard set has no attack:
+`Sword_Attack`, `Punch_Jab` or `Spell_Simple_Shoot`). `body: "none"` gives the
+skeleton and its joint print to model parts on; a body (`library`, `mpfb`,
+`game`) comes painted in the material `<name> skin`. Parts bind with
+`kurambit.skin_rigid(part, "Head")` or `kurambit.weights_along`; a hand holds
+with `kurambit.hold(prop, "r", grip=, tip=)`. A move the library lacks: op
+`animate`, poses on beats from a library pose.
 
-## Characters
+An animal: `kurambit.blender.metarig(kind, height=)` is its skeleton
+(`basic_quadruped`, `horse`, ...); `kurambit.blender.bake_ik_walk` keys its
+clips. A vehicle needs no rig: `kurambit.pivot(wheel, hub, parent=body)`.
 
-Organic subjects keep the hero kit (`from kurambit import hero` in op
-`code`; `print(hero.__doc__)` lists it): measured against plain `bpy`, it
-made the better character and animal. Buildings and props stay plain `bpy`.
+Set pieces that snap are each their own export, origin where the game
+places them; `kurambit.grid(pieces, 4)` names any gap. What repeats is drawn
+as instances in the game (`M.scatter`, shell/model.js); the ground is code
+(`M.ground`). With the library on, the lock's packs come first. A prop
+painted from a turnaround sheet: `game_blender` op `paint`, after the
+model's overlap with the sheet passes about 0.75. Realistic textures (Poly
+Haven, ambientCG) belong only in a realistic lock.
 
-### Humanoids
-
-`game_blender` op `character` puts a body on the standard skeleton, so the
-library's clips play on it unchanged: `height` from the brief, `clips` by
-name (the standard set has no attack: name `Sword_Attack`, `Punch_Jab` or
-`Spell_Simple_Shoot` when it fights). A small or round character takes a child
-body or the chibi style. Its body comes painted in the material `<name> skin`;
-recolour that. Then `hero.face`, `hero.hair`, `hero.garment` (innermost
-first), `hero.footwear`, `hero.trim` and `hero.zone`. Gear you model binds with
-`kurambit.skin_rigid(part, "head")`; a hand holds with `kurambit.hold(prop,
-"r", grip=, tip=)`. A move the library lacks: op `animate`, poses on beats
-from a library pose, until its numbers stop improving.
-
-### Creatures and machines: own rig, own clips
-
-An animal is a sketch of point chains `(x, y, z, radius)`, facing -Y, feet on
-z = 0: `spine` rear to front, `neck`, `head`, `leg_front_l`, `leg_hind_l`
-(hip to toe, bent at the knee), `tail`, `ear_l` (`_l` mirrors). Then
-`hero.creature_body`, `hero.creature_rig(body, height=(lo, hi))`,
-`hero.creature_face`, `hero.feet`, `hero.fur`, `hero.zone` and
-`hero.creature_clips(arm, ["idle", "walk", "run"])`: it plays only its own
-clips. A machine or a body the sketch cannot hold rigs with Rigify:
-`kurambit.blender.metarig(kind, height=)` (`basic_quadruped`, `horse`,
-`cat`, `bird`, `shark`, ...), fit its bones, `rig =
-kurambit.blender.rigify(meta, body)`, key actions on the controls (an idle
-first), then `kurambit.blender.game_rig(rig, name)` bakes them onto its
-deform bones for export. A loop's last key equals its first, in place. A
-vehicle needs no rig: `kurambit.pivot(wheel, hub, parent=body)`.
-
-### The hero sheet
+## The hero sheet
 
 A character or creature is done when the review keeps its sheet in
 `art/sheets/` and your critique is beside it (`game_check` op `final` lists
 the rest): `art/sheets/<sheet name>.md`, the brief's words for the subject,
 the review's numbers, then each defect numbered, biggest first, with what
 you fixed or why not.
-
-## Props
-
-Made the same way; with the library on, the lock's packs first. A
-third-person or top-down camera needs low partitions (about 1.8 m in a 4 m
-cell). Set pieces that snap are each their own export, origin where the game
-places them; `kurambit.grid(pieces, 4)` names any gap. What repeats is drawn as instances in the
-game (`M.scatter`, shell/model.js); the ground is code (`M.ground`). A prop
-painted from a turnaround sheet: `game_blender` op `paint`, after the model's
-overlap with the sheet passes about 0.75. Realistic textures (Poly Haven,
-ambientCG) belong only in a realistic lock.
 
 ## Generated art
 
