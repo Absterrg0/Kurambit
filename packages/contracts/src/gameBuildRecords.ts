@@ -85,6 +85,8 @@ export const GameBuildRestore = Schema.Struct({
   expect: Schema.optionalKey(GameBuildId),
   /** The chat that asked, whose next turn counts from the restored build. */
   thread: Schema.optionalKey(ThreadId),
+  /** The build the folder held as the restore was asked for, when the asker read it. */
+  holding: Schema.optionalKey(GameBuildId),
   outcome: Schema.NullOr(GameBuildRestoreOutcome),
 });
 export type GameBuildRestore = typeof GameBuildRestore.Type;
@@ -116,6 +118,7 @@ export const GAME_BUILD_EVENT_TYPES = [
   "game-build.restored",
   "game-build.kept",
   "game-build.migrated",
+  "game-build.dropped",
 ] as const;
 
 /** The events' payloads; the stored and live shapes are one (no DateTime fields). */
@@ -133,6 +136,13 @@ export const GameBuildEventPayloads = {
     ...FolderFields,
     keep: Schema.NullOr(GameBuildHeldKeep),
     drop: Schema.NullOr(Schema.String),
+  }),
+  /** Builds a tuning session folded away or put back: no longer the game's. */
+  dropped: Schema.Struct({
+    ...FolderFields,
+    ids: Schema.Array(GameBuildId),
+    /** The build the folder holds again; null leaves it as it was. */
+    current: Schema.NullOr(GameBuildId),
   }),
   /** The folder's legacy builds were read in; `current` and `restore` as they read. */
   migrated: Schema.Struct({
@@ -157,6 +167,16 @@ export const OrchestrationV2GameBuildCommand = Schema.Union([
     current: Schema.Boolean,
     /** A copy's first build numbers on from its seat's number. */
     numberFrom: Schema.optionalKey(Schema.Number),
+    /** The tuning build this one folds: it takes that build's number, and that build goes. */
+    replaces: Schema.optionalKey(GameBuildId),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("game-build.drop"),
+    ...GameBuildCommandFields,
+    ...FolderFields,
+    ids: Schema.Array(GameBuildId),
+    /** The build the folder holds again. */
+    current: Schema.NullOr(GameBuildId),
   }),
   /** A restore asked for: the record commits, and the folder's move is its outbox effect. */
   Schema.Struct({

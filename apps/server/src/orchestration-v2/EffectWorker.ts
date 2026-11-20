@@ -578,9 +578,10 @@ export const layerExecutor: Layer.Layer<
             return gameBuildMoves
               .move({
                 effectId: effect.id,
+                threadId: effect.threadId,
                 projectId: effect.request.projectId,
                 root: effect.request.root,
-                requestId: effect.request.requestId,
+                restore: effect.request.restore,
               })
               .pipe(
                 Effect.mapError(

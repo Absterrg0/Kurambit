@@ -54,6 +54,7 @@ const commit = (command: OrchestrationV2GameBuildCommand) =>
       {
         tally: store.getGameBuildTally,
         known: (p, b) => store.getGameBuilds(p, [b]).pipe(Effect.map((rows) => rows[0] ?? null)),
+        folder: store.getGameBuildFolder,
       },
       command,
     );
@@ -88,8 +89,8 @@ it.layer(layerTest)("game build projection", (it) => {
           [id(1), 1],
         ],
       );
-      // The repeat of build 1 moved the folder back to it, as a landing does.
-      assert.strictEqual((yield* store.getGameBuildFolder(projectId, root))?.current, id(1));
+      // A late repeat of an older build never moves the folder's build back to it.
+      assert.strictEqual((yield* store.getGameBuildFolder(projectId, root))?.current, id(2));
     }),
   );
 
@@ -116,6 +117,7 @@ it.layer(layerTest)("game build projection", (it) => {
       assert.strictEqual(asked.effects[0]?.request.type, "game-build.move");
       const pending = yield* store.getGameBuildFolder(projectId, root);
       assert.strictEqual(pending?.current, id(3));
+      assert.strictEqual(asked.effects.length, 1);
       assert.strictEqual(pending?.restore?.outcome, null);
       const settle = {
         type: "game-build.restore.settle",
@@ -160,14 +162,14 @@ it.layer(layerTest)("game build projection", (it) => {
           commandId: "k1",
         },
       };
-      const held = (keep: typeof keep | null, drop: string | null) =>
+      const held = (each: typeof keep | null, drop: string | null) =>
         commit({
           type: "game-build.keep",
-          commandId: CommandId.make(`keep:${keep?.request ?? drop}:${drop ?? "keep"}`),
+          commandId: CommandId.make(`keep:${each?.request ?? drop}:${drop ?? "keep"}`),
           threadId,
           projectId,
           root,
-          keep,
+          keep: each,
           drop,
         });
       yield* held(keep, null);

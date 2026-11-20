@@ -2,6 +2,7 @@
 // park from what is recorded, so two builds never share a number, and a restore's folder move is
 // an outbox effect of the record that asks for it. No I/O beyond the projection reads.
 import {
+  type GameBuildFolder,
   type GameBuildRecord,
   isNumberedGameBuildKind,
   type OrchestrationV2DomainEvent,
@@ -29,6 +30,10 @@ export interface GameBuildPlanReads {
     projectId: GameBuildRecord["projectId"],
     id: GameBuildRecord["id"],
   ) => Effect.Effect<GameBuildRecord | null, ProjectionStoreV2Error>;
+  readonly folder: (
+    projectId: GameBuildRecord["projectId"],
+    root: string,
+  ) => Effect.Effect<GameBuildFolder | null, ProjectionStoreV2Error>;
 }
 
 export interface GameBuildPlan {
@@ -61,21 +66,63 @@ export const planGameBuildCommand = (
     const base = { threadId: command.threadId, occurredAt } as const;
     switch (command.type) {
       case "game-build.record": {
-        const known = yield* reads.known(command.build.projectId, command.build.id);
+        const { projectId, root } = command.build;
+        const known = yield* reads.known(projectId, command.build.id);
+        const replaced =
+          command.replaces === undefined || known !== null
+            ? null
+            : yield* reads.known(projectId, command.replaces);
         const build =
           known ??
-          numbered(
-            command.build,
-            yield* reads.tally(command.build.projectId, command.build.root),
-            command.numberFrom,
-          );
+          (replaced !== null
+            ? { ...command.build, number: replaced.number }
+            : numbered(command.build, yield* reads.tally(projectId, root), command.numberFrom));
+        // The folder's build never moves back to an older one: a turn recorded late (a
+        // reconcile after a restart) lands after a restore or a keep that came since.
+        const folder = command.current ? yield* reads.folder(projectId, root) : null;
+        const holding =
+          folder?.current === null || folder?.current === undefined || folder.current === build.id
+            ? null
+            : yield* reads.known(projectId, folder.current);
+        const newer =
+          (holding !== null && holding.at > build.at) ||
+          (folder?.restore?.outcome?.moved === "restored" && folder.restore.requestedAt > build.at);
         return {
           events: [
-            { ...base, type: "game-build.recorded", payload: { build, current: command.current } },
+            ...(replaced === null
+              ? []
+              : [
+                  {
+                    ...base,
+                    type: "game-build.dropped",
+                    payload: { projectId, root, ids: [replaced.id], current: null },
+                  } as const,
+                ]),
+            {
+              ...base,
+              type: "game-build.recorded",
+              payload: { build, current: command.current && !newer },
+            },
           ],
           effects: [],
         } satisfies GameBuildPlan;
       }
+      case "game-build.drop":
+        return {
+          events: [
+            {
+              ...base,
+              type: "game-build.dropped",
+              payload: {
+                projectId: command.projectId,
+                root: command.root,
+                ids: command.ids,
+                current: command.current,
+              },
+            },
+          ],
+          effects: [],
+        } satisfies GameBuildPlan;
       case "game-build.restore":
         return {
           events: [
@@ -99,7 +146,7 @@ export const planGameBuildCommand = (
                 type: "game-build.move",
                 projectId: command.projectId,
                 root: command.root,
-                requestId: command.restore.requestId,
+                restore: { ...command.restore, outcome: null },
               },
             },
           ],
@@ -144,8 +191,12 @@ export const planGameBuildCommand = (
                 projectId: command.projectId,
                 root: command.root,
                 restore: command.restore,
+                // A move that found the folder already at its target leaves it there too.
                 current:
-                  command.restore.outcome?.moved === "restored" ? command.restore.target : null,
+                  command.restore.outcome?.moved === "restored" ||
+                  command.restore.outcome?.moved === "current"
+                    ? command.restore.target
+                    : null,
               },
             },
           ],

@@ -22,6 +22,9 @@ import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as GameBuildMoves from "../orchestration-v2/gameBuilds/GameBuildMoves.ts";
+
+let moveRunner: GameBuildMoves.GameBuildMoveRunner | null = null;
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -148,7 +151,24 @@ const world = Effect.gen(function* () {
         }),
         Layer.mock(GameOperations.GameOperations)({ current: () => null, events: Stream.empty }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
-        Layer.mock(Orchestrator.OrchestratorV2)({}),
+        // A recorded restore's move runs as its outbox effect would, right after the record.
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          dispatch: (command) =>
+            command.type === "game-build.restore" && moveRunner !== null
+              ? moveRunner
+                  .move({
+                    effectId: `effect:${command.commandId}`,
+                    threadId: command.threadId,
+                    projectId: command.projectId,
+                    root: command.root,
+                    restore: command.restore,
+                  })
+                  .pipe(Effect.orDie, Effect.forkDetach, Effect.as({} as never))
+              : Effect.succeed({} as never),
+        }),
+        Layer.mock(GameBuildMoves.GameBuildMoves)({
+          attach: (runner) => Effect.sync(() => void (moveRunner = runner)),
+        }),
       ),
     ),
   );

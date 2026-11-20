@@ -2,7 +2,7 @@
 // commits first, the move follows, and a restart runs a move it cut short again (moves are
 // safe to repeat with the same request). The game layer attaches the work once its services
 // exist, as it does keep going's jobs; the move reports with game-build.restore.settle.
-import type { ProjectId } from "@kurambit/contracts";
+import type { GameBuildRestore, ProjectId, ThreadId } from "@kurambit/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -11,9 +11,11 @@ import * as Schema from "effect/Schema";
 
 export interface GameBuildMove {
   readonly effectId: string;
+  /** The chat that asked: the move's owner of the game's lock. */
+  readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly root: string;
-  readonly requestId: string;
+  readonly restore: GameBuildRestore;
 }
 
 /** A move that did not get done; its effect is tried again. */

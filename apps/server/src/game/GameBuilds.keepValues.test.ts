@@ -14,6 +14,9 @@ import * as Layer from "effect/Layer";
 import { type GameManifest, ownsUndo, ProjectId, ThreadId } from "@kurambit/contracts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as GameBuildMoves from "../orchestration-v2/gameBuilds/GameBuildMoves.ts";
+
+let moveRunner: GameBuildMoves.GameBuildMoveRunner | null = null;
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -116,7 +119,24 @@ const layerFor = (root: string) =>
           quietWrite: () => Effect.void,
         }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
-        Layer.mock(Orchestrator.OrchestratorV2)({}),
+        // A recorded restore's move runs as its outbox effect would, right after the record.
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          dispatch: (command) =>
+            command.type === "game-build.restore" && moveRunner !== null
+              ? moveRunner
+                  .move({
+                    effectId: `effect:${command.commandId}`,
+                    threadId: command.threadId,
+                    projectId: command.projectId,
+                    root: command.root,
+                    restore: command.restore,
+                  })
+                  .pipe(Effect.orDie, Effect.forkDetach, Effect.as({} as never))
+              : Effect.succeed({} as never),
+        }),
+        Layer.mock(GameBuildMoves.GameBuildMoves)({
+          attach: (runner) => Effect.sync(() => void (moveRunner = runner)),
+        }),
       ),
     ),
   );

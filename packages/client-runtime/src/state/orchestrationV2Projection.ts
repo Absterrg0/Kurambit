@@ -335,6 +335,7 @@ export function applyOrchestrationV2ProjectionEvent(
     case "game-build.restored":
     case "game-build.kept":
     case "game-build.migrated":
+    case "game-build.dropped":
       return projection;
   }
 }

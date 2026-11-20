@@ -510,6 +510,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-build.restore.settle":
     case "game-build.keep":
     case "game-build.migrate":
+    case "game-build.drop":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -6615,6 +6616,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             projectionStore
               .getGameBuilds(projectId, [id])
               .pipe(Effect.map((rows) => rows[0] ?? null)),
+          folder: projectionStore.getGameBuildFolder,
         },
         command,
       ).pipe(
@@ -11037,6 +11039,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "game-build.restore.settle":
       case "game-build.keep":
       case "game-build.migrate":
+      case "game-build.drop":
         yield* dispatchGameBuild(command, events, effects);
         break;
       default:

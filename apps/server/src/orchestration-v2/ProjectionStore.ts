@@ -1014,6 +1014,7 @@ export function applyToProjection(
     case "game-build.restored":
     case "game-build.kept":
     case "game-build.migrated":
+    case "game-build.dropped":
       return projection;
   }
 }
@@ -1066,14 +1067,21 @@ function applyToGameBuildState(
   state: GameBuildState,
   event: Extract<OrchestrationV2DomainEvent, { readonly type: `game-build.${string}` }>,
 ): GameBuildState {
+  const kept =
+    event.type === "game-build.dropped"
+      ? state.builds.filter(
+          (each) =>
+            each.projectId !== event.payload.projectId || !event.payload.ids.includes(each.id),
+        )
+      : state.builds;
   const builds =
     event.type === "game-build.recorded" &&
-    !state.builds.some(
+    !kept.some(
       (each) =>
         each.projectId === event.payload.build.projectId && each.id === event.payload.build.id,
     )
-      ? [...state.builds, event.payload.build]
-      : state.builds;
+      ? [...kept, event.payload.build]
+      : kept;
   const key =
     event.type === "game-build.recorded"
       ? { projectId: event.payload.build.projectId, root: event.payload.build.root }
@@ -2854,6 +2862,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "game-build.restored":
           case "game-build.kept":
           case "game-build.migrated":
+          case "game-build.dropped":
+          case "game-build.dropped":
             yield* GameBuildProjection.applySql(sql, event);
             break;
           case "game-run.created":

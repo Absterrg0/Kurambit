@@ -54,6 +54,8 @@ export const applyToFolder = (
       );
       return { ...folder, held: keep === null ? held : [...held, keep] };
     }
+    case "game-build.dropped":
+      return event.payload.current === null ? null : { ...folder, current: event.payload.current };
     case "game-build.migrated":
       return {
         ...folder,
@@ -87,6 +89,11 @@ export const applySql = (sql: SqlClient.SqlClient, event: GameBuildEvent) =>
         ON CONFLICT(project_id, build_id) DO NOTHING
       `;
     }
+    if (event.type === "game-build.dropped" && event.payload.ids.length > 0)
+      yield* sql`
+        DELETE FROM orchestration_v2_projection_game_builds
+        WHERE project_id = ${event.payload.projectId} AND ${sql.in("build_id", event.payload.ids)}
+      `;
     const key = folderKey(event);
     const rows = yield* sql<{ readonly payload_json: string }>`
       SELECT payload_json FROM orchestration_v2_projection_game_build_folders

@@ -2,6 +2,7 @@ import {
   CheckpointId,
   CheckpointScopeId,
   CommandId,
+  GameBuildRestore,
   GameRunId,
   ProjectId,
   GameRunStepId,
@@ -154,7 +155,8 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     type: Schema.Literal("game-build.move"),
     projectId: ProjectId,
     root: Schema.String,
-    requestId: Schema.String,
+    /** The restore as recorded: the move needs nothing else, so a later restore never hides it. */
+    restore: GameBuildRestore,
   }),
   // A step's work run again later (a tool that failed, recovery), without holding a job meanwhile.
   Schema.Struct({

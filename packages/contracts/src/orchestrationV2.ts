@@ -1724,6 +1724,11 @@ function gameBuildEventMembers<const Base extends Schema.Struct.Fields>(base: Ba
       type: Schema.Literal("game-build.migrated"),
       payload: GameBuildEventPayloads.migrated,
     }),
+    Schema.Struct({
+      ...base,
+      type: Schema.Literal("game-build.dropped"),
+      payload: GameBuildEventPayloads.dropped,
+    }),
   ] as const;
 }
 
