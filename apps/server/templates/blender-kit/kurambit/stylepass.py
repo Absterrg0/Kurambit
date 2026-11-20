@@ -27,6 +27,10 @@ from . import helpers, skeleton
 # hue: degrees a swatch's ramp turns toward warm at its top and away at its bottom (ramp).
 DEFAULT_SHADING = {"gradient": 0.16, "roughness": 0.62, "glow": 2.5, "hue": 10.0}
 COLS, SWATCH_W, SWATCH_H = 8, 8, 32
+# A decal (kurambit.decal: eyes, brows, an emblem) is a painted cell the width of the atlas and two
+# swatch rows tall, below the swatches: the runtime recolours swatches by rows of equal height.
+DECAL_ROWS = 2
+DECAL = COLS * SWATCH_W
 
 
 def _lin(c):
@@ -217,10 +221,30 @@ def ramp(c, gradient, hue, t):
     return [_srgb(_lin(x) * k) for x in colorsys.hsv_to_rgb(h, sat, v)]
 
 
-def _atlas(colours, shading, out_dir):
-    rows = math.ceil(len(colours) / COLS)
+def _decal_pixels(image):
+    """A decal's image resampled to its DECAL x DECAL cell, bottom row first, sRGB."""
+    w, h = image.size
+    px = np.empty(w * h * 4, np.float32)
+    image.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    ys = np.minimum((np.arange(DECAL) + 0.5) * h / DECAL, h - 1).astype(int)
+    xs = np.minimum((np.arange(DECAL) + 0.5) * w / DECAL, w - 1).astype(int)
+    return px[ys][:, xs]
+
+
+def _atlas(colours, shading, out_dir, decals=()):
+    swatch_rows = math.ceil(len(colours) / COLS)
+    rows = swatch_rows + DECAL_ROWS * len(decals)
     img = bpy.data.images.new("palette", COLS * SWATCH_W, rows * SWATCH_H, alpha=False)
     px = np.ones((rows * SWATCH_H, COLS * SWATCH_W, 4), np.float32)
+    for j, image in enumerate(decals):
+        y0 = (len(decals) - 1 - j) * DECAL_ROWS * SWATCH_H
+        # The swatches' soft top light, over the cell's height, so the painted faces meet the
+        # plain ones around them without a lighter patch.
+        c = _decal_pixels(image)[:, :, :3]
+        k = (1 - shading["gradient"] + 2 * shading["gradient"] * np.linspace(0, 1, DECAL))[:, None, None]
+        lin = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92) * k
+        px[y0:y0 + DECAL, :DECAL, :3] = np.where(lin > 0.0031308, 1.055 * np.clip(lin, 0, 1) ** (1 / 2.4) - 0.055, 12.92 * lin)
     for i, c in enumerate(colours):
         col, row = i % COLS, rows - 1 - i // COLS
         for y in range(SWATCH_H):
@@ -266,22 +290,52 @@ def _hexed(c):
     return "#%02x%02x%02x" % tuple(round(max(0.0, min(1.0, x)) * 255) for x in c)
 
 
+def _decal_image(m):
+    """The painted image of a decal material (kurambit.decal), else None."""
+    if m is None or not m.get("kurambit_decal") or m.node_tree is None:
+        return None
+    return next((n.image for n in m.node_tree.nodes if n.type == "TEX_IMAGE" and n.image is not None), None)
+
+
+AXES = {"-y": ((1, 0, 0), (0, 0, 1)), "+y": ((-1, 0, 0), (0, 0, 1)), "+x": ((0, 1, 0), (0, 0, 1)),
+        "-x": ((0, -1, 0), (0, 0, 1)), "+z": ((1, 0, 0), (0, 1, 0)), "-z": ((1, 0, 0), (0, -1, 0))}
+
+
+def _project(points, axis):
+    """(u, v) 0..1 of points seen from the axis side (-y: the model's front), over their bounds."""
+    right, up = (np.array(a, float) for a in AXES.get(axis, AXES["-y"]))
+    uv = []
+    for d in (right, up):
+        x = points @ d
+        lo, hi = x.min(), x.max()
+        uv.append((x - lo) / (hi - lo) if hi - lo > 1e-9 else np.full(len(x), 0.5))
+    return uv
+
+
 def atlas_pass(meshes, shading, out_dir, hexes=None):
     """Every plain colour onto one atlas of gradient swatches, in one material (and Glow, when
     something glows): the packs' method. With a locked hex palette every material snaps to its
     nearest entry (in Lab; a textured face by the texture under it) and the atlas is the whole
     palette, one for the game; without one the swatches are the model's own colours and a
     textured or see-through material keeps itself. Each face samples its swatch by its height in
-    the model. Returns (palette entries used, swatches [{colour, name}] in atlas order, rows)."""
+    the model; a decal's faces sample its painted cell, projected along its axis over their
+    bounds. Returns (palette entries used, swatches [{colour, name}] in atlas order, rows)."""
     locked = bool(hexes)
     colours = [_hex(h) for h in hexes] if locked else []
     names = [None] * len(colours)
     plab = [_lab(c) for c in colours]
     slots_of = []
+    decals = []
     for o in meshes:
         infos = []
         for slot in o.material_slots or [None]:
             m = slot.material if slot is not None else None
+            image = _decal_image(m)
+            if image is not None:
+                if m not in decals:
+                    decals.append(m)
+                infos.append(("decal", decals.index(m)))
+                continue
             if not locked and not _plain(m):
                 infos.append(None)
                 continue
@@ -299,9 +353,9 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
                 names[k] = m.name.split(".")[0][:64]
             infos.append((k, glow))
         slots_of.append(infos)
-    if not colours:
+    if not colours and not decals:
         return [], [], 0
-    img, rows = _atlas(colours, shading, out_dir)
+    img, rows = _atlas(colours, shading, out_dir, [_decal_image(m) for m in decals])
     flat, glow_mat = _palette_material("Palette", img, shading, False), None
     used, seen, pixel_cache = set(), set(), {}
     for o, infos in zip(meshes, slots_of):
@@ -309,15 +363,17 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
         if me.as_pointer() in seen or all(i is None for i in infos):  # a shared mesh is styled once
             continue
         seen.add(me.as_pointer())
-        if any(i is not None and i[1] for i in infos) and glow_mat is None:
+        is_decal = lambda i: i is not None and i[0] == "decal"
+        if any(i is not None and not is_decal(i) and i[1] for i in infos) and glow_mat is None:
             glow_mat = _palette_material("Glow", img, shading, True)
         np_ = len(me.polygons)
         mat_index = np.empty(np_, np.int32)
         me.polygons.foreach_get("material_index", mat_index)
         mat_index = np.minimum(mat_index, len(infos) - 1)
         atlased = np.array([i is not None for i in infos])[mat_index]
-        swatch = np.array([i[0] if i is not None else 0 for i in infos])[mat_index]
-        glows = np.array([bool(i is not None and i[1]) for i in infos])[mat_index]
+        swatch = np.array([i[0] if i is not None and not is_decal(i) else 0 for i in infos])[mat_index]
+        glows = np.array([bool(i is not None and not is_decal(i) and i[1]) for i in infos])[mat_index]
+        decal = np.array([i[1] if is_decal(i) else -1 for i in infos])[mat_index]
         loop_poly = np.repeat(np.arange(np_), [p.loop_total for p in me.polygons])
         if locked:
             # A textured material (a generator's baked texture, a pack's colormap) is many colours:
@@ -325,6 +381,9 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
             images = []
             for slot in o.material_slots:
                 m = slot.material
+                if _decal_image(m) is not None:
+                    images.append(None)  # painted, never snapped
+                    continue
                 bsdf = next((nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED"), None) if m is not None and m.node_tree is not None else None
                 image = _feeding_image(bsdf.inputs["Base Color"]) if bsdf is not None else None
                 if image is not None and image.name not in pixel_cache:
@@ -332,24 +391,34 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
                 images.append(pixel_cache.get(image.name) if image is not None else None)
             snapped, textured = _face_swatches(me, images, mat_index, loop_poly, plab)
             swatch[textured] = snapped[textured]
-        used.update(int(k) for k in np.unique(swatch[atlased]))
+        used.update(int(k) for k in np.unique(swatch[atlased & (decal < 0)]))
         co = np.empty(len(me.vertices) * 3)
         me.vertices.foreach_get("co", co)
         mw = np.array(o.matrix_world)
         z = (co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3])[:, 2]
         loop_v = np.empty(len(me.loops), np.int32)
         me.loops.foreach_get("vertex_index", loop_v)
-        loop_swatch = swatch[loop_poly]
+        loop_swatch = np.where(decal[loop_poly] < 0, swatch[loop_poly], -1)
         lz = z[loop_v]
         t = np.full(len(lz), 0.5)
         # A voxel face is one colour edge to edge: its swatch's middle, no gradient up a merged face.
-        for k in [] if o.get("kurambit_voxel") else np.unique(loop_swatch):
+        for k in [] if o.get("kurambit_voxel") else np.unique(loop_swatch[loop_swatch >= 0]):
             sel = loop_swatch == k
             lo, hi = lz[sel].min(), lz[sel].max()
             if hi - lo > 1e-6:
                 t[sel] = (lz[sel] - lo) / (hi - lo)
         u = ((loop_swatch % COLS) + 0.5) / COLS
         v = ((rows - 1 - loop_swatch // COLS) + 0.08 + 0.84 * t) / rows
+        loop_decal = decal[loop_poly]
+        if (loop_decal >= 0).any():
+            world = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+            for j in np.unique(loop_decal[loop_decal >= 0]):
+                sel = loop_decal == j
+                du, dv = _project(world[loop_v[sel]], decals[j]["kurambit_decal"])
+                pad = 0.5 / DECAL
+                u[sel] = pad + (1 - 2 * pad) * du
+                y0 = (len(decals) - 1 - j) * DECAL_ROWS
+                v[sel] = (y0 + DECAL_ROWS * (pad + (1 - 2 * pad) * dv)) / rows
         kept = [o.material_slots[i].material for i, info in enumerate(infos) if info is None]
         loop_atlas = atlased[loop_poly]
         if kept and me.uv_layers.active is not None:

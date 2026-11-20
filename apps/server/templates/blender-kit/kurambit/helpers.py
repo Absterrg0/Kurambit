@@ -109,6 +109,34 @@ def material(hex_colour, glow=0.0, name=None, roughness=0.55):
     return m
 
 
+def decal(name, pixels, axis="-y"):
+    """A painted material for faces that need a picture, not geometry: eyes and brows on a face, an
+    emblem on a shield. pixels: rows of RGB or RGBA in 0..1 (sRGB), top row first, drawn in code
+    (numpy). Give it to the faces it covers: the export paints it as one cell of the model's one
+    atlas, seen along axis ("-y" is the front) and stretched over those faces' bounds, so paint
+    the cell's background in the surface's own colour. Returns the material."""
+    px = np.asarray(pixels, np.float32)
+    if px.ndim != 3 or px.shape[2] not in (3, 4) or min(px.shape[:2]) < 2:
+        raise ValueError("pixels: rows of RGB or RGBA values, at least 2 x 2")
+    if px.shape[2] == 3:
+        px = np.concatenate([px, np.ones(px.shape[:2] + (1,), np.float32)], 2)
+    h, w = px.shape[:2]
+    img = bpy.data.images.get(name) or bpy.data.images.new(name, w, h, alpha=False)
+    if tuple(img.size) != (w, h):
+        img.scale(w, h)
+    img.pixels.foreach_set(np.clip(px[::-1], 0, 1).ravel())
+    img.pack()
+    m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    use_nodes(m)
+    nt = m.node_tree
+    bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+    tex = next((n for n in nt.nodes if n.type == "TEX_IMAGE"), None) or nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    m["kurambit_decal"] = axis
+    return m
+
+
 def skin_rigid(obj, bone, armature=None):
     """Binds a mesh to the skeleton: bone is a bone name (rigid), a {bone: weight} dict, or a
     function of a vertex's world position returning such a dict. The mesh's transform is applied

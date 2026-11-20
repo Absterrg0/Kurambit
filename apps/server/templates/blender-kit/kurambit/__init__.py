@@ -10,12 +10,12 @@ from .animate import animate
 from .character import character
 from .digest import digest, resolve
 from .generated import generated
-from .helpers import (aim, eye_lid, eye_squash, grid, hold, key_pose, material, mirror_pose, joints, loft, palette_of, pivot, place_chain, place_on_surface,
+from .helpers import (aim, decal, eye_lid, eye_squash, grid, hold, key_pose, material, mirror_pose, joints, loft, palette_of, pivot, place_chain, place_on_surface,
                       ring_around, skin_rigid, surface_hit, tube_along_bones, turn, weights_along)
 from .protocol import Refused
 from .review import model_views, motion_strip, review
 from .surfaces import surface, wrap
 from .voxels import voxels
 
-__all__ = ["aim", "animate", "blender", "hero", "character", "digest", "eye_lid", "eye_squash", "generated", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "model_views", "motion_strip", "palette_of", "pivot",
+__all__ = ["aim", "animate", "blender", "hero", "character", "decal", "digest", "eye_lid", "eye_squash", "generated", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "model_views", "motion_strip", "palette_of", "pivot",
            "place_chain", "place_on_surface", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "voxels", "weights_along", "world", "wrap"]
