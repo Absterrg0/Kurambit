@@ -30,7 +30,7 @@ const [
   Auth,
   Config,
   Settings,
-  Tries,
+  CopyNotes,
 ] = await Promise.all([
   app("orchestration-v2/ProviderTurnStartService"),
   app("orchestration-v2/ProjectionStore"),
@@ -45,7 +45,7 @@ const [
   app("provider/ProviderAuthService"),
   app("config"),
   app("serverSettings"),
-  app("orchestration-v2/gameVersions/GameTries"),
+  app("orchestration-v2/gameCopies/GameCopyNotes"),
 ]);
 let current;
 let fullReads = 0;
@@ -73,7 +73,7 @@ const dependencies = Layer.mergeAll(
   Layer.mock(Auth.ProviderAuthService)({}),
   Layer.mock(Config.ServerConfig)({ worktreesDir: "/synthetic-worktrees" }),
   Settings.layerTest(),
-  Layer.mock(Tries.GameTries)({ copyNote: () => Effect.succeed(null) }),
+  CopyNotes.layer,
   Layer.mock(Projection.ProjectionStoreV2)({
     getThreadProjection: () =>
       Effect.sync(() => {
