@@ -27,6 +27,7 @@ export const GAME_TOOL_OPS = {
     generate: ["play"],
     wait: ["play"],
     image_edit: ["play"],
+    pictures: ["play"],
     import: ["import"],
     mine: [],
   },

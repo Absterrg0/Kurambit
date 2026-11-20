@@ -576,7 +576,7 @@ it flat, painted or real.
 ## Other kinds of art
 
 Read the one this game needs: `voxels.md` (a blocky world, chunky
-characters, .vox files).
+characters, .vox files), `pictures.md` (cards, tiles, tokens, icons, UI art).
 
 ## Key art
 

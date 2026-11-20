@@ -58,6 +58,7 @@ import {
 } from "./run-state.js";
 import { Juice, juiceShell } from "./juice.js";
 import { animateShell } from "./animate.js";
+import { sheetsShell } from "./sheets.js";
 import { cameraShell } from "./camera.js";
 import { createLook } from "./look.js";
 import { assets, onModelCopy, preloadAssets } from "./assets.js";
@@ -322,6 +323,7 @@ function clearRun() {
   leaveRun();
   juiceShell.reset();
   animateShell.reset();
+  sheetsShell.reset();
   cameraShell.reset();
   modelShell.reset();
   look.reset();
@@ -724,6 +726,7 @@ function step() {
       for (const timer of due) timer.fn();
       game.update?.(dt, stepping.ctx);
       animateShell.update(dt);
+      sheetsShell.update(dt);
       waterShell.update(dt, stepping.ctx);
       cameraShell.update(dt);
     } catch (error) {

@@ -124,7 +124,7 @@ const realDir = (realRoot: string, relative: string) =>
   );
 
 /** Writes a file, refusing to follow a symbolic link planted at its name. */
-const writeOwn = (path: string, bytes: Buffer) =>
+export const writeOwn = (path: string, bytes: Buffer) =>
   NodeFSP.writeFile(path, bytes, {
     flag:
       NodeFSP.constants.O_WRONLY |

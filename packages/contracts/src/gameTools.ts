@@ -97,6 +97,8 @@ export const GameAssetsToolInput = Schema.Struct({
   generate: op(GameGenerateInput),
   wait: op(GameGenerateWaitInput),
   image_edit: op(GameImageEditInput),
+  // Published bare like lock: GamePicturesInput, decoded by the service and taught by its skill.
+  pictures: op(Schema.Record(Schema.String, Schema.Unknown)),
   import: op(Nothing),
   mine: op(Schema.Struct({ add: Schema.optionalKey(Schema.String) })),
 });

@@ -9,6 +9,7 @@ import {
   GameAnimateResult,
   GameAssetsAddResult,
   GameAssetsSearchResult,
+  GamePicturesResult,
   GameBlenderAssetsImportResult,
   GameBlenderAssetsSearchResult,
   GameBlenderCarveResult,
@@ -416,6 +417,10 @@ const assetsHandlers = {
             withGame(GameArt.GameArt, (art, threadId) => art.imageEdit(threadId, edit)).pipe(
               as(GameGenerateResult),
             ),
+          pictures: (pictures) =>
+            withGame(GameEngine.GameEngine, (engines, threadId) =>
+              engines.pictures(threadId, pictures),
+            ).pipe(as(GamePicturesResult)),
           import: () =>
             withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)).pipe(
               as(GameActionResult),

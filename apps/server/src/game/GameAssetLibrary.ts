@@ -1565,7 +1565,7 @@ const make = Effect.gen(function* () {
           "Lock the look",
           GAME_STYLE_FILE,
           "invalid-input",
-          `lock takes view, palette (hex colours, or a PNG in the game), roles {role: "#rrggbb"}, shape {edges: faceted or soft, bevel, chunky, detail}, finish (flat, painted, real) and surfaces {role: {kind, pattern, metres, wear}}: ${decoded.failure.message.slice(0, 800)}`,
+          `lock takes view, palette (hex colours, or a PNG in the game), roles {role: "#rrggbb"}, shape {edges: faceted, soft or voxel, bevel, chunky, detail}, finish (flat, painted, real) and surfaces {role: {kind, pattern, metres, wear}}: ${decoded.failure.message.slice(0, 800)}`,
         );
       const input = decoded.success;
       const gameRoot = yield* realRootOf(root, "Lock the look");

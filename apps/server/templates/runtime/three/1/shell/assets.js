@@ -5,6 +5,7 @@
 //     cat: "assets/blender/space_cat.asset.json", // an exported model: its sidecar
 //     grass: "assets/textures/grass.png",
 //     oak: "assets/textures/oak.surface.json", // a made surface (kurambit.surface): its texture set
+//     cards: "assets/sheets/cards.sheet.json", // pictures and flipbooks: ctx.assets.sheet (shell/sheets.js)
 //   };
 //
 // then, in start(ctx) or later, synchronously:
@@ -26,10 +27,12 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneObject } from "three/addons/utils/SkeletonUtils.js";
 import { lock } from "./model.js";
+import { loadSheet } from "./sheets.js";
 
 const models = new Map();
 const textures = new Map();
 const surfaces = new Map();
+const sheets = new Map();
 // The shell's Stage bridge hears of each copy, so ASSETS models are things the
 // Stage can select with no code in the game (shell/stage-bridge.js).
 let copied = null;
@@ -48,6 +51,7 @@ const kindOf = (path) => {
   const file = path.toLowerCase().split("?")[0];
   if (file.endsWith(SIDECAR)) return "sidecar";
   if (file.endsWith(SURFACE)) return "surface";
+  if (file.endsWith(".sheet.json") || file.endsWith(".sprite.json")) return "sheet";
   const extension = file.split(".").pop();
   if (extension === "glb" || extension === "gltf") return "model";
   if (["png", "jpg", "jpeg", "webp"].includes(extension)) return "texture";
@@ -112,6 +116,12 @@ export const assets = {
     material.name = name;
     return material;
   },
+  /** A texture sheet's pictures and flipbooks (shell/sheets.js). */
+  sheet(name) {
+    const sheet = sheets.get(name);
+    if (sheet === undefined) throw missing("sheet", name, sheets);
+    return sheet;
+  },
   /** The whole loaded glTF (scene, animations, cameras; `userData.asset` for a sidecar entry), not copied. */
   gltf(name) {
     const gltf = models.get(name);
@@ -164,6 +174,8 @@ export async function preloadAssets(manifest) {
           const texture = await textureLoader.loadAsync(path);
           texture.colorSpace = THREE.SRGBColorSpace;
           textures.set(name, lockFilter(texture));
+        } else if (kind === "sheet") {
+          sheets.set(name, await loadSheet(path, textureLoader));
         } else if (kind === "surface") {
           const info = await readSurface(path);
           const folder = path.slice(0, path.lastIndexOf("/") + 1);
@@ -181,7 +193,7 @@ export async function preloadAssets(manifest) {
           });
         } else
           throw new Error(
-            `ASSETS.${name} is ${JSON.stringify(path)}: list .glb/.gltf models, .asset.json sidecars, .surface.json surfaces and .png/.jpg/.webp textures only.`,
+            `ASSETS.${name} is ${JSON.stringify(path)}: list .glb/.gltf models, .asset.json sidecars, .surface.json surfaces, .sheet.json sheets and .png/.jpg/.webp textures only.`,
           );
       } catch (error) {
         reportError(

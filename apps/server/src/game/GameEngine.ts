@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The check reads the source tree around the engine's run.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -7,6 +8,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   gameOperationFault,
@@ -29,6 +32,8 @@ import {
   savedPlaysWords,
   type GameModelSheetInput,
   type GameModelSheetResult,
+  GamePicturesInput,
+  type GamePicturesResult,
   type GameToolStatus,
   type GameViewport,
   type ThreadId,
@@ -41,6 +46,7 @@ import { runtimesDirectory } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import {
+  availableEngine,
   gamePaths,
   unavailableEngine,
   type GameEngineProfile,
@@ -52,6 +58,8 @@ import { HERO_KINDS, heroSheetProblems, keepHeroSheet } from "./heroSheets.ts";
 import { hashFile } from "./hashFile.ts";
 import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import { gameReference } from "./gameReference.ts";
+import { readGameStyle } from "./gameStyle.ts";
+import { renderPictures } from "./pictures.ts";
 import type { SheetView } from "./webPlaySession.ts";
 import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
@@ -327,6 +335,11 @@ export class GameEngine extends Context.Service<
       play: GamePlay,
       moment?: ReplayMoment,
     ) => Effect.Effect<GameReplayRun, GameOperationError>;
+    /** `game_assets` op `pictures`: a template drawn once per row into texture sheets. */
+    readonly pictures: (
+      threadId: ThreadId,
+      input: unknown,
+    ) => Effect.Effect<GamePicturesResult, GameOperationError>;
     /** `game_play` op `model_sheet`: the named things alone, from four sides, with their size and cost. */
     readonly modelSheet: (
       threadId: ThreadId,
@@ -341,6 +354,11 @@ export class GameEngine extends Context.Service<
     readonly viewport: (root: string) => Effect.Effect<GameViewport, GameOperationError>;
   }
 >()("kurambit/game/GameEngine") {}
+
+const decodePictures = Schema.decodeUnknownResult(GamePicturesInput, {
+  errors: "all",
+  onExcessProperty: "error",
+});
 
 const make = Effect.gen(function* () {
   const projects = yield* GameProjectService.GameProjectService;
@@ -666,6 +684,41 @@ const make = Effect.gen(function* () {
         operations.exclusive(root, label, check(root, { qa: true }), owner),
       ),
     replayIn,
+    pictures: (threadId, input) =>
+      projects.exclusive(threadId, "Pictures", (root) =>
+        Effect.gen(function* () {
+          const decoded = decodePictures(input);
+          if (Result.isFailure(decoded))
+            return yield* new GameOperationError({
+              operation: "game-pictures",
+              path: root,
+              reason: "invalid-input",
+              detail: `pictures takes output, template, rows [{name, ...}], size [w, h], and for animations frames, fps, loop; pivot [x, y] (studio-skills/pictures.md): ${decoded.failure.message.slice(0, 800)}`,
+            });
+          const manifest = yield* projects.read(root);
+          const realRoot = yield* Effect.tryPromise({
+            try: () => NodeFSP.realpath(root),
+            catch: (cause) =>
+              new GameOperationError({
+                operation: "game-pictures",
+                path: root,
+                reason: "io",
+                cause,
+              }),
+          });
+          const browser = yield* gameBrowser("game-pictures", root);
+          return yield* renderPictures(
+            {
+              browser,
+              realRoot,
+              engine: yield* availableEngine(manifest.engine.name),
+              project: manifestProject(manifest),
+              style: yield* readGameStyle(realRoot),
+            },
+            decoded.success,
+          );
+        }),
+      ),
     modelSheet: (threadId, input) =>
       projects.exclusive(threadId, "Model sheet", (root) =>
         Effect.gen(function* () {
