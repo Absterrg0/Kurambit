@@ -2863,7 +2863,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "game-build.kept":
           case "game-build.migrated":
           case "game-build.dropped":
-          case "game-build.dropped":
             yield* GameBuildProjection.applySql(sql, event);
             break;
           case "game-run.created":
