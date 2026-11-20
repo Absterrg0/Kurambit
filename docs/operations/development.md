@@ -108,7 +108,8 @@ provider off and a stand-in agent (no model): a new game from a brief, the Stage
 Tune, Check, undo, one Keep going step, Blender code, look and export, and export Web. It runs
 in about two minutes and fails on the first path whose result a person would not see. Blender's
 path runs only when the server finds one (`KURAMBIT_BLENDER`). Pass `--home <dir>` to keep the
-headless browser the server installs between runs; CI runs it on Linux in the `First-use gate`
+headless browser the server installs between runs, and `--old-game <dir>` to also open a copy of
+a game made before your change and run its own bot. CI runs it on Linux in the `First-use gate`
 job. A change to what an agent calls (tool names, ops, their inputs) updates the stand-in's
 steps in [gate.ts](../../scripts/first-use-gate/gate.ts) in the same commit.
 

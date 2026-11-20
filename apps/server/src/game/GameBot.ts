@@ -50,7 +50,15 @@ import {
   writeKeptStorage,
 } from "./gameKeptSaves.ts";
 import { playBot, runWithoutPlay } from "./gameBotPlay.ts";
-import { botEnding, botFinalState, cellOf, opError, type Session } from "./gameBotRuntime.ts";
+import {
+  botEnding,
+  botFinalState,
+  botWon,
+  cellOf,
+  opError,
+  type Session,
+} from "./gameBotRuntime.ts";
+import { isSteppedBot, playSteppedBot } from "./gameBotStep.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import { runtimesFor } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
@@ -321,6 +329,10 @@ const make = Effect.gen(function* () {
       );
       if (!isFile)
         return yield* opError("Bot run", input.file, "invalid-input", "No bot file there.");
+      const source = yield* Effect.promise(() => NodeFSP.readFile(botFile, "utf8").catch(() => ""));
+      // A stepped bot plays in the game's page on the run's own clock; the kit's format keeps
+      // its real-time Node child.
+      const stepped = isSteppedBot(source);
       const seconds = Math.min(
         GAME_BOT_BOUNDS.maxSeconds,
         Math.max(GAME_BOT_BOUNDS.minSeconds, input.seconds ?? GAME_BOT_BOUNDS.defaultSeconds),
@@ -341,7 +353,7 @@ const make = Effect.gen(function* () {
       const ffmpeg = yield* Effect.promise(() =>
         findExecutable("ffmpeg", { pathEnv, override: process.env.KURAMBIT_FFMPEG }),
       );
-      if (ffmpeg === null)
+      if (ffmpeg === null && !stepped)
         return yield* opError(
           "Bot run",
           "ffmpeg",
@@ -454,24 +466,34 @@ const make = Effect.gen(function* () {
                     Effect.andThen(
                       Effect.tryPromise({
                         try: (signal) => {
-                          const run = playBot(opened, {
-                            host: processHost,
-                            root,
-                            runId,
-                            runDir,
-                            childPath,
-                            videoPath,
-                            tracePath,
-                            botFile,
-                            seconds,
-                            ffmpeg,
-                            session,
-                            signal,
-                            runIndex: index,
-                            runTotal: count,
-                            seed: NodeCrypto.randomInt(1_000_000_000),
-                            priorRuns: [...priorRuns],
-                          });
+                          const run = stepped
+                            ? playSteppedBot(opened, {
+                                root,
+                                runId,
+                                runDir,
+                                tracePath,
+                                botFile,
+                                source,
+                                seconds,
+                              })
+                            : playBot(opened, {
+                                host: processHost,
+                                root,
+                                runId,
+                                runDir,
+                                childPath,
+                                videoPath,
+                                tracePath,
+                                botFile,
+                                seconds,
+                                ffmpeg: ffmpeg ?? "ffmpeg",
+                                session,
+                                signal,
+                                runIndex: index,
+                                runTotal: count,
+                                seed: NodeCrypto.randomInt(1_000_000_000),
+                                priorRuns: [...priorRuns],
+                              });
                           playing = run;
                           return run;
                         },
@@ -567,7 +589,7 @@ const make = Effect.gen(function* () {
                     runId,
                     file: NodePath.relative(root, botFile),
                     mode: "play",
-                    won: one.status.state === "done",
+                    won: botWon(one),
                     ending: botEnding(one.status.state),
                     seconds: one.gameSeconds,
                     findings: one.findings.length,
@@ -581,7 +603,7 @@ const make = Effect.gen(function* () {
                   `${JSON.stringify({
                     runId,
                     seconds: one.gameSeconds,
-                    won: one.status.state === "done",
+                    won: botWon(one),
                     ending: botEnding(one.status.state),
                     note: one.status.note.slice(0, 160),
                     final: botFinalState(one.finalState),

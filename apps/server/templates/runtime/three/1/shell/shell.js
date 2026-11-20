@@ -168,6 +168,8 @@ const STAGE_REPLAY_DRAW_EVERY = 30;
  * fresh run: a long run on a heavy game in software rendering would keep the person waiting.
  */
 const STAGE_REPLAY_MAX_MS = 20_000;
+/** A stepped bot's run keeps one frame in this many on the canvas while it hurries. */
+const BOT_DRAW_EVERY = 30;
 /** A loss Can't lose kept from ending the run is noted at most this often (play seconds). */
 const LOSS_NOTE_EVERY_S = 1;
 
@@ -320,6 +322,8 @@ function leaveRun() {
 }
 
 function clearRun() {
+  // A game that starts another run under a bot ends the bot's there, with what it played.
+  if (run?.bot !== undefined) botBudgetEnds(run);
   leaveRun();
   juiceShell.reset();
   animateShell.reset();
@@ -460,6 +464,7 @@ onRunEnded((won, text) => {
     }
     // Play goes on past the game's own ending, and the kept play ends here.
     run.recorder = null;
+    if (run.bot !== undefined) finishBot(play ?? null, outcome);
   }
 });
 
@@ -708,8 +713,92 @@ const reachedStop = (stepping) =>
     ? stepping.steps >= replayStop.step
     : stepping.time >= replayStop.at);
 
+/** The game's own values, as plain data: what a bot run ends with. */
+const stateValues = () =>
+  Object.fromEntries(
+    Object.entries(GameState).filter(
+      ([, value]) =>
+        typeof value === "string" ||
+        typeof value === "boolean" ||
+        (typeof value === "number" && Number.isFinite(value)),
+    ),
+  );
+
+/**
+ * A stepped bot's step (studio.bot): its decide(obs) names the actions held this step, and they
+ * are held through their first key or mouse button, so the run records and replays as a person's
+ * does. It runs outside the run's seeded work: a bot's own randomness never shifts the game's.
+ */
+function botInput(stepping) {
+  const bot = stepping.bot;
+  let actions = [];
+  try {
+    const obs = {
+      t: stepping.time,
+      step: stepping.steps,
+      state: GameState,
+      player: mark(stepping.time, stepping.ctx.player, {}).at,
+      ctx: stepping.ctx,
+    };
+    actions = bot.decide(obs, stepping.time) ?? [];
+  } catch (error) {
+    bot.error ??= `decide threw at ${stepping.time.toFixed(1)} s: ${error?.message ?? error}`;
+  }
+  bot.decisions += 1;
+  const keys = new Set();
+  const buttons = new Set();
+  for (const name of typeof actions[Symbol.iterator] === "function" ? actions : []) {
+    const action = controls.actions.get(name);
+    if (action === undefined) {
+      if (bot.unknown.size < 8) bot.unknown.add(String(name));
+    } else if (action.keys[0] !== undefined) keys.add(action.keys[0]);
+    else if (action.mouse[0] !== undefined) buttons.add(action.mouse[0]);
+  }
+  stepping.down.clear();
+  for (const key of keys) stepping.down.add(key);
+  stepping.buttons.clear();
+  for (const button of buttons) stepping.buttons.add(button);
+}
+
+/** The bot's run is over: by the game's own ending (`outcome`), or its budget (null). */
+function finishBot(play, outcome) {
+  const stepping = run;
+  const bot = stepping?.bot;
+  if (bot === undefined) return;
+  stepping.bot = undefined;
+  replayDrawEvery = 1;
+  releaseKeys();
+  redraw = true;
+  bot.resolve({
+    outcome,
+    seconds: Math.round(stepping.time * 10) / 10,
+    steps: stepping.steps,
+    decisions: bot.decisions,
+    wallMs: Math.round(nativeNow.call(performance) - bot.startedAt),
+    error: bot.error ?? null,
+    unknown: [...bot.unknown],
+    where: mark(stepping.time, stepping.ctx.player, GameState),
+    values: stateValues(),
+    play,
+  });
+}
+
+/** A bot's run cut by its budget: what it played so far is its play, kept once. */
+function botBudgetEnds(stepping) {
+  const play =
+    stepping.recorder?.soFar(
+      Math.round(stepping.time * 10) / 10,
+      mark(stepping.time, stepping.ctx.player, GameState),
+      stepping.input.reads,
+      { asked: true },
+    ) ?? null;
+  stepping.recorder = null;
+  finishBot(play, null);
+}
+
 /** One fixed step: this step's input, then the game, at the step's slice times the time scale. */
 function step() {
+  if (run.bot !== undefined) botInput(run);
   const { down, pressed, buttons, clicked } = run;
   const pad = run.player !== null ? run.player.input(run, run.steps, replayEvent) : gamepad;
   run.recorder?.input(run, gamepad);
@@ -1036,6 +1125,45 @@ const studio = installStudio({
       replayStop = Number.isFinite(options.at) ? { at: Math.max(0, options.at) } : null;
     });
   },
+  // A stepped bot (a .studio/bot/ file that exports decide(obs) → the actions held): a fresh run in
+  // play, stepped on the run's own clock as fast as the page allows, to the game's ending or
+  // `seconds` of play (or `wallMs` of real time). Its answer carries the run's play, recorded as a
+  // person's is, so it replays on any build.
+  async bot(source, options = {}) {
+    let decide;
+    try {
+      const url = URL.createObjectURL(new Blob([String(source)], { type: "text/javascript" }));
+      try {
+        decide = (await import(url)).decide;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      return { error: `the bot file does not load: ${error?.message ?? error}` };
+    }
+    if (typeof decide !== "function") return { error: "the bot file exports no decide(obs)" };
+    const seconds = Math.max(1, Number(options.seconds) || 120);
+    return new Promise((resolve) => {
+      replayDone?.(null);
+      handover = null;
+      replayPace = null;
+      nextReplay = null;
+      startRun();
+      const startedAt = nativeNow.call(performance);
+      run.bot = {
+        decide,
+        until: seconds,
+        wallUntil: startedAt + Math.max(5_000, Number(options.wallMs) || seconds * 1_000 + 30_000),
+        startedAt,
+        decisions: 0,
+        unknown: new Set(),
+        error: null,
+        resolve,
+      };
+      replayDrawEvery = Math.max(1, Math.floor(Number(options.drawEvery) || BOT_DRAW_EVERY));
+      replayFrames = 0;
+    });
+  },
   // The runs this page played to an end since the last call, for a harness session to keep.
   takePlays: () => finishedPlays.splice(0),
   // The harness's QA play: a retry is GameState.play()'s own startRun.
@@ -1115,8 +1243,15 @@ renderer.setAnimationLoop((now) => {
     const { id, live: before } = handover;
     freshRun(before, true);
     bridge.replayed({ id, slow: STAGE_REPLAY_MAX_MS / 1000 });
-  } else if (moving && run.player !== null && (replayPace === null || run.steps < replayPace)) {
-    // A replay: as many steps as fit in part of a frame, never waiting on real time.
+  } else if (run?.bot !== undefined && nativeNow.call(performance) > run.bot.wallUntil) {
+    // A page too slow for the bot's budget, or a game that paused itself: it ends on wall time.
+    botBudgetEnds(run);
+  } else if (
+    moving &&
+    (run.player !== null || run.bot !== undefined) &&
+    (replayPace === null || run.steps < replayPace)
+  ) {
+    // A replay or a stepped bot: as many steps as fit in part of a frame, never waiting on real time.
     const until = performance.now() + REPLAY_FRAME_MS;
     const stepping = run;
     for (;;) {
@@ -1128,6 +1263,13 @@ renderer.setAnimationLoop((now) => {
       if (reachedStop(stepping)) {
         finishReplay(null);
         break;
+      }
+      if (stepping.bot !== undefined) {
+        if (stepping.time >= stepping.bot.until) {
+          botBudgetEnds(stepping);
+          break;
+        }
+        continue;
       }
       if (
         replayDone !== null &&

@@ -212,6 +212,15 @@ const RUN_REPLAY = `(async (play, options) => {
     return null;
   }
 })`;
+const RUN_BOT = `(async (source, options) => {
+  const bot = window.__studio?.bot;
+  if (typeof bot !== "function") return "no-bot";
+  try {
+    return JSON.parse(JSON.stringify(await bot(source, options)));
+  } catch (error) {
+    return { error: String(error?.message ?? error) };
+  }
+})`;
 const TAKE_PLAYS = `(() => {
   const take = window.__studio?.takePlays;
   return typeof take === "function" ? JSON.parse(JSON.stringify(take())) : [];
@@ -1040,6 +1049,15 @@ export const openWebPlaySession = async (input: {
             .evaluate(`${RUN_REPLAY}(${JSON.stringify(play)}, ${JSON.stringify(options ?? {})})`)
             .catch(() => null),
           REPLAY_MS(play.steps * play.dt),
+        );
+        return answered === TIMED_OUT ? null : answered;
+      },
+      stepBot: async (source, options) => {
+        const answered = await bounded(
+          page
+            .evaluate(`${RUN_BOT}(${JSON.stringify(source)}, ${JSON.stringify(options)})`)
+            .catch(() => null),
+          options.wallMs + 15_000,
         );
         return answered === TIMED_OUT ? null : answered;
       },

@@ -5,6 +5,27 @@
 
 # Bot kit: write decisions, not navigation
 
+## Stepped bots: start here
+
+A bot file that exports `decide(obs)` plays inside the game's page on the
+run's own clock, as fast as the page allows, instead of in real time:
+
+```js
+export const goal = "Reach the reeds";
+// obs: { t, step, state (GameState), player ([x, y, z] or null), ctx }
+export function decide(obs) {
+  return obs.player && obs.player[0] < 14 ? ["move_right"] : ["jump"];
+}
+```
+
+`decide` runs every fixed step and returns the names of the ACTIONS held
+during it (main.js's `ACTIONS`, as `ctx.input` reads them). The run ends with
+the game's own `GameState.win`/`lose`, or after `seconds` of play. Its run is
+a play with one id: `game_play` op `replay` `{run: <id>, at: <s>}` shows any
+second of it, `{save: <name>, run: <id>}` keeps it as a test play. Keep
+`decide` plain JavaScript with no imports. The kit's format below still runs
+(in real time) for files that export `observe` instead.
+
 The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
 (`.studio/bot/<name>.mjs`) decides. The split:
 

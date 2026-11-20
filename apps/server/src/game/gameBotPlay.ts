@@ -42,7 +42,7 @@ import {
 import { spawnOwned, type OwnedProcess, type ProcessHostState } from "./processHost.ts";
 import { VIDEO_FPS, VIDEO_WIDTH, openFrameVideo, type FrameVideo } from "./frameVideo.ts";
 import type { PlayLaunch } from "./playLaunch.ts";
-import { keepPlay } from "./playFiles.ts";
+import { botPlayTag, keepPlay } from "./playFiles.ts";
 
 const END_SETTLE_MS = 1500;
 
@@ -54,17 +54,18 @@ const decodePlay = Schema.decodeUnknownOption(GamePlay);
  * folder as it was: no build. Their tags and how each ended, for the result; a run the game
  * never ended is not kept.
  */
-const keepBotRuns = async (play: BotLaunch["play"], root: string) => {
+const keepBotRuns = async (play: BotLaunch["play"], root: string, runId: string) => {
   const taken = await (play.takePlays?.() ?? Promise.resolve([])).catch(() => []);
   const kept: Array<string> = [];
   for (const raw of taken) {
     const decoded = decodePlay(raw);
     if (Option.isNone(decoded) || decoded.value.outcome.left === true) continue;
-    const id = await keepPlay(root, {
-      at: new Date().toISOString(),
-      build: null,
-      play: decoded.value,
-    }).catch(() => null);
+    // The first is kept under the bot run's own id, so that one id names its play too.
+    const id = await keepPlay(
+      root,
+      { at: new Date().toISOString(), build: null, play: decoded.value },
+      kept.length === 0 ? botPlayTag(runId) : undefined,
+    ).catch(() => null);
     if (id !== null)
       kept.push(`\`${keptRunTag(id)}\` (${playOutcomeWords(decoded.value.outcome)})`);
   }
@@ -564,7 +565,7 @@ export const playBot = async (launch: BotLaunch, args: BotRunArgs): Promise<Game
         error: `this game's runner takes no state writes, so ${target} was never sent; the game's harness files predate them`,
       })),
     ];
-    const keptRuns = await keepBotRuns(play, args.root);
+    const keptRuns = await keepBotRuns(play, args.root, args.runId);
     await play.close();
     const videoFacts = (await video?.finish()) ?? null;
     // Every child ends with the run: the bot child's stdin pipe closes so its

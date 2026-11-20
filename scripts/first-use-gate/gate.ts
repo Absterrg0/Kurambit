@@ -10,7 +10,8 @@
  *
  * New game from a brief, the Stage shows a frame, play, Tune a value, Check (look, final), undo,
  * Keep going one step, Blender code, look and export (when the server finds a Blender:
- * KURAMBIT_BLENDER or PATH), export Web. `--home` keeps its `tools/` and `caches/` between runs
+ * KURAMBIT_BLENDER or PATH), export Web. `--old-game <dir>`: a copy of a game made before this
+ * checkout opens, is looked at, and its own .studio/bot/play.mjs plays, as it did. `--home` keeps its `tools/` and `caches/` between runs
  * (the headless browser and Blender add-on the server downloads); the rest starts empty.
  */
 import * as NodeCrypto from "node:crypto";
@@ -44,7 +45,7 @@ import { observationProtocolLayer } from "../lib/observation-transport.ts";
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const checkout = NodePath.resolve(here, "../..");
 const { values: args } = NodeUtil.parseArgs({
-  options: { home: { type: "string" }, out: { type: "string" } },
+  options: { home: { type: "string" }, out: { type: "string" }, "old-game": { type: "string" } },
 });
 const home = NodePath.resolve(args.home ?? NodePath.join(NodeOS.tmpdir(), "kurambit-gate"));
 const out = NodePath.resolve(args.out ?? NodePath.join(home, "report"));
@@ -95,6 +96,7 @@ export function update(dt) {
 
 const BRIEF = "A fish swims across the pond to the reeds.";
 const PHRASES = {
+  old: "Look at this older game and play its bot",
   play: "Play the pond and see the fish swim",
   check: "Check the pond as a player sees it",
   blender: "Model a rock for the pond in Blender",
@@ -105,6 +107,11 @@ const PHRASES = {
 /** What the stand-in does for each message: written before the server starts. */
 const standinSteps = {
   [PHRASES.step]: [{ write: ["web/main.js", pond("0x7fb0d8", 5)] }, { reply: "Two more reeds." }],
+  [PHRASES.old]: [
+    { tool: ["game_check", { look: {} }] },
+    { tool: ["game_play", { bot: { file: ".studio/bot/play.mjs", seconds: 45 } }] },
+    { tool: ["game_play", { replay: { run: "$last.runId", at: 5 } }] },
+  ],
   [PHRASES.play]: [
     // Its first act opens the session.
     { tool: ["game_play", { act: { steps: [{ press: "Space" }, { waitMs: 800 }] } }] },
@@ -120,6 +127,15 @@ const standinSteps = {
       ],
     },
     { tool: ["game_play", { close: { sessionId: "$last.sessionId" } }] },
+    // A stepped bot plays the run on its own clock; its one id names the play replay shows.
+    {
+      write: [
+        ".studio/bot/swim.mjs",
+        'export const goal = "Reach the reeds";\nexport function decide() {\n  return ["swim"];\n}\n',
+      ],
+    },
+    { tool: ["game_play", { bot: { file: ".studio/bot/swim.mjs", seconds: 30 } }] },
+    { tool: ["game_play", { replay: { run: "$last.runId", at: 2 } }] },
   ],
   [PHRASES.check]: [
     { tool: ["game_check", { look: {} }] },
@@ -541,11 +557,18 @@ async function main() {
       succeeded(answers[2], "game_play close");
       const value = evaluated.answer.structuredContent?.value as { canvases?: number } | undefined;
       expect((value?.canvases ?? 0) > 0, "eval found no canvas in the playing page");
+      const bot = succeeded(answers[3], "game_play bot").answer.structuredContent ?? {};
+      const final = bot.finalState as { result?: string } | undefined;
+      expect(
+        final?.result === "won",
+        `the stepped bot did not win: ${textOf(answers[3]!).slice(0, 300)}`,
+      );
+      succeeded(answers[4], "game_play replay of the bot's run");
       const result = act.answer.structuredContent ?? {};
       expect(typeof result.screenshotPath === "string", "the play answered no frame");
       const player = (result.probe as { player?: { x?: number } } | null)?.player;
       expect(typeof player?.x === "number" && player.x > -6, "the fish did not swim while played");
-      return `played ${result.nominalMs} ms of game; the fish swam to x ${player!.x!.toFixed(1)}; eval saw ${value!.canvases} canvas`;
+      return `played ${result.nominalMs} ms of game; the fish swam to x ${player!.x!.toFixed(1)}; eval saw ${value!.canvases} canvas; the bot won at ${String(bot.gameSeconds)} s, ${String(bot.timeRatio)}× real time`;
     });
 
     let tuned!: GameBuild;
@@ -675,6 +698,23 @@ async function main() {
       );
       return `${zip.files.length} files in ${NodePath.basename(zip.archivePath)}`;
     });
+    const oldGame = args["old-game"];
+    if (oldGame !== undefined)
+      await path("an older game opens, plays and runs its bot", async () => {
+        const copy = NodePath.join(gamesDir, `old-${NodePath.basename(oldGame)}`);
+        await NodeFSP.rm(copy, { recursive: true, force: true });
+        await NodeFSP.cp(NodePath.resolve(oldGame), copy, { recursive: true });
+        const opened = await call((client) =>
+          client[WS_METHODS.gameOpen]({ path: copy, modelSelection, newChat: true }),
+        );
+        const answers = await say(opened.threadId, PHRASES.old);
+        const look = succeeded(answers[0], "the older game's look");
+        const bot = succeeded(answers[1], "the older game's bot").answer.structuredContent ?? {};
+        const status = bot.status as { state?: string; note?: string } | undefined;
+        expect(bot.played !== false, `its bot did not play: ${status?.note ?? ""}`);
+        const replayed = answers[2]?.answer.isError !== true;
+        return `look ${imagesOf(look)} image(s); its kit bot ended ${status?.state} at ${String(bot.gameSeconds)} s (${String(bot.timeRatio)}× real time)${replayed ? ", its run replays by the bot's id" : ", no ended run to replay"}`;
+      });
   } finally {
     await server.stop();
     const seconds = Math.round((Date.now() - began) / 1000);

@@ -53,15 +53,22 @@ const writeAtomically = async (dir: string, name: string, text: string) => {
 };
 
 /** Keeps a run played to its end; returns its id. Older runs past the newest few go. */
-export const keepPlay = async (root: string, kept: KeptPlay): Promise<string> => {
+export const keepPlay = async (root: string, kept: KeptPlay, tag?: string): Promise<string> => {
   const dir = await ensureGameDir(root, KEPT_DIR);
-  const id = `${keptId(kept.at)}-${NodeCrypto.randomBytes(3).toString("hex")}`;
+  const id = `${keptId(kept.at)}-${tag ?? NodeCrypto.randomBytes(3).toString("hex")}`;
   await writeAtomically(dir, `${id}.json`, encodeKept(kept));
   const names = (await NodeFSP.readdir(dir)).filter((each) => each.endsWith(".json")).sort();
   for (const old of names.slice(0, Math.max(0, names.length - KEPT)))
     await NodeFSP.rm(NodePath.join(dir, old), { force: true });
   return id;
 };
+
+const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * The tag a bot run's play is kept under: its run id's first six characters, so the one id a bot
+ * run prints names its play too (keptPlay takes either).
+ */
+export const botPlayTag = (runId: string) => runId.replace(/-/g, "").slice(0, 6).toLowerCase();
 
 /** A kept run's id: when it was kept, then a few random characters; its file sorts by it. */
 const keptId = (at: string) => at.replace(/[:.]/g, "-");
@@ -87,11 +94,14 @@ export const keptPlay = async (
   id?: string,
 ): Promise<(KeptPlay & { readonly id: string }) | null> => {
   const { dir, names } = await keptNames(root);
+  const wanted = id !== undefined && RUN_ID.test(id) ? botPlayTag(id) : id;
   const named = (each: string) =>
-    id === undefined || each === `${id}.json` || (id.length >= 6 && each.endsWith(`-${id}.json`));
+    wanted === undefined ||
+    each === `${wanted}.json` ||
+    (wanted.length >= 6 && each.endsWith(`-${wanted}.json`));
   for (const name of names.filter(named)) {
     const kept = decodeKept(await NodeFSP.readFile(NodePath.join(dir, name), "utf8"));
-    if (Option.isNone(kept) || (id === undefined && kept.value.play.outcome.left === true))
+    if (Option.isNone(kept) || (wanted === undefined && kept.value.play.outcome.left === true))
       continue;
     return { ...kept.value, id: name.slice(0, -".json".length) };
   }

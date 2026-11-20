@@ -221,6 +221,7 @@ export function installStudio({
   scene,
   qa,
   replay,
+  bot,
   takePlays,
   sheet,
   play,
@@ -273,6 +274,8 @@ export function installStudio({
     // step (shell/replay.js): how it ended, and where the run stood each second. `options`:
     // { drawEvery } for a measuring replay, { at } to stop and hold at a second of play.
     replay: (play, options) => replay(play, options),
+    // A stepped bot's run (shell.js bot): the source of a file that exports decide(obs).
+    bot: (source, options) => bot(source, options),
     // The runs this page played to an end since the last call (shell/replay.js), for a harness
     // session, which no Stage holds, to keep as the Stage keeps a person's.
     takePlays: () => takePlays(),

@@ -100,6 +100,20 @@ const ENDINGS: Readonly<Record<string, string>> = {
 };
 export const botEnding = (state: string): string => ENDINGS[state] ?? state.slice(0, 40);
 
+/**
+ * Whether a bot run won: by the game's own ending when the run ended (GameState.result), never
+ * by the bot's word against it. A stepped bot's "done" says only that its run is over.
+ */
+export const botWon = (result: {
+  readonly status: { readonly state: string; readonly evidence?: unknown };
+  readonly finalState: Readonly<Record<string, unknown>>;
+}) => {
+  if (result.status.state !== "done") return false;
+  if (result.finalState["state"] === "ended") return result.finalState["result"] === "won";
+  const evidence = result.status.evidence as { readonly stepped?: unknown } | undefined;
+  return evidence?.stepped !== true;
+};
+
 /** The endings only the harness measures; a bot's own status can never claim one. */
 const HARNESS_STATES: ReadonlySet<string> = new Set([
   "crashed",
