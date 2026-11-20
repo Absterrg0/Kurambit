@@ -516,6 +516,7 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
     size = max(0.05, float(np.mean([rig.head(b)[2] for b in spine])))
     # A wing with a skin (anatomy.wing) rests half folded; feathers fold flat.
     fold = [tuple(x) for x in json.loads(arm[anatomy.FOLD_KEY])] if anatomy.FOLD_KEY in arm else FOLD
+    fingers = json.loads(arm.get(anatomy.FINGERS_KEY, "{}") or "{}")
     out = {}
     for clip in clips:
         if clip not in CLIPS:
@@ -556,6 +557,9 @@ def creature_clips(armature, clips=("walk", "idle"), *, fps=None, **options):
                     sweep, lift = pose["wings"][j] if "wings" in pose and j < len(pose["wings"]) else fold[min(j, len(fold) - 1)]
                     turns[b] = (side * sweep, lift)
             pose["turns"] = turns
+            # A skinned wing's fingers spread to fly and close like a fan on the ground.
+            shut = 0.0 if clip in ("flap", "fly") else 1.0
+            pose["fingers"] = {f: (v["axis"], v["fold"] * shut) for f, v in fingers.items()}
         act = _key(arm, rig, label, made, legs_rec, body_bone, centre, rear, necks, heads, tails, ears)
         # The generator knows the speed its feet were planted for; the export's measure reads it
         # off the feet, and takes this where it finds none.
@@ -596,6 +600,7 @@ def _pose(rig, pose, legs_rec, body_bone, centre, rear, necks, heads, tails, ear
     M = animrig.M4(R, pivot + np.asarray(b["at"], float) - R @ pivot)
     head_yaw, head_pitch = pose.get("head", (0.0, 0.0))
     turns = pose.get("turns", {})
+    fingers = pose.get("fingers", {})
     head_set = set(n for chain in heads for n in chain) if isinstance(heads, list) and heads and isinstance(heads[0], list) else set(heads)
     neck_set = set(necks)
     tail_of = {n: (i, chain) for chain in tails for i, n in enumerate(chain)}
@@ -617,7 +622,10 @@ def _pose(rig, pose, legs_rec, body_bone, centre, rear, necks, heads, tails, ear
             continue
         Pn = rig.local(n, P, np.eye(4))
         Rn = Pn[:3, :3]
-        if n in turns:
+        if n in fingers:
+            axis, deg = fingers[n]
+            P[n] = animrig.M4(Rn @ _axis_rot(axis, deg), Pn[:3, 3])
+        elif n in turns:
             yaw, pitch = turns[n]
             d = Rn[:, 1]
             # A wing lifts about the body's length, whichever way it is swept; a spine joint yaws.

@@ -353,6 +353,10 @@ def fur(armature, chain, *, colour="#3a2a20", length=None, count=None, side="top
 
 
 FOLD_KEY = "kurambit_wing_fold"
+# A skinned wing's fingers: {bone: {"axis": its local axis across the wing, "fold": degrees}}. The
+# clips close them toward the arm like a fan on the ground and open them in flight.
+FINGERS_KEY = "kurambit_wing_fingers"
+FINGER_CLOSE = 0.8
 # How a skinned wing rests on the ground, per bone from the shoulder (sweep, lift, degrees): half
 # folded, up and back. Folded flat as feathers fold, a skin crosses itself.
 HALF_FOLD = ((34.0, 38.0), (-46.0, 0.0), (30.0, 0.0), (0.0, 0.0))
@@ -413,18 +417,23 @@ def feathers(armature, chain="wing", *, depth, colour="#5a3a2a", cover=None, per
 def wing(armature, chain="wing", *, depth, colour="#8a3a2a", ribs=None, direction=(0, 1, 0), taper=0.25):
     """A wing's skin on its chain (both sides), as a bat's or a dragon's: a membrane from the bones
     back depth metres at the root, scalloped between ribs that run from each joint to its trailing
-    edge (ribs: their hex colour, default a darker shade). It bends in a curve across each joint
-    and its inner edge stays on the body, and such a wing rests half folded, up and back. Returns
-    the objects' names."""
+    edge (ribs: their hex colour, default a darker shade). Each rib is a finger bone, and the skin
+    runs from the arm at its leading edge to the fingers either side at its trailing edge, so the
+    clips (made after it) close the wing like a fan on the ground and open it in flight; its inner
+    edge stays on the body. Returns the objects' names."""
     arm = _arm(armature)
     roles, names = _wing_chains(arm, chain)
     mats = [helpers.material(colour, name="Wing skin"), helpers.material(ribs or _shade(colour, 0.6), name="Wing ribs")]
     back = Vector(direction).normalized()
     made = []
+    fingers = _fingers(arm, roles, names, depth, back, taper)
     for cname in names:
         bones = [arm.data.bones[b] for b in roles[cname]]
         pts = [arm.matrix_world @ b.head_local for b in bones] + [arm.matrix_world @ bones[-1].tail_local]
         n, cols, rows = len(bones), 5, 6
+        # Where the trailing edge is held at each joint: the body, the fingers, the tip.
+        anchor = [bones[0].parent.name if bones[0].parent is not None else bones[0].name]
+        anchor += [fingers.get(bones[k].name, {}).get("name", bones[k].name) for k in range(1, n)] + [bones[-1].name]
         out = (pts[-1] - pts[0]).normalized()
         normal = out.cross(back).normalized()
         parent = bones[0].parent.name if bones[0].parent is not None else bones[0].name
@@ -464,6 +473,13 @@ def wing(armature, chain="wing", *, depth, colour="#8a3a2a", ribs=None, directio
                         w[bones[a].name], w[bones[a - 1].name] = 1 - 0.5 * k, 0.5 * k
                     else:
                         w[bones[a].name] = 1.0
+                # Toward the trailing edge the skin is held by the fingers either side of it.
+                x = j + u
+                k, f = min(n - 1, int(math.floor(x))), x - min(n - 1, int(math.floor(x)))
+                held = {}
+                for bone, share in ((anchor[k], 1 - f), (anchor[k + 1], f)):
+                    held[bone] = held.get(bone, 0.0) + share
+                w = {b_: (1 - s) * w.get(b_, 0.0) + s * held.get(b_, 0.0) for b_ in set(w) | set(held)}
                 weights.append(w)
         for i in range(total):
             for r in range(rows):
@@ -498,7 +514,7 @@ def wing(armature, chain="wing", *, depth, colour="#8a3a2a", ribs=None, directio
                 path = [(pts[j] + d * (reach * u) + normal * 0.004, normal) for u in np.linspace(0, 1, 5)]
                 before = len(b.verts)
                 b.lock(path, 0.05 * depth, 0.05 * depth, sides=5, root=1.0, taper=0.3)
-                owner += [bones[min(j, n - 1) - (1 if j == n else 0)].name] * (len(b.verts) - before)
+                owner += [anchor[j] if j < n else bones[-1].name] * (len(b.verts) - before)
         for j in range(n):
             path = [(pts[j].lerp(pts[j + 1], u), normal) for u in np.linspace(0, 1, 3)]
             before = len(b.verts)
@@ -510,4 +526,41 @@ def wing(armature, chain="wing", *, depth, colour="#8a3a2a", ribs=None, directio
         skeleton.bind(ro, arm)
         made.append(ro.name)
     arm[FOLD_KEY] = json.dumps(HALF_FOLD)
+    arm[FINGERS_KEY] = json.dumps({f["name"]: {"axis": f["axis"], "fold": f["fold"]} for f in fingers.values()})
     return made
+
+
+def _fingers(arm, roles, names, depth, back, taper):
+    """A finger bone along each rib from a wing's inner joints to its trailing edge, on the bone
+    that starts there (made once); per chain bone: its finger's name, local fold axis and angle."""
+    want = {}
+    for cname in names:
+        bones = [arm.data.bones[b] for b in roles[cname]]
+        pts = [arm.matrix_world @ b.head_local for b in bones] + [arm.matrix_world @ bones[-1].tail_local]
+        n = len(bones)
+        out = (pts[-1] - pts[0]).normalized()
+        normal = out.cross(back).normalized()
+        inv = arm.matrix_world.inverted()
+        for j in range(1, n):
+            t = j / n
+            reach = depth * (1 - (1 - taper) * t ** 1.4)
+            d = (back * (1 - 0.6 * t) + out * 0.6 * t).normalized()
+            # Folded, a finger lies back along the arm toward the body: the signed angle to it about
+            # the wing's normal, most of the way.
+            to = -out
+            angle = math.degrees(math.atan2(normal.dot(d.cross(to)), d.dot(to))) * FINGER_CLOSE
+            want[bones[j].name] = {"name": f"{bones[j].name}_finger", "parent": bones[j].name, "head": inv @ pts[j], "tail": inv @ (pts[j] + d * reach),
+                                   "normal": (inv.to_3x3() @ normal).normalized(), "fold": round(angle, 2)}
+    skeleton.object_mode()
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = arm.data.edit_bones
+    for f in want.values():
+        b = eb.get(f["name"]) or eb.new(f["name"])
+        b.head, b.tail, b.roll = f["head"], f["tail"], 0.0
+        b.parent, b.use_connect = eb[f["parent"]], False
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for f in want.values():
+        rest = arm.data.bones[f["name"]].matrix_local.to_3x3()
+        f["axis"] = [round(v, 5) for v in rest.transposed() @ f.pop("normal")]
+    return want
