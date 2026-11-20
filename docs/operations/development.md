@@ -101,6 +101,17 @@ CI owns the full suite; see
 The [manual Windows lane](../../.github/workflows/windows-tests.yml) is available for focused
 Windows investigation while that suite is not a required gate.
 
+### The first-use gate
+
+`vp run first-use-gate` drives a person's golden paths through a private server with every
+provider off and a stand-in agent (no model): a new game from a brief, the Stage's frame, play,
+Tune, Check, undo, one Keep going step, Blender code, look and export, and export Web. It runs
+in about two minutes and fails on the first path whose result a person would not see. Blender's
+path runs only when the server finds one (`KURAMBIT_BLENDER`). Pass `--home <dir>` to keep the
+headless browser the server installs between runs; CI runs it on Linux in the `First-use gate`
+job. A change to what an agent calls (tool names, ops, their inputs) updates the stand-in's
+steps in [gate.ts](../../scripts/first-use-gate/gate.ts) in the same commit.
+
 ### Unused code
 
 `vp run knip:check` checks unused files and dependencies across the repo, then

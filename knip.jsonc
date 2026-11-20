@@ -26,6 +26,8 @@
         "smoke-cli-archive.ts",
         // The bench's bare lane hands this screenshot script to the agent it runs.
         "bench/bare/shot.mjs",
+        // The first-use gate's server runs this stand-in agent as its only provider.
+        "first-use-gate/standin.mjs",
       ],
       // The `kurambit` npm package's files: copied into the package, never imported.
       "ignore": ["npm-launcher/**"],

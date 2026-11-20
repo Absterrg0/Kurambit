@@ -411,6 +411,47 @@ jobs:
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
+  # The first-use gate (scripts/first-use-gate/gate.ts): a person's golden paths through a real
+  # server, with a stand-in agent and no model. No Blender here, so its path is skipped; macOS and
+  # Windows runs come later.
+  first_use_gate:
+    name: First-use gate
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.test_server != 'false' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: ./.github/actions/setup-ci-deps
+
+      # The headless browser the server installs into its home, pinned in PreviewBrowser.ts.
+      - name: Cache the server's browser
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/kurambit-gate/tools
+          key: gate-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/server/src/preview/PreviewBrowser.ts') }}
+
+      - name: Run the gate
+        run: |
+          git config --global user.name "First-use gate"
+          git config --global user.email "gate@localhost"
+          node scripts/first-use-gate/gate.ts --home "$RUNNER_TEMP/kurambit-gate" --out "$RUNNER_TEMP/gate-report"
+
+      - name: Keep the gate's report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-use-gate
+          path: ${{ runner.temp }}/gate-report
+
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
   # or resharding jobs needs no ruleset change. Add every new job to `needs`.
@@ -419,7 +460,7 @@ jobs:
   check:
     name: Check
     if: ${{ always() }}
-    needs: [changes, lint, build, test, test_web, test_server, rust, release_smoke]
+    needs: [changes, lint, build, test, test_web, test_server, rust, release_smoke, first_use_gate]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -432,7 +473,7 @@ jobs:
           # not needed. Gates are keyed by job name, except merged Build and the
           # macOS lint.
           echo "$RESULTS" | jq -e '.changes.outputs as $gates
-            | {build: ["build", "typecheck"]} as $renamed
+            | {build: ["build", "typecheck"], first_use_gate: ["test_server"]} as $renamed
             | all(to_entries[];
                 .value.result == "success"
                 or (.value.result == "skipped"
