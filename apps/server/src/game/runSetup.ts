@@ -109,7 +109,9 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
       await NodeFSP.cp(NodePath.join(templates, "studio"), skills, {
         recursive: true,
         force: true,
+        // `harness/` is the harness's own text for agents (studioText.ts), not a skill.
         filter: (from, to) =>
+          NodePath.relative(NodePath.join(templates, "studio"), from) !== "harness" &&
           !others.some((name) => NodePath.basename(from) === `${name}.md`) &&
           writableInGame(root, to),
       });

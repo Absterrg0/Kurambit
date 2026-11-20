@@ -1763,7 +1763,7 @@ const make = Effect.gen(function* () {
         );
       if (source.lane !== "model" && source.lane !== "creature")
         return yield* refuse(
-          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is (game_assets op import first where the engine has an import step).`,
+          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is.`,
         );
       if (source.lane === "creature") {
         const refused = lockCharacterRouteRefusal(

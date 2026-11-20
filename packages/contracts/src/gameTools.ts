@@ -94,7 +94,6 @@ export const GameAssetsToolInput = Schema.Struct({
   image_edit: op(GameImageEditInput),
   // Published bare like lock: GamePicturesInput, decoded by the service and taught by its skill.
   pictures: op(Schema.Record(Schema.String, Schema.Unknown)),
-  import: op(Nothing),
   mine: op(Schema.Struct({ add: Schema.optionalKey(Schema.String) })),
 });
 export type GameAssetsToolInput = typeof GameAssetsToolInput.Type;
@@ -140,7 +139,8 @@ export const GameBuildsToolInput = Schema.Struct({
       delete: Schema.optionalKey(GameSavedDeleteFields.name),
     }),
   ),
-  export: op(Schema.Struct({ target: Schema.Literals(["Web", "Linux", "Windows"]) })),
+  // A three.js game exports Web only (threeProfile.exportTargets).
+  export: op(Schema.Struct({ target: Schema.Literals(["Web"]) })),
   package: op(Schema.Struct({ target: Schema.Literals(["web"]) })),
   stop: op(Nothing),
 });

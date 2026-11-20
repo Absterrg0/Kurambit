@@ -10,8 +10,8 @@
  *
  * New game from a brief, the Stage shows a frame, play, Tune a value, Check (look, final), undo,
  * Keep going one step, Blender code, look and export (when the server finds a Blender:
- * KURAMBIT_BLENDER or PATH), export Web. `--home` keeps its `tools/` between runs (the headless
- * browser the server installs); everything else in it starts empty each run.
+ * KURAMBIT_BLENDER or PATH), export Web. `--home` keeps its `tools/` and `caches/` between runs
+ * (the headless browser and Blender add-on the server downloads); the rest starts empty.
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -167,11 +167,14 @@ async function seedSettings() {
   );
 }
 
-/** A fresh home each run, except the browser the server installed into `tools/`. */
+/**
+ * A fresh home each run, except what the server downloaded: the headless browser (`tools/`) and
+ * Blender's pinned add-on (`caches/`).
+ */
 async function resetHome() {
   await NodeFSP.mkdir(home, { recursive: true });
   for (const entry of await NodeFSP.readdir(home)) {
-    if (entry === "tools") continue;
+    if (entry === "tools" || entry === "caches") continue;
     await NodeFSP.rm(NodePath.join(home, entry), { recursive: true, force: true });
   }
   await NodeFSP.mkdir(gamesDir, { recursive: true });

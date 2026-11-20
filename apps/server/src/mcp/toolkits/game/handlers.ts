@@ -79,6 +79,7 @@ import {
 import { GAME_TOOL_OPS, opRefusal, type GameToolName } from "./placement.ts";
 import type { GameEngineCapability } from "../../../game/engineProfile.ts";
 import { besideReference, gameReference } from "../../../game/gameReference.ts";
+import { fill, STUDIO_TEXT } from "../../../game/studioText.ts";
 
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
@@ -163,27 +164,22 @@ const personsModelChoice = Effect.gen(function* () {
     operation: "model-choice",
     path: "game.json",
     reason: "invalid-input",
-    detail: `Keep going is working a step on this game, and game.json's model choice changed since the step started (characters ${started.route} → ${now.route}, library ${started.library} → ${now.library}). How models are made is the person's choice and stays as it was while the step runs: put characters back to "${started.route}" and library to ${started.library} (the step's end puts them back anyway), and say in your reply what the work needed.`,
+    detail: fill(STUDIO_TEXT.results.modelChoiceMoved, {
+      startedRoute: started.route,
+      nowRoute: now.route,
+      startedLibrary: started.library,
+      nowLibrary: now.library,
+    }),
   });
 });
 
 /**
- * How the agent judges its frame against the reference, carried by every check of a game that has
- * one, so it arrives at each look, including the last: a clean check is not a matching picture.
+ * How the agent judges its frame: against the reference when the game has one (carried by every
+ * check, including the last: a clean check is not a matching picture), else against the brief,
+ * never against a look the harness prefers. The opening line is said first when the check shows
+ * the page as a player opens it beside play: an eye, not a rule.
  */
-const FRAME_REVIEW =
-  "Before you change anything, and before you end the turn, write a numbered critique of the game's frame (top) against the reference (bottom), biggest difference first. 1. The camera comes first, solved rather than judged by eye: measure landmarks in the reference in pixels (where the horizon crosses, the subject's ends, top and waterline or ground line, how much larger its near end draws than its far end) and solve its camera from them, in a few lines of code: height above the ground or water, lens (the vertical field of view; a long lens of 15 to 30 degrees draws near and far ends at nearly one size) and angle round the subject, and so its distance. Put that camera in the game as a picture camera the player can switch to (a key) and that play starts in, so each check's frame is taken through it, and look until the subject's outline lies over the reference's. Then 2. silhouette and proportions, 3. colour, light and mood (sky and clouds, ground or sea, the subject's own colours, the time of day and the atmosphere; write the game's own sky, water or shader for it where the picture needs one, rather than settle), 4. surface and detail, 5. anything else the picture shows that the game lacks (its effects, its interface: the game draws its own). Fix the first item and look again, as many times as it takes. A clean check, final or not, says the game runs, not that it matches: the turn ends when this critique finds nothing major. When the person asked the game to match this picture, pass critique on your final check: the biggest difference left, and whether it is still major.";
-
-/**
- * The same look for a game without a reference: the brief is the only target, so the light and
- * atmosphere are judged against what it describes, never against a look the harness prefers.
- */
-const BRIEF_REVIEW =
-  "Before you end the turn, critique this frame as a player would, biggest gap first: does it read at a glance (the player big enough and seen from a side that reads, nothing washed out or too dark), do its light and atmosphere fit the mood the brief describes (the time of day, the weather, the place's own lights), and do its title and HUD look made for this game? Fix the biggest gap and look again.";
-
-/** Said first when the check shows the page as a player opens it beside play: an eye, not a rule. */
-const OPENING_REVIEW =
-  "The first picture is the game as a player opens it, before they press anything: what they see first. ";
+const REVIEW = STUDIO_TEXT.results;
 
 /** A check's answer, with its pictures attached as images (the views' PNGs, title then play). */
 const GameCheckAnswer = Schema.Struct({
@@ -235,7 +231,7 @@ const check = (final: boolean) =>
       ...(shown.length === 0
         ? {}
         : {
-            review: `${views[0]?.entry === "boot" && shown.length > 1 ? OPENING_REVIEW : ""}${reference === null ? BRIEF_REVIEW : FRAME_REVIEW}`,
+            review: `${views[0]?.entry === "boot" && shown.length > 1 ? REVIEW.openingReview : ""}${reference === null ? REVIEW.briefReview : REVIEW.frameReview}`,
           }),
     };
   }).pipe(as(GameCheckAnswer));
@@ -425,10 +421,6 @@ const assetsHandlers = {
             withGame(GameEngine.GameEngine, (engines, threadId) =>
               engines.pictures(threadId, pictures),
             ).pipe(as(GamePicturesResult)),
-          import: () =>
-            withGame(GameEngine.GameEngine, (engines, threadId) => engines.import(threadId)).pipe(
-              as(GameActionResult),
-            ),
           mine: ({ add }) =>
             withGame(GameLibrary.GameLibrary, (library, threadId) =>
               add === undefined

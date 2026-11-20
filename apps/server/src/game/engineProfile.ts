@@ -64,7 +64,7 @@ export interface GameEngineProfile {
   };
   /** The path a game's code loads a project-relative file by (./x). */
   readonly resourcePath: (projectRelative: string) => string;
-  /** Whether game_assets op import does work here; false when the project's files are the game as they are. */
+  /** Whether the engine imports a file before the game can load it; false when the project's files are the game as they are. */
   readonly importStep: boolean;
   /**
    * Whether a Blender export ships compressed (WebP images, meshopt geometry and clips): true where
@@ -132,26 +132,19 @@ export const engineViewport = (engine: GameEngineName): GameViewport =>
 
 /** What an agent runs after it brought a file into the engine project. */
 export const afterAddingArt = (profile: GameEngineProfile) =>
-  profile.importStep ? "Run game_assets op import, then game_check." : "Run game_check.";
+  profile.importStep ? "Run the engine's import, then game_check." : "Run game_check.";
 
 /**
  * What a game tool can need of its game's engine. `play` is every available
  * engine's: an engine this version does not have gives none, so its games'
  * agents get only the tools that need none (status, builds, saved media).
  */
-export type GameEngineCapability =
-  | "play"
-  | "import"
-  | "tune"
-  | "turnLoop"
-  | "packageWeb"
-  | "blender";
+export type GameEngineCapability = "play" | "tune" | "turnLoop" | "packageWeb" | "blender";
 const packageable = (profile: GameEngineProfile, target: GameExportTarget) =>
   profile.releases.some((release) => release.target === target && release.packageable);
 const capabilitiesOf = (profile: GameEngineProfile): ReadonlySet<GameEngineCapability> =>
   new Set<GameEngineCapability>([
     "play",
-    ...(profile.importStep ? (["import"] as const) : []),
     ...(profile.tuneFile === null ? [] : (["tune"] as const)),
     ...(profile.turnLoop ? (["turnLoop"] as const) : []),
     ...(packageable(profile, "Web") ? (["packageWeb"] as const) : []),

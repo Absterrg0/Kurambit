@@ -400,7 +400,10 @@ over RPC. A tool and its RPC twin call the same method of the service that owns 
 resolve the thread's game and take its operation lock themselves (`GameProjectService.exclusive`),
 so a new operation touches one service.
 
-A game's own `AGENTS.md` holds only its engine's guidance. The harness's rules travel with the
+A game's own `AGENTS.md` holds only its engine's guidance. The harness's own words for agents
+(turn rules, the first turn, tool descriptions, review text in results) are files in
+`apps/server/templates/studio/harness/`, JSON so the dev tree, tests and the packed server import
+them alike (`studioText.ts`); they are never copied into a game. The harness's rules travel with the
 turn instead, so changing them needs no migration of games already made: the first turn's steps
 are in the first message (`firstTurnMessage`), and every turn's rules (`gameTurnRules`) go in the
 turn input's `harnessInstructions`, which run execution fills from the cwd's `game.json` and each

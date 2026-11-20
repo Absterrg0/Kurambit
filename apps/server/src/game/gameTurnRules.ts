@@ -9,6 +9,7 @@ import { GameManifest, isAvailableEngine, keptRunTag, playOutcomeWords } from "@
 import { decisionsForTurn } from "./GameDecisions.ts";
 import { keptSince, savedPlays, type KeptPlay } from "./playFiles.ts";
 import { gameTurnRules } from "./scaffold.ts";
+import { fill, STUDIO_TEXT } from "./studioText.ts";
 
 const decodeManifest = Schema.decodeUnknownOption(Schema.fromJsonString(GameManifest));
 
@@ -50,9 +51,12 @@ const runsSection = (runs: ReadonlyArray<KeptRun>, sinceTurn: boolean): string |
   const first = runs[0];
   if (first === undefined) return null;
   const oneBuild = runs.every((run) => run.build === first.build);
-  const when = sinceTurn ? "Since your last turn the person" : "The person recently";
-  const on = oneBuild && first.build !== null ? ` on ${buildWords(first.build)}` : "";
-  const header = `${when} played ${runs.length === 1 ? "once" : `${runs.length} times`}${on}, newest first. \`game_play\` op \`replay\` \`{"run": "<id>", "at": <seconds>}\` shows any moment of a run.`;
+  const text = STUDIO_TEXT.turnRules.personRuns;
+  const header = fill(text.header, {
+    when: sinceTurn ? text.sinceTurn : text.recently,
+    times: runs.length === 1 ? text.once : fill(text.times, { n: runs.length }),
+    on: oneBuild && first.build !== null ? ` on ${buildWords(first.build)}` : "",
+  });
   const lines: Array<string> = [];
   let used = header.length;
   for (const run of runs) {
@@ -62,7 +66,7 @@ const runsSection = (runs: ReadonlyArray<KeptRun>, sinceTurn: boolean): string |
     used += line.length + 1;
   }
   const more = runs.length - lines.length;
-  return [header, ...lines, ...(more > 0 ? [`- and ${more} more`] : [])].join("\n");
+  return [header, ...lines, ...(more > 0 ? [fill(text.more, { n: more })] : [])].join("\n");
 };
 
 const read = <A>(work: () => Promise<A>, fallback: A) =>

@@ -28,7 +28,6 @@ export const GAME_TOOL_OPS = {
     wait: ["play"],
     image_edit: ["play"],
     pictures: ["play"],
-    import: ["import"],
     mine: [],
   },
   game_blender: {
@@ -129,7 +128,8 @@ export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
   game_generate: "game_assets op generate",
   game_generate_wait: "game_assets op wait",
   game_image_edit: "game_assets op image_edit",
-  game_import: "game_assets op import",
+  game_import:
+    "nothing: a three.js game loads its files from web/ as they are, with no import step",
   game_blender_assets_search: "game_blender op asset_search",
   game_blender_assets_import: "game_blender op asset_import",
   game_blender_code: "game_blender op code",

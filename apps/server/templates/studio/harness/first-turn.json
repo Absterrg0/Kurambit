@@ -1,0 +1,16 @@
+{
+  "heading": "## The first turn",
+  "goal": "Goal: the person plays the game the brief describes on the Stage, made as well as you can make it: every part a player sees is yours to design.",
+  "read": "Read `BRIEF.md` and the bridge contract in `TEMPLATE.md` (what the harness needs from the game, nothing about how it looks), then build the game in `web/`. Write no plan or design document.",
+  "watched": "The person watches the Stage while you work: it shows the game from the first frame it draws and follows every save. Get a scene they can see running first, then grow the game in place.",
+  "made": {
+    "blender": "made in Blender (each Blender tool names its recipe), with quick models in code standing in while they are made",
+    "generated": "generated from the key art below by the person's providers, with quick models in code standing in until they arrive",
+    "code": "built in three.js code, never bare primitives standing in for them"
+  },
+  "library": "The person turned the asset library on: use its models where it has what the brief names (`game_assets` op `search`; the first `add` takes `lock`), and the rest are {made}.",
+  "chosen": "The person chose how the game's models are made: its player, main threat and world are {made}.",
+  "blenderRoute": "The person chose how the game's models are made, by kind: the player, its characters and its creatures are made in Blender (each Blender tool names its recipe), with quick models in code standing in while they are made; so are trees, rocks and buildings and the prop the game is about; the rest is built in three.js code. If `game_check` op `status` shows no Blender, build the characters in code too and tell the person that Settings → Game tools takes a Blender.",
+  "generated": "Start the key art first: `game_assets` op `generate` with lane `image`, name `key_art`, `options.aspect` `\"16:9\"`, a prompt holding the game's world and moment in one image, and three `directions`: looks that truly differ, each one this game can reach, each grounded with a `style` (a library pack id that ships a picture of its look, or the person's own reference image; `studio-skills/art-pipeline.md`, Generated art). It renders while you build; never wait on it, and if it is refused, say so and go on. Before you end the turn, op `wait` for it: ask the person to pick one of its candidates in the chat, or say it is still rendering, and say what it cost.",
+  "reference": "The person attached a picture to aim for, attached here and saved as `art/reference.png`. When it holds more than the one view you will match (a phone screenshot, a page around it), save that view alone over it. The model sheet and the check show it beside yours, and the turn ends when the game's frame matches it."
+}
