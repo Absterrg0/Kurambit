@@ -1838,7 +1838,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:game-history",
       title: "Show the game's history",
-      searchTerms: ["builds", "history", "undo", "redo", "compare", "versions", "try", "keep"],
+      searchTerms: ["builds", "history", "undo", "redo", "compare"],
       icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
       run: async () => useGameWorkspaceStore.getState().requestStage({ kind: "history" }),
     });
