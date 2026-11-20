@@ -1,7 +1,8 @@
 """review(): the composite image of a candidate, rendered in a throwaway scene.
 
 params: {candidate: abs glb, out: abs png, gamePx, view, palette: [hex] | None, used: [hex],
-         concept_png: abs | None, characterHeight?: STYLE.json scale.character (a prop's scale)}
+         concept_png: abs | None, characterHeight?: STYLE.json scale.character (a prop's scale),
+         reference?: {path: abs png or glb, name: what the agent called it}}
 
 One PNG shows exactly what the export would write: a turnaround (front, three-quarter, side,
 back); the same views in clay (every material light grey, with cavity), where paint no longer hides
@@ -11,7 +12,9 @@ head (the top 45% of its height). A person stands for these in a neutral stand, 
 its face near the camera's line; its clips' poses are in their strips; six side-view frames of every clip (up to
 14, locomotion and jumps first), with six front-view frames beside each locomotion's, where hip roll and arms
 through the body show, and six from above beside a swim's or a slither's; the palette with the swatches the model uses marked; and the concept image
-on the left when there is one. A prop has no close-up: its turnaround already shows all of it at
+on the left when there is one. With a reference (a picture, or a model as yardstick) a row sets it
+beside the model at matched framing, with the silhouettes' overlap (compare.py) in the result's
+facts. A prop has no close-up: its turnaround already shows all of it at
 one scale, and no rule picks its most detailed region honestly.
 
 Every tile's coverage is checked: one where the subject fills under 1% of it is named in the
@@ -31,7 +34,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import helpers, skeleton, stylepass
+from . import compare, helpers, skeleton, stylepass
 from .protocol import Refused, entry
 
 BG = (0.29, 0.30, 0.33)
@@ -303,6 +306,127 @@ def _stand(arm):
     return True
 
 
+def _import_into(sc, path):
+    """A GLB's objects, moved into sc (the importer writes into the context's scene); what the
+    import changed in that scene's timing and selection is put back."""
+    live, layer = bpy.context.scene, bpy.context.view_layer
+    kept = (live.frame_start, live.frame_end, live.frame_current, live.render.fps, live.render.fps_base)
+    active, selected = layer.objects.active, [o for o in layer.objects if o.select_get()]
+    try:
+        new, _ = skeleton.import_gltf(path)
+    finally:
+        live.frame_start, live.frame_end, _, live.render.fps, live.render.fps_base = kept
+        live.frame_set(kept[2])
+        for o in layer.objects:
+            o.select_set(o in selected)
+        layer.objects.active = active
+    if live is not sc:
+        for o in new:
+            for c in list(o.users_collection):
+                c.objects.unlink(o)
+            sc.collection.objects.link(o)
+    for o in new:
+        if o.type == "ARMATURE":  # its rest pose: a yardstick stands, it does not act
+            if o.animation_data is not None:
+                o.animation_data.action = None
+            for pb in o.pose.bones:
+                pb.matrix_basis = Matrix()
+    return new
+
+
+def _triangles(sc, meshes):
+    dg = sc.view_layers[0].depsgraph
+    n = 0
+    for o in meshes:
+        me = o.evaluated_get(dg).to_mesh()
+        try:
+            n += sum(len(p.vertices) - 2 for p in me.polygons)
+        finally:
+            o.evaluated_get(dg).to_mesh_clear()
+    return n
+
+
+def _row(rows, label, side):
+    return f"{label}: " + "; ".join(f"{r['view']} {r[side]:.2f}" for r in rows)
+
+
+def _model_reference(sc, cam, lights, ref, meshes, points, folder):
+    """A library model (or any GLB) beside the candidate, both seen by the same cameras."""
+    new = _import_into(sc, ref["path"])
+    others = [o for o in new if o.type in ("MESH", "CURVE")]
+    if not others:
+        raise Refused("invalid-input", f"the reference {ref['name']} holds no model")
+    rpts = _world_coords(sc, others)
+    span = 0.0
+    exts = []
+    for _, az in TURN_VIEWS:
+        a, b = _extent(points, az, 8), _extent(rpts, az, 8)
+        e = (min(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), max(a[3], b[3]), min(a[4], b[4]), max(a[5], b[5]))
+        exts.append(e)
+        span = max(span, (e[1] - e[0]) * TURN[1] / TURN[0], e[3] - e[2])
+    span *= 1.1
+    tiles, rows, overlays = [], [], []
+    try:
+        for o in meshes:
+            o.hide_render = True
+        _setup(sc, "BLENDER_EEVEE_NEXT", TURN)
+        for i, (name, az) in enumerate(TURN_VIEWS):
+            _camera(cam, az, 8, exts[i], span)
+            _aim_lights(lights, az, 8)
+            tiles.append(_render(sc, os.path.join(folder, f"ref_{name}.png")))
+        for o in meshes:
+            o.hide_render = False
+        for o in others:
+            o.hide_render = True
+        _setup(sc, "BLENDER_WORKBENCH", TURN)
+        for i, (name, az) in enumerate(TURN_VIEWS):
+            _camera(cam, az, 8, exts[i], span)
+            m = compare.mask_of(_render(sc, os.path.join(folder, f"ref_model_{name}.png")))
+            r = compare.mask_of(tiles[i])
+            row = compare.describe(name, m, r)
+            row["sameCamera"] = round(compare.iou(m, r), 3)
+            rows.append(row)
+            overlays.append(compare.overlay(compare.fit(m, TURN[1] // 2, TURN[0] // 2), compare.fit(r, TURN[1] // 2, TURN[0] // 2)))
+    finally:
+        for o in meshes:
+            o.hide_render = False
+        for o in others:
+            o.hide_render = True  # the strips after this show the model alone
+    mh, rh = float(np.ptp(points[:, 2])), float(np.ptp(rpts[:, 2]))
+    mats = {s.material for o in others if o.type == "MESH" for s in o.material_slots if s.material is not None}
+    best = max(rows, key=lambda r: r["sameHeight"])
+    facts = [
+        f"Reference {ref['name']} (a model, beside it at the same cameras): {rh:.2f} m tall to the model's {mh:.2f} m ({mh / max(rh, 1e-6):.2f}x); {_triangles(sc, [o for o in others if o.type == 'MESH']):,} triangles, {len(mats)} material{'s' if len(mats) != 1 else ''}.",
+        "Silhouette overlap (1 is the same shape), " + _row(rows, "same camera", "sameCamera") + "; " + _row(rows, "same height", "sameHeight") + ".",
+        f"Width by tenths of height, feet first, as a share of height ({best['view']}): model {best['widths']['model']}, reference {best['widths']['reference']}.",
+    ]
+    return {"tiles": tiles, "overlays": overlays, "facts": facts,
+            "label": f"reference: {ref['name']}, at the same cameras", "overlayLabel": "overlap at the same height: dark both, orange the model only, blue the reference only"}
+
+
+def _image_reference(ref, turns):
+    """A picture beside the candidate: its figure against each turnaround view, at the same height."""
+    mask, px, note = compare.image_mask(ref["path"])
+    rows, overlays = [], []
+    for (name, _), t in zip(TURN_VIEWS, turns):
+        m = compare.mask_of(t)
+        rows.append(compare.describe(name, m, mask))
+        overlays.append(compare.overlay(compare.fit(m, TURN[1] // 2, TURN[0] // 2), compare.fit(mask, TURN[1] // 2, TURN[0] // 2)))
+    h, w = px.shape[:2]
+    k = TURN[1] / h
+    nw = max(1, int(round(w * k)))
+    picture = px[np.minimum((np.arange(TURN[1]) / k).astype(int), h - 1)][:, np.minimum((np.arange(nw) / k).astype(int), w - 1)].copy()
+    picture[:, :, 3] = 1.0
+    best = max(rows, key=lambda r: r["sameHeight"])
+    facts = [
+        f"Reference {ref['name']} (a picture; its figure scaled to the model's height)" + (f": {note}" if note else "") + ".",
+        "Silhouette overlap (1 is the same shape), " + _row(rows, "same height", "sameHeight") + f"; closest {best['view']}.",
+        f"Width by tenths of height, feet first, as a share of height ({best['view']}): model {best['widths']['model']}, reference {best['widths']['reference']}.",
+    ]
+    return {"tiles": [picture], "overlays": overlays, "facts": facts,
+            "label": f"reference: {ref['name']}", "overlayLabel": "overlap at the same height: dark both, orange the model only, blue the reference only"}
+
+
 @entry
 def review(params):
     out = params["out"]
@@ -409,6 +533,15 @@ def review(params):
         _camera(cam, gaz, gel, ge, size / per_m)
         _aim_lights(lights, gaz, gel)
         game = covered(_render(sc, os.path.join(folder, "game.png")), "game-distance")
+        facts = [f"At game distance ({game.shape[0]} px tile), {100 * compare.thin_share(compare.mask_of(game)):.0f}% of the silhouette is in parts under 3 px across."]
+        reference = None
+        if params.get("reference"):
+            ref = params["reference"]
+            if ref["path"].lower().endswith((".glb", ".gltf")):
+                reference = _model_reference(sc, cam, lights, ref, meshes, points, folder)
+            else:
+                reference = _image_reference(ref, turns)
+            facts += reference["facts"]
 
         strips = []
         if arm is not None:
@@ -460,11 +593,17 @@ def review(params):
         strip_h = LABEL_PX + 4 + STRIP[1] + PAD
         width = max(gx + game3.shape[1] + PAD + game.shape[1] + PAD,
                     gx + (CLOSE[0] + PAD if close is not None else 0),
-                    PAD + 2 * strip_w, PAD + 34 * len(palette) + PAD)
+                    PAD + 2 * strip_w, PAD + 34 * len(palette) + PAD,
+                    left + sum(t.shape[1] for t in reference["tiles"]) + PAD if reference is not None else 0,
+                    left + sum(o.shape[1] + PAD for o in reference["overlays"]) if reference is not None else 0)
         row_a = PAD + LABEL_PX + 4
         row_k = row_a + max(TURN[1], game3.shape[0]) + PAD  # the clay row
         row_b = row_k + LABEL_PX + 4 + TURN[1] + PAD
-        row_c = row_b + LABEL_PX + 4 + TURN[1] // 2 + PAD
+        row_r = row_b + LABEL_PX + 4 + TURN[1] // 2 + PAD
+        row_c = row_r
+        if reference is not None:
+            row_o = row_r + LABEL_PX + 4 + TURN[1] + PAD
+            row_c = row_o + LABEL_PX + 4 + max(o.shape[0] for o in reference["overlays"]) + PAD
         # A clip with a front strip takes a whole row; the others go two to a row.
         places, x, y = [], 0, row_c
         for _, cells in strips:
@@ -497,6 +636,17 @@ def review(params):
         _over(canvas, labels("silhouettes"), left, row_b)
         for i, t in enumerate(turns):
             _over(canvas, _silhouette(t), left + i * TURN[0] + TURN[0] // 4, row_b + LABEL_PX + 4)
+        if reference is not None:
+            _over(canvas, labels(reference["label"]), left, row_r)
+            x = left
+            for t in reference["tiles"]:
+                _over(canvas, t, x, row_r + LABEL_PX + 4)
+                x += t.shape[1]
+            _over(canvas, labels(reference["overlayLabel"]), left, row_o)
+            x = left
+            for o in reference["overlays"]:
+                _over(canvas, o, x, row_o + LABEL_PX + 4)
+                x += o.shape[1] + PAD
         for (label, cells), (x, y) in zip(strips, places):
             _over(canvas, label, x, y)
             for k, cell in enumerate(cells):
@@ -510,7 +660,7 @@ def review(params):
         img.filepath_raw = out
         img.file_format = "PNG"
         img.save()
-        return {"image": out, "width": width, "height": height, "problems": problems[:12]}
+        return {"image": out, "width": width, "height": height, "problems": problems[:12], "facts": facts}
     finally:
         if window is not None:
             window.scene = shown

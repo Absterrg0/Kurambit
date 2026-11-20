@@ -359,6 +359,8 @@ const ReviewRender = Schema.Struct({
   height: Schema.Number,
   /** Tiles the model hardly shows in (under 1% covered): out of frame, or too small to judge. */
   problems: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Measured from the pictures: thin parts at game distance, and the reference's overlap. */
+  facts: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 /** What kurambit.generated prints. */
 const GeneratedMade = Schema.Struct({
@@ -1796,6 +1798,41 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * A review's reference: a picture or model in the game, or a library model as yardstick
+   * (`<pack id>:<pack-relative file>`), which is only looked at, so the library switch does not
+   * govern it.
+   */
+  const referenceOf = (realRoot: string, reference: string) =>
+    Effect.gen(function* () {
+      const pack = /^([a-z0-9][a-z0-9-]*):(.+)$/.exec(reference);
+      const path =
+        pack === null
+          ? yield* inGame(realRoot, reference)
+          : yield* library.packFile(pack[1]!, pack[2]!);
+      if (!/\.(png|jpe?g|webp|glb|gltf)$/i.test(path))
+        return yield* opError(
+          "blender-review",
+          reference,
+          "invalid-input",
+          "A reference is a picture (PNG, JPEG, WebP) or a model (GLB).",
+        );
+      const exists = yield* Effect.promise(() =>
+        NodeFSP.stat(path).then(
+          (stat) => stat.isFile(),
+          () => false,
+        ),
+      );
+      if (!exists)
+        return yield* opError(
+          "blender-review",
+          reference,
+          "invalid-path",
+          `${reference} is not a file.`,
+        );
+      return { path, name: reference };
+    });
+
+  /**
    * The locked part of a review: the pass of this key (run now, or the one a review already ran,
    * kept as pass.json), its composite rendered in a throwaway scene of the live session, and only
    * then candidate.json, so an export never follows a review nobody saw.
@@ -1868,6 +1905,8 @@ const make = Effect.gen(function* () {
       const candidate: Candidate = { ...passed, parts: ledger.parts, concept: concept.ref };
       const image = NodePath.join(out, REVIEW_PNG);
       const view = style?.view ?? "perspective";
+      const reference =
+        input.reference === undefined ? null : yield* referenceOf(realRoot, input.reference);
       const rendered = yield* kitCall(
         root,
         "blender-review",
@@ -1880,6 +1919,7 @@ const make = Effect.gen(function* () {
           palette: Array.isArray(style?.palette) ? style.palette : null,
           used: candidate.usedPalette,
           concept_png: concept.png,
+          ...(reference === null ? {} : { reference }),
         })})`,
       );
       const png = yield* Effect.tryPromise({
@@ -1934,6 +1974,9 @@ const make = Effect.gen(function* () {
           ? []
           : [`Concept (${candidate.concept}):\n${concept.section}`]),
         measurementText(candidate, styleBudgets(style), bytes),
+        ...(rendered.facts === undefined || rendered.facts.length === 0
+          ? []
+          : [`Seen in the pictures:\n${rendered.facts.map((fact) => `- ${fact}`).join("\n")}`]),
         ...(rendered.problems === undefined || rendered.problems.length === 0
           ? []
           : [

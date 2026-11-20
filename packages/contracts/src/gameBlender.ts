@@ -44,6 +44,12 @@ export const GameBlenderLookInput = Schema.Struct({
   maxSize: Schema.optionalKey(Schema.Number),
   /** review: the character's height on screen at game distance, px. Default from STYLE.json view: perspective 96, side 96, top-down 64, isometric 64. */
   gamePx: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 16, maximum: 512 }))),
+  reference: Schema.optionalKey(
+    Schema.NonEmptyString.check(Schema.isMaxLength(300)).annotate({
+      description:
+        "review: set beside the model with its silhouette overlap. A game-relative PNG or GLB, or <pack id>:<file> for a library model.",
+    }),
+  ),
 });
 export type GameBlenderLookInput = typeof GameBlenderLookInput.Type;
 export const GameBlenderLookScreenshot = Schema.Struct({
