@@ -43,8 +43,9 @@ const check =
     return {
       line: numbers.join(" · "),
       findings: [...errors.map(issueLine), ...problems, ...(final ? scene : [])],
+      notes: answer.recipes ?? [],
       next,
-      said: ["errors", "performance", "qa.problems", "screens.problems", "scene.lines"],
+      said: ["errors", "performance", "qa.problems", "screens.problems", "scene.lines", "recipes"],
     };
   };
 

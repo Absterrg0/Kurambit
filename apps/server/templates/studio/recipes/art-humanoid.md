@@ -50,12 +50,12 @@ play on it.
 ## Checks
 
 ```yaml
-- gates: [height, deformation, feet, budget] all pass   # H gates
-- triangles <= 7000                                      # H style.roleBudget
-- materials == 1; style.hues <= 5                        # H style pass
-- floating == []; influences <= 4                        # H contact, pass
-- review.thinShare_gamePx < 0.05                         # H review
-- clips loop back to rest                                # H clip seams
+- review: "gates: [height, deformation, feet, budget] all pass (gates)"
+- review: "triangles <= 7000 (style.roleBudget)"
+- review: "materials == 1; style.hues <= 5 (style pass)"
+- review: "floating == []; influences <= 4 (contact, pass)"
+- review: "review.thinShare_gamePx < 0.05 (review)"
+- review: "clips loop back to rest (clip seams)"
 ```
 
 ## Code

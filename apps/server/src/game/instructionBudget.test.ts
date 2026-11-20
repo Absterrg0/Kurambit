@@ -40,13 +40,15 @@ const CHOICES = {
  * 15,267. Blender, the default since 2026-11-17 (its route by kind of model), read 10,639 then.
  * Generated read 15,986 until the art skill was cut to the packs' rules on 2026-11-20 (13,235).
  * The same day three.md sent the API to runtime.d.ts: Blender reads 11,071, code 10,759, the
- * library 10,837 and generated 13,228.
+ * library 10,837 and generated 13,228. These left out studio-skills/AGENTS.md (745), which the
+ * game's AGENTS.md points at; it is counted since it holds the recipe index (2026-11-20, 1,437):
+ * Blender 12,508, code 12,196, the library 12,274, generated 14,665.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
-  blender: 11_200,
-  code: 11_200,
-  "code with the library": 11_200,
-  generated: 13_400,
+  blender: 12_600,
+  code: 12_600,
+  "code with the library": 12_600,
+  generated: 14_800,
 };
 /**
  * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input
@@ -113,6 +115,8 @@ const firstTurnBytes = (choice: (typeof CHOICES)[keyof typeof CHOICES]) => {
     "turn rules": bytes(gameTurnRules("three") ?? ""),
     "AGENTS.md": bytes(agents),
     "three.md": bytes(template("studio/three.md")),
+    // The skills index the game's AGENTS.md points at, with the recipe index the agent picks from.
+    "studio-skills/AGENTS.md": bytes(template("studio/AGENTS.md")),
     // The bridge contract the first message sends the agent to.
     "TEMPLATE.md": message.includes("`TEMPLATE.md`")
       ? bytes(template("blank-three/TEMPLATE.md"))

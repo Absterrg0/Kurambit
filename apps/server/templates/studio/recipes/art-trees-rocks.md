@@ -47,10 +47,10 @@ their trees are realistic or heavy anyway (21k and 5k triangles).
 ## Checks
 
 ```yaml
-- triangles <= 1000 (tree), <= 400 (rock) # H style.roleBudget
-- floating == [] # H contact
-- review.thinShare_gamePx < 0.05 # H review
-- style.hues <= 3 # H style pass
+- review: "triangles <= 1000 (tree), <= 400 (rock) (style.roleBudget)"
+- review: "floating == [] (contact)"
+- review: "review.thinShare_gamePx < 0.05 (review)"
+- review: "style.hues <= 3 (style pass)"
 ```
 
 ## Code

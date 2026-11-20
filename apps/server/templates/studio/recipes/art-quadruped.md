@@ -52,10 +52,10 @@ horse, cow, husky and more), on the library route.
 ## Checks
 
 ```yaml
-- gates: [height, deformation, feet, budget] all pass   # H gates
-- triangles <= 3000                                      # H style.roleBudget
-- detachedChains == []                                   # H measure (limbs reach the spine)
-- walk ground speed > 0; seams loop                      # H clip facts
+- review: "gates: [height, deformation, feet, budget] all pass (gates)"
+- review: "triangles <= 3000 (style.roleBudget)"
+- review: "detachedChains == [] (measure (limbs reach the spine))"
+- review: "walk ground speed > 0; seams loop (clip facts)"
 ```
 
 ## Code

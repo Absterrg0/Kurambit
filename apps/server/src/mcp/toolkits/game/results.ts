@@ -130,6 +130,8 @@ const capDetails = (details: Record<string, Json>, budget: number) => {
 export interface Verdict {
   readonly line: string;
   readonly findings?: ReadonlyArray<string>;
+  /** Readings that are not problems (a picked recipe's numbers), shown after the findings. */
+  readonly notes?: ReadonlyArray<string>;
   readonly next: string;
   /** Detail fields the line and findings already say ("qa.problems"): said once, not twice. */
   readonly said?: ReadonlyArray<string>;
@@ -157,6 +159,7 @@ export const present = (
     ...(findings.length > FINDINGS_SHOWN
       ? [`- and ${findings.length - FINDINGS_SHOWN} more (in the details)`]
       : []),
+    ...(verdict.notes ?? []),
     `next: ${verdict.next}`,
   ].join("\n");
   const json = (verdict.said ?? []).reduce<Json>(

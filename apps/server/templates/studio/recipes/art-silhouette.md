@@ -37,10 +37,10 @@ set piece.
 ## Checks
 
 ```yaml
-- review.overlap.sameHeight >= 0.7 on the views shared with the reference # H review
-- review.thinShare_gamePx < 0.05 # H review
-- floating == [] # H contact
-- problems: [] # H review
+- review: "review.overlap.sameHeight >= 0.7 on the views shared with the reference (review)"
+- review: "review.thinShare_gamePx < 0.05 (review)"
+- review: "floating == [] (contact)"
+- review: "problems: [] (review)"
 ```
 
 ## Code

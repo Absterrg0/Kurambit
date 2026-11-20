@@ -21,18 +21,8 @@ your yardstick in the review.
 
 ## Art recipes
 
-How the packs build each kind of model, with its numbers and checks: read
-the one or two your model needs from `studio-skills/recipes/`, no more.
-
-| Recipe            | When                                                   |
-| ----------------- | ------------------------------------------------------ |
-| `art-silhouette`  | every model: masses first, against a reference         |
-| `art-palette`     | colours, one atlas, faces and emblems as painted cells |
-| `art-humanoid`    | a hero or NPC on the standard skeleton                 |
-| `art-quadruped`   | an animal the library lacks                            |
-| `art-vehicle`     | cars, carts, boats                                     |
-| `art-ruin`        | walls, arches, houses: pieces on the grid              |
-| `art-trees-rocks` | trees, rocks and their scatter                         |
+How the packs build each kind of model is in `recipes/art-*.md` (the index is
+`studio-skills/AGENTS.md`): read the one or two your model needs, no more.
 
 ## The loop
 

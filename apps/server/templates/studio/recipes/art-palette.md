@@ -50,10 +50,10 @@ modelled.
 ## Checks
 
 ```yaml
-- materials == 1 (2 with Glow) # H style pass
-- textures == 1 # H style pass
-- style.hues <= 5 # H style pass
-- style.flat matches shape.edges # H style pass (faceted >= 0.9, smooth <= 0.1)
+- review: "materials == 1 (2 with Glow) (style pass)"
+- review: "textures == 1 (style pass)"
+- review: "style.hues <= 5 (style pass)"
+- review: "style.flat matches shape.edges (style pass (faceted >= 0.9, smooth <= 0.1))"
 ```
 
 ## Code

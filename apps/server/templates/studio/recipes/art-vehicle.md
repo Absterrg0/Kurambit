@@ -46,10 +46,10 @@
 ## Checks
 
 ```yaml
-- triangles <= 1500 # H style.roleBudget (vehicle)
-- floating == [] # H contact
-- each wheel its own object, origin at the hub # A scene
-- overlap with a pack vehicle >= 0.7 same height # H review
+- review: "triangles <= 1500 (style.roleBudget (vehicle))"
+- review: "floating == [] (contact)"
+- agent: "each wheel its own object, origin at the hub"
+- review: "overlap with a pack vehicle >= 0.7 same height (review)"
 ```
 
 ## Code

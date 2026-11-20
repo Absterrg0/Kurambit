@@ -41,10 +41,10 @@
 ## Checks
 
 ```yaml
-- grid(4).fits == true # H kurambit.grid
-- triangles <= 2000 # H style.roleBudget
-- floating == []; unsupported == [] # H contact
-- style.flat >= 0.9 when faceted # H style pass
+- review: "grid(4).fits == true (kurambit.grid)"
+- review: "triangles <= 2000 (style.roleBudget)"
+- review: "floating == []; unsupported == [] (contact)"
+- review: "style.flat >= 0.9 when faceted (style pass)"
 ```
 
 ## Code

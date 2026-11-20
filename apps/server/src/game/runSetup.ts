@@ -25,7 +25,7 @@ const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManife
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones this turn needs)";
-const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md.\n`;
+const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md with its recipes: read the index, then the recipes you pick.\n`;
 
 const readText = (path: string): Promise<string | null> =>
   NodeFSP.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
