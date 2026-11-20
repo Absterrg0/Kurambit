@@ -1,4 +1,4 @@
-"""read_sheet(): a turnaround sheet measured from its own pixels, for paint and carve.
+"""read_sheet(): a turnaround sheet measured from its own pixels, for paint.
 
 A sheet is two to four orthographic views of one subject side by side (front, side, back) on a
 plain background. Everything is measured, never typed in by hand:

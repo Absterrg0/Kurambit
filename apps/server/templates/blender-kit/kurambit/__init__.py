@@ -33,7 +33,9 @@ GONE = ("hero", "world", "carve", "face", "hair", "garment", "cloth", "footwear"
 
 def __getattr__(name):
     if name in GONE:
-        raise AttributeError(
+        # ImportError, not AttributeError: `from kurambit import hero` turns an AttributeError into a
+        # bare "cannot import name", and that is how the old scripts imported these.
+        raise ImportError(
             f"kurambit.{name} was removed: the craft helpers it held are gone. A model made with it still exports from its "
             ".blend; to make it again, build it as parts with loft, skin_rigid and weights_along (studio-skills/recipes).")
     raise AttributeError(f"module 'kurambit' has no attribute {name!r}")
