@@ -1,6 +1,7 @@
 // @effect-diagnostics globalDate:off globalTimers:off nodeBuiltinImport:off preferSchemaOverJson:off -- This module owns headless Chromium for browser play sessions: wall-clock boot polling and real-time input.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeModule from "node:module";
+import { PNG } from "pngjs";
 import {
   PLAY_SESSION_PROTOCOL,
   type GameConsoleMessage,
@@ -35,6 +36,25 @@ import {
 const requirePlaywright = NodeModule.createRequire(import.meta.url);
 const loadPlaywright = () =>
   requirePlaywright("playwright-core") as typeof import("playwright-core");
+
+/**
+ * Whether a still is one colour bar a little text: a canvas caught between frames, not a picture of
+ * the game. Sampled on a coarse grid, so a page's own text over the canvas does not count.
+ */
+export const looksFlat = (png: Buffer) => {
+  const { width, height, data } = PNG.sync.read(png);
+  const counts = new Map<number, number>();
+  let samples = 0;
+  for (let y = 0; y < 40; y += 1)
+    for (let x = 0; x < 64; x += 1) {
+      const i =
+        (Math.floor(((y + 0.5) * height) / 40) * width + Math.floor(((x + 0.5) * width) / 64)) * 4;
+      const key = ((data[i]! >> 3) << 10) | ((data[i + 1]! >> 3) << 5) | (data[i + 2]! >> 3);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      samples += 1;
+    }
+  return Math.max(...counts.values()) >= samples * 0.97;
+};
 
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 500;
@@ -683,6 +703,19 @@ export const openWebPlaySession = async (input: {
         if (typeof raw[1] === "number") pageSeconds = raw[1];
       });
     };
+    // A software GPU that is busy or restarting can hand the compositor an empty canvas although
+    // the game drew: a proof picture came back black while its own frame counted 8 draws. A flat
+    // still is taken again once the page has drawn twice more (or a quarter second has passed).
+    const shoot = async () => {
+      const first = await page.screenshot({ type: "png" }).catch(() => null);
+      if (first === null || !looksFlat(first)) return first;
+      await page
+        .evaluate(
+          "new Promise((done) => { requestAnimationFrame(() => requestAnimationFrame(done)); setTimeout(done, 250); })",
+        )
+        .catch(() => undefined);
+      return page.screenshot({ type: "png" }).catch(() => first);
+    };
     /** The page's state; TIMED_OUT when its main thread did not answer in `ms`. */
     const readState = async (ms: number) => {
       const raw = await bounded(
@@ -862,13 +895,7 @@ export const openWebPlaySession = async (input: {
       const state = await readState(PLAY_BOUNDS.webCallMs);
       if (state === TIMED_OUT) throw unresponsive();
       const probe = sanitizeProbe(state);
-      const shot =
-        screenshotPath === null
-          ? null
-          : await bounded(
-              page.screenshot({ type: "png" }).catch(() => null),
-              PLAY_BOUNDS.stillMs,
-            );
+      const shot = screenshotPath === null ? null : await bounded(shoot(), PLAY_BOUNDS.stillMs);
       const saved =
         shot !== null && shot !== TIMED_OUT && screenshotPath !== null
           ? await NodeFSP.writeFile(screenshotPath, shot).then(
@@ -1128,9 +1155,13 @@ export const openWebPlaySession = async (input: {
       refusedStates: () => refused,
       still: async (path) =>
         (await bounded(
-          page.screenshot({ path }).then(
-            () => true,
-            () => false,
+          shoot().then((shot) =>
+            shot === null
+              ? false
+              : NodeFSP.writeFile(path, shot).then(
+                  () => true,
+                  () => false,
+                ),
           ),
           PLAY_BOUNDS.stillMs,
         )) === true,
