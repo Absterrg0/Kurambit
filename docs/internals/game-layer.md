@@ -221,8 +221,14 @@ check that matters.
   joints, a side profile extruded, coursed blocks on the grid. One sculpted blob decimated to
   budget has no edge loops and shades as noise. The recipes in `templates/studio/recipes/` carry
   the method; the kit adds only `loft`, `weights_along`, `bake_ik_walk`, `decal` and the joint
-  print. The hero and world kits (`cloth`, `face`, `creature`, `gait`, `world`, ...) stay only so
-  models made with them rebuild, until the asset bench is judged.
+  print.
+- Recipes (`templates/studio/recipes/`, one part made well with sourced numbers, at most about
+  800 words) are indexed in the studio `AGENTS.md`, which the game's AGENTS.md points at, never
+  left for the agent to discover: Vercel's evals saw an available skill go unopened in 56% of
+  tasks, and an index always in view score 100%. SkillsBench found 2 to 3 curated skills per task
+  helped and long ones hurt, so a game names at most three in game.json `recipes`, and a check
+  prints one line of numbers per pick (`recipes.ts`). Those lines report; style numbers bind only
+  through STYLE.json's lock, so the harness measures and the creator decides taste.
 - A decal is a painted cell in the model's one atlas, the atlas's width and two swatch rows tall,
   below the swatches: the runtime recolours a swatch by cutting the atlas into rows of equal
   height (`look-edits.js`), so a cell of any other height would shift every swatch it recolours.

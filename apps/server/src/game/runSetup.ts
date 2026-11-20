@@ -95,6 +95,9 @@ const ioError = (operation: string, path: string, cause: unknown) =>
     cause,
   });
 
+/** Skills that became recipes (studio/recipes/): a refresh takes the old copies out of a game. */
+const RETIRED_SKILLS = ["playtest.md", "audio.md", "pictures.md", "voxels.md"];
+
 /**
  * The studio skills as this server ships them, for the game's engine only (a role told to read
  * every skill must not get another engine's rules). Files whose text did not change stay as they
@@ -116,7 +119,9 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
           writableInGame(root, to),
       });
       await Promise.all(
-        others.map((name) => NodeFSP.rm(NodePath.join(skills, `${name}.md`), { force: true })),
+        [...others.map((name) => `${name}.md`), ...RETIRED_SKILLS].map((file) =>
+          NodeFSP.rm(NodePath.join(skills, file), { force: true }),
+        ),
       );
       // A game that loads Kurambit's runtime reads its modules' comment blocks on one page.
       // Earlier games got the modules' whole sources (`runtime/`), which agents read through

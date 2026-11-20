@@ -113,7 +113,7 @@ piece arrives: start a generation, keep building, pick it up with op
 
 Render sprites and strips with `game_blender` op `sprites`, never your own
 render code, and look at its contact sheet; the game plays its
-`.sheet.json` (`pictures.md`). A library character: import its GLB, then
+`.sheet.json` (`recipes/pictures-2d.md`). A library character: import its GLB, then
 render with `"objects": ["<rig>"], "action": "Walking_A"` once per clip. Pixel art: leave out `pixelArt`, `size` and `views`. Pass the first strip's
 `pixelsPerUnit` to every other strip of that character. Views: side-scroller `right`; top-down `front`, `back`,
 `left`, `right` with `elevation` 35, or `top`; `isometric`.
@@ -124,5 +124,5 @@ Off the generated route, render it from the game's real assets at
 1280x720 in a throwaway scene removed in `finally`, view transform
 `Standard`. Open every PNG you render.
 
-Other kinds of art: `voxels.md` (blocky worlds, .vox), `pictures.md`
-(cards, tiles, icons, UI art, 2D characters).
+Other kinds of art: `recipes/voxels.md` (blocky worlds, .vox),
+`recipes/pictures-2d.md` (cards, tiles, icons, UI art, 2D characters).

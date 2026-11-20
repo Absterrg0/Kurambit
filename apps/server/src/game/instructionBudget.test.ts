@@ -41,14 +41,14 @@ const CHOICES = {
  * Generated read 15,986 until the art skill was cut to the packs' rules on 2026-11-20 (13,235).
  * The same day three.md sent the API to runtime.d.ts: Blender reads 11,071, code 10,759, the
  * library 10,837 and generated 13,228. These left out studio-skills/AGENTS.md (745), which the
- * game's AGENTS.md points at; it is counted since it holds the recipe index (2026-11-20, 1,437):
- * Blender 12,508, code 12,196, the library 12,274, generated 14,665.
+ * game's AGENTS.md points at; it is counted since it holds the recipe index (2026-11-20, 2,069
+ * with all 24 recipes): Blender 13,140, code 12,828, the library 12,906, generated 15,297.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
-  blender: 12_600,
-  code: 12_600,
-  "code with the library": 12_600,
-  generated: 14_800,
+  blender: 13_300,
+  code: 13_300,
+  "code with the library": 13_300,
+  generated: 15_400,
 };
 /**
  * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input
@@ -72,9 +72,10 @@ const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", num
  * Bytes of the art skill every Blender tool names as its recipe, read whole by any chat that makes
  * a model. It was 36,030 (5,483 words, a recipe per craft helper) until 2026-11-20, when it became
  * the packs' rules, each naming the number the review reports for it (10,373). Later that day the
- * craft moved into the art recipes it indexes, read one or two at a time (7,627).
+ * craft moved into the art recipes it indexes, read one or two at a time (7,627), and the index
+ * moved to the studio AGENTS.md with every recipe's (6,994).
  */
-const ART_SKILL_BUDGET = 8_000;
+const ART_SKILL_BUDGET = 7_100;
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");
