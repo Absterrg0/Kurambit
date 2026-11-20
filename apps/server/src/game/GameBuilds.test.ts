@@ -8,10 +8,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/sql/SqlClient";
 import {
   type CheckpointRef,
   CheckpointScopeId,
+  CommandId,
   GameBuildId,
   type GameManifest,
   ProjectId,
@@ -23,8 +23,8 @@ import { checkpointRefForGameRun } from "../checkpointing/Utils.ts";
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as GameBuildMoves from "../orchestration-v2/gameBuilds/GameBuildMoves.ts";
+import { memoryBuildRecords } from "./gameBuildsTestkit.ts";
 
-let moveRunner: GameBuildMoves.GameBuildMoveRunner | null = null;
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
@@ -91,6 +91,7 @@ const world = Effect.gen(function* () {
       } as unknown as ProjectionStore.ProjectTurnCheckpoint);
       return ref;
     });
+  const records = memoryBuildRecords();
   const layer = GameBuilds.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -100,6 +101,7 @@ const world = Effect.gen(function* () {
           read: () => Effect.succeed(manifest),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          ...records.reads,
           getThreadShell: () =>
             Effect.succeed({ projectId: ProjectId.make("arena") } as unknown as Effect.Success<
               ReturnType<ProjectionStore.ProjectionStoreV2["Service"]["getThreadShell"]>
@@ -151,47 +153,37 @@ const world = Effect.gen(function* () {
         }),
         Layer.mock(GameOperations.GameOperations)({ current: () => null, events: Stream.empty }),
         Layer.mock(GameBuildCopies.GameBuildCopies)({ plays: () => [] }),
-        // A recorded restore's move runs as its outbox effect would, right after the record.
-        Layer.mock(Orchestrator.OrchestratorV2)({
-          dispatch: (command) =>
-            command.type === "game-build.restore" && moveRunner !== null
-              ? moveRunner
-                  .move({
-                    effectId: `effect:${command.commandId}`,
-                    threadId: command.threadId,
-                    projectId: command.projectId,
-                    root: command.root,
-                    restore: command.restore,
-                  })
-                  .pipe(Effect.orDie, Effect.forkDetach, Effect.as({} as never))
-              : Effect.succeed({} as never),
-        }),
-        Layer.mock(GameBuildMoves.GameBuildMoves)({
-          attach: (runner) => Effect.sync(() => void (moveRunner = runner)),
-        }),
+        Layer.mock(Orchestrator.OrchestratorV2)({ dispatch: records.dispatch }),
+        Layer.mock(GameBuildMoves.GameBuildMoves)({ attach: records.attach }),
       ),
     ),
   );
-  return { refs, addTurn, layer };
+  return { refs, addTurn, layer, records };
 });
 
-/** The game's one no-run restore record, as an Undo writes it once it moved the folder. */
-const restored = (requestId: string, target: string, before: string, minute: number) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const payload = JSON.stringify({
+/** An Undo that moved the folder, as its settle records it: the target is back, the park kept. */
+const restored = (
+  records: ReturnType<typeof memoryBuildRecords>,
+  requestId: string,
+  target: string,
+  before: string,
+  minute: number,
+) =>
+  records.dispatch({
+    type: "game-build.restore.settle",
+    commandId: CommandId.make(`settle-${requestId}`),
+    threadId: THREAD,
+    projectId: ProjectId.make("arena"),
+    root: ROOT,
+    restore: {
       requestId,
-      target,
+      target: GameBuildId.make(target),
       label: `Build ${target.slice(0, 8)}`,
       requestedAt: DateTime.formatIso(at(minute)),
-      before,
-      outcome: { restored: true, message: "restored" },
-    });
-    yield* sql`
-      INSERT INTO game_build_restores (root, payload_json, updated_at)
-      VALUES (${ROOT}, ${payload}, ${DateTime.formatIso(at(minute))})
-      ON CONFLICT (root) DO UPDATE SET payload_json = excluded.payload_json
-    `;
+      before: GameBuildId.make(before),
+      outcome: { restored: true, message: "restored", moved: "restored" },
+    },
+    park: { id: GameBuildId.make(before), at: DateTime.formatIso(at(minute)) },
   });
 
 describe("GameBuilds base", () => {
@@ -222,15 +214,17 @@ describe("GameBuilds base", () => {
         const builds = yield* GameBuilds.GameBuilds;
         yield* game.addTurn(1, 0); // A = oid(2)
         yield* game.addTurn(2, 10); // T = oid(3)
+        // The game's builds are read into its records as it opens.
+        yield* builds.list(THREAD, {});
         // Undo of T: the folder is A again, T parked.
         park("r1", oid(3));
-        yield* restored("r1", oid(2), oid(3), 20);
+        yield* restored(game.records, "r1", oid(2), oid(3), 20);
         // A new turn U = oid(4), begun after the Undo, recorded as it lands.
         const u = yield* game.addTurn(3, 25);
         yield* builds.recordTurn(THREAD, u);
         // Undo of U: back to its base, U parked; this record replaces the first.
         park("r2", oid(4));
-        yield* restored("r2", oid(2), oid(4), 40);
+        yield* restored(game.records, "r2", oid(2), oid(4), 40);
         const listed = yield* builds.list(THREAD, {});
         const uRow = listed.builds.find((b) => b.id === oid(4));
         // U's Undo lands on A, never on T, which the person had undone.

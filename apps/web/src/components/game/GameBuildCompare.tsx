@@ -29,12 +29,10 @@ import { GameFrame, GameFrameBox } from "./GamePlaySurface";
 import {
   allChecks,
   buildCaption,
-  buildName,
   compareRows,
   formatBuildTime,
   requestShortForm,
 } from "./gameBuilds.logic";
-import { isUndone } from "./gameBuildTimeline.logic";
 import { useBuildPlay, useMeasureOnOpen } from "./useBuildActions";
 
 const isBuildId = Schema.is(GameBuildId);
@@ -136,14 +134,14 @@ export function GameBuildCompare({
                   <Button
                     size="xs"
                     variant="ghost"
-                    aria-label={`Side ${side}: ${build === null ? "loading" : buildName(build)}. Pick another build`}
+                    aria-label={`Side ${side}: ${build === null ? "loading" : build.name}. Pick another build`}
                     className="min-w-0 shrink"
                   />
                 }
               >
                 <CompareSideBadge side={side} />
                 <Text variant="meta" tone="strong" truncate>
-                  {build === null ? "…" : buildName(build)}
+                  {build === null ? "…" : build.name}
                 </Text>
                 <ChevronDownIcon aria-hidden="true" />
               </MenuTrigger>
@@ -156,7 +154,7 @@ export function GameBuildCompare({
                       onClick={() => pick(index === 0 ? 0 : 1, choice)}
                     >
                       <span className="flex min-w-0 flex-col">
-                        <span className="truncate">{buildName(choice)}</span>
+                        <span className="truncate">{choice.name}</span>
                         <Text variant="caption" tone="muted">
                           {formatBuildTime(choice.at)}
                         </Text>
@@ -205,7 +203,7 @@ export function GameBuildCompare({
                     gameName={gameName}
                     shown={focused === index}
                     inspectorOpen={inspectorOpen}
-                    undone={builds !== null && isUndone(side, builds)}
+                    undone={side.undone}
                     playing={!hidden && focused === index}
                     onFocus={() => setFocused(index === 0 ? 0 : 1)}
                   />
@@ -261,7 +259,7 @@ function ComparePane({
     setResult(await plays.send(ref));
   };
   const url = result?._tag === "web" ? result.url : null;
-  const label = `${side} · ${buildName(build)}`;
+  const label = `${side} · ${build.name}`;
   // A saved build's caption is its name, already said; a turn's or a step's is what was asked.
   const request = build.source._tag === "saved" ? null : buildCaption(build).trim() || null;
   return (
@@ -349,7 +347,7 @@ function ComparePane({
         <Text variant="meta" tone="muted" numeric truncate render={<p />}>
           {/* Name, then its states, then its time: the same order on both sides. */}
           {[
-            buildName(build),
+            build.name,
             undone ? "undone" : null,
             shown && inspectorOpen ? "in Checks" : null,
             formatBuildTime(build.at),

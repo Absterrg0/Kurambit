@@ -16,7 +16,7 @@ import { DiffStatLabel, hasNonZeroStat } from "../chat/DiffStatLabel";
 import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { showWorkbench } from "./gameWorkbenchPanel";
-import { buildName, checksLine, factsSettled } from "./gameBuilds.logic";
+import { checksLine, factsSettled } from "./gameBuilds.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 import { useTurnUndo } from "./useBuildActions";
 
@@ -84,7 +84,7 @@ export function GameTurnBuild({
           <CheckIcon className="ms-2 size-3.5 shrink-0 text-success" aria-hidden="true" />
         )}
         <Button size="xs" variant="ghost" onClick={open} disabled={!build.available}>
-          {buildName(build)}
+          {build.name}
         </Button>
         <Button
           size="xs"

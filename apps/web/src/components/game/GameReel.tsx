@@ -8,7 +8,6 @@ import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { refOf } from "./gameBuildRef";
 import { GameImage } from "./GameGenerationCard";
-import { buildName } from "./gameBuilds.logic";
 import { stepVerdictText } from "./keepGoing.logic";
 
 /** The reel shows this many of Keep going's newest steps. */
@@ -51,7 +50,7 @@ export function GameReel({
         return (
           <section
             key={build.id}
-            aria-label={buildName(build)}
+            aria-label={build.name}
             className="flex w-64 shrink-0 flex-col gap-1.5 border-border px-3 first:ps-0 [&+&]:border-l"
           >
             <div className="grid grid-cols-2 gap-1.5">
@@ -139,12 +138,12 @@ function StepFrame({
           environmentId={threadRef.environmentId}
           root={root}
           path={frame}
-          alt={`${label}: ${build === null ? "" : buildName(build)}`}
+          alt={`${label}: ${build === null ? "" : build.name}`}
           className={cn("aspect-video", dim && "opacity-55 saturate-50")}
         />
       )}
       <figcaption className="truncate text-2xs text-muted-foreground">
-        {label} · {build === null ? "none" : buildName(build)}
+        {label} · {build === null ? "none" : build.name}
       </figcaption>
     </figure>
   );

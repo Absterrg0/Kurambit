@@ -21,49 +21,6 @@ import {
 export type GameBuildRestore = NonNullable<GameBuildsResult["restore"]>;
 
 /**
- * A build named in a sentence, in the game's one sequence: "Build 5", "Build 6 · Keep going",
- * "Build 7 · tuned", "Build 8 · added", "Build 5 · fix 1". The number is the server's, never a turn's: a resumed
- * or stopped turn is no extra build. A restore's parked folder goes by its label and its place
- * among the game's with that label, so two never share a name.
- */
-/** A saved edit's word beside its number: what the person (or the agent) did to the game. */
-const EDIT_WORDS = {
-  values: "tuned",
-  library: "added",
-  "bring-in": "brought in",
-  undo: "undo",
-} as const;
-
-export const buildName = (
-  build: Pick<GameBuild, "id" | "source" | "number"> & {
-    readonly fix?: number | undefined;
-    readonly inCopy?: boolean | undefined;
-  },
-): string =>
-  // A copy's list: its own builds, numbered on from its seat, after the game's up to the seat.
-  `${ownName(build)}${build.inCopy === true ? " · in this copy" : build.inCopy === false ? " · in the game" : ""}`;
-
-const ownName = (
-  build: Pick<GameBuild, "id" | "source" | "number"> & { readonly fix?: number | undefined },
-): string => {
-  const source = build.source;
-  const numbered = `Build ${build.number ?? build.id.slice(0, 8)}`;
-  switch (source._tag) {
-    case "turn":
-      return source.step !== null
-        ? `${numbered} · Keep going`
-        : // A small fix keeps its build's number: the person sees one build, fixed.
-          `${numbered}${build.fix === undefined ? "" : ` · fix ${build.fix}`}`;
-    case "version":
-      return `Version ${source.n} of ${source.of}${source.kept ? " · kept" : ""}`;
-    case "saved":
-      if (source.edit !== undefined && build.number !== null)
-        return `${numbered} · ${EDIT_WORDS[source.edit]}`;
-      return source.nth === undefined ? source.label : `${source.label} ${source.nth}`;
-  }
-};
-
-/**
  * What a build was asked to do, in a line: the person's request, or what a
  * keep-going step set out to change.
  */

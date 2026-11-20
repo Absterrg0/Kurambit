@@ -7,7 +7,6 @@ import { useEnvironmentQuery } from "../../state/query";
 import { StatusDot } from "../ui/status-dot";
 import { Text } from "../ui/text";
 import { GameBuildStill } from "./GameBuildStill";
-import { buildName } from "./gameBuilds.logic";
 import { checkingStep, useGameCopies } from "./useGameCopies";
 
 /** A copy's state in a few words. */
@@ -141,7 +140,7 @@ function CopyRow({
               threadRef={copyRef}
               gameName={gameName}
               build={build}
-              title={buildName(build)}
+              title={build.name}
               mark="blank"
               className="h-6.75 w-12 rounded-sm"
             />

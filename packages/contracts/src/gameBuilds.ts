@@ -242,6 +242,13 @@ export const GameBuild = Schema.Struct({
    * false for the game's builds up to the seat. Absent everywhere else.
    */
   inCopy: Schema.optionalKey(Schema.Boolean),
+  /**
+   * What every surface calls it, from the game's records: "Build 5", "Build 6 · tuned",
+   * "Build 7 · Keep going", "The game before restore 2"; a copy's list adds where it lives.
+   */
+  name: Schema.String,
+  /** A restore moved the folder away from it: made after the build it put back, so not in the game now. */
+  undone: Schema.Boolean,
   summary: Schema.String,
   /** At most 8, most changed first. */
   files: Schema.Array(GameBuildFile),

@@ -23,7 +23,7 @@ import {
   turnBuild,
 } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { buildName, type GameBuildRestore } from "./gameBuilds.logic";
+import { type GameBuildRestore } from "./gameBuilds.logic";
 import { turnStripRestore } from "./gameTurnBuild.logic";
 
 const NO_PERMISSION = Atom.make(false);
@@ -123,7 +123,7 @@ export function useTurnUndo(threadRef: ScopedThreadRef | null, runId: string | n
     if (view === null || action === null) return null;
     return restores.send(
       action.target,
-      action.kind === "go-back" ? restoreQuestion(buildName(view.build)) : null,
+      action.kind === "go-back" ? restoreQuestion(view.build.name) : null,
     );
   };
   return {

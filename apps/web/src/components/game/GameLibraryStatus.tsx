@@ -26,7 +26,7 @@ const keepGoingStartsAt = (status: GameKeepGoingStatus | null | undefined): stri
 import { derivePhase } from "../../session-logic";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarThreadStatus } from "../Sidebar.logic";
-import { buildName, doesNotStart } from "./gameBuilds.logic";
+import { doesNotStart } from "./gameBuilds.logic";
 import { gameLibraryStatus, type GameLibraryStatus } from "./gameLibraryStatus.logic";
 import type { GameLibraryEntry } from "./useGameLibrary";
 
@@ -107,7 +107,7 @@ export function useGameLibraryLine(input: {
     build:
       build == null
         ? null
-        : { name: buildName(build), at: build.at, doesNotStart: doesNotStart(build.facts) },
+        : { name: build.name, at: build.at, doesNotStart: doesNotStart(build.facts) },
     // A game with no chat has no builds to read; any other waits for its read.
     known: opens === null || build !== undefined,
   });

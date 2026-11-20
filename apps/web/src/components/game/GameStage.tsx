@@ -114,7 +114,7 @@ import {
 } from "./gameStageBridge";
 import { useKeepGoing } from "./useKeepGoing";
 import { clockTime } from "./keepGoing.logic";
-import { buildName, buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.logic";
+import { buildPhrase, doesNotStart, undoOutcome } from "./gameBuilds.logic";
 import { nextBuildOf } from "./GameLibraryStatus";
 import {
   restoreQuestion,
@@ -150,18 +150,14 @@ const BUSY_LABELS: Record<GameAction, string> = {
 const folderBuildShort = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result)) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
-  return build === undefined
-    ? null
-    : build.number === null
-      ? buildName(build)
-      : `Build ${build.number}`;
+  return build === undefined ? null : build.number === null ? build.name : `Build ${build.number}`;
 };
 
 // The build the folder holds, by name, for the held build's chip.
 const folderBuildName = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result)) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
-  return build === undefined ? null : buildName(build);
+  return build === undefined ? null : build.name;
 };
 
 const hasAnyBuild = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
@@ -180,7 +176,7 @@ const buildPhraseOf = (id: string | null) => {
     select = (result) => {
       if (!AsyncResult.isSuccess(result)) return null;
       const build = result.value.builds.find((each) => each.id === id);
-      return build === undefined ? null : buildPhrase(buildName(build));
+      return build === undefined ? null : buildPhrase(build.name);
     };
     buildPhraseSelectors.set(id, select);
   }
@@ -203,7 +199,7 @@ const currentBuildOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknow
 const folderBuildPhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result) || result.value.folderEdited === true) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
-  return build === undefined ? null : buildPhrase(buildName(build));
+  return build === undefined ? null : buildPhrase(build.name);
 };
 
 /** The build the folder holds was measured and does not start. */
@@ -217,7 +213,7 @@ const folderDoesNotStartOf = (result: AsyncResult.AsyncResult<GameBuildsResult, 
 const changedSincePhrase = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result) || result.value.folderEdited !== true) return null;
   const build = result.value.builds.find((each) => each.id === result.value.current);
-  return build === undefined ? null : buildPhrase(buildName(build));
+  return build === undefined ? null : buildPhrase(build.name);
 };
 
 const hasStepsOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) =>
@@ -634,7 +630,7 @@ function ThreadGameStage({
   const stageBuildName = useEnvironmentQuerySelector(buildsAtom, folderBuildPhrase);
   const changedSince = useEnvironmentQuerySelector(buildsAtom, changedSincePhrase);
   const folderDoesNotStart = useEnvironmentQuerySelector(buildsAtom, folderDoesNotStartOf) === true;
-  const undoName = turnUndo.view === null ? null : buildPhrase(buildName(turnUndo.view.build));
+  const undoName = turnUndo.view === null ? null : buildPhrase(turnUndo.view.build.name);
   // On a game changed since its build, the restore keeps those changes as a build of their own.
   // The control names the build; the sentences under it are the build menu's own.
   // A control that cannot act names nothing: after an undo, "Undo build 6" would name a build
@@ -903,7 +899,7 @@ function ThreadGameStage({
     }
     setStagePlayTarget(threadRef, {
       build: ref.build,
-      label: "id" in build ? buildName(build) : "an earlier build",
+      label: "id" in build ? build.name : "an earlier build",
       result,
     });
   };
@@ -1571,9 +1567,7 @@ function ThreadGameStage({
                     setHistoryOpen(false);
                     onAskAgent(text);
                   }}
-                  onGoBack={(build) =>
-                    void goBack.send(build.id, restoreQuestion(buildName(build)))
-                  }
+                  onGoBack={(build) => void goBack.send(build.id, restoreQuestion(build.name))}
                 />
               </PopoverPopup>
             </Popover>

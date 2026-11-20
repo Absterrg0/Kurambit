@@ -43,24 +43,6 @@ export const markTone = (build: GameBuild): GameFactTone => {
 };
 
 /**
- * PURE. Builds a restore moved the folder away from: made before the latest
- * restore and after the build it put back, so they are not in the game now. A
- * saved build is the folder parked by a restore, never an undone change.
- */
-export const isUndone = (build: GameBuild, list: GameBuildsResult): boolean => {
-  const restore = list.restore;
-  if (restore === null || restore.outcome?.restored !== true || build.source._tag === "saved")
-    return false;
-  const target = list.builds.find((entry) => entry.id === restore.target);
-  return (
-    target !== undefined &&
-    build.id !== list.current &&
-    build.at > target.at &&
-    build.at < restore.requestedAt
-  );
-};
-
-/**
  * PURE. The mark a step lands on, oldest to newest with "now" after the newest:
  * from the selected one (the newest build when none is), by one either way,
  * held at the oldest loaded.

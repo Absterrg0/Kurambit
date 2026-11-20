@@ -59,7 +59,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { refOf } from "./gameBuildRef";
 import {
   buildCaption,
-  buildName,
   buildPhrase,
   formatBuildTime,
   notMeasuredWhy,
@@ -305,7 +304,7 @@ function BuildHeader({
             truncate
             render={<h2 className={from === null ? undefined : "shrink-0"} />}
           >
-            {buildName(build)}
+            {build.name}
           </Text>
           {from === null ? null : (
             <Text variant="caption" tone="muted" truncate data-build-from="">
@@ -335,7 +334,7 @@ function BuildHeader({
           <Menu>
             <MenuTrigger
               render={
-                <Button size="icon-xs" variant="ghost" aria-label={`${buildName(build)} actions`} />
+                <Button size="icon-xs" variant="ghost" aria-label={`${build.name} actions`} />
               }
             >
               <MoreHorizontalIcon aria-hidden="true" />
@@ -352,7 +351,7 @@ function BuildHeader({
                   <span className="flex min-w-0 flex-col">
                     Compare with the build before
                     <Text variant="caption" tone="muted" truncate>
-                      {buildName(previous)}
+                      {previous.name}
                     </Text>
                   </span>
                 </MenuItem>
@@ -372,7 +371,7 @@ function BuildHeader({
                   onClick={() =>
                     void restores.send(
                       action.target,
-                      action.kind === "go-back" ? restoreQuestion(buildName(build)) : null,
+                      action.kind === "go-back" ? restoreQuestion(build.name) : null,
                     )
                   }
                 >
@@ -380,12 +379,12 @@ function BuildHeader({
                   <span className="flex min-w-0 flex-col">
                     {restores.restoring(action.target)
                       ? kind.busy
-                      : kind.label(buildPhrase(buildName(build)))}
+                      : kind.label(buildPhrase(build.name))}
                     <Text variant="caption" tone="muted">
                       {action.blocked ??
                         (action.kind === "undo"
                           ? undoOutcome(
-                              previous === undefined ? null : buildName(previous),
+                              previous === undefined ? null : previous.name,
                               list.folderEdited === true,
                             )
                           : action.kind === "redo"

@@ -63,6 +63,8 @@ export const GameBuildRecord = Schema.Struct({
   summary: Schema.String,
   files: Schema.Array(GameBuildFile),
   fileCount: Schema.NullOr(Schema.Number),
+  /** The request that made a build outside a turn: a repeat of it answers with this build. */
+  request: Schema.optionalKey(Schema.String),
 });
 export type GameBuildRecord = typeof GameBuildRecord.Type;
 

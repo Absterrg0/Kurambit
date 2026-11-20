@@ -31,13 +31,12 @@ import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
 import {
   buildCaption,
-  buildName,
   checksLine,
   doesNotStart,
   factsSettled,
   formatBuildTime,
 } from "./gameBuilds.logic";
-import { isUndone, stageBuildId, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
+import { stageBuildId, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 import { GameHistoryCopies } from "./GameHistoryCopies";
 import { checkingStep, heldWords, useGameCopies } from "./useGameCopies";
 
@@ -128,7 +127,7 @@ const stripItems = (marks: ReadonlyArray<GameBuild>): ReadonlyArray<StripItem> =
 const shortName = (build: GameBuild) => {
   const source = build.source;
   if (source._tag === "version") return `Version ${source.n}`;
-  if (build.number === null) return buildName(build);
+  if (build.number === null) return build.name;
   return `Build ${build.number}`;
 };
 
@@ -371,11 +370,11 @@ export function GameHistory({
       label={label}
       onStage={onStage === build.id && !pickingNow}
       copy={playing === build.id}
-      undone={list !== null && isUndone(build, list)}
+      undone={build.undone}
       picking={pickingNow}
       picked={picking !== null && picking !== "any" && sameRef(picking, build)}
       onClick={() => (pickingNow ? pick(build) : play(build))}
-      {...(undoable(build) && !pickingNow && (list === null || !isUndone(build, list))
+      {...(undoable(build) && !pickingNow && !build.undone
         ? { onUndo: () => void undoBuild(build), undoing: undoing === build.id }
         : {})}
     />
@@ -384,7 +383,7 @@ export function GameHistory({
     picking !== null
       ? firstPicked === null
         ? "Pick the first build to compare"
-        : `Pick a build to compare with ${buildName(firstPicked)}`
+        : `Pick a build to compare with ${firstPicked.name}`
       : sought !== null
         ? "Finding that build…"
         : notFound
@@ -637,7 +636,7 @@ function BuildThumb({
           <button
             type="button"
             aria-current={onStage ? "true" : undefined}
-            aria-label={`${buildName(build)}, ${formatBuildTime(build.at)}${onStage ? ", on the Stage" : ""}`}
+            aria-label={`${build.name}, ${formatBuildTime(build.at)}${onStage ? ", on the Stage" : ""}`}
             disabled={!build.available && !picking}
             onClick={onClick}
             className="group/thumb flex w-24 shrink-0 cursor-pointer flex-col items-start gap-1.5 rounded-md text-left outline-none disabled:cursor-default"
@@ -648,7 +647,7 @@ function BuildThumb({
           threadRef={threadRef}
           gameName={gameName}
           build={build}
-          title={buildName(build)}
+          title={build.name}
           mark="blank"
           className={cn(
             "h-13.5 w-24 rounded-md",
@@ -695,7 +694,7 @@ function BuildThumb({
       <TooltipPopup side="top" className="max-w-sm">
         <span className="flex flex-col gap-1">
           <span>
-            {buildName(build)} · {formatBuildTime(build.at)}
+            {build.name} · {formatBuildTime(build.at)}
             {undone ? " · undone" : copy ? " · playing a copy" : ""}
           </span>
           <span className="text-muted-foreground">{buildCaption(build)}</span>
@@ -724,7 +723,7 @@ function BuildThumb({
           <Button
             size="icon-xs"
             variant="overlay"
-            aria-label={`Undo ${buildName(build)}`}
+            aria-label={`Undo ${build.name}`}
             disabled={undoing}
             onClick={onUndo}
           >
@@ -732,7 +731,7 @@ function BuildThumb({
           </Button>
         </TooltipTrigger>
         <TooltipPopup side="top" className="max-w-xs">
-          {`Undo ${buildName(build)}: take its change out, later builds stay`}
+          {`Undo ${build.name}: take its change out, later builds stay`}
         </TooltipPopup>
       </Tooltip>
     </div>

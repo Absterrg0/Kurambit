@@ -30,8 +30,10 @@ import {
   type GameBuildChanges,
   type GameBuildComparison,
   type GameBuildFacts,
+  type GameBuildFolder,
   GameBuildId,
   type GameBuildKind,
+  gameBuildName,
   type GameBuildRecord,
   type GameBuildRestore,
   type GameBuildRestoreOutcome,
@@ -130,12 +132,15 @@ const LIBRARY_LABEL = "Added from the Library";
  */
 const LANDED_SUFFIX = "-in";
 const UNDO_SUFFIX = "-undo";
+/** Where a capture lands before it is kept under its own id (keepRef). */
+const CAPTURE_REF = CheckpointRef.make("refs/kurambit/game-builds/capture");
+/** A build made outside a turn, kept reachable: the ref holds its commit and means nothing else. */
+const KEEP_REFS = "refs/kurambit/game-builds/builds/";
+const keepRef = (id: string) => CheckpointRef.make(`${KEEP_REFS}${id}`);
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 const MOVED_ON =
   "The game changed after the build this would undo, so nothing was restored and nothing was lost.";
-/** The local branch the game's builds are written to as plain commits (mirrorHistory). */
-const HISTORY_BRANCH = CheckpointRef.make("refs/heads/kurambit/history");
 /** Where a build with no known time sorts: last. */
 const EPOCH = "1970-01-01T00:00:00.000Z";
 const isoOfSeconds = (seconds: number) => DateTime.formatIso(DateTime.makeUnsafe(seconds * 1000));
@@ -600,7 +605,6 @@ const make = Effect.gen(function* () {
   const waiters = new Map<string, Deferred.Deferred<MoveResult>>();
   // Older turns never change their builds: a page's count below it is read once per ref set.
   const numberedCounts = new Map<string, number>();
-  const mirrorLock = yield* KeyedLock.make<string>();
   // A round's change against the build before it never changes: read once.
   const roundFiles = new Map<string, { files: GameBuild["files"]; count: number | null }>();
 
@@ -633,6 +637,7 @@ const make = Effect.gen(function* () {
       readonly undid?: GameBuildId | undefined;
       readonly numberFrom?: number | undefined;
       readonly replaces?: GameBuildId | undefined;
+      readonly request?: string | undefined;
     },
   ) =>
     ensureMigrated(threadId, g).pipe(
@@ -655,6 +660,7 @@ const make = Effect.gen(function* () {
             summary: entry.summary,
             files: entry.files,
             fileCount: entry.fileCount,
+            ...(options.request === undefined ? {} : { request: options.request }),
           } satisfies GameBuildRecord,
           current: options.current,
           ...(options.numberFrom === undefined ? {} : { numberFrom: options.numberFrom }),
@@ -662,8 +668,8 @@ const make = Effect.gen(function* () {
         }),
       ),
       Effect.asVoid,
-      Effect.catchCause((cause) =>
-        Effect.logWarning("A build could not be recorded.", { root: g.root, cause }),
+      Effect.mapError((cause) =>
+        failed("Builds", g.root, "io", "the build could not be recorded", cause),
       ),
     );
 
@@ -764,27 +770,7 @@ const make = Effect.gen(function* () {
           };
         });
       const legacy = yield* noRunRestoreOf(g.root);
-      const restore: GameBuildRestore | null =
-        legacy === null
-          ? null
-          : {
-              requestId: legacy.requestId,
-              target: legacy.target,
-              label: legacy.label,
-              requestedAt: legacy.requestedAt,
-              before: legacy.before,
-              ...(legacy.expect === undefined ? {} : { expect: legacy.expect }),
-              ...(legacy.thread === undefined ? {} : { thread: legacy.thread }),
-              outcome:
-                legacy.outcome === null
-                  ? null
-                  : {
-                      restored: legacy.outcome.restored,
-                      message: legacy.outcome.message,
-                      moved:
-                        legacy.outcome.moved ?? (legacy.outcome.restored ? "restored" : "current"),
-                    },
-            };
+      const restore = legacy === null ? null : fromLegacyRestore(legacy);
       const held = yield* heldKeepsOf(g.root);
       yield* engine.dispatch({
         type: "game-build.migrate",
@@ -857,7 +843,7 @@ const make = Effect.gen(function* () {
 
   /** Every ref a build of the game lives under: turn checkpoints and run builds, never a capture's index. */
   const buildRefs = (root: string) =>
-    Effect.forEach([TURN_REFS, "refs/kurambit/game-runs/"], (prefix) =>
+    Effect.forEach([TURN_REFS, "refs/kurambit/game-runs/", KEEP_REFS], (prefix) =>
       checkpoints.listCheckpointRefs({ cwd: root, prefix }),
     ).pipe(
       Effect.map((lists) => lists.flat()),
@@ -882,6 +868,7 @@ const make = Effect.gen(function* () {
       if (shell === null)
         return yield* failed("Builds", root, "project-not-found", "the thread is gone");
       return {
+        threadId,
         root,
         // The game's own folder, where its one decisions file lives, even for a chat in a copy.
         home: home ? root : (yield* projects.home(threadId)).root,
@@ -1147,6 +1134,24 @@ const make = Effect.gen(function* () {
       }),
       Effect.orElseSucceed(() => null),
     );
+  /** An earlier server's restore record, as the game's records keep one. */
+  const fromLegacyRestore = (legacy: NoRunRestore): GameBuildRestore => ({
+    requestId: legacy.requestId,
+    target: legacy.target,
+    label: legacy.label,
+    requestedAt: legacy.requestedAt,
+    before: legacy.before,
+    ...(legacy.expect === undefined ? {} : { expect: legacy.expect }),
+    ...(legacy.thread === undefined ? {} : { thread: legacy.thread }),
+    outcome:
+      legacy.outcome === null
+        ? null
+        : {
+            restored: legacy.outcome.restored,
+            message: legacy.outcome.message,
+            moved: legacy.outcome.moved ?? (legacy.outcome.restored ? "restored" : "current"),
+          },
+  });
   const saveNoRunRestore = (root: string, record: NoRunRestore) =>
     Effect.gen(function* () {
       const now = DateTime.formatIso(yield* DateTime.now);
@@ -1474,6 +1479,8 @@ const make = Effect.gen(function* () {
           source: entry.source,
           number: numbers.get(entry.id)?.number ?? null,
           ...(numbers.get(entry.id)?.fix == null ? {} : { fix: numbers.get(entry.id)!.fix! }),
+          name: "",
+          undone: false,
           // Only a build still kept can be restored to undo this one.
           base:
             entry.base !== null && isGameBuildId(entry.base) && kept.has(entry.base)
@@ -1529,38 +1536,213 @@ const make = Effect.gen(function* () {
       return seated?.number ?? (yield* projections.getGameBuildTally(g.projectId, g.home)).number;
     }).pipe(Effect.orElseSucceed(() => undefined));
 
+  /**
+   * A turn's build as it lands, or null when the turn changed no game files (no build). T3 diffs
+   * a turn against its thread's previous checkpoint, which in a game includes whatever another
+   * chat or a restore did in between: the base is the newest build that came into the folder
+   * after the thread's previous turn and before this one began (turnChangeBase), else T3's own.
+   */
+  const turnEntryOf = (g: Game, checkpointRef: string) =>
+    Effect.gen(function* () {
+      const rows = yield* projections.listProjectTurnCheckpoints(g.projectId, { limit: 100 });
+      const row = rows.find((each) => each.checkpoint.ref === checkpointRef);
+      if (row === undefined) return null;
+      const oid = yield* oidAt(g.root, CheckpointRef.make(checkpointRef));
+      if (oid === null || !isGameBuildId(oid)) return null;
+      const folder = yield* folderOf(g);
+      const restore = folder?.restore ?? null;
+      const recent = yield* recordsOf(g, 50);
+      const earlier: ReadonlyArray<EarlierBuild> = [
+        ...rows
+          .filter((each) => each.threadId === row.threadId)
+          .map((each) => ({
+            id: "",
+            at: DateTime.formatIso(each.checkpoint.capturedAt),
+            thread: each.threadId,
+            turn: each.runOrdinal,
+          })),
+        ...recent
+          .filter((r) => r.kind !== "restore-before" && r.id !== oid)
+          .map((r) => ({ id: r.id, at: r.at, thread: null, turn: null })),
+        ...(restore?.outcome?.restored === true
+          ? [{ id: restore.target, at: restore.requestedAt, thread: null, turn: null }]
+          : []),
+      ];
+      const ordinal = row.checkpoint.ordinalWithinScope;
+      const t3Base =
+        ordinal === 0
+          ? null
+          : yield* oidAt(
+              g.root,
+              yield* checkpointRefForScopeOrdinal({
+                scopeId: row.checkpoint.scopeId,
+                ordinalWithinScope: ordinal - 1,
+              }).pipe(Effect.provideService(Crypto.Crypto, crypto)),
+            );
+      const base =
+        turnChangeBase(
+          { id: oid, startedAt: row.startedAt, thread: row.threadId, turn: row.runOrdinal },
+          earlier,
+        ) ?? t3Base;
+      const inGame = yield* gamePaths(g.root);
+      const restored = isRestored(g.lane);
+      const t3Files = row.checkpoint.files.flatMap((file) => {
+        const path = inGame(file.path);
+        return path !== null && restored(path) ? [{ ...file, path }] : [];
+      });
+      const change =
+        base === null || base === t3Base
+          ? { files: topFiles(t3Files), count: t3Files.length }
+          : yield* changeOf(g.root, g.lane, base, oid);
+      if (change.count === 0) return null;
+      return {
+        id: oid,
+        at: DateTime.formatIso(row.checkpoint.capturedAt),
+        source: {
+          _tag: "turn",
+          threadId: row.threadId,
+          threadTitle: row.threadTitle,
+          turn: row.runOrdinal,
+          runId: row.runId,
+          request: firstLine(row.request, "(no request text)"),
+          step: null,
+        },
+        summary: firstLine(row.request, "A turn's changes"),
+        files: change.files,
+        fileCount: change.count,
+        base,
+      } satisfies Entry;
+    });
+
   const recordTurn: GameBuilds["Service"]["recordTurn"] = (threadId, checkpointRef) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
-      const { entries, refs, recorded } = yield* allEntries(g, 50, undefined);
-      const id = refs.get(checkpointRef);
-      if (id === undefined) return;
-      const entry = entries.find((each) => each.id === id && each.source._tag === "turn");
-      if (entry === undefined) return;
+      const entry = yield* turnEntryOf(g, checkpointRef);
+      if (entry === null) return;
       yield* recordBuild(threadId, g, entry, "turn", {
         current: true,
         numberFrom: g.root === g.home ? undefined : yield* seatNumber(threadId, g),
       });
-      if (entry.base === null) return;
-      if (recorded.has(id)) return;
-      yield* checkpoints.updateCheckpointRef({
-        cwd: g.root,
-        checkpointRef: CheckpointRef.make(`${BASES}${id}`),
-        oid: entry.base,
-      });
-      const number = (yield* numbersOf(yield* allEntries(g, 50, undefined), entries)).get(
-        id,
-      )?.number;
-      yield* mirrorHistory(
-        g,
-        id,
-        `${number === undefined ? "Build" : `Build ${number}`}: ${entry.summary}${entry.source._tag === "turn" ? `\n\nChat: ${entry.source.threadTitle}` : ""}`,
-      );
     }).pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("A turn build's base could not be recorded.", { threadId, cause }),
+        Effect.logWarning("A turn's build could not be recorded.", { threadId, cause }),
       ),
     );
+
+  const readFailed = (root: string) => (cause: unknown) =>
+    failed("Builds", root, "io", "the game's builds could not be read", cause);
+
+  /** A folder's state from the records, once its legacy builds are read in. */
+  const folderOf = (g: Pick<Game, "threadId" | "root" | "projectId">) =>
+    ensureMigrated(g.threadId, g).pipe(
+      Effect.andThen(projections.getGameBuildFolder(g.projectId, g.root)),
+      Effect.mapError(readFailed(g.root)),
+    );
+  /** The build the folder holds, as the records say: its newest landing, keep or restore. */
+  const folderCurrent = (g: Pick<Game, "threadId" | "root" | "projectId">) =>
+    Effect.map(folderOf(g), (folder) => folder?.current ?? null);
+  /** A folder's builds, newest first, from `before`. */
+  const recordsOf = (
+    g: Pick<Game, "threadId" | "root" | "projectId">,
+    limit: number,
+    before?: string | undefined,
+  ) =>
+    ensureMigrated(g.threadId, g).pipe(
+      Effect.andThen(projections.listGameBuilds(g.projectId, { root: g.root, before, limit })),
+      Effect.mapError(readFailed(g.root)),
+    );
+  const recordOf = (g: Pick<Game, "root" | "projectId">, id: string) =>
+    (isGameBuildId(id)
+      ? projections.getGameBuilds(g.projectId, [id])
+      : Effect.succeed([] as ReadonlyArray<GameBuildRecord>)
+    ).pipe(
+      Effect.map((rows) => rows[0] ?? null),
+      Effect.mapError(readFailed(g.root)),
+    );
+
+  /** Records as the rail's entries, each turn with its keep-going step's mark as it is now. */
+  const entriesOf = (records: ReadonlyArray<GameBuildRecord>) =>
+    Effect.gen(function* () {
+      const steps = yield* stepsOf(
+        new Set(records.flatMap((r) => (r.source._tag === "turn" ? [r.source.threadId] : []))),
+      );
+      return records.map((r): Entry => ({
+        id: r.id,
+        at: r.at,
+        source:
+          r.source._tag === "turn"
+            ? { ...r.source, step: steps.get(RunId.make(r.source.runId)) ?? null }
+            : r.source,
+        summary: r.summary,
+        files: r.files,
+        fileCount: r.fileCount,
+        base: r.base,
+      }));
+    });
+  const numbersFrom = (records: ReadonlyArray<GameBuildRecord>) =>
+    new Map(
+      records.flatMap((r): ReadonlyArray<readonly [string, BuildNumber]> =>
+        r.number === null ? [] : [[r.id, { number: r.number, fix: r.fix ?? null }]],
+      ),
+    );
+
+  /** The rail's rows of records: their facts, their names and whether a restore undid them. */
+  const rowsFrom = (
+    g: Game,
+    records: ReadonlyArray<GameBuildRecord>,
+    folder: GameBuildFolder | null,
+    inCopy?: boolean,
+  ) =>
+    Effect.gen(function* () {
+      const entries = yield* entriesOf(records);
+      const restore = folder?.restore ?? null;
+      const target =
+        restore?.outcome?.restored === true ? yield* recordOf(g, restore.target) : null;
+      const resolved = yield* resolveOf(
+        g,
+        records.map((r) => r.id),
+      );
+      const measured = yield* facts.readMany([...resolved.values()]);
+      const stills = yield* Effect.forEach(records, (r) => stillOf(g.root, measured.get(r.id)), {
+        concurrency: 8,
+      });
+      const where = inCopy === true ? " · in this copy" : inCopy === false ? " · in the game" : "";
+      const builds = records.map((r, index): GameBuild => {
+        const entry = entries[index]!;
+        const available = resolved.has(r.id);
+        const read = measured.get(r.id);
+        return {
+          id: r.id,
+          at: r.at,
+          source: entry.source,
+          number: r.number,
+          ...(r.fix === undefined ? {} : { fix: r.fix }),
+          ...(inCopy === undefined ? {} : { inCopy }),
+          name: `${gameBuildName(r, entry.source._tag === "turn" && entry.source.step !== null)}${where}`,
+          // Made after the build a restore put back and before the restore: not in the game now.
+          undone:
+            restore !== null &&
+            target !== null &&
+            (r.kind === "turn" || r.kind === "version") &&
+            r.id !== folder?.current &&
+            r.at > target.at &&
+            r.at < restore.requestedAt,
+          base: r.base,
+          summary: r.summary,
+          files: r.files,
+          fileCount: r.fileCount,
+          available,
+          noPlay: !available ? "This build is no longer kept." : noPlayReason(g.engine),
+          noRestore: !available ? "This build is no longer kept." : null,
+          facts:
+            read === undefined
+              ? { state: "never", chips: [], notMeasured: 0, good: 0, bad: 0 }
+              : summaryOf(read),
+          still: stills[index] ?? null,
+        };
+      });
+      return { builds, measured };
+    });
 
   const pendingTurnOf = (threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -1633,16 +1815,15 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId, input.home === true);
       const limit = Math.min(50, Math.max(1, input.limit ?? 30));
-      // Read before the turns: a checkpoint committing between the two reads then leaves the turn
-      // pending or listed, never neither, which would show the build before it for a moment.
+      // Read before the builds: a turn's build recorded between the two reads then leaves the
+      // turn pending or listed, never neither, which would show the build before it for a moment.
       const pending = input.before === undefined ? yield* pendingTurnOf(threadId) : null;
-      const listed = yield* allEntries(g, limit, input.before);
-      const { entries, kept, more } = listed;
-      const page = entries.slice(0, limit);
-      const rail = g.root === g.home ? null : yield* copyRail(threadId, g, limit, input.before);
+      const folder = yield* folderOf(g);
+      const rail = g.root === g.home ? null : yield* copyRailOf(g, limit, input.before);
+      const page = rail === null ? yield* recordsOf(g, limit + 1, input.before) : [];
       const { builds, measured } =
         rail === null
-          ? yield* rowsOf(g, page, kept, yield* numbersOf(listed, page))
+          ? yield* rowsFrom(g, page.slice(0, limit), folder)
           : { builds: rail.rows, measured: rail.measured };
       // The generation cards read the newest build whose asset use was measured.
       const latestUse =
@@ -1654,22 +1835,58 @@ const make = Effect.gen(function* () {
                 : [];
             })[0]
           : undefined;
-      const restore = yield* restoreRefOf(g, entries);
-      const current = input.before === undefined ? yield* currentOf(g, listed) : null;
-      const pendingTurn = listed.entries.some(
-        (entry) => entry.source._tag === "turn" && entry.source.runId === pending,
+      const current = input.before === undefined ? (folder?.current ?? null) : null;
+      const pendingTurn = builds.some(
+        (build) => build.source._tag === "turn" && build.source.runId === pending,
       )
         ? null
         : pending;
       return {
         builds,
-        next: rail !== null ? rail.next : more && page.length > 0 ? page.at(-1)!.at : null,
-        current: shownAs(listed, current),
+        next: rail !== null ? rail.next : page.length > limit ? page[limit - 1]!.at : null,
+        current,
         folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
-        restore,
+        restore: yield* restoreRefOf(g, folder),
         ...(latestUse === undefined ? {} : { latestUse }),
         ...(pendingTurn === null ? {} : { pendingTurn }),
       } satisfies GameBuildsResult;
+    });
+
+  /**
+   * A chat in a copy: the game's builds up to the copy's seat, then the copy's own builds since it
+   * was made or last brought in, numbered on from the seat. One numbering, never the game's later
+   * builds, its kept edits or another chat's copies. Null for a copy with no seat kept.
+   */
+  const copyRailOf = (g: Game, limit: number, before: string | undefined) =>
+    Effect.gen(function* () {
+      const seatedAt = yield* refTime(g.home, worktreeSeedRef(g.threadId));
+      if (seatedAt === null) return null;
+      const home: Game = { ...g, root: g.home };
+      // The seat's own build commits within the second its ref says.
+      const upTo = isoOfSeconds(seatedAt + 1);
+      const gamePage = yield* recordsOf(home, limit + 1, before ?? upTo);
+      const gameRows = yield* rowsFrom(
+        home,
+        gamePage.slice(0, limit),
+        yield* folderOf(home),
+        false,
+      );
+      const next = gamePage.length > limit ? gamePage[limit - 1]!.at : null;
+      if (before !== undefined) return { rows: gameRows.builds, measured: gameRows.measured, next };
+      const copiesFolder = `${gameRunRefsFolder(NO_RUN)}copies/${threadRefKey(g.threadId)}`;
+      const since = isoOfSeconds(
+        Math.max(
+          (yield* refTime(g.home, `${copiesFolder}/in`)) ?? 0,
+          (yield* refTime(g.home, `${copiesFolder}/brought`)) ?? 0,
+        ),
+      );
+      const own = (yield* recordsOf(g, 50)).filter((r) => r.at > since);
+      const copyRows = yield* rowsFrom(g, own, yield* folderOf(g), true);
+      return {
+        rows: [...copyRows.builds, ...gameRows.builds],
+        measured: new Map([...gameRows.measured, ...copyRows.measured]),
+        next,
+      };
     });
 
   /** The build the rail shows for the folder's: a bot setup's point shows as the build it was written on. */
@@ -1681,26 +1898,28 @@ const make = Effect.gen(function* () {
     return from !== undefined && isGameBuildId(from) ? from : id;
   };
 
-  const restoreRefOf = (g: Game, entries: ReadonlyArray<Entry>) =>
+  /** The folder's latest restore, with the build that undoes it while no turn came since. */
+  const restoreRefOf = (g: Game, folder: GameBuildFolder | null) =>
     Effect.gen(function* () {
-      const newerThan = (at: string) =>
-        entries.some((entry) => entry.source._tag === "turn" && entry.at > at);
-      const r = yield* noRunRestoreOf(g.root);
+      const r = folder?.restore ?? null;
       if (r === null) return null;
+      const newer = (yield* recordsOf(g, 50)).some(
+        (record) => record.kind === "turn" && record.at > r.requestedAt,
+      );
       return {
         requestId: r.requestId,
         target: r.target,
         label: r.label,
         requestedAt: r.requestedAt,
-        undo: r.outcome?.restored === true && !newerThan(r.requestedAt) ? r.before : null,
-        outcome: r.outcome,
+        undo: r.outcome?.restored === true && !newer ? r.before : null,
+        outcome:
+          r.outcome === null ? null : { restored: r.outcome.restored, message: r.outcome.message },
       };
     });
 
-  /** A build the caller named, checked to be one of this game's: its entry and content key. */
+  /** A build the caller named, checked to be one of this game's: its content key. */
   const resolve = (g: Game, ref: GameBuildRef) =>
     Effect.gen(function* () {
-      const refs = yield* buildRefs(g.root);
       let id: string | null = null;
       if (ref._tag === "build") id = ref.build;
       else {
@@ -1713,7 +1932,9 @@ const make = Effect.gen(function* () {
         id =
           checkpoint === undefined
             ? null
-            : (refs.find((each) => each.checkpointRef === checkpoint.ref)?.oid ?? null);
+            : yield* oidAt(g.root, CheckpointRef.make(checkpoint.ref)).pipe(
+                Effect.orElseSucceed(() => null),
+              );
         if (id === null)
           return yield* failed(
             "Build",
@@ -1722,7 +1943,17 @@ const make = Effect.gen(function* () {
             "That turn captured no build of this game.",
           );
       }
-      if (id === null || !isGameBuildId(id) || !refs.some((each) => each.oid === id))
+      // One of the game's records, or a commit the game keeps (a turn's checkpoint that changed
+      // no game files, the folder an edit started from).
+      const known =
+        id !== null && isGameBuildId(id)
+          ? ref._tag === "turn" ||
+            (yield* recordOf(g, id)) !== null ||
+            (yield* buildRefs(g.root).pipe(Effect.orElseSucceed(() => []))).some(
+              (each) => each.oid === id,
+            )
+          : false;
+      if (id === null || !isGameBuildId(id) || !known)
         return yield* failed(
           "Build",
           g.root,
@@ -1740,29 +1971,37 @@ const make = Effect.gen(function* () {
       return resolved;
     });
 
-  /** The list row of one build: found among the given builds, else a bare row. */
-  const rowOf = (g: Game, id: GameBuildId, listed: Effect.Success<ReturnType<typeof allEntries>>) =>
+  /** The list row of one build: its record's, else a bare row. */
+  const rowOf = (g: Game, id: GameBuildId) =>
     Effect.gen(function* () {
-      const entry =
-        listed.entries.find((each) => each.id === id) ??
-        ({
-          id,
-          at: EPOCH,
-          source: { _tag: "saved", label: `Build ${id.slice(0, 8)}` },
-          summary: `Build ${id.slice(0, 8)}`,
-          files: [],
-          fileCount: null,
-          base: null,
-        } satisfies Entry);
-      const kept = new Set([...listed.kept, id]);
-      const [row] = (yield* rowsOf(g, [entry], kept, yield* numbersOf(listed, [entry]))).builds;
+      const record = yield* recordOf(g, id);
+      const [row] = (yield* rowsFrom(
+        g,
+        [
+          record ??
+            ({
+              id,
+              projectId: g.projectId,
+              root: g.root,
+              at: EPOCH,
+              kind: "setup",
+              number: null,
+              base: null,
+              source: { _tag: "saved", label: `Build ${id.slice(0, 8)}` },
+              summary: `Build ${id.slice(0, 8)}`,
+              files: [],
+              fileCount: null,
+            } satisfies GameBuildRecord),
+        ],
+        null,
+      )).builds;
       return row!;
     });
 
   const changes: GameBuilds["Service"]["changes"] = (threadId, id) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
-      const row = yield* rowOf(g, id, yield* allEntries(g, 50, undefined));
+      const row = yield* rowOf(g, id);
       if (row.base === null) return { files: row.files, count: row.fileCount, tunes: [] };
       const between = (format: "numstat" | "patch", filePaths?: ReadonlyArray<string>) =>
         checkpoints
@@ -1835,10 +2074,9 @@ const make = Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const ra = yield* resolve(g, a);
       const rb = yield* resolve(g, b);
-      const listed = yield* allEntries(g, 50, undefined);
       const [rowA, rowB, factsA, factsB] = yield* Effect.all([
-        rowOf(g, ra.build, listed),
-        rowOf(g, rb.build, listed),
+        rowOf(g, ra.build),
+        rowOf(g, rb.build),
         facts.read(ra),
         facts.read(rb),
       ]);
@@ -1927,7 +2165,7 @@ const make = Effect.gen(function* () {
       // A retried request answers from its record and decides nothing again.
       const repeat =
         commandId !== undefined &&
-        (yield* noRunRestoreOf(g.root))?.requestId === restoreRequestId(g.root, commandId);
+        (yield* folderOf(g))?.restore?.requestId === restoreRequestId(g.root, commandId);
       const held =
         options.person === true && !repeat
           ? yield* heldBefore(g).pipe(
@@ -1961,11 +2199,11 @@ const make = Effect.gen(function* () {
   /** The game's newest builds, their numbers and the folder's build: what a restore leaves. */
   const heldBefore = (g: Game) =>
     Effect.gen(function* () {
-      const listed = yield* allEntries(g, 50, undefined);
+      const records = yield* recordsOf(g, 50);
       return {
-        entries: listed.entries,
-        numbers: yield* numbersOf(listed, listed.entries),
-        current: yield* currentOf(g, listed),
+        entries: yield* entriesOf(records),
+        numbers: numbersFrom(records),
+        current: yield* folderCurrent(g),
       };
     });
 
@@ -2085,7 +2323,7 @@ const make = Effect.gen(function* () {
   const current: GameBuilds["Service"]["current"] = (threadId) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId);
-      const build = yield* currentOf(g, yield* allEntries(g, 1, undefined));
+      const build = yield* folderCurrent(g);
       return {
         build,
         edited: build !== null && !(yield* holdsIn(g, build, String(threadId))),
@@ -2114,14 +2352,8 @@ const make = Effect.gen(function* () {
       if (id === undefined || !isGameBuildId(id)) return null;
       // Recorded as the turn lands (the reactor may not have yet): idempotent.
       yield* recordTurn(threadId, checkpoint.ref);
-      const recorded = yield* checkpoints
-        .listCheckpointRefs({ cwd: root, prefix: `${BASES}${id}` })
-        .pipe(
-          Effect.map(
-            (refs) => refs.find((each) => each.checkpointRef === `${BASES}${id}`)?.oid ?? null,
-          ),
-          Effect.orElseSucceed(() => null),
-        );
+      const projectId = (yield* gameOf(threadId)).projectId;
+      const recorded = (yield* recordOf({ root, projectId }, id))?.base ?? null;
       const known = recorded !== null && isGameBuildId(recorded) ? recorded : null;
       const base = known ?? fallback;
       const counted = base === null ? null : (yield* changeOf(root, lane, base, id)).count;
@@ -2180,7 +2412,7 @@ const make = Effect.gen(function* () {
   const moveWithoutRun = (
     root: string,
     lane: string,
-    record: NoRunRestore,
+    record: GameBuildRestore,
     owner: string,
     folderBuild: GameBuildId | null,
     projectId: ProjectId | null,
@@ -2283,7 +2515,6 @@ const make = Effect.gen(function* () {
         moved.kind !== "current" && !movedOn && before !== null && isGameBuildId(before)
           ? before
           : null;
-      yield* saveNoRunRestore(root, { ...record, before: same ?? kept, outcome });
       // After the record names the build, so a death in between leaves at most a spare mark.
       if (same !== null)
         yield* checkpoints
@@ -2312,15 +2543,13 @@ const make = Effect.gen(function* () {
     label?: string,
     /** What the folder holds as it moves, when the caller read it (a landing's merge did). */
     holding?: GameBuildId,
-    /** Written once the record is: a restart then settles a move whose rail already names it. */
-    afterRecord?: Effect.Effect<void, GameOperationError>,
   ) =>
     Effect.gen(function* () {
       const requestId = restoreRequestId(g.root, commandId);
-      const earlier = yield* noRunRestoreOf(g.root);
+      const earlier = (yield* folderOf(g))?.restore ?? null;
       // A repeat answers as the first try did.
       if (earlier?.requestId === requestId && earlier.outcome !== null) {
-        const moved = earlier.outcome.moved ?? (earlier.outcome.restored ? "restored" : "current");
+        const moved = earlier.outcome.moved;
         if (moved === "refused")
           return yield* failed("Restore build", g.root, "tool-failed", earlier.outcome.message);
         return {
@@ -2361,10 +2590,8 @@ const make = Effect.gen(function* () {
           ? null
           : holding !== undefined
             ? holding
-            : yield* currentOf(g, yield* allEntries(g, 1, undefined)).pipe(
-                Effect.orElseSucceed(() => null),
-              );
-      const record: NoRunRestore =
+            : yield* folderCurrent(g).pipe(Effect.orElseSucceed(() => null));
+      const record: GameBuildRestore =
         earlier?.requestId === requestId
           ? earlier
           : {
@@ -2390,16 +2617,11 @@ const make = Effect.gen(function* () {
             name: label ?? record.label,
             operation: "Restore build",
           },
-          saveNoRunRestore(g.root, record).pipe(
-            Effect.andThen(afterRecord ?? Effect.void),
-            Effect.andThen(
-              recordedMove(threadId, g, {
-                ...record,
-                ...(folderBuild === null ? {} : { holding: folderBuild }),
-                outcome: null,
-              }),
-            ),
-          ),
+          recordedMove(threadId, g, {
+            ...record,
+            ...(folderBuild === null ? {} : { holding: folderBuild }),
+            outcome: null,
+          }),
         ),
         scope,
       );
@@ -2461,30 +2683,15 @@ const make = Effect.gen(function* () {
   const moveRecorded: GameBuildMoves.GameBuildMoveRunner["move"] = (move) =>
     Effect.gen(function* () {
       const { root, restore } = move;
-      const legacy = yield* noRunRestoreOf(root);
+      const settled = (yield* projections.getGameBuildFolder(move.projectId, root))?.restore;
+      // Settled before a restart marked the effect done: answer from the record, move nothing.
       const result: MoveResult =
-        legacy?.requestId === restore.requestId && legacy.outcome !== null
-          ? {
-              outcome: {
-                ...legacy.outcome,
-                moved: legacy.outcome.moved ?? (legacy.outcome.restored ? "restored" : "current"),
-              },
-              before: legacy.before,
-              park: null,
-            }
+        settled?.requestId === restore.requestId && settled.outcome !== null
+          ? { outcome: settled.outcome, before: settled.before, park: null }
           : yield* moveWithoutRun(
               root,
               manifestProject(yield* projects.read(root)),
-              {
-                requestId: restore.requestId,
-                target: restore.target,
-                label: restore.label,
-                requestedAt: restore.requestedAt,
-                before: null,
-                ...(restore.expect === undefined ? {} : { expect: restore.expect }),
-                ...(restore.thread === undefined ? {} : { thread: restore.thread }),
-                outcome: null,
-              },
+              restore,
               String(move.threadId),
               restore.holding ?? null,
               move.projectId,
@@ -2510,64 +2717,6 @@ const make = Effect.gen(function* () {
     );
   yield* buildMoves.attach({ move: moveRecorded });
 
-  /**
-   * The game's builds as plain git history, for `git log` and editors: each build that lands in
-   * the game folder is also a commit on the local branch `kurambit/history`, its parent the
-   * branch's last commit and its tree the build's. The harness never reads it. It cannot diverge
-   * from the rail: it is only appended to, from the builds themselves, one game at a time. A
-   * person's own commits on their branch never reach it, and while they have it checked out it
-   * is left alone, so their HEAD and working tree are never moved.
-   */
-  const mirrorHistory = (g: Pick<Game, "root" | "home">, build: string, message: string) =>
-    Effect.gen(function* () {
-      if (g.root !== g.home) return;
-      const head = yield* Effect.promise(async () => {
-        let dir = NodePath.resolve(g.root);
-        for (;;) {
-          const text = await NodeFSP.readFile(NodePath.join(dir, ".git", "HEAD"), "utf8").catch(
-            () => null,
-          );
-          if (text !== null) return text.trim();
-          const up = NodePath.dirname(dir);
-          if (up === dir) return "";
-          dir = up;
-        }
-      });
-      if (head === `ref: ${HISTORY_BRANCH}`) return;
-      const [last] = yield* checkpoints.listCheckpointRefs({ cwd: g.root, prefix: HISTORY_BRANCH });
-      const parent = last?.checkpointRef === HISTORY_BRANCH ? last.oid : undefined;
-      if (parent !== undefined) {
-        const [was, now] = yield* checkpoints.resolveTrees({
-          cwd: g.root,
-          revisions: [parent, build],
-          path: "",
-        });
-        if (was !== null && was === now) return;
-      }
-      const commit = yield* checkpoints.commitTree({
-        cwd: g.root,
-        tree: `${build}^{tree}`,
-        ...(parent === undefined ? {} : { parent }),
-        message,
-      });
-      yield* checkpoints.updateCheckpointRef({
-        cwd: g.root,
-        checkpointRef: HISTORY_BRANCH,
-        oid: commit,
-      });
-    }).pipe(
-      // One game's history is appended to in order.
-      (work) => mirrorLock.withLock(g.root, work),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("A build could not be written to the game's history branch.", {
-          root: g.root,
-          cause,
-        }),
-      ),
-    );
-
-  const editRef = (request: string, suffix: string) =>
-    checkpointRefForGameRun(NO_RUN, `${EDITS}${request}${suffix}`);
   const oidAt = (root: string, ref: CheckpointRef) =>
     checkpoints.listCheckpointRefs({ cwd: root, prefix: ref }).pipe(
       Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid ?? null),
@@ -2576,54 +2725,45 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /** The folder captured as a commit, kept under a ref named by its id alone. */
+  const captureFolder = (root: string) =>
+    checkpoints
+      .withWorkspaceLock(
+        root,
+        checkpoints.captureCheckpoint({ cwd: root, checkpointRef: CAPTURE_REF }),
+      )
+      .pipe(Effect.tap((oid) => pin(root, oid)));
+  const pin = (root: string, oid: string) =>
+    checkpoints.updateCheckpointRef({ cwd: root, checkpointRef: keepRef(oid), oid });
+  /** The folder's build made outside a turn by this request, when an earlier try recorded it. */
+  const byRequest = (g: Game, request: string) =>
+    Effect.map(recordsOf(g, 100), (records) => records.find((r) => r.request === request) ?? null);
+
   const land: GameBuilds["Service"]["land"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId, true);
       const io = (detail: string) => (cause: unknown) =>
         failed("Land build", g.root, "io", detail, cause);
-      const suffix = input.kind === "in" ? LANDED_SUFFIX : UNDO_SUFFIX;
-      const known = yield* oidAt(g.root, editRef(input.request, suffix));
+      const kind = input.kind === "in" ? "bring-in" : "undo";
+      const known = (yield* byRequest(g, input.request))?.id ?? null;
       const made =
         known ??
         (yield* checkpoints
           .commitTree({ cwd: g.root, tree: input.tree, parent: input.from, message: input.label })
           .pipe(Effect.mapError(io("the build could not be made"))));
       if (!isGameBuildId(made)) return yield* failed("Land build", g.root, "io", "not a build");
-      // Listed once the landing's record is saved, before the folder moves: a restart settles
-      // the move and the rail already names it; a death before the record leaves neither.
-      const listRefs = Effect.forEach(
-        [
-          ["-from", input.from] as const,
-          ...(input.undid === undefined ? [] : [["-undid", input.undid] as const]),
-          [suffix, made] as const,
-        ],
-        ([suffixOf, oid]) =>
-          checkpoints
-            .updateCheckpointRef({
-              cwd: g.root,
-              checkpointRef: editRef(input.request, suffixOf),
-              oid,
-            })
-            .pipe(Effect.mapError(io("the build could not be kept"))),
-        { discard: true },
-      );
+      yield* pin(g.root, made).pipe(Effect.mapError(io("the build could not be kept")));
       const resolved = (yield* resolveOf(g, [made])).get(made);
       if (resolved === undefined)
         return yield* failed("Land build", g.root, "io", `the build holds no ${g.lane}/ project`);
-      // Recorded before the folder moves: the restore that lands it names it.
+      // Recorded before the folder moves: the restore that lands it names it, and a death before
+      // the record leaves neither.
       yield* recordBuild(
         threadId,
         g,
-        yield* savedEntry(
-          g,
-          made,
-          input.from,
-          input.label,
-          input.kind === "in" ? "bring-in" : "undo",
-          input.label,
-        ),
-        input.kind === "in" ? "bring-in" : "undo",
-        { current: false, undid: input.undid },
+        yield* savedEntry(g, made, input.from, input.label, kind, input.label),
+        kind,
+        { current: false, undid: input.undid, request: input.request },
       );
       const result = yield* restoreWithoutRun(
         threadId,
@@ -2633,20 +2773,15 @@ const make = Effect.gen(function* () {
         input.from,
         input.label,
         input.from,
-        known === null ? listRefs : Effect.void,
       );
       if (result.moved === "moved-on") {
-        yield* checkpoints
-          .deleteCheckpointRefs({
-            cwd: g.root,
-            checkpointRefs: ["-from", "-undid", suffix].map((each) => editRef(input.request, each)),
-          })
-          .pipe(Effect.ignore);
         yield* dropBuilds(threadId, g, [made], null);
+        yield* checkpoints
+          .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: [keepRef(made)] })
+          .pipe(Effect.ignore);
         return { build: made, moved: result.moved };
       }
       yield* playRestored(threadId, g);
-      yield* mirrorHistory(g, made, input.label);
       yield* operations.changed(g.root, GAME_BUILDS_EVENT, input.label);
       yield* measureIn(g.root, made, { supersede: true });
       return { build: made, moved: result.moved };
@@ -2656,14 +2791,17 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const g = yield* gameOf(threadId, true);
       const profile = engineProfile(yield* availableEngine(g.engine));
-      const listed = yield* allEntries(g, 50, undefined);
-      const entry =
-        listed.entries.find((each) => each.id === build) ??
-        (yield* allEntries(g, ALL_TURNS, undefined)).entries.find((each) => each.id === build);
-      const numbers = yield* numbersOf(listed, listed.entries);
+      const record = yield* recordOf(g, build);
+      const [entry] = record === null ? [] : yield* entriesOf([record]);
+      const undid = record?.kind === "undo" ? (record.undid ?? null) : null;
+      const named = new Map(
+        (yield* projections
+          .getGameBuilds(g.projectId, [build, ...(undid === null ? [] : [undid])])
+          .pipe(Effect.mapError(readFailed(g.root)))).map((r) => [r.id as string, r.number]),
+      );
       const name = (id: string) => {
-        const number = numbers.get(id)?.number;
-        return number === undefined ? `build ${id.slice(0, 7)}` : `Build ${number}`;
+        const number = named.get(id) ?? null;
+        return number === null ? `build ${id.slice(0, 7)}` : `Build ${number}`;
       };
       if (entry === undefined || entry.base === null || !isGameBuildId(entry.base))
         return yield* failed(
@@ -2679,22 +2817,15 @@ const make = Effect.gen(function* () {
               .update(`${g.root}\0undo\0${commandId}`)
               .digest("hex")
               .slice(0, 32);
-      // The game as it is now: the merge's ours, and what the undo lands on.
+      // The game as it is now: the merge's ours, and what the undo lands on. A repeat whose
+      // undo was recorded lands on what that one read.
       const now =
-        (yield* oidAt(g.root, editRef(request, "-from"))) ??
-        (yield* checkpoints
-          .withWorkspaceLock(
-            g.root,
-            checkpoints.captureCheckpoint({
-              cwd: g.root,
-              checkpointRef: editRef(request, "-from"),
-            }),
-          )
-          .pipe(
-            Effect.mapError((cause) =>
-              failed("Undo build", g.root, "io", "the game folder could not be read", cause),
-            ),
-          ));
+        (yield* byRequest(g, request))?.base ??
+        (yield* captureFolder(g.root).pipe(
+          Effect.mapError((cause) =>
+            failed("Undo build", g.root, "io", "the game folder could not be read", cause),
+          ),
+        ));
       if (!isGameBuildId(now)) return yield* failed("Undo build", g.root, "io", "not a build");
       const merged = yield* mergeBuilds(checkpoints, {
         root: g.root,
@@ -2711,9 +2842,6 @@ const make = Effect.gen(function* () {
         ),
       );
       if (merged.conflicts.length > 0) {
-        yield* checkpoints
-          .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: [editRef(request, "-from")] })
-          .pipe(Effect.ignore);
         return {
           _tag: "conflicts",
           files: merged.conflicts,
@@ -2721,17 +2849,9 @@ const make = Effect.gen(function* () {
         } as const;
       }
       // Undoing an undo is its Redo: it takes that undo's decision back.
-      const undid =
-        entry.source._tag === "saved" && entry.source.edit === "undo"
-          ? (listed.refs.get(
-              [...listed.refs.entries()]
-                .find(([, oid]) => oid === build)?.[0]
-                ?.replace(/-undo$/, "-undid") ?? "",
-            ) ?? null)
-          : null;
       const what = yield* whatBuildDid(g, entry);
       const label =
-        undid !== null && isGameBuildId(undid)
+        undid !== null
           ? `Redid ${name(undid)}`
           : `Undid ${name(build)}: ${what.text}`.slice(0, 140);
       const landed = yield* land(threadId, {
@@ -2778,21 +2898,16 @@ const make = Effect.gen(function* () {
   const HeldKeep = Schema.fromJsonString(
     Schema.Struct({ root: Schema.String, input: GameKeepValuesInputSchema }),
   );
-  const encodeHeldKeep = Schema.encodeEffect(HeldKeep);
   const holdKeep = (
-    g: Pick<Game, "root" | "projectId">,
+    g: Pick<Game, "threadId" | "root" | "projectId">,
     request: string,
     input: GameKeepValuesInput,
   ) =>
-    Effect.flatMap(Effect.orDie(encodeHeldKeep({ root: g.root, input })), (text) =>
-      Effect.promise(async () => {
-        const dir = heldKeepsDir(g.root);
-        await NodeFSP.mkdir(dir, { recursive: true });
-        const file = NodePath.join(dir, `${request}.json`);
-        await NodeFSP.writeFile(`${file}.tmp`, text);
-        await NodeFSP.rename(`${file}.tmp`, file);
-      }),
-    ).pipe(Effect.andThen(heldKeepEvent(input.threadId, g, { request, input }, null)));
+    heldKeepEvent(input.threadId, g, { request, input }, null).pipe(
+      Effect.mapError((cause) =>
+        failed("Keep values", g.root, "io", "the kept values could not be held", cause),
+      ),
+    );
   const heldKeepEvent = (
     threadId: ThreadId,
     g: Pick<Game, "root" | "projectId">,
@@ -2813,11 +2928,7 @@ const make = Effect.gen(function* () {
         keep: keep === null ? null : { ...keep, at },
         drop,
       });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("A held keep could not be recorded.", { root: g.root, cause }),
-      ),
-    );
+    });
   /** The chat whose turn writes this folder now (null: none): a copy's own chat in a copy. */
   const turnIn = (g: Game, threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -2853,17 +2964,12 @@ const make = Effect.gen(function* () {
     });
   const landHeldKeeps: GameBuilds["Service"]["landHeldKeeps"] = (root) =>
     Effect.gen(function* () {
-      const dir = heldKeepsDir(root);
-      const files = yield* Effect.promise(() => NodeFSP.readdir(dir).catch(() => [] as string[]));
-      for (const name of files.filter((each) => each.endsWith(".json")).toSorted()) {
-        const file = NodePath.join(dir, name);
-        const text = yield* Effect.promise(() => NodeFSP.readFile(file, "utf8").catch(() => null));
-        const held = text === null ? Option.none() : decodeHeldKeep(text);
-        if (Option.isNone(held)) {
-          yield* Effect.promise(() => NodeFSP.rm(file, { force: true }));
-          continue;
-        }
-        const { threadId, ...input } = held.value.input;
+      const held = (yield* projections.listGameBuildFolders())
+        .filter((folder) => folder.root === root)
+        .flatMap((folder) => folder.held.map((keep) => ({ projectId: folder.projectId, keep })))
+        .toSorted((a, b) => (a.keep.at < b.keep.at ? -1 : a.keep.at > b.keep.at ? 1 : 0));
+      for (const { projectId, keep } of held) {
+        const { threadId, ...input } = keep.input;
         const kept = yield* keepValues(threadId, input).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Values kept during a turn could not land.", { root, cause }).pipe(
@@ -2871,13 +2977,15 @@ const make = Effect.gen(function* () {
             ),
           ),
         );
-        // Still held (a turn at work again) keeps its file; landed or refused for good, it goes.
+        // Still held (a turn at work again) stays held; landed or refused for good, it goes.
         if (kept?.heldFor !== undefined) return;
-        yield* Effect.promise(() => NodeFSP.rm(file, { force: true }));
-        const g = yield* gameOf(threadId).pipe(Effect.orElseSucceed(() => null));
-        if (g !== null) yield* heldKeepEvent(threadId, g, null, name.slice(0, -".json".length));
+        yield* heldKeepEvent(threadId, { root, projectId }, null, keep.request);
       }
-    });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Held keeps could not land.", { root, cause }),
+      ),
+    );
 
   /** Each game's tuning session's base, and its tune file's text there (null: no file). */
   const tuningBases = new Map<string, { readonly base: string; readonly text: string | null }>();
@@ -2900,26 +3008,11 @@ const make = Effect.gen(function* () {
               .update(`${g.root}\0keep-values\0${input.commandId}`)
               .digest("hex")
               .slice(0, 32);
-      const fromRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-from`);
-      const keptRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-values`);
-      const oidOf = (ref: CheckpointRef) =>
-        checkpoints.listCheckpointRefs({ cwd: g.root, prefix: ref }).pipe(
-          Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid ?? null),
-          Effect.mapError((cause) =>
-            failed("Keep values", g.root, "io", "the game's builds could not be read", cause),
-          ),
-        );
-      const capture = (ref: CheckpointRef) =>
-        checkpoints
-          .withWorkspaceLock(
-            g.root,
-            checkpoints.captureCheckpoint({ cwd: g.root, checkpointRef: ref }),
-          )
-          .pipe(
-            Effect.mapError((cause) =>
-              failed("Keep values", g.root, "io", "the game folder could not be kept", cause),
-            ),
-          );
+      const capture = captureFolder(g.root).pipe(
+        Effect.mapError((cause) =>
+          failed("Keep values", g.root, "io", "the game folder could not be kept", cause),
+        ),
+      );
       const answer = (build: string, base: string, summary: string) =>
         isGameBuildId(build) && isGameBuildId(base)
           ? Effect.succeed({
@@ -2931,29 +3024,14 @@ const make = Effect.gen(function* () {
       // The tuning build the folder still holds, with the folder it was made from: the Stage's
       // next values fold into it, so a session of tuning stays one build and one Undo.
       const heldTuning = Effect.gen(function* () {
-        const refs = yield* checkpoints
-          .listCheckpointRefs({ cwd: g.root, prefix: `${gameRunRefsFolder(NO_RUN)}${EDITS}` })
-          .pipe(
-            Effect.mapError((cause) =>
-              failed("Keep values", g.root, "io", "the game's builds could not be read", cause),
-            ),
-          );
-        const newest = refs
-          .filter((ref) => ref.checkpointRef.endsWith("-values"))
-          .toSorted((a, b) => b.committedAt - a.committedAt)[0];
-        if (newest === undefined || !isGameBuildId(newest.oid)) return null;
-        const from = refs.find(
-          (ref) => ref.checkpointRef === newest.checkpointRef.replace(/-values$/, "-from"),
-        );
-        if (from === undefined || !isGameBuildId(from.oid)) return null;
-        const [changed] = yield* folderAgainst(g, [newest.oid]).pipe(
+        const newest = (yield* recordsOf(g, 50)).find((r) => r.kind === "values");
+        if (newest === undefined || newest.base === null) return null;
+        const [changed] = yield* folderAgainst(g, [newest.id]).pipe(
           Effect.mapError((cause) =>
             failed("Keep values", g.root, "io", "the folder could not be compared", cause),
           ),
         );
-        return changed === false
-          ? { base: from.oid, build: newest.oid, refs: [from.checkpointRef, newest.checkpointRef] }
-          : null;
+        return changed === false ? { base: newest.base, build: newest.id } : null;
       });
       const said = (things: GameKeepValuesInput["things"]) =>
         things
@@ -2968,23 +3046,15 @@ const make = Effect.gen(function* () {
       // The folder as the session found it. Still the build it holds (nothing edited since), it
       // is that build by its own id, so Undo goes back to a build the Stage can name.
       const sessionBase = Effect.gen(function* () {
-        const captured = yield* capture(fromRef);
-        const listed = yield* allEntries(g, 1, undefined);
-        const current = yield* currentOf(g, listed);
+        const captured = yield* capture;
+        const current = yield* folderCurrent(g);
         if (current === null || (yield* folderEditedSince(g, current)) !== false) return captured;
-        yield* checkpoints
-          .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: current })
-          .pipe(
-            Effect.mapError((cause) =>
-              failed("Keep values", g.root, "io", "the game folder could not be kept", cause),
-            ),
-          );
         return current;
       });
       // A repeat answers as the first try did.
-      const [doneFrom, doneKept] = yield* Effect.all([oidOf(fromRef), oidOf(keptRef)]);
-      if (doneFrom !== null && doneKept !== null)
-        return yield* answer(doneKept, doneFrom, said(input.things));
+      const done = yield* byRequest(g, request);
+      if (done !== null && done.base !== null)
+        return yield* answer(done.id, done.base, said(input.things));
       // A turn at work in this folder (any chat's, this one's too) would write over the values or
       // be captured half done: they are kept aside and land when its turn ends (landHeldKeeps).
       const writer = yield* turnIn(g, threadId);
@@ -2995,7 +3065,7 @@ const make = Effect.gen(function* () {
           threadId,
           commandId: input.commandId ?? request,
         });
-        const folder = yield* currentOf(g, yield* allEntries(g, 1, undefined));
+        const folder = yield* folderCurrent(g);
         if (folder === null)
           return yield* failed("Keep values", g.root, "busy", `${writer} is working in the game.`);
         return {
@@ -3031,27 +3101,10 @@ const make = Effect.gen(function* () {
           const merged = tuneFileWith(file, existing, input.things);
           if ("refusal" in merged)
             return yield* failed("Keep values", path, "invalid-input", merged.refusal);
-          const held = input.fold === true && doneFrom === null ? yield* heldTuning : null;
-          // A try cut short after its first capture keeps that one as the base; a fold keeps
-          // the base of the build it replaces, so Undo still goes back to before the session.
-          const base =
-            doneFrom ??
-            (held === null
-              ? yield* sessionBase
-              : yield* checkpoints
-                  .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: held.base })
-                  .pipe(
-                    Effect.as(held.base),
-                    Effect.mapError((cause) =>
-                      failed(
-                        "Keep values",
-                        g.root,
-                        "io",
-                        "the game folder could not be kept",
-                        cause,
-                      ),
-                    ),
-                  ));
+          const held = input.fold === true ? yield* heldTuning : null;
+          // A fold keeps the base of the build it replaces, so Undo still goes back to before
+          // the session.
+          const base = held === null ? yield* sessionBase : held.base;
           // The session's base file as it was: values put back write it again byte for byte, so
           // the folder is the base again whatever formatting the file had. Kept in memory; after
           // a server restart a session put back stays one build, as before.
@@ -3087,21 +3140,12 @@ const make = Effect.gen(function* () {
             catch: (cause) =>
               failed("Keep values", path, "io", `${file} could not be written`, cause),
           });
-          const build = yield* capture(keptRef);
-          const drop = (refs: ReadonlyArray<CheckpointRef>) =>
-            checkpoints
-              .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: refs })
-              .pipe(
-                Effect.mapError((cause) =>
-                  failed("Keep values", g.root, "io", "the game's builds could not be kept", cause),
-                ),
-              );
-          // Written before the build it replaces is dropped: a stop between the two leaves two
-          // tuning builds, never none.
-          if (held !== null) yield* drop(held.refs.map((ref) => CheckpointRef.make(ref)));
+          const build = yield* capture;
           // Every value put back: the session leaves no build, and the folder is its base again.
           if ((yield* changeOf(g.root, g.lane, base, build)).count === 0) {
-            yield* drop([fromRef, keptRef]);
+            yield* checkpoints
+              .deleteCheckpointRefs({ cwd: g.root, checkpointRefs: [keepRef(build)] })
+              .pipe(Effect.ignore);
             return {
               base,
               build: base,
@@ -3161,10 +3205,10 @@ const make = Effect.gen(function* () {
         {
           current: true,
           replaces: kept.held !== null && isGameBuildId(kept.held) ? kept.held : undefined,
+          request,
         },
       );
       yield* nextTurnsFrom(g, threadId, kept.build);
-      yield* mirrorHistory(g, kept.build, `Tuned values: ${kept.summary}`);
       yield* decideKept(g, kept.build, kept.held, kept.changes).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("Kept values could not be kept in the game's decisions.", { cause }),
@@ -3205,8 +3249,7 @@ const make = Effect.gen(function* () {
         from === to ? [] : [`${label} ${from} → ${to}`],
       );
       if (segments.length === 0) return;
-      const listed = yield* allEntries(g, 5, undefined);
-      const number = (yield* numbersOf(listed, listed.entries)).get(build)?.number;
+      const number = (yield* recordOf(g, build))?.number ?? undefined;
       yield* recordDecision(g.home, {
         kind: "kept-values",
         text: `Kept tuned values as ${number === undefined ? `build ${build.slice(0, 7)}` : `Build ${number}`}: ${segments.join("; ")}`,
@@ -3244,37 +3287,15 @@ const make = Effect.gen(function* () {
           moveWithoutRun(
             row.root,
             manifestProject(manifest),
-            row.record,
+            fromLegacyRestore(row.record),
             "game-builds:settle",
             null,
             games.find((game) => game.root === row.root)?.projectId ?? null,
           ),
         ),
-        // A landing (a bring-in, an undo) the restart cut short is a build: into the history too.
-        Effect.tap(({ outcome }) =>
-          outcome.moved !== "restored"
-            ? Effect.void
-            : Effect.flatMap(
-                checkpoints.listCheckpointRefs({
-                  cwd: row.root,
-                  prefix: `${gameRunRefsFolder(NO_RUN)}${EDITS}`,
-                }),
-                (refs) => {
-                  const landed = refs.find(
-                    (ref) =>
-                      ref.oid === row.record.target &&
-                      (ref.checkpointRef.endsWith(LANDED_SUFFIX) ||
-                        ref.checkpointRef.endsWith(UNDO_SUFFIX)),
-                  );
-                  return landed === undefined
-                    ? Effect.void
-                    : mirrorHistory(
-                        { root: row.root, home: row.root },
-                        landed.oid,
-                        landed.subject ?? row.record.label,
-                      );
-                },
-              ),
+        // Its own record settles, so the read into the game's records takes the outcome.
+        Effect.tap(({ outcome, before }) =>
+          saveNoRunRestore(row.root, { ...row.record, before, outcome }),
         ),
         Effect.catchCause((cause) =>
           Effect.logWarning("A cut-short restore could not be settled.", { root: row.root, cause }),
@@ -3373,45 +3394,28 @@ const make = Effect.gen(function* () {
               .update(`${g.root}\0keep-edit\0${input.commandId}`)
               .digest("hex")
               .slice(0, 32);
-      const fromRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-from`);
-      const keptRef = checkpointRefForGameRun(NO_RUN, `${EDITS}${request}-${input.edit}`);
       const io = (detail: string) => (cause: unknown) =>
         failed(input.operation, g.root, "io", detail, cause);
-      const oidOf = (ref: CheckpointRef) =>
-        checkpoints.listCheckpointRefs({ cwd: g.root, prefix: ref }).pipe(
-          Effect.map((refs) => refs.find((each) => each.checkpointRef === ref)?.oid ?? null),
-          Effect.mapError(io("the game's builds could not be read")),
-        );
-      const capture = (ref: CheckpointRef) =>
-        checkpoints
-          .withWorkspaceLock(
-            g.root,
-            checkpoints.captureCheckpoint({ cwd: g.root, checkpointRef: ref }),
-          )
-          .pipe(Effect.mapError(io("the game folder could not be kept")));
-      const [doneFrom, doneKept] = yield* Effect.all([oidOf(fromRef), oidOf(keptRef)]);
-      if (doneFrom !== null && doneKept !== null) return { build: doneKept, base: doneFrom };
+      const capture = captureFolder(g.root).pipe(
+        Effect.mapError(io("the game folder could not be kept")),
+      );
+      // A repeat answers as the first try did.
+      const done = yield* byRequest(g, request);
+      if (done !== null && done.base !== null) return { build: done.id, base: done.base };
       const kept = yield* operations.exclusive(
         g.root,
         input.operation,
         Effect.gen(function* () {
           // The folder as it stood: still the build it holds, that build by its own id, so Undo
           // goes back to a build the Stage can name.
+          const captured = yield* capture;
+          const current = yield* folderCurrent(g);
           const base =
-            doneFrom ??
-            (yield* Effect.gen(function* () {
-              const captured = yield* capture(fromRef);
-              const listed = yield* allEntries(g, 1, undefined);
-              const current = yield* currentOf(g, listed);
-              if (current === null || (yield* folderEditedSince(g, current)) !== false)
-                return captured;
-              yield* checkpoints
-                .updateCheckpointRef({ cwd: g.root, checkpointRef: fromRef, oid: current })
-                .pipe(Effect.mapError(io("the game folder could not be kept")));
-              return current;
-            }));
+            current === null || (yield* folderEditedSince(g, current)) !== false
+              ? captured
+              : current;
           yield* input.write(g.root);
-          return { base, build: yield* capture(keptRef) };
+          return { base, build: yield* capture };
         }),
         String(threadId),
       );
@@ -3429,10 +3433,9 @@ const make = Effect.gen(function* () {
               "Added from the Library",
             ),
             "library",
-            { current: true },
+            { current: true, request },
           );
         yield* nextTurnsFrom(g, threadId, kept.build);
-        yield* mirrorHistory(g, kept.build, input.operation);
         yield* operations.changed(
           g.root,
           GAME_BUILDS_EVENT,

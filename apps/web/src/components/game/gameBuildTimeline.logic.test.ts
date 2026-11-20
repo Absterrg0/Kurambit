@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  BUILD_B,
-  BUILD_C,
-  BUILD_D,
-  FAKE_BUILDS_RESULT,
-  FAKE_UNDONE_RESULT,
-} from "./gameBuilds.fixtures";
-import { isUndone, markTone, stageBuildId, stepMark } from "./gameBuildTimeline.logic";
+import { BUILD_B, BUILD_C, FAKE_BUILDS_RESULT } from "./gameBuilds.fixtures";
+import { markTone, stageBuildId, stepMark } from "./gameBuildTimeline.logic";
 
 const build = (list: typeof FAKE_BUILDS_RESULT, id: string) => {
   const found = list.builds.find((entry) => entry.id === id);
@@ -16,21 +10,6 @@ const build = (list: typeof FAKE_BUILDS_RESULT, id: string) => {
 };
 
 describe("the build timeline", () => {
-  // A mark that reads as undone while it is the game, or the reverse, lies about the folder.
-  it("dims only what a landed restore moved the folder away from", () => {
-    // After Undo of turn 5, turn 4 is back: turn 5 is undone, turn 4 and older are not.
-    expect(isUndone(build(FAKE_UNDONE_RESULT, BUILD_C), FAKE_UNDONE_RESULT)).toBe(true);
-    expect(isUndone(build(FAKE_UNDONE_RESULT, BUILD_D), FAKE_UNDONE_RESULT)).toBe(false);
-    expect(isUndone(build(FAKE_UNDONE_RESULT, BUILD_B), FAKE_UNDONE_RESULT)).toBe(false);
-    // A restore still running, or one that failed, undid nothing.
-    const undone = FAKE_UNDONE_RESULT.restore;
-    if (undone === null) throw new Error("the fake has a restore");
-    const pending = { ...FAKE_UNDONE_RESULT, restore: { ...undone, outcome: null } };
-    expect(isUndone(build(pending, BUILD_C), pending)).toBe(false);
-    // Turns after an older restore are new work, not undone.
-    expect(isUndone(build(FAKE_BUILDS_RESULT, BUILD_C), FAKE_BUILDS_RESULT)).toBe(false);
-  });
-
   it("tones a mark from what the list already says", () => {
     // One bad fact marks the build, whatever else is good.
     expect(markTone(build(FAKE_BUILDS_RESULT, BUILD_B))).toBe("bad");
