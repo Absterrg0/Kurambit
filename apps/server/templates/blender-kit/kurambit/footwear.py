@@ -73,7 +73,7 @@ def _one(arm, bodies, worn, s, kind, size, ease, top, toe, sole_t, welt):
 
     ankle, ball = _bone(arm, f"foot_{s}"), _bone(arm, f"ball_{s}")
     knee = _bone(arm, f"calf_{s}")
-    foot_pts, calf_pts, calf_w, inside = [], [], [], []
+    foot_pts, calf_pts, foot_w, calf_w, inside = [], [], [], [], []
     for body in bodies:
         co, _ = helpers.rest_coords(body)
         if len(co) != len(body.data.vertices):
@@ -82,6 +82,7 @@ def _one(arm, bodies, worn, s, kind, size, ease, top, toe, sole_t, welt):
         lead = np.array([l or "" for l in deform._dominant(body, arm)])
         on_foot = np.isin(lead, [f"foot_{s}", f"ball_{s}", f"ball_leaf_{s}"])
         foot_pts.append(co[on_foot])
+        foot_w.extend(_weights(body, np.flatnonzero(on_foot)))
         calf_pts.append(co[lead == f"calf_{s}"])
         calf_w.extend(_weights(body, np.flatnonzero(lead == f"calf_{s}")))
         inside.append((on_foot, lead == f"calf_{s}", co))
@@ -132,12 +133,23 @@ def _one(arm, bodies, worn, s, kind, size, ease, top, toe, sole_t, welt):
     ub = float((ball - base) @ f)
     blend = 0.12 * length
 
-    def foot_weight(p):
+    # Every part of it bends as what it covers does (the skin, or the trousers over the shin): rigid
+    # on the foot's bones, the skin at the ankle bends with the calf and comes through its top.
+    under = np.concatenate([foot, calf]) if len(calf) else foot
+    under_w = foot_w + calf_w
+    known = len(under_w) == len(under)
+
+    def weight(p):
+        if known:
+            near = under_w[int(np.argmin(np.sum((under - np.asarray(p)) ** 2, 1)))]
+            near = {b: w for b, w in near.items() if b in arm.data.bones}
+            if near:
+                return near
         k = min(1.0, max(0.0, (float((np.asarray(p) - base) @ f) - (ub - blend)) / (2 * blend)))
         k = k * k * (3 - 2 * k)
         return {f"foot_{s}": 1 - k, f"ball_{s}": k} if 0 < k < 1 else ({f"ball_{s}": 1.0} if k >= 1 else {f"foot_{s}": 1.0})
 
-    parts = [(*_tube(rings, True, True), 0, foot_weight)]
+    parts = [(*_tube(rings, True, True), 0, weight)]
     # The sole: the upper's own outline a welt wider, flat on the ground.
     out_r = [base + f * at + r * (vc + w * (1 + welt) + 0.25 * welt * length * 0.1) for at, vc, w in edge]
     out_l = [base + f * at + r * (vc - w * (1 + welt) - 0.25 * welt * length * 0.1) for at, vc, w in edge]
@@ -147,7 +159,7 @@ def _one(arm, bodies, worn, s, kind, size, ease, top, toe, sole_t, welt):
     n = len(loop)
     verts = [p + np.array([0, 0, ground + 0.0005]) for p in loop] + [p + np.array([0, 0, ground + sole_t]) for p in loop]
     faces = [(j, (j + 1) % n, n + (j + 1) % n, n + j) for j in range(n)] + [tuple(range(n - 1, -1, -1)), tuple(range(n, 2 * n))]
-    parts.append((verts, faces, 1, foot_weight))
+    parts.append((verts, faces, 1, weight))
     # The shaft: round the shin at each height, from inside the upper to where the boot ends.
     span = float(np.linalg.norm(knee - ankle))
     top_z = ankle[2] + (float(top) if kind == "boots" else 0.07) * span
@@ -171,20 +183,7 @@ def _one(arm, bodies, worn, s, kind, size, ease, top, toe, sole_t, welt):
         shaft.append([np.array([centre[0] + out[j] * math.sin(2 * math.pi * j / ROUND), centre[1] - out[j] * math.cos(2 * math.pi * j / ROUND), z]) for j in range(ROUND)])
     shaft.reverse()
     if len(shaft) >= 2:
-        soft = 0.035 * size
-
-        def shin_weight(p):
-            k = min(1.0, max(0.0, (float(p[2]) - (ankle[2] - soft)) / soft))  # the shin's by the joint, as its skin is
-            k = k * k * (3 - 2 * k)
-            # Above the ankle it bends as what it goes round does (the trousers, or the skin), so
-            # nothing under it comes through when the knee bends.
-            near = calf_w[int(np.argmin(np.sum((calf - np.asarray(p)) ** 2, 1)))] if len(calf_w) == len(calf) and len(calf) else {f"calf_{s}": 1.0}
-            out = {b: w * k for b, w in near.items() if b in arm.data.bones} or {f"calf_{s}": k}
-            if k < 1:
-                out[f"foot_{s}"] = out.get(f"foot_{s}", 0.0) + 1 - k
-            return out
-
-        parts.append((*_tube(shaft, False, False), 0, shin_weight))
+        parts.append((*_tube(shaft, False, False), 0, weight))
     hidden = []
     for item in inside:
         if item is None:

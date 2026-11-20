@@ -375,8 +375,13 @@ def _arm_bones(arm, side):
 
 def _unsleeved(g, arm):
     """A garment with no sleeve on an arm takes none of that arm's weights: a coat's side panel
-    beside a hanging hand would follow the hand. A sleeve is garment around the forearm."""
+    beside a hanging hand would follow the hand. A sleeve is garment around the forearm: within a
+    quarter of its length of the bone, or of its own skin's reach from it (a chibi's forearm is
+    short and thick, and its sleeve sits further out than a quarter of its length)."""
+    from . import deform
+
     co = _world(g)
+    skins = [(helpers.rest_coords(b)[0], deform._dominant(b, arm)) for b in _bodies(arm)]
     for side in ("l", "r"):
         bones = _arm_bones(arm, side)
         fore = arm.data.bones.get(f"lowerarm_{side}")
@@ -385,8 +390,16 @@ def _unsleeved(g, arm):
         h, t = np.array(arm.matrix_world @ fore.head_local), np.array(arm.matrix_world @ fore.tail_local)
         seg = t - h
         u = np.clip((co - h) @ seg / max(1e-12, seg @ seg), 0, 1)
-        d = np.linalg.norm(co - (h + np.outer(u, seg)), axis=1)
-        if (d < 0.25 * np.linalg.norm(seg)).sum() >= 12:
+        def off(points):
+            k = np.clip((points - h) @ seg / max(1e-12, seg @ seg), 0, 1)
+            return np.linalg.norm(points - (h + np.outer(k, seg)), axis=1)
+
+        reach = 0.25 * float(np.linalg.norm(seg))
+        for skin, lead in skins:
+            on = np.array([l == f"lowerarm_{side}" for l in lead], bool)
+            if len(skin) == len(lead) and on.sum() >= 12:
+                reach = max(reach, 1.5 * float(np.percentile(off(skin[on]), 90)))
+        if (off(co) < reach).sum() >= 12:
             continue
         for vg in list(g.vertex_groups):
             if vg.name in bones:
