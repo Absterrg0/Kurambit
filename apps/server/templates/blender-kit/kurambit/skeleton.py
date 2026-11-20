@@ -239,6 +239,24 @@ def skin_joints(doc):
     return out
 
 
+def detached_chains(doc):
+    """Joints of a glTF's skins that hang from no other joint, beside the one carrying the most:
+    each heads a chain that does not reach the spine (an exporter that flattened the tree, or a
+    bone left unparented). [] when every joint is under one root."""
+    nodes = doc.get("nodes", [])
+    joints = {j for skin in doc.get("skins", []) for j in skin.get("joints", [])}
+    parent = {c: i for i, n in enumerate(nodes) for c in n.get("children", [])}
+    roots = [j for j in joints if parent.get(j) not in joints]
+    if len(roots) < 2:
+        return []
+
+    def size(j):
+        return 1 + sum(size(c) for c in nodes[j].get("children", []) if c in joints)
+
+    main = max(roots, key=size)
+    return sorted(nodes[j].get("name", str(j)) for j in roots if j != main)
+
+
 def clip_rate(doc):
     """The frame rate a glTF's clips were sampled at (the commonest over its animations), or None.
     An animation input's accessor carries its count and max (the glTF spec requires both)."""

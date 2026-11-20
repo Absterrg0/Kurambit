@@ -328,15 +328,15 @@ def _shown(cover, garment, body_co, over=None):
 
 def _feet(arm):
     """(bone, which end) the feet are tracked by: the standard balls, the legs a creature rig names,
-    or the lowest bone of each chain."""
+    the bones named as feet, or the lowest bone of each chain."""
     if all(f in arm.data.bones for f in STANDARD_FEET):
         return [(f, "head") for f in STANDARD_FEET]
     if "kurambit_legs" in arm:  # a made creature names its feet, none when it floats
         legs = json.loads(arm["kurambit_legs"] or "[]")
         return [(leg["foot"], "tail") for leg in legs if leg.get("foot") in arm.data.bones]
-    from .measure import lowest_chains
+    from .measure import lowest_chains, named_feet
 
-    return [(n, "tail") for n in lowest_chains(arm)]
+    return [(n, "tail") for n in named_feet(arm) or lowest_chains(arm)]
 
 
 def _bone_point(arm, name, end):

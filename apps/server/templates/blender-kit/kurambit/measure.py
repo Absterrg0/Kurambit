@@ -19,6 +19,7 @@ its mean frame step, the pelvis's horizontal travel removed: about 1 is seamless
 skin at every ARM_EVERY-th frame: arm skin through the body, mm² per sampled frame. Bones are
 sampled with the meshes hidden; only that skin pass evaluates them."""
 import math
+import re
 
 import bpy
 import numpy as np
@@ -100,6 +101,21 @@ def _bend(arm, upper, lower):
     return math.degrees((u.tail - u.head).angle(lo.tail - lo.head, 0.0))
 
 
+FOOT_NAMES = re.compile(r"(foot|toe|paw|hoof|ball)", re.I)
+
+
+def named_feet(arm):
+    """The feet a made rig names: deforming bones called foot, toe, paw, hoof or ball with no such
+    bone below them (a toe, not its ankle), so a low tail tip is never taken for a foot. [] under two."""
+    named = [b for b in arm.data.bones if b.use_deform and FOOT_NAMES.search(b.name)]
+
+    def below(b):
+        return any(FOOT_NAMES.search(c.name) or below(c) for c in b.children)
+
+    feet = [b.name for b in named if not below(b)]
+    return sorted(feet) if len(feet) >= 2 else []
+
+
 def lowest_chains(arm):
     """The bones a body stands on, on any rig: the lowest bone of each chain whose rest head lies
     in the bottom tenth of the skeleton (a quadruped's four paws, a bird's two). [] under two."""
@@ -121,7 +137,7 @@ def _clips(arm, meshes, height, skin=None, named=None):
     sc = bpy.context.scene
     fps = sc.render.fps / sc.render.fps_base
     feet = ([n for n in ("ball_l", "ball_r") if n in arm.pose.bones] or [n for n in ("foot_l", "foot_r") if n in arm.pose.bones]
-            or [n for n in (named or []) if n in arm.pose.bones] or lowest_chains(arm))
+            or [n for n in (named or []) if n in arm.pose.bones] or named_feet(arm) or lowest_chains(arm))
     hips = next((n for n in ("pelvis", "root") if n in arm.pose.bones), arm.pose.bones[0].name)
     knees = [k for k in KNEES if all(n in arm.pose.bones for n in k)]
     out = []
@@ -283,6 +299,8 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
     }
     if through is not None:
         measured["skinThrough"] = through
+    if joints:
+        measured["detachedChains"] = skeleton.detached_chains(doc)[:32]
     blink = face.face_of(arm) if arm is not None else None
     if blink is not None:
         measured["face"] = blink

@@ -1,4 +1,5 @@
-"""Contact facts, numbers only: floating parts, skin through skin, arms through the body.
+"""Contact facts, numbers only: floating parts, unsupported parts, skin through skin, arms through
+the body.
 
 Adapted from blender-kiln (MIT, see THIRD-PARTY-NOTICES.md): `floating()` from the
 floating-parts check in plugin/references/reference-fidelity.md §3, `Skin` from
@@ -85,6 +86,66 @@ def floating(objects):
         for i in g:
             gap = min(d for d in (tree.find_nearest(v)[3] for v in parts[i][1].tolist()) if d is not None)
             out.append((parts[i][0], gap))
+    return sorted(out, key=lambda x: -x[1])
+
+
+SUPPORT_REACH = 0.02  # metres below a part's underside another part may begin and still carry it
+SUNK = 0.01  # metres a part's underside sits inside another that hold it there
+
+
+def unsupported(objects):
+    """[(name, metres above the ground)] of the parts that touch others only from the side: off the
+    lowest ground line, and nowhere on their underside resting on an upward face, sunk into another
+    part, or within SUPPORT_REACH above one. A block wedged between its neighbours over an opening
+    reads here, where the floating check calls it touching. Measured at rest."""
+    parts = []
+    for o in objects:
+        if o.type not in helpers.GEOMETRY:
+            continue
+        co, polys = helpers.rest_coords(o)
+        if len(co) and polys:
+            parts.append((o.name, np.asarray(co), polys))
+    if len(parts) < 2:
+        return []
+    ground = min(float(co[:, 2].min()) for _, co, _ in parts)
+    trees = [BVHTree.FromPolygons(co.tolist(), polys) for _, co, polys in parts]
+    lo = [co.min(0) for _, co, _ in parts]
+    hi = [co.max(0) for _, co, _ in parts]
+    up, down = Vector((0, 0, 1)), Vector((0, 0, -1))
+
+    def underside(i):
+        """Points on part i's underside: its lowest corners, and where rays up from below meet it."""
+        co = parts[i][1]
+        band = max(0.01, 0.05 * float(hi[i][2] - lo[i][2]))
+        pts = [Vector(v) for v in co[co[:, 2] <= lo[i][2] + band].tolist()]
+        for x in np.linspace(lo[i][0], hi[i][0], 8)[1:-1]:
+            for y in np.linspace(lo[i][1], hi[i][1], 8)[1:-1]:
+                hit = trees[i].ray_cast(Vector((x, y, lo[i][2] - 0.01)), up, float(hi[i][2] - lo[i][2]) + 0.02)
+                if hit[0] is not None and hit[1].z < 0:
+                    pts.append(hit[0])
+        return pts
+
+    def held(i, v):
+        for k, tree in enumerate(trees):
+            if k == i or (v.x < lo[k][0] - FLOAT_GAP or v.x > hi[k][0] + FLOAT_GAP or v.y < lo[k][1] - FLOAT_GAP
+                          or v.y > hi[k][1] + FLOAT_GAP or v.z < lo[k][2] - SUPPORT_REACH):
+                continue
+            near = tree.find_nearest(v)
+            if near[0] is not None:
+                if near[3] <= FLOAT_GAP and near[1].z > 0.2:
+                    return True  # resting on an upward face
+                if near[3] > SUNK and (v - near[0]).dot(near[1]) < 0:
+                    return True  # sunk into it
+            if tree.ray_cast(v + Vector((0, 0, FLOAT_GAP)), down, SUPPORT_REACH + FLOAT_GAP)[0] is not None:
+                return True
+        return False
+
+    out = []
+    for i, (name, _, _) in enumerate(parts):
+        if lo[i][2] <= ground + 4 * FLOAT_GAP:
+            continue
+        if not any(held(i, v) for v in underside(i)):
+            out.append((name, float(lo[i][2]) - ground))
     return sorted(out, key=lambda x: -x[1])
 
 

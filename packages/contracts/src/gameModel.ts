@@ -144,6 +144,18 @@ export const GameModelMeasure = Schema.Struct({
   springs: Schema.Array(GameModelSpring).check(Schema.isMaxLength(32)),
   /** Separate parts not touching the rest, over 0.5 mm away; omitted on a single mesh. */
   floating: Schema.optionalKey(Schema.Array(GameModelFloating).check(Schema.isMaxLength(32))),
+  /** Parts off the ground that touch others only from the side, with nothing under them; on models without a skeleton. */
+  unsupported: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ part: Schema.String.check(Schema.isMaxLength(128)), height: Metres }),
+    ).check(Schema.isMaxLength(32)),
+  ),
+  /** The most bones a skinned vertex follows in the scene; the export keeps its four strongest. */
+  influences: Schema.optionalKey(NonNegativeInt),
+  /** Joints of the exported skin hanging from no other joint, beside its main root: chains that do not reach the spine. */
+  detachedChains: Schema.optionalKey(
+    Schema.Array(Schema.String.check(Schema.isMaxLength(64))).check(Schema.isMaxLength(32)),
+  ),
   /** Share of the skin's area passing through other skin, %: at rest, and on one fixed bent pose (null off the standard skeleton). */
   skinThrough: Schema.optionalKey(Schema.Struct({ rest: Percent, bent: Schema.NullOr(Percent) })),
   face: Schema.optionalKey(GameModelFace),
@@ -169,7 +181,16 @@ export const GameModelMeasure = Schema.Struct({
   /** The look's facts: the model's role and the packs' triangle budget for it, its hue families and flat-shaded share. */
   style: Schema.optionalKey(
     Schema.Struct({
-      role: Schema.Literals(["prop", "rock", "plant", "tree", "building", "creature", "hero"]),
+      role: Schema.Literals([
+        "prop",
+        "rock",
+        "plant",
+        "tree",
+        "building",
+        "vehicle",
+        "creature",
+        "hero",
+      ]),
       /** False when the role was guessed from the model's kind. */
       roleNamed: Schema.Boolean,
       roleBudget: NonNegativeInt,

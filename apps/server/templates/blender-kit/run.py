@@ -120,6 +120,23 @@ def refusals_of(measured, info, params, creatures=()):
     return out
 
 
+def max_influences(objects):
+    """The most bones any skinned vertex follows, before the export keeps its four strongest; None
+    with nothing skinned."""
+    most = None
+    for o in objects:
+        if o.type != "MESH":
+            continue
+        arm = next((m.object for m in o.modifiers if m.type == "ARMATURE" and m.object is not None), None)
+        if arm is None:
+            continue
+        bones = {g.index for g in o.vertex_groups if g.name in arm.data.bones}
+        for v in o.data.vertices:
+            n = sum(1 for g in v.groups if g.group in bones and g.weight > 0)
+            most = n if most is None else max(most, n)
+    return most
+
+
 def _keep_only(objects):
     """Removes everything that is not the candidate (keeping where its objects are), and every
     clip another character owns."""
@@ -215,6 +232,9 @@ def run_pass(params):
     stylepass.facet(objects, params.get("style"))
     # Before the style pass, which joins a character's meshes into one.
     gaps = contact.floating(objects)
+    # Parts held by bones need nothing under them; a building's blocks do.
+    loose = contact.unsupported(objects) if not arms else None
+    influences = max_influences(objects)
     gates = hero_gates(objects, params)
     # Skin a garment covers does not ship (cloth.dress marks it). The gates read the whole body and
     # leave that skin out of what can show.
@@ -254,9 +274,14 @@ def run_pass(params):
     measured["style"] = {"role": role, "roleNamed": role_named, "roleBudget": stylepass.ROLE_BUDGETS[role],
                          "hues": styled["atlas"]["hues"] if styled["atlas"] else 0,
                          "flat": styled["atlas"]["flat"] if styled["atlas"] else round(stylepass.flat_share(styled["meshes"]), 3)}
+    k = styled["scaled"] or 1.0  # in the shipped size
     if gaps is not None:
-        k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
+    if loose is not None:
+        away = {n for n, _ in gaps or []}
+        measured["unsupported"] = [{"part": n[:128], "height": round(h * k, 4)} for n, h in loose if n not in away][:32]
+    if influences is not None:
+        measured["influences"] = influences
     still = ["clips that move no bone: " + ", ".join(info["frozen"])[:300]] if info["frozen"] else []
     refused = refusals_of(measured, info, params, set(creatures))
     return {

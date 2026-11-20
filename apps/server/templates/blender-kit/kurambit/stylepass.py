@@ -578,8 +578,8 @@ def _cloth_ratio(o, m, sink=0.003):
 
 # Triangles by role, from the CC0 packs measured on 2026-11-20 (Kenney Nature median 76, KayKit City
 # Builder 586 with an 828-triangle building, Quaternius Stylized Nature 698, Quaternius animals
-# 2,079, KayKit Adventurers 6,377): a fact the review reports, not a refusal.
-ROLE_BUDGETS = {"prop": 600, "rock": 400, "plant": 1000, "tree": 1000, "building": 2000, "creature": 3000, "hero": 7000}
+# 2,079, KayKit Adventurers 6,377, KayKit cars 1,222-1,256): a fact the review reports, not a refusal.
+ROLE_BUDGETS = {"prop": 600, "rock": 400, "plant": 1000, "tree": 1000, "building": 2000, "vehicle": 1500, "creature": 3000, "hero": 7000}
 
 
 def role_of(objects):

@@ -443,6 +443,18 @@ export const measurementText = (
     lines.push(
       `- Parts over 0.5 mm from every other part: ${m.floating.length === 0 ? "none" : m.floating.map((part) => `${part.part} ${(part.gap * 1000).toFixed(1)} mm`).join(", ")}.`,
     );
+  if (m.unsupported !== undefined && m.unsupported.length > 0)
+    lines.push(
+      `- Parts touching others only from the side, nothing under them: ${m.unsupported.map((part) => `${part.part} ${metres(part.height)} up`).join(", ")}.`,
+    );
+  if (m.influences !== undefined)
+    lines.push(
+      `- Bones per skinned vertex at most: ${m.influences}${m.influences > 4 ? " (the export keeps the four strongest)" : ""}.`,
+    );
+  if (m.detachedChains !== undefined && m.detachedChains.length > 0)
+    lines.push(
+      `- Chains not reaching the spine in the GLB (each hangs from no joint): ${m.detachedChains.join(", ")}.`,
+    );
   if (m.springs.length > 0)
     lines.push(
       `- Springs: ${m.springs.map((spring) => `${spring.name} (${spring.bones.join(", ")})`).join("; ")}.`,
