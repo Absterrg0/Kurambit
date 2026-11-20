@@ -608,6 +608,8 @@ def facet(objects, style):
     for o in objects:
         if o.type != "MESH" or o.get("kurambit_voxel"):  # thinned, a cube is no longer one
             continue
+        if o.get("kurambit_world") or (o.parent is not None and o.parent.get("kurambit_world")):
+            continue  # the world helpers build it in the lock's planes already; thinned, a willow's strands turn to spikes
         tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
         if tris > FACET_MIN and o.data.shape_keys is None:
             cloth = bool(o.get("kurambit_cloth"))

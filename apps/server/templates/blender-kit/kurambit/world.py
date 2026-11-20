@@ -478,48 +478,63 @@ def tree(name, height=6.0, crown="cone", *, trunk=None, spread=None, limbs=None,
                 az = k * 2.1 + rng.uniform(0, 1)
                 wood.append(_limb(rng, np.array([math.cos(az), math.sin(az), 0.0]) * spread * 0.12, centre + np.array([math.cos(az), math.sin(az), 0.2]) * spread * 0.4, radius * 0.8))
     elif crown == "weeping":
+        # One shape from crest to hem: a dome, and strands that start all over it, run out and over
+        # its curve and fall, the outer ones longest, so the crown pours down like a fountain
+        # instead of a lid with a curtain hung under its rim.
         tp, tr = _trunk(rng, height, height * (bare + 0.12), radius, lean * 0.5, flare=1.9)
         wood.append((tp, tr))
-        count = limbs or 7
-        crest = height * 0.93
-        solid.append(_blob(np.array([lean * 0.5, 0, crest - spread * 0.34]), np.array([spread * 0.6, spread * 0.6, spread * 0.46]), seed))
-        tassel = []
-        for k in range(count):
-            az = k * math.tau / count + rng.uniform(-0.25, 0.25)
+        crest = height * 0.97
+        rz = spread * 0.62
+        centre = np.array([lean * 0.5, 0.0, crest - rz])
+        solid.append(_blob(centre, np.array([spread * 0.74, spread * 0.74, rz]), seed, rough=0.1))
+        for k in range(limbs or 6):
+            az = k * math.tau / (limbs or 6) + rng.uniform(-0.25, 0.25)
             out = np.array([math.cos(az), math.sin(az), 0.0])
-            reach = spread * rng.uniform(0.8, 1.0)
             start = _along(tp, rng.uniform(0.8, 1.0))
-            apex = start + out * reach * 0.5 + np.array([0, 0, crest - start[2] - spread * 0.12])
-            tip = start + out * reach + np.array([0, 0, (crest - start[2]) * (1 - droop * 0.75)])
-            pts = [start, start * 0.4 + apex * 0.6 + np.array([0, 0, spread * 0.1]), apex, apex * 0.45 + tip * 0.55 + np.array([0, 0, spread * 0.08]), tip]
-            wood.append((pts, [radius * 0.4 * (1 - 0.8 * j / 4) for j in range(5)]))
-            solid.append(_blob(apex + out * reach * 0.1 - np.array([0, 0, spread * 0.16]), np.array([reach * 0.42, reach * 0.42, spread * 0.34]), seed * 7 + k))
-            # Tassels hang from the limb's outer half and its tip, to different lengths.
-            for j in range(max(3, int(round(9 * density)))):
-                t = rng.uniform(0.4, 1.0)
-                hang = _along(pts, t) + rng.normal(0, reach * 0.11, 3) * np.array([1, 1, 0.15])
-                floor = height * rng.uniform(0.06, 0.34)
-                tassel.append((hang, max(0.5, hang[2] - floor), rng.uniform(0.7, 1.3)))
+            wood.append(_limb(rng, start, centre + out * spread * 0.62 + np.array([0, 0, rz * 0.25]), radius * 0.42, sag=0.05))
+            solid.append(_blob(centre + out * spread * 0.38 + np.array([0, 0, rz * 0.1]), np.array([spread * 0.42] * 2 + [rz * 0.62]), seed * 7 + k, rough=0.1))
         verts, faces = [], []
-        sides = 5 if facets else 7
-        for hang, length, fat in tassel:
-            w = min(length * 0.085, spread * 0.1) * fat
+        sides = 3 if facets else 6
+        count = int(round((28 if facets else 64) * max(0.3, density) * (0.7 + 0.6 * detail)))
+        for j in range(count):
+            # Golden-angle spiral over the dome from near the crest to its widest; the lower a
+            # strand starts, the further out it runs and the longer it falls.
+            share = (j + 0.5) / count
+            polar = math.radians(18 + 80 * share ** 0.8) + rng.uniform(-0.06, 0.06)
+            az = j * 2.39996 + rng.uniform(-0.15, 0.15)
+            h = np.array([math.cos(az), math.sin(az), 0.0])
+            on = centre + np.array([h[0] * spread * 0.74 * math.sin(polar), h[1] * spread * 0.74 * math.sin(polar), rz * math.cos(polar)])
+            on = on + (on - centre) / np.linalg.norm(on - centre) * spread * 0.04
+            run = spread * (0.14 + 0.2 * share) * rng.uniform(0.8, 1.2)
+            floor = height * (0.08 + 0.32 * (1 - share) ** 1.5 + 0.45 * (1 - droop)) * rng.uniform(0.75, 1.3)
+            drop = max(on[2] - floor, spread * 0.3)
+            path = [on, on + h * run * 0.55 + np.array([0, 0, run * 0.12]), on + h * run - np.array([0, 0, run * 0.35])]
+            for q in (0.35, 0.7, 1.0):
+                path.append(path[2] + h * run * 0.18 * q - np.array([0, 0, (drop - run * 0.35) * q]))
+            w = spread * 0.075 * rng.uniform(0.75, 1.25) * (1 + 0.5 * chunky)
+            widths = [0.55, 0.85, 1.0, 0.95, 0.7, 0.3]
             start = len(verts)
-            prof = [(0.25, 0.0), (0.8, 0.14), (1.0, 0.45), (0.55, 0.82)]
             twist = rng.uniform(0, math.tau)
-            for share, t in prof:
+            for i, (pt, share_w) in enumerate(zip(path, widths)):
+                tangent = path[min(i + 1, len(path) - 1)] - path[max(i - 1, 0)]
+                tangent = tangent / np.linalg.norm(tangent)
+                side = np.cross(tangent, np.array([0, 0, 1.0]))
+                side = side / np.linalg.norm(side) if np.linalg.norm(side) > 1e-6 else np.array([1.0, 0, 0])
+                up = np.cross(side, tangent)
                 for q in range(sides):
-                    a = twist + math.tau * q / sides
-                    verts.append((hang[0] + math.cos(a) * w * share, hang[1] + math.sin(a) * w * share * 0.8, hang[2] + w * 0.4 - length * t))
-            verts.append((hang[0], hang[1], hang[2] + w * 0.6))
-            verts.append((hang[0] + rng.normal(0, w * 0.2), hang[1] + rng.normal(0, w * 0.2), hang[2] - length))
-            for ring in range(len(prof) - 1):
+                    ang = twist + math.tau * q / sides
+                    # Flattened across the strand, like a hanging fringe of leaves.
+                    verts.append(tuple(pt + (side * math.cos(ang) + up * math.sin(ang) * 0.55) * w * share_w))
+            ends = len(path)
+            verts.append(tuple(path[0] - (path[1] - path[0]) * 0.1))
+            verts.append(tuple(path[-1] - np.array([0, 0, w * 0.4])))
+            for ring in range(ends - 1):
                 for q in range(sides):
-                    a, b = start + ring * sides + q, start + ring * sides + (q + 1) % sides
-                    faces.append((a, b, b + sides, a + sides))
-            capa, capb = start + len(prof) * sides, start + len(prof) * sides + 1
+                    c0, c1 = start + ring * sides + q, start + ring * sides + (q + 1) % sides
+                    faces.append((c0, c1, c1 + sides, c0 + sides))
+            capa, capb = start + ends * sides, start + ends * sides + 1
             faces += [(start + (q + 1) % sides, start + q, capa) for q in range(sides)]
-            faces += [(start + (len(prof) - 1) * sides + q, start + (len(prof) - 1) * sides + (q + 1) % sides, capb) for q in range(sides)]
+            faces += [(start + (ends - 1) * sides + q, start + (ends - 1) * sides + (q + 1) % sides, capb) for q in range(sides)]
         hangs = _mesh_object(name + "_tassels", verts, faces)
         (loose if facets else leafy).append(hangs)
     elif crown == "palm":
@@ -913,11 +928,11 @@ def _cut(target, cutters):
     return _apply(target)
 
 
-def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="gable", pitch=None, overhang=None, sides=None, openings=(),
+def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=None, roof="gable", pitch=None, overhang=None, sides=None, openings=(),
              parapet=0, interior=True, frame=None, footing=None, chimney=None, batter=0.0, ruin=0.0, roof_part=False, seed=1, colours=None, facets=None):
     """A building you can walk into, standing at the origin, its front (side 0) facing -Y. plan:
     (wide, deep) metres, a radius with `sides` (a round tower of that many sides), or a convex
-    ring of (x, y) points; floors of storey metres; wall thickness. roof: "gable", "hip", "cone",
+    ring of (x, y) points; floors of storey metres; wall thickness (0.25, a ruin 0.5). roof: "gable", "hip", "cone",
     "shed" or "flat" at pitch degrees with an overhang; parapet: that many battlements round a
     flat roof, on a corbelled course. What shows it was built, each on by default where it suits
     and off with False: frame (a timber frame on the walls: posts, plates, studs and braces),
@@ -955,9 +970,11 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
     pitch = (38.0 + 14.0 * chunky) if pitch is None else pitch
     overhang = (0.35 + 0.3 * chunky) if overhang is None else overhang
     frame = (square and roof != "flat" and detail >= 0.3) if frame is None else frame
-    footing = (0.0 if round_plan else 0.55) if footing is None else (footing or 0.0)
+    footing = (0.7 if round_plan else 0.55) if footing is None else (footing or 0.0)
     chimney = (roof in ("gable", "hip") and square and detail >= 0.4) if chimney is None else chimney
     ruined = ruin > 0.05
+    # A ruin is what stood longest: thick masonry.
+    wall = (0.5 if ruined else 0.25) if wall is None else wall
     top = floors * storey
     pts = np.array(ring, dtype=float)
     centre = pts.mean(axis=0)
@@ -1046,7 +1063,7 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
     walls = _cut(outer, cutters)
     solid = [walls]
     if footing > 0:
-        base = _prism(name + "_footing", _inset(ring, -0.07 - batter), -0.3, footing, mat["stone"], top=_inset(ring, -0.055))
+        base = _prism(name + "_footing", _inset(ring, -0.07 - batter), -0.3, footing, mat["stone"], top=_inset(ring, -0.055 - batter * (1 - footing / top)))
         base_in = _prism(name + "_footing_in", _inset(ring, wall * 0.5), -0.5, footing + 0.5, None)
         solid.append(_cut(base, [base_in] + door_cutters))
         bpy.data.objects.remove(base_in, do_unlink=True)
@@ -1094,6 +1111,29 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
             share = 1 - fl * storey / top
             solid.append(_prism(f"{name}_course_{fl}", _inset(ring, -0.07 - batter * share), fl * storey - 0.1, fl * storey + 0.08, mat["stone"]))
 
+    def battlements(z, count):
+        """A parapet carried out past the wall on a corbelled course, `count` merlons round it."""
+        ext = _inset(ring, -0.22)
+        solid.append(_prism(name + "_corbel", ext, z - 0.42, z + 0.02, mat["wall"], top=None))
+        solid.append(_prism(name + "_corbel_low", _inset(ring, -0.1), z - 0.7, z - 0.42, mat["stone"]))
+        per = [np.linalg.norm(np.array(ext[(i + 1) % n]) - np.array(ext[i])) for i in range(n)]
+        step = sum(per) / count
+        walk = 0.0
+        for i in range(n):
+            p0, p1 = np.array(ext[i]), np.array(ext[(i + 1) % n])
+            e = (p1 - p0) / per[i]
+            inward = np.array([-e[1], e[0]])
+            if inward @ (centre - p0) < 0:
+                inward = -inward
+            deep = wall + 0.2
+            solid.append(_prism(f"{name}_curb_{i}", [tuple(p0), tuple(p1), tuple(p1 + inward * deep), tuple(p0 + inward * deep)], z, z + 0.5, mat["wall"]))
+            s_ = (-walk) % step
+            while s_ + step * 0.5 <= per[i] + 1e-6:
+                q0, q1 = p0 + e * s_, p0 + e * min(per[i], s_ + step * 0.5)
+                solid.append(_prism(f"{name}_merlon_{i}_{int(s_ * 100)}", [tuple(q0), tuple(q1), tuple(q1 + inward * deep), tuple(q0 + inward * deep)], z + 0.5, z + 1.1, mat["wall"]))
+                s_ += step
+            walk += per[i]
+
     # The roof.
     roof_parts = []
     eave = _inset(ring, -overhang)
@@ -1108,43 +1148,45 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
     elif roof == "flat":
         solid.append(_prism(name + "_roof", _inset(ring, wall * 0.5), top - 0.15, top, mat["floor"]))
         if parapet:
-            ext = _inset(ring, -0.22)
-            # A corbelled course carries the parapet out past the wall.
-            solid.append(_prism(name + "_corbel", ext, top - 0.42, top + 0.02, mat["wall"], top=None))
-            solid.append(_prism(name + "_corbel_low", _inset(ring, -0.1), top - 0.7, top - 0.42, mat["stone"]))
-            per = [np.linalg.norm(np.array(ext[(i + 1) % n]) - np.array(ext[i])) for i in range(n)]
-            step = sum(per) / parapet
-            walk = 0.0
-            for i in range(n):
-                p0, p1 = np.array(ext[i]), np.array(ext[(i + 1) % n])
-                e = (p1 - p0) / per[i]
-                inward = np.array([-e[1], e[0]])
-                if inward @ (centre - p0) < 0:
-                    inward = -inward
-                deep = wall + 0.2
-                solid.append(_prism(f"{name}_curb_{i}", [tuple(p0), tuple(p1), tuple(p1 + inward * deep), tuple(p0 + inward * deep)], top, top + 0.5, mat["wall"]))
-                s_ = (-walk) % step
-                while s_ + step * 0.5 <= per[i] + 1e-6:
-                    q0, q1 = p0 + e * s_, p0 + e * min(per[i], s_ + step * 0.5)
-                    solid.append(_prism(f"{name}_merlon_{i}_{int(s_ * 100)}", [tuple(q0), tuple(q1), tuple(q1 + inward * deep), tuple(q0 + inward * deep)], top + 0.5, top + 1.1, mat["wall"]))
-                    s_ += step
-                walk += per[i]
+            battlements(top, parapet)
     elif roof == "cone" or (roof == "hip" and not square):
+        base_ring, base_z = ring, top
+        if round_plan and detail >= 0.3:
+            # A tower's top: battlements on corbels round a lookout set in behind them, and the cap
+            # on the lookout, its eaves reaching out past the battlements.
+            battlements(top, max(6, n if n % 2 == 0 else n + 1))
+            base_ring = _inset(ring, wall + 0.12)
+            look_h = min(storey * 0.75, 2.3)
+            solid.append(_prism(name + "_lookout", base_ring, top - 0.1, top + look_h, mat["wall"]))
+            post = 0.16 * (1 + 0.5 * chunky)
+            for i, (x, y) in enumerate(_inset(base_ring, -0.04)):
+                d = np.array([x, y]) - centre
+                d = d / np.linalg.norm(d)
+                q = np.array([-d[1], d[0]]) * post / 2
+                c0, c1 = np.array([x, y]), np.array([x, y]) - d * post
+                parts.append(_prism(f"{name}_lookpost_{i}", [tuple(c0 - q), tuple(c0 + q), tuple(c1 + q), tuple(c1 - q)], top + 1.1, top + look_h, mat["trim"]))
+            parts.append(_prism(name + "_lookplate", _inset(base_ring, -0.07), top + look_h - 0.24, top + look_h, mat["trim"]))
+            base_z = top + look_h
+            eave = _inset(base_ring, -(wall + 0.12 + 0.22 + overhang))
+            ep = np.array(eave)
         reach = float(np.max(np.linalg.norm(ep - centre, axis=1)))
         apex_h = reach * math.tan(math.radians(pitch))
         # A kick at the eaves: the lowest part of the roof flares out flatter, as a tower's cap does.
-        kick = [(x + (x - centre[0]) * 0.0, y, top - 0.02) for x, y in eave]
-        mid = [(centre[0] + (x - centre[0]) * 0.72, centre[1] + (y - centre[1]) * 0.72, top + apex_h * (0.16 + 0.1 * (1 - chunky))) for x, y in eave]
+        kick = [(x, y, base_z - 0.02) for x, y in eave]
+        mid = [(centre[0] + (x - centre[0]) * 0.72, centre[1] + (y - centre[1]) * 0.72, base_z + apex_h * (0.16 + 0.1 * (1 - chunky))) for x, y in eave]
         m = len(eave)
-        verts = kick + mid + [(centre[0], centre[1], top + apex_h)] + [(x, y, top - thick) for x, y in eave]
+        verts = kick + mid + [(centre[0], centre[1], base_z + apex_h)] + [(x, y, base_z - thick) for x, y in eave]
         faces = [(i, (i + 1) % m, m + (i + 1) % m, m + i) for i in range(m)] + [(m + i, m + (i + 1) % m, 2 * m) for i in range(m)]
         faces += [(2 * m + 1 + (i + 1) % m, 2 * m + 1 + i, i, (i + 1) % m) for i in range(m)] + [tuple(2 * m + 1 + i for i in range(m))]
         roof_parts.append(_mesh_object(name + "_roof", verts, faces))
         roof_parts[-1].data.materials.append(mat["roof"])
         if detail >= 0.3:
-            # Two corbelled courses step the wall out to meet the eaves.
-            for step_out, z0, z1 in ((0.1, top - 0.62, top - 0.36), (0.22, top - 0.36, top - 0.1)):
-                solid.append(_prism(f"{name}_corbel_{step_out}", _inset(ring, -step_out), z0, z1, mat["stone"]))
+            # A fascia under the eave: the cap has an edge you can see.
+            roof_parts.append(_prism(name + "_fascia", _inset(eave, 0.02), base_z - thick - 0.12, base_z - thick + 0.01, mat["trim"], top=_inset(eave, 0.02)))
+            if base_ring is ring:
+                # Two corbelled courses step the wall out to meet the eaves.
+                for step_out, z0, z1 in ((0.1, top - 0.62, top - 0.36), (0.22, top - 0.36, top - 0.1)):
+                    solid.append(_prism(f"{name}_corbel_{step_out}", _inset(ring, -step_out), z0, z1, mat["stone"]))
     else:
         e_lo, e_hi = ep.min(axis=0), ep.max(axis=0)
         # Along the ridge (u) and across it (v): a gable or hip roof lofted over three sections, so
@@ -1254,8 +1296,10 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
             roof_parts += [stack, cap, pot]
     if ruined:
         # Fallen walls: every stretch of wall is broken off at its own height, lower with more
-        # ruin, and the stones lie at its foot.
-        breakers = []
+        # ruin, and stepped down course by course as laid stone falls, not sawn; the stone lies
+        # in heaps at the foot of what fell, and moss grows on all of it that faces the sky.
+        course = 0.3 + 0.12 * chunky
+        breakers, heaps = [], []
         for k in range(n):
             a, b, along, outward, length, rot = side_of(k)
             chunks = max(2, int(round(length / 1.1)))
@@ -1264,8 +1308,19 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
                 level = float(np.clip(level + rng.normal(0, top * 0.16), top * (1 - ruin) * 0.35 + 0.4, top + 0.3))
                 if level >= top:
                     continue
-                x0, x1 = length * j / chunks - 0.01, length * (j + 1) / chunks + 0.01
-                breakers.append(_slab(f"{name}_break_{k}_{j}", a, rot, (x0, -wall - 0.6, level), (x1, wall * 2 + 0.4, top + 3.0), None, lean=rng.normal(0, 0.07)))
+                x0, x1 = length * j / chunks, length * (j + 1) / chunks
+                steps = max(2, int(round((x1 - x0) / (course * 1.5))))
+                fall = 1 if rng.uniform() < 0.5 else -1
+                for q in range(steps):
+                    # Each stone's width a course and a half; the stair leans toward one side.
+                    lvl = level + fall * course * (q - steps / 2) * rng.uniform(0.6, 1.2)
+                    lvl = max(course, round(lvl / course) * course)
+                    xa, xb = x0 + (x1 - x0) * q / steps - 0.004, x0 + (x1 - x0) * (q + 1) / steps + 0.004
+                    breakers.append(_slab(f"{name}_break_{k}_{j}_{q}", a, rot, (xa, -wall - 0.6, lvl), (xb, wall * 2 + 0.4, top + 3.0), None))
+                volume = (top - level) * (x1 - x0)
+                if volume > 1.2 and rng.uniform() < 0.7:
+                    mid = a + along * (x0 + x1) / 2
+                    heaps.append((mid - outward * rng.uniform(0.3, 0.8) if rng.uniform() < 0.7 else mid + outward * (wall + rng.uniform(0.4, 0.9)), volume))
         walls = _cut(walls, breakers)
         if frame or footing:
             pieces = _cut(_join(name + "_timbers", [p for p in parts]), breakers) if parts else None
@@ -1273,15 +1328,30 @@ def building(name, plan=(6.0, 5.0), *, floors=1, storey=2.7, wall=0.25, roof="ga
         for bk in breakers:
             bpy.data.objects.remove(bk, do_unlink=True)
         solid[0] = walls
-        for j in range(int(round(4 + 8 * ruin))):
-            k = int(rng.integers(0, n))
-            a, b, along, outward, length, rot = side_of(k)
-            at = a + along * rng.uniform(0.1, 0.9) * length + outward * rng.uniform(-1.2, 1.4)
-            size = rng.uniform(0.25, 0.6)
-            block = _box(f"{name}_rubble_{j}", (-size / 2, -size * 0.35, -0.05), (size / 2, size * 0.35, size * rng.uniform(0.3, 0.6)), mat["wall" if rng.uniform() < 0.6 else "stone"])
-            block.location = (at[0], at[1], 0.0)
-            block.rotation_euler = (rng.normal(0, 0.25), rng.normal(0, 0.25), rng.uniform(0, math.tau))
-            solid.append(block)
+        moss = _material("moss", colours, lk)
+        stones = []
+        for h, (at, volume) in enumerate(heaps):
+            # A low mound of earth and small stone, and the dressed blocks on it.
+            reach = min(1.6, 0.5 + 0.35 * volume)
+            mound = _blob((at[0], at[1], -reach * 0.25), (reach, reach * 0.8, reach * 0.45), seed * 13 + h, rough=0.25, subdivisions=1 if facets else 2)
+            mound.data.materials.append(mat["stone"])
+            stones.append(mound)
+            for j in range(int(np.clip(round(volume * 1.5 * ruin), 2, 7))):
+                size = course * rng.uniform(0.9, 1.6)
+                off = rng.normal(0, reach * 0.4, 2)
+                lift = max(0.0, reach * 0.3 * (1 - np.linalg.norm(off) / reach))
+                block = _box(f"{name}_rubble_{h}_{j}", (-size / 2, -size * 0.35, -size * 0.2), (size / 2, size * 0.35, size * 0.45), mat["wall" if rng.uniform() < 0.6 else "stone"])
+                block.location = (at[0] + off[0], at[1] + off[1], lift)
+                block.rotation_euler = (rng.normal(0, 0.3), rng.normal(0, 0.3), rng.uniform(0, math.tau))
+                stones.append(block)
+        for o in [walls] + stones:
+            o.data.materials.append(moss)
+            mi = len(o.data.materials) - 1
+            mw = o.matrix_world
+            for poly in o.data.polygons:
+                if (mw.to_3x3() @ poly.normal).z > 0.75 and (mw @ poly.center).z > 0.2:
+                    poly.material_index = mi
+        solid += stones
     for c in cutters:
         bpy.data.objects.remove(c, do_unlink=True)
     body = solid + parts + ([] if roof_part else roof_parts)
