@@ -27,12 +27,13 @@ const BOOT_MS = 30_000;
  * an analyser placed between the graph and the speakers.
  */
 const PROBE = `(() => {
-  const kp = { ready: null, inputs: [], sounds: [], peak: 0, graph: false };
+  const kp = { ready: null, played: null, inputs: [], sounds: [], peak: 0, graph: false };
   window.__kp = kp;
   const raf = window.requestAnimationFrame.bind(window);
   const watch = () => {
-    if (window.__studio?.ready === true) kp.ready = performance.now();
-    else raf(watch);
+    if (kp.ready === null && window.__studio?.ready === true) kp.ready = performance.now();
+    if (kp.played === null && document.body?.dataset.state === "playing") kp.played = performance.now();
+    if (kp.ready === null || (kp.played === null && performance.now() < ${BOOT_MS})) raf(watch);
   };
   raf(watch);
   for (const type of ["keydown", "pointerdown"])
@@ -139,6 +140,8 @@ const buttonAt = (words: string) => `(() => {
 
 type Kp = {
   readonly ready: number | null;
+  /** When the page first said it was in play (its <body data-state>). */
+  readonly played: number | null;
   readonly inputs: ReadonlyArray<number>;
   readonly sounds: ReadonlyArray<number>;
   readonly peak: number;
@@ -294,13 +297,14 @@ const probe = async (session: WebPlaySession, folder: string): Promise<GamePlaye
       : changed(first, second) > 0.002;
   await readText(true);
 
-  // From the page as opened to play.
+  // From the page as opened to play. A first run that already ended by itself still opened in play.
   const opened = await state();
+  const endedAlone = opened?.state === "ended" && (await kp())?.played != null;
   const ready = "ready" in load ? load.ready : 0;
   let open: GamePlayerReport["open"];
   // The press a player's first sound should answer: the one that started play, or their first in it.
   let answered: number | null = null;
-  if (opened?.state === "playing") {
+  if (opened?.state === "playing" || endedAlone) {
     open = { inputs: 0, seconds: ready, by: "opens in play", started: true };
     answered = (await state())?.now ?? null;
     await session.input({ held: [], taps: ["Space"], clicks: [] });
@@ -329,16 +333,23 @@ const probe = async (session: WebPlaySession, folder: string): Promise<GamePlaye
     const began = Date.now();
     await readText(false);
     await sleep(1500);
-    await session.input({ held: [], taps: ["Escape"], clicks: [] });
-    await sleep(400);
-    pause = (await state())?.state === "paused";
-    for (const key of ["Escape", "KeyP", "Enter"]) {
-      if ((await state())?.state !== "paused") break;
-      await session.input({ held: [], taps: [key], clicks: [] });
-      await sleep(300);
+    // A first run that ended by itself has no play left to hold or picture.
+    if ((await state())?.state === "ended") {
+      const why = "its first run ended by itself before the probe pressed Esc";
+      pause = not(why);
+      frame = not(why);
+    } else {
+      await session.input({ held: [], taps: ["Escape"], clicks: [] });
+      await sleep(400);
+      pause = (await state())?.state === "paused";
+      for (const key of ["Escape", "KeyP", "Enter"]) {
+        if ((await state())?.state !== "paused") break;
+        await session.input({ held: [], taps: [key], clicks: [] });
+        await sleep(300);
+      }
+      const shot = await still("play");
+      frame = shot === null ? not("the page gave no picture") : light(shot);
     }
-    const shot = await still("play");
-    frame = shot === null ? not("the page gave no picture") : light(shot);
     await readText(true);
     while (Date.now() - began < WALL_PLAY_MS) {
       await sleep(2000);
