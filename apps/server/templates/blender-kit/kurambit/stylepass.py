@@ -613,12 +613,15 @@ def style_pass(objects, style, out_dir, texture_side):
     objects = [realize(o) if o.type in helpers.GEOMETRY else o for o in objects]
     arms = [o for o in objects if o.type == "ARMATURE"]
     meshes = [o for o in objects if o.type == "MESH"]
+    # Read before the join, which hides which part had no material.
+    unpainted = [o.name for o in meshes if not any(s.material for s in o.material_slots)]
     for arm in arms:
         meshes = join_character(arm, meshes)
     shading = {**DEFAULT_SHADING, **(style.get("shading") or {})}
     palette = style.get("palette")
     hexes = palette if isinstance(palette, list) and palette else None
     notes = [] if hexes else fit_textures(meshes, texture_side)
+    notes += [f"{n} has no material, so it ships the default white: give it one" for n in unpainted[:8]]
     used, swatches, rows = atlas_pass(meshes, shading, out_dir, hexes)
     scaled = character_scale(arms, meshes, style)
     if scaled is not None:

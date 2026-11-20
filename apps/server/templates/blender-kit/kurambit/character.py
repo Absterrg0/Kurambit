@@ -19,6 +19,9 @@ params (the server resolves every path):
               the body and its rig restyled before the conform (proportions.py)
     height    metres: the body and its rig scaled to it before the conform
     heightRange [lo, hi]: the height gate's range (default: height ±10%, or a human's 1.5-2.0 m)
+
+A made body (mpfb, or a drawn preset) comes with no material of its own: it gets one, "<name> skin",
+in SKIN, so it never ships the export's default white. Recolour that material; a replace keeps it.
 """
 import importlib
 import json
@@ -31,6 +34,8 @@ from mathutils import Vector
 
 from . import face, fit, helpers, proportions, skeleton, studio
 from .protocol import Refused, entry
+
+SKIN = "#e0a882"
 
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
 LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_assets op search lists them) need no install."
@@ -508,6 +513,13 @@ def character(params):
         bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken), *own_actions] if _alive(a)})
         skeleton.remove_objects([o for o in [std_arm, body_arm, *meshes] if o is not None and _alive(o)])
         raise
+
+    if "mpfb" in body_spec:
+        skin = bpy.data.materials.get(f"{name} skin") or helpers.material(SKIN, name=f"{name} skin")
+        for o in meshes:
+            if not any(s.material for s in o.material_slots):
+                o.data.materials.clear()
+                o.data.materials.append(skin)
 
     # The face the body brought, and the head drawn as far as its style is.
     face.take_landmarks(std_arm, meshes)
