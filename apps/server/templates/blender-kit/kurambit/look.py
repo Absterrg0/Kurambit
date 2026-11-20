@@ -2,12 +2,13 @@
 every made thing is built from, so the world helpers, surfaces and plain materials come out as one
 family. game_assets op lock writes it; the game's code reads the same lock (shell/model.js).
 
-  look.read()            {"palette", "roles", "finish", "facets", "bevel", "chunky", "detail", "surfaces"}
+  look.read()            {"palette", "roles", "finish", "facets", "voxel", "bevel", "chunky", "detail", "surfaces"}
   look.colour("wall")    a role's "#rrggbb" (a hex passes through)
 
 roles: a colour per role, the lock's over ROLES. finish: "flat" (plain colours), "painted" (soft
 hand-painted surfaces) or "real" (full grain and relief); flat under a hex palette, real without.
-facets: flat faces and hard edges (shape.edges "faceted", the default under a hex palette). bevel:
+facets: flat faces and hard edges (shape.edges "faceted", the default under a hex palette, or
+"voxel": facets, no bevel, and voxel is True; a voxel model is kurambit.voxels). bevel:
 metres an edge is rounded by. chunky: 0 true to life, 1 thick trunks, big crowns and roofs. detail:
 0 bare forms, 1 every beam, sill and tuft. surfaces: the made surface each role wears where the
 finish is not flat, the lock's over SURFACES. character: a character's height in metres, which a
@@ -35,8 +36,9 @@ def read():
     shape = style.get("shape") or {}
     return {"palette": palette, "roles": {**ROLES, **(style.get("roles") or {})}, "locked": set(style.get("roles") or {}),
             "finish": style.get("finish") or ("flat" if palette else "real"),
-            "facets": (shape.get("edges") or ("faceted" if palette else "soft")) == "faceted",
-            "bevel": shape.get("bevel", 0.025), "chunky": shape.get("chunky", 0.3 if palette else 0.0), "detail": shape.get("detail", 0.6),
+            "facets": (shape.get("edges") or ("faceted" if palette else "soft")) in ("faceted", "voxel"),
+            "voxel": shape.get("edges") == "voxel",
+            "bevel": 0 if shape.get("edges") == "voxel" else shape.get("bevel", 0.025), "chunky": shape.get("chunky", 0.3 if palette else 0.0), "detail": shape.get("detail", 0.6),
             "surfaces": {**SURFACES, **(style.get("surfaces") or {})}, "budget": style.get("budget") or {},
             "character": (style.get("scale") or {}).get("character") or 1.8}
 

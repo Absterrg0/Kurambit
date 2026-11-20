@@ -282,7 +282,8 @@ def snap_palette(meshes, hexes, shading, out_dir):
         loop_swatch = swatch[loop_poly]
         lz = z[loop_v]
         t = np.full(len(lz), 0.5)
-        for k in np.unique(loop_swatch):
+        # A voxel face is one colour edge to edge: its swatch's middle, no gradient up a merged face.
+        for k in [] if o.get("kurambit_voxel") else np.unique(loop_swatch):
             sel = loop_swatch == k
             lo, hi = lz[sel].min(), lz[sel].max()
             if hi - lo > 1e-6:
@@ -604,7 +605,7 @@ def facet(objects, style):
         return 0
     thinned = 0
     for o in objects:
-        if o.type != "MESH":
+        if o.type != "MESH" or o.get("kurambit_voxel"):  # thinned, a cube is no longer one
             continue
         tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
         if tris > FACET_MIN and o.data.shape_keys is None:
@@ -716,7 +717,7 @@ def style_pass(objects, style, out_dir, texture_side):
         depth = float(shading.get("depth", 0.0))
         paints = fold_flat(meshes, single=depth > 0)
         if depth > 0:
-            shade(meshes, depth)
+            shade([o for o in meshes if not o.get("kurambit_voxel")], depth)
     scaled = character_scale(arms, meshes, style)
     if scaled is not None:
         for arm in arms:

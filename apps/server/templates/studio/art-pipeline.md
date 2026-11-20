@@ -573,6 +573,11 @@ oak: "assets/textures/oak.surface.json" }`, then
 6 metres. Its colour stays one value Art edits. The lock's `finish` draws
 it flat, painted or real.
 
+## Other kinds of art
+
+Read the one this game needs: `voxels.md` (a blocky world, chunky
+characters, .vox files).
+
 ## Key art
 
 On the `generated` route the key art is generated (above). Otherwise, a

@@ -207,8 +207,11 @@ export function palette(colours) {
   return named;
 }
 
+// A voxel look's cubes are square to the edge, whatever bevel the lock also names.
+const bevelOf = (lock) => (lock?.shape?.edges === "voxel" ? 0 : (lock?.shape?.bevel ?? 0));
+
 /** A box with its edges rounded by `radius` (the look's bevel by default; bevelled with `segments` 1). */
-export function box(width, height, depth, radius = look?.shape?.bevel ?? 0, segments = 2) {
+export function box(width, height, depth, radius = bevelOf(look), segments = 2) {
   if (radius <= 0) return new THREE.BoxGeometry(width, height, depth);
   const most = Math.min(width, height, depth) / 2 - 1e-4;
   return new RoundedBoxGeometry(width, height, depth, segments, Math.min(radius, most));
@@ -839,7 +842,7 @@ export function ground({
     new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 1,
-      flatShading: look?.shape?.edges === "faceted",
+      flatShading: look?.shape?.edges === "faceted" || look?.shape?.edges === "voxel",
     }),
   );
   mesh.material.name = "Ground";

@@ -25,6 +25,7 @@ import * as THREE from "../vendor/three.module.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { clone as cloneObject } from "three/addons/utils/SkeletonUtils.js";
+import { lock } from "./model.js";
 
 const models = new Map();
 const textures = new Map();
@@ -162,7 +163,7 @@ export async function preloadAssets(manifest) {
         } else if (kind === "texture") {
           const texture = await textureLoader.loadAsync(path);
           texture.colorSpace = THREE.SRGBColorSpace;
-          textures.set(name, texture);
+          textures.set(name, lockFilter(texture));
         } else if (kind === "surface") {
           const info = await readSurface(path);
           const folder = path.slice(0, path.lastIndexOf("/") + 1);
@@ -170,7 +171,7 @@ export async function preloadAssets(manifest) {
             listed.add(folder + file);
             const texture = await textureLoader.loadAsync(folder + file);
             texture.colorSpace = colourSpace;
-            return texture;
+            return lockFilter(texture);
           };
           surfaces.set(name, {
             info,
@@ -190,6 +191,15 @@ export async function preloadAssets(manifest) {
     }),
   );
 }
+
+/** A voxel look draws its texels as squares up close (shape.edges "voxel"); mipmaps still calm the distance. */
+const lockFilter = (texture) => {
+  if (lock()?.shape?.edges === "voxel") {
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestMipmapLinearFilter;
+  }
+  return texture;
+};
 
 async function readSidecar(path) {
   const response = await fetch(path);
