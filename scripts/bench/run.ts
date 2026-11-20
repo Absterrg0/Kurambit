@@ -6,7 +6,7 @@
  * a dev home (never an installed one); runs are kept by date so two compare.
  *
  *   vp run bench [--briefs N] [--only <id>[,<id>…]] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--effort <level>] [--steps N]
- *   vp run bench --brief "<text>" [--reference <png>] [--minutes N] [--steps 0] …
+ *   vp run bench --brief "<text>" [--reference <png>] [--minutes N] [--steps 0] [--characters code|blender|generated] …
  *   vp run bench --remeasure <stamp> [--home <dir>] [--out <dir>]
  *
  * `--brief` runs one brief of your own instead of briefs.json as the Kurambit lane beside the
@@ -33,6 +33,7 @@ import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import { RpcClient } from "effect/rpc";
 import {
@@ -41,6 +42,8 @@ import {
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   ORCHESTRATION_V2_WS_METHODS,
+  GAME_STYLE_DEFAULT_CHARACTERS,
+  GameCharacterRoute,
   ProviderInstanceId,
   WS_METHODS,
   WsRpcGroup,
@@ -83,8 +86,13 @@ const { values: args } = NodeUtil.parseArgs({
     reference: { type: "string" },
     minutes: { type: "string" },
     effort: { type: "string" },
+    characters: { type: "string" },
   },
 });
+/** How each game makes its models: Home's default unless `--characters` names a route. */
+const CHARACTERS = Schema.decodeUnknownSync(GameCharacterRoute)(
+  args.characters ?? GAME_STYLE_DEFAULT_CHARACTERS,
+);
 /** One brief of your own: the Kurambit lane, capped, beside the bare lane. */
 const LANE = args.brief !== undefined;
 /** The first turn's wall-time cap; in the lane, the whole lane's. */
@@ -765,6 +773,7 @@ async function runBrief(
       parentDirectory: gamesDir,
       brief: brief.brief,
       engine: "three",
+      characters: CHARACTERS,
       ...(brief.reference === undefined ? {} : { reference: brief.reference }),
       modelSelection,
     }),
