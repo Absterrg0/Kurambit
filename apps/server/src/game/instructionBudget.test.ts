@@ -70,7 +70,7 @@ const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", num
  * Bytes of the art skill every Blender tool names as its recipe, read whole by any chat that makes
  * a model. It was 36,030 (5,483 words, a recipe per craft helper) until 2026-11-20, when it became
  * the packs' rules, each naming the number the review reports for it (10,373). Later that day the
- * craft moved into the art recipes it indexes, read one or two at a time (7,352).
+ * craft moved into the art recipes it indexes, read one or two at a time (7,627).
  */
 const ART_SKILL_BUDGET = 8_000;
 
