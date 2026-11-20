@@ -13,6 +13,7 @@ import {
 } from "./toolkits/game/tools.ts";
 import { RETIRED_GAME_TOOLS, retiredToolMessage } from "./toolkits/game/placement.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
+import { resultText } from "./toolkits/game/results.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -786,6 +787,8 @@ const registerImageTool = <T extends Tool.Any, E, R>(
     readonly defaultIncludeImage?: boolean;
     /** False for a tool that answers no pictures: it is offered no `includeImage`. */
     readonly images?: boolean;
+    /** The answer's text content; JSON of its structured content when omitted. */
+    readonly text?: (metadata: Record<string, unknown>) => string;
   },
 ) =>
   Effect.gen(function* () {
@@ -877,7 +880,10 @@ const registerImageTool = <T extends Tool.Any, E, R>(
                     isError: isFailure === true,
                     structuredContent: metadata,
                     content: [
-                      { type: "text", text: JSON.stringify(metadata) },
+                      {
+                        type: "text",
+                        text: options?.text?.(metadata) ?? JSON.stringify(metadata),
+                      },
                       ...(includeImage && isFailure !== true
                         ? frames.map((frame) => ({
                             type: "image" as const,
@@ -925,7 +931,7 @@ const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
       (effect) => effect.pipe(Effect.provideContext(services)),
       tool.name,
       (error) => (error instanceof Error ? error.message : `${tool.name} failed.`),
-      { images },
+      { images, text: resultText },
     );
   });
 

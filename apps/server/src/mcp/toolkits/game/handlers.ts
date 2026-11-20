@@ -3,6 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import { LRUCache } from "lru-cache";
 import * as Schema from "effect/Schema";
 import {
   GameActionResult,
@@ -80,6 +81,8 @@ import { GAME_TOOL_OPS, opRefusal, type GameToolName } from "./placement.ts";
 import type { GameEngineCapability } from "../../../game/engineProfile.ts";
 import { besideReference, gameReference } from "../../../game/gameReference.ts";
 import { fill, STUDIO_TEXT } from "../../../game/studioText.ts";
+import { present, refusal, type GameToolRefusal } from "./results.ts";
+import { verdictOf } from "./verdicts.ts";
 
 const caller = McpInvocationContext.McpInvocationContext.pipe(
   Effect.flatMap((context) => McpInvocationContext.requireThreadScope(context, "Kurambit tools")),
@@ -126,7 +129,7 @@ const dispatch = <
   fallback?: keyof Input & string,
 ): Effect.Effect<
   unknown,
-  GameOperationError | Effect.Error<ReturnType<Ops[keyof Ops]>>,
+  GameToolRefusal,
   McpInvocationContext.McpInvocationContext | Effect.Services<ReturnType<Ops[keyof Ops]>>
 > =>
   Effect.gen(function* () {
@@ -145,8 +148,9 @@ const dispatch = <
     // Looked up by name, an op takes its own input: the key it was found under. The signature
     // above carries every op's errors and services, which the lookup erases.
     const run = ops[op] as unknown as (value: unknown) => Effect.Effect<unknown>;
-    return yield* run(input[op] ?? {});
-  }) as never;
+    const answer = (yield* run(input[op] ?? {})) as Record<string, unknown>;
+    return present(tool, op, verdictOf(tool, op, answer), answer);
+  }).pipe(Effect.mapError(refusal)) as never;
 
 /**
  * How this game's models are made is the person's choice. While a keep-going step's turn is at
@@ -180,6 +184,19 @@ const personsModelChoice = Effect.gen(function* () {
  * the page as a player opens it beside play: an eye, not a rule.
  */
 const REVIEW = STUDIO_TEXT.results;
+
+/**
+ * The provider sessions that already read a review, by kind: it was 22% of all result text when
+ * every look carried it (TOOLS.md). A session keeps its context, so once per session is once per
+ * chat; a restarted server says it once more.
+ */
+const reviewed = new LRUCache<string, true>({ max: 2_000 });
+const firstReview = (session: string, kind: "frame" | "brief") => {
+  const key = `${session}:${kind}`;
+  if (reviewed.has(key)) return false;
+  reviewed.set(key, true);
+  return true;
+};
 
 /** A check's answer, with its pictures attached as images (the views' PNGs, title then play). */
 const GameCheckAnswer = Schema.Struct({
@@ -225,14 +242,16 @@ const check = (final: boolean) =>
       ),
     );
     const shown = screenshots.filter((shot) => shot !== null);
+    const session = (yield* caller).thread.providerSessionId;
+    const review = shown.length > 0 && firstReview(session, reference === null ? "brief" : "frame");
     return {
       ...result,
       ...(shown.length === 0 ? {} : { screenshots: shown }),
-      ...(shown.length === 0
-        ? {}
-        : {
+      ...(review
+        ? {
             review: `${views[0]?.entry === "boot" && shown.length > 1 ? REVIEW.openingReview : ""}${reference === null ? REVIEW.briefReview : REVIEW.frameReview}`,
-          }),
+          }
+        : {}),
     };
   }).pipe(as(GameCheckAnswer));
 
@@ -391,6 +410,7 @@ const LibraryText = Schema.Struct({ text: Schema.String });
 const assetsHandlers = {
   game_assets: McpToolAccess.actsAsCaller((input) =>
     personsModelChoice.pipe(
+      Effect.mapError(refusal),
       Effect.andThen(
         dispatch("game_assets", input, {
           search: (search) =>
@@ -441,6 +461,7 @@ export const layerAssets = McpToolAccess.toLayer(GameAssetsToolkit, assetsHandle
 const blenderHandlers = {
   game_blender: McpToolAccess.actsAsCaller((input) =>
     personsModelChoice.pipe(
+      Effect.mapError(refusal),
       Effect.andThen(
         dispatch("game_blender", input, {
           code: (code) =>
@@ -602,8 +623,19 @@ const handlers = {
           GameRunControl.GameRunError.toOperationError(`keep-going-${cause.operation}`, cause),
         ),
         as(GameKeepGoingStatus),
+        Effect.map((answer) =>
+          present(
+            "game_keep_going",
+            input.mode ?? "status",
+            {
+              line: `${(answer as { mode?: string }).mode ?? "off"}${(answer as { step?: number | null }).step == null ? "" : ` · step ${(answer as { step?: number }).step}`}`,
+              next: "none.",
+            },
+            answer as Record<string, unknown>,
+          ),
+        ),
       );
-    }),
+    }).pipe(Effect.mapError(refusal)),
   ),
 } satisfies McpToolAccess.Handlers<typeof GameToolkit.tools>;
 export const layer = McpToolAccess.toLayer(GameToolkit, handlers);

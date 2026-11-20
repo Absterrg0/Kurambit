@@ -11,7 +11,6 @@ import {
   GameBuildsToolInput,
   GameCheckToolInput,
   GameKeepGoingToolInput,
-  GameOperationFailure,
   GamePlayToolInput,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
@@ -35,8 +34,9 @@ import { fill, STUDIO_TEXT } from "../../../game/studioText.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import { listedFor } from "./placement.ts";
+import { GameToolRefusal } from "./results.ts";
 
-const failure = Schema.Union([GameOperationFailure, OrchestratorMcpFailure]);
+const failure = Schema.Union([GameToolRefusal, OrchestratorMcpFailure]);
 
 /** Every game op acts as the calling thread's agent. */
 const caller = [
