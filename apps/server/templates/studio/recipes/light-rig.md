@@ -41,10 +41,10 @@ Inigo Quilez's three-light outdoor rig, in linear space:
 ## Checks
 
 ```yaml
-- probe: frame.median
+- probe: player.frame.median
   label: median light
   want: ">= 0.35"
-- probe: frame.clipped
+- probe: player.frame.clipped
   label: clipped share
   want: "<= 0.02"
 - fact: scene.report.player.contrast

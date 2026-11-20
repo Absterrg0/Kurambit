@@ -38,7 +38,7 @@
 - fact: scene.report.empty.share
   label: empty view
   want: "<= 0.25"
-- probe: frame.median
+- probe: player.frame.median
   label: median light
   want: ">= 0.35"
 - agent: "horizon colour equals the fog colour within ΔE 10"

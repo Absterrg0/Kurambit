@@ -242,6 +242,13 @@ export const screensFact = (result: GameCheckResult): Facts["screens"] =>
       ? { status: "measured", value: result.screens.report }
       : notMeasured(result.screens.why, false);
 
+export const playerFact = (result: GameCheckResult): Facts["player"] =>
+  result.player === undefined
+    ? notMeasured("the boot check did not reach the gameplay entry", false)
+    : result.player.status === "measured"
+      ? { status: "measured", value: result.player.report }
+      : notMeasured(result.player.why, false);
+
 const TONE_ORDER: Readonly<Record<GameFactTone, number>> = { bad: 0, good: 1, neutral: 2 };
 
 /** A list row's facts: its state, at most three worded chips (what is wrong first), and how many were not measured. */

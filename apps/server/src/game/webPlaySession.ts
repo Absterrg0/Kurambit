@@ -504,6 +504,8 @@ export interface WebPlaySession extends PlaySession {
    * "no-sheet" when the shell has none. `still` then takes the picture.
    */
   readonly sheet: (name: string | null, views?: ReadonlyArray<SheetView>) => Promise<unknown>;
+  /** The window at another size, as a player's would be; the page lays itself out again. */
+  readonly resize: (width: number, height: number) => Promise<void>;
 }
 
 /**
@@ -552,6 +554,8 @@ export const openWebPlaySession = async (input: {
   readonly qa?: boolean | undefined;
   /** Counts the bytes the page loads from the start, for `loadedBytes()`. */
   readonly countBytes?: boolean | undefined;
+  /** A probe of the caller's own, run before any of the page's scripts (playerProbe.ts). */
+  readonly initScript?: string | undefined;
 }): Promise<WebPlaySession> => {
   input.signal?.throwIfAborted();
   const { chromium } = loadPlaywright();
@@ -608,6 +612,7 @@ export const openWebPlaySession = async (input: {
     });
     await context.addInitScript(FRAME_COUNTER);
     if (input.qa === true) await context.addInitScript(QA_COUNTERS);
+    if (input.initScript !== undefined) await context.addInitScript(input.initScript);
     const onSound = input.onSoundStarted;
     if (onSound !== undefined) {
       await context.exposeBinding(SOUND_BINDING, (_source, sound: unknown) => {
@@ -1060,6 +1065,12 @@ export const openWebPlaySession = async (input: {
           options.wallMs + 15_000,
         );
         return answered === TIMED_OUT ? null : answered;
+      },
+      resize: async (width, height) => {
+        await bounded(
+          page.setViewportSize({ width, height }).catch(() => undefined),
+          PLAY_BOUNDS.webCallMs,
+        );
       },
       evaluate: async (expression) => {
         const answered = await bounded(

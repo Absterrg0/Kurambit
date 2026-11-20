@@ -37,7 +37,7 @@
 ## Checks
 
 ```yaml
-- probe: player.stageMinutes
+- probe: stageMinutes
   label: minutes to the Stage moving
   want: "<= 6"
 - probe: player.moves

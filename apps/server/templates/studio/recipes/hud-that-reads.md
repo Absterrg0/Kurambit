@@ -43,7 +43,7 @@
 - probe: player.text800
   label: smallest text at 1280x800 px
   want: ">= 9"
-- probe: player.textWall
+- probe: player.textWall.words
   label: longest text block before 10 s
   want: "<= 30"
 - probe: player.pause

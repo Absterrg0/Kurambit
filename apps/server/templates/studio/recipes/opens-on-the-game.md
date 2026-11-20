@@ -47,10 +47,10 @@
 - probe: player.cover
   label: first frame covered
   want: "<= 0.3"
-- probe: player.load.frame
+- probe: player.load.ready
   label: seconds to first frame
   want: "<= 1"
-- probe: player.textWall
+- probe: player.textWall.words
   label: longest text block before 10 s
   want: "<= 30"
 ```

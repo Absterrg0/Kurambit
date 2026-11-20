@@ -2,6 +2,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import type * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import { LRUCache } from "lru-cache";
 import * as Schema from "effect/Schema";
@@ -23,6 +24,7 @@ import {
   GameBlenderSceneResult,
   GameBotRunResult,
   GameBuildFacts,
+  type GameBuild,
   GameBuildRestoreResult,
   GameBuildUndoResult,
   GameBringInResult,
@@ -199,6 +201,8 @@ const GameCheckAnswer = Schema.Struct({
   review: Schema.optionalKey(Schema.String),
   /** One line of numbers per recipe game.json `recipes` picks (recipes.ts). */
   recipes: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Minutes from the game's creation to the first build (or this check) that moved. */
+  stageMinutes: Schema.optionalKey(Schema.Number),
 });
 
 const png = (bytes: Buffer) => ({
@@ -206,6 +210,44 @@ const png = (bytes: Buffer) => ({
   data: bytes.toString("base64"),
   ...THREE_VIEWPORT,
 });
+
+/** The builds read for the first one that moved: a game's opening, never its whole history. */
+const STAGE_BUILDS = 20;
+/**
+ * Minutes from the brief (the game's repository created) to the Stage first moving: the oldest
+ * build whose first minute measured a moving frame, or this check's when no build moved yet. Its
+ * builds are made at turn ends, so this is the latest it can have moved, never sooner. Undefined
+ * when its earliest builds were not measured moving (made before the first minute was measured).
+ */
+const stageMinutes = (root: string, moves: boolean) =>
+  Effect.gen(function* () {
+    const born = yield* Effect.promise(() =>
+      NodeFSP.stat(NodePath.join(root, ".git")).then(
+        (stat) => (stat.birthtimeMs > 0 ? stat.birthtimeMs : null),
+        () => null,
+      ),
+    );
+    if (born === null) return undefined;
+    const oldest: Array<GameBuild> = [];
+    let before: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const listed = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+        builds.list(threadId, { before, limit: 100 }),
+      );
+      oldest.unshift(...listed.builds.toReversed());
+      if (listed.next === null) break;
+      before = listed.next;
+    }
+    for (const build of oldest.slice(0, STAGE_BUILDS)) {
+      const facts = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+        builds.facts(threadId, { _tag: "build", build: build.id }),
+      );
+      if (facts.player.status !== "measured") continue;
+      if (facts.player.value.moves === true) return (Date.parse(build.at) - born) / 60_000;
+    }
+    const now = yield* Clock.currentTimeMillis;
+    return oldest.length === 0 && moves ? (now - born) / 60_000 : undefined;
+  }).pipe(Effect.orElseSucceed(() => undefined));
 
 /** game.json's `recipes`, read leniently: a game without the field, or a bad one, picked none. */
 const pickedRecipes = (root: string) =>
@@ -233,10 +275,13 @@ const check = (final: boolean) =>
     const root = yield* withGame(GameProjectService.GameProjectService, (projects, threadId) =>
       projects.resolve(threadId),
     );
+    const moved = result.player?.status === "measured" && result.player.report.moves === true;
+    const minutes = final ? yield* stageMinutes(root, moved) : undefined;
+    const measured = minutes === undefined ? result : { ...result, stageMinutes: minutes };
     const picked = yield* pickedRecipes(root);
-    const recipes = picked.length === 0 ? [] : yield* recipeLines(root, picked, result);
+    const recipes = picked.length === 0 ? [] : yield* recipeLines(root, picked, measured);
     const views = result.views ?? [];
-    if (views.length === 0) return recipes.length === 0 ? result : { ...result, recipes };
+    if (views.length === 0) return recipes.length === 0 ? measured : { ...measured, recipes };
     const reference = yield* gameReference(root);
     const screenshots = yield* Effect.promise(() =>
       Promise.all(
@@ -255,7 +300,7 @@ const check = (final: boolean) =>
     const session = (yield* caller).thread.providerSessionId;
     const review = shown.length > 0 && firstReview(session, reference === null ? "brief" : "frame");
     return {
-      ...result,
+      ...measured,
       ...(recipes.length === 0 ? {} : { recipes }),
       ...(shown.length === 0 ? {} : { screenshots: shown }),
       ...(review

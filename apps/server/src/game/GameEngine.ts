@@ -137,6 +137,8 @@ export interface GameEngineCheckReport {
   readonly qa?: GameCheckQa;
   /** With the QA play: the game at phone portrait and widescreen (three.js). */
   readonly screens?: GameCheckScreens;
+  /** With the QA play: the first minute as a player meets it (three.js, playerProbe.ts). */
+  readonly player?: GameCheckResult["player"];
 }
 
 /** One release the engine wrote into a staging folder. */
@@ -472,6 +474,7 @@ const make = Effect.gen(function* () {
         ...(executed.performance === undefined ? {} : { performance: executed.performance.line }),
         ...(executed.qa === undefined ? {} : { qa: executed.qa }),
         ...(executed.screens === undefined ? {} : { screens: executed.screens }),
+        ...(executed.player === undefined ? {} : { player: executed.player }),
         ...(scene
           ? {
               scene: executed.scene ?? {

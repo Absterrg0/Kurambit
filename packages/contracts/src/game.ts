@@ -9,6 +9,7 @@ import { GameCharacterRoute, GameStoredCharacterRoute } from "./gameStyle.ts";
 import { GameArtLanes } from "./gameArt.ts";
 import { GameSceneReport } from "./gameScene.ts";
 import { GameQaReport, GameScreens } from "./gameQa.ts";
+import { GamePlayerReport } from "./gamePlayer.ts";
 import { GameSavedPlaysReading } from "./gamePlays.ts";
 
 export const GameBlenderInputSource = Schema.Struct({
@@ -988,6 +989,21 @@ export const GameCheckResult = Schema.Struct({
         status: Schema.Literal("measured"),
         problems: Schema.Array(Schema.String),
         report: GameScreens,
+        ms: Schema.Number,
+      }),
+      Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),
+    ]),
+  ),
+  /**
+   * After the screens (three.js): the page as a player opens it, its first minute measured as a
+   * player meets it (gamePlayer.ts). `lines` say each reading against its line; not part of `ok`.
+   */
+  player: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({
+        status: Schema.Literal("measured"),
+        lines: Schema.Array(Schema.String),
+        report: GamePlayerReport,
         ms: Schema.Number,
       }),
       Schema.Struct({ status: Schema.Literal("not-measured"), why: Schema.String }),

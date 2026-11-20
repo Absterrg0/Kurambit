@@ -41,6 +41,7 @@ import {
   GameQaReport,
   GameSavedPlaysReading,
   GameScreens,
+  GamePlayerReport,
   type GameBotRunResult,
   GameEngineName,
   engineDisplayName,
@@ -65,6 +66,7 @@ import {
   tierWallSeconds,
   qaFact,
   screensFact,
+  playerFact,
 } from "./buildFacts.ts";
 import * as GameBot from "./GameBot.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -196,6 +198,13 @@ const Stored = Schema.Struct({
       GameFactPending,
     ]),
   ),
+  player: Schema.optionalKey(
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("measured"), value: GamePlayerReport }),
+      GameFactNotMeasured,
+      GameFactPending,
+    ]),
+  ),
   /** Each play's own use record, so a tier measured again replaces only its own. */
   plays: Schema.optionalKey(
     Schema.Struct({
@@ -230,11 +239,12 @@ type FactName =
   | "performance"
   | "qa"
   | "screens"
+  | "player"
   | "savedPlays";
 const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
   // The boot check plays the QA play and the other screen sizes too (GameEngine.checkIn), so
   // their reports land with it.
-  boots: ["boots", "qa", "screens"],
+  boots: ["boots", "qa", "screens", "player"],
   replays: ["savedPlays"],
   masher: ["masher", "performance", "use"],
   skilled: ["skilled", "use"],
@@ -261,13 +271,17 @@ const BROWSER_ONLY: ReadonlySet<FactName> = new Set([
   "performance",
   "qa",
   "screens",
+  "player",
   "savedPlays",
 ]);
-const browserOnly = (engine: GameEngineName, fact: "use" | "performance" | "qa" | "screens") =>
+const browserOnly = (
+  engine: GameEngineName,
+  fact: "use" | "performance" | "qa" | "screens" | "player",
+) =>
   isAvailableEngine(engine)
     ? null
     : notMeasured(
-        `${engineDisplayName(engine)} games played in their engine's own process, which never measured ${fact === "use" ? "asset use" : fact === "performance" ? "performance" : fact === "screens" ? "other screen sizes" : "a QA play"}`,
+        `${engineDisplayName(engine)} games played in their engine's own process, which never measured ${fact === "use" ? "asset use" : fact === "performance" ? "performance" : fact === "screens" ? "other screen sizes" : fact === "player" ? "a player's first minute" : "a QA play"}`,
         false,
       );
 const useNotMeasured = (engine: GameEngineName) => browserOnly(engine, "use");
@@ -447,6 +461,12 @@ const make = Effect.gen(function* () {
       performance: browserOnly(build.engine, "performance") ?? get("performance"),
       qa: browserOnly(build.engine, "qa") ?? get("qa"),
       screens: browserOnly(build.engine, "screens") ?? get("screens"),
+      // Facts stored before the first minute was measured say so; measuring again fills it.
+      player:
+        browserOnly(build.engine, "player") ??
+        (stored !== undefined && stored.player === undefined && !pending("player")
+          ? notMeasured("measured before the first minute was measured", true)
+          : get("player")),
       savedPlays:
         useNotMeasured(build.engine) !== null
           ? NONE_SAVED
@@ -828,6 +848,7 @@ const make = Effect.gen(function* () {
                   boots: bootsFact(checked, "from game_check on the same files"),
                   qa: qaFact(checked),
                   screens: yield* keepScreenFrames(root, copy, key, screensFact(checked)),
+                  player: playerFact(checked),
                 }
               : yield* step(engines.checkIn(copy, OWNER)).pipe(
                   Effect.flatMap((result) =>
@@ -837,6 +858,7 @@ const make = Effect.gen(function* () {
                         boots: bootsFact(result),
                         qa: qaFact(result),
                         screens,
+                        player: playerFact(result),
                       }),
                     ),
                   ),
@@ -855,6 +877,9 @@ const make = Effect.gen(function* () {
                         screens:
                           fault ??
                           notMeasured("the boot check failed before the other screen sizes", false),
+                        player:
+                          fault ??
+                          notMeasured("the boot check failed before the first minute", false),
                       });
                     },
                   }),

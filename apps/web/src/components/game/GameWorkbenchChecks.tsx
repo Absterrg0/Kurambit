@@ -423,6 +423,7 @@ const FACT_KEYS = [
   "use",
   "qa",
   "screens",
+  "player",
 ] as const satisfies ReadonlyArray<keyof GameBuildFacts>;
 
 /** A measuring build's facts with each reading still to come taken from its last measure. */

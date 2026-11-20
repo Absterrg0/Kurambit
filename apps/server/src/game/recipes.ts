@@ -107,7 +107,13 @@ const recipeLine = (id: string, checks: ReadonlyArray<RecipeCheck>, answer: unkn
     else if (check.kind === "agent") agent += 1;
     else {
       const value = at(answer, check.what);
-      if (value === undefined || value === null) unmeasured.push(check.label);
+      // A reading that says why it was not measured is not a value.
+      if (
+        value === undefined ||
+        value === null ||
+        (typeof value === "object" && "notMeasured" in value)
+      )
+        unmeasured.push(check.label);
       else {
         const ok = check.want === null ? null : meets(value, check.want);
         parts.push(
@@ -145,6 +151,12 @@ const performanceNumbers = (line: unknown) => {
   };
 };
 
+/** The first minute's report (`player.*`), when the check measured it. */
+const playerReport = (answer: unknown) => {
+  const player = (answer as { player?: { status?: string; report?: unknown } }).player;
+  return player?.status === "measured" ? player.report : undefined;
+};
+
 /**
  * The lines for a game's picked recipes against a check's answer. A recipe the game does not
  * hold, or one past the per-turn limit, says so instead of being read.
@@ -169,6 +181,7 @@ export const recipeLines = (root: string, picked: ReadonlyArray<string>, answer:
           : recipeLine(id, recipeChecks(text), {
               ...(answer as object),
               perf: performanceNumbers((answer as { performance?: unknown }).performance),
+              player: playerReport(answer),
             }),
       );
     }

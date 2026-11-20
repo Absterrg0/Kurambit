@@ -12,6 +12,35 @@ const issueLine = (issue: Answer) =>
     .filter((part) => part !== "")
     .join(" at ");
 
+/**
+ * The first minute in one line: the readings off their line, then how many held and which were
+ * not measured. Every reading is in the details' `player.lines`.
+ */
+const firstMinute = (answer: Answer): ReadonlyArray<string> => {
+  const stage =
+    typeof answer.stageMinutes === "number"
+      ? [`Stage first moved ${answer.stageMinutes.toFixed(1)} min after the brief`]
+      : [];
+  if (answer.player?.status !== "measured")
+    return answer.player?.status === "not-measured"
+      ? [`first minute: not measured (${answer.player.why})`]
+      : [];
+  const lines: ReadonlyArray<string> = answer.player.lines ?? [];
+  const off = lines.filter((line) => line.endsWith(" ✗"));
+  const held = lines.filter((line) => line.endsWith(" ✓")).length;
+  const unmeasured = lines
+    .filter((line) => line.includes(": not measured"))
+    .map((line) => line.split(":")[0]);
+  return [
+    [
+      `first minute: ${held} on their line, ${off.length} off`,
+      ...stage,
+      ...off.map((line) => line.replace(/ ✗$/, "")),
+      ...(unmeasured.length === 0 ? [] : [`not measured: ${unmeasured.join(", ")}`]),
+    ].join(" · "),
+  ];
+};
+
 const check =
   (final: boolean) =>
   (answer: Answer): Verdict => {
@@ -43,9 +72,18 @@ const check =
     return {
       line: numbers.join(" · "),
       findings: [...errors.map(issueLine), ...problems, ...(final ? scene : [])],
-      notes: answer.recipes ?? [],
+      notes: [...(final ? firstMinute(answer) : []), ...(answer.recipes ?? [])],
       next,
-      said: ["errors", "performance", "qa.problems", "screens.problems", "scene.lines", "recipes"],
+      said: [
+        "errors",
+        "performance",
+        "qa.problems",
+        "screens.problems",
+        "scene.lines",
+        "recipes",
+        "player.report",
+        "stageMinutes",
+      ],
     };
   };
 

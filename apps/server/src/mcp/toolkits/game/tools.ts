@@ -56,6 +56,7 @@ export const GameCheckTool = Tool.make("game_check", {
     GameEngine.GameEngine,
     GameProjectService.GameProjectService,
     GameStatusService.GameStatusService,
+    GameBuilds.GameBuilds,
     ...caller,
   ],
 })

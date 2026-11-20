@@ -12,8 +12,10 @@ import {
   GameOperationError,
   GameQaReport,
   GameReplayRun,
+  gamePlayerLines,
   gameQaFindings,
   gameQaProblems,
+  type GameCheckResult,
   type GameActionResult,
   type GameCheckIssue,
   type GameCheckQa,
@@ -56,6 +58,7 @@ import {
   type PageScene,
 } from "./sceneReport.ts";
 import { checkPerformance } from "./playPerf.ts";
+import { measurePlayer } from "./playerProbe.ts";
 
 const BOOT_TIMEOUT_MS = 60_000;
 /**
@@ -465,6 +468,8 @@ export const makeThreeBackend = (
       let qaPlay: { readonly raw: unknown; readonly ms: number } | null = null;
       // The other screen sizes, played after the QA play.
       let screens: GameCheckScreens | undefined;
+      // The first minute as a player meets it, after the screens (playerProbe.ts).
+      let player: GameCheckResult["player"];
       // The agent waits on this play: it goes first in the play lane and is never interrupted.
       const played = yield* playLane
         .hold(
@@ -574,6 +579,22 @@ export const makeThreeBackend = (
                   known: thrown,
                   signal,
                 });
+                const probed = Date.now();
+                const report = await measurePlayer({
+                  browser,
+                  url: server.url,
+                  folder: temporary,
+                  signal,
+                });
+                player =
+                  report === null
+                    ? { status: "not-measured", why: "the page as a player opens it did not boot" }
+                    : {
+                        status: "measured",
+                        lines: gamePlayerLines(report),
+                        report,
+                        ms: Date.now() - probed,
+                      };
               }
               return { timedOut };
             },
@@ -653,6 +674,7 @@ export const makeThreeBackend = (
           : {}),
         ...(qa === undefined ? {} : { qa }),
         ...(screens === undefined ? {} : { screens }),
+        ...(player === undefined ? {} : { player }),
       };
     });
   return {

@@ -27,7 +27,7 @@ it.effect("reads picked recipes from the game only, and reports what it measured
     NodeFS.mkdirSync(NodePath.join(root, "studio-skills/recipes"), { recursive: true });
     NodeFS.writeFileSync(NodePath.join(root, "studio-skills/recipes/opens-on-game.md"), RECIPE);
     const lines = yield* recipeLines(root, ["opens-on-game", "../../etc/passwd", "a", "b"], {
-      player: { cover: 0.62 },
+      player: { status: "measured", report: { cover: 0.62 } },
     });
     expect(lines).toEqual([
       "recipe opens-on-game 1/2 measured · covered 0.62 (aim <= 0.3 ✗) · not measured: player ΔE · 1 by your own test",

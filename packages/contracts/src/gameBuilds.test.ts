@@ -36,6 +36,7 @@ const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   performance: { status: "not-measured", why: "ffmpeg failed", retry: true },
   qa: { status: "pending" },
   screens: { status: "not-measured", why: "not built", retry: false },
+  player: { status: "not-measured", why: "not built", retry: false },
   savedPlays: {
     status: "not-measured",
     why: "no saved play was replayed on this build",
@@ -115,8 +116,9 @@ describe("gameFactsView", () => {
   });
 
   it("reads a row stored with the facts no longer measured", () => {
+    const { player: _notYet, ...stored } = encodeFacts(facts());
     const old = {
-      ...encodeFacts(facts()),
+      ...stored,
       idle: tier("lost", 30),
       liveness: { status: "pending" },
       scene: { status: "not-measured", why: "old", retry: false },
@@ -130,8 +132,14 @@ describe("gameFactsView", () => {
       "hud",
       "performance",
       "screens",
+      "first-minute",
       "skilled",
     ]);
+    // Stored before the first minute was measured: it says so, never a pass.
+    expect(gameFactsView(decoded).find((row) => row.id === "first-minute")?.reading).toEqual({
+      _tag: "not-measured",
+      why: "measured before the first minute was measured",
+    });
   });
 
   it("reads a performance row from before draw counts as it read then", () => {

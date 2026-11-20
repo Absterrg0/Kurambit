@@ -12,6 +12,7 @@ import {
   loadedWords,
 } from "./gameQa.ts";
 import { GameSavedPlaysReading, savedPlayWords, savedPlaysWords } from "./gamePlays.ts";
+import { GamePlayerReport, gamePlayerLines } from "./gamePlayer.ts";
 
 // GameBuildId has a module of its own so game.ts (GameStatus.buildPlays) can name
 // it without importing this module, which would close an import cycle through gameBot.ts.
@@ -155,6 +156,7 @@ const MEASURED_FACT_IDS = [
   "hud",
   "performance",
   "screens",
+  "first-minute",
   "saved-plays",
   "skilled",
 ] as const;
@@ -473,6 +475,19 @@ export const GameBuildFacts = Schema.Struct({
       }),
     ),
   ),
+  /**
+   * From the build's boot check (three.js), after the screens: what a player meets in the first
+   * minute, from the page as they open it (gamePlayer.ts).
+   */
+  player: gameFact(GamePlayerReport).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        status: "not-measured" as const,
+        why: "measured before the first minute was measured",
+        retry: false,
+      }),
+    ),
+  ),
   /** The game's saved plays (.studio/plays), each replayed on the build in its copy. */
   savedPlays: gameFact(GameSavedPlaysReading).pipe(
     Schema.withDecodingDefault(
@@ -551,6 +566,7 @@ const LABELS: Readonly<Record<GameFactId, string>> = {
   "first-response": "First response",
   performance: "Performance",
   screens: "Screens",
+  "first-minute": "First minute",
   "saved-plays": "Test plays",
   assets: "Assets",
   use: "Asset use",
@@ -822,6 +838,17 @@ const readFact = (facts: GameBuildFacts, id: GameMeasuredFactId): Read => {
           value: words.broken,
           tone: words.broken === 0 ? "good" : "bad",
           kind: words.broken === 0 ? "fits" : "breaks",
+        };
+      });
+    case "first-minute":
+      return from(facts.player, (report) => {
+        const lines = gamePlayerLines(report);
+        const off = lines.filter((line) => line.endsWith(" ✗"));
+        return {
+          text: off.length === 0 ? lines.join("; ") : off.join("; "),
+          value: off.length,
+          tone: off.length === 0 ? "good" : "bad",
+          kind: off.length === 0 ? "clean" : "off",
         };
       });
   }
