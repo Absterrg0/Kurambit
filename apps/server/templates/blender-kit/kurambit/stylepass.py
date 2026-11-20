@@ -591,7 +591,8 @@ def character_scale(arms, meshes, style):
 
 # A faceted finish keeps this share of a mesh's triangles (a garment more: thinned as far as the body,
 # its planes cut through what is worn under it), and leaves a mesh under FACET_MIN whole.
-FACET_KEEP = 0.2
+FACET_KEEP = 0.1
+FACET_KEEP_HELD = 0.2
 FACET_KEEP_CLOTH = 0.35
 FACET_MIN = 500
 
@@ -609,8 +610,15 @@ def facet(objects, style):
             continue
         tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
         if tris > FACET_MIN and o.data.shape_keys is None:
+            cloth = bool(o.get("kurambit_cloth"))
+            arm = next((m.object for m in o.modifiers if m.type == "ARMATURE" and m.object is not None), None)
+            # A body with clothes cut from it is thinned as they are, joint by joint, or the two part
+            # at every joint and the skin comes through.
+            held = cloth or (arm is not None and any(x.get("kurambit_cloth") and arm in helpers._deforming(x) for x in objects))
             m = o.modifiers.new("facet", "DECIMATE")
-            m.ratio = max(FACET_KEEP_CLOTH if o.get("kurambit_cloth") else FACET_KEEP, FACET_MIN / tris)
+            m.ratio = max(FACET_KEEP_CLOTH if cloth else FACET_KEEP_HELD if held else FACET_KEEP, FACET_MIN / tris)
+            # Anything else mirrored, so both sides get the same planes (a body is made symmetric about X).
+            m.use_symmetry, m.symmetry_axis = not held, "X"
             # Where two colours meet stays where it is: thinned across, a stripe's edge turns to teeth.
             index = np.empty(len(o.data.polygons), np.int32)
             o.data.polygons.foreach_get("material_index", index)
@@ -620,14 +628,17 @@ def facet(objects, style):
                     other = seen.setdefault(key, index[p.index])
                     if other != index[p.index]:
                         border.update(key)
-            # So does where one bone's skin meets another's: thinned there, one long edge spans a
-            # joint (from one thigh to the other at the fork) and tears when it bends.
-            arm = next((m.object for m in o.modifiers if m.type == "ARMATURE" and m.object is not None), None)
+            # On clothing and what wears it, so does where one bone's skin meets another's: thinned
+            # there, one long edge spans a joint (from one thigh to the other at the fork) and tears
+            # when it bends. Not on an animal or a prop: held there, every joint keeps a dense band
+            # and the thinning between bands collapses into long fans, crumpled where low-poly art
+            # has clean planes.
             lead = []
             if arm is not None:
                 from . import deform
 
                 lead = deform._dominant(o, arm)
+            if arm is not None and held:
                 for e in o.data.edges:
                     a, b = e.vertices
                     if lead[a] != lead[b]:
@@ -647,8 +658,10 @@ def facet(objects, style):
                 keep.add(head, 0.0, "REPLACE")
                 keep.add(sorted(border), 0.0, "REPLACE")
                 m.vertex_group = keep.name
-                m.vertex_group_factor = 8.0
-            if o.get("kurambit_cloth"):
+                # Held hard, what is kept stays dense and its neighbours collapse into fans; the rest
+                # only lean their thinning away from colour borders and the face.
+                m.vertex_group_factor = 8.0 if held else 2.0
+            if cloth:
                 m.ratio = _cloth_ratio(o, m)
             with bpy.context.temp_override(object=o, active_object=o):
                 bpy.ops.object.modifier_move_to_index(modifier=m.name, index=0)
