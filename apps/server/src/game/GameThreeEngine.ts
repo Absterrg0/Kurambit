@@ -447,11 +447,13 @@ export const makeThreeBackend = (
       // The page as the player opens it, then the gameplay entry the template
       // names (the starter's shell boots straight into play with "?play"), so a
       // failure in gameplay start cannot hide behind the title screen.
-      // A quick look opens the gameplay entry alone, which boots the same page.
-      const entries: Array<readonly [GameCheckView["entry"], string]> =
-        input.look && input.gameplayScene !== "" ? [] : [["boot", server.url]];
-      if (input.gameplayScene !== "")
-        entries.push(["gameplay", new URL(input.gameplayScene, server.url).href]);
+      // A quick look boots once: the page as the player opens it, then play started on that
+      // same page (the bridge's "play"), so every look shows the agent its opening too. A game
+      // that refuses "play" there gets the gameplay entry of its own.
+      const gameplayUrl =
+        input.gameplayScene === "" ? null : new URL(input.gameplayScene, server.url).href;
+      const entries: Array<readonly [GameCheckView["entry"], string]> = [["boot", server.url]];
+      if (gameplayUrl !== null && !input.look) entries.push(["gameplay", gameplayUrl]);
       // The entry whose page booting is the game booting.
       const bootEntry = entries[0]![0];
       // The gameplay entry's play, measured by the shell's scene report: what it left, and how long it took.
@@ -503,7 +505,7 @@ export const makeThreeBackend = (
                   // A short random-input play the scene report watches; without one (or with a
                   // shell that has none, where nothing would watch it), one extra beat. Either
                   // way late module errors still land in the listeners above.
-                  const looking = input.look && entry === "gameplay";
+                  let looking = input.look && entry === "gameplay";
                   if (measure && session.scene() !== "no-shell")
                     await playRandomly(session.input, SCENE_CHECK_PLAY_MS, signal);
                   else if (looking) await playRandomly(session.input, LOOK_PLAY_MS, signal);
@@ -511,10 +513,28 @@ export const makeThreeBackend = (
                   const view = NodePath.join(temporary, `view-${entry}.png`);
                   if (await session.still(view))
                     views.push({ entry, path: NodePath.relative(ctx.root, view) });
+                  if (input.look && entry === "boot" && gameplayUrl !== null) {
+                    const refusedBefore = session.refusedStates().length;
+                    await session.setState("play", {});
+                    if (session.refusedStates().length > refusedBefore)
+                      entries.push(["gameplay", gameplayUrl]);
+                    else {
+                      await playRandomly(session.input, LOOK_PLAY_MS, signal);
+                      const played = NodePath.join(temporary, "view-gameplay.png");
+                      if (await session.still(played))
+                        views.push({
+                          entry: "gameplay",
+                          path: NodePath.relative(ctx.root, played),
+                        });
+                      looking = true;
+                    }
+                  }
                   await session.close();
                   if (measure) scenePlay = { page: session.scene(), ms: Date.now() - started };
                   if (measure || looking) playPerf = session.perf();
                   reached.push(entry);
+                  // A look's play started on the boot page reached gameplay there.
+                  if (looking && entry === "boot") reached.push("gameplay");
                 } else if (entry !== bootEntry && !crashed)
                   issues.push({
                     file: `${ctx.projectName}/${input.gameplayScene.split("?")[0]}`,

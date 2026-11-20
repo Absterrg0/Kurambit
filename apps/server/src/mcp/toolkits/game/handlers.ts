@@ -181,6 +181,10 @@ const FRAME_REVIEW =
 const BRIEF_REVIEW =
   "Before you end the turn, critique this frame as a player would, biggest gap first: does it read at a glance (the player big enough and seen from a side that reads, nothing washed out or too dark), do its light and atmosphere fit the mood the brief describes (the time of day, the weather, the place's own lights), and do its title and HUD look made for this game? Fix the biggest gap and look again.";
 
+/** Said first when the check shows the page as a player opens it beside play: an eye, not a rule. */
+const OPENING_REVIEW =
+  "The first picture is the game as a player opens it, before they press anything: what they see first. ";
+
 /** A check's answer, with its pictures attached as images (the views' PNGs, title then play). */
 const GameCheckAnswer = Schema.Struct({
   ...GameCheckResult.fields,
@@ -228,7 +232,11 @@ const check = (final: boolean) =>
     return {
       ...result,
       ...(shown.length === 0 ? {} : { screenshots: shown }),
-      ...(shown.length === 0 ? {} : { review: reference === null ? BRIEF_REVIEW : FRAME_REVIEW }),
+      ...(shown.length === 0
+        ? {}
+        : {
+            review: `${views[0]?.entry === "boot" && shown.length > 1 ? OPENING_REVIEW : ""}${reference === null ? BRIEF_REVIEW : FRAME_REVIEW}`,
+          }),
     };
   }).pipe(as(GameCheckAnswer));
 

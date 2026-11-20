@@ -48,7 +48,7 @@ const answers = { success: Schema.Unknown, failure, failureMode: "return" } as c
 const ONE_OP = 'One op per call, as the only key: {"<op>": {...}}.';
 
 export const GameCheckTool = Tool.make("game_check", {
-  description: `Facts on this game's running build. ${ONE_OP} No op: look. look: a moment of play: errors with file:line, frame rate, and the frame as an image beside the reference picture. final: the full check before you end a turn: also the player's entry, the scene report and the QA play, whose problems are bugs to fix. facts: what the harness measured on a build. status: toolchain, preview URL, model choice and art providers.`,
+  description: `Facts on this game's running build. ${ONE_OP} No op: look. look: the page as a player opens it, then a moment of play: errors with file:line, frame rate, both frames (play beside the reference picture). final: the full check before you end a turn: also the player's entry, the scene report and the QA play, whose problems are bugs to fix. facts: what the harness measured on a build. status: toolchain, preview URL, model choice and art providers.`,
   parameters: GameCheckToolInput,
   ...answers,
   dependencies: [

@@ -87,7 +87,7 @@ const SCOPE_LINES = `- **Do everything the person asked in this message,** and o
 - **A value they ask to change** that a \`ctx.tune\` already holds: set it in \`web/tune.json\` under the id its \`ctx.tune\` uses, say so, and that is the turn.
 - **How models are made** (game.json's \`characters\`: code, blender or generated, and \`library\`) is the person's choice: change it only when they ask in chat.
 - **A question:** answer it and change nothing; your previous \`Next:\` line stands, so repeat it.
-- **Look as often as you need; check in full once the work is done.** \`game_check\` is a quick look: a frame of play, its errors and frame rate. Before you end the turn, run its op \`final\`, which also plays the scene report and the QA play, and fix what they list. A clean check says the game runs, not that the work is done.
+- **Look as often as you need; check in full once the work is done.** \`game_check\` is a quick look: your game as a player opens it, a frame of play, its errors and frame rate. Before you end the turn, run its op \`final\`, which also plays the scene report and the QA play, and fix what they list. A clean check says the game runs, not that the work is done.
 - Install nothing the person did not ask for; the game_* tools are your toolchain.`;
 /** Said until a saved play wins the game: "can it be won" is then replayed on every build. */
 const FIRST_WIN_LINE =
