@@ -107,7 +107,7 @@ piece arrives: start a generation, keep building, pick it up with op
    `kurambit.palette_of("art/key-art.png", 8)` and lock them as `palette`
    (leave `palette` out for a painted or realistic key art) with `anchor`.
    Pass it in `references` of every later image.
-3. **Characters and props.** If `game_check` op `status` shows the lane
+3. **Characters and props.** If the status line of `game_check` op `final` shows the lane
    null in `artLanes`, tell the person what Settings → Art providers needs.
    Otherwise a sheet (lane `image`, full body, front, arms down), the
    person picks, then lane `character`, `creature` or `model` with it as
@@ -116,7 +116,7 @@ piece arrives: start a generation, keep building, pick it up with op
    `source: "generated"`; stand it facing -Y, review with the sheet as
    `reference`, export. A move the library lacks: lane `motion`.
 4. **Images**: lanes `image` and `texture` with the key art as reference;
-   op `image_edit` changes a picked one. Never switch route or lane to get
+   `game_assets` op `generate` with `edit` changes a picked one. Never switch route or lane to get
    past a refusal.
 
 ## 2D sprites from 3D
