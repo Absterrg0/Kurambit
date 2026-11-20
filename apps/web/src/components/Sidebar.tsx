@@ -137,34 +137,18 @@ function ChatTime({ at }: { at: string }) {
 }
 
 /**
- * What a game's latest builds say: its current build does not start (and which chat's turn made
- * it), and which chats have a Try-several-ways waiting for the person to keep one. Read from the
- * same first page of builds the row's picture reads.
+ * What a game's latest builds say: its current build does not start, and which chat's turn made
+ * it. Read from the same first page of builds the row's picture reads.
  */
 const buildStateOf = (result: AsyncResult.AsyncResult<GameBuildsResult, unknown>) => {
   if (!AsyncResult.isSuccess(result)) return NO_BUILD_STATE;
   const { builds, current } = result.value;
   const latest = builds.find((build) => build.id === current) ?? builds[0];
-  const tries = new Map<string, { chat: string; kept: boolean }>();
-  for (const build of builds) {
-    if (build.source._tag !== "version") continue;
-    const before = tries.get(build.source.runId);
-    tries.set(build.source.runId, {
-      chat: build.source.threadId,
-      kept: (before?.kept ?? false) || build.source.kept,
-    });
-  }
-  const picking = [...tries.values()].filter((each) => !each.kept).map((each) => each.chat);
-  const broken = latest !== undefined && doesNotStart(latest.facts);
-  if (picking.length === 0 && !broken) return NO_BUILD_STATE;
-  const source = latest?.source;
-  return {
-    broken,
-    brokenBy: broken && source !== undefined && "threadId" in source ? String(source.threadId) : "",
-    picking: picking.join("\n"),
-  };
+  if (latest === undefined || !doesNotStart(latest.facts)) return NO_BUILD_STATE;
+  const source = latest.source;
+  return { broken: true, brokenBy: "threadId" in source ? String(source.threadId) : "" };
 };
-const NO_BUILD_STATE = { broken: false, brokenBy: "", picking: "" };
+const NO_BUILD_STATE = { broken: false, brokenBy: "" };
 
 export default function Sidebar() {
   const gameLibrary = useGameLibrary();
@@ -777,8 +761,7 @@ function ChatRow({
       : { environmentId: chat.environmentId, threadId: chat.id },
   );
   const copyWaits = copyPlace?.state._tag === "conflicts" || copyPlace?.state._tag === "held";
-  const picking = new Set((builds?.picking ?? "").split("\n")).has(chat.id);
-  const ownMark = place === "list" ? chatMark(chat, picking) : null;
+  const ownMark = place === "list" ? chatMark(chat) : null;
   // Keep going and a build being made are the game's work: the chat the game opens to shows it.
   const gameAtWork =
     place === "list" &&

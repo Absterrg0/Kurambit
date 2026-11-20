@@ -65,8 +65,8 @@ const NO_THINGS: ReadonlyArray<GameThing> = [];
 /**
  * When each Workbench section gets its dot and the composer's ways to send arrive for one game,
  * from what the game already says: a build measured (Checks), a tuned value exposed (Tune), a model in the
- * scene (Art), a booting build whose reply ends in a `Next:` line (Keep going), the third message
- * (Try N ways), a phone or widescreen problem (Responsive view). Test plays arrive at the Stage's
+ * scene (Art), a booting build whose reply ends in a `Next:` line (Keep going), a phone or
+ * widescreen problem (Responsive view). Test plays arrive at the Stage's
  * bar, when a run first ends.
  */
 export function useGameArrivals(threadRef: ScopedThreadRef | null) {

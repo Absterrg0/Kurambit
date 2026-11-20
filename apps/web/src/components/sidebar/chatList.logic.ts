@@ -73,9 +73,9 @@ export const isSettledChat = (chat: Pick<ChatListChat, "settledOverride">) =>
   chat.settledOverride === "settled";
 
 /** A chat's mark from T3's thread status: approvals and questions wait on the person. */
-export const chatMark = (chat: ChatListChat, picking: boolean): ChatMark => {
+export const chatMark = (chat: ChatListChat): ChatMark => {
   const status = resolveSidebarThreadStatus(chat);
-  if (status === "approval" || status === "input" || picking) return "waiting";
+  if (status === "approval" || status === "input") return "waiting";
   return status === "working" ? "working" : null;
 };
 
