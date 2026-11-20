@@ -137,6 +137,13 @@ const CAPTURE_REF = CheckpointRef.make("refs/kurambit/game-builds/capture");
 /** A build made outside a turn, kept reachable: the ref holds its commit and means nothing else. */
 const KEEP_REFS = "refs/kurambit/game-builds/builds/";
 const keepRef = (id: string) => CheckpointRef.make(`${KEEP_REFS}${id}`);
+/**
+ * The base a keep outside a turn started from, written before it writes the folder and gone once
+ * its build is recorded: a repeat after a death in between finds the folder already written, and
+ * only this says what Undo goes back to. Never a build of the list.
+ */
+const requestRef = (request: string) =>
+  CheckpointRef.make(`refs/kurambit/game-builds/requests/${request}`);
 /** The folder as last compared with the build it was made from (folderEdited); no build of its own. */
 const FOLDER_REF = CheckpointRef.make("refs/kurambit/game-builds/folder");
 const MOVED_ON =
@@ -2759,6 +2766,12 @@ const make = Effect.gen(function* () {
   /** The folder's build made outside a turn by this request, when an earlier try recorded it. */
   const byRequest = (g: Game, request: string) =>
     Effect.map(recordsOf(g, 100), (records) => records.find((r) => r.request === request) ?? null);
+  const startRequest = (root: string, request: string, base: string) =>
+    checkpoints.updateCheckpointRef({ cwd: root, checkpointRef: requestRef(request), oid: base });
+  const endRequest = (root: string, request: string) =>
+    checkpoints
+      .deleteCheckpointRefs({ cwd: root, checkpointRefs: [requestRef(request)] })
+      .pipe(Effect.ignore);
 
   const land: GameBuilds["Service"]["land"] = (threadId, input) =>
     Effect.gen(function* () {
@@ -3075,6 +3088,7 @@ const make = Effect.gen(function* () {
       const done = yield* byRequest(g, request);
       if (done !== null && done.base !== null)
         return yield* answer(done.id, done.base, said(input.things));
+      const startedFrom = yield* oidAt(g.root, requestRef(request));
       // A turn at work in this folder (any chat's, this one's too) would write over the values or
       // be captured half done: they are kept aside and land when its turn ends (landHeldKeeps).
       const writer = yield* turnIn(g, threadId);
@@ -3121,10 +3135,15 @@ const make = Effect.gen(function* () {
           const merged = tuneFileWith(file, existing, input.things);
           if ("refusal" in merged)
             return yield* failed("Keep values", path, "invalid-input", merged.refusal);
-          const held = input.fold === true ? yield* heldTuning : null;
-          // A fold keeps the base of the build it replaces, so Undo still goes back to before
-          // the session.
-          const base = held === null ? yield* sessionBase : held.base;
+          const held = input.fold === true && startedFrom === null ? yield* heldTuning : null;
+          // A try cut short after it wrote keeps its first base; a fold keeps the base of the
+          // build it replaces, so Undo still goes back to before the session.
+          const base = startedFrom ?? (held === null ? yield* sessionBase : held.base);
+          yield* startRequest(g.root, request, base).pipe(
+            Effect.mapError((cause) =>
+              failed("Keep values", g.root, "io", "the game folder could not be kept", cause),
+            ),
+          );
           // The session's base file as it was: values put back write it again byte for byte, so
           // the folder is the base again whatever formatting the file had. Kept in memory; after
           // a server restart a session put back stays one build, as before.
@@ -3202,6 +3221,7 @@ const make = Effect.gen(function* () {
               Effect.logWarning("Tuned values put back could not leave the decisions.", { cause }),
             ),
           );
+        yield* endRequest(g.root, request);
         yield* operations.changed(g.root, GAME_BUILDS_EVENT, "Tuned values put back.");
         return {
           build: kept.base,
@@ -3228,6 +3248,7 @@ const make = Effect.gen(function* () {
           request,
         },
       );
+      yield* endRequest(g.root, request);
       yield* nextTurnsFrom(g, threadId, kept.build);
       yield* decideKept(g, kept.build, kept.held, kept.changes).pipe(
         Effect.catchCause((cause) =>
@@ -3422,18 +3443,25 @@ const make = Effect.gen(function* () {
       // A repeat answers as the first try did.
       const done = yield* byRequest(g, request);
       if (done !== null && done.base !== null) return { build: done.id, base: done.base };
+      const startedFrom = yield* oidAt(g.root, requestRef(request));
       const kept = yield* operations.exclusive(
         g.root,
         input.operation,
         Effect.gen(function* () {
           // The folder as it stood: still the build it holds, that build by its own id, so Undo
           // goes back to a build the Stage can name.
-          const captured = yield* capture;
-          const current = yield* folderCurrent(g);
           const base =
-            current === null || (yield* folderEditedSince(g, current)) !== false
-              ? captured
-              : current;
+            startedFrom ??
+            (yield* Effect.gen(function* () {
+              const captured = yield* capture;
+              const current = yield* folderCurrent(g);
+              return current === null || (yield* folderEditedSince(g, current)) !== false
+                ? captured
+                : current;
+            }));
+          yield* startRequest(g.root, request, base).pipe(
+            Effect.mapError(io("the game folder could not be kept")),
+          );
           yield* input.write(g.root);
           return { base, build: yield* capture };
         }),
@@ -3455,6 +3483,7 @@ const make = Effect.gen(function* () {
             "library",
             { current: true, request },
           );
+        yield* endRequest(g.root, request);
         yield* nextTurnsFrom(g, threadId, kept.build);
         yield* operations.changed(
           g.root,

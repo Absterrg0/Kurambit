@@ -2,8 +2,8 @@
 // Data safety: the server dies between a restore's commit and its move, between the move and
 // its settle, and after the settle before its effect is marked done. After each restart nothing
 // is lost or doubled: the folder holds the restore's target once, the person's build is listed
-// once with its number, and the list reads the same. The same holds for an old game's one-time
-// read-in.
+// once with its number, and the list reads the same. The same holds for a kept build whose record
+// died after its folder write, and for an old game's one-time read-in.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -178,6 +178,42 @@ it.effect("an Undo's landing the server died before moving lands once on restart
     Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
   );
 });
+
+it.effect(
+  "kept values whose record died are one build after a restart and the keep's repeat",
+  () => {
+    const root = repo();
+    const records = memoryBuildRecords();
+    const life = lifeOf(root, records);
+    return Effect.gen(function* () {
+      records.control.lose.add("game-build.record");
+      const first = yield* life((builds) =>
+        builds
+          .keepValues(THREAD, { things: [{ id: "Rover", values: [speed] }], commandId: "k1" })
+          .pipe(Effect.exit),
+      );
+      // Dead after the folder's write, before its record: the values are in the folder, unlisted.
+      assert.isTrue(first._tag === "Failure");
+      assert.deepStrictEqual(tuneOf(root).Rover, { speed: 9 });
+      assert.strictEqual(records.builds().length, 0);
+
+      // The Stage asks again with the same request: one build, whose Undo takes the values back.
+      const kept = yield* life((builds) =>
+        builds.keepValues(THREAD, { things: [{ id: "Rover", values: [speed] }], commandId: "k1" }),
+      );
+      const listed = yield* life((builds) => builds.list(THREAD, {}));
+      assert.deepStrictEqual(
+        listed.builds.map((build) => build.name),
+        ["Build 1 · tuned"],
+      );
+      assert.strictEqual(listed.current, kept.build);
+      yield* life((builds) => builds.undo(THREAD, kept.build, "undo-1"));
+      assert.strictEqual(tuneOf(root).Rover, undefined);
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
+    );
+  },
+);
 
 it.effect("an old game's read-in that died before its commit reads it in once on restart", () => {
   const root = repo();
