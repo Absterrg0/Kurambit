@@ -104,7 +104,7 @@ const textSize = (value: Json) =>
  * `details` within `budget` bytes of JSON: the largest list is halved or the longest string cut
  * until it fits, and `omitted` names each cut.
  */
-export const capDetails = (details: Record<string, Json>, budget: number) => {
+const capDetails = (details: Record<string, Json>, budget: number) => {
   let value: Json = details;
   const omitted = new Map<string, string>();
   for (let round = 0; round < 200 && textSize(value) > budget; round += 1) {

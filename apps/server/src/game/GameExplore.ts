@@ -21,6 +21,10 @@ import {
   GameExploreStartInput,
   GameExploreActInput,
   GameExploreCloseInput,
+  GAME_EVAL_MAX_BYTES,
+  type GameEvalInput,
+  type GameEvalResult,
+  type GamePlayActInput,
   GameExploreStartResult,
   GameExploreActResult,
   GameExploreCloseResult,
@@ -105,10 +109,22 @@ export class GameExplore extends Context.Service<
       threadId: ThreadId,
       input: typeof GameExploreCloseInput.Type,
     ) => Effect.Effect<typeof GameExploreCloseResult.Type, GameOperationError>;
+    /** An act in the thread's session, which it opens first when the input names none. */
+    readonly play: (
+      threadId: ThreadId,
+      input: GamePlayActInput,
+    ) => Effect.Effect<typeof GameExploreActResult.Type, GameOperationError>;
+    /** An agent's JavaScript in the session's page (opened first when none is named). */
+    readonly evaluate: (
+      threadId: ThreadId,
+      input: GameEvalInput,
+    ) => Effect.Effect<GameEvalResult, GameOperationError>;
     /** Closes the game's session when this thread owns it, as its turn is cancelled. */
     readonly release: (threadId: ThreadId, root: string) => Effect.Effect<void>;
   }
 >()("kurambit/game/GameExplore") {}
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
@@ -366,7 +382,7 @@ const make = Effect.gen(function* () {
     session: ExploreSession,
     key: "maxCalls" | "maxTotalSteps" | "maxTotalNominalMs" | "maxImages",
   ) => GAME_EXPLORE_BOUNDS[key] * session.budgets;
-  const goOn = "game_play op start goes on with this run and another budget; close ends it.";
+  const goOn = "game_play op act with this sessionId goes on with another budget; close ends it.";
   const exploreBudget =
     `This session holds ${GAME_EXPLORE_BOUNDS.maxCalls} acts and ` +
     `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, about ` +
@@ -660,7 +676,7 @@ const make = Effect.gen(function* () {
         if (session.closed || now >= session.wallDeadlineMs)
           return yield* exploreInvalid(
             session.id,
-            "That exploration session is closed or expired; start a new one with game_play op start.",
+            "That exploration session is closed or expired; act without a sessionId to open a new one.",
           );
         session.budgets += 1;
         session.lastActiveMs = now;
@@ -866,7 +882,7 @@ const make = Effect.gen(function* () {
       if (session === undefined)
         return yield* exploreInvalid(
           input.sessionId,
-          "That exploration session is unknown or expired; start a new one with game_play op start.",
+          "That exploration session is unknown or expired; act without a sessionId to open a new one.",
         );
       const root = yield* projects.resolve(threadId);
       const lease = exploreLease(session, root, threadId);
@@ -901,7 +917,7 @@ const make = Effect.gen(function* () {
           if (session.closed || exploreLive.get(session.root) !== session)
             return yield* exploreInvalid(
               session.id,
-              "That exploration session is closed or expired; start a new one with game_play op start.",
+              "That exploration session is closed or expired; act without a sessionId to open a new one.",
             );
           const now = yield* Clock.currentTimeMillis;
           if (
@@ -912,7 +928,7 @@ const make = Effect.gen(function* () {
             yield* exploreFinalize(session, reason);
             return yield* exploreInvalid(
               session.id,
-              `That exploration session ${reason}. Start a new exploration with game_play op start.`,
+              `That exploration session ${reason}. Act without a sessionId to open a new one.`,
             );
           }
           // Budgets are checked under the session lock so concurrent acts
@@ -955,7 +971,7 @@ const make = Effect.gen(function* () {
       if (session === undefined)
         return yield* exploreInvalid(
           input.sessionId,
-          "That exploration session is unknown or expired; start a new one with game_play op start.",
+          "That exploration session is unknown or expired; act without a sessionId to open a new one.",
         );
       const lease = exploreLease(session, root, threadId);
       if (lease !== null) return yield* lease;
@@ -977,7 +993,7 @@ const make = Effect.gen(function* () {
           if (result !== null) return result;
           return yield* exploreInvalid(
             input.sessionId,
-            "That exploration session is closed or expired; start a new one with game_play op start.",
+            "That exploration session is closed or expired; act without a sessionId to open a new one.",
           );
         }),
       );
@@ -1003,10 +1019,66 @@ const make = Effect.gen(function* () {
       }),
     ),
   );
+  /** The thread's open session on its game, else a new one opened with `start`'s options. */
+  const sessionFor = (
+    threadId: ThreadId,
+    named: string | undefined,
+    start: typeof GameExploreStartInput.Type,
+  ) =>
+    Effect.gen(function* () {
+      if (named !== undefined) return named;
+      const root = yield* projects.resolve(threadId);
+      const live = exploreLive.get(root);
+      if (
+        live !== undefined &&
+        live !== "starting" &&
+        !live.closed &&
+        String(live.threadId) === String(threadId)
+      )
+        return live.id;
+      return (yield* exploreStart(threadId, start)).sessionId;
+    });
+  const explorePlay = (threadId: ThreadId, input: GamePlayActInput) =>
+    Effect.gen(function* () {
+      const { sessionId: named, steps, ...start } = input;
+      const sessionId = yield* sessionFor(threadId, named, start);
+      return yield* exploreAct(threadId, { sessionId, steps });
+    });
+  const exploreEvaluate = (threadId: ThreadId, input: GameEvalInput) =>
+    Effect.gen(function* () {
+      const sessionId = yield* sessionFor(threadId, input.sessionId, {});
+      const root = yield* projects.resolve(threadId);
+      const session = liveSessions().find((live) => live.id === sessionId);
+      if (session === undefined || session.closed)
+        return yield* exploreInvalid(
+          sessionId,
+          "That exploration session is closed or expired; eval without a sessionId to open a new one.",
+        );
+      const lease = exploreLease(session, root, threadId);
+      if (lease !== null) return yield* lease;
+      const run = session.play.evaluate;
+      if (run === undefined)
+        return yield* exploreInvalid(sessionId, "This game's runner has no page to evaluate in.");
+      const answered = yield* session.lock.withPermits(1)(
+        Effect.promise(() => run(input.expression)),
+      );
+      if ("error" in answered)
+        return yield* exploreInvalid(sessionId, `The expression threw: ${answered.error}`);
+      const size = Buffer.byteLength(encodeJson(answered.value ?? null), "utf8");
+      if (size > GAME_EVAL_MAX_BYTES)
+        return yield* exploreInvalid(
+          sessionId,
+          `The value is ${size} bytes; the most is ${GAME_EVAL_MAX_BYTES}. Return less of it.`,
+        );
+      session.lastActiveMs = yield* Clock.currentTimeMillis;
+      return { sessionId, value: answered.value };
+    });
   return GameExplore.of({
     start: exploreStart,
     act: exploreAct,
     close: exploreClose,
+    play: explorePlay,
+    evaluate: exploreEvaluate,
     release: (threadId, root) =>
       Effect.gen(function* () {
         // A cancelled turn also releases the game's exploration session: the

@@ -23,8 +23,6 @@ import {
   GameBlenderRenderSpritesResult,
   GameBlenderSceneResult,
   GameBotRunResult,
-  GameBotViewResult,
-  GameBuildComparison,
   GameBuildFacts,
   GameBuildRestoreResult,
   GameBuildUndoResult,
@@ -33,9 +31,9 @@ import {
   GameCopyUpdateResult,
   GameBuildsResult,
   GameCheckResult,
+  GameEvalResult,
   GameExploreActResult,
   GameExploreCloseResult,
-  GameExploreStartResult,
   GameGenerateResult,
   GameKeepGoingStatus,
   GameModelSheetResult,
@@ -44,8 +42,6 @@ import {
   GameSavedPlaysReading,
   GameReplayMoment,
   GameSavedPlaysResult,
-  GameSavedListResult,
-  GameStatus,
   GameWebPackage,
   gameModelChoice,
   THREE_VIEWPORT,
@@ -53,7 +49,6 @@ import {
 } from "@kurambit/contracts";
 import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
-import * as GameLibrary from "../../../game/GameLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
@@ -65,8 +60,6 @@ import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
 import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
-import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
-import * as GameStage from "../../../game/GameStage.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -255,6 +248,25 @@ const check = (final: boolean) =>
     };
   }).pipe(as(GameCheckAnswer));
 
+/**
+ * The status line a final check ends with (what op status answered): how models are made, the
+ * Blender the game's tools would run, and which art lanes have a provider.
+ */
+const statusLine = Effect.gen(function* () {
+  const scope = yield* McpInvocationContext.McpInvocationContext;
+  const status = yield* withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
+    statuses.status(threadId, {}),
+  );
+  const lanes = Object.entries(status.artLanes ?? {})
+    .filter(([, provider]) => provider !== null)
+    .map(([lane]) => lane);
+  return [
+    `models ${status.characters}${status.library ? " with the library" : ""}`,
+    scope.blenderMissing == null ? "Blender ready" : `no Blender (${scope.blenderMissing})`,
+    lanes.length === 0 ? "no art providers" : `art: ${lanes.join(", ")}`,
+  ].join(" · ");
+});
+
 const checkHandlers = {
   game_check: McpToolAccess.actsAsCaller((input) =>
     dispatch(
@@ -263,28 +275,15 @@ const checkHandlers = {
       {
         look: () => check(false),
         // The critique is read back from this call's input by keep going (GameRunStepRunner).
-        final: () => check(true),
-        facts: (facts) =>
-          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-            Effect.gen(function* () {
-              const build =
-                facts.build ?? (yield* builds.list(threadId, { limit: 1 })).builds[0]?.id;
-              if (build === undefined)
-                return yield* invalid(
-                  "Build facts",
-                  "This game has no builds yet: a turn that changes the game makes one.",
-                );
-              return yield* builds.measure(
-                threadId,
-                { _tag: "build", build },
-                { waitFor: TOOL_FACTS_WAIT, queue: "background" },
-              );
-            }),
-          ).pipe(as(GameBuildFacts)),
-        status: (status) =>
-          withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
-            statuses.status(threadId, { checkSources: status.checkSources }),
-          ).pipe(as(GameStatus)),
+        final: () =>
+          check(true).pipe(
+            Effect.flatMap((answer) =>
+              statusLine.pipe(
+                Effect.map((status) => ({ ...(answer as object), status })),
+                Effect.orElseSucceed(() => answer),
+              ),
+            ),
+          ),
       },
       "look",
     ),
@@ -355,29 +354,21 @@ const replayMoment = (input: { readonly run: string; readonly at?: number }) =>
 const playHandlers = {
   game_play: McpToolAccess.actsAsCaller((input) =>
     dispatch("game_play", input, {
-      preview: () =>
-        withGame(GameStage.GameStage, (stage, threadId) => stage.preview(threadId)).pipe(
-          as(GameActionResult),
-        ),
-      start: (start) =>
-        withGame(GameExplore.GameExplore, (explore, threadId) =>
-          explore.start(threadId, start),
-        ).pipe(as(GameExploreStartResult)),
       act: (act) =>
-        withGame(GameExplore.GameExplore, (explore, threadId) => explore.act(threadId, act)).pipe(
+        withGame(GameExplore.GameExplore, (explore, threadId) => explore.play(threadId, act)).pipe(
           as(GameExploreActResult),
         ),
       close: (close) =>
         withGame(GameExplore.GameExplore, (explore, threadId) =>
           explore.close(threadId, close),
         ).pipe(as(GameExploreCloseResult)),
+      eval: (evaluation) =>
+        withGame(GameExplore.GameExplore, (explore, threadId) =>
+          explore.evaluate(threadId, evaluation),
+        ).pipe(as(GameEvalResult)),
       bot: (bot) =>
         withGame(GameBot.GameBot, (bots, threadId) => bots.run(threadId, bot)).pipe(
           as(GameBotRunResult),
-        ),
-      bot_view: (view) =>
-        withGame(GameBot.GameBot, (bots, threadId) => bots.view(threadId, view)).pipe(
-          as(GameBotViewResult),
         ),
       // A save (of the last ended run, or of `run`) or a delete answers with the saved plays as
       // they are then; a run, with its moment as an image; else the saved plays replay.
@@ -396,9 +387,10 @@ const playHandlers = {
                       ...(input.run === undefined ? {} : { kept: input.run }),
                     });
                   if (input.delete !== undefined) yield* plays.remove(threadId, input.delete);
-                  return yield* plays.saved(threadId);
+                  // An answer is an object: a tool's structured content cannot be a bare list.
+                  return { saved: yield* plays.saved(threadId) };
                 }),
-              ).pipe(as(GameSavedPlaysResult)),
+              ).pipe(as(Schema.Struct({ saved: GameSavedPlaysResult }))),
       model_sheet: modelSheet,
     }),
   ),
@@ -425,32 +417,28 @@ const assetsHandlers = {
             withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
               library.lock(threadId, lock),
             ).pipe(as(LibraryText)),
-          generate: (generate) =>
-            withGame(GameArt.GameArt, (art, threadId) => art.generate(threadId, generate)).pipe(
-              as(GameGenerateResult),
-            ),
+          // With `edit`, the prompt is one change to that game image (what op image_edit did).
+          generate: ({ edit, transparent, ...generate }) =>
+            withGame(GameArt.GameArt, (art, threadId) =>
+              edit === undefined
+                ? art.generate(threadId, generate)
+                : art.imageEdit(threadId, {
+                    path: edit,
+                    change: generate.prompt,
+                    ...(transparent === undefined ? {} : { transparent }),
+                    ...(generate.references === undefined
+                      ? {}
+                      : { references: generate.references.slice(0, 3) }),
+                  }),
+            ).pipe(as(GameGenerateResult)),
           wait: (wait) =>
             withGame(GameArt.GameArt, (art, threadId) => art.wait(threadId, wait)).pipe(
-              as(GameGenerateResult),
-            ),
-          image_edit: (edit) =>
-            withGame(GameArt.GameArt, (art, threadId) => art.imageEdit(threadId, edit)).pipe(
               as(GameGenerateResult),
             ),
           pictures: (pictures) =>
             withGame(GameEngine.GameEngine, (engines, threadId) =>
               engines.pictures(threadId, pictures),
             ).pipe(as(GamePicturesResult)),
-          mine: ({ add }) =>
-            withGame(GameLibrary.GameLibrary, (library, threadId) =>
-              add === undefined
-                ? library.list.pipe(
-                    Effect.map((listed) => ({ text: GameLibrary.libraryText(listed.items) })),
-                  )
-                : library
-                    .add({ threadId, id: add })
-                    .pipe(Effect.map((added) => ({ text: added.message }))),
-            ).pipe(as(LibraryText)),
         }),
       ),
     ),
@@ -472,10 +460,6 @@ const blenderHandlers = {
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.look(threadId, look),
             ).pipe(as(GameBlenderLookResult)),
-          scene: (scene) =>
-            withGame(GameBlender.GameBlender, (blender, threadId) =>
-              blender.scene(threadId, scene),
-            ).pipe(as(GameBlenderSceneResult)),
           export: (exported) =>
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.exportGlb(threadId, exported),
@@ -525,73 +509,65 @@ const handlers = {
       "game_builds",
       input,
       {
-        list: (list) =>
-          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-            builds.list(threadId, { before: list.before, limit: list.limit }),
-          ).pipe(as(GameBuildsResult)),
-        compare: (pair) =>
-          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-            builds.compare(
-              threadId,
-              { _tag: "build", build: pair.from },
-              { _tag: "build", build: pair.to },
-            ),
-          ).pipe(as(GameBuildComparison)),
-        restore: (restore) =>
-          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-            builds.restore(threadId, { _tag: "build", build: restore.build }, restore.commandId),
-          ).pipe(as(GameBuildRestoreResult)),
+        // One build answers with what the harness measured on it (what op facts did).
+        list: ({ build, ...list }) =>
+          build === undefined
+            ? withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+                builds.list(threadId, { before: list.before, limit: list.limit }),
+              ).pipe(as(GameBuildsResult))
+            : withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+                builds.measure(
+                  threadId,
+                  { _tag: "build", build },
+                  { waitFor: TOOL_FACTS_WAIT, queue: "background" },
+                ),
+              ).pipe(as(GameBuildFacts)),
+        // `to` goes back to the build (what op restore did); else its change alone is undone.
         undo: (undo) =>
-          withGame(GameBuilds.GameBuilds, (builds, threadId) =>
-            builds.undo(threadId, undo.build, undefined),
-          ).pipe(as(GameBuildUndoResult)),
-        copies: () =>
-          withGame(GameCopies.GameCopies, (copies, threadId) => copies.copies(threadId)).pipe(
-            as(GameCopiesResult),
-          ),
-        // An agent brings in its own copy or a child's: what it, or what it delegated, made.
-        bring_in: (bring) =>
-          withGame(GameCopies.GameCopies, (copies, threadId) =>
-            copies.bringIn(
-              {
-                threadId,
-                // A child's copy is done once brought in; the agent's own copy goes on.
-                ...(bring.chat === undefined || bring.chat === threadId
-                  ? {}
-                  : { chat: bring.chat, close: true }),
-              },
-              { agent: true },
-            ),
-          ).pipe(as(GameBringInResult)),
-        update: () =>
-          withGame(GameCopies.GameCopies, (copies, threadId) =>
-            copies.update(threadId, threadId),
-          ).pipe(as(GameCopyUpdateResult)),
-        saved: (saved) =>
-          withGame(GameSavedMediaService.GameSavedMediaService, (media, threadId) =>
-            Effect.gen(function* () {
-              if (saved.save !== undefined)
-                yield* media.save(threadId, saved.save.source, saved.save.label);
-              if (saved.delete !== undefined) yield* media.delete(threadId, saved.delete);
-              // An answer is an object: a tool's structured content cannot be a bare list.
-              return { saved: yield* media.list(threadId) };
-            }),
-          ).pipe(as(Schema.Struct({ saved: GameSavedListResult }))),
+          undo.to === true
+            ? withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+                builds.restore(threadId, { _tag: "build", build: undo.build }, undo.commandId),
+              ).pipe(as(GameBuildRestoreResult))
+            : withGame(GameBuilds.GameBuilds, (builds, threadId) =>
+                builds.undo(threadId, undo.build, undefined),
+              ).pipe(as(GameBuildUndoResult)),
         export: (release) =>
           withGame(GameExport.GameExport, (exporter, threadId) =>
-            exporter.export(threadId, release.target),
-          ).pipe(as(GameActionResult)),
-        package: () =>
-          withGame(GameExport.GameExport, (exporter, threadId) =>
-            exporter.packageWeb(threadId).pipe(as(GameWebPackage)),
-          ),
-        stop: () =>
-          withGame(GameStage.GameStage, (stage, threadId) => stage.stop(threadId)).pipe(
-            as(GameActionResult),
+            release.zip === true
+              ? exporter
+                  .export(threadId, "Web")
+                  .pipe(Effect.andThen(exporter.packageWeb(threadId)), as(GameWebPackage))
+              : exporter.export(threadId, "Web").pipe(as(GameActionResult)),
           ),
       },
       "list",
     ),
+  ),
+  game_copy: McpToolAccess.actsAsCaller((input) =>
+    dispatch("game_copy", input, {
+      copies: () =>
+        withGame(GameCopies.GameCopies, (copies, threadId) => copies.copies(threadId)).pipe(
+          as(GameCopiesResult),
+        ),
+      // An agent brings in its own copy or a child's: what it, or what it delegated, made.
+      bring_in: (bring) =>
+        withGame(GameCopies.GameCopies, (copies, threadId) =>
+          copies.bringIn(
+            {
+              threadId,
+              // A child's copy is done once brought in; the agent's own copy goes on.
+              ...(bring.chat === undefined || bring.chat === threadId
+                ? {}
+                : { chat: bring.chat, close: true }),
+            },
+            { agent: true },
+          ),
+        ).pipe(as(GameBringInResult)),
+      update: () =>
+        withGame(GameCopies.GameCopies, (copies, threadId) =>
+          copies.update(threadId, threadId),
+        ).pipe(as(GameCopyUpdateResult)),
+    }),
   ),
   // Keep going: the same service the composer control and the banner reach.
   game_keep_going: McpToolAccess.actsAsCaller((input) =>

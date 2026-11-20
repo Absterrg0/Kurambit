@@ -106,11 +106,17 @@ const PHRASES = {
 const standinSteps = {
   [PHRASES.step]: [{ write: ["web/main.js", pond("0x7fb0d8", 5)] }, { reply: "Two more reeds." }],
   [PHRASES.play]: [
-    { tool: ["game_play", { start: {} }] },
+    // Its first act opens the session.
+    { tool: ["game_play", { act: { steps: [{ press: "Space" }, { waitMs: 800 }] } }] },
     {
       tool: [
         "game_play",
-        { act: { sessionId: "$last.sessionId", steps: [{ press: "Space" }, { waitMs: 800 }] } },
+        {
+          eval: {
+            sessionId: "$last.sessionId",
+            expression: "({ canvases: document.querySelectorAll('canvas').length })",
+          },
+        },
       ],
     },
     { tool: ["game_play", { close: { sessionId: "$last.sessionId" } }] },
@@ -530,14 +536,16 @@ async function main() {
 
     await path("play", async () => {
       const answers = await say(threadId, PHRASES.play);
-      const start = succeeded(answers[0], "game_play start");
-      const act = succeeded(answers[1], "game_play act");
+      const act = succeeded(answers[0], "game_play act");
+      const evaluated = succeeded(answers[1], "game_play eval");
       succeeded(answers[2], "game_play close");
+      const value = evaluated.answer.structuredContent?.value as { canvases?: number } | undefined;
+      expect((value?.canvases ?? 0) > 0, "eval found no canvas in the playing page");
       const result = act.answer.structuredContent ?? {};
       expect(typeof result.screenshotPath === "string", "the play answered no frame");
       const player = (result.probe as { player?: { x?: number } } | null)?.player;
       expect(typeof player?.x === "number" && player.x > -6, "the fish did not swim while played");
-      return `played ${result.nominalMs} ms of game after a ${start.answer.structuredContent?.bootMs} ms boot; the fish swam to x ${player!.x!.toFixed(1)}`;
+      return `played ${result.nominalMs} ms of game; the fish swam to x ${player!.x!.toFixed(1)}; eval saw ${value!.canvases} canvas`;
     });
 
     let tuned!: GameBuild;

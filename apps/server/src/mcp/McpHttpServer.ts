@@ -6,12 +6,13 @@ import {
   GameBuildsTool,
   GameCheckTool,
   GameCheckToolkit,
+  GameCopyTool,
   GameKeepGoingTool,
   GamePlayTool,
   GamePlayToolkit,
   GameToolkit,
 } from "./toolkits/game/tools.ts";
-import { RETIRED_GAME_TOOLS, retiredToolMessage } from "./toolkits/game/placement.ts";
+import { RETIRED_GAME_TOOLS, retiredOp, retiredTool } from "./toolkits/game/placement.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import { resultText } from "./toolkits/game/results.ts";
 import * as Cause from "effect/Cause";
@@ -194,13 +195,24 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
     }
     // Which game tools a thread sees follows its game's engine and the person's model choice;
     // whether this machine has Blender decides only what its ops refuse (toolkits/game/placement.ts).
-    const manifest =
+    const folder =
       invocation.thread === undefined
         ? null
-        : yield* gameProjects.resolve(invocation.thread.threadId).pipe(
-            Effect.flatMap(gameProjects.read),
-            Effect.orElseSucceed(() => null),
-          );
+        : yield* gameProjects
+            .resolve(invocation.thread.threadId)
+            .pipe(Effect.orElseSucceed(() => null));
+    const manifest =
+      folder === null
+        ? null
+        : yield* gameProjects.read(folder).pipe(Effect.orElseSucceed(() => null));
+    // A chat in a copy works in a folder other than its game's own (GameCopies).
+    const gameInCopy =
+      manifest !== null && invocation.thread !== undefined
+        ? yield* gameProjects.home(invocation.thread.threadId).pipe(
+            Effect.map((home) => home.root !== folder),
+            Effect.orElseSucceed(() => false),
+          )
+        : false;
     const gameEngine = manifest?.engine.name ?? null;
     // The toolchain keeps its probe while the binary is unchanged, so this costs a stat per request.
     const blenderMissing =
@@ -224,6 +236,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         gameEngine,
         gameModels: manifest === null ? null : gameModelChoice(manifest),
         blenderMissing,
+        gameInCopy,
         ...(calledTool === undefined ? {} : { calledTool }),
       }),
       Effect.map(normalizeMcpHttpResponse),
@@ -924,10 +937,17 @@ const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
     const built = yield* toolkit;
     yield* registerImageTool(
       tool,
-      (payload, options) =>
-        built
+      (payload, options) => {
+        // An op an older chat still names answers where its work went, before the strict
+        // schema would refuse the unknown key without saying.
+        const retired = Object.keys((payload ?? {}) as object)
+          .map((op) => retiredOp(tool.name, op))
+          .find((refusal) => refusal !== null);
+        if (retired != null) return Effect.succeed({ encodedResult: retired, isFailure: true });
+        return built
           .handle(tool.name as keyof Tools, payload as never, undefined, options)
-          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption));
+      },
       (effect) => effect.pipe(Effect.provideContext(services)),
       tool.name,
       (error) => (error instanceof Error ? error.message : `${tool.name} failed.`),
@@ -944,7 +964,8 @@ const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
 const registerRetiredGameTools = Effect.gen(function* () {
   const server = yield* McpServer.McpServer;
   for (const name of Object.keys(RETIRED_GAME_TOOLS)) {
-    const message = retiredToolMessage(name);
+    const refusal = retiredTool(name);
+    const message = `${refusal.refused} next: ${refusal.next}`;
     yield* server.addTool({
       tool: new McpSchema.Tool({
         name,
@@ -959,7 +980,7 @@ const registerRetiredGameTools = Effect.gen(function* () {
         Effect.succeed(
           new McpSchema.CallToolResult({
             isError: true,
-            structuredContent: { error: { _tag: "RetiredGameTool", message } },
+            structuredContent: refusal,
             content: [{ type: "text", text: message }],
           }),
         ),
@@ -1092,6 +1113,10 @@ const layerGameToolkit = Layer.mergeAll(
   ),
   imageToolRegistration(
     registerGameImageTool(GameBuildsTool, GameToolkit, false),
+    GameHandlers.layer,
+  ),
+  imageToolRegistration(
+    registerGameImageTool(GameCopyTool, GameToolkit, false),
     GameHandlers.layer,
   ),
   imageToolRegistration(

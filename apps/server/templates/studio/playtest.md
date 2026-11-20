@@ -7,8 +7,8 @@ Kurambit plays and measures every turn's build, so play yourself when the
 person asks or when the check's play cannot reach what you changed.
 
 1. The code says what should happen, play shows what does, and play wins.
-   Start with game_play op start, play with op act, study each
-   returned frame, and release the session with op close.
+   Play with game_play op act (its first call opens a session), read
+   each returned frame, and release the session with op close.
 2. Passes: smoke (boots, menu, start, quit), feature (each system actually
    triggers), regression (what worked before still works), visual
    (frames against the key art).

@@ -54,12 +54,14 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
  * Code read exactly 10,000 on 2026-11-17; game_builds' undo, copies, bring_in and update (many
  * chats in one game) took it to 10,354, so its line is 10,400. The Blender listings read 17,680
  * until the carve and hero pointers left game_blender and its review took a reference (17,729).
+ * On 2026-11-20 the ops went from 45 to 29 (the copy's ops moved to game_copy, listed only in a
+ * copy): code reads 8,692 and the Blender listings 15,852.
  */
 const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", number>> = {
-  code: 10_400,
-  "code with the library": 17_800,
-  generated: 17_800,
-  blender: 17_800,
+  code: 8_800,
+  "code with the library": 16_000,
+  generated: 16_000,
+  blender: 16_000,
 };
 
 /**

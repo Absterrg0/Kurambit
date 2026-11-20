@@ -2,12 +2,7 @@
 // key ({"look": {...}}): an MCP tool's input must be one object at the top (providers refuse a
 // top-level union), and the key keeps every op's own typed input whole beside the others.
 import * as Schema from "effect/Schema";
-import {
-  GameAddonId,
-  GameModelSheetInput,
-  GameMediaSaveFields,
-  GameSavedDeleteFields,
-} from "./game.ts";
+import { GameAddonId, GameModelSheetInput } from "./game.ts";
 import { GameGenerateInput, GameGenerateWaitInput, GameImageEditInput } from "./gameArt.ts";
 import {
   GameAnimateInput,
@@ -20,16 +15,11 @@ import {
   GameBlenderLookInput,
   GameBlenderPaintInput,
   GameBlenderRenderSpritesInput,
-  GameBlenderSceneInput,
 } from "./gameBlender.ts";
-import { GameBotRunInput, GameBotViewInput } from "./gameBot.ts";
+import { GameBotRunInput } from "./gameBot.ts";
 import { ThreadId } from "./baseSchemas.ts";
 import { GameBuildId } from "./gameBuildId.ts";
-import {
-  GameExploreActInput,
-  GameExploreCloseInput,
-  GameExploreStartInput,
-} from "./gameExplore.ts";
+import { GameEvalInput, GameExploreCloseInput, GamePlayActInput } from "./gameExplore.ts";
 import { GameAssetsAddInput, GameAssetsSearchInput } from "./gameLibrary.ts";
 import { GameKeepGoingInput, GameKeepGoingSteerInput } from "./gameRun.ts";
 
@@ -59,18 +49,13 @@ export const GameCheckToolInput = Schema.Struct({
       ),
     }),
   ),
-  facts: op(Schema.Struct({ build: Schema.optionalKey(GameBuildId) })),
-  status: op(Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) })),
 });
 export type GameCheckToolInput = typeof GameCheckToolInput.Type;
 
 export const GamePlayToolInput = Schema.Struct({
-  preview: op(Nothing),
-  start: op(GameExploreStartInput),
-  act: op(GameExploreActInput),
+  act: op(GamePlayActInput),
   close: op(GameExploreCloseInput),
   bot: op(GameBotRunInput),
-  bot_view: op(GameBotViewInput),
   replay: op(
     Schema.Struct({
       save: Schema.optionalKey(Schema.String),
@@ -79,6 +64,7 @@ export const GamePlayToolInput = Schema.Struct({
       at: Schema.optionalKey(Schema.Finite),
     }),
   ),
+  eval: op(GameEvalInput),
   model_sheet: op(GameModelSheetInput),
 });
 export type GamePlayToolInput = typeof GamePlayToolInput.Type;
@@ -89,21 +75,30 @@ export const GameAssetsToolInput = Schema.Struct({
   // Published as a bare object: the fields are GameStyleLockInput's, decoded by the service and
   // taught by the art skill, so the look's schema is not paid for with every tool call.
   lock: op(Schema.Record(Schema.String, Schema.Unknown)),
-  generate: op(GameGenerateInput),
+  generate: op(
+    Schema.Struct({
+      ...GameGenerateInput.fields,
+      // What op image_edit did: the prompt is the one change to this game image.
+      edit: Schema.optionalKey(
+        GameImageEditInput.fields.path.annotate({
+          description: "A game image the prompt changes, for the person's pick.",
+        }),
+      ),
+      transparent: GameImageEditInput.fields.transparent,
+    }),
+  ),
   wait: op(GameGenerateWaitInput),
-  image_edit: op(GameImageEditInput),
   // Published bare like lock: GamePicturesInput, decoded by the service and taught by its skill.
   pictures: op(Schema.Record(Schema.String, Schema.Unknown)),
-  mine: op(Schema.Struct({ add: Schema.optionalKey(Schema.String) })),
 });
 export type GameAssetsToolInput = typeof GameAssetsToolInput.Type;
 
 export const GameBlenderToolInput = Schema.Struct({
   code: op(GameBlenderCodeInput),
   look: op(GameBlenderLookInput),
-  scene: op(GameBlenderSceneInput),
   export: op(GameBlenderExportInput),
   character: op(GameBlenderCharacterInput),
+  // The art helpers stay until the art phase measures Blender's own tools against them (TOOLS §4).
   paint: op(GameBlenderPaintInput),
   carve: op(GameBlenderCarveInput),
   sprites: op(GameBlenderRenderSpritesInput),
@@ -125,26 +120,38 @@ export const GameBuildsToolInput = Schema.Struct({
     Schema.Struct({
       before: Schema.optionalKey(Schema.String),
       limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
+      build: Schema.optionalKey(
+        GameBuildId.annotate({ description: "One build, with what the harness measured on it." }),
+      ),
     }),
   ),
-  compare: op(Schema.Struct({ from: GameBuildId, to: GameBuildId })),
-  restore: op(Schema.Struct({ build: GameBuildId, commandId })),
-  undo: op(Schema.Struct({ build: GameBuildId })),
-  copies: op(Nothing),
-  bring_in: op(Schema.Struct({ chat: Schema.optionalKey(ThreadId) })),
-  update: op(Nothing),
-  saved: op(
+  undo: op(
     Schema.Struct({
-      save: Schema.optionalKey(Schema.Struct(GameMediaSaveFields)),
-      delete: Schema.optionalKey(GameSavedDeleteFields.name),
+      build: GameBuildId,
+      to: Schema.optionalKey(
+        Schema.Boolean.annotate({ description: "Go back to this build: every later one goes." }),
+      ),
+      commandId,
     }),
   ),
   // A three.js game exports Web only (threeProfile.exportTargets).
-  export: op(Schema.Struct({ target: Schema.Literals(["Web"]) })),
-  package: op(Schema.Struct({ target: Schema.Literals(["web"]) })),
-  stop: op(Nothing),
+  export: op(
+    Schema.Struct({
+      zip: Schema.optionalKey(
+        Schema.Boolean.annotate({ description: "Also a ZIP of the Web build to hand out." }),
+      ),
+    }),
+  ),
 });
 export type GameBuildsToolInput = typeof GameBuildsToolInput.Type;
+
+/** A chat's copy of the game: listed only to a chat working in one. */
+export const GameCopyToolInput = Schema.Struct({
+  copies: op(Nothing),
+  bring_in: op(Schema.Struct({ chat: Schema.optionalKey(ThreadId) })),
+  update: op(Nothing),
+});
+export type GameCopyToolInput = typeof GameCopyToolInput.Type;
 
 /** Keep going is one operation: its status, or a mode, a budget or the person's words for it. */
 export const GameKeepGoingToolInput = Schema.Struct({

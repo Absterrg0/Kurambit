@@ -57,6 +57,8 @@ export interface McpInvocationScope {
   } | null;
   /** Why this machine has no Blender the game's tools can run, or null when it has one (or the engine uses none). */
   readonly blenderMissing?: string | null;
+  /** Whether the calling thread works in a copy of its game, where its copy's ops are listed. */
+  readonly gameInCopy?: boolean;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
   readonly requestNamespace: string;

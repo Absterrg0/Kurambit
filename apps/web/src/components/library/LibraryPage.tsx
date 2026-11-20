@@ -626,7 +626,7 @@ function LibraryDetail({
           item.credit === undefined ? null : `Licence: ${item.credit}.`,
           item.source === "pack"
             ? `game_assets op search with pack "${item.id.slice(5)}" lists its files.`
-            : `game_assets op mine with add "${item.id}" adds it to this game.`,
+            : "It is not in this game yet: if the work needs it, ask the person to add it from the Library.",
         ]
           .filter((line) => line !== null)
           .join(" "),

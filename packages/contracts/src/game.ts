@@ -883,7 +883,7 @@ export const GameSavedMedia = Schema.Struct({
   label: Schema.NullOr(Schema.String),
 });
 export type GameSavedMedia = typeof GameSavedMedia.Type;
-export const GameMediaSaveFields = {
+const GameMediaSaveFields = {
   /** Game-relative (or absolute) path of a video or image Kurambit generated. */
   source: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024)),
   /** Words for the saved name after its date ("round 2 bot run"). */
@@ -894,7 +894,7 @@ export type GameMediaSaveInput = typeof GameMediaSaveInput.Type;
 export const GameSavedListInput = Schema.Struct({ threadId: ThreadId });
 export const GameSavedListResult = Schema.Array(GameSavedMedia);
 export type GameSavedListResult = typeof GameSavedListResult.Type;
-export const GameSavedDeleteFields = {
+const GameSavedDeleteFields = {
   /** A file directly in saved/, as the list names it. */
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
 };

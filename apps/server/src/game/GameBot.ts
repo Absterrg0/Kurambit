@@ -667,7 +667,7 @@ const make = Effect.gen(function* () {
                   "Bot run",
                   root,
                   "busy",
-                  "A bot run is already in progress for this game. Stop it with game_builds op stop first.",
+                  "A bot run is already in progress for this game: wait for it to end before starting another.",
                 ),
               ),
         ),

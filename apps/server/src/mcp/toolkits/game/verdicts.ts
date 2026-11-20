@@ -53,7 +53,7 @@ const outcome = (play: Answer | null | undefined) =>
     ? "still playing"
     : `${play.left === true ? "left" : play.won === true ? "won" : "lost"} at ${num(play.seconds)} s`;
 
-export const VERDICTS: Readonly<Record<string, (answer: Answer) => Verdict>> = {
+const VERDICTS: Readonly<Record<string, (answer: Answer) => Verdict>> = {
   "game_check.look": check(false),
   "game_check.final": check(true),
   "game_play.act": (answer) => ({

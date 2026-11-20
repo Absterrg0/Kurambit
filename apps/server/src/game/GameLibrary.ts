@@ -354,11 +354,7 @@ const make = Effect.gen(function* () {
       const everything = (yield* list).items;
       const item = everything.find((each) => each.id === input.id);
       if (item === undefined || source === "pack")
-        return yield* failed(
-          "Add from the Library",
-          input.id,
-          "No Library item has that id; game_assets op mine lists them.",
-        );
+        return yield* failed("Add from the Library", input.id, "No Library item has that id.");
       // Where it goes, what it is copied from, and the words its credit line says.
       const plan = yield* Effect.gen(function* () {
         if (source === "look") {
@@ -490,18 +486,3 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(GameLibrary, make);
-
-/** The Library as an agent reads it: one line per item it can add, with its id. */
-export const libraryText = (items: ReadonlyArray<GameLibraryItem>) => {
-  const addable = items.filter((item) => item.source !== "pack");
-  if (addable.length === 0) return "The person's Library is empty.";
-  const lines = addable.slice(0, 80).map((item) => {
-    const where =
-      item.source === "saved"
-        ? `saved from ${item.from ?? "a game"}`
-        : item.usedIn.map((use) => use.game).join(", ");
-    return `${item.id} — ${item.kind} "${item.name}" (${where})`;
-  });
-  const more = addable.length - lines.length;
-  return `${lines.join("\n")}${more > 0 ? `\n…and ${more} more.` : ""}\nAdd one to this game with op mine and its id as add.`;
-};

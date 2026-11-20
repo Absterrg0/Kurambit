@@ -61,6 +61,13 @@ export interface PlaySession {
    * plays, shell/replay.js), to keep as the Stage keeps a person's. Absent where none are kept.
    */
   readonly takePlays?: () => Promise<ReadonlyArray<unknown>>;
+  /**
+   * An agent's expression run in the game's page as it is now (`game_play` op `eval`, like T3's
+   * preview_evaluate): its JSON value, or the page's error. Absent where the runner has no page.
+   */
+  readonly evaluate?: (
+    expression: string,
+  ) => Promise<{ readonly value: unknown } | { readonly error: string }>;
 }
 
 export type PlayTick =

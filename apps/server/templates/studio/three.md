@@ -41,6 +41,6 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
    calls past a few hundred (one InstancedMesh per repeated model, merge static
    pieces) and triangles past about 1.5M. A frame rate "not measured" in software
    is Kurambit's machine, not your game; the counts are still your game's.
-7. When you play with `game_play` ops `start`, `act` and `close`, send real keys (`"Enter"`, `"w"`, `"ArrowLeft"`), and a click
+7. When you play with `game_play` ops `act` and `close`, send real keys (`"Enter"`, `"w"`, `"ArrowLeft"`), and a click
    before the game can capture the pointer; the page opens as a player opens
    it, on your title when the game has one.

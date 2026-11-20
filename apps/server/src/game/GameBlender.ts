@@ -442,7 +442,7 @@ const routeRefusalOf = (candidate: Candidate, route: GameModelChoice) =>
           : null;
 
 const STILL_WORKING =
-  "Blender may still be finishing this call. Inspect the scene with game_blender op scene or game_blender op look before retrying, so the work is not done twice.";
+  "Blender may still be finishing this call. Inspect the scene with game_blender op code (printing what it needs) or op look before retrying, so the work is not done twice.";
 
 interface Session extends LiveHealth {
   readonly root: string;
@@ -3039,7 +3039,7 @@ const make = Effect.gen(function* () {
               "blender-addon",
               input.install,
               "invalid-input",
-              `${input.install} is not on the add-ons list; game_check op status lists it.`,
+              `${input.install} is not on the add-ons list; op addon's install names those it has.`,
             );
           const had = found.zip !== null;
           // The person's yes is needed for a large or unofficial add-on, and to undo their Remove.

@@ -169,6 +169,36 @@ export const GameExploreActInput = Schema.Struct({
 });
 export type GameExploreActInput = typeof GameExploreActInput.Type;
 
+/**
+ * `game_play` op `act`: input batches in this thread's session; with no `sessionId` it opens one
+ * (what op start did) and acts in it. A browser game takes the shared playtest steps only.
+ */
+export const GamePlayActInput = Schema.Struct({
+  sessionId: Schema.optionalKey(sessionId),
+  steps: Schema.Array(GamePlaytestStep).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(GAME_EXPLORE_BOUNDS.maxStepsPerCall),
+  ),
+  ...GameExploreStartInput.fields,
+});
+export type GamePlayActInput = typeof GamePlayActInput.Type;
+
+/** Most bytes of JSON an `eval` value answers with. */
+export const GAME_EVAL_MAX_BYTES = 16 * 1024;
+
+/** `game_play` op `eval`: JavaScript in the session's page, like T3's preview_evaluate. */
+export const GameEvalInput = Schema.Struct({
+  expression: Schema.NonEmptyString.check(Schema.isMaxLength(20_000)).annotate({
+    description:
+      "JavaScript run in the playing game's page; awaited; its JSON value answers, ≤16 KB.",
+  }),
+  sessionId: Schema.optionalKey(sessionId),
+});
+export type GameEvalInput = typeof GameEvalInput.Type;
+
+export const GameEvalResult = Schema.Struct({ sessionId, value: Schema.Unknown });
+export type GameEvalResult = typeof GameEvalResult.Type;
+
 export const GameExploreActResult = Schema.Struct({
   sessionId,
   callIndex: Schema.Int,

@@ -446,6 +446,9 @@ export interface KeptStorage {
   readonly contents: string;
 }
 
+/** How long an agent's `eval` expression may run in the page. */
+const EVALUATE_MS = 10_000;
+
 export interface WebPlaySession extends PlaySession {
   /** Settles when the page crashed (the game's) or our browser went away (ours). */
   readonly ended: Promise<PlayEnd>;
@@ -1039,6 +1042,18 @@ export const openWebPlaySession = async (input: {
           REPLAY_MS(play.steps * play.dt),
         );
         return answered === TIMED_OUT ? null : answered;
+      },
+      evaluate: async (expression) => {
+        const answered = await bounded(
+          page.evaluate(expression).then(
+            (value: unknown) => ({ value: value ?? null }),
+            (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+          ),
+          EVALUATE_MS,
+        );
+        return answered === TIMED_OUT
+          ? { error: `The expression did not finish within ${EVALUATE_MS / 1000} s.` }
+          : answered;
       },
       takePlays: async () => {
         if (endedWith !== null) return [];

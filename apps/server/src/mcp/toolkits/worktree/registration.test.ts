@@ -79,6 +79,11 @@ const layerStubServices = Layer.mergeAll(
             }),
           )
         : Effect.succeed(threadId === blenderThread ? "/games/blender" : "/games/test"),
+    // No thread here works in a copy: each one's game is its own folder.
+    home: (threadId) =>
+      Effect.succeed({
+        root: threadId === blenderThread ? "/games/blender" : "/games/test",
+      } as never),
     read: (root) =>
       Effect.succeed({
         engine: { name: "three", version: "0" },
@@ -246,7 +251,19 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         name: "game_preview",
         arguments: {},
       });
-      expect(retired).toContain("game_play op preview");
+      expect(retired).toContain("the person's Stage");
+      // An op an older chat still names answers where its work went, within a refusal's length.
+      const retiredOp = yield* request(ThreadId.make("thread-scratch"), "tools/call", {
+        name: "game_play",
+        arguments: { start: {} },
+      });
+      expect(retiredOp).toContain("game_play op act with no sessionId");
+      expect(retiredOp).toContain('"isError":true');
+      // A three.js chat is published three.js's steps: no native ui or inspect.
+      const play = tools.find((tool) => tool.name === "game_play");
+      expect(JSON.stringify(play?.inputSchema)).not.toMatch(/"inspect"|"ui"/);
+      const check = tools.find((tool) => tool.name === "game_check");
+      expect(check?.annotations?.readOnlyHint).toBe(true);
       const outside = yield* request(noGameThread, "tools/call", {
         name: "game_preview",
         arguments: {},
