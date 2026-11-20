@@ -10,6 +10,7 @@
     "dev:desktop": "node scripts/dev-runner.ts dev:desktop",
     "bench": "node scripts/bench/run.ts",
     "first-use-gate": "node scripts/first-use-gate/gate.ts",
+    "runtime-dts": "node scripts/runtime-dts.ts",
     "migrate-dev-db": "node apps/server/scripts/migrate-dev-db.ts",
     "start": "vp run --filter kurambit start",
     "start:desktop": "vp run --filter @kurambit/desktop start",

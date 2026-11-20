@@ -7,7 +7,7 @@ reloads the game on every save, so add a model to `ASSETS` only once its file is
 
 1. The game is yours: its title, menus, HUD, endings, camera, light, sky and post, made for the
    brief. TEMPLATE.md's contract is all the harness needs. The runtime's optional helper
-   modules are documented on one page, `studio-skills/runtime.md`; none is needed.
+   modules are typed in `studio-skills/runtime.d.ts`; none is needed.
 2. Go through `ctx` for what replays and the checks see: a raw `setTimeout` runs through pause
    and piles up across runs, so timers and listeners go through `ctx.after` and `ctx.listen`,
    and chance through `ctx.random()`. `GameState` holds only plain data; meshes, class

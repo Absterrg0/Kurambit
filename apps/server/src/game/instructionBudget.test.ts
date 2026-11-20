@@ -39,12 +39,14 @@ const CHOICES = {
  * from an empty page with no starter or recipe: code reads 10,301, the library 10,386 and generated
  * 15,267. Blender, the default since 2026-11-17 (its route by kind of model), read 10,639 then.
  * Generated read 15,986 until the art skill was cut to the packs' rules on 2026-11-20 (13,235).
+ * The same day three.md sent the API to runtime.d.ts: Blender reads 11,071, code 10,759, the
+ * library 10,837 and generated 13,228.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
-  blender: 11_500,
-  code: 11_500,
-  "code with the library": 11_500,
-  generated: 14_500,
+  blender: 11_200,
+  code: 11_200,
+  "code with the library": 11_200,
+  generated: 13_400,
 };
 /**
  * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input

@@ -126,12 +126,18 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
         .catch(() => null);
       await NodeFSP.rm(NodePath.join(skills, "runtime"), { recursive: true, force: true });
       const page = insideGame(root, "studio-skills/runtime.md");
-      if (major === null) await NodeFSP.rm(page, { force: true });
-      else {
-        const text = await runtimePage(
-          NodePath.join(runtimesDirectory(templates), engine, String(major)),
-        );
+      // Its API, typed: the runtime's own runtime.d.ts (scripts/runtime-dts.ts), beside the page.
+      const types = insideGame(root, "studio-skills/runtime.d.ts");
+      if (major === null) {
+        await NodeFSP.rm(page, { force: true });
+        await NodeFSP.rm(types, { force: true });
+      } else {
+        const runtime = NodePath.join(runtimesDirectory(templates), engine, String(major));
+        const text = await runtimePage(runtime);
         if ((await readText(page)) !== text) await NodeFSP.writeFile(page, text);
+        const typed = await readText(NodePath.join(runtime, "runtime.d.ts"));
+        if (typed === null) await NodeFSP.rm(types, { force: true });
+        else if ((await readText(types)) !== typed) await NodeFSP.writeFile(types, typed);
       }
       const index = insideGame(root, "studio-skills/AGENTS.md");
       const text = await NodeFSP.readFile(index, "utf8");

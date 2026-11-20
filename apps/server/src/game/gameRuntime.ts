@@ -92,7 +92,13 @@ export const copyRuntimeInto = async (
   const target = NodePath.join(staging, ...RUNTIME_ROUTE.split("/"), engine, String(major));
   // A folder of the game's own at that path is replaced: the release carries the real runtime.
   await NodeFSP.rm(target, { recursive: true, force: true });
-  await copyTree(NodePath.join(runtimes, engine, String(major)), target, signal);
+  // runtime.d.ts is the agent's reference (studio-skills), not something a release loads.
+  await copyTree(
+    NodePath.join(runtimes, engine, String(major)),
+    target,
+    signal,
+    (from) => NodePath.basename(from) === "runtime.d.ts",
+  );
 };
 
 /** Whether this server ships the runtime major a game loads. */
