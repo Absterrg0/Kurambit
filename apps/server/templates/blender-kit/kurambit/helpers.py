@@ -764,8 +764,11 @@ def _ring_frame(t, up):
 
 def loft(stations, sides=10, up=(0, 0, 1), squircle=2.0, cap=(True, True), *, name="loft", material=None, smooth=True):
     """A part as a ring loft, one ring per edge loop: stations [(centre, ru, rv)], ru along up (as
-    seen across the path) and rv across both. squircle 2 is an ellipse, 2.4-2.6 a rounded box. A
-    capped end closes with a smaller ring and a pole, so it is round, not flat. Returns the object."""
+    seen across the path) and rv across both; up must not run along the path (a trunk or a leg takes
+    up=(0, -1, 0)), or the rings twist. squircle 2 is an ellipse, 2.4-2.6 a rounded box. A
+    station's optional fourth item is its cross-section: sides radius factors going round from up
+    (a hock's teardrop, a ridge), in place of the plain ring. A capped end closes with a smaller
+    ring and a pole, so it is round, not flat. Returns the object."""
     if len(stations) < 2:
         raise ValueError("loft needs at least two stations")
     me = bpy.data.meshes.new(name)
@@ -776,13 +779,16 @@ def loft(stations, sides=10, up=(0, 0, 1), squircle=2.0, cap=(True, True), *, na
     up = Vector(up)
     e = 2.0 / squircle
     rings = []
-    for i, (_, ru, rv, *_) in enumerate(stations):
+    for i, (_, ru, rv, *rest) in enumerate(stations):
         t, u, v = _ring_frame(pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)], up)
+        shape = list(rest[0]) if rest and rest[0] is not None else [1.0] * sides
+        if len(shape) != sides:
+            raise ValueError(f"station {i}: a cross-section of {len(shape)} factors for {sides} sides")
         ring = []
         for k in range(sides):
             a = 2 * math.pi * k / sides
             c, s = math.cos(a), math.sin(a)
-            ring.append(bm.verts.new(pts[i] + u * ru * math.copysign(abs(c) ** e, c) + v * rv * math.copysign(abs(s) ** e, s)))
+            ring.append(bm.verts.new(pts[i] + (u * ru * math.copysign(abs(c) ** e, c) + v * rv * math.copysign(abs(s) ** e, s)) * shape[k]))
         rings.append((ring, t, min(ru, rv)))
     for (r0, *_), (r1, *_) in zip(rings, rings[1:]):
         for k in range(sides):

@@ -132,10 +132,11 @@ def unsupported(objects):
                 continue
             near = tree.find_nearest(v)
             if near[0] is not None:
-                if near[3] <= FLOAT_GAP and near[1].z > 0.2:
-                    return True  # resting on an upward face
-                if near[3] > SUNK and (v - near[0]).dot(near[1]) < 0:
-                    return True  # sunk into it
+                inside = (v - near[0]).dot(near[1]) < 0
+                if (near[3] <= FLOAT_GAP or inside) and near[1].z > 0.2:
+                    return True  # resting on an upward face, or set into it
+                if inside and near[3] > SUNK:
+                    return True  # sunk deep into it
             if tree.ray_cast(v + Vector((0, 0, FLOAT_GAP)), down, SUPPORT_REACH + FLOAT_GAP)[0] is not None:
                 return True
         return False

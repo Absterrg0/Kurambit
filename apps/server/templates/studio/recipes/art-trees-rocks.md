@@ -18,7 +18,8 @@ Quaternius Stylized Nature and Kenney Nature come first).
 ## Steps
 
 1. Trunk as a loft that bends a little: `kurambit.loft([(base, r, r), (mid + bend, .7 r, .7 r),
-(top, .5 r, .5 r)], sides=7, smooth=False)`; 1-3 branches as smaller lofts from the trunk's
+(top, .5 r, .5 r)], sides=7, up=(0, -1, 0), cap=(False, True), smooth=False)`
+   (`up` across the path, or the rings twist); 1-3 branches as smaller lofts from the trunk's
    upper half, their base inside it.
 2. Crown blobs: `bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2)`, a Displace modifier
    with a Voronoi or Clouds texture (strength 0.15-0.25 of the radius), Decimate (ratio 0.4-0.6),
