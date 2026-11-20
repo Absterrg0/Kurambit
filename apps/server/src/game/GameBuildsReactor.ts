@@ -17,7 +17,6 @@ import { forkParked } from "../serverActivation.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import * as GameFolders from "./GameFolders.ts";
-import * as GameVersions from "./GameVersions.ts";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameStage from "./GameStage.ts";
@@ -48,7 +47,6 @@ export class GameBuildsReactor extends Context.Service<
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;
   const builds = yield* GameBuilds.GameBuilds;
-  const versions = yield* GameVersions.GameVersions;
   const operations = yield* GameOperations.GameOperations;
   const projects = yield* GameProjectService.GameProjectService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -168,10 +166,9 @@ const make = Effect.gen(function* () {
         const runId = event.payload.runId;
         if (runId === null) return Effect.void;
         return Effect.flatMap(isRole(event.threadId), (role) =>
-          // A run's role turns are folded into its rounds: no rail changes for them. A try's
-          // version is a child too: its build lands in the game's name.
+          // A run's role turns are folded into its rounds: no rail changes for them.
           role
-            ? versions.landed(event)
+            ? Effect.void
             : event.payload.status === "ready" && event.payload.files.length > 0
               ? turnBuilt(event, runId)
               : pushTo(event, "A turn changed nothing.").pipe(Effect.ignore),
@@ -180,7 +177,7 @@ const make = Effect.gen(function* () {
       case "run.created":
       case "run.updated":
         return Effect.flatMap(isRole(event.threadId), (role) =>
-          role ? versions.landed(event) : turnChanged(event),
+          role ? Effect.void : turnChanged(event),
         ).pipe(Effect.andThen(folderFreed(event)));
       case "game-run-round.recorded": {
         const record = event.payload.round;

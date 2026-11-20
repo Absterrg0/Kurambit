@@ -70,22 +70,16 @@ interface GameWorkspaceStoreState {
   /** The game pauses when the person clicks away from it (the chat, Tune) and plays on when they click back. */
   pauseWhenAway: boolean;
   setPauseWhenAway: (on: boolean) => void;
-  /** How many ways each chat's next message is tried, by thread key; absent sends it once. Not persisted. */
-  tryWays: Readonly<Record<string, number>>;
-  /** Off, then 3, 4 and 2 ways, then off again: the composer's key and the palette. */
-  cycleTryWays: (threadKey: string) => void;
-  clearTryWays: (threadKey: string) => void;
   /**
    * Chats whose Send starts Keep going, in the mode it starts in, by thread key. Absent: Send
-   * sends the message (once, or `tryWays` ways). Not persisted.
+   * sends the message once. Not persisted.
    */
   keepGoingPick: Readonly<Record<string, GameRunProfile>>;
-  /** The composer's run picker: once, N ways, or Keep going in a mode. One excludes the others. */
+  /** The composer's run picker: once, or Keep going in a mode. One excludes the other. */
   pickRun: (
     threadKey: string,
     pick:
       | { readonly kind: "once" }
-      | { readonly kind: "ways"; readonly ways: number }
       | { readonly kind: "keep-going"; readonly profile: GameRunProfile },
   ) => void;
   /** The Workbench beside the game is open, for every game. */
@@ -109,8 +103,6 @@ interface GameWorkspaceStoreState {
 
 /** The view as it was last left, so toggling it back on returns to the same device. */
 let lastStageDevice = DEFAULT_STAGE_DEVICE;
-
-const TRY_WAYS_NEXT: Readonly<Record<number, number | undefined>> = { 3: 4, 4: 2, 2: undefined };
 
 const without = <T>(record: Readonly<Record<string, T>>, key: string) => {
   const { [key]: _removed, ...rest } = record;
@@ -159,32 +151,10 @@ export const useGameWorkspaceStore = create<GameWorkspaceStoreState>()(
         }));
       },
 
-      tryWays: {},
-      cycleTryWays: (threadKey) => {
-        openGameTool("try-ways");
-        set((state) => {
-          const current = state.tryWays[threadKey];
-          const next = current === undefined ? 3 : TRY_WAYS_NEXT[current];
-          const rest = without(state.tryWays, threadKey);
-          return {
-            tryWays: next === undefined ? rest : { ...rest, [threadKey]: next },
-            keepGoingPick: without(state.keepGoingPick, threadKey),
-          };
-        });
-      },
-      clearTryWays: (threadKey) =>
-        set((state) => {
-          if (state.tryWays[threadKey] === undefined) return state;
-          return { tryWays: without(state.tryWays, threadKey) };
-        }),
       keepGoingPick: {},
       pickRun: (threadKey, pick) => {
-        if (pick.kind !== "once") openGameTool(pick.kind === "ways" ? "try-ways" : "keep-going");
+        if (pick.kind !== "once") openGameTool("keep-going");
         set((state) => ({
-          tryWays:
-            pick.kind === "ways"
-              ? { ...state.tryWays, [threadKey]: pick.ways }
-              : without(state.tryWays, threadKey),
           keepGoingPick:
             pick.kind === "keep-going"
               ? { ...state.keepGoingPick, [threadKey]: pick.profile }

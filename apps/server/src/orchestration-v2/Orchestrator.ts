@@ -136,7 +136,6 @@ import {
   isForkableSourceRunStatus,
   ThreadForkServiceV2,
 } from "./ThreadForkService.ts";
-import { keptSignal } from "../game/gameTries.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import * as GameRunPlan from "./gameRun/plan.ts";
 import * as GameBuildPlan from "./gameBuilds/plan.ts";
@@ -502,8 +501,6 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "game-run.step.fail":
     case "game-run.decision.expire":
     case "game-run.step.schedule":
-    case "game-version.start":
-    case "game-version.kept":
     case "game.notice":
     case "game-build.record":
     case "game-build.restore":
@@ -4154,22 +4151,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             threadId: command.threadId,
           });
       }
-      // A try is a turn of its own, from the build the turns before it leave, and its versions
-      // get the person's words only.
-      if (
-        command.versions !== undefined &&
-        (command.dispatchMode.type === "defer_start" ||
-          command.attachments.length > 0 ||
-          projection.thread.lineage.relationshipToParent !== null)
-      )
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause:
-            command.attachments.length > 0
-              ? "Trying several ways sends text only: remove the attachments first."
-              : "Trying several ways starts a turn of a chat of its own, in its folder.",
-        });
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
@@ -4357,12 +4338,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         command.dispatchMode,
         command.deliveryIntent,
       );
-      // A try never joins a running turn: it waits for it, and starts from what it leaves.
-      if (
-        command.versions !== undefined &&
-        (dispatchMode.type === "steer_active" || dispatchMode.type === "restart_active")
-      )
-        dispatchMode = { type: "queue_after_active" };
       if (dispatchMode.type === "steer_active") {
         const targetRunId = dispatchMode.targetRunId;
         const target = projection.runs.find((run) => run.id === targetRunId);
@@ -4722,7 +4697,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             : { restartContinuationOfRunId: command.restartContinuationOfRunId }),
           ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
           ...(command.freshContext === true ? { freshContext: true } : {}),
-          ...(command.versions === undefined ? {} : { versions: command.versions }),
         };
         const attempt: OrchestrationV2RunAttempt = {
           id: attemptId,
@@ -5068,7 +5042,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
           ...wakeWorkStartedAt(projection.runs, command),
           ...(command.freshContext === true ? { freshContext: true } : {}),
-          ...(command.versions === undefined ? {} : { versions: command.versions }),
         };
         const attempt: OrchestrationV2RunAttempt = {
           id: attemptId,
@@ -5764,7 +5737,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(continuedTaskId === undefined ? {} : { delegatedTaskId: continuedTaskId }),
         ...wakeWorkStartedAt(projection.runs, command),
         ...(command.freshContext === true ? { freshContext: true } : {}),
-        ...(command.versions === undefined ? {} : { versions: command.versions }),
       };
       const attempt: OrchestrationV2RunAttempt = {
         id: attemptId,
@@ -6671,168 +6643,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       events,
       effects,
     );
-
-  /** A try's run whose versions are not yet made: the server's own run, still starting. */
-  const loadStartingTry = (
-    command: Extract<
-      OrchestrationV2InternalCommand,
-      { readonly type: "game-version.start" | "game-version.kept" }
-    >,
-  ) =>
-    projectionStore
-      .getThreadRecords(command.threadId, ["runs", "nodes", "attempts", "subagents"])
-      .pipe(mapDispatchError(command));
-
-  const dispatchGameVersionStart = Effect.fn("orchestrationV2.dispatch.gameVersionStart")(
-    function* (
-      command: Extract<OrchestrationV2InternalCommand, { readonly type: "game-version.start" }>,
-      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
-      effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
-    ) {
-      const projection = yield* loadStartingTry(command);
-      const run = projection.runs.find((candidate) => candidate.id === command.runId);
-      const rootNode = projection.nodes.find((node) => node.id === run?.rootNodeId);
-      const attempt = projection.attempts.find((each) => each.id === run?.activeAttemptId);
-      if (
-        run === undefined ||
-        run.versions === undefined ||
-        run.status !== "starting" ||
-        rootNode === undefined ||
-        attempt === undefined ||
-        command.versions.length !== run.versions
-      )
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: `Run ${command.runId} is not a try waiting to start its ${command.versions.length} versions.`,
-        });
-      const first = yield* nextTurnItemOrdinal(projection);
-      const now = yield* DateTime.now;
-      const emitEvent = emit(events, command);
-      const notice: OrchestrationV2TurnItem = {
-        id: idAllocator.derive.runSignalTurnItem({ runId: run.id, signal: "versions" }),
-        threadId: command.threadId,
-        runId: run.id,
-        nodeId: rootNode.id,
-        providerThreadId: run.providerThreadId,
-        providerTurnId: null,
-        nativeItemRef: null,
-        parentItemId: null,
-        ordinal: first,
-        status: "completed",
-        title: null,
-        startedAt: now,
-        completedAt: now,
-        updatedAt: now,
-        type: "system_notice",
-        message: command.notice,
-        notice: "versions",
-      };
-      const at = { threadId: command.threadId, runId: run.id, nodeId: rootNode.id };
-      // The notice first, then the versions: the turn reads as the request, what Kurambit does
-      // with it, and the versions. The children need the run still active, so its completion
-      // comes last, and all of it lands in one transaction or none does.
-      yield* emitEvent({ type: "turn-item.updated", ...at, occurredAt: now, payload: notice });
-      for (const [index, version] of command.versions.entries()) {
-        yield* dispatchChildTaskRequest(
-          {
-            command: {
-              ...command,
-              commandId: CommandId.make(`${command.commandId}:version:${version.n}`),
-            },
-            parentThreadId: command.threadId,
-            parentRunId: run.id,
-            parentNodeId: rootNode.id,
-            task: version.task,
-            title: version.title,
-            modelSelection: run.modelSelection,
-            runtimeMode: projection.thread.runtimeMode,
-            interactionMode: projection.thread.interactionMode,
-            worktreePath: version.worktreePath,
-            // The try's run is over at once; a version's end must never start a turn in the chat.
-            completionWake: "never",
-            parentRunPolicy: "active",
-            turnItemOrdinal: first + 1 + index,
-          },
-          events,
-          effects,
-        );
-      }
-      const settled = { status: "completed" as const, startedAt: now, completedAt: now };
-      yield* emitEvent({
-        type: "run-attempt.updated",
-        ...at,
-        occurredAt: now,
-        payload: { ...attempt, ...settled },
-      });
-      yield* emitEvent({
-        type: "node.updated",
-        ...at,
-        occurredAt: now,
-        payload: { ...rootNode, ...settled },
-      });
-      yield* emitEvent({
-        type: "run.updated",
-        ...at,
-        occurredAt: now,
-        payload: { ...run, ...settled },
-      });
-    },
-  );
-
-  const dispatchGameVersionKept = Effect.fn("orchestrationV2.dispatch.gameVersionKept")(function* (
-    command: Extract<OrchestrationV2InternalCommand, { readonly type: "game-version.kept" }>,
-    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
-  ) {
-    const projection = yield* loadStartingTry(command);
-    const run = projection.runs.find((candidate) => candidate.id === command.runId);
-    if (
-      run === undefined ||
-      run.versions === undefined ||
-      run.rootNodeId === null ||
-      command.n > run.versions
-    )
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: `Run ${command.runId} has no version ${command.n}.`,
-      });
-    const now = yield* DateTime.now;
-    const notice: OrchestrationV2TurnItem = {
-      // One per keep: the newest names the kept version, and when.
-      id: idAllocator.derive.runSignalTurnItem({
-        runId: run.id,
-        signal: keptSignal(command.n, command.commandId),
-      }),
-      threadId: command.threadId,
-      runId: run.id,
-      nodeId: run.rootNodeId,
-      providerThreadId: run.providerThreadId,
-      providerTurnId: null,
-      nativeItemRef: null,
-      parentItemId: null,
-      ordinal: yield* nextTurnItemOrdinal(projection),
-      status: "completed",
-      title: null,
-      startedAt: now,
-      completedAt: now,
-      updatedAt: now,
-      type: "system_notice",
-      message: command.notice,
-      notice: "game",
-    };
-    yield* emit(
-      events,
-      command,
-    )({
-      type: "turn-item.updated",
-      threadId: command.threadId,
-      runId: run.id,
-      nodeId: run.rootNodeId,
-      occurredAt: now,
-      payload: notice,
-    });
-  });
 
   const dispatchGameNotice = Effect.fn("orchestrationV2.dispatch.gameNotice")(function* (
     command: Extract<OrchestrationV2InternalCommand, { readonly type: "game.notice" }>,
@@ -10998,12 +10808,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "game-round.task.request":
         yield* dispatchGameRoundTaskRequest(command, events, effects);
-        break;
-      case "game-version.start":
-        yield* dispatchGameVersionStart(command, events, effects);
-        break;
-      case "game-version.kept":
-        yield* dispatchGameVersionKept(command, events);
         break;
       case "game.notice":
         yield* dispatchGameNotice(command, events);

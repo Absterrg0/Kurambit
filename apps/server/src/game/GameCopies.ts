@@ -51,6 +51,7 @@ import * as ServerConfig from "../config.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import { regressions } from "../orchestration-v2/gameRun/decide.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as GameCopyNotes from "../orchestration-v2/gameCopies/GameCopyNotes.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { availableEngine, engineProfile } from "./engineProfile.ts";
@@ -1044,6 +1045,8 @@ const make = Effect.gen(function* () {
       { discard: true },
     );
 
+  // A turn in a copy is told where it works, as its start reads it.
+  yield* (yield* GameCopyNotes.GameCopyNotes).attach(copyNote);
   return GameCopies.of({
     discard,
     adopt,

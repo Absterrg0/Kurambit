@@ -20,7 +20,6 @@ import * as GameCopies from "./game/GameCopies.ts";
 import * as GameFolders from "./game/GameFolders.ts";
 import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
-import * as GameVersions from "./game/GameVersions.ts";
 import * as GameBuildsReactor from "./game/GameBuildsReactor.ts";
 import * as GameFacts from "./game/GameFacts.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
@@ -552,8 +551,6 @@ const layerGameServices = layerGameRunWork.pipe(
   Layer.provideMerge(GameLibrary.layer),
   Layer.provideMerge(GamePlays.layer),
   Layer.provideMerge(GameDecisions.layer),
-  // A try's versions: started for the orchestration runtime's GameTries, kept through GameBuilds.
-  Layer.provideMerge(GameVersions.layer),
   // Chats working in copies of a game, and the way their work comes in.
   Layer.provideMerge(GameCopies.layer),
   Layer.provideMerge(GameBuilds.layer),

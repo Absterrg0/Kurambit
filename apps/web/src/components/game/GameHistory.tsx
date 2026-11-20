@@ -4,16 +4,7 @@ import { AsyncResult } from "effect/reactivity";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { FastForwardIcon, Redo2Icon, TriangleAlertIcon, Undo2Icon } from "lucide-react";
-import type {
-  GameBuild,
-  GameBuildId,
-  GameBuildRef,
-  GameBuildsResult,
-  GameCopy,
-  GameTryVersion,
-  ScopedThreadRef,
-} from "@kurambit/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import type { GameBuild, GameBuildId, GameBuildRef, ScopedThreadRef } from "@kurambit/contracts";
 
 import type { GameStageRequest } from "../../gameWorkspaceStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -38,7 +29,7 @@ import {
 } from "./gameBuilds.logic";
 import { stageBuildId, stepMark, timelineMarks } from "./gameBuildTimeline.logic";
 import { GameHistoryCopies } from "./GameHistoryCopies";
-import { checkingStep, heldWords, useGameCopies } from "./useGameCopies";
+import { useGameCopies } from "./useGameCopies";
 
 /** How many older pages an "Open build" reads to find its build before it says so. */
 const SEEK_PAGES = 10;
@@ -83,48 +74,9 @@ export interface GameStripUndo {
   readonly onRedo: () => void;
 }
 
-/** A place in the strip: one build, or the versions one "try it N ways" message made. */
-type StripItem =
-  | { readonly kind: "build"; readonly build: GameBuild }
-  | {
-      readonly kind: "try";
-      readonly runId: string;
-      readonly request: string;
-      readonly builds: ReadonlyArray<GameBuild>;
-    };
-
-/**
- * The builds oldest first, a try's versions together under their request at the place its first
- * version landed, in their own order (1, 2, 3), whichever finished first.
- */
-const stripItems = (marks: ReadonlyArray<GameBuild>): ReadonlyArray<StripItem> => {
-  const items: Array<StripItem> = [];
-  const tries = new Map<string, number>();
-  for (const build of marks) {
-    const source = build.source;
-    if (source._tag !== "version") {
-      items.push({ kind: "build", build });
-      continue;
-    }
-    const at = tries.get(source.runId);
-    const group = at === undefined ? undefined : items[at];
-    if (at !== undefined && group?.kind === "try")
-      items[at] = { ...group, builds: [...group.builds, build] };
-    else {
-      tries.set(source.runId, items.length);
-      items.push({ kind: "try", runId: source.runId, request: source.request, builds: [build] });
-    }
-  }
-  const versionOf = (build: GameBuild) => (build.source._tag === "version" ? build.source.n : 0);
-  return items.map((item) =>
-    item.kind === "try"
-      ? { ...item, builds: item.builds.toSorted((a, b) => versionOf(a) - versionOf(b)) }
-      : item,
-  );
-};
-
 /** A build's short name under its picture; its tooltip has the whole one. */
 const shortName = (build: GameBuild) => {
+  // A version an earlier Kurambit's "try it N ways" made.
   const source = build.source;
   if (source._tag === "version") return `Version ${source.n}`;
   if (build.number === null) return build.name;
@@ -133,8 +85,8 @@ const shortName = (build: GameBuild) => {
 
 /**
  * The game's History, in the popover under the header's build button: Undo, Redo and Compare,
- * then the builds as pictures in time order, oldest left, the one on the Stage ringed, a try's
- * versions grouped under what was asked with Keep. A picture plays its build and shows it in
+ * then the builds as pictures in time order, oldest left, the one on the Stage ringed. A picture
+ * plays its build and shows it in
  * Checks. It stays mounted while the popover is closed: the chat's cards, the palette and the keys
  * reach it through the Stage's requests, and a compare's pick opens it.
  */
@@ -182,16 +134,7 @@ export function GameHistory({
   /** The whole folder back to a build: Go back, after it asks. */
   onGoBack: (build: GameBuild) => void;
 }) {
-  const { place, copies } = useGameCopies(threadRef);
-  const tries = useEnvironmentQuery(
-    gameEnvironment.tries({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    }),
-  ).data;
-  const versionChats = new Set(
-    (tries?.tries ?? []).flatMap((each) => each.versions.map((version) => version.childThreadId)),
-  );
+  const { place } = useGameCopies(threadRef);
   const canUndo = useAtomValue(gameEnvironment.buildUndo.permissionAtom(threadRef.environmentId));
   const undoCommand = useAtomCommand(gameEnvironment.buildUndo, { reportFailure: false });
   // One build's change reversed with later builds kept, and what the server answered.
@@ -360,7 +303,6 @@ export function GameHistory({
   const onStage = stageBuildId(list, playing);
   const showNow =
     slot === null && list !== null && (list.folderEdited === true || playing !== null);
-  const items = stripItems(marks);
   const thumb = (build: GameBuild, label: ReactNode = shortName(build)) => (
     <BuildThumb
       key={build.id}
@@ -445,7 +387,7 @@ export function GameHistory({
           onDismiss={() => setUndoAnswer(null)}
         />
       )}
-      <GameHistoryCopies threadRef={threadRef} gameName={gameName} hide={versionChats} />
+      <GameHistoryCopies threadRef={threadRef} gameName={gameName} />
       {reelOpen ? (
         <GameReel
           threadRef={threadRef}
@@ -454,7 +396,7 @@ export function GameHistory({
           onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
         />
       ) : null}
-      <StripRow open={open} count={items.length + (showNow ? 1 : 0) + (slot === null ? 0 : 1)}>
+      <StripRow open={open} count={marks.length + (showNow ? 1 : 0) + (slot === null ? 0 : 1)}>
         {olderNext !== null ? (
           <Button
             size="xs"
@@ -483,25 +425,7 @@ export function GameHistory({
             active
           />
         ) : null}
-        {items.map((item) =>
-          item.kind === "build" ? (
-            thumb(item.build)
-          ) : (
-            <TryGroup
-              key={item.runId}
-              threadRef={threadRef}
-              item={item}
-              list={list}
-              playing={playing}
-              versions={
-                tries?.tries.find((each) => each.runId === item.runId)?.versions ?? NO_VERSIONS
-              }
-              copies={copies}
-            >
-              {item.builds.map((build) => thumb(build))}
-            </TryGroup>
-          ),
-        )}
+        {marks.map((build) => thumb(build))}
         {showNow && list !== null ? (
           <NowThumb
             threadRef={threadRef}
@@ -827,155 +751,6 @@ const thumbState = (build: GameBuild): "measuring" | "failed" | null => {
   if (!factsSettled(build.facts)) return null;
   return doesNotStart(build.facts) ? "failed" : null;
 };
-
-/**
- * A try's versions under the message that asked for them, and Keep for the one on the Stage: it
- * becomes the game folder's through the same restore Undo takes back.
- */
-function TryGroup({
-  threadRef,
-  item,
-  list,
-  playing,
-  versions,
-  copies,
-  children,
-}: {
-  threadRef: ScopedThreadRef;
-  item: Extract<StripItem, { kind: "try" }>;
-  list: GameBuildsResult | null;
-  playing: GameBuildId | null;
-  /** The try's versions: the chat each works in. */
-  versions: ReadonlyArray<GameTryVersion>;
-  /** The game's copies: a version is one until it is kept, and Keep brings it in. */
-  copies: ReadonlyArray<GameCopy>;
-  children: ReactNode;
-}) {
-  const navigate = useNavigate();
-  const canKeep = useAtomValue(gameEnvironment.keepVersion.permissionAtom(threadRef.environmentId));
-  const keepVersion = useAtomCommand(gameEnvironment.keepVersion, { reportFailure: false });
-  const [keeping, setKeeping] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const shown = item.builds.find((build) => build.id === playing) ?? null;
-  const kept = item.builds.find((build) => build.source._tag === "version" && build.source.kept);
-  const inFolder = shown !== null && shown.id === list?.current;
-  const shownN = shown?.source._tag === "version" ? shown.source.n : null;
-  const shownChat = versions.find((version) => version.n === shownN)?.childThreadId ?? null;
-  const copyState = copies.find((copy) => copy.threadId === shownChat)?.place.state ?? null;
-  const step = copyState === null ? null : checkingStep(copyState);
-  const keep = async (build: GameBuild, anyway = false) => {
-    if (build.source._tag !== "version") return;
-    if (!anyway) setKeeping(true);
-    setNote(null);
-    const result = await keepVersion({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        runId: item.runId,
-        n: build.source.n,
-        commandId: randomUUID(),
-        ...(anyway ? { anyway: true } : {}),
-      },
-    });
-    setKeeping(false);
-    setNote(
-      result._tag === "Failure" ? String(squashAtomCommandFailure(result)) : result.value.message,
-    );
-  };
-  return (
-    <div
-      role="group"
-      aria-label={`Tried ${item.builds.length} ways: ${item.request}`}
-      className="flex shrink-0 flex-col gap-1.5"
-    >
-      <div className="flex h-6 max-w-full items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Text
-                variant="caption"
-                tone="muted"
-                truncate
-                render={<span className="max-w-60 min-w-0" />}
-              />
-            }
-          >
-            {item.request}
-          </TooltipTrigger>
-          <TooltipPopup side="top" className="max-w-sm">
-            {note ?? `Tried ${item.builds.length} ways: ${item.request}`}
-          </TooltipPopup>
-        </Tooltip>
-        {shown !== null &&
-        shown.source._tag === "version" &&
-        !inFolder &&
-        canKeep &&
-        step !== null ? (
-          // Keep is a Bring in: its check plays the version first; Keep now ends the wait.
-          <>
-            <Button size="xs" variant="secondary" disabled>
-              <span className="tabular-nums">{`Checking… ${step}`}</span>
-            </Button>
-            <Button size="xs" variant="ghost" onClick={() => void keep(shown, true)}>
-              Keep now
-            </Button>
-          </>
-        ) : shown !== null && shown.source._tag === "version" && !inFolder && canKeep ? (
-          <Button size="xs" variant="secondary" disabled={keeping} onClick={() => void keep(shown)}>
-            {keeping ? "Keeping…" : `Keep version ${shown.source.n}`}
-          </Button>
-        ) : kept !== undefined && kept.source._tag === "version" ? (
-          <Text variant="caption" tone="muted" numeric>
-            Kept {kept.source.n}
-          </Text>
-        ) : null}
-      </div>
-      {shown !== null && copyState?._tag === "held" ? (
-        <div className="flex h-6 max-w-full items-center gap-2" data-try-keep="held">
-          <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden="true" />
-          <Text
-            variant="caption"
-            tone="muted"
-            truncate
-            render={<span className="max-w-72 min-w-0" />}
-          >
-            {`Not kept: ${heldWords(copyState.reason)}`}
-          </Text>
-          <Button size="xs" variant="ghost" onClick={() => void keep(shown, true)}>
-            Keep anyway
-          </Button>
-        </div>
-      ) : shown !== null && copyState?._tag === "conflicts" && shownChat !== null ? (
-        <div className="flex h-6 max-w-full items-center gap-2" data-try-keep="conflicts">
-          <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden="true" />
-          <Text
-            variant="caption"
-            tone="muted"
-            truncate
-            render={<span className="max-w-72 min-w-0" />}
-          >
-            {`${copyState.files.length} file${copyState.files.length === 1 ? "" : "s"} conflict${copyState.files.length === 1 ? "s" : ""} with the game`}
-          </Text>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() =>
-              void navigate({
-                to: "/$environmentId/$threadId",
-                params: { environmentId: threadRef.environmentId, threadId: shownChat },
-              })
-            }
-          >
-            {`Open version ${shownN}`}
-          </Button>
-        </div>
-      ) : null}
-      <div className="flex items-end gap-2">{children}</div>
-    </div>
-  );
-}
-
-const NO_VERSIONS: ReadonlyArray<GameTryVersion> = [];
 
 /** The game as it is now, when that is no build: edited since, or another build plays. */
 function NowThumb({

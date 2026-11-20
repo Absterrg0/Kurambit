@@ -277,7 +277,7 @@ control is disabled and says why.
 To start, choose **Keep going** in the picker beside the paperclip, under the box where you tell the
 game what to change (it says **Once** until you change it; `mod+Shift+A` opens it), then send. The
 picker appears once Keep going has something to go on, when a build starts and your agent's reply
-ends in a `Next:` line, or after your third message, for Try N ways. What you write is its
+ends in a `Next:` line. What you write is its
 direction, the first thing it does; you can also send nothing and let it take your agent's latest
 `Next:` line. While it runs, a line above the box says which step it is on, with **Stop**, and what
 you send goes to it as its next step. **Keep going: Guided** and **Keep going: Autopilot** in the
@@ -336,8 +336,8 @@ agent and the box where you tell the game what to change. A new game starts with
 
 The Workbench and its **Tune**, **Art** and **Checks** are always there. Every other tool appears
 when the game first has something for it, and then stays where it is: **Save as test play** once
-a run ends; **Responsive view** once a phone or widescreen check finds a problem; **Try N ways**
-after your third message and **Keep going** once a build starts with a `Next:` line; the
+a run ends; **Responsive view** once a phone or widescreen check finds a problem; **Keep going**
+once a build starts with a `Next:` line; the
 **Library** with your second game. A new tool, or a Workbench section the first time it has
 something in it, carries a dot until you open it: one dot at a time, on the newest. Their keys and
 the command palette reach each one before then.
@@ -359,10 +359,8 @@ Full.
 
 The bar on top has the game's name, which opens its menu (rename, folder, **Export…**, **Art…**),
 then the build on the Stage, such as **Build 4**, which opens **History**: **Undo**, **Redo** and
-**Compare**, then every build as a small picture in time order with the one on the Stage ringed,
-and each **Try N ways** message's versions together under what you asked. Click a picture to
-play that build and show its checks; while a version plays, **Keep** makes it the game. On the
-right is the Workbench button.
+**Compare**, then every build as a small picture in time order with the one on the Stage ringed.
+Click a picture to play that build and show its checks. On the right is the Workbench button.
 
 If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
 it** and **Undo**. An error while you play shows as one small line in the game's corner.
@@ -502,8 +500,7 @@ keep their references. A game's agent ends its reply with the one change it woul
 it does, the empty composer shows it as **Next:**, and only there: the chat leaves that line out of
 the reply. Press Tab to put that change in the composer, then edit or send it.
 
-Under the box, the composer's footer holds how your message runs (**Once**, **Try N ways**,
-**Keep going**) and, on the right, the model, how hard it thinks, and how much of its context the
+Under the box, the composer's footer holds how your message runs (**Once** or **Keep going**) and, on the right, the model, how hard it thinks, and how much of its context the
 chat uses, such as **121k**. That number turns amber near the limit; click it to compact the chat.
 
 Stopping the agent's turn stops its Blender commands, but a game that is already running
@@ -560,15 +557,6 @@ chat. The command palette has each of these, plus **Compare builds…**, **Expor
 a build…**. A game you clicked into owns every key, Tab, Escape and the number keys included; only
 these `mod+Alt` keys reach Kurambit while you play.
 
-**Try several ways.** For a change where taste decides ("make the dash feel better"), choose **Try 3
-ways** in the picker under the box (2 and 4 are in the same picker; `mod+Alt+W`, or **Try the next
-message 3 ways** in the command palette) to send your next message that many ways at once. Each version works in its own copy of the game with a session of
-its own and takes a different approach, so it costs that many times the tokens. The Stage lists
-them as **Version 1**, **2** and **3** with each one's approach and checks; choose one to play it
-and **Keep version 2** to bring it into the game: builds another chat landed since the try stay.
-Undo takes it back, and the other versions' copies go, while their builds stay in the builds list. It sends text only, and not while Keep going is on.
-A version a restart cut off keeps what it had built.
-
 **Checks** are what Kurambit measured by playing the build, only what you would act on: whether
 it boots, whether it crashes or stops answering in a minute of random input, and for a three.js
 game a QA pass (it presses every control the game declares on a fresh run, ends a run and presses
@@ -611,8 +599,7 @@ going runs only in the game.
 
 Your agent can do the same: it brings in its own copy or one it delegated work to, and updates
 its copy; the chat shows each as a line with its result. A chat's decisions are the game's,
-wherever the chat works, and every build that lands is also a commit on the game's
-`kurambit/history` branch, for `git log`.
+wherever the chat works.
 
 ## Keep a video or image
 

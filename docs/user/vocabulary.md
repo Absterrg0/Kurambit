@@ -18,9 +18,7 @@ guides.
 - **Art**: the game's models, textures, sounds and fonts, each with its inspector.
 - **Decisions**: what the game remembers you decided, listed at the end of Checks.
 - **Responsive view**: the Stage as a phone, tablet or wide screen, at any size you type.
-- **Try N ways**: one message tried two, three or four ways at once; each result is a version.
-- **Version**: one of a Try N ways message's results, which **Keep** makes the game.
-- **Copy**: a separate copy of the game, where a version or a chat works without touching the game until you bring it in.
+- **Copy**: a separate copy of the game, where a chat works without touching the game until you bring it in.
 - **In the game**: work the game itself holds; a chat works in the game unless it works in a copy.
 - **Not in the game yet**: a copy's builds the game does not hold, listed at the top of History.
 - **Bring in**: puts a copy's work into the game as one build, after checking it still plays; Undo takes it out.

@@ -125,6 +125,14 @@ const RENAMED_KEYBINDING_COMMANDS: ReadonlyMap<string, KeybindingRule["command"]
   ["game.tune.toggle", "game.workbench.toggle"],
 ]);
 
+/** Commands of features since removed: their entries leave the file, as a rename does. */
+const RETIRED_KEYBINDING_COMMANDS: ReadonlySet<string> = new Set(["composer.tryWays"]);
+const retiredEntry = (entry: unknown) =>
+  Predicate.isObject(entry) &&
+  "command" in entry &&
+  typeof entry.command === "string" &&
+  RETIRED_KEYBINDING_COMMANDS.has(entry.command);
+
 const renamedEntry = (entry: unknown): unknown => {
   if (!Predicate.isObject(entry) || !("command" in entry) || typeof entry.command !== "string")
     return entry;
@@ -442,12 +450,21 @@ const make = Effect.gen(function* () {
     );
   };
 
-  /** Rewrites renamed commands in place, keeping every other entry as the person wrote it. */
+  /**
+   * Rewrites renamed commands in place and drops retired ones, keeping every other entry as the
+   * person wrote it.
+   */
   const renameCommands = readRawConfig.pipe(
     Effect.flatMap(Schema.decodeEffect(RawKeybindingsEntries)),
     Effect.flatMap((entries) => {
-      const renamed = entries.map(renamedEntry);
-      if (renamed.every((entry, index) => entry === entries[index])) return Effect.void;
+      const renamed = entries.flatMap((entry) =>
+        retiredEntry(entry) ? [] : [renamedEntry(entry)],
+      );
+      if (
+        renamed.length === entries.length &&
+        renamed.every((entry, index) => entry === entries[index])
+      )
+        return Effect.void;
       return writeFileStringAtomically({
         filePath: keybindingsConfigPath,
         contents: `${JSON.stringify(renamed, null, 2)}\n`,

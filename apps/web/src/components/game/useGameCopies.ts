@@ -106,9 +106,6 @@ export const checkingStep = (state: GameCopyPlace["state"]) =>
         : `boots, then ${state.plays} test play${state.plays === 1 ? "" : "s"}`
       : `test play ${state.play} of ${state.plays}`;
 
-/** A hold's reason in the product's words: "the test play "x" now ends "y"". */
-export const heldWords = (reason: string) => reason.replace(/ \(it ended "[^"]*"\)/g, "");
-
 /** Text files still holding both sides: Bring in waits for them to be resolved. */
 export const unresolvedText = (place: GameCopyPlace) =>
   place.state._tag === "conflicts" ? place.state.files.filter((file) => !file.binary) : [];

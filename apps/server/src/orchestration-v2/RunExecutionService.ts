@@ -553,8 +553,6 @@ export interface RunExecutionServiceV2StartRootRunInput {
    * fresh. A game's turn is told the person's decisions since then, or all of them.
    */
   readonly sessionLastTurnAt?: DateTime.Utc;
-  /** What the person's tries ("try it N ways") since this agent's last turn built and kept. */
-  readonly gameTries?: string;
   /** Where a chat in a copy of a game works and how far the game is ahead (GameCopies.copyNote). */
   readonly gameCopy?: string;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
@@ -1426,9 +1424,6 @@ export const layer: Layer.Layer<
             ...(personRuns === null
               ? []
               : [`<kurambit_game_runs>\n${personRuns}\n</kurambit_game_runs>`]),
-            ...(input.gameTries === undefined || slash
-              ? []
-              : [`<kurambit_game_versions>\n${input.gameTries}\n</kurambit_game_versions>`]),
             ...(input.gameCopy === undefined || slash
               ? []
               : [`<kurambit_game_copy>\n${input.gameCopy}\n</kurambit_game_copy>`]),

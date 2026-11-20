@@ -43,7 +43,7 @@ export class TurnAdmission extends Context.Reference<
   defaultValue: () => ({ admit: () => Effect.void }),
 }) {}
 
-/** One admission for the runtime, which the game layer attaches to as GameTries' starter is. */
+/** One admission for the runtime, which the game layer attaches to as its copy note is. */
 export const layerAttachable = Layer.sync(TurnAdmission, () => {
   let attached: TurnAdmissionShape | null = null;
   return {

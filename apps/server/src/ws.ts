@@ -3,7 +3,6 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as GameBuilds from "./game/GameBuilds.ts";
-import * as GameVersions from "./game/GameVersions.ts";
 import * as GameCopies from "./game/GameCopies.ts";
 import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
@@ -1201,7 +1200,6 @@ const layerWsRpc = (
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
-      const gameVersions = yield* GameVersions.GameVersions;
       const gameCopies = yield* GameCopies.GameCopies;
       const gamePlays = yield* GamePlays.GamePlays;
       const gameDecisions = yield* GameDecisions.GameDecisions;
@@ -1845,8 +1843,19 @@ const layerWsRpc = (
         [WS_METHODS.gameCopyThrowAway]: ({ threadId }) => gameCopies.throwAway(threadId, threadId),
         [WS_METHODS.gameRunInCopy]: ({ threadId, commandId }) =>
           gameCopies.runInCopy(threadId, commandId),
-        [WS_METHODS.gameTries]: ({ threadId }) => gameVersions.tries(threadId),
-        [WS_METHODS.gameKeepVersion]: ({ threadId, ...keep }) => gameVersions.keep(threadId, keep),
+        // "Try it N ways" is gone: no chat has tries now, and an older client's Keep is refused.
+        // An earlier game's versions are its builds, read into its records.
+        [WS_METHODS.gameTries]: () => Effect.succeed({ tries: [] }),
+        [WS_METHODS.gameKeepVersion]: ({ threadId }) =>
+          Effect.fail(
+            new GameOperationError({
+              operation: "Keep version",
+              path: threadId,
+              reason: "invalid-input",
+              detail:
+                "Trying several ways is gone: run the chat in a copy and bring it in instead.",
+            }),
+          ),
         [WS_METHODS.gameBuildStop]: ({ threadId, build }) =>
           gameBuilds.stopPlay(threadId, build).pipe(Effect.as({})),
         [WS_METHODS.gameKeepValues]: ({ threadId, things, commandId, fold }) =>
@@ -3009,7 +3018,6 @@ export const layer = Layer.unwrap(
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
     const gameBuilds = yield* GameBuilds.GameBuilds;
-    const gameVersions = yield* GameVersions.GameVersions;
     const gameCopies = yield* GameCopies.GameCopies;
     const gamePlays = yield* GamePlays.GamePlays;
     const gameDecisions = yield* GameDecisions.GameDecisions;
@@ -3079,12 +3087,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),
               Layer.provide(Layer.succeed(GameBuilds.GameBuilds, gameBuilds)),
-              Layer.provide(
-                Layer.mergeAll(
-                  Layer.succeed(GameVersions.GameVersions, gameVersions),
-                  Layer.succeed(GameCopies.GameCopies, gameCopies),
-                ),
-              ),
+              Layer.provide(Layer.mergeAll(Layer.succeed(GameCopies.GameCopies, gameCopies))),
               Layer.provide(Layer.succeed(GamePlays.GamePlays, gamePlays)),
               Layer.provide(Layer.succeed(GameDecisions.GameDecisions, gameDecisions)),
               Layer.provideMerge(RpcSerialization.layerJson),

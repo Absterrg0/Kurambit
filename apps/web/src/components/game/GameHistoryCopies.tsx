@@ -33,22 +33,18 @@ const waitsForYou = (state: GameCopyState) => state._tag === "conflicts" || stat
 /**
  * History's top section once the game has copies: each copy as a row, its chat's name, how many
  * builds it has that the game does not, its state, and those builds as small pictures. A row
- * opens its chat. A try's versions are left to their own group below.
+ * opens its chat.
  */
 export function GameHistoryCopies({
   threadRef,
   gameName,
-  hide,
   onOpenChat,
 }: {
   threadRef: ScopedThreadRef;
   gameName: string;
-  /** Chats shown elsewhere in History: a try's versions. */
-  hide: ReadonlySet<string>;
   onOpenChat?: () => void;
 }) {
-  const { copies } = useGameCopies(threadRef);
-  const shown = copies.filter((copy) => !hide.has(copy.threadId));
+  const { copies: shown } = useGameCopies(threadRef);
   if (shown.length === 0) return null;
   return (
     <section

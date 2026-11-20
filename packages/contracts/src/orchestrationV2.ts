@@ -1682,7 +1682,7 @@ const OrchestrationV2EventBase = Schema.Struct({
   occurredAt: Schema.DateTimeUtc,
 });
 
-export const GAME_RUN_EVENT_TYPES = [
+const GAME_RUN_EVENT_TYPES = [
   "game-run.created",
   "game-run.updated",
   "game-run-step.updated",
@@ -2897,8 +2897,6 @@ export const OrchestrationV2Command = Schema.Union([
     usageLimitRecoveryRequestId: Schema.optional(CommandId),
     /** Start the run in a new native provider session (`OrchestrationV2Run.freshContext`). */
     freshContext: Schema.optional(Schema.Boolean),
-    /** Build the message this many ways in parallel (`OrchestrationV2Run.versions`). */
-    versions: Schema.optional(OrchestrationV2TryVersions),
     /** Set by turn admission: the run waits held in the queue for this reason (`queueHeldReason`). */
     queueHold: Schema.optional(Schema.String),
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
@@ -3309,38 +3307,6 @@ const OrchestrationV2InternalCommand = Schema.Union([
     interactionMode: ProviderInteractionMode,
     evidenceDirectory: Schema.NullOr(TrimmedNonEmptyString),
     createdAt: Schema.optional(Schema.DateTimeUtc),
-  }),
-  /**
-   * A try's run, done by the game layer instead of a provider: its versions as
-   * child threads, each working in its own worktree of the game, then the run
-   * completed with `notice`, in one transaction. The children reuse the
-   * delegated-task path with no wake, so none can ever start a turn in the chat.
-   */
-  Schema.Struct({
-    type: Schema.Literal("game-version.start"),
-    ...OrchestrationV2CreationFields,
-    commandId: CommandId,
-    threadId: ThreadId,
-    runId: RunId,
-    versions: Schema.Array(
-      Schema.Struct({
-        n: PositiveInt,
-        task: TrimmedNonEmptyString,
-        title: TrimmedNonEmptyString,
-        worktreePath: TrimmedNonEmptyString,
-      }),
-    ),
-    notice: TrimmedNonEmptyString,
-  }),
-  /** The person kept one of a try's versions: a notice on the try's run, which records it. */
-  Schema.Struct({
-    type: Schema.Literal("game-version.kept"),
-    ...OrchestrationV2CreationFields,
-    commandId: CommandId,
-    threadId: ThreadId,
-    runId: RunId,
-    n: PositiveInt,
-    notice: TrimmedNonEmptyString,
   }),
   /** A line in a game chat about what the person did to its work ("Brought into the game as Build 15"), on its newest turn. */
   Schema.Struct({

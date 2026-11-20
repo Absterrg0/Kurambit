@@ -53,7 +53,7 @@ export const memoryBuildRecords = () => {
     /** Done once a move is held: the test kills the server then. */
     held: null as Deferred.Deferred<void> | null,
   };
-  let pending: ReadonlyArray<GameBuildMoves.GameBuildMove> = [];
+  let pending: Array<GameBuildMoves.GameBuildMove> = [];
   const folderOf = (projectId: string, root: string) =>
     folders.find((each) => each.projectId === projectId && each.root === root) ?? null;
   const reads = {
@@ -147,7 +147,7 @@ export const memoryBuildRecords = () => {
           restore: effect.request.restore,
         };
         if (control.hold || runner === null) {
-          pending = [...pending, move];
+          pending.push(move);
           if (control.held !== null) yield* Deferred.succeed(control.held, undefined);
         } else yield* runner.move(move).pipe(Effect.orDie, Effect.forkDetach);
       }
@@ -163,7 +163,7 @@ export const memoryBuildRecords = () => {
     pending: () => pending,
     /** The outbox runs a move again whose effect a death left unmarked. */
     requeue: (moves: ReadonlyArray<GameBuildMoves.GameBuildMove>) =>
-      Effect.sync(() => void (pending = [...pending, ...moves])),
+      Effect.sync(() => void pending.push(...moves)),
     /** A restart's outbox: every pending move runs again in turn; one that fails stays pending. */
     replay: Effect.suspend(() => {
       const moves = pending;

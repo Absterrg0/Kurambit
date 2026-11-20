@@ -15,7 +15,6 @@ import {
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import * as GameVersions from "./GameVersions.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import * as GameFolders from "./GameFolders.ts";
 import * as GameBuildsReactor from "./GameBuildsReactor.ts";
@@ -102,7 +101,6 @@ const run = (
             listCheckpointRefs: () =>
               Effect.succeed([{ checkpointRef: REF, oid: OID, committedAt: 0 }]),
           }),
-          Layer.mock(GameVersions.GameVersions)({ landed: () => Effect.void }),
           Layer.mock(GameFolders.GameFolders)({ release: () => Effect.void }),
         ),
       ),

@@ -4,7 +4,6 @@
 // Stage's tuning folds into one build per session, and a session put back
 // leaves no build.
 import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";

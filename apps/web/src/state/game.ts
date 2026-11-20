@@ -588,18 +588,6 @@ export const gameEnvironment = {
     label: "game:buildRestore",
     tag: WS_METHODS.gameBuildRestore,
   }),
-  // The chat's tries ("try it N ways"): a version landing or a keep pushes "builds".
-  tries: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:tries",
-    tag: WS_METHODS.gameTries,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("builds"),
-  }),
-  keepVersion: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:keepVersion",
-    tag: WS_METHODS.gameKeepVersion,
-  }),
   // The game's copies and the asking chat's place: reread on the game's builds pushes (a landing,
   // a bring-in's check, an outcome) and when any of its chats starts, ends or moves.
   copies: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {

@@ -4,7 +4,7 @@ import { AsyncResult } from "effect/reactivity";
 import { useEffect } from "react";
 
 import { type GameTool, useArrivalDot, useGameArrivalStore } from "../../gameArrivalStore";
-import { useProjects, useThreadSentCount } from "../../state/entities";
+import { useProjects } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { codeModels } from "./gameArt.logic";
@@ -83,7 +83,6 @@ export function useGameArrivals(threadRef: ScopedThreadRef | null) {
   const screensFail = useEnvironmentQuerySelector(builds, currentScreensFail) === true;
   const things = useThreadStageBridge(threadKey, (state) => state.things, NO_THINGS);
   const next = useGameLatestNext(threadRef) !== null;
-  const sent = useThreadSentCount(threadRef);
   const tunable = things.some(hasValues);
   const modelled =
     codeModels(things).length > 0 || things.some((thing) => thing.asset !== undefined);
@@ -92,7 +91,6 @@ export function useGameArrivals(threadRef: ScopedThreadRef | null) {
     art: useArrival("art", modelled),
     checks: useArrival("checks", measured),
     keepGoing: useArrival("keep-going", next && boots),
-    tryWays: useArrival("try-ways", sent >= 3),
     responsive: useArrival("responsive", screensFail),
   };
 }
