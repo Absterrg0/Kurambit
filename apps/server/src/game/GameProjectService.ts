@@ -412,7 +412,8 @@ const make = Effect.gen(function* () {
     const lexicalRoot = NodePath.resolve(root);
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
     const manifest = yield* read(canonicalRoot);
-    if (options.resume === true && isAvailableEngine(manifest.engine.name))
+    // An existing game, resumed or in a new chat, reads this server's skills from its first turn.
+    if (options.firstTurn !== true && isAvailableEngine(manifest.engine.name))
       yield* refreshSkills(canonicalRoot, manifest.engine.name, yield* templates.directory).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
