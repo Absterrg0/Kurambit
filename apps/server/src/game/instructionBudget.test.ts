@@ -38,12 +38,13 @@ const CHOICES = {
  * blocks the message names. Set about 10% over what they were on 2026-11-16, once a new game started
  * from an empty page with no starter or recipe: code reads 10,301, the library 10,386 and generated
  * 15,267. Blender, the default since 2026-11-17 (its route by kind of model), read 10,639 then.
+ * Generated read 15,986 until the art skill was cut to the packs' rules on 2026-11-20 (13,235).
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
   blender: 11_500,
   code: 11_500,
   "code with the library": 11_500,
-  generated: 17_000,
+  generated: 14_500,
 };
 /**
  * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input
@@ -59,6 +60,13 @@ const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", num
   generated: 18_000,
   blender: 18_000,
 };
+
+/**
+ * Bytes of the art skill every Blender tool names as its recipe, read whole by any chat that makes
+ * a model. It was 36,030 (5,483 words, a recipe per craft helper) until 2026-11-20, when it became
+ * the packs' rules, each naming the number the review reports for it (10,600).
+ */
+const ART_SKILL_BUDGET = 11_000;
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");
@@ -187,6 +195,13 @@ it("keeps a three.js game's first-turn reading within its budget", () => {
       ),
     ).toBeLessThanOrEqual(budget);
   }
+});
+
+it("keeps the art skill a model's chat reads within its budget", () => {
+  expect(
+    bytes(template("studio/art-pipeline.md")),
+    "The art skill grew past its budget: a rule is one sentence of craft and the number the review reports for it; how a tool works belongs in its result.",
+  ).toBeLessThanOrEqual(ART_SKILL_BUDGET);
 });
 
 it.effect("keeps the game tools a three.js chat reads within its model choice's budget", () =>

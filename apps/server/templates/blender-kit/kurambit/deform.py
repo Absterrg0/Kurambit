@@ -366,7 +366,7 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
         rng = list(gates.HUMAN_HEIGHT)
     if rng is None:
         out.append(gates.gate("height", False, round(height, 3), None,
-                              f"{height:.2f} m tall, and no height range declared: a creature declares the brief's (hero.creature_rig height=(lo, hi), or armature['kurambit_height'] = [lo, hi])"))
+                              f"{height:.2f} m tall, and no height range declared: a creature declares the brief's (armature['kurambit_height'] = [lo, hi])"))
     else:
         out.append(gates.height(height, rng[0], rng[1]))
 
@@ -549,7 +549,7 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
                  f"{worst_layer[2] * 100:.1f}% of what is under it there past {limit}")
         # A refusal names only what failed, each with its fix, so the text stays inside the protocol.
         failed = ([sunk + ": lift it (hero.dress offset), weight it like the body under it, or hang the hem on chains"] if not sunk_ok else []) + \
-                 ([shown + ": the body shows through. Make it with hero.garment, run hero.follow_hem after adding clips, or widen it there"] if not shown_ok else []) + \
+                 ([shown + ": the body shows through: widen it there, or take its weights from the body (Data Transfer)"] if not shown_ok else []) + \
                  ([layer + ": the under garment shows through. Make it first, run hero.follow_hem after adding clips, or end the outer one higher (a closed skirt past mid-thigh does not clear a lunge)"] if not layer_ok else [])
         out.append(gates.gate("cloth", ok, round(max(depth, through, between) * 1000, 1), gates.CLOTH_DEPTH_MAX * 1000,
                               "; ".join(failed) if failed else "; ".join([sunk, shown] + ([layer] if layered else []))))
