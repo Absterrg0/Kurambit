@@ -646,22 +646,7 @@ const make = Effect.gen(function* () {
           type: "game-build.record",
           commandId: CommandId.make(`game-build:record:${g.projectId}:${entry.id}`),
           threadId,
-          build: {
-            id: entry.id,
-            projectId: g.projectId,
-            root: g.root,
-            at: entry.at,
-            kind,
-            number: null,
-            base: entry.base !== null && isGameBuildId(entry.base) ? entry.base : null,
-            ...(options.undid === undefined ? {} : { undid: options.undid }),
-            // A step's mark is read live: its verdict comes after the build.
-            source: entry.source._tag === "turn" ? { ...entry.source, step: null } : entry.source,
-            summary: entry.summary,
-            files: entry.files,
-            fileCount: entry.fileCount,
-            ...(options.request === undefined ? {} : { request: options.request }),
-          } satisfies GameBuildRecord,
+          build: toRecord(g, entry, kind, options),
           current: options.current,
           ...(options.numberFrom === undefined ? {} : { numberFrom: options.numberFrom }),
           ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
@@ -672,6 +657,29 @@ const make = Effect.gen(function* () {
         failed("Builds", g.root, "io", "the build could not be recorded", cause),
       ),
     );
+
+  /** A build as the records keep it; its number and park place are the decider's. */
+  const toRecord = (
+    g: Pick<Game, "root" | "projectId">,
+    entry: Entry,
+    kind: GameBuildKind,
+    options: { readonly undid?: GameBuildId | undefined; readonly request?: string | undefined },
+  ): GameBuildRecord => ({
+    id: entry.id,
+    projectId: g.projectId,
+    root: g.root,
+    at: entry.at,
+    kind,
+    number: null,
+    base: entry.base !== null && isGameBuildId(entry.base) ? entry.base : null,
+    ...(options.undid === undefined ? {} : { undid: options.undid }),
+    // A step's mark is read live: its verdict comes after the build.
+    source: entry.source._tag === "turn" ? { ...entry.source, step: null } : entry.source,
+    summary: entry.summary,
+    files: entry.files,
+    fileCount: entry.fileCount,
+    ...(options.request === undefined ? {} : { request: options.request }),
+  });
 
   /**
    * The one-time read of a folder's legacy builds into the records: the turn checkpoints, the
@@ -2543,6 +2551,8 @@ const make = Effect.gen(function* () {
     label?: string,
     /** What the folder holds as it moves, when the caller read it (a landing's merge did). */
     holding?: GameBuildId,
+    /** The build a landing brings in, recorded with the restore. */
+    landing?: GameBuildRecord,
   ) =>
     Effect.gen(function* () {
       const requestId = restoreRequestId(g.root, commandId);
@@ -2617,11 +2627,16 @@ const make = Effect.gen(function* () {
             name: label ?? record.label,
             operation: "Restore build",
           },
-          recordedMove(threadId, g, {
-            ...record,
-            ...(folderBuild === null ? {} : { holding: folderBuild }),
-            outcome: null,
-          }),
+          recordedMove(
+            threadId,
+            g,
+            {
+              ...record,
+              ...(folderBuild === null ? {} : { holding: folderBuild }),
+              outcome: null,
+            },
+            landing,
+          ),
         ),
         scope,
       );
@@ -2641,7 +2656,12 @@ const make = Effect.gen(function* () {
    * the record commits before anything moves, and a restart runs a move it cut short again.
    * Waits for the move here, so the person's Undo answers with what it did.
    */
-  const recordedMove = (threadId: ThreadId, g: Game, restore: GameBuildRestore) =>
+  const recordedMove = (
+    threadId: ThreadId,
+    g: Game,
+    restore: GameBuildRestore,
+    landing: GameBuildRecord | undefined,
+  ) =>
     Effect.gen(function* () {
       yield* ensureMigrated(threadId, g).pipe(
         Effect.catchCause((cause) =>
@@ -2658,6 +2678,7 @@ const make = Effect.gen(function* () {
           projectId: g.projectId,
           root: g.root,
           restore,
+          ...(landing === undefined ? {} : { landing }),
         })
         .pipe(
           Effect.mapError((cause) =>
@@ -2756,14 +2777,12 @@ const make = Effect.gen(function* () {
       const resolved = (yield* resolveOf(g, [made])).get(made);
       if (resolved === undefined)
         return yield* failed("Land build", g.root, "io", `the build holds no ${g.lane}/ project`);
-      // Recorded before the folder moves: the restore that lands it names it, and a death before
-      // the record leaves neither.
-      yield* recordBuild(
-        threadId,
+      // Recorded in the restore's own commit: a death leaves both or neither.
+      const landing = toRecord(
         g,
         yield* savedEntry(g, made, input.from, input.label, kind, input.label),
         kind,
-        { current: false, undid: input.undid, request: input.request },
+        { undid: input.undid, request: input.request },
       );
       const result = yield* restoreWithoutRun(
         threadId,
@@ -2773,6 +2792,7 @@ const make = Effect.gen(function* () {
         input.from,
         input.label,
         input.from,
+        landing,
       );
       if (result.moved === "moved-on") {
         yield* dropBuilds(threadId, g, [made], null);

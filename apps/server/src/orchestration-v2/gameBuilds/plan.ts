@@ -123,9 +123,27 @@ export const planGameBuildCommand = (
           ],
           effects: [],
         } satisfies GameBuildPlan;
-      case "game-build.restore":
+      case "game-build.restore": {
+        const landing =
+          command.landing === undefined
+            ? null
+            : ((yield* reads.known(command.projectId, command.landing.id)) ??
+              numbered(
+                command.landing,
+                yield* reads.tally(command.projectId, command.root),
+                undefined,
+              ));
         return {
           events: [
+            ...(landing === null
+              ? []
+              : [
+                  {
+                    ...base,
+                    type: "game-build.recorded",
+                    payload: { build: landing, current: false },
+                  } as const,
+                ]),
             {
               ...base,
               type: "game-build.restored",
@@ -151,6 +169,7 @@ export const planGameBuildCommand = (
             },
           ],
         } satisfies GameBuildPlan;
+      }
       case "game-build.restore.settle": {
         const events: Array<GameBuildEventDraft> = [];
         if (

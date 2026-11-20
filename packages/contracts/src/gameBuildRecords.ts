@@ -180,12 +180,17 @@ export const OrchestrationV2GameBuildCommand = Schema.Union([
     /** The build the folder holds again. */
     current: Schema.NullOr(GameBuildId),
   }),
-  /** A restore asked for: the record commits, and the folder's move is its outbox effect. */
+  /**
+   * A restore asked for: the record commits, and the folder's move is its outbox effect. A
+   * landing (a bring-in, an undo) carries its build, recorded in the same commit, so a death
+   * never leaves a listed landing without its move or a move without its build.
+   */
   Schema.Struct({
     type: Schema.Literal("game-build.restore"),
     ...GameBuildCommandFields,
     ...FolderFields,
     restore: GameBuildRestore,
+    landing: Schema.optionalKey(GameBuildRecord),
   }),
   /** The move's answer, from the effect that made it. */
   Schema.Struct({
