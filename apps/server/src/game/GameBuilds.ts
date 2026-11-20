@@ -635,36 +635,175 @@ const make = Effect.gen(function* () {
       readonly replaces?: GameBuildId | undefined;
     },
   ) =>
-    engine
-      .dispatch({
-        type: "game-build.record",
-        commandId: CommandId.make(`game-build:record:${g.projectId}:${entry.id}`),
-        threadId,
-        build: {
-          id: entry.id,
-          projectId: g.projectId,
-          root: g.root,
-          at: entry.at,
-          kind,
-          number: null,
-          base: entry.base !== null && isGameBuildId(entry.base) ? entry.base : null,
-          ...(options.undid === undefined ? {} : { undid: options.undid }),
-          // A step's mark is read live: its verdict comes after the build.
-          source: entry.source._tag === "turn" ? { ...entry.source, step: null } : entry.source,
-          summary: entry.summary,
-          files: entry.files,
-          fileCount: entry.fileCount,
-        } satisfies GameBuildRecord,
-        current: options.current,
-        ...(options.numberFrom === undefined ? {} : { numberFrom: options.numberFrom }),
-        ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
-      })
-      .pipe(
-        Effect.asVoid,
-        Effect.catchCause((cause) =>
-          Effect.logWarning("A build could not be recorded.", { root: g.root, cause }),
+    ensureMigrated(threadId, g).pipe(
+      Effect.andThen(
+        engine.dispatch({
+          type: "game-build.record",
+          commandId: CommandId.make(`game-build:record:${g.projectId}:${entry.id}`),
+          threadId,
+          build: {
+            id: entry.id,
+            projectId: g.projectId,
+            root: g.root,
+            at: entry.at,
+            kind,
+            number: null,
+            base: entry.base !== null && isGameBuildId(entry.base) ? entry.base : null,
+            ...(options.undid === undefined ? {} : { undid: options.undid }),
+            // A step's mark is read live: its verdict comes after the build.
+            source: entry.source._tag === "turn" ? { ...entry.source, step: null } : entry.source,
+            summary: entry.summary,
+            files: entry.files,
+            fileCount: entry.fileCount,
+          } satisfies GameBuildRecord,
+          current: options.current,
+          ...(options.numberFrom === undefined ? {} : { numberFrom: options.numberFrom }),
+          ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
+        }),
+      ),
+      Effect.asVoid,
+      Effect.catchCause((cause) =>
+        Effect.logWarning("A build could not be recorded.", { root: g.root, cause }),
+      ),
+    );
+
+  /**
+   * The one-time read of a folder's legacy builds into the records: the turn checkpoints, the
+   * suffix refs (kept edits, landings, undos, parks, fixes, bases), the restore record and the
+   * held-keep files, numbered and named as the legacy reader numbered and named them, so an old
+   * game lists the same. Nothing legacy is deleted. Every write of a build waits for it first, so
+   * a build landing during it is read in with the rest and never numbered twice.
+   */
+  const migratedFolders = new Set<string>();
+  const migrateLock = yield* KeyedLock.make<string>();
+  const ensureMigrated = (threadId: ThreadId, g: Pick<Game, "root" | "projectId">) =>
+    Effect.suspend(() => {
+      const key = `${g.projectId}\0${g.root}`;
+      if (migratedFolders.has(key)) return Effect.void;
+      return migrateLock.withLock(
+        key,
+        Effect.gen(function* () {
+          if (migratedFolders.has(key)) return;
+          const folder = yield* projections.getGameBuildFolder(g.projectId, g.root);
+          if (folder?.migrated !== true) {
+            const home = (yield* projects.home(threadId)).root;
+            yield* migrateFolder(threadId, yield* gameOf(threadId, g.root === home));
+          }
+          migratedFolders.add(key);
+        }),
+      );
+    });
+
+  const kindOf = (entry: Pick<Entry, "source">): GameBuildKind => {
+    switch (entry.source._tag) {
+      case "turn":
+        return "turn";
+      case "version":
+        return "version";
+      case "saved":
+        return entry.source.edit === "bring-in"
+          ? "bring-in"
+          : (entry.source.edit ?? "restore-before");
+    }
+  };
+
+  const migrateFolder = (threadId: ThreadId, g: Game) =>
+    Effect.gen(function* () {
+      const home = g.root === g.home;
+      const listed = yield* allEntries(g, ALL_TURNS / 3, undefined);
+      const undoneBy = new Map(
+        [...listed.refs].flatMap(([ref, oid]) =>
+          ref.endsWith(UNDO_SUFFIX)
+            ? [[oid, listed.refs.get(ref.replace(/-undo$/, "-undid"))] as const]
+            : [],
         ),
       );
+      // A copy's own turns, numbered on from its seat, as the copy's rail listed them.
+      const rows = home
+        ? listed.entries.map((entry) => ({ entry, number: undefined as BuildNumber | undefined }))
+        : ((yield* copyRail(threadId, g, 50, undefined))?.rows ?? [])
+            .filter((row) => row.inCopy === true)
+            .map((row) => ({
+              entry: {
+                id: row.id,
+                at: row.at,
+                source: row.source,
+                summary: row.summary,
+                files: row.files,
+                fileCount: row.fileCount,
+                base: row.base,
+              } satisfies Entry,
+              number:
+                row.number === null ? undefined : { number: row.number, fix: row.fix ?? null },
+            }));
+      const numbers = home ? yield* numbersOf(listed, listed.entries) : new Map();
+      const builds = rows
+        .toSorted((a, b) => (a.entry.at < b.entry.at ? -1 : a.entry.at > b.entry.at ? 1 : 0))
+        .map(({ entry, number }): GameBuildRecord => {
+          const numbered = number ?? numbers.get(entry.id);
+          const undid = undoneBy.get(entry.id);
+          return {
+            id: entry.id,
+            projectId: g.projectId,
+            root: g.root,
+            at: entry.at,
+            kind: kindOf(entry),
+            number: numbered?.number ?? null,
+            ...(numbered?.fix == null ? {} : { fix: numbered.fix }),
+            ...(entry.source._tag === "saved" &&
+            entry.source.nth !== undefined &&
+            entry.source.edit === undefined
+              ? { nth: entry.source.nth }
+              : {}),
+            base: entry.base !== null && isGameBuildId(entry.base) ? entry.base : null,
+            ...(undid !== undefined && isGameBuildId(undid) ? { undid } : {}),
+            source: entry.source._tag === "turn" ? { ...entry.source, step: null } : entry.source,
+            summary: entry.summary,
+            files: entry.files,
+            fileCount: entry.fileCount,
+          };
+        });
+      const legacy = yield* noRunRestoreOf(g.root);
+      const restore: GameBuildRestore | null =
+        legacy === null
+          ? null
+          : {
+              requestId: legacy.requestId,
+              target: legacy.target,
+              label: legacy.label,
+              requestedAt: legacy.requestedAt,
+              before: legacy.before,
+              ...(legacy.expect === undefined ? {} : { expect: legacy.expect }),
+              ...(legacy.thread === undefined ? {} : { thread: legacy.thread }),
+              outcome:
+                legacy.outcome === null
+                  ? null
+                  : {
+                      restored: legacy.outcome.restored,
+                      message: legacy.outcome.message,
+                      moved:
+                        legacy.outcome.moved ?? (legacy.outcome.restored ? "restored" : "current"),
+                    },
+            };
+      const held = yield* heldKeepsOf(g.root);
+      yield* engine.dispatch({
+        type: "game-build.migrate",
+        commandId: CommandId.make(
+          `game-build:migrate:${g.projectId}:${NodeCrypto.createHash("sha256").update(g.root).digest("hex").slice(0, 24)}`,
+        ),
+        threadId,
+        projectId: g.projectId,
+        root: g.root,
+        builds,
+        current: shownAs(listed, yield* currentOf(g, listed)),
+        restore,
+        held,
+      });
+      yield* Effect.logInfo("A game's builds were read into its records.", {
+        root: g.root,
+        builds: builds.length,
+      });
+    });
 
   /** A build made outside a turn, as the rail lists it: its change counted from its base. */
   const savedEntry = (
@@ -2282,6 +2421,11 @@ const make = Effect.gen(function* () {
    */
   const recordedMove = (threadId: ThreadId, g: Game, restore: GameBuildRestore) =>
     Effect.gen(function* () {
+      yield* ensureMigrated(threadId, g).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("A game's builds could not be read into its records.", { cause }),
+        ),
+      );
       const waiter = yield* Deferred.make<MoveResult>();
       waiters.set(restore.requestId, waiter);
       yield* engine
@@ -2657,6 +2801,7 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const at = DateTime.formatIso(yield* DateTime.now);
+      yield* ensureMigrated(threadId, g);
       yield* engine.dispatch({
         type: "game-build.keep",
         commandId: CommandId.make(
@@ -2689,6 +2834,23 @@ const make = Effect.gen(function* () {
         : null;
     });
   const decodeHeldKeep = Schema.decodeUnknownOption(HeldKeep);
+  /** The held keeps' files of a folder, oldest first. */
+  const heldKeepsOf = (root: string) =>
+    Effect.gen(function* () {
+      const dir = heldKeepsDir(root);
+      const files = yield* Effect.promise(() => NodeFSP.readdir(dir).catch(() => [] as string[]));
+      const at = DateTime.formatIso(yield* DateTime.now);
+      const held = [];
+      for (const name of files.filter((each) => each.endsWith(".json")).toSorted()) {
+        const text = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(dir, name), "utf8").catch(() => null),
+        );
+        const decoded = text === null ? Option.none() : decodeHeldKeep(text);
+        if (Option.isSome(decoded))
+          held.push({ request: name.slice(0, -".json".length), input: decoded.value.input, at });
+      }
+      return held;
+    });
   const landHeldKeeps: GameBuilds["Service"]["landHeldKeeps"] = (root) =>
     Effect.gen(function* () {
       const dir = heldKeepsDir(root);
@@ -3162,11 +3324,33 @@ const make = Effect.gen(function* () {
       );
   });
 
+  /** Every game folder's legacy builds read into the records, once (ensureMigrated). */
+  const migrateGames = Effect.gen(function* () {
+    const games = yield* projects.list().pipe(Effect.orElseSucceed(() => []));
+    for (const summary of games)
+      yield* Effect.gen(function* () {
+        const [turn] = yield* projections.listProjectTurnCheckpoints(summary.projectId, {
+          limit: 1,
+        });
+        // A game no chat ever changed has no builds to read.
+        if (turn === undefined) return;
+        yield* ensureMigrated(turn.threadId, { root: summary.root, projectId: summary.projectId });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("A game's builds could not be read into its records.", {
+            root: summary.root,
+            cause,
+          }),
+        ),
+      );
+  });
+
   // Measures owed from data, after a restart or between startup and the
   // reactor's subscription: every row that still owes a tier. Builds of an
   // engine this version does not have are not measured.
   const reconcile: GameBuilds["Service"]["reconcile"] = Effect.gen(function* () {
     yield* settleRestores;
+    yield* migrateGames;
     for (const build of yield* facts.owed)
       if (measurable(build.engine)) yield* facts.measure(build, { queue: "background" });
     yield* reconcileTurns;
