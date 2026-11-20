@@ -242,6 +242,8 @@ const stageMinutes = (root: string, moves: boolean) =>
       const facts = yield* withGame(GameBuilds.GameBuilds, (builds, threadId) =>
         builds.facts(threadId, { _tag: "build", build: build.id }),
       );
+      // A build stored before the first minute was measured may have moved; when is unknown.
+      if (facts.player.status === "not-measured" && facts.player.retry) return undefined;
       if (facts.player.status !== "measured") continue;
       if (facts.player.value.moves === true) return (Date.parse(build.at) - born) / 60_000;
     }

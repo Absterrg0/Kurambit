@@ -28,9 +28,10 @@ const firstMinute = (answer: Answer): ReadonlyArray<string> => {
   const lines: ReadonlyArray<string> = answer.player.lines ?? [];
   const off = lines.filter((line) => line.endsWith(" ✗"));
   const held = lines.filter((line) => line.endsWith(" ✓")).length;
-  const unmeasured = lines
-    .filter((line) => line.includes(": not measured"))
-    .map((line) => line.split(":")[0]);
+  const unmeasured = [
+    ...(stage.length === 0 ? ["Stage first moved"] : []),
+    ...lines.filter((line) => line.includes(": not measured")).map((line) => line.split(":")[0]),
+  ];
   return [
     [
       `first minute: ${held} on their line, ${off.length} off`,
