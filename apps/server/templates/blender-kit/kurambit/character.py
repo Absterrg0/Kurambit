@@ -34,7 +34,7 @@ import re
 import bpy
 from mathutils import Vector
 
-from . import face, fit, helpers, proportions, skeleton, studio
+from . import fit, helpers, proportions, skeleton, studio
 from .protocol import Refused, entry
 
 SKIN = "#e0a882"
@@ -44,6 +44,16 @@ LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_as
 
 
 MADE_BODY = {"what": "body", "from": "made", "licence": "made in this game", "ai": False, "credits": None}
+
+# Where a body's face is (its eye helpers and lips), kept on the armature; and how far each style
+# smooths a sculpted head's features so a drawn style reads as drawn.
+EYES = {"l": "face_eye_l", "r": "face_eye_r"}
+LIPS = "face_lips"
+LANDMARKS = "kurambit_face"
+BASE = "kurambit_base"
+STYLE = "kurambit_style"
+SOFTEN = {"realistic": 0.0, "heroic": 0.0, "cartoon": 0.7, "chibi": 1.0}
+
 WHATS = {"body", "clips", "mesh", "parts", "texture"}
 
 
@@ -83,9 +93,9 @@ def _mpfb_body(spec):
                               feet_on_ground=True, scale=0.1, macro_detail_dict=macro)
     # The base mesh carries where its face is: an eyeball in each socket (helper geometry its mask
     # hides) and its lips' vertices. Both stay through the restyle and the conform, weighted to the
-    # head, so the face kit finds them on the finished body (face.take_landmarks).
+    # head, so take_landmarks finds them on the finished body.
     shown = body.vertex_groups.new(name="kurambit_shown")
-    marked = {g.index: face.EYES[g.name[7]] for g in body.vertex_groups if g.name in ("helper-l-eye", "helper-r-eye")}
+    marked = {g.index: EYES[g.name[7]] for g in body.vertex_groups if g.name in ("helper-l-eye", "helper-r-eye")}
     skin = body.vertex_groups.get("body")
     eye_verts = {}
     for v in body.data.vertices:
@@ -103,7 +113,7 @@ def _mpfb_body(spec):
         body.vertex_groups.new(name=name).add(idx, 1.0, "REPLACE")
     lips = body.vertex_groups.get("lips")
     if lips is not None:
-        lips.name = face.LIPS
+        lips.name = LIPS
     # MPFB fits its rig to the vertex coordinates: bake the targets first, or an adult skeleton
     # ends up inside a child's mesh.
     _bake_shape_keys(body)
@@ -111,10 +121,10 @@ def _mpfb_body(spec):
     skeleton.baked_mesh(body, keep=lambda m: m.type == "ARMATURE")
     bones = {b.name for b in rig.data.bones}
     for vg in list(body.vertex_groups):
-        if vg.name not in bones and vg.name not in (face.LIPS, *face.EYES.values()):
+        if vg.name not in bones and vg.name not in (LIPS, *EYES.values()):
             body.vertex_groups.remove(vg)
     head = body.vertex_groups.get("head")
-    for name in face.EYES.values():
+    for name in EYES.values():
         g = body.vertex_groups.get(name)
         if g is not None and head is not None:
             head.add([v.index for v in body.data.vertices if any(e.group == g.index for e in v.groups)], 1.0, "REPLACE")
@@ -425,6 +435,90 @@ def _stylise(body_arm, meshes, name_map, style, height):
     return "body " + "; ".join(parts)
 
 
+def take_landmarks(arm, meshes):
+    """Reads a body's face off its marked vertices at rest (an MPFB2 body's eye helpers and lips),
+    keeps it on the armature and removes the eye helpers: {eye_l, eye_r: [x, y, z, radius], mouth:
+    [x, y, z, width]} in world metres."""
+    import bmesh
+    import json
+
+    from . import helpers
+
+    found = {}
+    for o in meshes:
+        co, _ = helpers.rest_coords(o)
+        if len(co) != len(o.data.vertices):
+            continue
+        gone = set()
+        for key, name in (*EYES.items(), ("mouth", LIPS)):
+            g = o.vertex_groups.get(name)
+            if g is None:
+                continue
+            idx = [v.index for v in o.data.vertices if any(e.group == g.index and e.weight > 0.5 for e in v.groups)]
+            if not idx:
+                continue
+            pts = co[idx]
+            lo, hi = pts.min(axis=0), pts.max(axis=0)
+            c = (lo + hi) / 2
+            if key == "mouth":
+                found["mouth"] = [float(c[0]), float(lo[1]), float(c[2]), float(hi[0] - lo[0])]
+            else:
+                found[f"eye_{key}"] = [*map(float, c), float(max(hi - lo)) / 2]
+                gone |= set(idx)
+                o.vertex_groups.remove(g)
+        if gone:
+            bm = bmesh.new()
+            bm.from_mesh(o.data)
+            bm.verts.ensure_lookup_table()
+            bmesh.ops.delete(bm, geom=[bm.verts[i] for i in gone], context="VERTS")
+            bm.to_mesh(o.data)
+            bm.free()
+    if found:
+        arm[LANDMARKS] = json.dumps(found)
+    return found
+
+
+def soften(arm, meshes, amount):
+    """Smooths the face's sculpted features (lids, the brow ridge, the nose's wings) by amount
+    (0..1): a drawn eye on a sculpted adult face reads as a sticker. Only the front of the head
+    moves, fading out toward the ears, and the lips keep their shape so the mouth stays shut."""
+    import bmesh
+
+    rounds = int(round(36 * amount))
+    if rounds <= 0:
+        return
+    for o in meshes:
+        g = o.vertex_groups.get("Head")
+        if g is None:
+            continue
+        lips = o.vertex_groups.get(LIPS)
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        layer = bm.verts.layers.deform.active
+        if layer is None:
+            bm.free()
+            continue
+        head = [v for v in bm.verts if v[layer].get(g.index, 0.0) > 0.98]
+        if len(head) > 8:
+            ys = [v.co.y for v in head]
+            front, back = min(ys), max(ys)
+            mid = front + (back - front) * 0.45
+            was = {v: v.co.copy() for v in head}
+            for _ in range(rounds):
+                bmesh.ops.smooth_vert(bm, verts=head, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+            mouth = [v for v in head if lips is not None and v[layer].get(lips.index, 0.0) > 0.5]
+            # The lips go back with the face around them as one piece, never each vertex its own way.
+            sink = sum((v.co - was[v] for v in mouth), Vector()) / len(mouth) if mouth else Vector()
+            for v in mouth:
+                v.co = was[v] + sink
+            for v in set(head) - set(mouth):
+                t = max(0.0, min(1.0, (mid - was[v].y) / max(1e-9, (mid - front) * 0.5)))
+                v.co = was[v].lerp(v.co, t * t * (3 - 2 * t))
+            bm.to_mesh(o.data)
+            o.data.update()
+        bm.free()
+
+
 @entry
 def character(params):
     name = params["name"]
@@ -528,12 +622,13 @@ def character(params):
                 o.data.materials.append(skin)
 
     # The face the body brought, and the head drawn as far as its style is.
-    face.take_landmarks(std_arm, meshes)
+    take_landmarks(std_arm, meshes)
     if preset:
-        std_arm[face.STYLE] = preset
+        std_arm[STYLE] = preset
         if base == "studio":
-            std_arm[face.BASE] = base
-        face.soften(std_arm, meshes, face.style_of(std_arm)["soften"])
+            std_arm[BASE] = base
+        # A drawn (studio) body's head already has its style's skull; a sculpted one is smoothed.
+        soften(std_arm, meshes, 0.0 if base == "studio" else SOFTEN.get(preset, 0.0))
 
     parts, old_chains = [], {}
     if old is not None:

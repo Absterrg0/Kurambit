@@ -512,7 +512,7 @@ def place_chain(armature, chain, points=None, *, start=None, direction=None, len
     return {"chain": chain, "bones": bones, "parent": parent}
 
 
-# ---- eyes that blink by bones (face.py reads them for the sidecar) -------------------------------
+# ---- eyes that blink by bones (blink.py reads them for the sidecar) -------------------------------
 
 def _eye_frame(eye, look):
     """The eye's centre and radius (from its rest bounds), and (look, up, side) unit vectors."""
@@ -560,7 +560,7 @@ def eye_lid(eye, side, *, armature=None, look=(0, -1, 0), open_deg=125.0, cover_
     The eye is bound to Head if nothing binds it yet. Then it measures how the lid shuts, by rays over
     the eye, and returns that blink ({bone, kind, axis, amount}); a lid that never covers the eye is
     refused. The sidecar's face carries it, and the game blinks it on its own."""
-    from . import face
+    from . import blink
 
     arm = _armature(armature) if armature is not None else armature_of("Head")
     side = _side(side)
@@ -602,7 +602,7 @@ def eye_lid(eye, side, *, armature=None, look=(0, -1, 0), open_deg=125.0, cover_
         me.materials.append(material)
     bone = _blink_bone(arm, f"blink_lid_{side}", "Head", centre, d, up, 1.5 * radius)
     skin_rigid(lid, bone, armature=arm)
-    blink = face.blink_of(arm, bone)
+    blink = blink.blink_of(arm, bone)
     if blink is None:
         raise ValueError(f"the lid on {eye.name} never covers it when turned: check look (the way the eye faces) and cover_deg")
     return blink
@@ -614,21 +614,21 @@ def eye_squash(eye, side, *, shine=(), armature=None, look=(0, -1, 0)):
     hiding its highlights (shine: their objects, modelled apart from the eye) on blink_shine_<side>,
     a child of it. Each part is bound 100% to its bone. Returns the blinks ({bone, kind, axis, amount}),
     the squash axis measured off the bone."""
-    from . import face
+    from . import blink
 
     arm = _armature(armature) if armature is not None else armature_of("Head")
     side = _side(side)
     centre, radius, d, up, _ = _eye_frame(eye, look)
     bone = _blink_bone(arm, f"blink_eye_{side}", "Head", centre, d, up, max(radius, 0.005))
     skin_rigid(eye, bone, armature=arm)
-    out = [face.blink_of(arm, bone)]
+    out = [blink.blink_of(arm, bone)]
     shine = list(shine)
     if shine:
         at = sum((_eye_frame(o, look)[0] for o in shine), Vector()) / len(shine)
         lit = _blink_bone(arm, f"blink_shine_{side}", bone, at, d, up, max(radius / 2, 0.003))
         for o in shine:
             skin_rigid(o, lit, armature=arm)
-        out.append(face.blink_of(arm, lit))
+        out.append(blink.blink_of(arm, lit))
     return out
 
 
@@ -675,7 +675,7 @@ def pivot(obj, at, parent=None):
     """Puts obj's origin at a world point, its mesh staying where it is, optionally under parent: a
     wheel's hub, a door's hinge line, a turret's ring. The export keeps each object as a named node
     turning about its origin, so the game spins a wheel or swings a door by that name; a part that
-    plays clips of its own goes on hero.hinge_rig instead. Returns obj."""
+    plays clips of its own gets a bone of its own instead. Returns obj."""
     obj = bpy.data.objects[obj] if isinstance(obj, str) else obj
     skeleton.object_mode()
     if obj.data.users > 1:
@@ -869,3 +869,33 @@ def joints(armature, fingers=False):
         axis = max(_AXES, key=lambda a: d.dot(Vector(a[1])))[0]
         out.append(f"{b.name} ({h.x:.3f}, {h.y:.3f}, {h.z:.3f}) {axis}")
     return "\n".join(out)
+
+
+def bind(mesh, arm):
+    """Automatic (heat) weights; a vertex heat leaves unweighted takes its nearest bone."""
+    o = bpy.data.objects[mesh] if isinstance(mesh, str) else mesh
+    for x in bpy.context.view_layer.objects:
+        x.select_set(False)
+    o.select_set(True)
+    arm.select_set(True)
+    bpy.context.view_layer.objects.active = arm
+    with bpy.context.temp_override(selected_objects=[o, arm], selected_editable_objects=[o, arm], active_object=arm, object=arm):
+        bpy.ops.object.parent_set(type="ARMATURE_AUTO")
+    deform = [b for b in arm.data.bones if b.use_deform]
+    groups = {g.index for g in o.vertex_groups if g.name in arm.data.bones}
+    loose = [v.index for v in o.data.vertices if not any(g.group in groups and g.weight > 1e-4 for g in v.groups)]
+    if loose:
+        mw = o.matrix_world
+        for i in loose:
+            p = mw @ o.data.vertices[i].co
+            best, d = None, 1e9
+            for b in deform:
+                h, t = arm.matrix_world @ b.head_local, arm.matrix_world @ b.tail_local
+                seg = t - h
+                u = max(0.0, min(1.0, (p - h).dot(seg) / max(1e-12, seg.length_squared)))
+                dd = (h + seg * u - p).length
+                if dd < d:
+                    best, d = b, dd
+            g = o.vertex_groups.get(best.name) or o.vertex_groups.new(name=best.name)
+            g.add([i], 1.0, "REPLACE")
+    return len(loose)

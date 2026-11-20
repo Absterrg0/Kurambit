@@ -25,7 +25,8 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import contact, face, skeleton
+from . import contact, skeleton
+from .blink import face_of
 
 LOCOMOTION = ("walk", "run", "jog", "sprint", "trot", "gallop", "canter")
 # The most spring chains a sidecar holds (GameModelSidecar).
@@ -301,7 +302,7 @@ def measure(glb, kind, standard_rest=None, standard_joints=None, chains=None, ri
         measured["skinThrough"] = through
     if joints:
         measured["detachedChains"] = skeleton.detached_chains(doc)[:32]
-    blink = face.face_of(arm) if arm is not None else None
+    blink = face_of(arm) if arm is not None else None
     if blink is not None:
         measured["face"] = blink
     return measured, {"armatures": {a.name: [b.name for b in a.data.bones] for a in arms}, "joints": joints, "worstJoint": worst,

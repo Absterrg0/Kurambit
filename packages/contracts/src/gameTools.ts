@@ -8,7 +8,6 @@ import {
   GameAnimateInput,
   GameBlenderAssetsImportInput,
   GameBlenderAssetsSearchInput,
-  GameBlenderCarveInput,
   GameBlenderCharacterInput,
   GameBlenderCodeInput,
   GameBlenderExportInput,
@@ -100,7 +99,6 @@ export const GameBlenderToolInput = Schema.Struct({
   character: op(GameBlenderCharacterInput),
   // The art helpers stay until the art phase measures Blender's own tools against them (TOOLS §4).
   paint: op(GameBlenderPaintInput),
-  carve: op(GameBlenderCarveInput),
   sprites: op(GameBlenderRenderSpritesInput),
   animate: op(GameAnimateInput),
   asset_search: op(GameBlenderAssetsSearchInput),

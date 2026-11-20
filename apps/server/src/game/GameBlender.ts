@@ -29,8 +29,6 @@ import {
   type GameBlenderAssetsSearchResult,
   type GameBlenderCharacterInput,
   type GameBlenderCharacterResult,
-  type GameBlenderCarveInput,
-  type GameBlenderCarveResult,
   type GameBlenderCodeInput,
   type GameBlenderCodeResult,
   type GameBlenderExportInput,
@@ -267,8 +265,8 @@ const PASS_ROOM: MemoryRoom = {
 };
 /** A character's height on screen at game distance, px, by the lock's view. */
 /**
- * A paint or carve run: the sheet, the depth renders, a handful of float atlases of up to
- * 4096² and Cycles bakes; a carve also holds its dense sculpt. Measured peaks are in the K report.
+ * A paint run: the sheet, the depth renders, a handful of float atlases of up to
+ * 4096² and Cycles bakes. Measured peaks are in the K report.
  */
 const SHEET_ROOM: MemoryRoom = {
   what: "Blender sheet projection",
@@ -276,8 +274,7 @@ const SHEET_ROOM: MemoryRoom = {
   env: "KURAMBIT_BLENDER_SHEET_MEMORY_MB",
 };
 const PAINT_TIMEOUT_MS = 15 * 60_000;
-const CARVE_TIMEOUT_MS = 20 * 60_000;
-/** Where painted and carved textures live in the game, one folder per name. */
+/** Where painted textures live in the game, one folder per name. */
 const TEXTURES_DIR = "art/blender/textures";
 const decodePainted = Schema.decodeUnknownEffect(
   Schema.Struct({
@@ -295,21 +292,6 @@ const decodePainted = Schema.decodeUnknownEffect(
     ),
     mirrored: Schema.NullOr(Schema.String),
     head: Schema.Boolean,
-    seen: Schema.Number,
-    notes: Schema.Array(Schema.String),
-  }),
-);
-const decodeCarved = Schema.decodeUnknownEffect(
-  Schema.Struct({
-    library: Schema.String,
-    object: Schema.String,
-    triangles: Schema.Number,
-    size: Schema.Array(Schema.Number),
-    files: Schema.Array(Schema.String),
-    views: Schema.Array(
-      Schema.Struct({ label: Schema.String, columns: Schema.Array(Schema.Number) }),
-    ),
-    mirrored: Schema.NullOr(Schema.String),
     seen: Schema.Number,
     notes: Schema.Array(Schema.String),
   }),
@@ -687,11 +669,6 @@ export class GameBlender extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderPaintInput,
     ) => Effect.Effect<GameBlenderPaintResult, GameOperationError>;
-    /** Live Blender scene: an organic hard prop carved from its three-view sheet, then painted. */
-    readonly carve: (
-      threadId: ThreadId,
-      input: GameBlenderCarveInput,
-    ) => Effect.Effect<GameBlenderCarveResult, GameOperationError>;
     readonly scene: (
       threadId: ThreadId,
       input: GameBlenderSceneInput,
@@ -1532,7 +1509,7 @@ const make = Effect.gen(function* () {
 
   /**
    * One kit entry in a one-shot, factory-startup Blender under the session's isolated folders,
-   * behind the memory gate: run.py's `pass`, `paint` or `carve`. With `copy`, it opens a copy of
+   * behind the memory gate: run.py's `pass` or `paint`. With `copy`, it opens a copy of
    * the saved live scene, which the live scene saves itself: Blender remaps its relative paths
    * (library textures) for the copy's folder, so the run resolves the same files the scene does.
    * Its one result line comes back undecoded; a refusal fails with the reason it names.
@@ -1541,7 +1518,7 @@ const make = Effect.gen(function* () {
     root: string,
     out: string,
     job: {
-      readonly entry: "pass" | "paint" | "carve";
+      readonly entry: "pass" | "paint";
       readonly operation: string;
       readonly copy: boolean;
       readonly room: MemoryRoom;
@@ -2037,7 +2014,7 @@ const make = Effect.gen(function* () {
     Effect.forEach([...sessions.keys()], drop, { discard: true, concurrency: "unbounded" }),
   );
 
-  /** A scratch folder of one paint or carve run under the pipeline's logs. */
+  /** A scratch folder of one paint run under the pipeline's logs. */
   const sheetRunDir = (realRoot: string, kind: string, name: string) =>
     Effect.tryPromise({
       try: () =>
@@ -2165,76 +2142,6 @@ const make = Effect.gen(function* () {
           `Saved .blend source: ${blend}. Look at it (game_blender op look with mode review, which also shows the ¾ view the sheet never drew), then game_blender op export.`,
         ].join("\n"),
         alignment,
-        blend,
-      };
-    });
-
-  const carveProp = (root: string, input: GameBlenderCarveInput) =>
-    Effect.gen(function* () {
-      const realRoot = yield* realRootOf(root);
-      const style = yield* readGameStyle(realRoot);
-      const { size } = atlasSize(style, input.size);
-      const triangles = input.triangles ?? styleBudgets(style).prop;
-      const sheet = yield* sheetSource(realRoot, input.sheet, "blender-carve", (id, path) =>
-        art.delivered(root, id, path),
-      );
-      // Before the run: a name already taken is refused without carving anything.
-      yield* kitCall(
-        root,
-        "blender-carve",
-        decodeAdopted,
-        [
-          "import bpy",
-          `name = ${JSON.stringify(input.name)}`,
-          `if (bpy.data.objects.get(name) or bpy.data.collections.get(name)) and not ${input.replace === true ? "True" : "False"}: print('KURAMBIT_REFUSED ' + json.dumps({'reason': 'invalid-input', 'text': name + ' already exists in the live scene: carve again with replace: true to replace it, or under another name'}))`,
-          "else: print('KURAMBIT_RESULT ' + json.dumps({'objects': [], 'files': []}))",
-        ].join("\n"),
-      );
-      const out = yield* sheetRunDir(realRoot, "carve", input.name);
-      const carved = yield* oneShot(root, out, {
-        entry: "carve",
-        operation: "blender-carve",
-        copy: false,
-        room: SHEET_ROOM,
-        timeoutMs: CARVE_TIMEOUT_MS,
-        params: {
-          sheet: sheet.file,
-          views: input.views ?? null,
-          name: input.name,
-          height: input.height,
-          box: input.box ?? 0,
-          triangles,
-          size,
-          relief: input.relief ?? 1,
-          roughness: input.roughness ?? 0.8,
-          metallic: input.metallic ?? 0,
-        },
-      }).pipe(Effect.flatMap(decodeCarved), Effect.mapError(protocolError("blender-carve", root)));
-      yield* saveBlend(root);
-      const adopted = yield* kitCall(
-        root,
-        "blender-carve",
-        decodeAdopted,
-        `import kurambit.carve\nkurambit.carve.adopt(${pyJson({
-          library: carved.library,
-          object: carved.object,
-          name: input.name,
-          dest: yield* inGame(realRoot, `${TEXTURES_DIR}/${input.name}`),
-          stamp: sheet.stamp,
-          replace: input.replace === true,
-        })})`,
-      ).pipe(Effect.ensuring(removeScratch(out, [])));
-      const blend = yield* saveBlend(root);
-      return {
-        text: [
-          `Carved ${adopted.objects.join(", ")} from ${sheet.path}, ${sheetCredit(sheet)}: ${carved.size.map((x) => x.toFixed(2)).join(" x ")} m, ${carved.triangles} triangles, standing at the origin facing -Y${input.replace === true ? " (or where the one it replaced stood)" : ""}.`,
-          `Views read: ${carved.views.map((view) => `${view.label} (columns ${view.columns.join("-")})`).join(", ")}${carved.mirrored === null ? "" : `; the ${carved.mirrored} side is the other side mirrored`}. ${Math.round(carved.seen * 100)}% of the surface was painted from a view.`,
-          `Textures: ${size} px albedo, a normal map baked from the sculpt and ORM, under ${TEXTURES_DIR}/${input.name}/.`,
-          ...carved.notes,
-          ...paletteNote(style),
-          `Saved .blend source: ${blend}. Look at it from a ¾ view (game_blender op look with mode review) before game_blender op export: three views leave its corners to guesswork.`,
-        ].join("\n"),
-        object: adopted.objects[0] ?? input.name,
         blend,
       };
     });
@@ -2834,10 +2741,6 @@ const make = Effect.gen(function* () {
     paint: (threadId, input) =>
       projects.exclusive(threadId, "Blender paint", (root) =>
         holding(root, pipelineLocked(root)(paintModel(root, input))),
-      ),
-    carve: (threadId, input) =>
-      projects.exclusive(threadId, "Blender carve", (root) =>
-        holding(root, pipelineLocked(root)(carveProp(root, input))),
       ),
     exportGlb: (threadId, input) =>
       projects.exclusive(threadId, "Blender export", (root) =>

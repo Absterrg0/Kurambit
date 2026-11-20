@@ -2,10 +2,10 @@
 style pass joins its meshes: height in its range, edge stretch and squash on every clip, clothing
 inside the body, feet on walk and run, and the budget (gates.py holds the numbers' rules).
 
-Clothing is a mesh marked kurambit_cloth (hero.dress marks it); the body is the character's body
+Clothing is a mesh marked kurambit_cloth (the earlier dress helper marked it; models made with it still export); the body is the character's body
 mesh (stamped what: body). A hero's height leaves out what it holds and its tail: vertices led by
 a hand's bones or a tail's, so a rod held overhead or a raised tail is not its height. Its range is the armature's kurambit_height [lo, hi] (game_blender op character's
-height, hero.creature_rig's height); a body on the standard skeleton with none is a human,
+height, an own rig's height); a body on the standard skeleton with none is a human,
 1.5-2.0 m; a body on its own rig must declare one."""
 import json
 import math
@@ -22,6 +22,61 @@ from .skeleton import assign_action
 DEFORM_FRAMES = 8
 LOCOMOTION = ("walk", "run", "jog", "sprint", "trot", "gallop", "canter", "hop")
 STANDARD_FEET = ("ball_l", "ball_r")
+
+
+# Skin a garment covers (the earlier dress helper marked it) does not ship.
+UNDER_GROUP = "kurambit_under"
+
+
+def drop_under(meshes):
+    """Removes the faces of each body whose every vertex is marked as under a garment (the export's
+    pass runs this on its own copy of the scene, so the live body stays whole for the next fitting).
+    Returns how many faces went."""
+    import bmesh
+
+    gone = 0
+    for o in meshes:
+        group = o.vertex_groups.get(UNDER_GROUP) if o.type == "MESH" else None
+        if group is None:
+            continue
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        layer = bm.verts.layers.deform.active
+        if layer is not None:
+            faces = [f for f in bm.faces if all(v[layer].get(group.index, 0.0) > 0.5 for v in f.verts)]
+            gone += len(faces)
+            bmesh.ops.delete(bm, geom=faces, context="FACES")
+            bm.to_mesh(o.data)
+            o.data.update()
+        bm.free()
+        o.vertex_groups.remove(group)
+    return gone
+
+
+def _boundary_distance(co, edges, boundary):
+    """How far each vertex is from the mesh's open edges, along its edges (metres)."""
+    import heapq
+
+    n = len(co)
+    dist = np.full(n, np.inf)
+    near = [[] for _ in range(n)]
+    for a, b in edges:
+        w = float(np.linalg.norm(co[a] - co[b]))
+        near[a].append((b, w))
+        near[b].append((a, w))
+    heap = [(0.0, int(i)) for i in boundary]
+    for _, i in heap:
+        dist[i] = 0.0
+    heapq.heapify(heap)
+    while heap:
+        d, i = heapq.heappop(heap)
+        if d > dist[i]:
+            continue
+        for j, w in near[i]:
+            if d + w < dist[j]:
+                dist[j] = d + w
+                heapq.heappush(heap, (d + w, j))
+    return dist
 
 
 def _clip_name(a):
@@ -139,7 +194,6 @@ def _inside(points, body_co, body_polys, gone=None):
 def _gone(bodies):
     """Per face of the merged bodies, whether it is left out of the export (cloth.dress marked every
     vertex of it as under a garment), and per vertex whether every face it is on is."""
-    from .cloth import UNDER_GROUP
 
     faces, verts = [], []
     for o in bodies:
@@ -214,7 +268,6 @@ def _cover_rest(garment, body, height, hidden=None):
     open_edges = [[(a, b) for a, b in zip(f, f[1:] + f[:1]) if count[(min(a, b), max(a, b))] == 1] for f in gpolys]
     # Skin within a seam's width of an opening comes and goes as the cloth shifts along the limb:
     # it is at the edge of the garment, not under it.
-    from .cloth import _boundary_distance
 
     pairs = np.array(sorted(count), np.int64).reshape(-1, 2)
     rim = np.unique(np.array([k for k, c in count.items() if c == 1], np.int64).reshape(-1, 2)) if any(c == 1 for c in count.values()) else np.zeros(0, np.int64)
@@ -287,7 +340,6 @@ def _lies_over(cover, garment, under_co, height, rings=3):
         over |= grown
     # Not its rims: once a hem lifts past a leg the leg's nearest cloth is the hem's turned-in
     # edge, and the leg is past the cloth, not through it.
-    from .cloth import _boundary_distance
 
     count = {}
     for f in gpolys:
@@ -548,9 +600,9 @@ def hero_gates(arm, meshes, budgets, scale=1.0):
         layer = (f"one garment comes at most {between * 1000:.0f} mm through another{where(worst_layer[1])}, "
                  f"{worst_layer[2] * 100:.1f}% of what is under it there past {limit}")
         # A refusal names only what failed, each with its fix, so the text stays inside the protocol.
-        failed = ([sunk + ": lift it (hero.dress offset), weight it like the body under it, or hang the hem on chains"] if not sunk_ok else []) + \
+        failed = ([sunk + ": lift it off the body, weight it like the body under it, or hang the hem on chains"] if not sunk_ok else []) + \
                  ([shown + ": the body shows through: widen it there, or take its weights from the body (Data Transfer)"] if not shown_ok else []) + \
-                 ([layer + ": the under garment shows through. Make it first, run hero.follow_hem after adding clips, or end the outer one higher (a closed skirt past mid-thigh does not clear a lunge)"] if not layer_ok else [])
+                 ([layer + ": the under garment shows through. Make it first, or end the outer one higher (a closed skirt past mid-thigh does not clear a lunge)"] if not layer_ok else [])
         out.append(gates.gate("cloth", ok, round(max(depth, through, between) * 1000, 1), gates.CLOTH_DEPTH_MAX * 1000,
                               "; ".join(failed) if failed else "; ".join([sunk, shown] + ([layer] if layered else []))))
     if feet and any(any(w in _clip_name(a).lower() for w in LOCOMOTION) for a in clips):

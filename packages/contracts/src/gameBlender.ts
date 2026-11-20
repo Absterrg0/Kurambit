@@ -6,7 +6,7 @@ import { GameModelMeasure, GameModelRefusal } from "./gameModel.ts";
 /** Live Blender through the pinned mcp-for-blender server, behind GameBlender. */
 
 /**
- * A scene name (a character's collection and armature, a carved prop): lower case, as the export
+ * A scene name (a character's collection and armature, a prop): lower case, as the export
  * stems and sidecars are. Agents name heroes "Bram"; the capital is taken, not refused.
  */
 const BlenderName = Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,31}$/)).pipe(
@@ -342,35 +342,6 @@ export const GameBlenderPaintResult = Schema.Struct({
   blend: Schema.String,
 });
 export type GameBlenderPaintResult = typeof GameBlenderPaintResult.Type;
-
-export const GameBlenderCarveInput = Schema.Struct({
-  /** The object and its collection in the live scene. */
-  name: BlenderName,
-  sheet: SheetPath,
-  /** Its standing height in metres. */
-  height: Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 50 })),
-  views: Schema.optionalKey(SheetViews),
-  /** Below this height (m) sections stay boxes: a plinth or a base. */
-  box: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 50 }))),
-  /** Triangle budget of the game mesh; default STYLE.json's budget.prop. */
-  triangles: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 200_000 })),
-  ),
-  size: Schema.optionalKey(AtlasSize),
-  /** How deep the painting's light and dark are carved (1 is the default). */
-  relief: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 3 }))),
-  roughness: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
-  metallic: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
-  /** Replace an object of this name, keeping where it stands. */
-  replace: Schema.optionalKey(Schema.Boolean),
-});
-export type GameBlenderCarveInput = typeof GameBlenderCarveInput.Type;
-export const GameBlenderCarveResult = Schema.Struct({
-  text: Schema.String,
-  object: Schema.String,
-  blend: Schema.String,
-});
-export type GameBlenderCarveResult = typeof GameBlenderCarveResult.Type;
 
 /** Named views; the four sides take `elevation`, top looks straight down, isometric is 45° round and 30° down. */
 export const GameBlenderSpriteViewName = Schema.Literals([

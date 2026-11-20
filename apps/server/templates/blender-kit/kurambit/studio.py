@@ -19,7 +19,6 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import face
 from .protocol import Refused
 
 LICENCE = "CC0 1.0 (Blender Studio Human Base Meshes)"
@@ -270,7 +269,8 @@ def body(gender=0.5, path=BODIES):
     """(rig, [mesh], name map): the stylised body for gender (0 female .. 1 male), standing at the
     origin facing -Y, bound to a rig of the standard joints' names in its own A-pose, its eye sockets
     and lips marked for the face kit as an MPFB2 body's are."""
-    from . import creature, skeleton
+    from . import helpers, skeleton
+    from .character import EYES, LIPS
 
     skeleton.object_mode()
     mesh, eye_l, eye_r = _load(path, "male" if float(gender) >= 0.5 else "female")
@@ -309,7 +309,7 @@ def body(gender=0.5, path=BODIES):
     arm = _armature("studio_rig", joints, tips)
     for p in me.polygons:
         p.use_smooth = True
-    creature.bind(mesh, arm)
+    helpers.bind(mesh, arm)
     rigid = np.unique(np.concatenate([vert_sets[SETS[k]] for k in RIGID_HEAD]))
     for vg in mesh.vertex_groups:
         vg.remove(rigid.tolist())
@@ -333,10 +333,10 @@ def body(gender=0.5, path=BODIES):
     g = mesh.vertex_groups.new(name=NOSE_GROUP)
     for i in nose_v:
         g.add([int(i)], min(1.0, float(depth[i]) / min(top, 4)), "REPLACE")
-    lips = mesh.vertex_groups.new(name=face.LIPS)
+    lips = mesh.vertex_groups.new(name=LIPS)
     lips.add(np.unique(np.concatenate([vert_sets[SETS["lip_top"]], vert_sets[SETS["lip_low"]]])).tolist(), 1.0, "REPLACE")
     # The eyes come as their own spheres in the sockets: joined in as marked helper geometry, which
-    # face.take_landmarks reads and removes, as it does an MPFB2 body's.
+    # character.take_landmarks reads and removes, as it does an MPFB2 body's.
     n0 = len(me.vertices)
     counts = [len(eye_l.data.vertices), len(eye_r.data.vertices)]
     with bpy.context.temp_override(active_object=mesh, object=mesh, selected_objects=[mesh, eye_l, eye_r], selected_editable_objects=[mesh, eye_l, eye_r]):
@@ -344,7 +344,7 @@ def body(gender=0.5, path=BODIES):
     start = n0
     for key, count in zip(("l", "r"), counts):
         idx = list(range(start, start + count))
-        mesh.vertex_groups.new(name=face.EYES[key]).add(idx, 1.0, "REPLACE")
+        mesh.vertex_groups.new(name=EYES[key]).add(idx, 1.0, "REPLACE")
         mesh.vertex_groups["Head"].add(idx, 1.0, "REPLACE")
         start += count
     for a in [a for a in mesh.data.attributes if a.name in (".sculpt_face_set", ".sculpt_mask", "crease_edge")]:

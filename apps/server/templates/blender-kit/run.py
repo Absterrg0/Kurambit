@@ -1,7 +1,6 @@
 """The one-shot entry: blender -b <copy of live.blend> --python run.py -- pass <params.json>.
-Also `paint <params.json>` (kurambit.paint) and `carve <params.json>` (kurambit.carve, in an empty
-scene): work that outlasts a live call, done on a copy so the live scene changes only when its
-result is adopted.
+Also `paint <params.json>` (kurambit.paint): work that outlasts a live call, done on a copy so the
+live scene changes only when its result is adopted.
 
 params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.json | null,
          budgets: {character, prop, texture}, standardJoints: [...] | null, out: abs dir,
@@ -25,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 from mathutils import Matrix  # noqa: E402
 
-from kurambit import cloth, contact, deform, measure, skeleton, stylepass  # noqa: E402
+from kurambit import contact, deform, measure, skeleton, stylepass  # noqa: E402
 from kurambit import gates as gates_rules  # noqa: E402
 from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
@@ -236,9 +235,9 @@ def run_pass(params):
     loose = contact.unsupported(objects) if not arms else None
     influences = max_influences(objects)
     gates = hero_gates(objects, params)
-    # Skin a garment covers does not ship (cloth.dress marks it). The gates read the whole body and
+    # Skin a garment covers does not ship (the earlier dress helper marked it). The gates read the whole body and
     # leave that skin out of what can show.
-    cloth.drop_under(objects)
+    deform.drop_under(objects)
     role, role_named = stylepass.role_of(objects)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
@@ -303,13 +302,13 @@ def run_pass(params):
 
 if __name__ == "__main__":
     argv = sys.argv[sys.argv.index("--") + 1:]
-    if len(argv) != 2 or argv[0] not in ("pass", "paint", "carve"):
-        raise SystemExit("usage: blender -b <scene.blend> --python run.py -- pass|paint|carve <params.json>")
+    if len(argv) != 2 or argv[0] not in ("pass", "paint"):
+        raise SystemExit("usage: blender -b <scene.blend> --python run.py -- pass|paint <params.json>")
     with open(argv[1]) as f:
         params = json.load(f)
     if argv[0] == "pass":
         run_pass(params)
     else:
-        from kurambit import carve, paint  # noqa: E402
+        from kurambit import paint  # noqa: E402
 
-        (paint.paint if argv[0] == "paint" else carve.carve)(params)
+        paint.paint(params)

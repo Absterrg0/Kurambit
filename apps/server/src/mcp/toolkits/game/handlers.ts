@@ -13,7 +13,6 @@ import {
   GamePicturesResult,
   GameBlenderAssetsImportResult,
   GameBlenderAssetsSearchResult,
-  GameBlenderCarveResult,
   GameBlenderCharacterResult,
   GameBlenderCodeResult,
   GameBlenderExportResult,
@@ -472,10 +471,6 @@ const blenderHandlers = {
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.paint(threadId, paint),
             ).pipe(as(GameBlenderPaintResult)),
-          carve: (carve) =>
-            withGame(GameBlender.GameBlender, (blender, threadId) =>
-              blender.carve(threadId, carve),
-            ).pipe(as(GameBlenderCarveResult)),
           sprites: (sprites) =>
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.renderSprites(threadId, sprites),

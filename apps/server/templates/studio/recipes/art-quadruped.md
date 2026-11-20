@@ -42,8 +42,8 @@ horse, cow, husky and more), on the library route.
 
 ## Pitfalls
 
-- Rigify `rigify()` then `game_rig()` twists the rest pose (133° at a front thigh, measured): keep
-  the meta-rig.
+- Generating Rigify's rig twists the rest pose (133° at a front thigh, measured): keep the
+  meta-rig.
 - Rings centred on the spine give a thin body hung high.
 - Body weights reaching the thighs: 3.42x stretch.
 - Round tube legs on straight joints read as stilts; give the hock its angle.

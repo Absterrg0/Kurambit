@@ -184,8 +184,8 @@ check that matters.
   the sidecar names the shipped bytes and triangles, which keeps the asset fact valid. The asset is its sidecar `<name>.asset.json` (skeleton, clips with ground speed,
   springs, height, source and licence), which the three.js shell reads from `ASSETS` and which
   another engine can read later; GLB extras are not used because native engines drop them.
-  Painting from a sheet (`game_blender` op `paint`) and carving (`game_blender` op `carve`) run in a
-  one-shot Blender too, since their bakes outlast the live server's 180 s per command; the live
+  Painting from a sheet (`game_blender` op `paint`) runs in a
+  one-shot Blender too, since its bakes outlast the live server's 180 s per command; the live
   scene only adopts the result, after checking its objects did not change meanwhile.
   `game_blender` op `animate` compiles a move spec in the live scene itself (a pass takes seconds) and keeps
   each pass's spec, numbers and pictures under `builds/logs/animate/<clip>/<n>`. Its clips follow
@@ -232,8 +232,12 @@ check that matters.
   standard names whose rest frames are the library's, so its clips play with no retarget loss.
   A creature's skeleton is a Rigify meta-rig used as the armature itself, its clips keyed through
   IK legs and baked (`bake_ik_walk`). Generating Rigify's rig and baking it onto its DEF bones
-  (`game_rig`, kept for rigs made before) turned a wolf's front thigh 133° at rest; the cause was
-  not found, and the meta-rig's own hierarchy exports intact, legs under the spine. Blender 4.5 bundles only
+  turned a wolf's front thigh 133° at rest, and Rigify's own DEF export flattens the limbs under the
+  rig root; the meta-rig's own hierarchy exports intact, legs under the spine.
+- The earlier craft kits (`hero`, `world`, `carve` and their modules) were deleted after the asset
+  bench. Their `.blend` files still export byte for byte, because the export pass reads only data
+  they left (`kurambit_cloth`, the `kurambit_under` group, `kurambit_rig`): `deform.py` keeps
+  `drop_under` and the cloth gates for them. Their scripts no longer rebuild. Blender 4.5 bundles only
   Smooth by Angle and the hair groups as node assets (Scatter on Surface and Curve to Tube came
   with 5.x Essentials), so `scatter` and `tube` build those few nodes themselves.
   A machine's moving parts ride bones laid along their hinge lines, because an export carries only
