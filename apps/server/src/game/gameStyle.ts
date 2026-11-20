@@ -406,7 +406,7 @@ export const styleFromLook = (
 };
 
 /** What of a lock the game's code reads (shell/model.js): its colours, shape, finish and surfaces, every role holding a colour. */
-export const gameLook = (style: GameStyle | null): GameLook => ({
+const gameLook = (style: GameStyle | null): GameLook => ({
   ...(style === null ? {} : { view: style.view }),
   ...(Array.isArray(style?.palette) ? { palette: style.palette } : {}),
   roles: { ...GAME_STYLE_ROLES, ...style?.roles },

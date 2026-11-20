@@ -41,7 +41,7 @@ const loadPlaywright = () =>
  * Whether a still is one colour bar a little text: a canvas caught between frames, not a picture of
  * the game. Sampled on a coarse grid, so a page's own text over the canvas does not count.
  */
-export const looksFlat = (png: Buffer) => {
+const looksFlat = (png: Buffer) => {
   const { width, height, data } = PNG.sync.read(png);
   const counts = new Map<number, number>();
   let samples = 0;
