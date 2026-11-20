@@ -596,11 +596,11 @@ FACET_MIN = 500
 
 
 def facet(objects, style):
-    """The lock's faceted finish (shading.finish "faceted"): each mesh thinned to clean planes and
+    """The lock's faceted look (shape.edges "faceted", set in STYLE.json): each mesh thinned to clean planes and
     shaded flat, which is how most low-poly art gets its look. It runs before the gates, so they
     measure what ships. Weights, materials and the skin marked as under a garment carry through the
     thinning. Returns how many meshes it thinned."""
-    if ((style or {}).get("shading") or {}).get("finish") != "faceted":
+    if ((style or {}).get("shape") or {}).get("edges") != "faceted":
         return 0
     thinned = 0
     for o in objects:

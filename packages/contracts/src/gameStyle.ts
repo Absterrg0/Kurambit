@@ -59,7 +59,7 @@ export const GAME_STYLE_ROLES = {
 
 /** How made things are shaped: read by the kit's world helpers and shell/model.js. */
 export const GameStyleShape = Schema.Struct({
-  /** faceted: flat faces and hard edges; soft: smooth shading and rounder forms. */
+  /** faceted: flat faces and hard edges (made characters and creatures are thinned to clean planes); soft: smooth shading and rounder forms. */
   edges: Schema.optionalKey(Schema.Literals(["faceted", "soft"])),
   /** Metres a built thing's edges are rounded by. */
   bevel: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 0.2 }))),
@@ -127,8 +127,6 @@ export const GameStyle = Schema.Struct({
       glow: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 20 }))),
       /** How strongly a made model is shaded into its vertex colours (creases, a gradient, a darker underside); 0 leaves it flat. */
       depth: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
-      /** A made model's surface: "faceted" thins it to clean planes, shaded flat; "smooth" (the default) keeps it round. */
-      finish: Schema.optionalKey(Schema.Literals(["smooth", "faceted"])),
     }),
   ),
   /** Metres: a made character is scaled to this standing height. */
