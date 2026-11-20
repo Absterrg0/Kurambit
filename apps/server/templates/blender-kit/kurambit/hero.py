@@ -1,4 +1,7 @@
-"""The hero kit, as one namespace for game_blender op code: `from kurambit import hero`.
+"""Kept so models made with it still rebuild; new models are parts on a structure
+(studio-skills/recipes).
+
+The hero kit, as one namespace for game_blender op code: `from kurambit import hero`.
 
 Body:    hero.creature_body(name, sketch, style="cartoon"|...), hero.sculpt(obj, kind, ...), hero.decimate(obj, tris)
          (a human body is game_blender op character's: body mpfb or library, style, height)

@@ -1,4 +1,7 @@
-"""The world kit, for game_blender op code: `from kurambit import world`. What a place is made of
+"""Kept so models made with it still rebuild; new models are parts on a structure
+(studio-skills/recipes).
+
+The world kit, for game_blender op code: `from kurambit import world`. What a place is made of
 that Blender makes better than code, each from one call and a few numbers, built with Blender's
 own curves, modifiers and geometry nodes.
 

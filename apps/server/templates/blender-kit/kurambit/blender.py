@@ -72,7 +72,8 @@ def metarig(kind, name=None, height=None):
 
 def rigify(meta, body=None, name=None):
     """Generates Rigify's control rig from a meta-rig and, given the body (a mesh or a list),
-    binds it with automatic weights to the deform bones. Returns the control rig."""
+    binds it with automatic weights to the deform bones. Returns the control rig. Kept for rigs
+    made with it; a game creature keeps its meta-rig (game_rig twists its rest pose)."""
     _rigify()
     skeleton.object_mode()
     name = name or meta.name.replace("_metarig", "") + "_controls"

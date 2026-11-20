@@ -1592,7 +1592,7 @@ const make = Effect.gen(function* () {
         text: [
           `${before === null ? "Wrote" : "Rewrote"} ${GAME_STYLE_FILE}: ${style.finish} finish, ${style.view} view${Array.isArray(style.palette) ? `, a palette of ${style.palette.length}` : ""}${style.anchor === undefined ? "" : `, anchored to ${style.anchor}`}.`,
           ...(roles === "" ? [] : [`Roles: ${roles}.`]),
-          "Made things take it: the Blender kit's world, surface and material helpers, and shell/model.js (M.role, M.paintOf with a role). What is already built keeps its look until it is made again.",
+          "Made things take it: the Blender kit's surface and material helpers, and shell/model.js (M.role, M.paintOf with a role). What is already built keeps its look until it is made again.",
         ].join("\n"),
       };
     });

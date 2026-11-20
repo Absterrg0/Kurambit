@@ -215,21 +215,25 @@ check that matters.
 - Made art follows the CC0 packs' method rather than a hand-written craft kit: one material on a
   gradient-swatch atlas (`stylepass.py`), budgets by role taken from the packs, and the review's
   numbers (`review.py`, `compare.py`: silhouette overlap against a reference picture or a library
-  model, width by tenths of height, thin parts at game distance) as the loop's eyes. Hard-surface
-  subjects (buildings, props) are plain `bpy`: there it beat the craft kit (`world`, `carve`, not
-  named any more). Organic ones keep the hero kit, which beat plain `bpy` on a character and an
-  animal: clothes cut from the body's own surface and weighted by the skin under them (`cloth.py`;
-  automatic weights split a coat between the legs), a face built from the body's own landmarks
-  (`face.py`), and a creature's body and rig from one sketch of joint chains (`creature.py`), so
-  its joints sit inside its body by construction and its gaits come from a generator (`gait.py`).
+  model, width by tenths of height, thin parts at game distance) as the loop's eyes. Every subject
+  is built as parts on a structure, the way the packs' own files are split (KayKit's Rogue is a
+  head rigid to one bone plus separate torso, arm and leg parts): lofted rings on a skeleton's
+  joints, a side profile extruded, coursed blocks on the grid. One sculpted blob decimated to
+  budget has no edge loops and shades as noise. The recipes in `templates/studio/recipes/` carry
+  the method; the kit adds only `loft`, `weights_along`, `bake_ik_walk`, `decal` and the joint
+  print. The hero and world kits (`cloth`, `face`, `creature`, `gait`, `world`, ...) stay only so
+  models made with them rebuild, until the asset bench is judged.
+- A decal is a painted cell in the model's one atlas, the atlas's width and two swatch rows tall,
+  below the swatches: the runtime recolours a swatch by cutting the atlas into rows of equal
+  height (`look-edits.js`), so a cell of any other height would shift every swatch it recolours.
   A made body (MPFB2 or the drawn bodies) carries no material, so op `character` paints it
   `<name> skin`; unpainted, it ships the glTF default white.
 - Humans use no Rigify: op `character`'s conform already is the game rig, deform bones under
   standard names whose rest frames are the library's, so its clips play with no retarget loss.
-  A creature rigged with Rigify (`kurambit.blender`) does not ship Rigify's rig: its DEF bones are
-  parented under ORG and MCH bones, so `game_rig` copies them into a plain armature (each under its
-  nearest DEF ancestor), bakes every clip keyed on the controls onto it and moves the weights; the
-  controls' clips stay owned by the control rig so they never ride along. Blender 4.5 bundles only
+  A creature's skeleton is a Rigify meta-rig used as the armature itself, its clips keyed through
+  IK legs and baked (`bake_ik_walk`). Generating Rigify's rig and baking it onto its DEF bones
+  (`game_rig`, kept for rigs made before) turned a wolf's front thigh 133° at rest; the cause was
+  not found, and the meta-rig's own hierarchy exports intact, legs under the spine. Blender 4.5 bundles only
   Smooth by Angle and the hair groups as node assets (Scatter on Surface and Curve to Tube came
   with 5.x Essentials), so `scatter` and `tube` build those few nodes themselves.
   A machine's moving parts ride bones laid along their hinge lines, because an export carries only
