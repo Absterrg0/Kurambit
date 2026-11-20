@@ -275,8 +275,8 @@ head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
    knee so it can reach; six legs and more are `leg_1_l`...), `tail`,
    `ear_l` (`_l` mirrors to `_r`), `wing_l` (shoulder to tip, spread), any
    other name a part of its own (`lantern`, `fin_top`):
-   `body = hero.creature_body("cat", sketch)` (it adds the plan's chest,
-   haunches and cheeks), then named passes `hero.sculpt(body,
+   `body = hero.creature_body("cat", sketch, style=<the people's preset>)`
+   (it adds the plan's chest, haunches and cheeks), then named passes `hero.sculpt(body,
 "inflate"|"crease"|"smooth"|"grab"|"flatten", at=, to=, radius=, amount=)` and
    `hero.decimate(body, 15000)` (it keeps a body skinned, its hands and
    head densest).
@@ -284,12 +284,13 @@ head?, legs?, arms?, hands?, feet?, girth?, limbs?}`, factors on the
 "boots"|"gloves"|"skirt", colour=, sleeves="long"|"short"|"none", hem=<a
 height: a coat's or dress's skirt>, fit=1.5)` cuts each from the body's
    own surface with clean edges, fits it and hangs a skirt on `spring_` hem
-   chains; the skin under it does not ship. A shape it lacks (a cape,
-   armour): model it over the body at rest, then `hero.dress(cape, "fisher",
-hang=<shoulder height>, chains=6)`. A scarf's end, a
-   strap: `hero.dangle(part, "fisher", start, end)`. A hat or helmet:
-   `hero.wear(hat, "fisher")` sizes it to the head and its hair. Bags:
-   `kurambit.skin_rigid(bag, "spine_03")`. What a hand holds:
+   chains; the skin under it does not ship. Then the gear that makes it a
+   character, made round what it wears: `hero.trim("fisher", "belt"|"strap"|
+"pouch"|"bag"|"collar"|"cuffs"|"buttons"|"pauldrons"|"cape"|"scabbard",
+colour=, metal=)`, and second colours: `hero.zone("fisher_coat", "hems"|
+"stripe"|"panel"|"patch", colour)`. Armour: model it over the body at rest,
+   then `hero.dress(part, "fisher", hang=, chains=6)`. A hat or helmet:
+   `hero.wear(hat, "fisher")` sizes it to the head and its hair. What a hand holds:
    `kurambit.hold(rod, "r", grip=, tip=)` puts it in the palm and returns its
    length against the body.
 3. **Rig.** A human's is op `character`'s: the standard skeleton fitted to
@@ -301,7 +302,9 @@ hang=<shoulder height>, chains=6)`. A scarf's end, a
    blink, nostrils, a mouth), `hero.feet(arm, "hoof"|"paw"|"claw")`,
    `hero.fur(arm, "neck"|"tail", side="top"|"end")` (a mane, a tail's tuft),
    `hero.feathers(arm, "wing", depth=)` or `hero.wing(arm, "wing", depth=)`
-   (a ribbed skin); a fin: `hero.membrane(arm, "fin_top", depth)`. To pose a
+   (a ribbed skin); a fin: `hero.membrane(arm, "fin_top", depth)`; markings:
+   `hero.zone(body, "belly"|"socks"|"muzzle"|"ears"|"blaze"|"stripes"|"spots"|
+"saddle"|"tip"|"mask", colour)`. To pose a
    move by hand, `hero.controls(arm)`
    generates a Rigify control rig (IK paws, a torso); key it, then
    `hero.bake_controls(arm, "Pounce", start, end)` and `hero.controls(arm,

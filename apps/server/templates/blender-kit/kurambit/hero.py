@@ -1,6 +1,6 @@
 """The hero kit, as one namespace for game_blender op code: `from kurambit import hero`.
 
-Body:    hero.creature_body(name, sketch), hero.sculpt(obj, kind, ...), hero.decimate(obj, tris)
+Body:    hero.creature_body(name, sketch, style="cartoon"|...), hero.sculpt(obj, kind, ...), hero.decimate(obj, tris)
          (a human body is game_blender op character's: body mpfb or library, style, height)
 Face:    hero.face(armature, iris="#4f7396", brows="#3a2a20"): eyes that blink, brows and a mouth in
          the body's style
@@ -13,6 +13,11 @@ Clothes: hero.garment(armature, "top"|"trousers"|"gloves"|"skirt", colour=, ...)
          footwear with a sole and one toe, made for the feet it is on; by hand,
          hero.dress(garment, armature, hang=..., chains=6), hero.dangle(part, armature, start, end),
          hero.follow_hem(armature)
+Gear:    hero.trim(armature, "belt"|"strap"|"pouch"|"bag"|"collar"|"cuffs"|"buttons"|"pauldrons"|
+         "cape"|"scabbard", colour=, metal=): gear made round what the character wears now
+Colour:  hero.zone(mesh, kind, colour): a second colour by what the part is. A creature's "belly",
+         "socks", "muzzle", "ears", "blaze", "stripes", "spots", "saddle", "tip", "mask"; a
+         garment's "hems", "stripe", "panel", "patch". Each is one more colour in Art
 Animal:  hero.creature_face(armature, eyes=, set="side"|"front"|"top"): eyes that blink, nostrils,
          a mouth; hero.feet(armature, "hoof"|"paw"|"claw"); hero.fur(armature, "neck"|"tail"|chain,
          side="top"|"under"|"end"): a mane, a ruff, a tail's tuft; hero.feathers(armature, "wing",
@@ -31,6 +36,8 @@ from .anatomy import creature_face, feathers, feet, fur, wing
 from .cloth import dangle, dress, follow_hem
 from .face import face
 from .footwear import footwear
+from .trim import trim
+from .zones import zone
 from .garment import garment
 from .hair import beard, glasses, hair, wear
 from .creature import bake_controls, bind, controls, creature_body, creature_clips, creature_rig, decimate, hinge_clips, hinge_rig, membrane, sculpt

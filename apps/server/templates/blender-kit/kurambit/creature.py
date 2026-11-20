@@ -69,13 +69,49 @@ def _apply(o):
             bpy.ops.object.modifier_apply(modifier=m.name)
 
 
-def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None, triangles=24000, masses=True):
+# A style's proportions on an animal's sketch, as people's presets are on a body: how much bigger
+# the head and what is on it, how much thicker the legs, neck and tail, how much shorter the body.
+STYLES = {
+    "realistic": {"head": 1.0, "legs": 1.0, "body": 1.0, "neck": 1.0},
+    "heroic": {"head": 0.95, "legs": 1.12, "body": 1.0, "neck": 1.12},
+    "cartoon": {"head": 1.32, "legs": 1.35, "body": 0.86, "neck": 1.15},
+    "chibi": {"head": 1.6, "legs": 1.55, "body": 0.72, "neck": 1.2},
+}
+HEAD_PARTS = ("head", "ear", "beak", "jaw", "horn", "crest")
+
+
+def _styled(chains, style):
+    """The sketch in a style's proportions: its head (and what is on it) grown about the neck's
+    end, its legs, neck and tail thickened, its length drawn in about its middle."""
+    if style in (None, "realistic"):
+        return chains
+    if style not in STYLES:
+        raise ValueError(f"creature style {style!r}: one of {', '.join(STYLES)}")
+    k = STYLES[style]
+    mid = float(np.mean([p[1] for p in chains["spine"]]))
+    out = {n: [(x, mid + (y - mid) * k["body"], z, r) for x, y, z, r in pts] for n, pts in chains.items()}
+    if "head" in out:
+        hx, hy, hz, _ = out["head"][0]
+        for n in out:
+            if n.startswith(HEAD_PARTS):
+                out[n] = [(hx + (x - hx) * k["head"], hy + (y - hy) * k["head"], hz + (z - hz) * k["head"], r * k["head"]) for x, y, z, r in out[n]]
+    for n in out:
+        if n.startswith("leg"):
+            out[n] = [(x, y, z, r * k["legs"]) for x, y, z, r in out[n]]
+        elif n.startswith(("neck", "tail")):
+            out[n] = [(x, y, z, r * k["neck"]) for x, y, z, r in out[n]]
+    return out
+
+
+def creature_body(name, chains, *, mirror=True, voxel=None, smooth=10, subdivide=2, material=None, triangles=24000, masses=True, style=None):
     """The body mesh <name>_body from the sketch: skin, subdivision, a voxel remesh (voxel metres;
     default a 90th of its longest side, finer for thin parts), smooth passes, then thinned to
     about triangles (None keeps every one the remesh made). masses: the plan's own forms fused in
     (a four-legged body's deep chest, croup and belly, the muscle over each leg's first bone, cheeks
-    behind a muzzle); False keeps the bare sketch. Returns the object."""
-    chains = _chains(chains, mirror)
+    behind a muzzle); False keeps the bare sketch. style ("realistic", "heroic", "cartoon",
+    "chibi": the preset a person in this game takes) gives the sketch that style's proportions.
+    Returns the object."""
+    chains = _styled(_chains(chains, mirror), style)
     verts, radii, edges, joins = [], [], [], {}
     for cname, pts in chains.items():
         start = len(verts)

@@ -206,6 +206,8 @@ def run_pass(params):
             notes.append(f"{o.name} was shown in rest position; its clips were exported posed (the live scene is unchanged)")
     out = params["out"]
     os.makedirs(out, exist_ok=True)
+    # The lock's faceted finish first: the gates below measure the mesh that ships.
+    stylepass.facet(objects, params.get("style"))
     # Before the style pass, which joins a character's meshes into one.
     gaps = contact.floating(objects)
     gates = hero_gates(objects, params)

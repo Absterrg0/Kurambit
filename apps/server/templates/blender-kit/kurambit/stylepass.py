@@ -588,6 +588,114 @@ def character_scale(arms, meshes, style):
     return want / h if h > 1e-6 else None
 
 
+# A faceted finish keeps this share of a mesh's triangles (a garment more: thinned as far as the body,
+# its planes cut through what is worn under it), and leaves a mesh under FACET_MIN whole.
+FACET_KEEP = 0.2
+FACET_KEEP_CLOTH = 0.35
+FACET_MIN = 500
+
+
+def facet(objects, style):
+    """The lock's faceted finish (shading.finish "faceted"): each mesh thinned to clean planes and
+    shaded flat, which is how most low-poly art gets its look. It runs before the gates, so they
+    measure what ships. Weights, materials and the skin marked as under a garment carry through the
+    thinning. Returns how many meshes it thinned."""
+    if ((style or {}).get("shading") or {}).get("finish") != "faceted":
+        return 0
+    thinned = 0
+    for o in objects:
+        if o.type != "MESH":
+            continue
+        tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
+        if tris > FACET_MIN and o.data.shape_keys is None:
+            m = o.modifiers.new("facet", "DECIMATE")
+            m.ratio = max(FACET_KEEP_CLOTH if o.get("kurambit_cloth") else FACET_KEEP, FACET_MIN / tris)
+            # Where two colours meet stays where it is: thinned across, a stripe's edge turns to teeth.
+            index = np.empty(len(o.data.polygons), np.int32)
+            o.data.polygons.foreach_get("material_index", index)
+            seen, border = {}, set()
+            for p in o.data.polygons:
+                for key in p.edge_keys:
+                    other = seen.setdefault(key, index[p.index])
+                    if other != index[p.index]:
+                        border.update(key)
+            # So does where one bone's skin meets another's: thinned there, one long edge spans a
+            # joint (from one thigh to the other at the fork) and tears when it bends.
+            arm = next((m.object for m in o.modifiers if m.type == "ARMATURE" and m.object is not None), None)
+            lead = []
+            if arm is not None:
+                from . import deform
+
+                lead = deform._dominant(o, arm)
+                for e in o.data.edges:
+                    a, b = e.vertices
+                    if lead[a] != lead[b]:
+                        border.update((a, b))
+                bones = {g.index for g in o.vertex_groups if g.name in arm.data.bones}
+                for v in o.data.vertices:
+                    if max((g.weight for g in v.groups if g.group in bones), default=1.0) < 0.6:
+                        border.add(v.index)
+            head = []
+            if arm is not None:
+                # A head is small and round, and what a face reads from: thinned as hard as a body,
+                # it comes to a point.
+                head = [i for i, name in enumerate(lead) if name == "Head" and i not in border]
+            if border or head:
+                keep = o.vertex_groups.new(name="kurambit_facet_keep")
+                keep.add(list(range(len(o.data.vertices))), 1.0, "REPLACE")
+                keep.add(head, 0.0, "REPLACE")
+                keep.add(sorted(border), 0.0, "REPLACE")
+                m.vertex_group = keep.name
+                m.vertex_group_factor = 8.0
+            if o.get("kurambit_cloth"):
+                m.ratio = _cloth_ratio(o, m)
+            with bpy.context.temp_override(object=o, active_object=o):
+                bpy.ops.object.modifier_move_to_index(modifier=m.name, index=0)
+                bpy.ops.object.modifier_apply(modifier=m.name)
+            thinned += 1
+            keep = o.vertex_groups.get("kurambit_facet_keep")
+            if keep is not None:
+                o.vertex_groups.remove(keep)
+        o.data.polygons.foreach_set("use_smooth", [False] * len(o.data.polygons))
+        o.data.update()
+    return thinned
+
+
+def _cloth_ratio(o, m, sink=0.003):
+    """The least a garment can keep and still lie where it was: thinned, its planes cut inside its
+    own curve, and on a thin limb that is inside the arm it covers. The first share at which nearly
+    every original vertex is within sink metres of the thinned surface."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+
+    co = np.array([v.co for v in o.data.vertices])
+    ratio = m.ratio
+    while ratio < 0.95:
+        tmp = bpy.data.objects.new("kurambit_facet_try", o.data.copy())
+        bpy.context.scene.collection.objects.link(tmp)
+        try:
+            for vg in o.vertex_groups:
+                tmp.vertex_groups.new(name=vg.name)
+            d = tmp.modifiers.new("facet", "DECIMATE")
+            d.ratio, d.vertex_group, d.vertex_group_factor = ratio, m.vertex_group, m.vertex_group_factor
+            with bpy.context.temp_override(object=tmp, active_object=tmp):
+                bpy.ops.object.modifier_apply(modifier=d.name)
+            me = tmp.data
+            tree = BVHTree.FromPolygons([v.co for v in me.vertices], [tuple(p.vertices) for p in me.polygons])
+            out = []
+            for c in co:
+                hit = tree.find_nearest(Vector(c))
+                out.append(0.0 if hit[0] is None else max(0.0, (Vector(c) - hit[0]).dot(hit[1])))
+        finally:
+            me = tmp.data
+            bpy.data.objects.remove(tmp)
+            bpy.data.meshes.remove(me)
+        if np.percentile(out, 99.5) <= sink:
+            return ratio
+        ratio = min(1.0, ratio * 1.4)
+    return 1.0
+
+
 def style_pass(objects, style, out_dir, texture_side):
     """Runs the pass on objects (the resolved candidate, in this one-shot copy). Returns
     {kind, meshes, armatures, usedPalette, scaled, notes, paints}."""

@@ -155,7 +155,7 @@ def _one(arm, bodies, s, kind, size, ease, top, toe, sole_t, welt):
         soft = 0.035 * size
 
         def shin_weight(p):
-            k = min(1.0, max(0.0, (float(p[2]) - (ankle[2] - soft)) / (2 * soft)))
+            k = min(1.0, max(0.0, (float(p[2]) - (ankle[2] - soft)) / soft))  # the shin's by the joint, as its skin is
             k = k * k * (3 - 2 * k)
             return {f"foot_{s}": 1 - k, f"calf_{s}": k} if 0 < k < 1 else ({f"calf_{s}": 1.0} if k >= 1 else {f"foot_{s}": 1.0})
 
