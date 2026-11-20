@@ -13,7 +13,9 @@
 // A mesh painted per vertex under one white material (a merged model) has its colours there, not
 // on the material: each distinct one is a value of that material too (`2:hull/paint:e5b04c`,
 // keyed by the colour the game gave), and an edit repaints those vertices on this thing's own
-// copy of the geometry's colours.
+// copy of the geometry's colours. An exported model's gradient atlas is listed the same way, one
+// value per swatch its sidecar names, and an edit repaints that cell on this thing's own copy of
+// the atlas.
 import * as THREE from "../vendor/three.module.js";
 
 export const LOOK = "look:";
@@ -279,6 +281,61 @@ const sidecarPaints = (node) => {
   }
   return [];
 };
+// An exported model's gradient atlas (`atlas` and its swatches as `paints`, row by row from the
+// top): the swatches of the material that samples it, or null. Only the atlas's own material
+// lists them; a Glow beside it samples the same texture and keeps its colours.
+const atlasOf = (material, node) => {
+  if (material.map == null || !/^Palette(\.\d+)?$/.test(material.name ?? "")) return null;
+  for (let at = node; at != null; at = at.parent) {
+    const asset = at.userData?.asset;
+    if (asset === undefined) continue;
+    const { atlas, paints } = asset;
+    if (atlas == null || !Array.isArray(paints) || !finite(atlas.columns) || !finite(atlas.rows))
+      return null;
+    return {
+      columns: atlas.columns,
+      rows: atlas.rows,
+      swatches: paints.flatMap((paint) =>
+        typeof paint?.colour === "string" && /^#[0-9a-f]{6}$/i.test(paint.colour)
+          ? [[parseInt(paint.colour.slice(1), 16), human(paint.name)]]
+          : [],
+      ),
+    };
+  }
+  return null;
+};
+// An atlas with some swatches recoloured: each cell's pixels scaled by the new colour over the
+// old, channel by channel, so its gradient and hue shift carry over. Drawn once per edit.
+const repaintedAtlas = (map, atlas, repaint) => {
+  const image = map.image;
+  const width = image?.width ?? 0;
+  const height = image?.height ?? 0;
+  if (width === 0 || height === 0) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const g = canvas.getContext("2d", { willReadFrequently: true });
+  if (g === null) return null;
+  g.drawImage(image, 0, 0);
+  const cellW = width / atlas.columns;
+  const cellH = height / atlas.rows;
+  atlas.swatches.forEach(([hex], index) => {
+    const to = repaint.get(hex);
+    if (to === undefined) return;
+    const x = Math.round((index % atlas.columns) * cellW);
+    const y = Math.round(Math.floor(index / atlas.columns) * cellH);
+    const cell = g.getImageData(x, y, Math.round(cellW), Math.round(cellH));
+    const k = [16, 8, 0].map((shift) => (((to >> shift) & 255) + 1) / (((hex >> shift) & 255) + 1));
+    for (let i = 0; i < cell.data.length; i += 4)
+      for (let c = 0; c < 3; c += 1) cell.data[i + c] = Math.min(255, cell.data[i + c] * k[c]);
+    g.putImageData(cell, x, y);
+  });
+  const texture = new THREE.CanvasTexture(canvas);
+  for (const key of ["flipY", "colorSpace", "magFilter", "minFilter", "wrapS", "wrapT", "channel"])
+    texture[key] = map[key];
+  return texture;
+};
+const atlasMaps = new WeakMap();
 // The export's packer quantises colours, so a vertex reads a level or two off what was written.
 const NEAR = 3;
 const near = (a, b) =>
@@ -293,7 +350,26 @@ const near = (a, b) =>
 const entryPaints = (entry) => {
   if (entry.paints !== undefined) return entry.paints;
   entry.paints = null;
-  if (entry.own.vertexColors !== true || propsOf(entry.own).length === 0) return null;
+  if (propsOf(entry.own).length === 0) return null;
+  const atlas = entry.nodes.length > 0 ? atlasOf(entry.own, entry.nodes[0]) : null;
+  if (atlas !== null) {
+    const said = new Map();
+    entry.paints = {
+      listed: atlas.swatches.map(([hex, name]) => {
+        const family = name ?? familyOfColour(SHADE.setHex(hex)).toLowerCase();
+        const count = (said.get(family) ?? 0) + 1;
+        said.set(family, count);
+        return {
+          hex,
+          key: paintKey(entry, hex),
+          word: count === 1 ? family : `${family} ${count}`,
+        };
+      }),
+      more: 0,
+    };
+    return entry.paints;
+  }
+  if (entry.own.vertexColors !== true) return null;
   const counts = new Map();
   for (const node of entry.nodes) {
     if (!node.isMesh) continue;
@@ -452,7 +528,9 @@ export function applyLook(bodies, materials, live, defaults) {
     for (const paint of entryPaints(entry)?.listed ?? [])
       if (paint.key in live && live[paint.key] !== paint.hex)
         repaint.set(paint.hex, live[paint.key]);
-    if (repaint.size > 0)
+    const atlas =
+      repaint.size > 0 && entry.nodes.length > 0 ? atlasOf(entry.own, entry.nodes[0]) : null;
+    if (repaint.size > 0 && atlas === null)
       for (const node of entry.nodes) {
         if (!node.isMesh) continue;
         const own = ownGeometryOf(node.geometry);
@@ -475,7 +553,7 @@ export function applyLook(bodies, materials, live, defaults) {
       const key = `${entry.key}/${prop}`;
       return key in live && live[key] !== read(entry.own, prop);
     });
-    if (!edited) continue;
+    if (!edited && atlas === null) continue;
     let clone = clones.get(entry.own);
     if (clone === undefined) {
       clone = entry.own.clone();
@@ -489,6 +567,17 @@ export function applyLook(bodies, materials, live, defaults) {
       const key = `${entry.key}/${prop}`;
       write(clone, prop, key in live ? live[key] : read(entry.own, prop), entry.own);
     }
+    atlasMaps.get(clone)?.dispose();
+    atlasMaps.delete(clone);
+    clone.map = entry.own.map;
+    if (atlas !== null) {
+      const map = repaintedAtlas(entry.own.map, atlas, repaint);
+      if (map !== null) {
+        clone.map = map;
+        atlasMaps.set(clone, map);
+      }
+    }
+    clone.needsUpdate = true;
     const mine = (material) => (ownOf(material) === entry.own ? clone : material);
     for (const node of entry.nodes)
       node.material = Array.isArray(node.material) ? node.material.map(mine) : mine(node.material);

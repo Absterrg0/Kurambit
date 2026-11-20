@@ -382,6 +382,11 @@ export const measurementText = (
     `Measured: a ${m.kind}${m.skeleton === null ? "" : ` on ${m.skeleton}`}${m.restDeviation === null ? "" : `, rest frames ${m.restDeviation.toFixed(1)}° off the standard skeleton at most`}.`,
     `- ${m.triangles.toLocaleString("en-US")} triangles of ${budget.toLocaleString("en-US")}; ${m.materials} material${m.materials === 1 ? "" : "s"}; textures ${m.textures.length === 0 ? "none" : m.textures.map((t) => `${t.width}x${t.height}`).join(", ")} (largest side allowed ${budgets.texture}); ${(bytes / 1048576).toFixed(2)} MB.`,
     `- ${metres(m.height)} tall, footprint ${metres(m.footprint.width)} x ${metres(m.footprint.depth)}.`,
+    ...(m.style === undefined
+      ? []
+      : [
+          `- Look: ${m.atlas === undefined ? "no atlas" : `${m.paints?.length ?? 0} swatch${m.paints?.length === 1 ? "" : "es"} on one gradient atlas`}, ${m.style.hues} hue famil${m.style.hues === 1 ? "y" : "ies"}, ${Math.round(m.style.flat * 100)}% of faces flat-shaded; role ${m.style.role}${m.style.roleNamed ? "" : " (guessed: name it with kurambit_role)"}, ${m.triangles.toLocaleString("en-US")} triangles of the packs' ${m.style.roleBudget.toLocaleString("en-US")}.`,
+        ]),
   ];
   if (m.clips.length > 0)
     lines.push(

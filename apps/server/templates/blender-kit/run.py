@@ -219,6 +219,7 @@ def run_pass(params):
     # Skin a garment covers does not ship (cloth.dress marks it). The gates read the whole body and
     # leave that skin out of what can show.
     cloth.drop_under(objects)
+    role, role_named = stylepass.role_of(objects)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
     candidate = params.get("glb") or os.path.join(out, "candidate.glb")
@@ -248,6 +249,11 @@ def run_pass(params):
         measured["gates"] = gates
     if styled["paints"]:
         measured["paints"] = styled["paints"]
+    if styled["atlas"]:
+        measured["atlas"] = {"columns": styled["atlas"]["columns"], "rows": styled["atlas"]["rows"]}
+    measured["style"] = {"role": role, "roleNamed": role_named, "roleBudget": stylepass.ROLE_BUDGETS[role],
+                         "hues": styled["atlas"]["hues"] if styled["atlas"] else 0,
+                         "flat": styled["atlas"]["flat"] if styled["atlas"] else round(stylepass.flat_share(styled["meshes"]), 3)}
     if gaps is not None:
         k = styled["scaled"] or 1.0  # in the shipped size
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]

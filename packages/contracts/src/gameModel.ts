@@ -147,7 +147,10 @@ export const GameModelMeasure = Schema.Struct({
   /** Share of the skin's area passing through other skin, %: at rest, and on one fixed bent pose (null off the standard skeleton). */
   skinThrough: Schema.optionalKey(Schema.Struct({ rest: Percent, bent: Schema.NullOr(Percent) })),
   face: Schema.optionalKey(GameModelFace),
-  /** The flat colours the pass folded into one material painted per vertex, each with the name of the material it was. */
+  /**
+   * The colours Art lists by name: the swatches of the model's gradient atlas in its order (with
+   * `atlas`), or, in exports made before it, the flat colours painted per vertex.
+   */
   paints: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
@@ -155,6 +158,24 @@ export const GameModelMeasure = Schema.Struct({
         name: Schema.String.check(Schema.isMaxLength(64)),
       }),
     ).check(Schema.isMaxLength(64)),
+  ),
+  /** The gradient atlas the plain colours were packed into: `paints` fill its cells row by row from the top. */
+  atlas: Schema.optionalKey(
+    Schema.Struct({
+      columns: PositiveInt.check(Schema.isLessThanOrEqualTo(64)),
+      rows: PositiveInt.check(Schema.isLessThanOrEqualTo(64)),
+    }),
+  ),
+  /** The look's facts: the model's role and the packs' triangle budget for it, its hue families and flat-shaded share. */
+  style: Schema.optionalKey(
+    Schema.Struct({
+      role: Schema.Literals(["prop", "rock", "plant", "tree", "building", "creature", "hero"]),
+      /** False when the role was guessed from the model's kind. */
+      roleNamed: Schema.Boolean,
+      roleBudget: NonNegativeInt,
+      hues: NonNegativeInt,
+      flat: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+    }),
   ),
   /** A character's gates, measured on its clips before the style pass joins its meshes. */
   gates: Schema.optionalKey(Schema.Array(GameModelGate).check(Schema.isMaxLength(8))),

@@ -115,7 +115,7 @@ export const GameStyle = Schema.Struct({
       Schema.Array(Hex).check(Schema.isMinLength(2), Schema.isMaxLength(64)),
     ]),
   ),
-  /** The 3D style pass's shading: gradient strength of each swatch, roughness, emissive strength of glow colours, baked depth. */
+  /** The 3D style pass's shading: each atlas swatch's gradient strength and hue shift, roughness, emissive strength of glow colours. */
   shading: Schema.optionalKey(
     Schema.Struct({
       gradient: Schema.optionalKey(
@@ -125,7 +125,9 @@ export const GameStyle = Schema.Struct({
         Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
       ),
       glow: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 20 }))),
-      /** How strongly a made model is shaded into its vertex colours (creases, a gradient, a darker underside); 0 leaves it flat. */
+      /** Degrees a swatch's ramp turns toward warm at its top and away at its bottom. */
+      hue: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 30 }))),
+      /** Read from locks written before the atlas, which shaded made models per vertex; ignored now. */
       depth: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
     }),
   ),
