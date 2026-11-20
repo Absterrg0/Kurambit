@@ -343,9 +343,13 @@ describe("the proposal", () => {
     expect(Loop.propose(state(), look({ facts: facts(), earlier: crashed }))?.why).toBe("next");
   });
 
-  it("checks the budget before each turn and caps the turn at the time left", () => {
+  it("keeps starting turns while the budget has time, each capped at the time left", () => {
     const ends = (minutes: number) => state({ budgetEndsAt: NOW + minutes * 60_000 });
-    expect(Loop.applyLook(ends(5), look(), NOW).state.ending).toBe("budget");
+    expect(Loop.applyLook(ends(0.5), look(), NOW).state.ending).toBe("budget");
+    expect(Loop.applyLook(ends(4), look(), NOW).plan).toMatchObject({
+      kind: "turn",
+      capMs: 4 * 60_000,
+    });
     expect(Loop.applyLook(ends(10), look(), NOW).plan).toMatchObject({
       kind: "turn",
       capMs: 10 * 60_000,

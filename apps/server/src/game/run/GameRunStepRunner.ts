@@ -315,13 +315,19 @@ const make = Effect.gen(function* () {
         // The step starts a turn in the chat, so it takes the admission any message turn does.
         const admitted = yield* turnAdmission.admit(yield* projections.getThread(threadId));
         const root = yield* projects.resolve(threadId);
-        const message = stepMessage(rounds, gameLastStep, step.proposal, {
-          brief: yield* Effect.promise(() =>
-            NodeFSP.readFile(NodePath.join(root, "BRIEF.md"), "utf8").catch(() => null),
-          ),
-          lastReply: (yield* repliesOf(threadId))[0] ?? null,
-          facts: yield* factsSoFar(threadId, step.base),
-        });
+        const message = stepMessage(
+          rounds,
+          gameLastStep,
+          step.proposal,
+          {
+            brief: yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(root, "BRIEF.md"), "utf8").catch(() => null),
+            ),
+            lastReply: (yield* repliesOf(threadId))[0] ?? null,
+            facts: yield* factsSoFar(threadId, step.base),
+          },
+          step.capMs,
+        );
         yield* GameRunTurnReactor.refusedOnly(
           engine.dispatch({
             type: "message.dispatch",

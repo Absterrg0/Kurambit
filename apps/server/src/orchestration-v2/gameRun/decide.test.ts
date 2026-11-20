@@ -628,6 +628,11 @@ describe("a keep-going run", () => {
     expect(
       Decide.stepMessage([], 0, { why: "next", text: "Add a boss.", target: null }).text,
     ).not.toContain("time cap");
+    const boss = { why: "next", text: "Add a boss.", target: null } as const;
+    expect(Decide.stepMessage([], 0, boss, undefined, 4 * 60_000).text).toContain(
+      "leaves this turn 4 minute(s)",
+    );
+    expect(Decide.stepMessage([], 0, boss, undefined, 15 * 60_000).text).not.toContain("leaves");
   });
 
   it("numbers a chat's first step after the game's steps in its other chats", () => {

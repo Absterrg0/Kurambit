@@ -625,8 +625,9 @@ cannot both find none.
   started on another build) pause it `stalled` with why, so no mix of supersedes and looks runs
   without bound; two unmeasured steps in a row pause it `tool-failed`, since a broken measure would
   otherwise repeat at the game's cost. `Next: none` with nothing else to propose ends it `done`.
-  The budget is checked before each turn against a typical step (6 min), and it is what bounds an
-  Autopilot that keeps adding content. Every ending but `done` resumes.
+  While the budget has a minute left another turn starts, capped at the time left (at most
+  15 min) and told so when that is shorter, and it is what bounds an Autopilot that keeps adding
+  content: a fixed "typical step" ended runs with minutes unused. Every ending but `done` resumes.
 - **Never repeat.** Each proposal has a key (`fact:<id>`, `steer:<fnv>`, `next:<fnv>`; a retry
   carries the undone step's). Two misses of a key (undone, or kept with its target still bad), any
   step that changed nothing (it is never sent again as it was), or Skip set the key aside for the

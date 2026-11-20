@@ -137,9 +137,12 @@ export type JudgeResult = StepResult<"judge">;
 export type UndoResult = StepResult<"undo">;
 
 const MIN = 60_000;
-/** A typical step: a turn of about 5 min, then its boot check. */
-const STEP_TYPICAL_MS = 6 * MIN;
-const CAP_FLOOR_MS = 5 * MIN;
+/**
+ * The least time a step's turn is started with: less lands no change. Above it a run with time
+ * left starts another step capped at that time, so the budget, not a typical step's length, ends
+ * the run (a 6-minute "typical step" stopped runs with 5 minutes left).
+ */
+const STEP_LEAST_MS = 1 * MIN;
 const CAP_CEILING_MS = 15 * MIN;
 /** Guided starts its proposal after this unless the person answers. */
 const PROPOSAL_WAIT_MS = 60_000;
@@ -302,6 +305,7 @@ export const stepMessage = (
   gameLastStep: number,
   proposal: Pick<GameRunProposal, "why" | "text" | "target">,
   briefing?: StepBriefing,
+  capMs?: number,
 ): { readonly text: string; readonly summary: string } => {
   const n = stepNumber(rounds, gameLastStep);
   const capped = rounds.find((r) => isStepRecord(r.round) && r.round.round === n - 1)?.round.step
@@ -310,9 +314,14 @@ export const stepMessage = (
     capped === undefined
       ? ""
       : `Kurambit's ${capped}-minute time cap stopped your last keep-going step's turn; the person did not stop it.\n\n`;
+  // A step the budget shortens says so: a change cut off mid-edit may stop the game booting.
+  const short =
+    capMs === undefined || capMs >= CAP_CEILING_MS
+      ? ""
+      : `Keep going's budget leaves this turn ${Math.max(1, Math.floor(capMs / MIN))} minute(s): make a change that fits.\n\n`;
   const about = briefing === undefined ? "" : `\n\n---\n\n${briefingText(rounds, briefing)}`;
   return {
-    text: `Keep going · step ${n} (${WHY_LABEL[proposal.why]})\n\n${cap}${proposal.text}\n\n${STEP_TAIL}${about}`,
+    text: `Keep going · step ${n} (${WHY_LABEL[proposal.why]})\n\n${cap}${short}${proposal.text}\n\n${STEP_TAIL}${about}`,
     summary: `Keep going · step ${n}: ${proposalSummary(proposal)}`,
   };
 };
@@ -556,12 +565,11 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
 // ── Budget. ─────────────────────────────────────────────────────────────────
 const remaining = (state: RunState, now: number) =>
   state.budgetEndsAt === null ? Number.POSITIVE_INFINITY : state.budgetEndsAt - now;
-/** Another step fits: a turn and its facts take about 8 minutes. */
 const fitsBudget = (state: RunState, now: number): boolean =>
-  remaining(state, now) >= STEP_TYPICAL_MS;
-/** The turn's cap: the time left, clamped to 5–15 minutes. */
+  remaining(state, now) >= STEP_LEAST_MS;
+/** The turn's cap: the time left, at most 15 minutes. */
 const turnCap = (state: RunState, now: number): number =>
-  Math.max(CAP_FLOOR_MS, Math.min(CAP_CEILING_MS, remaining(state, now)));
+  Math.min(CAP_CEILING_MS, remaining(state, now));
 
 // ── Steer and its captured prefix. ──────────────────────────────────────────
 /**
