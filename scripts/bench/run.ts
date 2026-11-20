@@ -38,7 +38,6 @@ import { RpcClient } from "effect/rpc";
 import {
   CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
-  GAME_FACTS_SKILLED_DEFERRED,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
   ORCHESTRATION_V2_WS_METHODS,
@@ -394,8 +393,7 @@ async function screenshots(root: string, facts: GameBuildFacts, id: string) {
  * A build's facts once they settle, and how long they took from the moment the
  * server was seen measuring them (null when they were never seen measuring:
  * already measured, or measured between two polls). A person's measure is
- * asked for when the server never starts one, and when the tester's bot was
- * left for keep going: the floor reads all three plays, as it always has.
+ * asked for when the server never starts one.
  */
 async function settledFacts(
   server: BenchmarkServer,
@@ -410,7 +408,6 @@ async function settledFacts(
   const since = Date.now();
   let measuringSince: number | null = null;
   let asked = false;
-  let askedSkilled = false;
   if (options.ask === true) {
     asked = true;
     await call(server, cookie, (client) => client[WS_METHODS.gameBuildMeasure](ref));
@@ -419,16 +416,7 @@ async function settledFacts(
     const facts = await call(server, cookie, (client) => client[WS_METHODS.gameBuildFacts](ref));
     if (facts.state === "measuring" && measuringSince === null) measuringSince = Date.now();
     const settled = FACTS_SETTLED.has(facts.state);
-    if (
-      settled &&
-      !askedSkilled &&
-      facts.skilled.status === "not-measured" &&
-      facts.skilled.why === GAME_FACTS_SKILLED_DEFERRED
-    ) {
-      askedSkilled = true;
-      log(`${id}: the tester's bot was left for keep going; asking for it`);
-      await call(server, cookie, (client) => client[WS_METHODS.gameBuildMeasure](ref));
-    } else if (settled || Date.now() > deadline) {
+    if (settled || Date.now() > deadline) {
       const seconds = measuringSince === null ? null : (Date.now() - measuringSince) / 1000;
       log(`${id}: facts ${facts.state}${seconds === null ? "" : ` in ${Math.round(seconds)} s`}`);
       return { facts: settled ? facts : null, seconds };

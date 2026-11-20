@@ -578,8 +578,8 @@ frames per second, the slowest 1% of frames, the GPU's time per frame and the sh
 resolution it drew at. On a machine where Kurambit's browser cannot use the GPU, performance says
 so instead of guessing.
 
-**Can it be won** is measured only when you ask: ask your agent to prove the game can be won, and
-it writes a play bot for it and has Kurambit play it; after that, **Measure again** plays it too.
+**Can it be won** needs a play bot: ask your agent to prove the game can be won, and it writes
+one. From then on Kurambit plays it on every build it measures.
 A game with no way to win is never held to one: this is not one of its checks. A game that can be
 won stays **Not yet proven winnable** until the play bot wins it.
 Opening or playing a build that was never measured measures it, one build at a time, and a

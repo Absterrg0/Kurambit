@@ -635,12 +635,13 @@ cannot both find none.
   back from or skipped from the game's decisions (`decidedKeys`), and passes over them the same
   way: a person's undone turn carries the `next:` key of its request, so the Next line it acted on
   is not proposed again.
-- **The play bot plays only when asked.** Writing one cost 4 to 10 minutes between steps and its
-  one real-time run was noise, so no build's measure and no step plays it. The person asks with
-  Measure again in the Workbench's Checks, or asks their agent to prove the game can be won: it writes
-  `.studio/bot/play.mjs` with the bot kit, wins one run with `game_play` op `bot`, and calls
-  `game_check` op `facts` with `skilled: true`. Otherwise the skilled fact reads not measured with why
-  (`deferred`, `no-play-bot`). A build whose own code never calls `.win(` reads `no-win` before
+- **Every measure plays the game's own play bot.** Writing one cost 4 to 10 minutes between
+  steps, so no step writes one: the agent writes `.studio/bot/play.mjs` with the bot kit when the
+  person asks it to prove the game can be won. Once it exists, every build's measure plays it
+  (after its other plays, so keep going's judge never waits on it), which costs no model call; deferring it to an ask
+  left every bench game's facts incomplete within its cap. The skilled fact is not watched by
+  keep going, so its one real-time run never proposes or undoes a step. With no bot it reads not
+  measured (`no-play-bot`). A build whose own code never calls `.win(` reads `no-win` before
   any bot is looked for (`gameCanWin` on the measured copy): like `no-saved-plays`, no surface shows,
   compares or counts it. Only the code decides that, so one bot play that found no ending never
   hides the check. `.studio/bot` is in `restoredPaths`, so an undo keeps the build's own bot. Games

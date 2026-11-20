@@ -125,11 +125,10 @@ challenge; if idle wins, it plays itself.
 
 ## Proving the game can be won
 
-The play bot plays only when asked: the person's Measure in the Inspector,
-or the person asking you to prove the game can be won. Write
-`.studio/bot/play.mjs`, a win bot with a `policy` whose goal is to win one
-run of the core loop with the game's own verbs, run it with `game_play` op
-`bot` and fix it until it plays a full run, then call `game_check` op
-`facts` with `skilled: true`. Keep it general to the game's verbs and goal
+Every build's measure plays `.studio/bot/play.mjs` when the game has one.
+Write it when the person asks you to prove the game can be won: a win bot
+with a `policy` whose goal is to win one run of the core loop with the
+game's own verbs. Run it with `game_play` op `bot` and fix it until it plays
+a full run. Keep it general to the game's verbs and goal
 rather than one level's layout: it reads the game's state as it plays,
 never numbers copied from the code. Update it when the game's rules change.

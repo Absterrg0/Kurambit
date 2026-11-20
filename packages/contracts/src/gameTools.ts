@@ -59,12 +59,7 @@ export const GameCheckToolInput = Schema.Struct({
       ),
     }),
   ),
-  facts: op(
-    Schema.Struct({
-      build: Schema.optionalKey(GameBuildId),
-      skilled: Schema.optionalKey(Schema.Boolean),
-    }),
-  ),
+  facts: op(Schema.Struct({ build: Schema.optionalKey(GameBuildId) })),
   status: op(Schema.Struct({ checkSources: Schema.optionalKey(Schema.Boolean) })),
 });
 export type GameCheckToolInput = typeof GameCheckToolInput.Type;

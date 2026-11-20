@@ -195,13 +195,7 @@ export function useMeasureOnOpen(threadRef: ScopedThreadRef) {
     asked.current.add(build);
     const result = await measure({
       environmentId: threadRef.environmentId,
-      // The Measure button is the person asking, so it also plays the game's play bot;
-      // opening a build never does.
-      input: {
-        threadId: threadRef.threadId,
-        build: { _tag: "build", build },
-        ...(again ? { skilled: true } : {}),
-      },
+      input: { threadId: threadRef.threadId, build: { _tag: "build", build } },
     });
     if (result._tag === "Failure") {
       // Only the Measure button asks again: an open never retries a refusal.

@@ -32,7 +32,6 @@ import {
   GAME_FACTS_EVENT,
   GAME_FACTS_NO_PLAY_BOT,
   GAME_FACTS_NO_WIN,
-  GAME_FACTS_SKILLED_DEFERRED,
   GameAssetUse,
   GameBuildFacts,
   GameBuildId,
@@ -303,8 +302,6 @@ interface Job {
   readonly ticket: LaneTicket;
   /** A person asked: standing faults are tried again. */
   person: boolean;
-  /** The person or their agent asked the play bot to play it, to prove it can be won. */
-  skilled: boolean;
   /** Only a newer turn build's measure asked: a newer one drops it while it waits. */
   supersedable: boolean;
   /** What it measures, known once it runs. */
@@ -356,11 +353,6 @@ export class GameFacts extends Context.Service<
         readonly queue?: "person" | "background";
         readonly supersede?: boolean;
         readonly upTo?: "boots";
-        /**
-         * Whether the game's play bot plays the build (default false): only
-         * when the person or their agent asks to prove the game can be won.
-         */
-        readonly skilled?: boolean;
       },
     ) => Effect.Effect<GameBuildFacts>;
     /**
@@ -615,14 +607,13 @@ const make = Effect.gen(function* () {
   // What a measurement must do: everything under a new harness, else each
   // tier never measured or not measured for a reason waiting clears (and,
   // for a person, a standing fault they may have fixed), and the skilled
-  // tier again when the play bot changed, or once someone wants the play
-  // a chat turn's measure deferred.
+  // tier again when the play bot changed. A row an earlier Kurambit wrote with
+  // the play deferred is not measured, so its bot plays now.
   const planOf = (
     found: Found | null,
     bot: { readonly hash: string } | null,
     person: boolean,
     engine: GameEngineName,
-    skilledWanted: boolean,
     runtime: string | null,
     savedSet: string,
   ): ReadonlySet<Tier> => {
@@ -665,11 +656,9 @@ const make = Effect.gen(function* () {
       bot === null
         ? skilled?.status === "measured"
         : skilled?.status !== "measured" || skilled.value.bot.hash !== bot.hash;
-    const stillDeferred =
-      !skilledWanted && skilled?.status === "not-measured" && skilled.cause === "deferred";
     // Read from these very files, which no bot changes: there is no ending to play for.
     const cannotWin = skilled?.status === "not-measured" && skilled.cause === "no-win";
-    if (botChanged && !stillDeferred && !cannotWin) tiers.add("skilled");
+    if (botChanged && !cannotWin) tiers.add("skilled");
     return tiers;
   };
 
@@ -758,11 +747,25 @@ const make = Effect.gen(function* () {
           return { ...fact, value: { ...fact.value, sizes } };
         });
 
+  /** The win an older harness measured on these files with this bot, on the same runtime. */
+  const wonBefore = (
+    found: Found | null,
+    stored: Found["stored"],
+    bot: { readonly hash: string },
+  ) => {
+    const before = found !== null && found.harness !== harness ? found.stored : null;
+    return before?.skilled?.status === "measured" &&
+      before.skilled.value.ending === "won" &&
+      before.skilled.value.bot.hash === bot.hash &&
+      (before.runtime === undefined || before.runtime === stored.runtime)
+      ? before.skilled
+      : null;
+  };
+
   const measureJob = (
     build: ResolvedBuild,
     tiers: ReadonlySet<Tier>,
     found: Found | null,
-    skilledWanted: boolean,
     written: Set<FactName>,
     booted: Deferred.Deferred<void>,
   ) =>
@@ -1076,25 +1079,14 @@ const make = Effect.gen(function* () {
             // No play ran: the other plays' reason stands when they left no record either.
             const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
             yield* write({ skilled, ...(yield* useAfter("skilled", null, why)) });
-          } else if (!skilledWanted) {
-            // The play bot plays only when the person or their agent asks (GameFacts.measure).
-            // A win it already has stays proven through a new harness: these files and this bot
-            // won, and no change to how Kurambit measures unproves that. Anything short of a
-            // win is played again when asked, since a new harness may read it differently.
-            const before = found !== null && found.harness !== harness ? found.stored : null;
-            const won =
-              before?.skilled?.status === "measured" &&
-              before.skilled.value.ending === "won" &&
-              before.skilled.value.bot.hash === bot.hash &&
-              (before.runtime === undefined || before.runtime === stored.runtime)
-                ? before.skilled
-                : null;
-            const skilled =
-              won ?? notMeasured(GAME_FACTS_SKILLED_DEFERRED, false, false, "deferred");
-            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(skilled);
+          } else if (wonBefore(found, stored, bot) !== null) {
+            // A win stays proven through a new harness: these files and this bot won, and no
+            // change to how Kurambit measures unproves that. Anything short of a win plays again.
+            const won = wonBefore(found, stored, bot)!;
+            const why = stored.use?.status === "not-measured" ? stored.use : noRecord(won);
             yield* write({
-              skilled,
-              ...(yield* useAfter("skilled", won?.value.evidence ?? null, why)),
+              skilled: won,
+              ...(yield* useAfter("skilled", won.value.evidence, why)),
             });
           } else {
             // The game's own bot and its copy of the kit, beside the harness's kit.
@@ -1165,13 +1157,11 @@ const make = Effect.gen(function* () {
           if (job.stopped) return;
           job.running = true;
           const found = yield* load(build.key);
-          const skilled = job.skilled;
           const tiers = planOf(
             found,
             yield* currentBot(build.root),
             job.person,
             build.engine,
-            skilled,
             yield* runtimeOf(build.root, build.engine),
             yield* savedSetOf(build.root),
           );
@@ -1185,25 +1175,7 @@ const make = Effect.gen(function* () {
             GAME_FACTS_EVENT,
             `Measuring build ${build.build.slice(0, 8)}.`,
           );
-          yield* measureJob(build, tiers, found, skilled, job.written, job.booted);
-          // The person or their agent asked for the play bot while this measure
-          // ran without it: only its play is owed, the rest was just measured.
-          if (!skilled && job.skilled && !job.stopped) {
-            const now = yield* load(build.key);
-            const again = planOf(
-              now,
-              yield* currentBot(build.root),
-              job.person,
-              build.engine,
-              true,
-              yield* runtimeOf(build.root, build.engine),
-              yield* savedSetOf(build.root),
-            );
-            job.tiers = again.has("skilled") ? new Set<Tier>(["skilled"]) : new Set<Tier>();
-            job.written.clear();
-            if (job.tiers.size > 0)
-              yield* measureJob(build, job.tiers, now, true, job.written, job.booted);
-          }
+          yield* measureJob(build, tiers, found, job.written, job.booted);
         }).pipe(
           Effect.onInterrupt(() =>
             Effect.suspend(() => {
@@ -1266,7 +1238,6 @@ const make = Effect.gen(function* () {
             yield* currentBot(build.root),
             person,
             build.engine,
-            options.skilled === true,
             yield* runtimeOf(build.root, build.engine),
             yield* savedSetOf(build.root),
           ).size > 0;
@@ -1287,7 +1258,6 @@ const make = Effect.gen(function* () {
           const existing = jobs.get(build.key);
           if (existing !== undefined) {
             if (person) existing.person = true;
-            if (options.skilled === true) existing.skilled = true;
             if (!supersede) existing.supersedable = false;
             return Effect.as(playLane.raise(existing.ticket, priority), {
               job: existing,
@@ -1311,7 +1281,6 @@ const make = Effect.gen(function* () {
             build,
             ticket: playLane.ticket(priority),
             person,
-            skilled: options.skilled === true,
             supersedable: supersede,
             tiers: null,
             written: new Set(),

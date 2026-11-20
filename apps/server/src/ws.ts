@@ -1832,11 +1832,8 @@ const layerWsRpc = (
         [WS_METHODS.gameBuildCompare]: ({ threadId, a, b }) => gameBuilds.compare(threadId, a, b),
         [WS_METHODS.gameBuildFacts]: ({ threadId, build }) => gameBuilds.facts(threadId, build),
         [WS_METHODS.gameBuildChanges]: ({ threadId, build }) => gameBuilds.changes(threadId, build),
-        [WS_METHODS.gameBuildMeasure]: ({ threadId, build, skilled }) =>
-          gameBuilds.measure(threadId, build, {
-            queue: "person",
-            ...(skilled === true ? { skilled } : {}),
-          }),
+        [WS_METHODS.gameBuildMeasure]: ({ threadId, build }) =>
+          gameBuilds.measure(threadId, build, { queue: "person" }),
         [WS_METHODS.gameBuildPlay]: ({ threadId, build }) => gameBuilds.play(threadId, build),
         [WS_METHODS.gameBuildRestore]: ({ threadId, build, commandId }) =>
           gameBuilds.restore(threadId, build, commandId, { person: true }),

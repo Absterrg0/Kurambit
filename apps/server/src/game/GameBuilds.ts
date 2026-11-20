@@ -272,8 +272,6 @@ export class GameBuilds extends Context.Service<
         readonly queue?: "person" | "background";
         /** Wait only for the boot check, the QA play and the saved plays (GameFacts.measure). */
         readonly upTo?: "boots";
-        /** Also play the game's play bot, to prove it can be won (GameFacts.measure). */
-        readonly skilled?: boolean;
       },
     ) => Effect.Effect<GameBuildFacts, GameOperationError>;
     /** Measures the work owed by data (rows owing tiers, live runs' rounds) and settles cut-short restores. */

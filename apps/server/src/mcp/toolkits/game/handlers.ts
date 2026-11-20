@@ -254,11 +254,7 @@ const checkHandlers = {
               return yield* builds.measure(
                 threadId,
                 { _tag: "build", build },
-                {
-                  waitFor: TOOL_FACTS_WAIT,
-                  queue: "background",
-                  ...(facts.skilled === true ? { skilled: true } : {}),
-                },
+                { waitFor: TOOL_FACTS_WAIT, queue: "background" },
               );
             }),
           ).pipe(as(GameBuildFacts)),

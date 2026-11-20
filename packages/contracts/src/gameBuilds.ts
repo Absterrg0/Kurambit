@@ -26,12 +26,6 @@ export const GAME_FACTS_BOUNDS = {
   startSeconds: 10,
 } as const;
 
-/**
- * Why a build's skilled fact was not measured: the play bot plays only when the person or
- * their agent asks to prove the game can be won, never as part of a build's measure.
- */
-export const GAME_FACTS_SKILLED_DEFERRED =
-  "not asked for: the play bot plays only when you or your agent ask to prove the game can be won";
 /** The skilled fact of a game whose own code never ends a run with a win. */
 export const GAME_FACTS_NO_WIN = "the game's code never calls win(): it has no ending to prove";
 /** The skilled fact of a game with no play bot yet. */
@@ -281,7 +275,7 @@ export type GameBuild = typeof GameBuild.Type;
  * - slow: the game itself ran below real time on an idle machine (a step can make it faster).
  * - old-shell: the game's copy of the shell predates this measurement; a new build adds it.
  * - no-play-bot: the game has no play bot to measure skilled play with.
- * - deferred: the play bot plays only when the person or their agent asks for it.
+ * - deferred: rows from before every measure played the play bot; measuring again plays it.
  * - no-saved-plays: the game had no saved play to replay. Such a fact is not shown at all.
  * - no-win: the game's code never calls win(): it has no ending to prove. Such a fact is not
  *   shown, compared or counted.
@@ -1426,11 +1420,8 @@ export const GameBuildChanges = Schema.Struct({
 });
 export type GameBuildChanges = typeof GameBuildChanges.Type;
 export const GameBuildChangesInput = Schema.Struct({ threadId: ThreadId, build: GameBuildId });
-/** A measure the person asked for; `skilled` also plays the game's play bot, to prove it can be won. */
-export const GameBuildMeasureInput = Schema.Struct({
-  ...GameBuildRefInput.fields,
-  skilled: Schema.optionalKey(Schema.Boolean),
-});
+/** A measure the person asked for. */
+export const GameBuildMeasureInput = Schema.Struct(GameBuildRefInput.fields);
 export const GameBuildPlayResult = Schema.Union([
   Schema.TaggedStruct("web", { url: Schema.String }),
   Schema.TaggedStruct("window", { message: Schema.String }),
