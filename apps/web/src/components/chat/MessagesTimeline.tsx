@@ -177,7 +177,6 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
 import { ChangedFilesCard, type ChangedFileContextMenuHandler } from "./ChangedFilesTree";
-import { GameGenerationCard } from "../game/GameGenerationCard";
 import { GameTurnBuild } from "../game/GameTurnBuild";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
@@ -1033,16 +1032,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setFullscreenAppRowId((current) => (fullscreen ? rowId : current === rowId ? null : current));
   };
   const alwaysRenderIndices = restoringAlwaysRender?.indices ?? [];
-  // Generation cards stay mounted: a card may wait on the person's pick, and the list sizes a row
-  // it has not drawn by a guess far from a card's height, so a card far up the chat was otherwise
-  // never drawn. A chat holds few of them.
-  const generationCardKeys = rows.flatMap((row) =>
-    row.kind === "game-generation" ? [keyExtractor(row)] : [],
-  );
   const alwaysRenderKeys = [
     ...(citationAlwaysRender?.keys ?? []),
     ...(fullscreenAppRowId === null ? [] : [fullscreenAppRowId]),
-    ...generationCardKeys,
   ];
   const alwaysRender =
     alwaysRenderIndices.length === 0 && alwaysRenderKeys.length === 0
@@ -1949,8 +1941,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                 row.kind === "event" ||
                 row.kind === "attempt-fold" ||
                 row.kind === "html-render" ||
-                row.kind === "mcp-app" ||
-                row.kind === "game-generation"
+                row.kind === "mcp-app"
               ? "pb-2"
               : "pb-4",
         (row.kind === "message" && row.message.role === "assistant") ||
@@ -2000,7 +1991,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
-      {row.kind === "game-generation" ? <GameGenerationTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
@@ -2842,20 +2832,6 @@ function ProposedPlanTimelineRow({
         workspaceRoot={ctx.workspaceRoot}
         findActive={ctx.findActive}
       />
-    </div>
-  );
-}
-
-function GameGenerationTimelineRow({
-  row,
-}: {
-  row: Extract<TimelineRow, { kind: "game-generation" }>;
-}) {
-  const ctx = use(TimelineRowCtx);
-  if (ctx.threadRef === null) return null;
-  return (
-    <div className="min-w-0 px-1">
-      <GameGenerationCard threadRef={ctx.threadRef} generationId={row.generationId} />
     </div>
   );
 }

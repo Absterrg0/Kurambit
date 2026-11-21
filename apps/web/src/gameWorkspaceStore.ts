@@ -30,8 +30,7 @@ export type GameStageRequest =
   | { readonly kind: "redo" }
   | { readonly kind: "export" }
   /** The header's History popover opens. */
-  | { readonly kind: "history" }
-  | { readonly kind: "generated-art" };
+  | { readonly kind: "history" };
 
 /** The Workbench's sections beside the game: its values, its art, and the build's checks. */
 export const WORKBENCH_TABS = ["tune", "art", "checks"] as const;

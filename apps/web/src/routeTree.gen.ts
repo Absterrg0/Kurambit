@@ -32,7 +32,6 @@ import { Route as ChatSettingsGeneralRouteImport } from './routes/_chat.settings
 import { Route as ChatSettingsGameToolsRouteImport } from './routes/_chat.settings.game-tools'
 import { Route as ChatSettingsDiagnosticsRouteImport } from './routes/_chat.settings.diagnostics'
 import { Route as ChatSettingsConnectionsRouteImport } from './routes/_chat.settings.connections'
-import { Route as ChatSettingsArtRouteImport } from './routes/_chat.settings.art'
 import { Route as ChatSettingsArchivedRouteImport } from './routes/_chat.settings.archived'
 import { Route as ChatSettingsAppearanceRouteImport } from './routes/_chat.settings.appearance'
 import { Route as ChatSettingsSplatRouteImport } from './routes/_chat.settings.$'
@@ -157,11 +156,6 @@ const ChatSettingsConnectionsRoute = ChatSettingsConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
-const ChatSettingsArtRoute = ChatSettingsArtRouteImport.update({
-  id: '/art',
-  path: '/art',
-  getParentRoute: () => ChatSettingsRoute,
-} as any)
 const ChatSettingsArchivedRoute = ChatSettingsArchivedRouteImport.update({
   id: '/archived',
   path: '/archived',
@@ -204,7 +198,6 @@ export interface FileRoutesByFullPath {
   '/settings/$': typeof ChatSettingsSplatRoute
   '/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/settings/archived': typeof ChatSettingsArchivedRoute
-  '/settings/art': typeof ChatSettingsArtRoute
   '/settings/connections': typeof ChatSettingsConnectionsRoute
   '/settings/diagnostics': typeof ChatSettingsDiagnosticsRoute
   '/settings/game-tools': typeof ChatSettingsGameToolsRoute
@@ -234,7 +227,6 @@ export interface FileRoutesByTo {
   '/settings/$': typeof ChatSettingsSplatRoute
   '/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/settings/archived': typeof ChatSettingsArchivedRoute
-  '/settings/art': typeof ChatSettingsArtRoute
   '/settings/connections': typeof ChatSettingsConnectionsRoute
   '/settings/diagnostics': typeof ChatSettingsDiagnosticsRoute
   '/settings/game-tools': typeof ChatSettingsGameToolsRoute
@@ -266,7 +258,6 @@ export interface FileRoutesById {
   '/_chat/settings/$': typeof ChatSettingsSplatRoute
   '/_chat/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/_chat/settings/archived': typeof ChatSettingsArchivedRoute
-  '/_chat/settings/art': typeof ChatSettingsArtRoute
   '/_chat/settings/connections': typeof ChatSettingsConnectionsRoute
   '/_chat/settings/diagnostics': typeof ChatSettingsDiagnosticsRoute
   '/_chat/settings/game-tools': typeof ChatSettingsGameToolsRoute
@@ -298,7 +289,6 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/appearance'
     | '/settings/archived'
-    | '/settings/art'
     | '/settings/connections'
     | '/settings/diagnostics'
     | '/settings/game-tools'
@@ -328,7 +318,6 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/appearance'
     | '/settings/archived'
-    | '/settings/art'
     | '/settings/connections'
     | '/settings/diagnostics'
     | '/settings/game-tools'
@@ -359,7 +348,6 @@ export interface FileRouteTypes {
     | '/_chat/settings/$'
     | '/_chat/settings/appearance'
     | '/_chat/settings/archived'
-    | '/_chat/settings/art'
     | '/_chat/settings/connections'
     | '/_chat/settings/diagnostics'
     | '/_chat/settings/game-tools'
@@ -547,13 +535,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatSettingsConnectionsRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
-    '/_chat/settings/art': {
-      id: '/_chat/settings/art'
-      path: '/art'
-      fullPath: '/settings/art'
-      preLoaderRoute: typeof ChatSettingsArtRouteImport
-      parentRoute: typeof ChatSettingsRoute
-    }
     '/_chat/settings/archived': {
       id: '/_chat/settings/archived'
       path: '/archived'
@@ -596,7 +577,6 @@ interface ChatSettingsRouteChildren {
   ChatSettingsSplatRoute: typeof ChatSettingsSplatRoute
   ChatSettingsAppearanceRoute: typeof ChatSettingsAppearanceRoute
   ChatSettingsArchivedRoute: typeof ChatSettingsArchivedRoute
-  ChatSettingsArtRoute: typeof ChatSettingsArtRoute
   ChatSettingsConnectionsRoute: typeof ChatSettingsConnectionsRoute
   ChatSettingsDiagnosticsRoute: typeof ChatSettingsDiagnosticsRoute
   ChatSettingsGameToolsRoute: typeof ChatSettingsGameToolsRoute
@@ -616,7 +596,6 @@ const ChatSettingsRouteChildren: ChatSettingsRouteChildren = {
   ChatSettingsSplatRoute: ChatSettingsSplatRoute,
   ChatSettingsAppearanceRoute: ChatSettingsAppearanceRoute,
   ChatSettingsArchivedRoute: ChatSettingsArchivedRoute,
-  ChatSettingsArtRoute: ChatSettingsArtRoute,
   ChatSettingsConnectionsRoute: ChatSettingsConnectionsRoute,
   ChatSettingsDiagnosticsRoute: ChatSettingsDiagnosticsRoute,
   ChatSettingsGameToolsRoute: ChatSettingsGameToolsRoute,

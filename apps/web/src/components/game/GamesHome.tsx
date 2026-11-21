@@ -66,10 +66,9 @@ import { KurambitMark } from "../brand/KurambitBrand";
 import { useStageStill } from "./gameStageBridge";
 import {
   CHARACTER_ROUTES,
+  characterRouteBlocker,
   LibraryChoice,
   modelChoiceLabel,
-  useCharacterRouteBlockers,
-  useGeneratedRouteNote,
 } from "./GameCharacterRoute";
 import { showOpenGameDialog, useGameEntryStore } from "./gameEntryStore";
 import { GameLibraryStatusText, useGameLibraryLine } from "./GameLibraryStatus";
@@ -285,10 +284,8 @@ function BriefBox({
     }
   };
 
-  const generatedNote = useGeneratedRouteNote(environmentId);
   const notes = [
     error === null ? null : { text: error, tone: "destructive" as const },
-    characters === "generated" && generatedNote !== null ? { text: generatedNote } : null,
     canCreate ? null : { text: "This connection cannot make games here." },
     choice.notReadyReason === null ? null : { text: choice.notReadyReason },
     engineTool !== null && engineTool.status !== "ready"
@@ -463,7 +460,6 @@ function BriefBox({
             />
           )}
           <BriefOptions
-            environmentId={environmentId}
             characters={characters}
             onCharacters={setCharacters}
             library={library}
@@ -553,22 +549,18 @@ function BriefBox({
  * button, so the box stays a place to write; a changed choice names itself.
  */
 function BriefOptions({
-  environmentId,
   characters,
   onCharacters,
   library,
   onLibrary,
   disabled,
 }: {
-  environmentId: EnvironmentId;
   characters: GameCharacterRoute;
   onCharacters: (route: GameCharacterRoute) => void;
   library: boolean;
   onLibrary: (library: boolean) => void;
   disabled: boolean;
 }) {
-  const navigate = useNavigate();
-  const blocker = useCharacterRouteBlockers(environmentId);
   return (
     <Menu>
       <MenuTrigger
@@ -594,7 +586,7 @@ function BriefOptions({
             onValueChange={(value: GameCharacterRoute) => onCharacters(value)}
           >
             {CHARACTER_ROUTES.map((option) => {
-              const blocked = blocker(option.route);
+              const blocked = characterRouteBlocker(option.route);
               return (
                 <MenuRadioItem key={option.route} value={option.route} disabled={blocked !== null}>
                   <span className="flex flex-col">
@@ -610,14 +602,6 @@ function BriefOptions({
           <MenuSeparator />
           <LibraryChoice checked={library} onChange={onLibrary} />
         </MenuGroup>
-        {blocker("generated") !== null ? (
-          <>
-            <MenuSeparator />
-            <MenuItem onClick={() => void navigate({ to: "/settings/art" })}>
-              Set up an art provider…
-            </MenuItem>
-          </>
-        ) : null}
       </MenuPopup>
     </Menu>
   );

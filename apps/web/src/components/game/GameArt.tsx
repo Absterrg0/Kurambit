@@ -47,7 +47,6 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Text } from "../ui/text";
-import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -62,7 +61,6 @@ import {
   type ModelViewerHandle,
   type ViewerModelInfo,
 } from "./GameArtViewers";
-import { useGameGenerations } from "./GameGenerationCard";
 import { GameKeyArt } from "./GameKeyArt";
 import { GameSaveToLibrary } from "./GameSaveToLibrary";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
@@ -288,7 +286,6 @@ export function GameArtPanel({
           use={use}
           viewerUrl={viewerUrl}
           heroSheets={read.data?.heroSheets ?? NO_SHEETS}
-          onAsk={onAsk}
           onOpen={(next) => setSelected(entryKey(next))}
           onBack={() => {
             hoverStageThing(null);
@@ -1070,7 +1067,7 @@ const assetContext = (
   const asset = entry.asset;
   return [
     `The asset \`${asset.path}\` (${asset.kind}, ${bytesWords(asset.bytes)}${asset.triangles === undefined ? "" : `, ${asset.triangles} triangles`}).`,
-    `Where it came from: ${ROUTE_WORDS[asset.route]}${asset.pack === undefined ? "" : ` (library pack ${asset.pack})`}${asset.generations === undefined ? "" : ` (generation ${asset.generations.join(", ")})`}.`,
+    `Where it came from: ${ROUTE_WORDS[asset.route]}${asset.pack === undefined ? "" : ` (library pack ${asset.pack})`}.`,
     asset.sidecar === undefined ? null : `Its sidecar: \`${asset.sidecar}\`.`,
     asset.note === undefined ? null : `ASSETS.md says: ${asset.note}`,
     info === null
@@ -1113,7 +1110,6 @@ function ArtDetail({
   use,
   viewerUrl,
   heroSheets,
-  onAsk,
   onOpen,
   onBack,
 }: {
@@ -1128,7 +1124,6 @@ function ArtDetail({
   use: GameAssetUse | null;
   viewerUrl: string | null;
   heroSheets: ReadonlyArray<GameHeroSheet>;
-  onAsk: (text: string) => void;
   onOpen: (entry: GameArtEntry) => void;
   onBack: () => void;
 }) {
@@ -1328,7 +1323,6 @@ function ArtDetail({
           info={info}
           onInfo={setInfo}
           onHandle={setHandle}
-          onAsk={onAsk}
           saver={saver}
           onBake={bake}
         />
@@ -1559,7 +1553,6 @@ function FileDetail({
   info,
   onInfo,
   onHandle,
-  onAsk,
   saver,
   onBake,
 }: {
@@ -1574,7 +1567,6 @@ function FileDetail({
   info: ViewerModelInfo | null;
   onInfo: (info: ViewerModelInfo | null) => void;
   onHandle: (handle: ModelViewerHandle | null) => void;
-  onAsk: (text: string) => void;
   saver: ReturnType<typeof useTuneSaver>;
   onBake: (changed: ReadonlyArray<GameThingValue>) => void;
 }) {
@@ -1654,7 +1646,6 @@ function FileDetail({
           {asset.credit === undefined ? null : <ArtFact name="Licence" reading={asset.credit} />}
           {usedWords === null ? null : <ArtFact name="In play" reading={usedWords} />}
         </PropertySection>
-        <GenerateAgain threadRef={threadRef} asset={asset} onAsk={onAsk} />
       </div>
     </>
   );
@@ -1763,55 +1754,5 @@ function ModelFacts({
         </PropertySection>
       )}
     </>
-  );
-}
-
-/** A generated file's prompt, to edit and generate again; nothing for any other file. */
-function GenerateAgain({
-  threadRef,
-  asset,
-  onAsk,
-}: {
-  threadRef: ScopedThreadRef;
-  asset: GameArtAsset;
-  onAsk: (text: string) => void;
-}) {
-  const generations = useGameGenerations(threadRef).data?.generations ?? [];
-  const generation =
-    generations.find(
-      (each) =>
-        asset.generations?.includes(each.id) === true ||
-        each.files.includes(asset.path) ||
-        (asset.sidecar !== undefined && each.files.includes(asset.sidecar)),
-    ) ?? null;
-  const [prompt, setPrompt] = useState<string | null>(null);
-  if (generation === null) return null;
-  const text = prompt ?? generation.prompt;
-  return (
-    <PropertySection title="Prompt" count={generation.provider}>
-      <div className="flex flex-col gap-2 px-4 pt-1">
-        <Textarea
-          size="sm"
-          value={text}
-          onChange={(event) => setPrompt(event.currentTarget.value)}
-          aria-label="Prompt"
-          rows={3}
-        />
-        <div className="flex">
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={text.trim() === ""}
-            onClick={() =>
-              onAsk(
-                `Generate ${asset.path} again with game_art (my keys, the same kind and provider, ${generation.provider}) from this prompt, then put the new one in the game in its place:\n\n${text.trim()}`,
-              )
-            }
-          >
-            Generate again
-          </Button>
-        </div>
-      </div>
-    </PropertySection>
   );
 }

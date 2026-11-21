@@ -18,7 +18,7 @@ const WORKBENCH_PALETTE: ReadonlyArray<{
   {
     tab: "art",
     title: "Art",
-    searchTerms: ["art", "look", "style", "characters", "palette", "generated"],
+    searchTerms: ["art", "look", "style", "characters", "palette"],
   },
   {
     tab: "checks",
@@ -48,8 +48,8 @@ const WORKBENCH_PALETTE: ReadonlyArray<{
 import { useKeepGoing } from "./game/useKeepGoing";
 import {
   CHARACTER_ROUTES,
+  characterRouteBlocker,
   useCharacterRoute,
-  useCharacterRouteBlockers,
 } from "./game/GameCharacterRoute";
 import { keepGoingControlView } from "./game/keepGoing.logic";
 import { scopeProjectRef, scopeThreadRef } from "@kurambit/client-runtime/environment";
@@ -139,7 +139,6 @@ import {
   Undo2Icon,
   WrenchIcon,
   PaletteIcon,
-  ImagesIcon,
   RotateCcwIcon,
   SettingsIcon,
   SkipForwardIcon,
@@ -158,7 +157,6 @@ import {
   HammerIcon,
   CrosshairIcon,
   CircleStopIcon,
-  BrushIcon,
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
@@ -904,9 +902,6 @@ function OpenCommandPaletteDialog(props: {
   const { settleThread, unsettleThread } = useThreadActions();
   const copiesArrived = useGameArrivalStore((state) => state.met.includes("copies"));
   const characterRoute = useCharacterRoute(isGameThread ? activeThreadRef : null);
-  const characterRouteBlocker = useCharacterRouteBlockers(
-    isGameThread && characterRoute.canSet ? (activeThreadRef?.environmentId ?? null) : null,
-  );
 
   const activeThreadReferenceCopyTarget =
     activeThread === null
@@ -2044,7 +2039,6 @@ function OpenCommandPaletteDialog(props: {
           "code",
           "library",
           "blender",
-          "generated",
           "route",
           "game",
         ],
@@ -2180,15 +2174,6 @@ function OpenCommandPaletteDialog(props: {
         icon: <PackageIcon className={ITEM_ICON_CLASS} />,
         run: requestStage({ kind: "export" }),
       });
-    // Read-only for a run's role thread too: picking is guarded inside.
-    actionItems.push({
-      kind: "action",
-      value: "action:game-generated-art",
-      title: "Show generated art…",
-      searchTerms: ["generated", "art", "assets", "images", "candidates", "pick", "cost", "game"],
-      icon: <ImagesIcon className={ITEM_ICON_CLASS} />,
-      run: requestStage({ kind: "generated-art" }),
-    });
   }
   // Everything above is about the open game. Stopping it ends the group: it is reached by
   // name, not offered first to someone who opened the palette to go somewhere.
@@ -2224,18 +2209,6 @@ function OpenCommandPaletteDialog(props: {
     icon: <WrenchIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings/game-tools" });
-    },
-  });
-  actionItems.push({
-    kind: "action",
-    value: "action:game-art-providers",
-    title: "Open art providers",
-    searchTerms: [
-      "art providers generated keys codex openai gemini tripo meshy elevenlabs daily limit",
-    ],
-    icon: <BrushIcon className={ITEM_ICON_CLASS} />,
-    run: async () => {
-      await navigate({ to: "/settings/art" });
     },
   });
 

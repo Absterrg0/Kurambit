@@ -3,7 +3,6 @@ import {
   ArchiveIcon,
   BlocksIcon,
   BotIcon,
-  BrushIcon,
   CalendarClockIcon,
   createLucideIcon,
   GitBranchIcon,
@@ -58,7 +57,6 @@ const SETTINGS_SECTION_ICONS: Readonly<
 > = {
   "/settings/general": Settings2Icon,
   "/settings/game-tools": WrenchIcon,
-  "/settings/art": BrushIcon,
   "/settings/diagnostics": Settings2Icon,
   "/settings/appearance": PaletteIcon,
   "/settings/projects": Gamepad2Icon,
@@ -86,7 +84,6 @@ const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     paths: [
       "/settings/general",
       "/settings/game-tools",
-      "/settings/art",
       "/settings/appearance",
       "/settings/keybindings",
       "/settings/snap-shot",

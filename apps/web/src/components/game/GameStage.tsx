@@ -947,9 +947,6 @@ function ThreadGameStage({
       case "history":
         setHistoryOpen(true);
         return;
-      case "generated-art":
-        showWorkbench("art");
-        return;
     }
   });
   const requestN = stageRequest?.n ?? 0;

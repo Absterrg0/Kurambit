@@ -10,8 +10,6 @@ function sameInput(left: TimelineEntriesInput, right: TimelineEntriesInput): boo
     left.visibleTurnItems === right.visibleTurnItems &&
     left.optimisticMessages === right.optimisticMessages &&
     left.anchoredMessages === right.anchoredMessages &&
-    // Cards (a run's rounds, the agent's generations) arrive after the first render.
-    left.anchoredCards === right.anchoredCards &&
     left.attachmentUrlById === right.attachmentUrlById &&
     left.attempts === right.attempts &&
     left.nodes === right.nodes &&

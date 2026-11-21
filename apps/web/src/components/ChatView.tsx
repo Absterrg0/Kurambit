@@ -364,7 +364,6 @@ import { useGameDecide } from "./game/GameDecisions";
 import { useKeepGoingBanner } from "./game/useKeepGoingBanner";
 import { useKeepGoing } from "./game/useKeepGoing";
 import { useGameLatestNext } from "./game/useGameLatestNext";
-import { useGameGenerationCards } from "./game/GameGenerationCard";
 import { useEnvironmentScope } from "~/state/session";
 import {
   environmentServerConfigsAtom,
@@ -2693,8 +2692,6 @@ export default function ChatView(props: ChatViewProps) {
     }
     return urls;
   })();
-  // A card per generation the chat's agent started, at its start.
-  const gameGenerationCards = useGameGenerationCards(isGameThread ? routeThreadDetailRef : null);
   const anchoredTimelineMessages = feedbackSubmissions.flatMap((submission) =>
     submission.status === "interrupted"
       ? []
@@ -2707,7 +2704,6 @@ export default function ChatView(props: ChatViewProps) {
     visibleTurnItems: serverVisibleTurnItems,
     optimisticMessages: optimisticUserMessages,
     anchoredMessages: anchoredTimelineMessages,
-    anchoredCards: gameGenerationCards,
     attachmentUrlById: timelineAttachmentUrlById,
     ...(serverProjection === null
       ? {}

@@ -608,12 +608,6 @@ type MessagesTimelineRowContent =
       itemId: TurnItemId;
       revision: string;
       mcpApp: McpAppReference;
-    }
-  | {
-      kind: "game-generation";
-      id: string;
-      createdAt: string;
-      generationId: string;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -1414,17 +1408,10 @@ export function deriveMessagesTimelineRows(input: {
     liveSubagentEntryIds,
     completeSupersededReplyEntryIds: completeSupersededReplyIds,
   });
-  // A generation card never folds away with its turn: it may wait on the person's pick, and
-  // when done it is what the turn made and what it cost.
-  const unfoldedCardIds = new Set(
-    timelineEntries.filter((entry) => entry.kind === "game-generation").map((entry) => entry.id),
-  );
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
     if (!input.expandedRunIds?.has(fold.runId)) {
-      for (const entryId of fold.hiddenEntryIds) {
-        if (!unfoldedCardIds.has(entryId)) collapsedEntryIds.add(entryId);
-      }
+      for (const entryId of fold.hiddenEntryIds) collapsedEntryIds.add(entryId);
     }
   }
   const collapsedSupersededEntryIds = new Set<string>();
@@ -1779,16 +1766,6 @@ export function deriveMessagesTimelineRows(input: {
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         htmlRender: timelineEntry.htmlRender,
-      });
-      continue;
-    }
-
-    if (timelineEntry.kind === "game-generation") {
-      nextRows.push({
-        kind: "game-generation",
-        id: timelineEntry.id,
-        createdAt: timelineEntry.createdAt,
-        generationId: timelineEntry.generationId,
       });
       continue;
     }
@@ -2223,11 +2200,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       // Entries rebuild on any tool update; an equal page must keep its mounted frame.
       const bh = b as typeof a;
       return a.createdAt === bh.createdAt && htmlRenderReferencesEqual(a.htmlRender, bh.htmlRender);
-    }
-
-    case "game-generation": {
-      const bg = b as typeof a;
-      return a.createdAt === bg.createdAt && a.generationId === bg.generationId;
     }
 
     case "mcp-app": {

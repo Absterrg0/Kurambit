@@ -7,7 +7,7 @@ import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { refOf } from "./gameBuildRef";
-import { GameImage } from "./GameGenerationCard";
+import { GameImage } from "./GameImage";
 import { stepVerdictText } from "./keepGoing.logic";
 
 /** The reel shows this many of Keep going's newest steps. */

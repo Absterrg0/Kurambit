@@ -154,7 +154,7 @@ those defaults.
 ## Models
 
 Each game has one setting for how its models are made, **Make models with**: **Blender** (the
-default), **Code** or **Generated**, and a separate **Library models** switch, off by default.
+default) or **Code**, and a separate **Library models** switch, off by default.
 Pick them under the home screen box's options button, so the first turn builds your way, and change
 them later in the Scene tab's **Models** row or the command palette's **Make models with…**. You can
 also ask your agent in chat to switch; it never switches on its own.
@@ -171,10 +171,6 @@ also ask your agent in chat to switch; it never switches on its own.
   and props it models itself, with the library's animations already fitted; an animal is sculpted
   with its own skeleton and moves. Without Blender installed, it builds the characters in code
   and tells you.
-- **Generated**: an art provider makes them (see [Generated art](#generated-art)): Tripo or Meshy
-  on your own key makes rigged 3D characters, and with Codex alone they are images, such as
-  character sheets and sprites. Generated can be picked once a 3D provider or Codex is ready; until
-  then the choice says what to set up.
 - **Library models** on: the free CC0 asset library's models come first, and the route makes what
   it has no model of. Off, its models, textures and sprites stay out of the game; its animations and
   sounds are always available, and a Blender character may still start from one of its base
@@ -209,66 +205,6 @@ from; three.js games play its animations at the speed the character moves, so it
 planted, and swing its tail, ears, coat hems and scarf ends. Select the character on the stage to
 tune how stiff and how damped that swing is while it plays. The turn's build lists the model under **Assets**, and undo
 brings back the model the game had before.
-
-## Generated art
-
-Agents can have art made by specialist providers: images (key art, concepts, character sheets,
-sprites, UI art) and textures by Codex, OpenAI or Google Gemini; characters, creatures and props by
-Tripo or Meshy; moves for human characters by Uthana; sound effects, music and voice by ElevenLabs. Whatever comes back goes through the
-same pipeline as everything else, matched to the game's key art and style, reviewed, recorded in
-`ASSETS.md` with its source, an AI flag and its cost, and undone like any other change. Files land
-under `art/generated/`. When an undo removes a generation's files, its card says so; restoring a
-later build brings them back. Characters and creatures are generated only on a game whose
-characters are made with **Generated**, so nothing is spent on one the game could not use; images,
-props, textures, sound and moves can be generated on every game.
-
-Set it up in **Settings → Art providers**. Codex needs no key: it uses your ChatGPT plan
-through the Codex you already run in Kurambit. Every other provider takes your own API key: choose **Add key…** on its row, which
-also links to where you get one and shows whether it is ready. **Each kind of asset** shows who makes it, picks one
-provider for a kind or leaves it on **Auto**, the first ready one. The agent never switches provider
-or route to get past a refusal; it tells you what is missing.
-
-Paid generations cost money on your provider account. Each one shows its estimate while it is being
-made and its cost when it is done, and every paid call counts against the **Daily limit** (5 USD a day
-across all games by default). A generation that would go over it is refused, with the numbers.
-
-For key art and hero characters the agent asks for a few candidates, each a different look (a different rendering, palette or shape) with a short label. They appear as a card in the
-chat: click one, then **Use this** (or use the arrow keys and Enter). Your pick goes into the chat as
-your message (`Use "Warm toon" for key_art.`), queued behind the agent's turn if it is still
-working, and the agent carries on from it. If the provider refuses one of the looks, the others
-still arrive and the card names the refused one with the provider's reason. Keep going takes the
-first candidate and says so. A new game on **Generated** starts from key
-art: the agent asks for three while it builds the first playable version, you pick one, and the
-game's colours and every later asset come from it. Human characters share the animation library;
-creatures (animals, monsters) keep their own skeleton and animations. Because human characters
-share one skeleton, a move the library lacks (a boss's slam, a victory dance), made by Uthana from
-words or from a video of someone doing it, plays on every human character in the game; its card
-shows a strip of the move. **Cancel** stops a generation still being made.
-
-A character or creature the agent makes while you direct stops once, after its model and before the
-rig is bought: its card shows the model from the front, side and back, with its textures and in plain
-clay, and the cost so far. **Rig this** has it rigged and given its moves; **Cancel** stops there, and
-only the model is paid for. Keep going rigs without stopping and says so. The agent can also rig a
-model the game already has, such as a creature you modelled in Blender or a free library model, with
-no new model made: its shape and textures stay as they were, and only the skeleton and moves are
-added. A model that already has a skeleton is refused. Props can be made in clean low-poly at the
-game's triangle budget, or in separate parts (a door, a turret, a wheel) that the game can move.
-**Generated art**, under **Look…** in the game's menu (also in the command palette), lists everything the game has generated, with its cost and files, and lets you pick, cancel or show a file in its folder.
-Once a three.js build has been measured, a finished image or sound reads **In the game** when the
-build's plays loaded it, or **Not in the game yet**; it is recognised by its file's bytes, so a copy
-the agent changed (or a model exported through Blender) is not matched.
-
-To change an image you kept instead of making it again, choose **Change…** under it (in the chat card
-or in **Generated art**), say what should change, and press Enter. Your words go to the agent as
-your message, and it has the change made, at the price of one image. You then pick **Changed** or
-**As it was**: As it was keeps your image untouched and deletes only the change. Ask for the
-background to be cut out to get a sprite with a transparent background; that needs OpenAI or Codex,
-since Google's images have no transparency.
-
-Generated assets are yours on a paid plan; free plans of these providers do not allow commercial use.
-ElevenLabs music also has a studio-size limit, so check its terms before you ship a game that uses it.
-Uthana's moves made on its free sign-up credit belong to Uthana under CC BY 4.0, so a game that uses
-them credits Uthana; moves made on bought credit are yours.
 
 ## Keep going
 
@@ -403,8 +339,7 @@ what fills it:
   own. Every change shows at once in the view and in the game, and saves as a build
   like Tune's values: **Keep as a build**, **Put all back**, and Undo work the same. **Bake into
   the code** asks your agent to make the changes part of the model's code. An image shows at full
-  size with its alpha and a sprite sheet's frames; a sound shows its waveform; a generated asset's
-  prompt can be edited and generated again. **Ask about this** adds the asset to your message with
+  size with its alpha and a sprite sheet's frames; a sound shows its waveform. **Ask about this** adds the asset to your message with
   a picture of the view, and **Show on the Stage** points at it in the paused game. Pointing at a
   thing in the paused game opens it here while Art is showing (or says it has no model); click the
   same spot again to step out from a part to what holds it. Pointing never changes which section

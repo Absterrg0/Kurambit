@@ -465,24 +465,6 @@ export const gameEnvironment = {
     label: "game:setCharacterRoute",
     tag: WS_METHODS.gameSetCharacterRoute,
   }),
-  // The game's generations and today's spend: reread on art pushes only, so a
-  // card's making state never polls and a pick from another client shows here.
-  generations: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:generations",
-    tag: WS_METHODS.gameGenerations,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("art"),
-  }),
-  // Only the person picks a candidate; Keep going's autopilot picks on the server.
-  chooseGeneration: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:chooseGeneration",
-    tag: WS_METHODS.gameChooseGeneration,
-  }),
-  cancelGeneration: createEnvironmentRpcCommand(connectionAtomRuntime, {
-    label: "game:cancelGeneration",
-    tag: WS_METHODS.gameCancelGeneration,
-  }),
   // The game's art files for the Workbench's Art tab: reread when a build lands, art arrives, or
   // an operation moves (a Blender review or export is one, and changes what is being made).
   artAssets: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
@@ -517,13 +499,6 @@ export const gameEnvironment = {
   libraryRemove: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "game:libraryRemove",
     tag: WS_METHODS.gameLibraryRemove,
-  }),
-  // Which art providers are ready; a key saved in Settings refreshes it there.
-  artProviders: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "game:artProviders",
-    tag: WS_METHODS.gameArtProviders,
-    staleTimeMs: 5_000,
-    idleTtlMs: 60_000,
   }),
   status: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:status",

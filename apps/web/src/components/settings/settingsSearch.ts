@@ -16,7 +16,6 @@ export type SettingsPath =
   | "/settings/projects"
   | "/settings/general"
   | "/settings/game-tools"
-  | "/settings/art"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -77,7 +76,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/projects": "Games",
   "/settings/general": "General",
   "/settings/game-tools": "Game tools",
-  "/settings/art": "Art providers",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "Snapshots",
@@ -174,32 +172,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment",
     environmentOnly: true,
     searchTerms: ["blender executable paths install download toolchain"],
-  },
-  {
-    id: "art-providers",
-    title: "Art providers",
-    to: "/settings/art",
-    scope: "environment",
-    environmentOnly: true,
-    searchTerms: [
-      "generated art keys codex chatgpt openai gemini google tripo meshy elevenlabs uthana licence",
-    ],
-  },
-  {
-    id: "art-lanes",
-    title: "Who makes each kind of asset",
-    to: "/settings/art",
-    scope: "environment",
-    environmentOnly: true,
-    searchTerms: ["image character creature model texture sound effect music voice motion auto"],
-  },
-  {
-    id: "art-daily-limit",
-    title: "Daily art limit",
-    to: "/settings/art",
-    scope: "environment",
-    environmentOnly: true,
-    searchTerms: ["spend cost budget money usd dollars"],
   },
   {
     id: "storage-worktree-keep-when",
@@ -884,7 +856,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/projects": "project",
   "/settings/general": null,
   "/settings/game-tools": null,
-  "/settings/art": null,
   "/settings/appearance": null,
   "/settings/snap-shot": null,
   "/settings/keybindings": null,
