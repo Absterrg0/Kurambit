@@ -6,7 +6,7 @@
  * a dev home (never an installed one); runs are kept by date so two compare.
  *
  *   vp run bench [--briefs N] [--only <id>[,<id>…]] [--out <dir>] [--home <dir>] [--model <instance>/<model>] [--effort <level>] [--steps N]
- *   vp run bench --brief "<text>" [--reference <png>] [--minutes N] [--steps 0] [--characters code|blender|generated] …
+ *   vp run bench --brief "<text>" [--reference <png>] [--minutes N | --rounds N] [--steps 0] [--characters code|blender|generated] …
  *   vp run bench --remeasure <stamp> [--home <dir>] [--out <dir>]
  *
  * `--brief` runs one brief of your own instead of briefs.json as the Kurambit lane beside the
@@ -14,6 +14,8 @@
  * game gets the first turn and then Keep going on Autopilot until `--minutes` (30) from the
  * moment the brief was sent, as a person who pressed Keep going would; at that cap its folder's
  * frame is taken the way the bare lane's is (`lane/<id>.png`), and anything still running stops.
+ * `--rounds N` caps the lane by turns instead: the first turn, then N Keep going steps, each turn
+ * waited on up to `--minutes` (120), so a slow machine takes longer but its game is not cut short.
  *
  * Phase 1 scores each brief's first turn. Phase 2 then runs keep going on the
  * game for `--steps` steps (default 3; 0 skips it) and records what each step
@@ -85,6 +87,7 @@ const { values: args } = NodeUtil.parseArgs({
     brief: { type: "string" },
     reference: { type: "string" },
     minutes: { type: "string" },
+    rounds: { type: "string" },
     effort: { type: "string" },
     characters: { type: "string" },
   },
@@ -95,8 +98,13 @@ const CHARACTERS = Schema.decodeUnknownSync(GameCharacterRoute)(
 );
 /** One brief of your own: the Kurambit lane, capped, beside the bare lane. */
 const LANE = args.brief !== undefined;
-/** The first turn's wall-time cap; in the lane, the whole lane's. */
-const TURN_MINUTES = args.minutes === undefined ? (LANE ? 30 : 60) : Number(args.minutes);
+/** Keep going steps after the lane's first turn, in place of its wall-time cap. */
+const ROUNDS = args.rounds === undefined ? null : Number(args.rounds);
+if (ROUNDS !== null && (!LANE || !Number.isInteger(ROUNDS) || ROUNDS < 0 || ROUNDS > 10))
+  throw new Error(`--rounds takes 0 to 10 steps, with --brief, not ${args.rounds}.`);
+/** The first turn's wall-time cap; in the lane, the whole lane's, or each turn's under --rounds. */
+const TURN_MINUTES =
+  args.minutes === undefined ? (LANE ? (ROUNDS === null ? 30 : 120) : 60) : Number(args.minutes);
 if (!Number.isFinite(TURN_MINUTES) || TURN_MINUTES <= 0)
   throw new Error(`--minutes takes a number of minutes, not ${args.minutes}.`);
 
@@ -529,8 +537,11 @@ async function toCap(
   id: string,
   turnEnded: boolean,
 ): Promise<void> {
-  const capAt = sentAt.getTime() + TURN_MINUTES * 60_000;
-  const keepGoing = (mode: "autopilot" | "off", budgetMinutes?: number) =>
+  const capAt =
+    ROUNDS === null
+      ? sentAt.getTime() + TURN_MINUTES * 60_000
+      : Date.now() + ROUNDS * TURN_MINUTES * 60_000;
+  const keepGoing = (mode: "autopilot" | "off", budgetMinutes?: number | null) =>
     call(server, cookie, (client) =>
       client[WS_METHODS.gameKeepGoing]({
         threadId: game.threadId,
@@ -541,12 +552,17 @@ async function toCap(
     );
   const left = Math.floor((capAt - Date.now()) / 60_000);
   let now = null as Awaited<ReturnType<typeof keepGoing>> | null;
-  if (turnEnded && left >= 1) {
-    log(`${id}: keep going on Autopilot for the ${left} min left`);
-    now = await keepGoing("autopilot", left);
+  const settled = () => now?.steps.filter((step) => step.verdict !== null).length ?? 0;
+  if (turnEnded && (ROUNDS === null ? left >= 1 : ROUNDS > 0)) {
+    log(
+      ROUNDS === null
+        ? `${id}: keep going on Autopilot for the ${left} min left`
+        : `${id}: keep going on Autopilot for ${ROUNDS} step(s)`,
+    );
+    now = await keepGoing("autopilot", ROUNDS === null ? left : null);
     // The status lists steps newest first: each one is logged once, by its number.
     const logged = new Set<number>();
-    while (now.mode !== "off" && Date.now() < capAt) {
+    while (now.mode !== "off" && Date.now() < capAt && (ROUNDS === null || settled() < ROUNDS)) {
       await sleep(5);
       now = await call(server, cookie, (client) =>
         client[WS_METHODS.gameKeepGoingStatus]({ threadId: game.threadId }),
@@ -576,7 +592,10 @@ async function toCap(
         commandId: CommandId.make(`bench:${NodeCrypto.randomUUID()}`),
         threadId: game.threadId,
         runId: running.id,
-        reason: `the lane's ${TURN_MINUTES}-minute cap`,
+        reason:
+          ROUNDS === null
+            ? `the lane's ${TURN_MINUTES}-minute cap`
+            : `the lane's ${ROUNDS} round(s)`,
       }),
     ).catch(() => undefined);
   await NodeFSP.writeFile(
