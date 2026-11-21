@@ -15,17 +15,22 @@ The earlier craft kits (hero, world, carve) are gone. A model made with them sti
 from its .blend, but its script no longer rebuilds: kurambit.hero or kurambit.world says so."""
 from . import blender, look
 from .animate import animate
+from .bake import bake_down
 from .character import character
 from .digest import digest, resolve
+from .hardsurface import hard_surface
 from .helpers import (aim, decal, eye_lid, eye_squash, grid, hold, key_pose, material, mirror_pose, joints, loft, palette_of, pivot, place_chain, place_on_surface,
                       ring_around, skin_rigid, surface_hit, tube_along_bones, turn, weights_along)
 from .protocol import Refused
 from .qa import qa
+from .refplanes import ref_planes
 from .review import review
+from .skin import one_skin
 from .surfaces import surface, wrap
+from .sweep import sweep
 
-__all__ = ["aim", "animate", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "palette_of", "pivot",
-           "place_chain", "place_on_surface", "qa", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "weights_along", "wrap"]
+__all__ = ["aim", "animate", "bake_down", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "grid", "hard_surface", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "one_skin", "palette_of", "pivot",
+           "place_chain", "place_on_surface", "qa", "ref_planes", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "sweep", "tube_along_bones", "turn", "weights_along", "wrap"]
 
 GONE = ("hero", "world", "carve", "face", "hair", "garment", "cloth", "footwear", "trim", "zones", "anatomy", "creature", "gait")
 

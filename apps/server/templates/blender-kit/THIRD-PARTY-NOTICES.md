@@ -53,11 +53,16 @@ SOFTWARE.
 
 Copyright (c) 2026 EL4CTEO, https://github.com/EL4CTEO/blender-skills, read through Patch's fork
 cloud-blender-skills (https://github.com/patch-gg/cloud-blender-skills, MIT, the same licence) at
-commit d659b96. It is not vendored; this kit file adapts part of it:
+commit d659b96, and upstream at commit 9e7e04a. It is not vendored; these kit files adapt parts of it:
 
 - `kurambit/qa.py` adapts `skills/blender-asset-qa/scripts/qa_check.py` (the signed volume of each
   closed part, the directed edge used twice, coplanar overlap sampled against a BVH). The file's
   header states the changes.
+- `kurambit/hardsurface.py` follows the midpoly preset of
+  `skills/blender-hardsurface-modeling/scripts/apply_stack.py` (Boolean, Bevel by angle with
+  harden normals, Weighted Normal keeping sharp edges).
+- `kurambit/bake.py` follows `skills/blender-texture-baking/scripts/bake_maps.py` for the
+  selected-to-active bake settings (extrusion and ray distance from the model's size, extend margin).
 
 ```
 MIT License
