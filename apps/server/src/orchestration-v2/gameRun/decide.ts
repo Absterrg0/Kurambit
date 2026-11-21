@@ -185,8 +185,10 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   next: "your agent's next step",
 };
 const STEER_INTRO = "The person asked for this, in their words:";
+// Keep going measures every step's build itself and undoes one that breaks the game, so the
+// step spends its time on the change, not on a full check of its own.
 const STEP_TAIL =
-  "This is a keep-going step: make this one change, end with a clean `game_check` op `final`, then your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
+  "This is a keep-going step: make this one change, look at it, then your `Next:` line. When nothing worth doing for BRIEF.md is left, end with `Next: none`.";
 const NEXT_FALLBACK = "Make the one change that most improves the game for BRIEF.md.";
 
 const clip = (text: string, max: number) =>
