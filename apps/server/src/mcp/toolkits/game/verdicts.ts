@@ -62,14 +62,10 @@ const check =
     ];
     const next =
       errors.length > 0
-        ? "fix the first error where it points, then look again."
+        ? "fix the first error where it points."
         : final && problems.length > 0
-          ? "fix each QA problem (they are bugs), then run final again."
-          : final
-            ? "if the critique of the frame finds nothing major, end the turn: what changed, then a Next: line."
-            : answer.review === undefined
-              ? "critique the frame as your first look's review said, fix the biggest gap, look again; final before you end the turn."
-              : "write the critique the review asks for, fix the biggest gap, look again; final before you end the turn.";
+          ? "fix each QA problem (they are bugs)."
+          : "go on with the work; when it is done, end the turn: what changed, then a Next: line.";
     return {
       line: numbers.join(" · "),
       findings: [...errors.map(issueLine), ...problems, ...(final ? scene : [])],

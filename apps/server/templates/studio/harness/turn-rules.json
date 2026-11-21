@@ -24,11 +24,11 @@
     ]
   },
   "scope": [
-    "- **Do everything the person asked in this message,** and only that: your own ideas go in `Next:`. The turn ends when that work is done and you have looked at it, not when the check is clean. When the game has a reference picture, keep going until your critique of the game's frame beside it finds nothing major.",
+    "- **Do everything the person asked in this message,** and only that: your own ideas go in `Next:`. The turn ends when that work is done and you have looked at it.",
     "- **A value they ask to change** that a `ctx.tune` already holds: set it in `web/tune.json` under the id its `ctx.tune` uses, say so, and that is the turn.",
     "- **How models are made** (game.json's `characters`: code, blender or generated, and `library`) is the person's choice: change it only when they ask in chat.",
     "- **A question:** answer it and change nothing; your previous `Next:` line stands, so repeat it.",
-    "- **Look as often as you need; check in full once the work is done.** `game_check` is a quick look: your game as a player opens it, a frame of play, its errors and frame rate. Before you end the turn, run its op `final`, which also plays the scene report and the QA play, and fix what they list. A clean check says the game runs, not that the work is done.",
+    "- **Look when you need to see it.** `game_check` is a quick look: your game as a player opens it, a frame of play, its errors and frame rate. You need not check in full: when your turn ends, Kurambit measures the build (its facts and the QA play) and shows them to the person; op `facts` reads them, and op `final` runs that full check now, when you want it.",
     "- Install nothing the person did not ask for; the game_* tools are your toolchain."
   ],
   "playtest": "- Play it yourself (`game_play` ops `start`, `act`, `close`) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. Read `game_check` op `facts` when the person reports a problem.",

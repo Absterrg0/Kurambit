@@ -182,15 +182,14 @@ const personsModelChoice = Effect.gen(function* () {
 const REVIEW = STUDIO_TEXT.results;
 
 /**
- * The provider sessions that already read a review, by kind: it was 22% of all result text when
- * every look carried it (TOOLS.md). A session keeps its context, so once per session is once per
+ * The provider sessions that already read which picture is which: a review was 22% of all result
+ * text when every look carried it (TOOLS.md). A session keeps its context, so once per session is once per
  * chat; a restarted server says it once more.
  */
 const reviewed = new LRUCache<string, true>({ max: 2_000 });
-const firstReview = (session: string, kind: "frame" | "brief") => {
-  const key = `${session}:${kind}`;
-  if (reviewed.has(key)) return false;
-  reviewed.set(key, true);
+const firstReview = (session: string) => {
+  if (reviewed.has(session)) return false;
+  reviewed.set(session, true);
   return true;
 };
 
@@ -198,7 +197,7 @@ const firstReview = (session: string, kind: "frame" | "brief") => {
 const GameCheckAnswer = Schema.Struct({
   ...GameCheckResult.fields,
   screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
-  /** How to judge the frame (beside the reference, when the game has one) before ending. */
+  /** Which picture is the reference, once per session, when the game has one. */
   review: Schema.optionalKey(Schema.String),
   /** One line of numbers per recipe game.json `recipes` picks (recipes.ts). */
   recipes: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -310,14 +309,15 @@ const check = (store: CheckpointStore["Service"], final: boolean) =>
     );
     const shown = screenshots.filter((shot) => shot !== null);
     const session = (yield* caller).thread.providerSessionId;
-    const review = shown.length > 0 && firstReview(session, reference === null ? "brief" : "frame");
+    // A brief alone needs no words beside the frames; a reference says which picture is which.
+    const review = shown.length > 0 && reference !== null && firstReview(session);
     return {
       ...measured,
       ...(recipes.length === 0 ? {} : { recipes }),
       ...(shown.length === 0 ? {} : { screenshots: shown }),
       ...(review
         ? {
-            review: `${views[0]?.entry === "boot" && shown.length > 1 ? REVIEW.openingReview : ""}${reference === null ? REVIEW.briefReview : REVIEW.frameReview}`,
+            review: `${views[0]?.entry === "boot" && shown.length > 1 ? REVIEW.openingReview : ""}${REVIEW.frameReview}`,
           }
         : {}),
     };
