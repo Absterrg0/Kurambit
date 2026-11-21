@@ -1560,7 +1560,9 @@ const make = Effect.gen(function* () {
           "Lock the look",
           GAME_STYLE_FILE,
           "invalid-input",
-          `lock takes view, palette (hex colours, or a PNG in the game), roles {role: "#rrggbb"}, shape {edges: faceted, soft or voxel, bevel, chunky, detail}, finish (flat, painted, real) and surfaces {role: {kind, pattern, metres, wear}}: ${decoded.failure.message.slice(0, 800)}`,
+          // What is wrong first: a refusal is read cut, and the shape after the reason hid it
+          // (8 of 12 lock calls in a model bench were refused, each cut before its reason).
+          `${decoded.failure.message.replace(/\s+/g, " ").slice(0, 400)}. lock takes view, palette (hex colours, or a PNG in the game), roles {role: "#rrggbb"}, shape {edges: faceted, soft or voxel, bevel, chunky, detail}, finish (flat, painted, real) and surfaces {role: {kind, pattern, metres, wear}}.`,
         );
       const input = decoded.success;
       const gameRoot = yield* realRootOf(root, "Lock the look");
