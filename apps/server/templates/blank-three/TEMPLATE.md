@@ -12,8 +12,8 @@ exists the page runs nothing. This is all the bridge needs from it:
 2. **An end.** `GameState.win(text)` and `GameState.lose(text)`, with `GameState` imported from
    `./shell/run-state.js`. Plain values the game puts on `GameState` are what the harness reads,
    and each run starts from their first values again.
-3. **The run's moves.** A run opens in play. Only a game that wants its own title calls
-   `GameState.title()` in `start`, which holds the run on it (`GameState.state` is `"title"`;
+3. **The run's moves.** A run opens in play; a game that wants its own title calls
+   `GameState.title()` in `start` to hold the run on it (`GameState.state` is `"title"`;
    update keeps running); `GameState.play()` starts a fresh run
    in play (from a title, or as a retry), `menu()` a fresh run on the title, `pause()` and
    `resume()` hold play. The harness's plays open in play, where `title()` does nothing.
