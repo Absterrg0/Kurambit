@@ -81,6 +81,8 @@ export const GameBlenderReview = Schema.Struct({
 export type GameBlenderReview = typeof GameBlenderReview.Type;
 export const GameBlenderLookResult = Schema.Struct({
   text: Schema.String,
+  /** With fresh: the separate model's view of the picture's biggest visible defects. */
+  fresh: Schema.optionalKey(Schema.String),
   screenshot: Schema.optionalKey(GameBlenderLookScreenshot),
   review: Schema.optionalKey(GameBlenderReview),
 });

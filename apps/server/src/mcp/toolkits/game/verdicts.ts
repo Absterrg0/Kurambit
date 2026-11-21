@@ -134,7 +134,10 @@ const VERDICTS: Readonly<Record<string, (answer: Answer) => Verdict>> = {
     line: `ran · ${String(answer.output ?? "").split("\n").length} lines of output`,
   }),
   "game_blender.look": (answer) => ({
-    line: `${(answer.screenshots ?? []).length} picture(s)${answer.review === undefined ? "" : " · reviewed"}`,
+    line: `${answer.screenshot === undefined ? 0 : 1} picture${answer.review === undefined ? "" : " · reviewed"}`,
+    ...(typeof answer.fresh === "string"
+      ? { notes: answer.fresh.split("\n"), said: ["fresh"] }
+      : {}),
   }),
   "game_blender.export": (answer) => ({
     line: `${answer.file ?? answer.path ?? "exported"}${answer.triangles === undefined ? "" : ` · ${answer.triangles} triangles`}`,

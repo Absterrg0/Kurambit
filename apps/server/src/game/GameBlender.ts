@@ -1885,8 +1885,10 @@ const make = Effect.gen(function* () {
    * render its composite in a throwaway scene of the live session.
    */
   /**
-   * With fresh, the look's picture also goes to a separate model (GameFreshEyes), whose defects
-   * follow the look's own text. The picture is kept under builds/logs/fresh-eyes.
+   * With fresh, the look's picture also goes to a separate model (GameFreshEyes); its defects
+   * are a field of their own, which the look's verdict shows whole (a review's measurements
+   * fill the result's byte cap, and a cap once cut them away). The picture is kept under
+   * builds/logs/fresh-eyes.
    */
   const freshLook = (
     threadId: ThreadId,
@@ -1909,18 +1911,11 @@ const make = Effect.gen(function* () {
                     return file;
                   })
                 : null;
-          if (image === null)
-            return {
-              ...result,
-              text: `${result.text}\nFresh eyes need a picture, and this look made none.`,
-            };
-          const seen = yield* freshEyes.review({
-            threadId,
-            root,
-            images: [image],
-            about: input.about,
-          });
-          return { ...result, text: `${result.text}\n\n${seen}` };
+          const seen =
+            image === null
+              ? "Fresh eyes need a picture, and this look made none."
+              : yield* freshEyes.review({ threadId, root, images: [image], about: input.about });
+          return { ...result, fresh: seen };
         });
 
   const review = (root: string, input: GameBlenderLookInput) =>
