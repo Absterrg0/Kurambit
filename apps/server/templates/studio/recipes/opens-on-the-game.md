@@ -18,13 +18,14 @@
 
 ## Steps
 
-1. The first frame is the scene in motion: the real level, the player idle, a slow camera move.
-2. `GameState.title()` in `start` holds the run on that live scene; the title is a transparent
-   DOM overlay at an edge, never a full-screen card.
-3. Enter, Space, a click or a pad button calls `GameState.play()`; ease the camera to play.
-4. Teach the first verb in play with one short prompt near the player that fades after use;
+1. The first frame is the game in play, already moving: the real level, the player in it, the
+   HUD up. Open straight into play unless the person asks for a title.
+2. A title the person asked for: `GameState.title()` in `start` holds the run on that live
+   scene; the title is a transparent DOM overlay at an edge, never a full-screen card. Enter,
+   Space, a click or a pad button calls `GameState.play()`; ease the camera to play.
+3. Teach the first verb in play with one short prompt near the player that fades after use;
    never a list of every control up front.
-5. During load, show the scene or a progress bar, never a blank page.
+4. During load, show the scene or a progress bar, never a blank page.
 
 ## Pitfalls
 

@@ -13,7 +13,7 @@ in `recipes/<id>.md`. Pick at most 3 for this turn, read only those, and name th
 `"recipes": [...]`; `game_check` then prints each one's numbers.
 
 - `block-out-first`: the first turn: a moving scene within minutes, improved in place.
-- `opens-on-the-game`: any title or start screen; the first frame.
+- `opens-on-the-game`: every game's first frame; a title only when asked for.
 - `light-rig`: any lit 3D scene: sun, sky, bounce, tone mapping, shadows.
 - `sky-fog`: outdoors: sky, sun-tinted fog, distance.
 - `stylised-sea`: open water: swell, depth colour, foam.
