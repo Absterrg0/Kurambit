@@ -28,10 +28,10 @@
     "- **A value they ask to change** that a `ctx.tune` already holds: set it in `web/tune.json` under the id its `ctx.tune` uses, say so, and that is the turn.",
     "- **How models are made** (game.json's `characters`: code, blender or generated, and `library`) is the person's choice: change it only when they ask in chat.",
     "- **A question:** answer it and change nothing; your previous `Next:` line stands, so repeat it.",
-    "- **Look when you need to see it.** `game_check` is a quick look: your game as a player opens it, a frame of play, its errors and frame rate. You need not check in full: after your turn Kurambit measures the build (its facts, the QA play) for the person; op `facts` reads them, op `final` runs that check now.",
+    "- **Look when you need to see it.** `game_check` is a quick look: your game as a player opens it, a frame of play, its errors and frame rate. You need not check in full: after your turn Kurambit measures the build (its facts, the QA play) for the person; `game_builds` op `list` reads them; `game_check` op `final` runs it now.",
     "- Install nothing the person did not ask for; the game_* tools are your toolchain."
   ],
-  "playtest": "- Play it yourself (`game_play` ops `start`, `act`, `close`) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build. Read `game_check` op `facts` when the person reports a problem.",
+  "playtest": "- Play it yourself (`game_play` op `act` opens a session, `close` ends it) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build.",
   "undo": "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.",
   "firstWin": "- **No saved play wins this game yet.** Once it can be won, win it with a `game_play` bot or session and save that run (op `replay` `save`), so every later build replays it.",
   "keepGoing": [
