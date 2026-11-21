@@ -157,9 +157,12 @@ check that matters.
   ([heroSheets.ts](../../apps/server/src/game/heroSheets.ts)). Nothing asks for a critique of it:
   a written critique quoting numbers was bookkeeping the picture never showed, and agents spent
   turns on it.
-- Made characters are conformed, not retargeted: `game_blender` op `character` fits the standard
-  armature to the body once, keeping the standard rest frames, so library clips play unchanged.
-  The style pass and measurement run in a separate one-shot Blender on a saved copy of the live
+- Made characters are rigged, not conformed: `game_blender` op `character` fits a Mesh2Motion
+  template (or chains, for a body no template fits) to a static model and weights it with
+  Blender's automatic weights, a voxel copy where bone heat fails; the template's own clips play
+  on it. Conforming bodies to the standard skeleton by bone-name maps broke on every body whose
+  names or rest frames differed, and hand weighting part by part tore at the joints. Each clip's
+  stretch, foot slide and floor depth come back as notes, never refusals. The style pass and measurement run in a separate one-shot Blender on a saved copy of the live
   scene, keyed by the objects' digests and the lock (not the kit: a pass an older kit made is run
   again, but nothing else goes stale). `game_blender` op `look` mode review renders that pass;
   `game_blender` op `export` ships it, running it first when no review did, and returns the same
@@ -227,12 +230,10 @@ check that matters.
   height (`look-edits.js`), so a cell of any other height would shift every swatch it recolours.
   A made body (MPFB2 or the drawn bodies) carries no material, so op `character` paints it
   `<name> skin`; unpainted, it ships the glTF default white.
-- Humans use no Rigify: op `character`'s conform already is the game rig, deform bones under
-  standard names whose rest frames are the library's, so its clips play with no retarget loss.
-  A creature's skeleton is a Rigify meta-rig used as the armature itself, its clips keyed through
-  IK legs and baked (`bake_ik_walk`). Generating Rigify's rig and baking it onto its DEF bones
-  turned a wolf's front thigh 133° at rest, and Rigify's own DEF export flattens the limbs under the
-  rig root; the meta-rig's own hierarchy exports intact, legs under the spine.
+- No Rigify rig is generated: generating Rigify's rig and baking it onto its DEF bones turned a
+  wolf's front thigh 133° at rest, and Rigify's own DEF export flattens the limbs under the rig
+  root. The human template's head bone takes the standard name `Head` so `animate`, the clip
+  measures and sheet poses still find it.
 - The earlier craft kits (`hero`, `world`, `carve` and their modules) were deleted after the asset
   bench. Their `.blend` files still export byte for byte, because the export pass reads only data
   they left (`kurambit_cloth`, the `kurambit_under` group, `kurambit_rig`): `deform.py` keeps

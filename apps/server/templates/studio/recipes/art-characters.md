@@ -13,9 +13,9 @@
   fused together cannot be told apart.
 - A human starts from a base body: `game_blender` op `character`, `body` `{studio: {gender}}`
   (Blender Studio's drawn stylised body, ships with the kit), `{mpfb: {...}}` (MPFB2's realistic
-  human; the person agrees to the add-on first), a library body, or `{game: path}`; reshape it
-  with `style` factors (`head`, `legs`, `arms`, `hands`, `feet`, `girth`, `limbs`; 1 keeps it)
-  and `height`. Its clips come already fitted.
+  human; the person agrees to the add-on first), a library body, or `{game: path}`, at a
+  `height`. To restyle it (a bigger head, shorter legs), edit the static body mesh yourself
+  before it is rigged (`recipes/art-rigging.md`).
 - From scratch, each region is a `kurambit.sweep`: a centreline through the joints and 4-8
   stations of width, height and superellipse exponent (2 round, 3-4 a rounded box) that blend
   smoothly. 48-96 sides for a hero, 24-32 for a background part. Sink each region a few cm into
@@ -29,8 +29,8 @@ voxel=height/200, smooth=10, target_faces=)`, then Subdivision 1.
   `kurambit.hard_surface`, overlapping like real lamellae; hair is a sweep, or cards.
 - Surface layers (scales, feathers, fur) are cards scattered along a flow over the skin
   (`kurambit.blender.scatter`), each card one feather or tuft, with size and colour jitter.
-- An animal's skeleton: `kurambit.blender.metarig("basic_quadruped" | "horse", height=)` prints
-  its joints; build the body round them (`recipes/art-rigging.md`).
+- An animal: build it static with its legs apart, then rig it on a template (`fox`, `horse`,
+  `dragon`…) or chains (`recipes/art-rigging.md`).
 - Materials: skin with subsurface and roughness 0.4-0.6; cloth matte with a weave or noise;
   metal metallic 1 with worn, lighter edges; eyes glossy. Variation everywhere: no part one
   flat colour.

@@ -35,7 +35,7 @@ low-sided tubes on a skeleton read as a toy robot.
 3. Dense form, one surface per region:
    - a body from a base: `game_blender` op `character` with `body`
      `{studio: {gender}}` (a drawn stylised body, no install), `mpfb`
-     (a realistic human), `library` or `game`, reshaped by `style` factors;
+     (a realistic human), `library` or `game`; reshape its mesh yourself;
    - or from scratch: `kurambit.sweep(path, stations, sides=48-96)` per
      region (torso, limb, neck, tail, hull, trunk), fused with
      `kurambit.one_skin([...], voxel=, smooth=)`, then a Subdivision
@@ -64,8 +64,8 @@ Model them in an A-pose (arms 30-45° down, clear of the body; legs apart),
 facing -Y, with every prop (sword, shield, bag) a separate object, and four
 legs separated down to the feet: a rig is fitted to the joints, and weights
 come from Blender's automatic weights on the body, with props rigid on one
-bone. Keep the joint positions you built on (shoulder, elbow, wrist, hip,
-knee, ankle, neck, head top, tail root) where your code can print them.
+bone (`recipes/art-rigging.md`). Keep the joint positions you built on
+where your code can print them: the rig takes them as `joints`.
 
 ## The loop
 
