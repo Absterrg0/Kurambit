@@ -426,7 +426,6 @@ export function filterCommandPaletteGroups(input: {
   query: string;
   isInSubmenu: boolean;
   gameSearchItems: ReadonlyArray<CommandPaletteActionItem>;
-  librarySearchItems?: ReadonlyArray<CommandPaletteActionItem>;
   settingsSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
@@ -456,13 +455,6 @@ export function filterCommandPaletteGroups(input: {
         value: "games-search",
         label: "Games",
         items: input.gameSearchItems,
-      });
-    }
-    if (input.librarySearchItems && input.librarySearchItems.length > 0) {
-      searchableGroups.push({
-        value: "library-search",
-        label: "Library",
-        items: input.librarySearchItems,
       });
     }
     if (input.settingsSearchItems && input.settingsSearchItems.length > 0) {

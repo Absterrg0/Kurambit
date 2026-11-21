@@ -4,7 +4,6 @@ import { AsyncResult } from "effect/reactivity";
 import { useEffect } from "react";
 
 import { type GameTool, useArrivalDot, useGameArrivalStore } from "../../gameArrivalStore";
-import { useProjects } from "../../state/entities";
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuerySelector } from "../../state/query";
 import { codeModels } from "./gameArt.logic";
@@ -93,9 +92,4 @@ export function useGameArrivals(threadRef: ScopedThreadRef | null) {
     keepGoing: useArrival("keep-going", next && boots),
     responsive: useArrival("responsive", screensFail),
   };
-}
-
-/** The Library arrives with a second game. */
-export function useLibraryArrival(): GameArrival {
-  return useArrival("library", useProjects().length >= 2);
 }

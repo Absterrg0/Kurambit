@@ -62,7 +62,6 @@ import {
   type ViewerModelInfo,
 } from "./GameArtViewers";
 import { GameKeyArt } from "./GameKeyArt";
-import { GameSaveToLibrary } from "./GameSaveToLibrary";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
 import { colourHex, PropertyReading, PropertyRow, PropertySection } from "../ui/property-field";
 import { GameLookInspector, LabelInput, renameLook, SizeRow } from "./GameLookInspector";
@@ -1268,14 +1267,6 @@ function ArtDetail({
             <TooltipPopup side="bottom">Show on the Stage</TooltipPopup>
           </Tooltip>
         )}
-        {entry.kind === "code-model" ? (
-          <GameSaveToLibrary
-            threadRef={threadRef}
-            thing={entry.id}
-            name={name}
-            picture={orbit?.png ?? null}
-          />
-        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

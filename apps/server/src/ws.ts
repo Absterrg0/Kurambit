@@ -10,7 +10,6 @@ import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameExport from "./game/GameExport.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
 import * as GameArtAssets from "./game/GameArtAssets.ts";
-import * as GameLibrary from "./game/GameLibrary.ts";
 import * as GameStage from "./game/GameStage.ts";
 import * as GameStatusService from "./game/GameStatusService.ts";
 import * as GameProjectService from "./game/GameProjectService.ts";
@@ -1194,7 +1193,6 @@ const layerWsRpc = (
       const gameExport = yield* GameExport.GameExport;
       const gameSaved = yield* GameSavedMediaService.GameSavedMediaService;
       const gameArtAssets = yield* GameArtAssets.GameArtAssets;
-      const gameLibrary = yield* GameLibrary.GameLibrary;
       const gameRun = yield* GameRunControl.GameRunControl;
       const gameProjects = yield* GameProjectService.GameProjectService;
       const gameBuilds = yield* GameBuilds.GameBuilds;
@@ -1884,10 +1882,6 @@ const layerWsRpc = (
         [WS_METHODS.gameSetCharacterRoute]: ({ threadId, ...choice }) =>
           gameRun.setModelChoice(threadId, choice),
         [WS_METHODS.gameArtAssets]: ({ threadId }) => gameArtAssets.list(threadId),
-        [WS_METHODS.gameLibraryList]: () => gameLibrary.list,
-        [WS_METHODS.gameLibraryAdd]: (input) => gameLibrary.add(input),
-        [WS_METHODS.gameLibrarySave]: (input) => gameLibrary.save(input),
-        [WS_METHODS.gameLibraryRemove]: ({ id }) => gameLibrary.remove(id).pipe(Effect.as({})),
         [WS_METHODS.gameArtThumbnail]: ({ threadId, sha256, png }) =>
           gameArtAssets
             .saveThumbnail(threadId, sha256, png)
@@ -3005,7 +2999,6 @@ export const layer = Layer.unwrap(
     const gameExport = yield* GameExport.GameExport;
     const gameSaved = yield* GameSavedMediaService.GameSavedMediaService;
     const gameArtAssets = yield* GameArtAssets.GameArtAssets;
-    const gameLibrary = yield* GameLibrary.GameLibrary;
     const gameRun = yield* GameRunControl.GameRunControl;
     const gameProjects = yield* GameProjectService.GameProjectService;
     const gameToolchain = yield* GameToolchain.GameToolchain;
@@ -3073,7 +3066,6 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameExport.GameExport, gameExport)),
               Layer.provide(Layer.succeed(GameSavedMediaService.GameSavedMediaService, gameSaved)),
               Layer.provide(Layer.succeed(GameArtAssets.GameArtAssets, gameArtAssets)),
-              Layer.provide(Layer.succeed(GameLibrary.GameLibrary, gameLibrary)),
               Layer.provide(Layer.succeed(GameRunControl.GameRunControl, gameRun)),
               Layer.provide(Layer.succeed(GameProjectService.GameProjectService, gameProjects)),
               Layer.provide(Layer.succeed(GameToolchain.GameToolchain, gameToolchain)),

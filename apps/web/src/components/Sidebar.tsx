@@ -10,11 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  parseScopedThreadKey,
-  scopeThreadRef,
-  scopedThreadKey,
-} from "@kurambit/client-runtime/environment";
+import { scopeThreadRef, scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { presentThreadShell } from "@kurambit/client-runtime/state/models";
 import {
   isAtomCommandInterrupted,
@@ -27,7 +23,7 @@ import {
   type GameBuildsResult,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { AsyncResult } from "effect/reactivity";
 import * as Schema from "effect/Schema";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -75,7 +71,6 @@ import {
   moveThreadContextDrag,
 } from "./chat/threadContextDrag";
 import { useNewGame } from "./game/gameEntryStore";
-import { useLastGameChat } from "./library/lastGameChat";
 import { doesNotStart } from "./game/gameBuilds.logic";
 import { GameLibraryPicture } from "./game/GameLibraryStatus";
 import { chatTitle } from "./game/gameLibrary.logic";
@@ -163,7 +158,6 @@ export default function Sidebar() {
   );
   const routeThreadRef = resolveActiveThreadRouteRef(routeTarget, routeDraft);
   const routeThreadKey = routeThreadRef === null ? null : scopedThreadKey(routeThreadRef);
-  const libraryOpen = useLocation({ select: (location) => location.pathname === "/library" });
   const [archivedOpen, setArchivedOpen] = useLocalStorage(ARCHIVED_OPEN_KEY, false, Schema.Boolean);
   const [settledOpen, setSettledOpen] = useLocalStorage(SETTLED_OPEN_KEY, false, Schema.Boolean);
   const [settledShown, setSettledShown] = useState(SHELF_PAGE);
@@ -206,14 +200,6 @@ export default function Sidebar() {
   // A shelf opens on the chat on screen, so the selected row is never folded away.
   const shelfOpen = settledOpen || (currentRow !== null && list.settled.includes(currentRow));
   const archiveOpen = archivedOpen || (currentRow !== null && list.archived.includes(currentRow));
-
-  // The Library knows the game the person was last on.
-  const rememberChat = useLastGameChat((state) => state.set);
-  const currentProjectId = currentRow?.game.projectId ?? null;
-  useEffect(() => {
-    const ref = routeThreadKey === null ? null : parseScopedThreadKey(routeThreadKey);
-    if (ref !== null && currentProjectId !== null) rememberChat(ref, currentProjectId);
-  }, [routeThreadKey, currentProjectId, rememberChat]);
 
   // The chat on screen is always in view in the list, however it was opened.
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -554,11 +540,6 @@ export default function Sidebar() {
                 openCommandPalette();
               }}
               searchShortcutLabel={shortcutLabelForCommand(keybindings, "commandPalette.toggle")}
-              libraryOpen={libraryOpen}
-              onLibrary={() => {
-                closeMobile();
-                void navigate({ to: "/library" });
-              }}
             />
           </SidebarGroup>
         }

@@ -125,18 +125,6 @@ chat** opens the game's screen with an empty chat: the game fills the screen abo
 offers your agent's latest suggestion (Tab takes it), and the game settles into the column once you
 send. A game keeps one empty chat, so asking again opens that one.
 
-## Library
-
-**Library** in the sidebar, there from your second game on, shows every model, texture, sound and font in all your games (a file
-in several games is listed once), the models you saved, the asset packs Kurambit knows with their
-licences, and each game's look. Filter by kind and between **Yours** and **Packs**, or find an
-asset from **Search**. Open one to see it, where it is used and its licence. **Add to game** copies
-it into a game with its credit in `ASSETS.md`, as a build that Undo takes back; for a look it gives
-the game that look, or starts a new game in it. **Ask about this** puts it in your current chat.
-In a game's Art, **Save to library** on a thing the game's code makes (or one of its parts) keeps
-it as a model you can add to your next game; **Remove from Library** forgets it again, and the games
-it was added to keep their copies.
-
 ## Style
 
 A game's look can be recorded in `STYLE.json` at the game's root. For what the game makes itself:
@@ -184,7 +172,7 @@ Game tools**, under Blender, **Human bodies**, **Install**. Its code is GPL-3.0,
 ship it: it is downloaded from extensions.blender.org (46 MB) into Kurambit's own Blender sessions,
 never your Blender settings, and the bodies it makes are CC0. **Remove** deletes it again; a live
 Blender view already open keeps it until it reopens. Without MPFB2, Blender characters use library
-bodies. Add-ons are tools that make things; finished models and textures are the Library's.
+bodies. Add-ons are tools that make things, not finished models or textures.
 
 A character or creature is finished only once its sheet (its turnaround and every move in one
 image) is kept in `art/sheets/`, it passes its measured gates, and the agent has written its
@@ -275,8 +263,7 @@ agent and the box where you tell the game what to change. A new game starts with
 The Workbench and its **Tune**, **Art** and **Checks** are always there. Every other tool appears
 when the game first has something for it, and then stays where it is: **Save as test play** once
 a run ends; **Responsive view** once a phone or widescreen check finds a problem; **Keep going**
-once a build starts with a `Next:` line; the
-**Library** with your second game. A new tool, or a Workbench section the first time it has
+once a build starts with a `Next:` line. A new tool, or a Workbench section the first time it has
 something in it, carries a dot until you open it: one dot at a time, on the newest. Their keys and
 the command palette reach each one before then.
 

@@ -158,7 +158,7 @@ const RETIRED_GAME_OPS: Readonly<Record<string, string>> = {
   "game_play.bot_view": "game_play op replay {run, at}",
   "game_assets.image_edit": "nothing: generated art is gone; make it in Blender or code",
   "game_assets.import": "nothing: a three.js game loads web/ files as they are",
-  "game_assets.mine": "nothing for agents: the person's Library is theirs",
+  "game_assets.mine": "nothing: the personal Library is gone",
   "game_blender.scene": "game_blender op code, printing what it needs",
   "game_blender.carve":
     "game_blender op code: model the prop in bpy as parts (studio-skills/recipes)",

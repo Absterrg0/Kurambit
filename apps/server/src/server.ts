@@ -8,7 +8,6 @@ import * as GameExport from "./game/GameExport.ts";
 import * as GameMemoryGate from "./game/GameMemoryGate.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
 import * as GameArtAssets from "./game/GameArtAssets.ts";
-import * as GameLibrary from "./game/GameLibrary.ts";
 import * as GameStage from "./game/GameStage.ts";
 import * as GameStatusService from "./game/GameStatusService.ts";
 import * as GameOperations from "./game/GameOperations.ts";
@@ -546,7 +545,6 @@ const layerGameOperations = GameStage.layer.pipe(
 );
 const layerGameServices = layerGameRunWork.pipe(
   // The Library adds through the builds (a Library add is a build) and reads every game.
-  Layer.provideMerge(GameLibrary.layer),
   Layer.provideMerge(GamePlays.layer),
   Layer.provideMerge(GameDecisions.layer),
   // Chats working in copies of a game, and the way their work comes in.

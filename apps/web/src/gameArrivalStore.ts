@@ -14,7 +14,6 @@ const GAME_TOOLS = [
   "checks",
   "test-plays",
   "keep-going",
-  "library",
   "responsive",
   // A copy: met when a chat of a game first works in one (Run in a copy). It brings the
   // new-chat choice "in a copy", with no dot.
@@ -100,7 +99,6 @@ const DOTTED: ReadonlySet<GameTool> = new Set([
   "keep-going",
   "test-plays",
   "responsive",
-  "library",
 ]);
 
 /**

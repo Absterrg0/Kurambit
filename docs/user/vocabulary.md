@@ -24,6 +24,5 @@ guides.
 - **Bring in**: puts a copy's work into the game as one build, after checking it still plays; Undo takes it out.
 - **Update**: brings the game's newer builds into a copy.
 - **Keep going**: your agent takes the next step itself, turn after turn, until it runs out of steps or budget.
-- **Library**: every model, texture, sound, font and look across your games, with the asset packs.
-- **Pack**: a set of free assets from the asset library, listed in the Library.
+- **Pack**: a set of free assets from the asset library.
 - **Look**: a game's style, its palette and type, which another game can take.

@@ -1,8 +1,7 @@
-import { LibraryBigIcon, SearchIcon, SquarePenIcon } from "lucide-react";
+import { SearchIcon, SquarePenIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ArrivalDot } from "../game/ArrivalDot";
-import { useLibraryArrival } from "../game/useGameArrivals";
 import { Kbd } from "../ui/kbd";
 import { Text } from "../ui/text";
 import { SIDEBAR_ROW } from "./SidebarChatRows";
@@ -10,26 +9,18 @@ import { SIDEBAR_ROW } from "./SidebarChatRows";
 export interface SidebarThreadHeaderProps {
   onNewGame: () => void;
   newGameShortcutLabel: string | null;
-  /** Opens the command palette, which finds games, chats, Library assets and what was said. */
+  /** Opens the command palette, which finds games, chats and what was said. */
   onSearch: () => void;
   searchShortcutLabel: string | null;
-  libraryOpen: boolean;
-  onLibrary: () => void;
 }
 
-/**
- * The sidebar's places: start a game, find anything, and every asset you have. The Library
- * arrives with a second game, when there is something to share between games.
- */
+/** The sidebar's places: start a game, and find anything. */
 export function SidebarThreadHeader({
   onNewGame,
   newGameShortcutLabel,
   onSearch,
   searchShortcutLabel,
-  libraryOpen,
-  onLibrary,
 }: SidebarThreadHeaderProps) {
-  const library = useLibraryArrival();
   return (
     <div className="flex flex-col gap-px">
       <SidebarHeaderRow
@@ -44,16 +35,6 @@ export function SidebarThreadHeader({
         shortcut={searchShortcutLabel}
         onClick={onSearch}
       />
-      {library.shown || libraryOpen ? (
-        <SidebarHeaderRow
-          icon={<LibraryBigIcon />}
-          label="Library"
-          shortcut={null}
-          active={libraryOpen}
-          news={library.dot}
-          onClick={onLibrary}
-        />
-      ) : null}
     </div>
   );
 }
