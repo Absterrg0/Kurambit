@@ -59,7 +59,6 @@ import {
 import { Juice, juiceShell } from "./juice.js";
 import { animateShell } from "./animate.js";
 import { sheetsShell } from "./sheets.js";
-import { cameraShell } from "./camera.js";
 import { createLook } from "./look.js";
 import { assets, onModelCopy, preloadAssets } from "./assets.js";
 import { createControls, createInput } from "./controls.js";
@@ -74,7 +73,6 @@ import {
 } from "./replay.js";
 import { createDevView } from "./dev-view.js";
 import { modelShell } from "./model.js";
-import { waterShell } from "./water.js";
 import { createSheet } from "./sheet.js";
 import { VOLUME_NAMES, getVolume, holdAudio, setVolume, unlockAudio, muteAudio } from "./audio.js";
 import * as game from "#main";
@@ -328,7 +326,6 @@ function clearRun() {
   juiceShell.reset();
   animateShell.reset();
   sheetsShell.reset();
-  cameraShell.reset();
   modelShell.reset();
   look.reset();
   bridge.reset();
@@ -816,8 +813,6 @@ function step() {
       game.update?.(dt, stepping.ctx);
       animateShell.update(dt);
       sheetsShell.update(dt);
-      waterShell.update(dt, stepping.ctx);
-      cameraShell.update(dt);
     } catch (error) {
       // One report a run: the loop keeps going so the menus keep working.
       if (!stepping.reported) reportError(error);

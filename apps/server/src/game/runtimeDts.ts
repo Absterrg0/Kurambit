@@ -1,8 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- A synchronous hash shared by a maintainer script and a test.
 // What runtime.d.ts covers (scripts/runtime-dts.ts writes it): the shell modules a game's main.js
 // imports. The shell's own plumbing (the bridge, the checks' probes, replay) is not a game's API.
-// water.js and camera.js stay for the games that import them but are not offered: agents that
-// reached for them shipped flat seas and stock cameras a bare agent beats with its own code.
 import * as NodeCrypto from "node:crypto";
 
 export const RUNTIME_DTS_MODULES = [

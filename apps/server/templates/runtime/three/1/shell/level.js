@@ -24,8 +24,6 @@
 //   for (const at of level.spawns.E) addEnemy(at);
 //   // every frame: slide the player's circle along the walls (never through one)
 //   level.move(player.position, velocity.clone().multiplyScalar(dt), 0.35);
-//   followCamera3D(ctx, player, { blockers: level.walls });
-//   followCamera2D(ctx, player, { plane: "xz", bounds: level.bounds });
 //
 // " " is void (blocked, nothing drawn) and "." is plain floor unless the legend
 // says otherwise; any other character must be in the legend. Every non-void
@@ -171,9 +169,9 @@ export function buildLevel(ctx, rows, legend = {}, options = {}) {
     ground: surround,
     /** Spawn cells by letter, each an array of Vector3 at floor height. */
     spawns,
-    /** The level's box (Box3); pass it to followCamera2D's bounds. */
+    /** The level's box (Box3), for a camera's bounds. */
     bounds,
-    /** The solid pieces' meshes: followCamera3D's blockers. */
+    /** The solid pieces' meshes, for a camera's blockers. */
     walls,
     cell,
     width,

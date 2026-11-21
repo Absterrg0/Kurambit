@@ -8,8 +8,6 @@ astern.
 - Unity Cinemachine Third Person Follow defaults: shoulder offset **(0.5, -0.4, 0)** m, vertical
   arm **0.4** m, camera distance **2.0** m, damping **(0.1, 0.5, 0.3)** s, collision radius
   **0.2** m, damping into a collision **0** (snap in), out of it **0.5** s (ease out).
-- The runtime's `camera.js`: distance `max(3, 3 × height)`, lag 10, look-ahead 1.5,
-  radius 0.3, pitch 0.3; `cam.focus` keeps a foe in frame.
 - The player at least **7% of the view's height** (50 px of 720); hidden or off screen under
   **25%** of play (the scene report's lines).
 - In a duel, the foe on screen at least **80%** of the fight (judgement).
@@ -52,7 +50,6 @@ camera's avoidance.
 
 ## Code
 
-The runtime's `camera.js` already has dead zone, look-ahead, clearance and shoulder.
 Cinemachine is under the Unity Companion License: learn, do not copy.
 
 ## Sources

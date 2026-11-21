@@ -22,9 +22,9 @@
 // (0 left, 2 right) and counts only presses on the game canvas. label is the
 // Controls' name for it (default: the name, "move_left" -> "Move left").
 //
-// `look` is the runtime's own: held, the pointer turns shell/camera.js's orbiting camera. It is
-// listed once a game uses that camera, and takes a key like any action (hold it and move the
-// pointer); `look: { mouse: [1] }` moves it to another button.
+// `look` is the runtime's own pointer action: held, the pointer's movement drives it. It is listed
+// once a game reads it, and takes a key like any action (hold it and move the pointer);
+// `look: { mouse: [1] }` moves it to another button.
 
 /** Defaults every genre can read; each one has a reason in TEMPLATE.md. */
 export const DEFAULT_ACTIONS = {
@@ -35,7 +35,7 @@ export const DEFAULT_ACTIONS = {
   jump: { keys: ["Space"], pad: ["a"] },
   action: { keys: ["KeyJ", "Enter"], pad: ["x"], mouse: [0] },
   alt: { keys: ["KeyK", "ShiftLeft"], pad: ["b"] },
-  // Read by the orbiting follow camera. The right button: the left is the game's action, and a
+  // For a camera the game orbits. The right button: the left is the game's action, and a
   // trackpad has no middle one. `pointer`: it acts through the pointer's movement while held.
   look: { keys: [], mouse: [2], pad: ["rstick"], label: "Look around", pointer: true },
   // The shell's own; it stays bound so a player can always reach the game's pause.
@@ -208,7 +208,7 @@ export function createControls(gameActions) {
     /** Whether an action is one of the game's: named in ACTIONS, or read through ctx.input. */
     ownedByGame: (name) => named.has(name) || used.has(name),
     has: (name) => actions.has(name),
-    /** The mouse buttons an action answers to, when the game's code names them late (the camera's orbitButton). */
+    /** The mouse buttons an action answers to, when the game's code names them late. */
     setMouse(name, buttons) {
       const action = actions.get(name);
       if (action !== undefined) action.mouse = buttons.filter(Number.isInteger);
