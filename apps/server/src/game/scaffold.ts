@@ -106,16 +106,10 @@ const firstTurnSection = (manifest: GameManifest): string | undefined => {
   if (manifest.engine.name !== "three") return undefined;
   const { route, library } = gameModelChoice(manifest);
   // The Stage follows the first turn's saves from the first frame the game draws (GameStage
-  // `makingFirstBuild`), so `watched` asks for a running scene first; on the generated route the
-  // key art starts before anything, so art never blocks the playable.
-  return [
-    FIRST.heading,
-    FIRST.goal,
-    ...(route === "generated" ? [FIRST.generated] : []),
-    FIRST.read,
-    FIRST.watched,
-    routeLine(route, library),
-  ].join("\n\n");
+  // `makingFirstBuild`), so `watched` asks for a running scene first.
+  return [FIRST.heading, FIRST.goal, FIRST.read, FIRST.watched, routeLine(route, library)].join(
+    "\n\n",
+  );
 };
 
 /**

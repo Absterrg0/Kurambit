@@ -4,7 +4,7 @@ Craft advice, a skill per file. A game's first turn needs only what
 "The first turn" in its first message names.
 
 - `three`: three.js rules beside the bridge contract; the Stage's Ask.
-- `art-pipeline`: STYLE.json's look, reviews, Blender, generated art, sprites.
+- `art-pipeline`: STYLE.json's look, reviews, Blender, sprites.
 
 ## Recipes
 

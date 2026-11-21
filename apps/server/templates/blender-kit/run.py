@@ -7,9 +7,9 @@ params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.js
          standard?: abs path of the standard armature's GLB, rig?: the lock's rig id,
          glb?: abs path to write the GLB to (default <out>/candidate.glb)}
 Writes the GLB and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
-usedPalette, armatures, creatures, creatureSources, ownClips, notes}: armatures are those the
+usedPalette, armatures, creatures, ownClips, notes}: armatures are those the
 lock's rig governs; creatures (name to its own rig id) those marked kurambit_rig, which keep their
-own skeleton, with the generation that delivered each (creatureSources) and each one's clips
+own skeleton, with each one's clips
 (ownClips: its own, and those from the clip library), from which the server decides whether the
 mark stands. It works on its own copy of the scene: the live scene and the game folder
 are never touched, and what it measures is the GLB it wrote, so the review, the export and
@@ -195,14 +195,10 @@ def run_pass(params):
         standard_rest = json.loads(stored) if stored else None
     rig = params.get("rig") or ("standard-humanoid" if standard_rest else None)
     creatures = {a.name: a["kurambit_rig"] for a in arms if a.get("kurambit_rig")}
-    creature_sources = {}
     own_clips = {}
     for a in arms:
         if not a.get("kurambit_rig"):
             continue
-        s = _stamp(a, "kurambit_generation")
-        if isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("path"), str):
-            creature_sources[a.name] = {"id": s["id"][:64], "path": s["path"][:500]}
         # game_blender op character marks the clips it brings from the library with their pack.
         clips = [(c.get("kurambit_clip", c.name)[:120], "kurambit_from" in c) for c in exported_actions(a)]
         own_clips[a.name] = {"own": [n for n, lib in clips if not lib][:64], "library": [n for n, lib in clips if lib][:64]}
@@ -293,7 +289,6 @@ def run_pass(params):
         "usedPalette": styled["usedPalette"],
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},
         "creatures": creatures,
-        "creatureSources": creature_sources,
         "ownClips": own_clips,
         "notes": [n[:400] for n in notes + styled["notes"] + still],
     }

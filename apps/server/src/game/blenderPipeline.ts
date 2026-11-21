@@ -135,19 +135,6 @@ export const PassResult = Schema.Struct({
   /** Armatures marked on their own rig (kurambit_rig), each to its rig id: kept off the lock's rig check. */
   creatures: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /**
-   * The generation and file each creature armature was imported from, as the import wrote them;
-   * the server checks them against its own generations before the rig check is skipped.
-   */
-  creatureSources: Schema.optionalKey(
-    Schema.Record(
-      Schema.String,
-      Schema.Struct({
-        id: Schema.String.check(Schema.isMaxLength(64)),
-        path: Schema.String.check(Schema.isMaxLength(500)),
-      }),
-    ),
-  ),
-  /**
    * Each marked armature's clips by name: its own (made here or brought with its body) and those
    * game_blender op character brought from the clip library. A mark no generation delivered stands
    * only on its own clips (ownRigRefusal).

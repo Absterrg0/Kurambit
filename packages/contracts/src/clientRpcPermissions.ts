@@ -35,8 +35,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.gameDeletePlay]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameDecide]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameSetCharacterRoute]: AuthOrchestrationOperateScope,
-  [WS_METHODS.gameChooseGeneration]: AuthOrchestrationOperateScope,
-  [WS_METHODS.gameCancelGeneration]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameArtThumbnail]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameLibraryAdd]: AuthOrchestrationOperateScope,
   [WS_METHODS.gameLibrarySave]: AuthOrchestrationOperateScope,

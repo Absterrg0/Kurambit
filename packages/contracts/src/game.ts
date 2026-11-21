@@ -6,7 +6,6 @@ import { GameAssetFamily } from "./gameAssets.ts";
 import { GameBuildId } from "./gameBuildId.ts";
 import { GameRunErrorReason } from "./gameRunReasons.ts";
 import { GameCharacterRoute, GameStoredCharacterRoute } from "./gameStyle.ts";
-import { GameArtLanes } from "./gameArt.ts";
 import { GameSceneReport } from "./gameScene.ts";
 import { GameQaReport, GameScreens } from "./gameQa.ts";
 import { GamePlayerReport } from "./gamePlayer.ts";
@@ -218,7 +217,7 @@ export const GameManifest = Schema.Struct({
    */
   families: Schema.optionalKey(Schema.Array(GameAssetFamily).check(Schema.isMaxLength(16))),
   /**
-   * The person's choice of how models are made: in three.js code, in Blender, or generated.
+   * The person's choice of how models are made: in three.js code or in Blender.
    * Read through gameModelChoice: "library" is the old default (code with the library on).
    * Only the person changes it, or the agent when they ask.
    */
@@ -646,11 +645,6 @@ export const GameStatus = Schema.Struct({
   characters: GameCharacterRoute,
   /** Whether the person let this game take models from the free library. */
   library: Schema.Boolean,
-  /**
-   * Generated art: per lane, the provider game_assets op generate would use now (a key saved, Codex
-   * signed in); null when nothing can make that lane. Absent when it could not be read.
-   */
-  artLanes: Schema.optionalKey(GameArtLanes),
   /** The builds being played from copies of their own (Play of a build), with their URLs. */
   buildPlays: Schema.Array(
     Schema.Struct({ build: GameBuildId, url: Schema.NullOr(Schema.String) }),

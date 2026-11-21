@@ -14,8 +14,8 @@ root (`~` is its own home); print every path you write. `<assets>` is
 glow). A `palette` with `finish: "flat"` is the pack look, every model on
 one atlas (`recipes/art-palette.md`): only when the person chose it.
 Change direction by locking again, never by drift. How models are made is
-the person's choice in game.json: `characters` (`blender`, `code` or
-`generated`) and `library` (off by default). Read both before any model; an
+the person's choice in game.json: `characters` (`blender` or `code`) and
+`library` (off by default). Read both before any model; an
 unrigged model is a prop on every route. With the library off its models
 are refused, but its clips and sounds come in, and any library model can be
 your yardstick in the review.
@@ -82,36 +82,6 @@ the rest): `art/sheets/<sheet name>.md`, the brief's words for the subject,
 the review's numbers, then each defect numbered, biggest first, with what
 you fixed or why not.
 
-## Generated art
-
-On the `generated` route providers make the art (`game_assets` op
-`generate`) and the person picks every candidate. Stand-ins play until each
-piece arrives: start a generation, keep building, pick it up with op
-`wait`, and say what it cost.
-
-1. **Key art, in the first turn.** Lane `image`, name `key_art`,
-   `options.aspect` `"16:9"`, the game's world and moment in one image (no
-   text or UI), and three `directions` that differ in rendering, palette and
-   shape language, each an in-game screenshot this engine can reach,
-   labelled in two or three words, grounded with a `style`: a library pack
-   id of a different family each (Kenney and Quaternius Monsters ship a
-   picture; KayKit none), or the person's reference.
-2. **After the pick**, copy it to `art/key-art.png`, read its colours with
-   `kurambit.palette_of("art/key-art.png", 8)` and lock them as `palette`
-   with `finish` `painted` or `real` (the roles take them) and `anchor`.
-   Pass it in `references` of every later image.
-3. **Characters and props.** If the status line of `game_check` op `final` shows the lane
-   null in `artLanes`, tell the person what Settings → Art providers needs.
-   Otherwise a sheet (lane `image`, full body, front, arms down), the
-   person picks, then lane `character`, `creature` or `model` with it as
-   the only reference. A humanoid goes through op `character` with `body:
-{game: "<the .glb>"}`, anything else through op `asset_import` with
-   `source: "generated"`; stand it facing -Y, review with the sheet as
-   `reference`, export. A move the library lacks: lane `motion`.
-4. **Images**: lanes `image` and `texture` with the key art as reference;
-   `game_assets` op `generate` with `edit` changes a picked one. Never switch route or lane to get
-   past a refusal.
-
 ## 2D sprites from 3D
 
 Render sprites and strips with `game_blender` op `sprites`, never your own
@@ -123,7 +93,7 @@ render with `"objects": ["<rig>"], "action": "Walking_A"` once per clip. Pixel a
 
 ## Key art
 
-Off the generated route, render it from the game's real assets at
+Render it from the game's real assets at
 1280x720 in a throwaway scene removed in `finally`, view transform
 `Standard`. Open every PNG you render.
 

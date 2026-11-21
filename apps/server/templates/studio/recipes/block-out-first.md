@@ -21,7 +21,7 @@
 3. Add the loop: the goal, the threat, `GameState.win` and `GameState.lose`.
 4. Name what a person would tune and select (`ctx.thing`, `ctx.tune`).
 5. Now replace boxes with models, one at a time, each at the box's size, saving after each so
-   the Stage never stops. Start Blender or generated models early and keep the box until they
+   the Stage never stops. Start Blender models early and keep the box until they
    arrive.
 6. Title, HUD and end screen come last, over the live game (`opens-on-the-game`).
 
@@ -29,7 +29,7 @@
 
 - A title card, a menu or a model as the first thing built: the Stage shows nothing for many
   minutes.
-- Waiting on a Blender or generated model before anything moves.
+- Waiting on a Blender model before anything moves.
 - Rewriting the scene from scratch late: grow it in place, so every save still boots.
 - Guessing a scale per model: size each one to the box it replaces.
 - Dressing a level before walking it with the real controller and camera.

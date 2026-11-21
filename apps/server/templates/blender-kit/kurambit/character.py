@@ -3,16 +3,13 @@
 params (the server resolves every path):
     name      the collection, the armature's name and the export's default stem
     body      {"library": abs, "pack"?: id, "licence"?: str} | {"mpfb": {age, gender, weight, ...}}
-              | {"game": abs, "source"?: {from, licence, ai, credits}} | "none": the skeleton, its
-              proportions and clips with no body (the drawn body sets the joints, then goes), for
-              parts modelled on the joints. (source: a generated file's
-              record, read by the server; without it the sidecar beside the file is the ledger).
+              | {"game": abs} | "none": the skeleton, its proportions and clips with no body (the
+              drawn body sets the joints, then goes), for parts modelled on the joints. A game body's
+              ledger is the sidecar beside its file.
               A game body keeps its own clips, and every body its own skinned bone chains (cloth,
               hair) as spring chains.
     standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
-    clips     [{pack, name, path, licence?}] | {pack, name, path, licence, source, motion: true}: a GLB
-              the motion lane delivered (one clip retargeted onto the body it holds), its source
-              the generation's stamp {from, licence, ai, credits}
+    clips     [{pack, name, path, licence?}]
     chains    [{name, parent, bones, direction, length, mirror?}]
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
     fit       {arms?, calm?, walk?} | None: fit.fit() on every library clip, after the conform (its
@@ -229,67 +226,9 @@ MAX_REST_DEVIATION = 2.0
 MAX_SPRINGS = 32
 
 
-def _height(arm, name_map):
-    """Head over foot_l at rest, in metres: what a clip's pelvis travel is scaled by."""
-    by_std = {name_map.get(b.name, b.name): b for b in arm.data.bones}
-    head, foot = by_std.get("Head"), by_std.get("foot_l")
-    if head is None or foot is None:
-        return None
-    return ((arm.matrix_world @ head.head_local).z - (arm.matrix_world @ foot.head_local).z) or None
-
-
-def _take_motion(c, reference, standard_height):
-    """A motion-lane GLB's clip: (action, the scale of the body it was made on). Its bones are
-    renamed to the standard joints when Uthana named them otherwise, the way a body is conformed,
-    and it is refused when its skeleton's rest frames are not the standard's: glTF keys absolute
-    joint rotations, so on other rest frames it would play twisted."""
-    path, label = c["path"], c["name"]
-    if not os.path.isfile(path):
-        raise Refused("invalid-input", f"no clip file at {path}")
-    new, actions = skeleton.import_gltf(path)
-    try:
-        rigs = [o for o in new if o.type == "ARMATURE"]
-        if len(rigs) != 1 or not actions:
-            raise Refused("invalid-input", f"{os.path.basename(path)} holds {len(rigs)} armatures and {len(actions)} clips: a motion is one clip on one skeleton")
-        rig = rigs[0]
-        name_map = skeleton.humanoid_map({b.name: b.parent.name if b.parent else None for b in rig.data.bones})
-        frames = {name_map.get(n, n): q for n, q in skeleton.local_frames(rig).items()}
-        missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in frames]
-        if missing:
-            raise Refused("invalid-input", f"{label}'s skeleton has no {', '.join(missing)} under any name the kit knows: its bones are {', '.join(b.name for b in rig.data.bones)[:400]}")
-        worst = max(((math.degrees(frames[n].rotation_difference(q).angle), n) for n, q in reference.items() if n in frames), default=(0.0, None))
-        if worst[0] > MAX_REST_DEVIATION:
-            raise Refused("invalid-input", f"{label} was made on a skeleton whose {worst[1]} rest frame is {worst[0]:.1f}° off the standard (at most {MAX_REST_DEVIATION:.0f}°): it would play twisted on the game's humanoids. Make it on a character on the standard skeleton")
-        made = _height(rig, name_map)
-        act = max(actions, key=lambda a: a.frame_range[1] - a.frame_range[0])
-        for a in actions:
-            if a is not act:
-                bpy.data.actions.remove(a)
-        fcs = skeleton.action_fcurves(act)
-        for fc in list(fcs):
-            m = re.match(r'^pose\.bones\["(.+?)"\](.*)$', fc.data_path)
-            if m is None:
-                fcs.remove(fc)
-                continue
-            joint = name_map.get(m.group(1), m.group(1))
-            if joint not in reference:
-                fcs.remove(fc)  # a bone the standard lacks keys nothing in the game
-            elif joint != m.group(1):
-                fc.data_path = f'pose.bones["{joint}"]{m.group(2)}'
-        return act, (made / standard_height) if made and standard_height else 1.0
-    except BaseException:
-        bpy.data.batch_remove({a for a in actions if _alive(a)})
-        raise
-    finally:
-        skeleton.remove_objects(new)
-
-
-def _take_clips(clips, standard, standard_actions, reference=None, standard_height=None):
-    """The requested library clips as actions owned by name; every other imported action goes.
-    A motion-lane clip comes with the scale of the body it was made on (1 for a library clip)."""
+def _take_clips(clips, standard, standard_actions):
+    """The requested library clips as actions owned by name; every other imported action goes."""
     by_path, taken = {}, []
-    motions = [c for c in clips if c.get("motion")]
-    clips = [c for c in clips if not c.get("motion")]
     for c in clips:
         by_path.setdefault(c["path"], []).append(c)
     counts = {}
@@ -312,16 +251,6 @@ def _take_clips(clips, standard, standard_actions, reference=None, standard_heig
             taken.append((act, label, c, 1.0))
         for a in base.values():
             bpy.data.actions.remove(a)
-    names = {label for _, label, _, _ in taken}
-    for c in motions:
-        act, made = _take_motion(c, reference, standard_height)
-        label = c["name"]
-        for n in range(2, 100):
-            if label not in names:
-                break
-            label = f"{c['name']}_{n}"
-        names.add(label)
-        taken.append((act, label, c, made))
     return taken
 
 
@@ -567,7 +496,7 @@ def character(params):
                 raise Refused("invalid-input", f"chain {chain['name']}: the standard skeleton has no joint {chain['parent']} (a tail hangs from pelvis, ears from Head)")
             labels = [f"{chain['name']}_l", f"{chain['name']}_r"] if chain.get("mirror") else [chain["name"]]
             asked_bones |= {f"{label}_{i + 1:02d}" for label in labels for i in range(int(chain["bones"]))}
-        taken = _take_clips(params.get("clips", []), standard, std_actions, reference, _height(std_arm, {}))
+        taken = _take_clips(params.get("clips", []), standard, std_actions)
         preset = (params.get("style") or {}).get("preset")
         drawn = "mpfb" in body_spec and (preset in studio.PRESETS or bare)
         if drawn:
@@ -592,9 +521,7 @@ def character(params):
             if clash:
                 raise Refused("invalid-input", f"the body already has bones {', '.join(clash[:6])}, which it keeps as its own spring chains: leave that chain out of chains, or name it another way")
             skeleton.merge_unmapped(meshes, body_arm, name_map, joints | {b for _, bones, _ in extra for b in bones})
-            if body_spec.get("source"):
-                body_part = {"what": "body", **body_spec["source"]}
-            elif "game" in body_spec:
+            if "game" in body_spec:
                 body_part, carried = _game_source(path)
             else:
                 body_part = {**MADE_BODY, "from": body_spec.get("pack", "library"), "licence": body_spec.get("licence", "")}
@@ -607,7 +534,7 @@ def character(params):
         own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
         # Its clips move the pelvis in the body's own units.
         unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z
-        height_ratio, ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
+        _, ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
     except BaseException:
         # a refused or failed build leaves the live scene as it was
         bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken), *own_actions] if _alive(a)})
@@ -671,17 +598,14 @@ def character(params):
     if own:
         notes.append(f"kept the body's own clips: {', '.join(label for _, label, c, _ in taken if c.get('own'))}")
     for act, label, c, made in taken:
-        # A clip made on this body already moves its pelvis this body's distances.
-        # A motion made on a body is in that body's metres, by its height; a library clip's hips
-        # travel by this body's legs.
-        skeleton.fit_clip(act, (height_ratio if c.get("motion") else ratio) / made)
+        # A clip made on this body already moves its pelvis this body's distances; a library
+        # clip's hips travel by this body's legs.
+        skeleton.fit_clip(act, ratio / made)
         act.use_fake_user = True
         act["kurambit_from"] = c["pack"]
         act["kurambit_owner"] = name
         act["kurambit_clip"] = label
-        if c.get("motion"):
-            act["kurambit_source"] = json.dumps({"what": "clips", **c["source"]})  # credited per clip: ai, cost
-        elif c.get("own"):
+        if c.get("own"):
             act["kurambit_source"] = json.dumps({**body_part, "what": "clips"})  # credited as the body is
         # Clip names are per character; in Blender every action needs its own name, so a second
         # character's Idle_Loop would read Idle_Loop.001. The export names it by kurambit_clip.

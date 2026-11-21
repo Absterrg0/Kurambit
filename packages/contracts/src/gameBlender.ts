@@ -101,14 +101,11 @@ export const GameBlenderAssetsSearchResult = Schema.Struct({ text: Schema.String
 export type GameBlenderAssetsSearchResult = typeof GameBlenderAssetsSearchResult.Type;
 
 export const GameBlenderAssetsImportInput = Schema.Struct({
-  /**
-   * generated: a file game_assets op generate delivered, by its game path (`path`), not a download.
-   * library: a model file of a game_assets op search entry (`id` the entry, `path` the file).
-   */
-  source: Schema.Literals(["polyhaven", "sketchfab", "polypizza", "generated", "library"]),
-  /** The source's asset id, or the library entry id; every source but generated needs it. */
+  /** library: a model file of a game_assets op search entry (`id` the entry, `path` the file). */
+  source: Schema.Literals(["polyhaven", "sketchfab", "polypizza", "library"]),
+  /** The source's asset id, or the library entry id. */
   id: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,80}$/))),
-  /** generated: the game-relative model under art/generated/ (.glb, .gltf or .fbx); library: the entry's file. */
+  /** library: the entry's file. */
   path: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))),
   assetType: Schema.optionalKey(Schema.String),
   targetSize: Schema.optionalKey(Schema.Number),
@@ -178,7 +175,7 @@ export const GameBlenderBody = Schema.Union([
       proportions: Schema.optionalKey(Unit),
     }),
   }),
-  /** A rigged humanoid in this game: an earlier export, or a generated one under art/generated/ (UE, Mixamo or other common bone names). */
+  /** A rigged humanoid in this game, such as an earlier export (UE, Mixamo or other common bone names). */
   Schema.Struct({ game: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)) }),
   /** No body: the skeleton at the style's proportions and height, with its clips, for parts modelled on its joints. */
   Schema.Literal("none"),
@@ -311,7 +308,7 @@ export const GameBlenderPaintInput = Schema.Struct({
     Schema.isMinLength(1),
     Schema.isMaxLength(64),
   ),
-  /** Game path of the turnaround sheet: a generated image under art/generated/, or the person's own. */
+  /** Game path of the turnaround sheet: the person's own image. */
   sheet: SheetPath,
   /** The sheet's views left to right, when the measured reading is wrong. */
   views: Schema.optionalKey(SheetViews),

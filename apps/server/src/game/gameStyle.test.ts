@@ -169,16 +169,14 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
   });
 });
 
-it("makes in Blender what the library lacks, never what the person's providers own", () => {
+it("makes in Blender what the library lacks", () => {
   // A game from before the library was opt-in keeps its library and its Blender fallback.
   expect(lockCharacterRouteRefusal("mpfb-body", modelChoice({}))).toBeNull();
   expect(
     lockCharacterRouteRefusal("unstamped-mesh", modelChoice({ characters: "library" })),
   ).toBeNull();
-  expect(
-    lockCharacterRouteRefusal("unstamped-mesh", { route: "generated", library: true }),
-  ).toMatch(/with generated/);
-  expect(lockCharacterRouteRefusal("generated-body", modelChoice({}))).toMatch(/Make models with/);
+  // The removed generated route reads as Blender.
+  expect(characterRoute({ characters: "generated" })).toBe("blender");
   expect(
     lockCharacterRouteRefusal("mpfb-body", modelChoice({ characters: "blender", library: false })),
   ).toBeNull();

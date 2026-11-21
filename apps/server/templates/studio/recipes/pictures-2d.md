@@ -31,7 +31,7 @@ screen_height_px`. A 0.63 m card seen from 1.2 m with a 45° camera on a 1080 px
    picture: `size` pixels, background clear.
 2. Nothing from the network: images, fonts and styles load from paths in the game; text needs
    a font the game ships via `@font-face` (`game_assets` op `search` "font").
-3. Art on a card: `game_blender` op `sprites` from the game's models, or a generated image,
+3. Art on a card: `game_blender` op `sprites` from the game's models,
    placed with `<img src>`.
 4. Look at the contact sheet the answer returns, every picture, before using them.
 5. In the game:

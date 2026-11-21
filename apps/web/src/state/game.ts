@@ -220,13 +220,7 @@ const gameListSignal = Atom.family((environmentId: string) => {
     if (!AsyncResult.isSuccess(result)) return changes;
     for (const event of result.value) {
       const scope = gameEventScope(event);
-      if (
-        scope === "saved" ||
-        scope === "builds" ||
-        scope === "facts" ||
-        scope === "live" ||
-        scope === "art"
-      )
+      if (scope === "saved" || scope === "builds" || scope === "facts" || scope === "live")
         continue;
       // A run event's message is its current step, which the card shows.
       const state =
@@ -465,14 +459,14 @@ export const gameEnvironment = {
     label: "game:setCharacterRoute",
     tag: WS_METHODS.gameSetCharacterRoute,
   }),
-  // The game's art files for the Workbench's Art tab: reread when a build lands, art arrives, or
-  // an operation moves (a Blender review or export is one, and changes what is being made).
+  // The game's art files for the Workbench's Art tab: reread when a build lands or an operation
+  // moves (a Blender review or export is one, and changes what is being made).
   artAssets: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "game:artAssets",
     tag: WS_METHODS.gameArtAssets,
     staleTimeMs: 5_000,
     idleTtlMs: 60_000,
-    refreshTrigger: threadSignal("builds", "art", "operation"),
+    refreshTrigger: threadSignal("builds", "operation"),
   }),
   // A model's thumbnail, drawn once by the Art tab's viewer and kept by its content.
   artThumbnail: createEnvironmentRpcCommand(connectionAtomRuntime, {

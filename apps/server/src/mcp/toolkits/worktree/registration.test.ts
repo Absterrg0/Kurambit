@@ -1,6 +1,5 @@
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameProjectService from "../../../game/GameProjectService.ts";
-import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameLibrary from "../../../game/GameLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
@@ -58,7 +57,6 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(GameStatusService.GameStatusService)({}),
   Layer.mock(GameStage.GameStage)({}),
   Layer.mock(GameBlender.GameBlender)({}),
-  Layer.mock(GameArt.GameArt)({}),
   Layer.mock(GameAssetLibrary.GameAssetLibrary)({}),
   Layer.mock(GameLibrary.GameLibrary)({}),
   Layer.mock(GameEngine.GameEngine)({}),

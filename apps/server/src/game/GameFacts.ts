@@ -81,7 +81,7 @@ import { isPathWithinRoot } from "@kurambit/shared/pathContainment";
 import * as GameOperations from "./GameOperations.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { gameCanWin, runtimesDirectory, runtimeVersion } from "./gameRuntime.ts";
-import { assetUseOf, generationsShipped, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
+import { assetUseOf, PlayUse, readPlayUse, shippedFiles } from "./assetUse.ts";
 import { performanceOf, readPlayPerf } from "./playPerf.ts";
 import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
@@ -994,14 +994,10 @@ const make = Effect.gen(function* () {
             const engine = build.engine;
             if (!isAvailableEngine(engine)) return { use: none };
             const files = yield* Effect.promise(() => shippedFiles(copy, engine, project));
-            const loaded = new Set(recorded.flatMap((each) => each.loaded));
-            const generations = yield* Effect.promise(() =>
-              generationsShipped(copy, files, loaded),
-            );
             return {
               use: {
                 status: "measured" as const,
-                value: assetUseOf(files, recorded, generations),
+                value: assetUseOf(files, recorded),
               },
             };
           });

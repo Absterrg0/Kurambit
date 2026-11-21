@@ -49,7 +49,6 @@ import {
   manifestRuntime,
   type ThreadId,
 } from "@kurambit/contracts";
-import * as GameArt from "./art/GameArt.ts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import type { PackClips } from "./GameAssetLibrary.ts";
 import * as GameTemplates from "./GameTemplates.ts";
@@ -120,13 +119,7 @@ import { afterAddingArt, availableEngine, engineProfile, gamePaths } from "./eng
 import { gltfTriangles } from "./assetFacts.ts";
 import { glbJson } from "./gltfJson.ts";
 import { packGlb } from "./glbPack.ts";
-import {
-  GENERATED_DIR,
-  type SheetSource,
-  generatedSource,
-  motionClipName,
-  sheetSource,
-} from "./generatedSource.ts";
+import { type SheetSource, sheetSource } from "./sheetSource.ts";
 import { breakSession, HeldSources, type LiveHealth, makeLiveRecords } from "./liveEditor.ts";
 import {
   commandFlag,
@@ -313,9 +306,9 @@ const protocolError =
           cause,
         );
 const sheetCredit = (sheet: SheetSource) =>
-  sheet.stamp.generation === undefined
-    ? `credited to the person's own image ${sheet.path}`
-    : `credited to ${sheet.stamp.from}'s generation ${sheet.stamp.generation} (AI-made, ${sheet.stamp.credits === null ? "cost unknown" : `$${sheet.stamp.credits.toFixed(2)}`})`;
+  sheet.stamp.ai
+    ? `credited as AI-made (${sheet.stamp.licence})`
+    : `credited to the person's own image ${sheet.path}`;
 
 const GAME_PX: Readonly<Record<GameStyleView, number>> = {
   perspective: 96,
@@ -346,17 +339,7 @@ const ReviewRender = Schema.Struct({
   /** Measured from the pictures: thin parts at game distance, and the reference's overlap. */
   facts: Schema.optionalKey(Schema.Array(Schema.String)),
 });
-/** What kurambit.generated prints. */
-const GeneratedMade = Schema.Struct({
-  objects: Schema.Array(Schema.String),
-  armature: Schema.NullOr(Schema.String),
-  clips: Schema.Array(Schema.String),
-  size: Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]),
-  notes: Schema.Array(Schema.String),
-});
-const decodeGeneratedMade = Schema.decodeUnknownEffect(GeneratedMade);
 const decodeCharacterMade = Schema.decodeUnknownEffect(CharacterMade);
-const decodeMotionStrip = Schema.decodeUnknownEffect(Schema.Struct({ image: Schema.String }));
 /** What kurambit.animate prints; the full bundle is its bundle.json. */
 const decodeAnimated = Schema.decodeUnknownEffect(
   Schema.Struct({
@@ -404,26 +387,20 @@ const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", f
 const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
   `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}", "asked": true} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
 /**
- * The person's choice refuses a Blender-made character on code with the library off (and on
- * generated): an MPFB2 body, or a mesh no library
- * or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
+ * The person's choice refuses a Blender-made character on code with the library off: an MPFB2
+ * body, or a mesh no library or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
  */
 const routeRefusalOf = (candidate: Candidate, route: GameModelChoice) =>
   candidate.kind !== "character"
     ? null
     : candidate.parts.some((part) => part.from === "mpfb2")
       ? lockCharacterRouteRefusal("mpfb-body", route)
-      : // The body or a generated creature's rig: a generated prop it holds (a sword, a hat) is no
-        // character. A rig marked with no generation behind it is made here, so its mesh is.
-        candidate.parts.some((part) => part.ai && part.what === "body") ||
-          Object.keys(candidate.creatureSources ?? {}).length > 0
-        ? lockCharacterRouteRefusal("generated-body", route)
-        : // A texture painted from the person's own sheet makes no mesh.
-          candidate.parts.some(
-              (part) => part.from === "made" && part.what !== "clips" && part.what !== "texture",
-            )
-          ? lockCharacterRouteRefusal("unstamped-mesh", route)
-          : null;
+      : // A texture painted from the person's own sheet makes no mesh.
+        candidate.parts.some(
+            (part) => part.from === "made" && part.what !== "clips" && part.what !== "texture",
+          )
+        ? lockCharacterRouteRefusal("unstamped-mesh", route)
+        : null;
 
 const STILL_WORKING =
   "Blender may still be finishing this call. Inspect the scene with game_blender op code (printing what it needs) or op look before retrying, so the work is not done twice.";
@@ -710,7 +687,6 @@ const make = Effect.gen(function* () {
   const tools = yield* GameToolchain.GameToolchain;
   const projects = yield* GameProjectService.GameProjectService;
   const settings = yield* ServerSettings.ServerSettingsService;
-  const art = yield* GameArt.GameArt;
   const library = yield* GameAssetLibrary.GameAssetLibrary;
   const templates = yield* GameTemplates.GameTemplates;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -1694,90 +1670,17 @@ const make = Effect.gen(function* () {
 
   /**
    * The lock's rig check skips an armature marked on its own rig (kurambit_rig), and any scene
-   * code can set that mark. It stands when the import of a finished creature generation of this
-   * game wrote it with that generation, or, with no generation named, when the armature carries
-   * clips of its own and none from the library (a model rigged and animated here). Anything else
-   * is refused here, at the review and again at the export. The route is routeRefusalOf's.
+   * code can set that mark. It stands when the armature carries clips of its own and none from
+   * the library (a model rigged and animated here). Anything else is refused here, at the review
+   * and again at the export. The route is routeRefusalOf's.
    */
-  const creatureRefusal = (root: string, candidate: Candidate) =>
-    Effect.gen(function* () {
-      for (const name of Object.keys(candidate.creatures ?? {})) {
-        const source = candidate.creatureSources?.[name];
-        if (source === undefined) {
-          const refused = ownRigRefusal(
-            name,
-            candidate.ownClips?.[name] ?? { own: [], library: [] },
-          );
-          if (refused !== null) return refused;
-          continue;
-        }
-        const row = yield* art.delivered(root, source.id, source.path);
-        if (row === null || row.generation.lane !== "creature")
-          return `${name} names a creature generation (kurambit_generation), but no finished creature generation of this game delivered it. Bring the creature that game_assets op generate made in with game_blender op asset_import (source generated), or take the generation stamp off a model you rigged and animated yourself.`;
-      }
-      return null;
-    });
-
-  /**
-   * A model game_assets op generate delivered, into the live scene: stamped with its generation record (the
-   * provider, its licence, ai and the cost), so the review and the export credit it like any import.
-   * A prop comes in as it is; a creature keeps its own rig and clips. A humanoid is conformed by
-   * game_blender op character instead, and images and sound never need Blender.
-   */
-  const importGenerated = (root: string, path: string | undefined) =>
-    Effect.gen(function* () {
-      const refuse = (detail: string) =>
-        Effect.fail(opError("blender-assets-import", path ?? root, "invalid-input", detail));
-      if (path === undefined)
-        return yield* refuse(
-          `source generated takes path: the game-relative model game_assets op generate delivered under ${GENERATED_DIR}/ (game_assets op wait lists its files).`,
-        );
-      const realRoot = yield* realRootOf(root);
-      const { file, source } = yield* generatedSource(
-        realRoot,
-        path,
-        "blender-assets-import",
-        (id, delivered) => art.delivered(root, id, delivered),
-      );
-      if (source.lane === "character")
-        return yield* refuse(
-          `${path} is a generated humanoid: game_blender op character with body {game: "${path}"} conforms it to the standard skeleton, so the clip library plays on it.`,
-        );
-      if (source.lane !== "model" && source.lane !== "creature")
-        return yield* refuse(
-          `${path} came from the ${source.lane} lane, which Blender does not take: load it in the game from where it is.`,
-        );
-      if (source.lane === "creature") {
-        const refused = lockCharacterRouteRefusal(
-          "generated-body",
-          modelChoice(yield* projects.read(root)),
-        );
-        if (refused !== null) return yield* refuse(refused);
-      }
-      const name = NodePath.basename(NodePath.dirname(file));
-      const made = yield* kitCall(
-        root,
-        "blender-assets-import",
-        decodeGeneratedMade,
-        `kurambit.generated(${pyJson({ path: file, name, lane: source.lane, stamp: source.stamp, rig: source.rig, generation: source.generation, restore: source.restore })})`,
-      );
-      const blend = yield* saveBlend(root);
-      const cost =
-        source.stamp.credits === null ? "cost unknown" : `$${source.stamp.credits.toFixed(2)}`;
-      return {
-        text: [
-          `${made.objects.join(", ")} from ${source.stamp.from} (${source.lane}), ${made.size.map((x) => x.toFixed(2)).join(" x ")} m, marked AI-made with its licence (${source.stamp.licence}) and ${cost}.`,
-          ...(made.armature === null
-            ? []
-            : [
-                `${made.armature} keeps its own rig, ${source.rig}${made.clips.length === 0 ? ", with no clips" : `, and its clips: ${made.clips.join(", ")}`}. The lock's rig governs humanoids only.`,
-              ]),
-          ...made.notes,
-          `Saved .blend source: ${blend}. Generators model at their own scale and facing: check the size, stand it on the ground facing -Y, then game_blender op look with mode review and game_blender op export.`,
-        ].join("\n"),
-        blend,
-      };
-    });
+  const creatureRefusal = (candidate: Candidate) => {
+    for (const name of Object.keys(candidate.creatures ?? {})) {
+      const refused = ownRigRefusal(name, candidate.ownClips?.[name] ?? { own: [], library: [] });
+      if (refused !== null) return refused;
+    }
+    return null;
+  };
 
   /**
    * A review's reference: a picture or model in the game, or a library model as yardstick
@@ -1944,8 +1847,7 @@ const make = Effect.gen(function* () {
             })
           : null;
       const route = modelChoice(yield* projects.read(root));
-      const routeRefusal =
-        routeRefusalOf(candidate, route) ?? (yield* creatureRefusal(root, candidate));
+      const routeRefusal = routeRefusalOf(candidate, route) ?? creatureRefusal(candidate);
       const refusing = [
         ...candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`),
         ...(routeRefusal === null ? [] : [`- [route] ${routeRefusal}`]),
@@ -2064,9 +1966,7 @@ const make = Effect.gen(function* () {
       const realRoot = yield* realRootOf(root);
       const style = yield* readGameStyle(realRoot);
       const { size, budget } = atlasSize(style, input.size);
-      const sheet = yield* sheetSource(realRoot, input.sheet, "blender-paint", (id, path) =>
-        art.delivered(root, id, path),
-      );
+      const sheet = yield* sheetSource(realRoot, input.sheet, "blender-paint");
       const digest = yield* liveDigest(root, input.objects);
       const out = yield* sheetRunDir(realRoot, "paint", "model");
       const alignmentFile = NodePath.join(out, "alignment.png");
@@ -2167,46 +2067,6 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.orElseSucceed(() => false));
       return `This game's ${engineDir}/${MESHOPT_LOADER} has no meshopt decoder, so the geometry shipped quantized but not meshopt-compressed. To ship it smaller, ${present ? "" : `copy three.js 0.180's examples/jsm/libs/meshopt_decoder.module.js to ${engineDir}/${MESHOPT_DECODER}, `}add import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js"${present ? ` (now in ${engineDir}/${MESHOPT_DECODER})` : ""}, make the loader new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder), and export again.`;
     });
-
-  // Strips of motion-lane clips, each on the body its GLB holds, written as one PNG; rendered in
-  // a throwaway scene like the review, so the live scene does not change.
-  const motionStrip: GameArt.MotionStripRender = (root, clips, out) =>
-    holding(
-      root,
-      Effect.gen(function* () {
-        const realRoot = yield* realRootOf(root);
-        const paths = yield* Effect.forEach(clips, (clip) => inGame(realRoot, clip.path));
-        yield* kitCall(
-          root,
-          "blender-motion-strip",
-          decodeMotionStrip,
-          `kurambit.motion_strip(${pyJson({
-            clips: clips.map((clip, index) => ({ path: paths[index], label: clip.label })),
-            out: yield* inGame(realRoot, out),
-          })})`,
-        );
-      }),
-    );
-  // A model's front, side and back, textured and in clay, as one PNG; the live scene does not change.
-  const modelViews: GameArt.ModelViewsRender = (root, model, out) =>
-    holding(
-      root,
-      Effect.gen(function* () {
-        const realRoot = yield* realRootOf(root);
-        yield* kitCall(
-          root,
-          "blender-model-views",
-          decodeMotionStrip,
-          `kurambit.model_views(${pyJson({
-            model: yield* inGame(realRoot, model),
-            out: yield* inGame(realRoot, out),
-          })})`,
-        );
-      }),
-    );
-  // A landed motion's strip and a model's views before its rig are rendered in the game's live
-  // Blender, which reads GameArt's records.
-  yield* art.renderWith({ motionStrip, modelViews });
 
   return GameBlender.of({
     code: (threadId, input) =>
@@ -2441,25 +2301,6 @@ const make = Effect.gen(function* () {
                 }
               }
               body = { mpfb: input.body.mpfb };
-            } else if (input.body.game.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`)) {
-              // A generated humanoid: conformed like any body, credited to its provider.
-              const generated = yield* generatedSource(
-                realRoot,
-                input.body.game,
-                "blender-character",
-                (id, delivered) => art.delivered(root, id, delivered),
-              );
-              if (generated.source.lane !== "character")
-                return yield* fail(
-                  "invalid-input",
-                  `${input.body.game} came from the ${generated.source.lane} lane. ${generated.source.lane === "creature" ? "A creature keeps its own rig and clips: bring it in with game_blender op asset_import (source generated), then review and export it." : "Only a character-lane humanoid is put on the standard skeleton."}`,
-                );
-              const refused = lockCharacterRouteRefusal(
-                "generated-body",
-                modelChoice(yield* projects.read(root)),
-              );
-              if (refused !== null) return yield* fail("invalid-input", refused);
-              body = { game: generated.file, source: generated.source.stamp };
             } else {
               const relative = input.body.game;
               const absolute = NodePath.resolve(realRoot, relative);
@@ -2477,44 +2318,7 @@ const make = Effect.gen(function* () {
                 );
               body = { game: real };
             }
-            // A clip is a library name, or the game path of a GLB the motion lane delivered: the
-            // generation that delivered it is checked, and its clip carries that generation's stamp.
-            const asked = input.clips ?? STANDARD_CLIPS;
-            const isMotion = (clip: string) =>
-              clip.replaceAll("\\", "/").startsWith(`${GENERATED_DIR}/`);
-            const fromLibrary = yield* resolveClips(
-              root,
-              asked.filter((clip) => !isMotion(clip)),
-              standardPacks,
-            );
-            const fromMotion = yield* Effect.forEach(asked.filter(isMotion), (clip) =>
-              Effect.gen(function* () {
-                const generated = yield* generatedSource(
-                  realRoot,
-                  clip,
-                  "blender-character",
-                  (id, delivered) => art.delivered(root, id, delivered),
-                );
-                if (generated.source.lane !== "motion")
-                  return yield* fail(
-                    "invalid-input",
-                    `${clip} came from the ${generated.source.lane} lane; clips take a library clip name or a GLB the motion lane delivered.`,
-                  );
-                const delivered = generated.source.generation.path;
-                return {
-                  pack: generated.source.stamp.from,
-                  name: motionClipName(
-                    NodePath.posix.basename(NodePath.posix.dirname(delivered)),
-                    delivered,
-                  ),
-                  path: generated.file,
-                  licence: generated.source.stamp.licence,
-                  source: generated.source.stamp,
-                  motion: true,
-                };
-              }),
-            );
-            const clips = [...fromLibrary, ...fromMotion];
+            const clips = yield* resolveClips(root, input.clips ?? STANDARD_CLIPS, standardPacks);
             const made = yield* kitCall(
               root,
               "blender-character",
@@ -2589,7 +2393,6 @@ const make = Effect.gen(function* () {
         holding(
           root,
           Effect.gen(function* () {
-            if (input.source === "generated") return yield* importGenerated(root, input.path);
             const id = input.id;
             if (id === undefined)
               return yield* opError(
@@ -2776,8 +2579,7 @@ const make = Effect.gen(function* () {
               );
             // The person's route is read now, not at the review: they may have changed it since.
             const routeRefusal =
-              routeRefusalOf(candidate, modelChoice(manifest)) ??
-              (yield* creatureRefusal(root, candidate));
+              routeRefusalOf(candidate, modelChoice(manifest)) ?? creatureRefusal(candidate);
             if (routeRefusal !== null)
               return yield* opError("blender-export", root, "invalid-input", routeRefusal);
             const file = input.file ?? `${yield* assetDirOf(manifest)}/${candidate.subject}.glb`;

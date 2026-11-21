@@ -324,12 +324,6 @@ const gameFact = <S extends Schema.Top>(value: S) =>
 export const GAME_ASSET_USE_CAP = 64;
 const UsePaths = Schema.Array(Schema.String).check(Schema.isMaxLength(GAME_ASSET_USE_CAP));
 
-/** Generations whose bytes a build ships, and whether its plays loaded them. */
-export const GameGenerationUse = Schema.Array(
-  Schema.Struct({ id: Schema.String, loaded: Schema.Boolean }),
-).check(Schema.isMaxLength(GAME_ASSET_USE_CAP));
-export type GameGenerationUse = typeof GameGenerationUse.Type;
-
 /**
  * What the plays used of the files the game ships: measured from the running game, never claimed.
  * Library files ASSETS.md credits are left out; everything else under the engine's assets
@@ -346,12 +340,6 @@ export const GameAssetUse = Schema.Struct({
   silent: UsePaths,
   /** Used and unused files past the caps, counted only. */
   more: NonNegativeInt,
-  /**
-   * Generations of this build (their records under art/generated/) whose delivered bytes are
-   * also a shipped file, joined by content hash: loaded when some play loaded such a file.
-   * A generation missing here ships no file with its bytes (a Blender export rewrites them).
-   */
-  generations: Schema.optionalKey(GameGenerationUse),
 });
 export type GameAssetUse = typeof GameAssetUse.Type;
 
@@ -1398,16 +1386,6 @@ export const GameBuildsResult = Schema.Struct({
   folderEdited: Schema.Union([Schema.Boolean, Schema.Literal("unknown")]),
   /** The game's latest restore, from any source. */
   restore: Schema.NullOr(GameBuildRestoreRef),
-  /**
-   * The first page only: the newest listed build whose asset use was measured, and which of the
-   * game's generations it ships (their bytes) and loaded. The generation cards read it.
-   */
-  latestUse: Schema.optionalKey(
-    Schema.Struct({
-      build: GameBuildId,
-      generations: GameGenerationUse,
-    }),
-  ),
   /**
    * The first page only: the run of the asking chat whose turn has not settled into a build yet,
    * because it is still running or its checkpoint is still being saved. Read in the same pass as

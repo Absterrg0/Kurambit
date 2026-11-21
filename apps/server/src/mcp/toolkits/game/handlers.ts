@@ -35,7 +35,6 @@ import {
   GameEvalResult,
   GameExploreActResult,
   GameExploreCloseResult,
-  GameGenerateResult,
   GameKeepGoingStatus,
   GameModelSheetResult,
   GameOperationError,
@@ -48,7 +47,6 @@ import {
   THREE_VIEWPORT,
   type ThreadId,
 } from "@kurambit/contracts";
-import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
@@ -324,21 +322,17 @@ const check = (store: CheckpointStore["Service"], final: boolean) =>
   }).pipe(as(GameCheckAnswer));
 
 /**
- * The status line a final check ends with (what op status answered): how models are made, the
- * Blender the game's tools would run, and which art lanes have a provider.
+ * The status line a final check ends with (what op status answered): how models are made and the
+ * Blender the game's tools would run.
  */
 const statusLine = Effect.gen(function* () {
   const scope = yield* McpInvocationContext.McpInvocationContext;
   const status = yield* withGame(GameStatusService.GameStatusService, (statuses, threadId) =>
     statuses.status(threadId, {}),
   );
-  const lanes = Object.entries(status.artLanes ?? {})
-    .filter(([, provider]) => provider !== null)
-    .map(([lane]) => lane);
   return [
     `models ${status.characters}${status.library ? " with the library" : ""}`,
     scope.blenderMissing == null ? "Blender ready" : `no Blender (${scope.blenderMissing})`,
-    lanes.length === 0 ? "no art providers" : `art: ${lanes.join(", ")}`,
   ].join(" · ");
 });
 
@@ -498,24 +492,6 @@ const assetsHandlers = {
             withGame(GameAssetLibrary.GameAssetLibrary, (library, threadId) =>
               library.lock(threadId, lock),
             ).pipe(as(LibraryText)),
-          // With `edit`, the prompt is one change to that game image (what op image_edit did).
-          generate: ({ edit, transparent, ...generate }) =>
-            withGame(GameArt.GameArt, (art, threadId) =>
-              edit === undefined
-                ? art.generate(threadId, generate)
-                : art.imageEdit(threadId, {
-                    path: edit,
-                    change: generate.prompt,
-                    ...(transparent === undefined ? {} : { transparent }),
-                    ...(generate.references === undefined
-                      ? {}
-                      : { references: generate.references.slice(0, 3) }),
-                  }),
-            ).pipe(as(GameGenerateResult)),
-          wait: (wait) =>
-            withGame(GameArt.GameArt, (art, threadId) => art.wait(threadId, wait)).pipe(
-              as(GameGenerateResult),
-            ),
           pictures: (pictures) =>
             withGame(GameEngine.GameEngine, (engines, threadId) =>
               engines.pictures(threadId, pictures),

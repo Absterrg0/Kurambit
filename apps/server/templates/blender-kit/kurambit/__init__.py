@@ -1,7 +1,7 @@
 """Kurambit's Blender kit: the helpers and entry points the live scene imports as kurambit.
 
-Entry points (each prints one KURAMBIT_RESULT line, or KURAMBIT_REFUSED): animate, character, digest,
-generated, model_views, motion_strip and review; paint.paint runs in the one-shot pass, and
+Entry points (each prints one KURAMBIT_RESULT line, or KURAMBIT_REFUSED): animate, character, digest
+and review; paint.paint runs in the one-shot pass, and
 paint.adopt takes its result into the live scene. resolve returns names.
 
 Models are parts on a structure (studio-skills/recipes): loft makes a part as rings on its joints,
@@ -18,16 +18,15 @@ from . import blender, look
 from .animate import animate
 from .character import character
 from .digest import digest, resolve
-from .generated import generated
 from .helpers import (aim, decal, eye_lid, eye_squash, grid, hold, key_pose, material, mirror_pose, joints, loft, palette_of, pivot, place_chain, place_on_surface,
                       ring_around, skin_rigid, surface_hit, tube_along_bones, turn, weights_along)
 from .protocol import Refused
 from .qa import qa
-from .review import model_views, motion_strip, review
+from .review import review
 from .surfaces import surface, wrap
 from .voxels import voxels
 
-__all__ = ["aim", "animate", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "generated", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "model_views", "motion_strip", "palette_of", "pivot",
+__all__ = ["aim", "animate", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "palette_of", "pivot",
            "place_chain", "place_on_surface", "qa", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "voxels", "weights_along", "wrap"]
 
 GONE = ("hero", "world", "carve", "face", "hair", "garment", "cloth", "footwear", "trim", "zones", "anatomy", "creature", "gait")

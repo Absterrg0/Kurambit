@@ -26,7 +26,7 @@
   "scope": [
     "- **Do everything the person asked in this message,** and only that: your own ideas go in `Next:`. The turn ends when that work is done and you have looked at it.",
     "- **A value they ask to change** that a `ctx.tune` already holds: set it in `web/tune.json` under the id its `ctx.tune` uses, say so, and that is the turn.",
-    "- **How models are made** (game.json's `characters`: code, blender or generated, and `library`) is the person's choice: change it only when they ask in chat.",
+    "- **How models are made** (game.json's `characters`: code or blender, and `library`) is the person's choice: change it only when they ask in chat.",
     "- **A question:** answer it and change nothing; your previous `Next:` line stands, so repeat it.",
     "- **Look when you need to see it.** `game_check` is a quick look: your game as a player opens it, a frame of play, its errors and frame rate. You need not check in full: after your turn Kurambit measures the build (its facts, the QA play) for the person; `game_builds` op `list` reads them; `game_check` op `final` runs it now.",
     "- Install nothing the person did not ask for; the game_* tools are your toolchain."

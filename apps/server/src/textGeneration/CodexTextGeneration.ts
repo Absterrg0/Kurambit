@@ -14,10 +14,6 @@ import {
   TextGenerationError,
 } from "@kurambit/contracts";
 import { resolveSpawnCommand } from "@kurambit/shared/shell";
-import type {
-  ProviderImageGenerationInput,
-  ProviderImageGenerationResult,
-} from "@kurambit/provider-core/server/driver";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -384,66 +380,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     return stdout;
   });
 
-  /**
-   * Codex's image generation on the person's plan, as a hidden one-shot `codex exec` in the
-   * caller's own folder: read-only sandbox, so the agent can run nothing that writes, and its
-   * images are the `image_generation` items it reports (their saved paths), else the files
-   * Codex saved under the folder's generated_images/.
-   */
-  const generateImages = (
-    input: ProviderImageGenerationInput,
-  ): Effect.Effect<ProviderImageGenerationResult, TextGenerationError> => {
-    const operation = "generateImages";
-    return Effect.gen(function* () {
-      const stdout = yield* execCodex({
-        operation,
-        cwd: input.cwd,
-        prompt: input.prompt,
-        args: () => [
-          "--json",
-          "-s",
-          "read-only",
-          "--config",
-          `model_reasoning_effort="low"`,
-          "-C",
-          input.cwd,
-          ...input.referencePaths.flatMap((imagePath) => ["--image", imagePath]),
-        ],
-      }).pipe(
-        Effect.scoped,
-        Effect.timeoutOption(input.timeoutMs),
-        Effect.flatMap(
-          Option.match({
-            onNone: () =>
-              Effect.fail(
-                new TextGenerationError({ operation, detail: "Codex image request timed out." }),
-              ),
-            onSome: Effect.succeed,
-          }),
-        ),
-      );
-      const reported = codexSavedImagePaths(stdout);
-      const saved = yield* fileSystem
-        .readDirectory(path.join(input.cwd, "generated_images"), { recursive: true })
-        .pipe(
-          Effect.map((entries) =>
-            entries
-              .filter((entry) => /\.(png|webp|jpe?g)$/i.test(entry))
-              .toSorted()
-              .map((entry) => path.join(input.cwd, "generated_images", entry)),
-          ),
-          Effect.orElseSucceed((): ReadonlyArray<string> => []),
-        );
-      const files = [...new Set([...reported, ...saved])];
-      if (files.length === 0)
-        return yield* new TextGenerationError({
-          operation,
-          detail: `Codex made no image. ${codexLastMessage(stdout) ?? ""}`.trim(),
-        });
-      return { files };
-    });
-  };
-
   const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
     operation,
     cwd,
@@ -556,37 +492,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     ...TextGenerationOperations.fromRunner("CodexTextGeneration", runCodexJson, {
       images: true,
     }),
-    generateImages,
   };
 });
-
-/**
- * The saved paths `codex exec --json` reports for its image generation items. The item's
- * field names have moved between Codex versions (savedPath, saved_path), so any key that names
- * a saved path on an image item is read.
- */
-export const codexSavedImagePaths = (stdout: string): ReadonlyArray<string> => {
-  const paths: string[] = [];
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.includes("image")) continue;
-    let event: unknown;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const item =
-      typeof event === "object" && event !== null && "item" in event
-        ? (event as { readonly item: unknown }).item
-        : null;
-    if (typeof item !== "object" || item === null) continue;
-    const record = item as Record<string, unknown>;
-    if (typeof record.type !== "string" || !/image_?generation/i.test(record.type)) continue;
-    const saved = record.savedPath ?? record.saved_path ?? record.path;
-    if (typeof saved === "string" && saved !== "" && !paths.includes(saved)) paths.push(saved);
-  }
-  return paths;
-};
 
 /** Why a `codex exec --json` turn failed, as Codex said it; null when it said nothing. */
 export const codexTurnFailure = (stdout: string): string | null => {
@@ -611,20 +518,4 @@ export const codexTurnFailure = (stdout: string): string | null => {
     }
   }
   return reason;
-};
-
-/** The agent's last message in a `codex exec --json` stream: why it made nothing, usually. */
-const codexLastMessage = (stdout: string): string | null => {
-  let last: string | null = null;
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.includes("agent_message")) continue;
-    try {
-      const event = JSON.parse(line) as { readonly item?: { type?: unknown; text?: unknown } };
-      if (event.item?.type === "agent_message" && typeof event.item.text === "string")
-        last = event.item.text.slice(0, 400);
-    } catch {
-      // Not an event line.
-    }
-  }
-  return last;
 };

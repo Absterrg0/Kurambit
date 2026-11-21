@@ -346,7 +346,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv, Path.Pat
         consumeResetCredit,
         orchestrationAdapter,
         textGeneration,
-        generateImages: textGeneration.generateImages,
       } satisfies ProviderInstance;
     }),
 };

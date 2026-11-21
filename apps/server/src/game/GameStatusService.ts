@@ -19,7 +19,6 @@ import {
   type ThreadId,
 } from "@kurambit/contracts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as GameArt from "./art/GameArt.ts";
 import { engineProfile } from "./engineProfile.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GameEngine from "./GameEngine.ts";
@@ -76,7 +75,6 @@ const make = Effect.gen(function* () {
   const tools = yield* GameToolchain.GameToolchain;
   const engines = yield* GameEngine.GameEngine;
   const preview = yield* GamePreview.GamePreview;
-  const art = yield* GameArt.GameArt;
   const operations = yield* GameOperations.GameOperations;
   const exporter = yield* GameExport.GameExport;
   const copies = yield* GameBuildCopies.GameBuildCopies;
@@ -243,10 +241,6 @@ const make = Effect.gen(function* () {
         live: live ? preview.liveState(root) : ("off" as const),
         characters: modelChoice(manifest).route,
         library: modelChoice(manifest).library,
-        ...(yield* art.lanes.pipe(
-          Effect.map((artLanes) => ({ artLanes })),
-          Effect.orElseSucceed(() => ({})),
-        )),
         buildPlays: copies.plays(root),
         operation: operations.current(root),
       };

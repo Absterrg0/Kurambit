@@ -74,8 +74,6 @@ describe("command permissions", () => {
           WS_METHODS.gameBuildStop,
           WS_METHODS.gameKeepValues,
           WS_METHODS.gameSetCharacterRoute,
-          WS_METHODS.gameChooseGeneration,
-          WS_METHODS.gameCancelGeneration,
         ] as const) {
           const command = createCommandPermissions(runtime, tag);
           registry.set(sessions(env), AsyncResult.success(grant(false)));

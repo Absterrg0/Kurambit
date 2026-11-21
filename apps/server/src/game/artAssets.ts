@@ -1,8 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Reads a game's asset files, their sidecars and ASSETS.md from disk.
 // The Workbench's Art tab: every file the game's assets folder holds that a person would open as
 // art (models, textures and sprites, sounds, fonts), with where its own records say it came from.
-// Nothing here judges a file; it reads the sidecar, ASSETS.md and the generation records the art
-// tools already write.
+// Nothing here judges a file; it reads the sidecar and ASSETS.md the art tools already write.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Option from "effect/Option";
@@ -23,14 +22,12 @@ import { reviewedNotExported } from "./blenderPipeline.ts";
 import { gamePaths } from "./engineProfile.ts";
 import { fileSha256 } from "./fileHash.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
-import { GENERATED_DIR } from "./generatedSource.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import { walkFiles } from "./walkFiles.ts";
 import { listHeroSheets } from "./heroSheets.ts";
 
 const MAX_ASSETS = 1_000;
 const MAX_WALK = 20_000;
-const MAX_RECORDS = 500;
 const MAX_GLTF_JSON = 8 * 1024 * 1024;
 /** Thumbnails the Art tab drew, by content, in the game's ignored builds folder. */
 const ART_THUMBNAIL_DIR = GAME_ART_THUMBNAIL_DIR;
@@ -108,8 +105,6 @@ export const sheetOfLine = (line: string) => {
 };
 
 const decodeSidecar = Schema.decodeUnknownOption(Schema.fromJsonString(GameModelSidecar));
-const GenerationRecord = Schema.Struct({ id: Schema.String, files: Schema.Array(Schema.String) });
-const decodeRecord = Schema.decodeUnknownOption(Schema.fromJsonString(GenerationRecord));
 
 const slash = (path: string) => path.split(NodePath.sep).join("/");
 const exists = (path: string) =>
@@ -145,27 +140,6 @@ export const listArtAssets = async (
   const listed = found.slice(0, MAX_ASSETS);
   const served = project === "" ? "" : `${project}/`;
 
-  // Generation records under art/generated/, joined to listed files by their delivered bytes.
-  const records = await walkFiles(NodePath.join(root, GENERATED_DIR), {
-    match: (name) => name.endsWith(".generation.json"),
-    maxDepth: 2,
-    limit: MAX_RECORDS,
-  });
-  const delivered = new Map<string, string[]>();
-  for (const record of records) {
-    const decoded = decodeRecord(await NodeFSP.readFile(record, "utf8").catch(() => ""));
-    if (Option.isNone(decoded)) continue;
-    for (const file of decoded.value.files) {
-      const normal = NodePath.posix.normalize(file);
-      if (!normal.startsWith(`${GENERATED_DIR}/`)) continue;
-      const full = NodePath.join(root, normal);
-      const stat = await NodeFSP.stat(full).catch(() => null);
-      if (stat === null || !stat.isFile()) continue;
-      const sha = await sha256Of(full, stat.size, stat.mtimeMs);
-      delivered.set(sha, [...(delivered.get(sha) ?? []), decoded.value.id]);
-    }
-  }
-
   const assets: GameArtAsset[] = [];
   for (const path of listed) {
     const kind = kindOf(path)!;
@@ -194,12 +168,6 @@ export const listArtAssets = async (
       }
     }
     const fromParts = sidecar?.source.parts ?? [];
-    const generations = [
-      ...new Set([
-        ...fromParts.flatMap((part) => (part.generation === undefined ? [] : [part.generation])),
-        ...(delivered.get(sha256) ?? []),
-      ]),
-    ];
     const pack =
       /\blibrary pack ([a-z0-9][a-z0-9._-]*)/i.exec(line ?? "")?.[1] ??
       (sidecar?.source.route === "library"
@@ -208,7 +176,7 @@ export const listArtAssets = async (
     const route: GameArtAssetRoute =
       sidecar?.source.route ??
       (line === null ? null : routeOfLine(line)) ??
-      (generations.length > 0 ? "generated" : path.startsWith(library) ? "library" : "unrecorded");
+      (path.startsWith(library) ? "library" : "unrecorded");
     const licences = [...new Set(fromParts.map((part) => part.licence).filter((l) => l !== ""))];
     const credit =
       licences.length > 0 ? licences.join(", ") : line === null ? null : creditOfLine(line);
@@ -225,7 +193,6 @@ export const listArtAssets = async (
       ...(credit === null ? {} : { credit }),
       ...(line === null || line === "" ? {} : { note: line.slice(0, 400) }),
       ...(sidecar === null || sidecarPath === null ? {} : { sidecar: sidecarPath }),
-      ...(generations.length === 0 ? {} : { generations }),
       ...(pack === undefined || route !== "library" ? {} : { pack }),
       ...(sheet === null ? {} : { sheet }),
       ...(kind === "model" && (await exists(NodePath.join(root, thumbnail))) ? { thumbnail } : {}),

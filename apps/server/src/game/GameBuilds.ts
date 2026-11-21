@@ -1836,20 +1836,8 @@ const make = Effect.gen(function* () {
       const folder = yield* folderOf(g);
       const rail = g.root === g.home ? null : yield* copyRailOf(g, limit, input.before);
       const page = rail === null ? yield* recordsOf(g, limit + 1, input.before) : [];
-      const { builds, measured } =
-        rail === null
-          ? yield* rowsFrom(g, page.slice(0, limit), folder)
-          : { builds: rail.rows, measured: rail.measured };
-      // The generation cards read the newest build whose asset use was measured.
-      const latestUse =
-        input.before === undefined
-          ? builds.flatMap((build) => {
-              const use = measured.get(build.id)?.use;
-              return use?.status === "measured"
-                ? [{ build: build.id, generations: use.value.generations ?? [] }]
-                : [];
-            })[0]
-          : undefined;
+      const builds =
+        rail === null ? (yield* rowsFrom(g, page.slice(0, limit), folder)).builds : rail.rows;
       const current = input.before === undefined ? (folder?.current ?? null) : null;
       const pendingTurn = builds.some(
         (build) => build.source._tag === "turn" && build.source.runId === pending,
@@ -1862,7 +1850,6 @@ const make = Effect.gen(function* () {
         current,
         folderEdited: current !== null ? yield* folderEditedSince(g, current) : "unknown",
         restore: yield* restoreRefOf(g, folder),
-        ...(latestUse === undefined ? {} : { latestUse }),
         ...(pendingTurn === null ? {} : { pendingTurn }),
       } satisfies GameBuildsResult;
     });

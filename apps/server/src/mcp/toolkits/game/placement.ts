@@ -46,8 +46,8 @@ export const GAME_TOOL_OPS = {
 export type GameToolName = keyof typeof GAME_TOOL_OPS;
 
 /**
- * Whether the person's model choice makes models in Blender: the Blender route; generated, whose
- * humanoids are put on the standard skeleton there; and code with the library on, where Blender
+ * Whether the person's model choice makes models in Blender: the Blender route, and code with the
+ * library on, where Blender
  * makes what the library lacks (gameStyle's makesInBlender). Code with the library off, the
  * default, makes every model in code, so its chats are never handed Blender's schemas.
  */
@@ -114,9 +114,9 @@ export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
   game_model_sheet: "game_play op model_sheet",
   game_assets_search: "game_assets op search",
   game_assets_add: "game_assets op add",
-  game_generate: "game_assets op generate",
-  game_generate_wait: "game_assets op wait",
-  game_image_edit: "game_assets op generate {edit}",
+  game_generate: "nothing: generated art is gone; make it in Blender or code",
+  game_generate_wait: "nothing: generated art is gone; make it in Blender or code",
+  game_image_edit: "nothing: generated art is gone; make it in Blender or code",
   game_import:
     "nothing: a three.js game loads its files from web/ as they are, with no import step",
   game_blender_assets_search: "game_blender op asset_search",
@@ -139,7 +139,7 @@ export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
   game_tune:
     "an edit of the game's tune file (web/tune.json for three.js): write the values the person asked to keep there; the turn's build keeps them",
   game_models_route:
-    "an edit of game.json's `characters` (code, blender or generated) and `library` (true or false), only when the person asks you to in chat",
+    "an edit of game.json's `characters` (code or blender) and `library` (true or false), only when the person asks you to in chat",
   game_more: "the game tool it reached, now listed itself",
 };
 
@@ -156,7 +156,7 @@ const RETIRED_GAME_OPS: Readonly<Record<string, string>> = {
   "game_play.preview": "the person's Stage; game_check op look",
   "game_play.start": "game_play op act with no sessionId (it opens one)",
   "game_play.bot_view": "game_play op replay {run, at}",
-  "game_assets.image_edit": "game_assets op generate {edit}",
+  "game_assets.image_edit": "nothing: generated art is gone; make it in Blender or code",
   "game_assets.import": "nothing: a three.js game loads web/ files as they are",
   "game_assets.mine": "nothing for agents: the person's Library is theirs",
   "game_blender.scene": "game_blender op code, printing what it needs",

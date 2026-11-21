@@ -131,12 +131,11 @@ check that matters.
   ranks its packs first, but nothing is refused for falling outside it: refusals that kept a game
   inside a family the harness picked decided the look for the agent, which is its and the
   person's. The rig exists only so library clips fit every character, so an armature marked on its
-  own rig (`kurambit_rig`) plays its own: the mark stands when a creature generation of this game
-  delivered the armature, or, with no generation named, when it carries clips of its own and none
-  from the library (`ownRigRefusal`). A STYLE.json that is a link, not JSON or names unknown
+  own rig (`kurambit_rig`) plays its own: the mark stands when the armature carries clips of its
+  own and none from the library (`ownRigRefusal`). A STYLE.json that is a link, not JSON or names unknown
   library ids fails every art tool with the field. It is a game file, so checkpoints carry it and
   a run's restore brings it back with the art (`restoredPaths`). How a game's
-  models are made (code, Blender or generated) and whether the free library's models may come in
+  models are made (code or Blender) and whether the free library's models may come in
   are the person's choice, kept in `game.json` (`characters`, `library`) rather than STYLE.json, so
   they can be set before the first turn writes one; the tools enforce them, and the agent changes
   them in `game.json` only when the person asks. A keep-going step is no one asking: its
@@ -147,7 +146,8 @@ check that matters.
   (`GameRunControl.setModelChoice`), since the step's end would undo it. The code route
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and
   `generated`, still opens the game; a game.json with no `library` key predates the switch and
-  keeps its library on (`gameModelChoice`). New games default to `blender`, which routes by kind
+  keeps its library on, and one that says `generated` (the removed generated-art route) reads as
+  `blender` (`gameModelChoice`). New games default to `blender`, which routes by kind
   of model: characters, creatures, trees, rocks and buildings in Blender, ground, furniture
   and clutter in code. The AQ bake-off (the same hero brief through every route on Opus) chose
   Blender for characters: sculpted and tailored ones beat code's capsules and reshaped library
@@ -295,7 +295,7 @@ check that matters.
   version does not have).
   A tool is listed from a game thread's first turn whenever the game runs any of its ops: its
   engine, and for `game_blender` the person's model choice (the routes that make models in
-  Blender: blender, generated and code with the library on), so a code chat never reads Blender's
+  Blender: blender and code with the library on), so a code chat never reads Blender's
   schemas. A missing Blender never changes the listing. An op the game
   or machine cannot run is refused when called, with why. A retired tool name stays registered,
   never listed: the MCP auth middleware reads a `tools/call`'s name from the request body

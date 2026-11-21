@@ -1835,6 +1835,25 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerSettings));
   });
 
+  it.effect("loads a settings file that still holds the removed generated-art fields", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({
+          gameBlenderPath: "/opt/blender",
+          gameArtDailyLimitUsd: 12,
+          gameArtLanes: { image: "codex", character: "tripo" },
+          gameTripoApiKey: "",
+        }),
+      );
+
+      assert.strictEqual((yield* serverSettings.getSettings).gameBlenderPath, "/opt/blender");
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
   it.effect("keeps game keys stored before they were settings, and clears them for good", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;

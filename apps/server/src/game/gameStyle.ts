@@ -502,8 +502,7 @@ export const characterRoute = (manifest: Pick<GameManifest, "characters" | "libr
 /**
  * Whether characters may be made in Blender: on the Blender route, and wherever the library is on,
  * which means the library first and Blender for a subject it has no model of (a robot, a cat), as
- * the old library route did. Code with the library off makes them in code; generated ships only
- * what the person's providers made, or library and stamped sources.
+ * the old library route did. Code with the library off makes them in code.
  */
 const makesInBlender = (choice: GameModelChoice) =>
   choice.route === "blender" || (choice.route === "code" && choice.library);
@@ -511,26 +510,20 @@ const makesInBlender = (choice: GameModelChoice) =>
 const ROUTE_USE: Record<GameCharacterRoute, string> = {
   code: "build it in three.js code (shell/model.js)",
   blender: "make it in Blender",
-  generated: "use a generated character (game_assets op generate)",
 };
 
 /**
- * Why the person's model choice refuses a character, or null: on the generated route, an MPFB2
- * body or a character mesh that came from no stamped source is not theirs to ship; off the
- * generated route, neither is a generated character or creature; on the code route with the
- * library off, neither is a Blender-made one.
+ * Why the person's model choice refuses a character, or null: on the code route with the library
+ * off, a Blender-made one is not theirs to ship.
  */
 export const lockCharacterRouteRefusal = (
-  what: "mpfb-body" | "unstamped-mesh" | "generated-body",
+  what: "mpfb-body" | "unstamped-mesh",
   choice: GameModelChoice,
 ): string | null => {
-  if (what === "generated-body" ? choice.route === "generated" : makesInBlender(choice))
-    return null;
+  if (makesInBlender(choice)) return null;
   const thing =
     what === "mpfb-body"
       ? "An MPFB2 body is a Blender-made character"
-      : what === "generated-body"
-        ? "A generated character or creature (an AI provider made its body)"
-        : "A character mesh with no library or import source is a Blender-made character";
+      : "A character mesh with no library or import source is a Blender-made character";
   return `${thing}, and the person chose to make this game's models with ${choice.route}${choice.library ? " and the library" : ""}. Instead ${ROUTE_USE[choice.route]}${choice.library ? " or use a library model" : ""}. If the request needs another kind of model, say so in your reply: the person changes how models are made in the game's "Make models with" setting.`;
 };

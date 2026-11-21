@@ -6,14 +6,6 @@ import {
   GameKeepGoingStatusInput,
 } from "./gameRun.ts";
 import {
-  GameArtProvidersResult,
-  GameCancelGenerationInput,
-  GameChooseGenerationInput,
-  GameGenerationChangeResult,
-  GameGenerationsInput,
-  GameGenerationsResult,
-} from "./gameArt.ts";
-import {
   GameArtAssetsInput,
   GameArtAssetsResult,
   GameArtThumbnailInput,
@@ -402,10 +394,6 @@ export const WS_METHODS = {
   gameToolchainInstall: "game.toolchainInstall",
   gameToolchainRemove: "game.toolchainRemove",
   gameSetCharacterRoute: "game.setCharacterRoute",
-  gameGenerations: "game.generations",
-  gameChooseGeneration: "game.chooseGeneration",
-  gameCancelGeneration: "game.cancelGeneration",
-  gameArtProviders: "game.artProviders",
   gameArtAssets: "game.artAssets",
   gameArtThumbnail: "game.artThumbnail",
   gameLibraryList: "game.libraryList",
@@ -1589,26 +1577,6 @@ const WsGameLibraryRemoveRpc = Rpc.make(WS_METHODS.gameLibraryRemove, {
   success: Schema.Struct({}),
   error: gameError,
 });
-const WsGameGenerationsRpc = Rpc.make(WS_METHODS.gameGenerations, {
-  payload: GameGenerationsInput,
-  success: GameGenerationsResult,
-  error: gameError,
-});
-const WsGameChooseGenerationRpc = Rpc.make(WS_METHODS.gameChooseGeneration, {
-  payload: GameChooseGenerationInput,
-  success: GameGenerationChangeResult,
-  error: gameError,
-});
-const WsGameCancelGenerationRpc = Rpc.make(WS_METHODS.gameCancelGeneration, {
-  payload: GameCancelGenerationInput,
-  success: GameGenerationChangeResult,
-  error: gameError,
-});
-const WsGameArtProvidersRpc = Rpc.make(WS_METHODS.gameArtProviders, {
-  payload: Schema.Struct({}),
-  success: GameArtProvidersResult,
-  error: gameError,
-});
 
 const WsGameKeepGoingRpc = Rpc.make(WS_METHODS.gameKeepGoing, {
   payload: GameKeepGoingInput,
@@ -1795,10 +1763,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameLibraryAddRpc,
   WsGameLibrarySaveRpc,
   WsGameLibraryRemoveRpc,
-  WsGameGenerationsRpc,
-  WsGameChooseGenerationRpc,
-  WsGameCancelGenerationRpc,
-  WsGameArtProvidersRpc,
   WsGameKeepGoingRpc,
   WsGameKeepGoingStatusRpc,
   WsGameKeepGoingDecideRpc,

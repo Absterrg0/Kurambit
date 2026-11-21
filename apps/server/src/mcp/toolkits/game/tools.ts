@@ -15,7 +15,6 @@ import {
   GamePlayToolInput,
   OrchestratorMcpFailure,
 } from "@kurambit/contracts";
-import * as GameArt from "../../../game/art/GameArt.ts";
 import * as GameAssetLibrary from "../../../game/GameAssetLibrary.ts";
 import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
@@ -93,7 +92,6 @@ export const GameAssetsTool = Tool.make("game_assets", {
   ...answers,
   dependencies: [
     GameAssetLibrary.GameAssetLibrary,
-    GameArt.GameArt,
     GameEngine.GameEngine,
     GameRunControl.GameRunControl,
     GameProjectService.GameProjectService,

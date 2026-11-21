@@ -3,7 +3,6 @@
 // top-level union), and the key keeps every op's own typed input whole beside the others.
 import * as Schema from "effect/Schema";
 import { GameAddonId, GameModelSheetInput } from "./game.ts";
-import { GameGenerateInput, GameGenerateWaitInput, GameImageEditInput } from "./gameArt.ts";
 import {
   GameAnimateInput,
   GameBlenderAssetsImportInput,
@@ -74,19 +73,6 @@ export const GameAssetsToolInput = Schema.Struct({
   // Published as a bare object: the fields are GameStyleLockInput's, decoded by the service and
   // taught by the art skill, so the look's schema is not paid for with every tool call.
   lock: op(Schema.Record(Schema.String, Schema.Unknown)),
-  generate: op(
-    Schema.Struct({
-      ...GameGenerateInput.fields,
-      // What op image_edit did: the prompt is the one change to this game image.
-      edit: Schema.optionalKey(
-        GameImageEditInput.fields.path.annotate({
-          description: "A game image the prompt changes, for the person's pick.",
-        }),
-      ),
-      transparent: GameImageEditInput.fields.transparent,
-    }),
-  ),
-  wait: op(GameGenerateWaitInput),
   // Published bare like lock: GamePicturesInput, decoded by the service and taught by its skill.
   pictures: op(Schema.Record(Schema.String, Schema.Unknown)),
 });

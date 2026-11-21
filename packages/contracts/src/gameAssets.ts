@@ -137,8 +137,6 @@ export const GameArtAsset = Schema.Struct({
   note: Schema.optionalKey(Schema.String),
   /** A model's sidecar, game-relative: three.js loads the model through it. */
   sidecar: Schema.optionalKey(AssetPathText),
-  /** The generations that delivered it, by id. */
-  generations: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The library pack it came from. */
   pack: Schema.optionalKey(Schema.String),
   sheet: Schema.optionalKey(GameArtSpriteSheet),

@@ -29,26 +29,23 @@ const CHOICES = {
   blender: { characters: "blender", library: false },
   code: { characters: "code", library: false },
   "code with the library": { characters: "code", library: true },
-  generated: { characters: "generated", library: false },
 } as const satisfies Record<string, { characters: GameCharacterRoute; library: boolean }>;
 /**
  * Bytes a new three.js game's first turn reads, by model choice: its first message (the first
  * turn's steps), the turn rules the harness sends, AGENTS.md, three.md, the bridge contract
  * (TEMPLATE.md) the message sends it to, the art-pipeline sections they name and the kit comment
  * blocks the message names. Set about 10% over what they were on 2026-11-16, once a new game started
- * from an empty page with no starter or recipe: code reads 10,301, the library 10,386 and generated
- * 15,267. Blender, the default since 2026-11-17 (its route by kind of model), read 10,639 then.
- * Generated read 15,986 until the art skill was cut to the packs' rules on 2026-11-20 (13,235).
- * The same day three.md sent the API to runtime.d.ts: Blender reads 11,071, code 10,759, the
- * library 10,837 and generated 13,228. These left out studio-skills/AGENTS.md (745), which the
+ * from an empty page with no starter or recipe: code reads 10,301 and the library 10,386.
+ * Blender, the default since 2026-11-17 (its route by kind of model), read 10,639 then.
+ * On 2026-11-20 three.md sent the API to runtime.d.ts: Blender reads 11,071, code 10,759 and the
+ * library 10,837. These left out studio-skills/AGENTS.md (745), which the
  * game's AGENTS.md points at; it is counted since it holds the recipe index (2026-11-20, 2,069
- * with all 24 recipes): Blender 13,140, code 12,828, the library 12,906, generated 15,297.
+ * with all 24 recipes): Blender 13,140, code 12,828, the library 12,906.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
   blender: 13_300,
   code: 13_300,
   "code with the library": 13_300,
-  generated: 15_400,
 };
 /**
  * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input
@@ -64,7 +61,6 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
 const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", number>> = {
   code: 8_800,
   "code with the library": 16_000,
-  generated: 16_000,
   blender: 16_000,
 };
 
