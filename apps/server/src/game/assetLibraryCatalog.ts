@@ -16,8 +16,8 @@
 // its GLBs at pin time: kaykit-1 (41 joints, Adventurers and Skeletons alike), kenney-mini
 // (7 joints, Mini Characters and Mini Dungeon) and standard-humanoid (Quaternius' 65-joint
 // UE-named rig, shared by both animation libraries and the base characters; the base
-// characters' rest frames differ by up to 23 degrees, so game_blender op character conforms
-// every body to it). kenney-blocky is a shared node hierarchy without a skin;
+// characters' rest frames differ by up to 23 degrees; game_blender op character re-rigs a body
+// on Mesh2Motion's human instead). kenney-blocky is a shared node hierarchy without a skin;
 // kenney-character, quaternius-knight and quaternius-ultimate ship as FBX and are named
 // from the author's description.
 //
@@ -150,7 +150,7 @@ export const LIBRARY_RIG_JOINTS: Readonly<Record<string, ReadonlyArray<string>>>
 /** The pack game_blender op character's rigs and clips come from. */
 export const MESH2MOTION_PACK = "mesh2motion-rigs";
 
-/** The skeleton made characters are conformed to. */
+/** The skeleton library humanoid clips are on; a model on it measures its rest frames against it. */
 export const STANDARD_RIG = STANDARD_SKELETON;
 
 /** Rig ids older locks may name that are the same skeleton under another name. */
@@ -164,24 +164,11 @@ export const RETIRED_RIGS: Readonly<Record<string, string>> = {
     "quaternius-ual1 was the 53-joint rig of the old Universal Animation Library pin; the library's UAL1 is now on standard-humanoid. Set STYLE.json's rig to standard-humanoid.",
 };
 
-/** The armature every made character starts from: its rest frames are the ones every library clip expects. */
+/** The standard armature: its rest frames are the ones every library humanoid clip expects. */
 export const STANDARD_ARMATURE = {
   pack: "quaternius-universal-animation-library",
   file: "Unreal-Godot/UAL1_Standard.glb",
 } as const;
-
-/** The clips a character gets when it names none: idle, locomotion, jump, hit and death. */
-export const STANDARD_CLIPS = [
-  "Idle_Loop",
-  "Walk_Loop",
-  "Jog_Fwd_Loop",
-  "Sprint_Loop",
-  "Jump_Start",
-  "Jump_Loop",
-  "Jump_Land",
-  "Hit_Chest",
-  "Death01",
-] as const;
 
 /** Packs that share one look; a game's STYLE.json picks one, and its packs come from it. */
 export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
@@ -203,7 +190,7 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
   {
     id: "quaternius-universal",
     title: "Quaternius universal animation",
-    look: "humanoid bodies and two animation libraries on one standard skeleton; game_blender op character conforms any body to it",
+    look: "humanoid bodies and two animation libraries on one standard skeleton",
   },
   {
     id: "mesh2motion",
@@ -827,7 +814,7 @@ export const CURATED_PACKS: ReadonlyArray<LibraryPack> = [
     style: "realistic humanoid base body",
     tags: "3d character humanoid base body male female hair hairstyles eyebrows rigged standard skeleton",
     description:
-      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF); game_blender op character conforms them.",
+      "Male and female base bodies with rigged hairstyles and eyebrows on the standard skeleton (glTF); game_blender op character rigs one as a body.",
     family: "quaternius-universal",
     rig: STANDARD_RIG,
     root: "Universal Base Characters[Standard]",

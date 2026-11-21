@@ -29,7 +29,6 @@ from kurambit.digest import digests, exported_actions  # noqa: E402
 from kurambit.protocol import Refused, entry  # noqa: E402
 
 MADE = {"from": "made", "licence": "made in this game", "ai": False, "credits": None}
-MAX_REST_DEVIATION = 2.0
 
 
 def _stamp(idb, key="kurambit_source"):
@@ -113,9 +112,6 @@ def facts_of(measured, info, params, creatures=()):
             missing = [j for j in joints if j not in bones]
             if missing:
                 out.append(f"{name} lacks {len(missing)} joints of the standard skeleton ({', '.join(missing[:4])}): library clips will not fit it, its own clips play as keyed.")
-    dev = measured["restDeviation"]
-    if dev is not None and dev > MAX_REST_DEVIATION:
-        out.append(f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton: library clips may play twisted on it (game_blender op character conforms a body).")
     budget = params["budgets"][kind]
     if measured["triangles"] > budget:
         out.append(f"{measured['triangles']} triangles, over STYLE.json's budget.{kind} of {budget}; the game's Performance row says whether the scene can carry them.")

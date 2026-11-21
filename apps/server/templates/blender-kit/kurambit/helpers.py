@@ -1,6 +1,6 @@
-"""Helpers for modelling parts and keying clips on a conformed character: loft (a part as rings on
-its joints), skin_rigid with weights_along, ring_around, tube_along_bones, place_on_surface, aim, key_pose and mirror_pose, plus material and place_chain, and the
-eyes that blink by bones: eye_lid and eye_squash.
+"""Helpers for modelling parts and keying clips on a rigged character: loft (a part as rings on its
+joints), skin_rigid (a part added to a rig afterwards, on one bone), place_on_surface, aim, key_pose
+and mirror_pose, plus material, hold, and the eyes that blink by bones: eye_lid and eye_squash.
 
 Every helper works in world space on the character's rest pose (what the export binds to), even
 while a clip poses it in the viewport. The Blender traps live here, not in the agent's code:
@@ -138,178 +138,24 @@ def decal(name, pixels, axis="-y"):
 
 
 def skin_rigid(obj, bone, armature=None):
-    """Binds a mesh to the skeleton: bone is a bone name (rigid), a {bone: weight} dict, or a
-    function of a vertex's world position returning such a dict. The mesh's transform is applied
-    first, so it stays exactly where it was modelled. Returns obj."""
+    """Binds a mesh rigidly to one bone, its transform applied first so it stays exactly where it was
+    modelled. Returns obj. (A whole model is rigged with kurambit.rig; this is for a part added to a
+    rig afterwards.)"""
     if obj.type != "MESH":
         raise ValueError(f"{obj.name} is a {obj.type.lower()}: skin_rigid needs a mesh")
-    if callable(bone):
-        arm = _armature(armature) if armature is not None else None
-        if arm is None:
-            raise ValueError("pass armature= with a weight function")
-    else:
-        weights = {bone: 1.0} if isinstance(bone, str) else dict(bone)
-        arm = _armature(armature) if armature is not None else armature_of(next(iter(weights)))
-        missing = [b for b in weights if b not in arm.data.bones]
-        if missing:
-            raise ValueError(f"{arm.name} has no bone {', '.join(missing)}")
+    arm = _armature(armature) if armature is not None else armature_of(bone)
+    if bone not in arm.data.bones:
+        raise ValueError(f"{arm.name} has no bone {bone}")
     skeleton.to_world(obj)
-    for vg in list(obj.vertex_groups):
-        obj.vertex_groups.remove(vg)
-    groups = {}
-
-    def group(name):
-        if name not in groups:
-            groups[name] = obj.vertex_groups.new(name=name)
-        return groups[name]
-
-    if callable(bone):
-        for v in obj.data.vertices:
-            for name, w in bone(v.co.copy()).items():
-                if w > 0:
-                    group(name).add([v.index], w, "REPLACE")
-    else:
-        everything = list(range(len(obj.data.vertices)))
-        for name, w in weights.items():
-            group(name).add(everything, w, "REPLACE")
+    obj.vertex_groups.clear()
+    obj.vertex_groups.new(name=bone).add(range(len(obj.data.vertices)), 1.0, "REPLACE")
     skeleton.bind(obj, arm)
     return obj
-
-
-def _section(body, center, axis, slab, pick, bins):
-    """The body's cross-section around an axis: its radius in each of `bins` directions (from the
-    vertices within slab of the plane), gaps filled and smoothed, plus the plane's two axes."""
-    axis = Vector(axis).normalized()
-    a = Vector((1, 0, 0)) if abs(axis.x) < 0.9 else Vector((0, 1, 0))
-    a = (a - axis * a.dot(axis)).normalized()
-    b = axis.cross(a)
-    co, _ = rest_coords(body)
-    d = co - np.array(center)
-    near = np.abs(d @ np.array(axis)) <= slab
-    if pick is not None:
-        near &= np.array([bool(pick(Vector(p))) for p in co])
-    x, y = d[near] @ np.array(a), d[near] @ np.array(b)
-    if len(x) == 0:
-        raise ValueError(f"no vertex of {body.name} within {slab} m of that plane: move t or raise slab")
-    k = ((np.arctan2(y, x) % (2 * math.pi)) / (2 * math.pi) * bins).astype(int) % bins
-    rad = [0.0] * bins
-    for i, r in zip(k, np.hypot(x, y)):
-        rad[i] = max(rad[i], float(r))
-    for _ in range(2):
-        rad = [max(rad[i], 0.5 * (rad[i - 1] + rad[(i + 1) % bins])) for i in range(bins)]
-    rad = [(rad[i - 1] + 2 * rad[i] + rad[(i + 1) % bins]) / 4 for i in range(bins)]
-    return rad, a, b
 
 
 def _link(obj):
     bpy.context.collection.objects.link(obj)
     return obj
-
-
-def ring_around(body, bone, t=0.5, *, axis=None, center=None, thick=0.014, height=0.01, slab=0.02,
-                pick=None, material=None, weights=None, name=None, armature=None, bins=24, gap=0.002):
-    """A soft band hugging the body's measured cross-section (a cuff, a belt, a collar), so a colour
-    seam on the body is covered by a modelled edge instead of jagged per-face colours.
-    It sits at fraction t from the bone's joint to the next (or at center), around axis (default:
-    along the bone), and is skinned to the bone (or weights). pick(world_co) limits which vertices count (one leg only)."""
-    arm = _armature(armature) if armature is not None else armature_of(bone)
-    b = arm.data.bones[bone]
-    child = skeleton._child_joint(arm.data.bones, bone, lambda k: True)
-    head = arm.matrix_world @ b.head_local
-    tail = arm.matrix_world @ (arm.data.bones[child].head_local if child is not None else b.tail_local)
-    c = Vector(center) if center is not None else head.lerp(tail, t)
-    ax = Vector(axis).normalized() if axis is not None else (tail - head).normalized()
-    rad, a, bb = _section(body, c, ax, slab, pick, bins)
-    rows = 6
-    verts, faces = [], []
-    for i in range(bins):
-        ang = 2 * math.pi * (i + 0.5) / bins
-        out = a * math.cos(ang) + bb * math.sin(ang)
-        for j in range(rows):
-            u = 2 * math.pi * j / rows
-            verts.append(c + out * (rad[i] + gap + thick * (1 + math.cos(u)) * 0.5) + ax * (math.sin(u) * (thick + height) * 0.5))
-    for i in range(bins):
-        for j in range(rows):
-            n = (i + 1) % bins
-            faces.append((i * rows + j, n * rows + j, n * rows + (j + 1) % rows, i * rows + (j + 1) % rows))
-    me = bpy.data.meshes.new(name or f"ring_{bone}")
-    me.from_pydata([tuple(v) for v in verts], [], faces)
-    me.shade_smooth()
-    obj = _link(bpy.data.objects.new(me.name, me))
-    if material is not None:
-        me.materials.append(material)
-    return skin_rigid(obj, weights or bone, armature=arm)
-
-
-def _frames(path):
-    """Ring frames along a path that do not twist (parallel transport)."""
-    tangents = [(path[min(i + 1, len(path) - 1)] - path[max(i - 1, 0)]).normalized() for i in range(len(path))]
-    ref = Vector((1, 0, 0)) if abs(tangents[0].x) < 0.9 else Vector((0, 0, 1))
-    side = (ref - tangents[0] * ref.dot(tangents[0])).normalized()
-    out = []
-    for t in tangents:
-        side = (side - t * side.dot(t)).normalized()
-        out.append((t, side, t.cross(side)))
-    return out
-
-
-def tube_along_bones(bones, radius, *, armature=None, taper=0.35, ring=10, samples=9, material=None, name=None):
-    """A smooth tapered tube through a chain of bones (a tail, a cable, a tentacle), weighted by arc
-    length so each bone owns its stretch and neighbours blend at the joints. radius is metres at the
-    root, or a function of t (0 root .. 1 tip) returning metres."""
-    arm = _armature(armature) if armature is not None else armature_of(bones[0])
-    mw = arm.matrix_world
-    bs = [arm.data.bones[n] for n in bones]
-    pts = [mw @ bs[0].head_local] + [mw @ b.tail_local for b in bs]
-    ext = [pts[0] * 2 - pts[1]] + pts + [pts[-1] * 2 - pts[-2]]
-
-    def cr(p0, p1, p2, p3, t):
-        return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3)
-
-    path = [cr(ext[i - 1], ext[i], ext[i + 1], ext[i + 2], k / samples) for i in range(1, len(ext) - 2) for k in range(samples)]
-    path.append(pts[-1])
-    r_of = radius if callable(radius) else (lambda t: radius * (1 - taper * t))
-    verts, faces = [], []
-    frames = _frames(path)
-    for i, (p, (_, side, up)) in enumerate(zip(path, frames)):
-        r = r_of(i / (len(path) - 1))
-        verts += [p + (side * math.cos(2 * math.pi * j / ring) + up * math.sin(2 * math.pi * j / ring)) * r for j in range(ring)]
-    for i in range(len(path) - 1):
-        for j in range(ring):
-            faces.append((i * ring + j, i * ring + (j + 1) % ring, (i + 1) * ring + (j + 1) % ring, (i + 1) * ring + j))
-    tip = len(verts)
-    verts.append(path[-1] + frames[-1][0] * r_of(1.0) * 0.7)
-    last = (len(path) - 1) * ring
-    faces += [(last + j, last + (j + 1) % ring, tip) for j in range(ring)]
-    me = bpy.data.meshes.new(name or f"tube_{bones[0]}")
-    me.from_pydata([tuple(v) for v in verts], [], faces)
-    me.shade_smooth()
-    obj = _link(bpy.data.objects.new(me.name, me))
-    if material is not None:
-        me.materials.append(material)
-    parent = bs[0].parent.name if bs[0].parent is not None else None
-
-    def weights(p):
-        def nearest(i):
-            q = p - pts[i]
-            seg = pts[i + 1] - pts[i]
-            f = max(0.0, min(1.0, q.dot(seg) / max(seg.length_squared, 1e-12)))
-            return (pts[i].lerp(pts[i + 1], f) - p).length, f
-
-        best = min(range(len(bones)), key=lambda i: nearest(i)[0])
-        f = nearest(best)[1]
-        w = {bones[best]: 1.0}
-        if f < 0.25 and best > 0:
-            k = (0.25 - f) / 0.5
-            w = {bones[best]: 1 - k, bones[best - 1]: k}
-        elif f > 0.75 and best < len(bones) - 1:
-            k = (f - 0.75) / 0.5
-            w = {bones[best]: 1 - k, bones[best + 1]: k}
-        if best == 0 and f < 0.15 and parent is not None:
-            w = {bones[0]: 0.6, parent: 0.4}
-        return w
-
-    return skin_rigid(obj, weights, armature=arm)
 
 
 def place_on_surface(obj, target, direction, *, offset=0.0):
@@ -460,56 +306,6 @@ def mirror_pose(pose):
 
 def chains_of(arm):
     return json.loads(arm.get("kurambit_chains", "{}"))
-
-
-def add_chain(arm, name, parent, points):
-    """Adds bones name_01.. through world points (root to tip) under parent; returns their names."""
-    inv = arm.matrix_world.inverted()
-    names = [f"{name}_{i + 1:02d}" for i in range(len(points) - 1)]
-    with skeleton.edit_bones(arm) as eb:
-        prev = eb[parent]
-        for i, bone in enumerate(names):
-            b = eb.get(bone) or eb.new(bone)
-            b.head = inv @ Vector(points[i])
-            b.tail = inv @ Vector(points[i + 1])
-            b.roll = 0.0
-            b.parent = prev
-            b.use_connect = i > 0
-            b.use_deform = True
-            prev = b
-    chains = chains_of(arm)
-    chains[name] = names
-    arm["kurambit_chains"] = json.dumps(chains)
-    return names
-
-
-def place_chain(armature, chain, points=None, *, start=None, direction=None, length=None):
-    """Moves a spring chain's bones (made by game_blender op character's chains), for example ears onto
-    a hood you modelled: points are world positions root to tip (one more than the bones), or give
-    start (and optionally direction and length; both default to the chain's own). Do it before
-    skinning parts to the chain: a skinned part keeps its shape, not its place on the bones."""
-    arm = _armature(armature)
-    chains = chains_of(arm)
-    if chain not in chains:
-        raise ValueError(f"{arm.name} has no chain {chain!r}; it has {', '.join(chains) or 'none'}")
-    bones = chains[chain]
-    mw = arm.matrix_world
-    if points is None:
-        first, last = arm.data.bones[bones[0]], arm.data.bones[bones[-1]]
-        root, tip = mw @ first.head_local, mw @ last.tail_local
-        d = Vector(direction).normalized() if direction is not None else (tip - root).normalized()
-        n = length if length is not None else (tip - root).length
-        s = Vector(start) if start is not None else root
-        points = [s + d * n * i / len(bones) for i in range(len(bones) + 1)]
-    if len(points) != len(bones) + 1:
-        raise ValueError(f"chain {chain!r} has {len(bones)} bones: give {len(bones) + 1} points")
-    parent = arm.data.bones[bones[0]].parent.name
-    inv = mw.inverted()
-    with skeleton.edit_bones(arm) as eb:
-        for i, bone in enumerate(bones):
-            eb[bone].head = inv @ Vector(points[i])
-            eb[bone].tail = inv @ Vector(points[i + 1])
-    return {"chain": chain, "bones": bones, "parent": parent}
 
 
 # ---- eyes that blink by bones (blink.py reads them for the sidecar) -------------------------------
@@ -811,37 +607,6 @@ def loft(stations, sides=10, up=(0, 0, 1), squircle=2.0, cap=(True, True), *, na
     if material is not None:
         me.materials.append(material)
     return ob
-
-
-def weights_along(armature, chains, power=6.0, keep=3):
-    """A weight function for skin_rigid that keeps a part on its own bones: each vertex follows the
-    nearest of the named bone segments (a name runs head to tail, a (bone, next bone) pair head to
-    head), by inverse distance to the power (soft at a joint, rigid mid-bone), its top keep
-    normalised. A torso given only spine bones can never pull on a thigh."""
-    arm = _armature(armature)
-    mw = arm.matrix_world
-    segs = []
-    for c in chains:
-        bone, nxt = (c, None) if isinstance(c, str) else c
-        if bone not in arm.data.bones or (nxt is not None and nxt not in arm.data.bones):
-            raise ValueError(f"{arm.name} has no bone {bone if bone not in arm.data.bones else nxt}")
-        b = arm.data.bones[bone]
-        a = np.array(mw @ b.head_local)
-        segs.append((bone, a, np.array(mw @ (b.tail_local if nxt is None else arm.data.bones[nxt].head_local))))
-
-    def weights(co):
-        p = np.array(co)
-        near = []
-        for bone, a, b in segs:
-            ab = b - a
-            t = np.clip(np.dot(p - a, ab) / max(np.dot(ab, ab), 1e-9), 0, 1)
-            near.append((float(np.linalg.norm(p - (a + t * ab))) + 1e-4, bone))
-        out = {}
-        for d, bone in sorted(near)[:keep]:
-            out[bone] = out.get(bone, 0.0) + d ** -power
-        total = sum(out.values())
-        return {k: w / total for k, w in out.items() if w / total > 0.02}
-    return weights
 
 
 FINGERS = re.compile(r"(thumb|index|middle|ring|pinky)", re.I)

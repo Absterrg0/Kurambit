@@ -175,16 +175,15 @@ export const GameBlenderBody = Schema.Union([
       proportions: Schema.optionalKey(Unit),
     }),
   }),
-  /** Blender Studio's drawn stylised human (CC0, ships with the kit, no install): a big skull, simple hands. gender 0 female, 1 male. */
-  Schema.Struct({ studio: Schema.Struct({ gender: Unit }) }),
   /** A rigged humanoid in this game, such as an earlier export (UE, Mixamo or other common bone names). */
   Schema.Struct({ game: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)) }),
-  /** No body: the skeleton at the style's proportions and height, with its clips, for parts modelled on its joints. */
+  /** Blender Studio's drawn stylised human (CC0, ships with the kit, no install): a big skull, simple hands. gender 0 female, 1 male. */
+  Schema.Struct({ studio: Schema.Struct({ gender: Schema.optionalKey(Unit) }) }),
+  /** Retired: model the body static, then rig it. Kept so an earlier call gets that pointer. */
   Schema.Literal("none"),
 ]);
 export type GameBlenderBody = typeof GameBlenderBody.Type;
 
-const StyleFactor = Schema.Number.check(Schema.isBetween({ minimum: 0.3, maximum: 3 }));
 const HeroHeight = Schema.Number.check(Schema.isBetween({ minimum: 0.05, maximum: 20 }));
 
 export const GameBlenderChain = Schema.Struct({
@@ -263,13 +262,13 @@ export const GameBlenderCharacterInput = Schema.Struct({
    * skeleton fitted inside, its clips by name), or "chains" for one none fits.
    */
   rig: Schema.optionalKey(GameBlenderRig),
-  /** With rig: the model's meshes or collections in the scene. Omitted: the object or collection called name. */
+  /** The model's meshes or collections in the scene. Omitted: the object or collection called name (with body: none beside it). */
   objects: Schema.optionalKey(
     Schema.Array(SceneObject).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   ),
-  /** With rig: where template joints are, by bone name ({hand_r: [x, y, z]}); the fit moves the rest with them. */
+  /** Where template joints are, by bone name ({hand_r: [x, y, z]}); the fit moves the rest with them. */
   joints: Schema.optionalKey(Schema.Record(Schema.String.check(Schema.isMaxLength(40)), Point)),
-  /** With rig: parts moved by one bone, never bent (props, armour plates): {object: bone}, or names for the nearest bone. */
+  /** Parts moved by one bone, never bent (props, armour plates): {object: bone}, or names for the nearest bone. */
   rigid: Schema.optionalKey(
     Schema.Union([
       Schema.Array(SceneObject).check(Schema.isMaxLength(64)),
@@ -279,56 +278,26 @@ export const GameBlenderCharacterInput = Schema.Struct({
       ),
     ]),
   ),
-  /** Without rig: the body to build and conform to the standard skeleton. */
+  /** A human body to build as a static mesh and rig on the human template, with any objects beside it. */
   body: Schema.optionalKey(GameBlenderBody),
   /**
-   * With rig: the template's clips by name (Idle_A, Walk, Sword_Attack; Walk, Run, Bite), or on
-   * chains the roles (Idle, Walk, Attack). Without: "Walk_Loop" or "<pack-id>:Walk_Loop", from the
-   * lock's packs on standard-humanoid, or the game path of a motion-lane GLB. Omitted: idle, a move
-   * and an attack.
+   * The template's clips by name (human: Idle_A, Walk, Jog, Sword_Attack, of its 234; fox: Walk,
+   * Run, Bite), or on chains the roles (Idle, Walk, Attack). Omitted: idle, a move and an attack.
    */
   clips: Schema.optionalKey(
     Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160))).check(
       Schema.isMaxLength(48),
     ),
   ),
-  /** With rig "chains": the chain spec (none: guessed from the parts). Without rig: spring chains on the standard skeleton. */
+  /** With rig "chains": the chain spec (none: guessed from the parts). Spring chains on the standard skeleton are retired: an earlier call's get a pointer. */
   chains: Schema.optionalKey(
     Schema.Union([
       Schema.Array(GameBlenderRigChain).check(Schema.isMinLength(1), Schema.isMaxLength(48)),
       Schema.Array(GameBlenderChain).check(Schema.isMaxLength(16)),
     ]),
   ),
-  /** Rebuild the body and armature of an existing <name>, re-binding its other objects by parent bone. */
-  replace: Schema.optionalKey(Schema.Boolean),
-  /**
-   * Fit the library clips to this body: arms swung clear of the torso, hips, spine and head
-   * turns calmed (0 none, 1 full), and the walk strode out to the speed the game walks at (m/s).
-   * Chosen from the review's strips; gaits on legs short for the body are strode out without it.
-   */
-  fit: Schema.optionalKey(
-    Schema.Struct({
-      arms: Schema.optionalKey(Schema.Boolean),
-      calm: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
-      walk: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0.2, maximum: 4 }))),
-    }),
-  ),
-  /** The body and its rig restyled before they are conformed, by factor (1 keeps it). */
-  style: Schema.optionalKey(
-    Schema.Struct({
-      head: Schema.optionalKey(StyleFactor),
-      legs: Schema.optionalKey(StyleFactor),
-      arms: Schema.optionalKey(StyleFactor),
-      hands: Schema.optionalKey(StyleFactor),
-      feet: Schema.optionalKey(StyleFactor),
-      girth: Schema.optionalKey(StyleFactor),
-      limbs: Schema.optionalKey(StyleFactor),
-    }),
-  ),
-  /** Standing height in metres the body is scaled to; the height gate then holds it within 10%. */
+  /** With body: its standing height in metres, scaled to before it is rigged. */
   height: Schema.optionalKey(HeroHeight),
-  /** The height gate's range in metres, as the brief means it; default a human's 1.5-2.0, or height ±10%. */
-  heightRange: Schema.optionalKey(Schema.Tuple([HeroHeight, HeroHeight])),
 });
 export type GameBlenderCharacterInput = typeof GameBlenderCharacterInput.Type;
 
@@ -371,11 +340,8 @@ export const GameBlenderCharacterResult = Schema.Struct({
   clips: Schema.Array(Schema.String),
   /** Chain name to its bones. */
   chains: Schema.Record(Schema.String, Schema.Array(Schema.String)),
-  /** Without rig: the worst rest frame's angle off the standard skeleton, degrees. */
-  restDeviation: Schema.optionalKey(Schema.Number),
-  height: Schema.optionalKey(Schema.Number),
-  /** With rig: per clip, how it moves the model. */
-  facts: Schema.optionalKey(Schema.Array(GameBlenderRigFact)),
+  /** Per clip, how it moves the model. */
+  facts: Schema.Array(GameBlenderRigFact),
 });
 export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
 

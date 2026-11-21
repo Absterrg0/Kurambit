@@ -1,216 +1,17 @@
-"""The standard skeleton: its joints (read from STANDARD_ARMATURE at run time), the name maps
-identity and mpfb_game_engine, conform() and rest_deviation().
-
-glTF clips store absolute local joint rotations, so a library clip plays right only on a skeleton
-whose rest joint frames match the one it was made on. Conforming never retargets a clip: it takes
-the standard armature itself and moves its joints onto the body, keeping every bone's orientation
-and roll, so only lengths change and every library clip plays as it is.
+"""Skeleton plumbing: glTF joints and rest frames (rest_deviation against the standard skeleton,
+for models made before rigging moved to rig.py), imports, binding and clip actions.
 
 Imports use the glTF importer's default bone heuristic ("BLENDER"): it is the one that round-trips
 joint frames exactly (import then export gives the same node rotations); TEMPERANCE re-aims the
 root bone and turns the root and pelvis 90 degrees off the standard."""
 import json
 import math
-import re
 import struct
 from contextlib import contextmanager
 
 import bpy
 from mathutils import Matrix
 
-NAME_MAPS = {
-    "identity": {},
-    # MPFB2's game_engine rig already uses UE names, except these two.
-    "mpfb_game_engine": {"Root": "root", "head": "Head"},
-}
-
-# A rigged humanoid from elsewhere (a generator, Mixamo, another pack) names its bones its own way.
-# Each name is read as (side, word): prefixes such as "mixamorig:" or "Armature|" go, a side is
-# found as .L / _l / Left..., and the word picks the standard joint. Earlier words win a joint
-# (KayKit's wrist before its hand); a bone that names no joint lends its weights to the nearest
-# mapped ancestor (merge_unmapped), so nothing is left unweighted.
-_SIDED = [
-    ("clavicle", ("clavicle", "shoulder", "collar", "collarbone")),
-    ("upperarm", ("upperarm", "uparm", "arm")),
-    ("lowerarm", ("lowerarm", "forearm", "elbow")),
-    ("hand", ("wrist", "hand", "fist", "palm")),
-    ("thigh", ("thigh", "upleg", "upperleg", "hip")),
-    ("calf", ("calf", "shin", "lowerleg", "leg", "knee")),
-    ("foot", ("foot", "feet", "ankle")),
-    ("ball", ("ball", "toebase", "toe", "toes")),
-]
-_CENTRE = [
-    ("pelvis", ("pelvis", "hips", "hip")),
-    ("Head", ("head",)),
-    ("root", ("root",)),
-]
-# The spine and the neck are chains: their bones take spine_01..03 and neck_01 root first.
-_SPINE = re.compile(r"^(spine\d*|abdomen|waist|stomach|chest|upperchest|torso)$")
-_NECK = re.compile(r"^neck\d*$")
-def _side_and_word(name):
-    n = name.split("|")[-1].split(":")[-1]
-    n = re.sub(r"^(mixamorig\d*|def|bip\d*|b|bone|j|jnt|cc_base)[_\-. ]", "", n, flags=re.I)
-    side = None
-    m = re.match(r"^(left|right)[_\-. ]?(.*)$", n, re.I) or re.match(r"^([lr])[_\-.](.+)$", n, re.I)
-    if m:
-        side, n = m.group(1)[0].lower(), m.group(2)
-    else:
-        m = re.match(r"^(.*?)[_\-. ]?(left|right)$", n, re.I) or re.match(r"^(.+?)[_\-.]([lr])$", n, re.I)
-        if m:
-            side, n = m.group(2)[0].lower(), m.group(1)
-        else:
-            m = re.match(r"^(.+?)[_\-.]([lr])[_\-.](\d+)$", n, re.I)  # thumb_l_01
-            if m:
-                side, n = m.group(2).lower(), m.group(1) + m.group(3)
-    return side, re.sub(r"[^a-z0-9]", "", n.lower())
-
-
-def _finger_joint(word):
-    """(finger, 1..3) or None: Mixamo's HandThumb1, UE's thumb_01, KayKit-free names."""
-    m = re.match(r"^(?:hand)?(thumb|index|middle|ring|pinky|little)(?:finger)?0?([1-4])$", word)
-    if not m:
-        return None
-    return ("pinky" if m.group(1) == "little" else m.group(1)), int(m.group(2))
-
-
-def humanoid_map(parents):
-    """{bone name: standard joint} for a humanoid's bones ({name: parent name or None}) under any
-    common naming; identity names are left out. A rig already on the standard names maps to {}."""
-    names = list(parents)
-    if all(j in names for j in ("pelvis", "Head", "foot_l", "hand_l")):
-        return {}
-    taken, out = set(), {}
-    parsed = [(n, *_side_and_word(n)) for n in names]
-
-    def depth(n):
-        d = 0
-        while parents.get(n) is not None:
-            n, d = parents[n], d + 1
-        return d
-
-    for pattern, joints in ((_SPINE, ("spine_01", "spine_02", "spine_03")), (_NECK, ("neck_01",))):
-        chain = sorted((n for n, side, w in parsed if side is None and pattern.match(w)), key=depth)
-        for n, joint in zip(chain, joints):
-            out[n] = joint
-            taken.add(joint)
-    for joint, words in _CENTRE:
-        for word in words:
-            hit = next((n for n, side, w in parsed if side is None and w == word and n not in out), None)
-            if hit is not None and joint not in taken:
-                out[hit] = joint
-                taken.add(joint)
-                break
-    for base, words in _SIDED:
-        for side in ("l", "r"):
-            joint = f"{base}_{side}"
-            for word in words:
-                hit = next((n for n, s, w in parsed if s == side and w == word and n not in out), None)
-                if hit is not None and joint not in taken:
-                    out[hit] = joint
-                    taken.add(joint)
-                    break
-    for n, side, word in parsed:
-        f = _finger_joint(word) if side is not None else None
-        if f is not None and f[1] <= 3 and n not in out:
-            joint = f"{f[0]}_0{f[1]}_{side}"
-            if joint not in taken:
-                out[n] = joint
-                taken.add(joint)
-    return {k: v for k, v in out.items() if k != v}
-
-
-def merge_unmapped(meshes, arm, name_map, joints):
-    """Each vertex group of a bone that maps to no standard joint adds its weights to its nearest
-    ancestor that does (a UE5 spine_04 into spine_03, Mixamo's HeadTop_End into Head), then goes."""
-    std = lambda n: name_map.get(n, n)
-    target = {}
-    for b in arm.data.bones:
-        if std(b.name) in joints:
-            continue
-        p = b.parent
-        while p is not None and std(p.name) not in joints:
-            p = p.parent
-        target[b.name] = p.name if p is not None else None
-    for o in meshes:
-        for name, into in target.items():
-            g = o.vertex_groups.get(name)
-            if g is None:
-                continue
-            if into is not None:
-                dst = o.vertex_groups.get(into) or o.vertex_groups.new(name=into)
-                for v in o.data.vertices:
-                    w = next((e.weight for e in v.groups if e.group == g.index), 0.0)
-                    if w > 0:
-                        have = next((e.weight for e in v.groups if e.group == dst.index), 0.0)
-                        dst.add([v.index], have + w, "REPLACE")
-            o.vertex_groups.remove(g)
-
-
-# A body's own bones that must not swing on a spring: twist and corrective helpers, IK targets,
-# the face's, and a weapon's or a prop's socket. They lend their weights to a joint (merge_unmapped).
-_HELD = {"twist", "corrective", "roll", "ik", "fk", "pole", "target", "ctrl", "mch", "eye", "eyes", "jaw",
-         "teeth", "tongue", "lid", "brow", "lip", "weapon", "slot", "socket", "attach", "prop", "grip"}
-
-
-def _words(name):
-    n = name.split("|")[-1].split(":")[-1]
-    n = re.sub(r"([a-z])([A-Z])", r"\1_\2", n)
-    return {w for w in re.split(r"[^a-z0-9]+", n.lower()) if w}
-
-
-def body_chains(meshes, arm, name_map, joints):
-    """A body's own bones the standard lacks that carry its skin and lead to no standard joint (a
-    robe's, a sash's, hair), as runs root to tip: [(chain name, [bones], parent bone)]. They stay on
-    the standard armature as spring chains instead of lending their weights to a joint. Ordered
-    parents first, so a run's parent is a joint or a bone of an earlier run."""
-    std = lambda n: name_map.get(n, n)
-    weighted = set()
-    for o in meshes:
-        names = {g.index: g.name for g in o.vertex_groups}
-        for v in o.data.vertices:
-            for e in v.groups:
-                if e.weight > 1e-3 and e.group in names:
-                    weighted.add(names[e.group])
-    bones = arm.data.bones
-    free = {b.name for b in bones
-            if std(b.name) not in joints and b.use_deform and not (_words(b.name) & _HELD)
-            and not any(std(c.name) in joints for c in b.children_recursive)}
-    starts = [b for b in bones if b.name in free and b.parent is not None
-              and (b.parent.name not in free or sum(c.name in free for c in b.parent.children) != 1)]
-    runs, kept, taken = [], set(), set()
-    depth = lambda b: len(b.parent_recursive)
-    for b in sorted(starts, key=depth):
-        run = [b]
-        while len(run) < 8:
-            kids = [c for c in run[-1].children if c.name in free]
-            if len(kids) != 1:
-                break
-            run.append(kids[0])
-        while run and run[-1].name not in weighted:
-            run.pop()  # an end bone that holds no skin is no link
-        parent = b.parent.name
-        if not run or not (std(parent) in joints or parent in kept):
-            continue
-        stem = re.sub(r"[^a-z0-9]+", "_", b.name.split("|")[-1].split(":")[-1].lower()).strip("_")
-        stem = re.sub(r"_?0*1$", "", stem) or "chain"
-        stem = (stem if stem[0].isalpha() else f"c_{stem}")[:21]
-        name, n = stem, 2
-        while name in taken:
-            name, n = f"{stem}_{n}", n + 1
-        taken.add(name)
-        kept.update(x.name for x in run)
-        runs.append((name, [x.name for x in run], std(parent) if std(parent) in joints else parent))
-    return runs
-
-
-# Limb bones posed onto the standard rest directions before a body is baked (MPFB stands in an
-# A-pose; library bodies are close to the standard T-pose but not exactly on it). Parents first.
-ALIGN = []
-for _side in ("l", "r"):
-    ALIGN += [f"clavicle_{_side}", f"upperarm_{_side}", f"lowerarm_{_side}", f"hand_{_side}",
-              f"thigh_{_side}", f"calf_{_side}", f"foot_{_side}"]
-    for _finger in ("thumb", "index", "middle", "ring", "pinky"):
-        ALIGN += [f"{_finger}_01_{_side}", f"{_finger}_02_{_side}", f"{_finger}_03_{_side}"]
 
 # A bone points at this child joint: hands at the middle finger, the spine up the chain.
 _POINTS_AT = ("middle_01", "spine_01", "neck_01", "Head", "calf", "foot", "ball", "lowerarm", "hand")
@@ -269,11 +70,6 @@ def clip_rate(doc):
         rate = round((a["count"] - 1) / a["max"][0])
         votes[rate] = votes.get(rate, 0) + 1
     return max(votes, key=votes.get) if votes else None
-
-
-def standard_joints(standard_glb):
-    """The standard skeleton's joints, read from the standard armature's own file."""
-    return skin_joints(gltf_json(standard_glb))
 
 
 def local_rest(doc):
@@ -369,26 +165,6 @@ def remove_objects(objects):
             bpy.data.batch_remove([data])
 
 
-def local_frames(arm):
-    """Each bone's rest rotation relative to its parent bone, in Blender's armature space."""
-    out = {}
-    for b in arm.data.bones:
-        m = b.matrix_local.to_3x3().normalized()
-        if b.parent is not None:
-            m = b.parent.matrix_local.to_3x3().normalized().inverted() @ m
-        out[b.name] = m.to_quaternion()
-    return out
-
-
-def frame_deviation(arm, reference):
-    """Largest difference (degrees) between arm's bone frames and reference (local_frames of the
-    standard), over the reference's bones; None when arm misses one."""
-    mine = local_frames(arm)
-    if any(n not in mine for n in reference):
-        return None
-    return max((math.degrees(mine[n].rotation_difference(q).angle) for n, q in reference.items()), default=0.0)
-
-
 def baked_mesh(obj, keep=lambda m: False):
     """Applies obj's modifiers (except those keep() names) into its mesh without operators, so it
     works in the live session from any context. Vertex groups survive; shape keys are baked."""
@@ -437,122 +213,6 @@ def _child_joint(bones, name, has):
             if k.startswith(want):
                 return k
     return kids[0] if kids else None
-
-
-def align_pose(body_arm, std_world, std_bones, std_name):
-    """Poses the body's own rig so each limb points the way the standard rest pose points it."""
-    mw3 = body_arm.matrix_world.to_3x3()
-    to_arm = mw3.inverted()
-    by_std = {std_name(pb.name): pb.name for pb in body_arm.pose.bones}
-    for name in ALIGN:
-        if name not in by_std or name not in std_bones:
-            continue
-        target = _child_joint(std_bones, name, lambda k: k in by_std)
-        if target is None:
-            continue
-        bpy.context.view_layer.update()
-        pb = body_arm.pose.bones[by_std[name]]
-        pc = body_arm.pose.bones[by_std[target]]
-        cur = pc.head - pb.head
-        want = to_arm @ (std_world[target] - std_world[name])
-        if cur.length < 1e-6 or want.length < 1e-6:
-            continue
-        q = cur.normalized().rotation_difference(want.normalized())
-        pb.matrix = Matrix.Translation(pb.head) @ q.to_matrix().to_4x4() @ Matrix.Translation(-pb.head) @ pb.matrix
-    bpy.context.view_layer.update()
-
-
-def conform(std_arm, body_arm, body_meshes, name_map, chains=()):
-    """Fits std_arm (the standard armature, freshly imported) to a body, keeping every bone's
-    orientation and roll, so clips made for it play on the body, and skins the body to it. body_arm is removed afterwards.
-
-    1. Pose the body's rig onto the standard rest directions and bake that pose into the meshes.
-    2. Move each standard joint onto the body's joint; joints the body lacks (leaf bones) keep
-       their offset from the parent, scaled by the height ratio.
-    3. Skin the meshes to the standard armature by name (the body's weights, renamed by the map).
-    chains (body_chains) are the body's own bones that stay: added under their joint where the
-    posed body has them, keeping their weights.
-    Returns the height ratio (body / standard) and the leg-length ratio, which scales the pelvis
-    translation of the clips."""
-    std_name = lambda n: name_map.get(n, n)
-    std_world = {b.name: std_arm.matrix_world @ b.head_local for b in std_arm.data.bones}
-    std_bones = {b.name: b for b in std_arm.data.bones}
-    if body_arm is not None:
-        align_pose(body_arm, std_world, std_bones, std_name)
-        mw = body_arm.matrix_world
-        joints = {std_name(pb.name): mw @ pb.head for pb in body_arm.pose.bones}
-        kept = {b: (mw @ body_arm.pose.bones[b].head, mw @ body_arm.pose.bones[b].tail) for _, bones, _ in chains for b in bones}
-        for o in body_meshes:
-            baked_mesh(o, keep=lambda m: m.type != "ARMATURE")
-            if o.parent is not None and o.parent_type == "BONE":
-                # A part on a bone the standard lacks (KayKit's handslot) rides its nearest joint.
-                b = body_arm.data.bones.get(o.parent_bone)
-                while b is not None and std_name(b.name) not in std_bones:
-                    b = b.parent
-                bone = b.name if b is not None else o.parent_bone
-                to_world(o)
-                for vg in list(o.vertex_groups):
-                    o.vertex_groups.remove(vg)
-                o.vertex_groups.new(name=std_name(bone)).add(list(range(len(o.data.vertices))), 1.0, "REPLACE")
-            else:
-                to_world(o)
-    else:
-        joints, kept = {}, {}
-    missing = [n for n in ("Head", "foot_l", "pelvis") if n not in joints]
-    if missing:
-        raise ValueError(f"the body's rig has no {', '.join(missing)} joint: it is not a humanoid on a known name map")
-    ratio = (joints["Head"].z - joints["foot_l"].z) / (std_world["Head"].z - std_world["foot_l"].z)
-    # The clips' hips travel by the legs under them: on legs short for the body (a chibi's), hips
-    # moved by the body's height bob further than the legs reach and the feet leave the ground.
-    travel = ratio
-    if "thigh_l" in joints and "thigh_l" in std_world:
-        travel = (joints["thigh_l"].z - joints["foot_l"].z) / (std_world["thigh_l"].z - std_world["foot_l"].z)
-
-    inv = std_arm.matrix_world.inverted()
-    with edit_bones(std_arm) as eb:
-        old = {b.name: (b.head.copy(), b.tail.copy(), b.roll) for b in eb}
-        for b in eb:
-            b.use_connect = False
-        heads = {}
-
-        def place(b):
-            h0 = old[b.name][0]
-            if b.name in joints:
-                heads[b.name] = inv @ joints[b.name]
-            elif b.parent is not None:
-                heads[b.name] = heads[b.parent.name] + (h0 - old[b.parent.name][0]) * ratio
-            else:
-                heads[b.name] = h0 * ratio
-            for c in b.children:
-                place(c)
-
-        for b in eb:
-            if b.parent is None:
-                place(b)
-        for b in eb:
-            h0, t0, r0 = old[b.name]
-            b.head = heads[b.name]
-            b.tail = heads[b.name] + (t0 - h0) * ratio
-            b.roll = r0
-        for _, bones, parent in chains:
-            prev = eb[parent]
-            for i, name in enumerate(bones):
-                b = eb.new(name)
-                b.head, b.tail = inv @ kept[name][0], inv @ kept[name][1]
-                b.roll = 0.0
-                b.parent = prev
-                b.use_connect = False
-                b.use_deform = True
-                prev = b
-
-    for o in body_meshes:
-        for vg in o.vertex_groups:
-            if vg.name in name_map:
-                vg.name = name_map[vg.name]
-        bind(o, std_arm)
-    if body_arm is not None:
-        remove_objects([body_arm])
-    return ratio, travel
 
 
 def bind(obj, arm):

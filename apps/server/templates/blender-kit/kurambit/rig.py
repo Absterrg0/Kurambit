@@ -275,7 +275,7 @@ def _build_fitted(T, heads, s, name, collection, limbs, turns):
     return F, world
 
 
-def _bake_template(T, F, world, clips, track, action_for):
+def _bake_template(T, F, world, clips, track, action_for, renamed):
     """Each fitted bone copies its template bone's rotation (world for `world`, rest-relative for the
     rest), the tracking bone and root its world location, with the template scaled so its tracking
     bone stands as high as the fitted one; each clip is baked into its own action."""
@@ -288,8 +288,8 @@ def _bake_template(T, F, world, clips, track, action_for):
     bpy.context.view_layer.update()
     for pb in F.pose.bones:
         c = pb.constraints.new("COPY_ROTATION")
-        c.target, c.subtarget = T, pb.name
-        c.target_space = c.owner_space = "WORLD" if pb.name in world else "LOCAL"
+        c.target, c.subtarget = T, renamed.get(pb.name, pb.name)
+        c.target_space = c.owner_space = "WORLD" if renamed.get(pb.name, pb.name) in world else "LOCAL"
         if pb.name in (track, "root"):
             c = pb.constraints.new("COPY_LOCATION")
             c.target, c.subtarget = T, pb.name
@@ -349,6 +349,11 @@ def _template(model, rigid, template, hints, wanted, name, pack, collection, not
         ref = []
         limbs = {c[2][0] for c in chains.values() if c[0] in ("leg", "arm", "wing", "fin")}
         F, world = _build_fitted(T, heads, s, name, collection, limbs, turns)
+        # The human template is the standard skeleton but for its head's name: renamed, every tool
+        # that reads the standard joints (animate, the clip measures, sheet poses) reads this rig.
+        renamed = {"Head": "head"} if template == "human" else {}
+        for new_name, old_name in renamed.items():
+            F.data.bones[old_name].name = new_name
         # Leaves orient their parent and the root carries the body: neither takes weight.
         deform = {b.name for b in F.data.bones if b.name != "root" and b.children}
         deform |= {b.name for b in F.data.bones if b.parent is not None and b.parent.name == "root"}
@@ -356,6 +361,11 @@ def _template(model, rigid, template, hints, wanted, name, pack, collection, not
         for b in F.data.bones:
             b.use_deform = b.name in deform
         for o, bone in rigid.items():
+            if bone is not None and bone not in F.data.bones:
+                asked = bone
+                bone = {v: k for k, v in renamed.items()}.get(asked) or rigfit.HUMAN_ALIASES.get(asked) if template == "human" else None
+                if bone is None or bone not in F.data.bones:
+                    raise Refused("invalid-input", f"{o.name} rides {asked}, which the {template} template has no bone called; its bones: {', '.join(sorted(deform))}")
             _one_bone(o, F, bone or _nearest(F, _centre(o), sorted(deform)))
         picked = _template_clips(man, template, wanted)
         acts = []
@@ -365,12 +375,13 @@ def _template(model, rigid, template, hints, wanted, name, pack, collection, not
             bpy.data.batch_remove(objs)
             acts.append((clip, got[0]))
             bpy.data.batch_remove(got[1:])
-        made = _bake_template(T, F, world, acts, rigchains.TEMPLATES[template]["track"], lambda c: _action(F, c))
+        made = _bake_template(T, F, world, acts, rigchains.TEMPLATES[template]["track"], lambda c: _action(F, c), renamed)
         bpy.data.batch_remove([a for _, a in acts])
     finally:
         bpy.data.batch_remove([T] + list(ref))
+    back = {v: k for k, v in renamed.items()}
     legs = [c[2][-1] for c in chains.values() if c[0] == "leg"]
-    table = {n: c[2] for n, c in chains.items()}
+    table = {n: [back.get(b, b) for b in c[2]] for n, c in chains.items()}
     return F, made, how, legs, table, {n: c[0] for n, c in chains.items()}
 
 

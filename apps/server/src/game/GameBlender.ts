@@ -56,7 +56,6 @@ import {
   LIBRARY_RIG_JOINTS,
   MESH2MOTION_PACK,
   STANDARD_ARMATURE,
-  STANDARD_CLIPS,
   STANDARD_RIG,
 } from "./assetLibraryCatalog.ts";
 import {
@@ -313,18 +312,6 @@ const GAME_PX: Readonly<Record<GameStyleView, number>> = {
   isometric: 64,
 };
 const isReason = Schema.is(GameOperationError.fields.reason);
-/** What kurambit.character prints: one JSON result line. */
-const CharacterMade = Schema.Struct({
-  armature: Schema.String,
-  meshes: Schema.Array(Schema.String),
-  clips: Schema.Array(Schema.String),
-  chains: Schema.Record(Schema.String, Schema.Array(Schema.String)),
-  restDeviation: Schema.Number,
-  height: Schema.Number,
-  /** Each joint's world position and axis, and how the rig stands at rest. */
-  joints: Schema.String,
-  notes: Schema.Array(Schema.String),
-});
 /** What kurambit.review prints: one JSON result line. */
 const ReviewRender = Schema.Struct({
   image: Schema.String,
@@ -335,8 +322,7 @@ const ReviewRender = Schema.Struct({
   /** Measured from the pictures: thin parts at game distance, and the reference's overlap. */
   facts: Schema.optionalKey(Schema.Array(Schema.String)),
 });
-const decodeCharacterMade = Schema.decodeUnknownEffect(CharacterMade);
-/** What kurambit.rig prints: one JSON result line. */
+/** What kurambit.rig and kurambit.character print: one JSON result line. */
 const decodeRigged = Schema.decodeUnknownEffect(
   Schema.Struct({
     armature: Schema.String,
@@ -386,9 +372,6 @@ const clipWords = (name: string) =>
 const decodeReviewRender = Schema.decodeUnknownEffect(ReviewRender);
 const decodeDigest = Schema.decodeUnknownEffect(KitDigest);
 const decodePass = Schema.decodeUnknownEffect(PassResult);
-const STANDARD_BODY_PACKS = LIBRARY_CATALOG.filter(
-  (pack) => pack.rig === STANDARD_RIG && pack.kinds.includes("character"),
-).map((pack) => pack.id);
 /** A human body's library stand-in, while MPFB2 is not installed. */
 const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", file: "Base Characters/Godot - UE/Superhero_Female_FullBody.gltf"}} (or Superhero_Male_FullBody.gltf), or the Universal Animation Library's mannequin`;
 /**
@@ -627,7 +610,7 @@ export class GameBlender extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderLookInput,
     ) => Effect.Effect<GameBlenderLookResult, GameOperationError>;
-    /** Live Blender scene: a rigged, animated character conformed to the standard skeleton. */
+    /** Live Blender scene: a model (or a human body it builds) rigged on a Mesh2Motion template or on chains, with its clips. */
     readonly character: (
       threadId: ThreadId,
       input: GameBlenderCharacterInput,
@@ -2243,169 +2226,137 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const fail = (reason: GameOperationError["reason"], detail: string) =>
               Effect.fail(opError("blender-character", root, reason, detail));
-            if (input.rig !== undefined) {
-              if (input.body !== undefined)
-                return yield* fail(
-                  "invalid-input",
-                  "rig rigs a model already in the scene; body builds one on the standard skeleton. Pass one of them.",
-                );
-              const chains = input.chains?.filter((chain) => "kind" in chain);
-              if (input.chains !== undefined && chains?.length !== input.chains.length)
-                return yield* fail(
-                  "invalid-input",
-                  "With rig, chains are the model's chains ({name, kind, parent, part, points}); spring chains on the standard skeleton go with body.",
-                );
-              if (chains !== undefined && input.rig !== "chains")
-                return yield* fail(
-                  "invalid-input",
-                  `chains describe a model no template fits: pass rig "chains" with them, or rig "${input.rig}" with joints.`,
-                );
-              const manifest = yield* library.packFile(MESH2MOTION_PACK, "manifest.json");
-              const made = yield* kitCall(
-                root,
-                "blender-character",
-                decodeRigged,
-                `kurambit.rig(${pyJson({
-                  name: input.name,
-                  objects: input.objects ?? [input.name],
-                  template: input.rig,
-                  chains: chains ?? null,
-                  joints: input.joints ?? null,
-                  rigid: input.rigid ?? {},
-                  clips: input.clips ?? [],
-                  pack: NodePath.dirname(manifest),
-                })})`,
-              );
-              const blend = yield* saveBlend(root);
-              const rigid = Object.entries(made.rigid);
-              return {
-                text: [
-                  `${made.armature}: ${made.meshes.join(", ")} on ${made.template === "chains" ? "chains" : `the ${made.template} template`}, ${made.bones} bones, weighted by ${made.weights}.`,
-                  ...(rigid.length === 0
-                    ? []
-                    : [`Rigid: ${rigid.map(([part, bone]) => `${part} on ${bone}`).join(", ")}.`]),
-                  `Bones by chain: ${Object.entries(made.chains)
-                    .map(([name, bones]) => `${name} ${bones.join(" ")}`)
-                    .join("; ")}.`,
-                  `Clips: ${made.clips.join(", ") || "none"}. How each moves the model:`,
-                  ...made.notes,
-                  `Saved .blend source: ${blend}. Look at the clips with game_blender op look, then game_blender op export.`,
-                ].join("\n"),
-                armature: made.armature,
-                meshes: made.meshes,
-                clips: made.clips,
-                chains: made.chains,
-                facts: made.facts,
-              };
-            }
-            if (input.body === undefined)
+            if (input.body === "none")
               return yield* fail(
                 "invalid-input",
-                'Pass rig (a template such as "human", or "chains") to rig a model in the scene, or body to build one.',
+                'body "none" is retired: model the body static (or start from body mpfb, studio or library), then rig it with rig "human".',
               );
-            const realRoot = yield* realRootOf(root);
-            const lock = yield* readGameStyle(realRoot);
-            const standardPacks = standardClipPacks(lock);
-            let body: Record<string, unknown> | "none";
-            const inputBody = input.body;
-            if (inputBody === "none") body = "none";
-            else if ("library" in inputBody) {
-              const { pack: id, file } = inputBody.library;
-              const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
-              if (pack?.rig !== STANDARD_RIG)
-                return yield* fail(
-                  "invalid-input",
-                  `${id} is not on ${STANDARD_RIG}; library bodies come from ${STANDARD_BODY_PACKS.join(" or ")}.`,
-                );
-              body = {
-                library: yield* library.packFile(id, file),
-                pack: id,
-                licence: pack.licence,
-              };
-            } else if ("studio" in inputBody) {
-              body = { studio: inputBody.studio };
-            } else if ("mpfb" in inputBody) {
-              const mpfb = (yield* tools.addon("mpfb"))!;
-              if (mpfb.zip === null) {
-                // A small official add-on a route needs installs on first need; the rest ask
-                // first, as does one the person removed.
-                if (GameToolchain.addonAsksFirst(mpfb.entry) || mpfb.removed)
-                  return yield* fail(
-                    "tool-missing",
-                    addonAsk(
-                      "An mpfb body",
-                      mpfb.entry,
-                      `Meanwhile use {studio: {gender}} or a library body: ${LIBRARY_BODY}.`,
-                    ),
-                  );
-                yield* tools.install(mpfb.entry.id);
-              }
-              // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
-              if (!(yield* ensure(root)).addons.has("mpfb")) {
-                yield* drop(root);
-                if (!(yield* ensure(root)).addons.has("mpfb"))
-                  return yield* fail(
-                    "tool-failed",
-                    "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
-                  );
-              }
-              body = { mpfb: inputBody.mpfb };
-            } else {
-              const relative = inputBody.game;
-              const absolute = NodePath.resolve(realRoot, relative);
-              const real = yield* Effect.promise(() =>
-                NodeFSP.realpath(absolute).catch(() => null),
+            if (input.body === undefined && input.rig === undefined)
+              return yield* fail(
+                "invalid-input",
+                'Pass rig (a template such as "human", or "chains") to rig a model in the scene, or body to build a human and rig it.',
               );
-              if (
-                real === null ||
-                !staysInsideGame(realRoot, relative) ||
-                !/\.(glb|gltf)$/i.test(real)
-              )
-                return yield* fail(
-                  "invalid-input",
-                  `${relative} is not a .glb or .gltf file in this game; a game body is a game-relative path to an earlier export.`,
+            if (input.body !== undefined && input.rig !== undefined && input.rig !== "human")
+              return yield* fail(
+                "invalid-input",
+                `A body is a human, rigged on the human template; rig "${input.rig}" rigs a model already in the scene.`,
+              );
+            const chains = input.chains?.filter((chain) => "kind" in chain);
+            if (input.chains !== undefined && chains?.length !== input.chains.length)
+              return yield* fail(
+                "invalid-input",
+                'Spring chains on the standard skeleton are retired: model hair and cloth with the body (they are weighted with it), or describe a model\'s own chains ({name, kind, parent, part, points}) with rig "chains".',
+              );
+            if (chains !== undefined && input.rig !== "chains")
+              return yield* fail(
+                "invalid-input",
+                `chains describe a model no template fits: pass rig "chains" with them, or a template with joints.`,
+              );
+            let body: Record<string, unknown> | null = null;
+            if (input.body !== undefined) {
+              const realRoot = yield* realRootOf(root);
+              const inputBody = input.body;
+              if ("library" in inputBody) {
+                const { pack: id, file } = inputBody.library;
+                const pack = LIBRARY_CATALOG.find((candidate) => candidate.id === id);
+                if (pack === undefined)
+                  return yield* fail("invalid-input", `${id} is not a library pack.`);
+                body = {
+                  library: yield* library.packFile(id, file),
+                  pack: id,
+                  licence: pack.licence,
+                };
+              } else if ("studio" in inputBody) {
+                body = { studio: inputBody.studio };
+              } else if ("mpfb" in inputBody) {
+                const mpfb = (yield* tools.addon("mpfb"))!;
+                if (mpfb.zip === null) {
+                  // A small official add-on a route needs installs on first need; the rest ask
+                  // first, as does one the person removed.
+                  if (GameToolchain.addonAsksFirst(mpfb.entry) || mpfb.removed)
+                    return yield* fail(
+                      "tool-missing",
+                      addonAsk(
+                        "An mpfb body",
+                        mpfb.entry,
+                        `Meanwhile use a library body: ${LIBRARY_BODY}, or body studio.`,
+                      ),
+                    );
+                  yield* tools.install(mpfb.entry.id);
+                }
+                // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
+                if (!(yield* ensure(root)).addons.has("mpfb")) {
+                  yield* drop(root);
+                  if (!(yield* ensure(root)).addons.has("mpfb"))
+                    return yield* fail(
+                      "tool-failed",
+                      "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library and studio bodies work meanwhile.",
+                    );
+                }
+                body = { mpfb: inputBody.mpfb };
+              } else {
+                const relative = inputBody.game;
+                const real = yield* Effect.promise(() =>
+                  NodeFSP.realpath(NodePath.resolve(realRoot, relative)).catch(() => null),
                 );
-              body = { game: real };
+                if (
+                  real === null ||
+                  !staysInsideGame(realRoot, relative) ||
+                  !/\.(glb|gltf)$/i.test(real)
+                )
+                  return yield* fail(
+                    "invalid-input",
+                    `${relative} is not a .glb or .gltf file in this game; a game body is a game-relative path to an earlier export.`,
+                  );
+                body = { game: real };
+              }
             }
-            const clips = yield* resolveClips(root, input.clips ?? STANDARD_CLIPS, standardPacks);
+            const manifest = yield* library.packFile(MESH2MOTION_PACK, "manifest.json");
+            const params = {
+              name: input.name,
+              joints: input.joints ?? null,
+              rigid: input.rigid ?? {},
+              clips: input.clips ?? [],
+              pack: NodePath.dirname(manifest),
+            };
             const made = yield* kitCall(
               root,
               "blender-character",
-              decodeCharacterMade,
-              `kurambit.character(${pyJson({
-                name: input.name,
-                body,
-                standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
-                clips,
-                chains: input.chains?.filter((chain) => !("kind" in chain)) ?? [],
-                replace: input.replace ?? false,
-                fit: input.fit ?? null,
-                style: input.style ?? null,
-                height: input.height ?? null,
-                heightRange: input.heightRange ?? null,
-              })})`,
+              decodeRigged,
+              body === null
+                ? `kurambit.rig(${pyJson({
+                    ...params,
+                    objects: input.objects ?? [input.name],
+                    template: input.rig,
+                    chains: chains ?? null,
+                  })})`
+                : `kurambit.character(${pyJson({
+                    ...params,
+                    body,
+                    objects: input.objects ?? [],
+                    height: input.height ?? null,
+                  })})`,
             );
             const blend = yield* saveBlend(root);
-            const chains = Object.entries(made.chains);
+            const rigid = Object.entries(made.rigid);
             return {
               text: [
-                `${made.armature}: ${made.meshes.length === 0 ? "no mesh" : made.meshes.join(", ")} on ${STANDARD_RIG}, ${made.height.toFixed(2)} m tall, rest frames ${made.restDeviation.toFixed(1)}° off the standard skeleton at most.`,
-                `Clips: ${made.clips.join(", ") || "none"}.`,
-                ...(chains.length === 0
+                `${made.armature}: ${made.meshes.join(", ")} on ${made.template === "chains" ? "chains" : `the ${made.template} template`}, ${made.bones} bones, weighted by ${made.weights}.`,
+                ...(rigid.length === 0
                   ? []
-                  : [
-                      `Chains (no clip keys them; the game springs them): ${chains.map(([name, bones]) => `${name} ${bones.join(", ")}`).join("; ")}.`,
-                    ]),
+                  : [`Rigid: ${rigid.map(([part, bone]) => `${part} on ${bone}`).join(", ")}.`]),
+                `Bones by chain: ${Object.entries(made.chains)
+                  .map(([name, bones]) => `${name} ${bones.join(" ")}`)
+                  .join("; ")}.`,
+                `Clips: ${made.clips.join(", ") || "none"}. How each moves the model:`,
                 ...made.notes,
-                `Joints (metres, the axis each bone points along), ${made.joints}`,
-                `Saved .blend source: ${blend}. Model the rest with game_blender op code (import kurambit for the helpers), parented to its bones; then game_blender op look with mode review, then game_blender op export.`,
+                `Saved .blend source: ${blend}. Look at the clips with game_blender op look, then game_blender op export.`,
               ].join("\n"),
               armature: made.armature,
               meshes: made.meshes,
               clips: made.clips,
               chains: made.chains,
-              restDeviation: made.restDeviation,
-              height: made.height,
+              facts: made.facts,
             };
           }),
         ),

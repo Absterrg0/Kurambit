@@ -1,38 +1,28 @@
-"""character(): a body conformed to the standard skeleton, skinned, with its clips and chains.
+"""character(): a human body made or imported as a static mesh, then rigged on the human template
+with its clips (rig.py), the agent's own parts rigged with it.
 
 params (the server resolves every path):
-    name      the collection, the armature's name and the export's default stem
+    name      the armature's name and the export's default stem
     body      {"library": abs, "pack"?: id, "licence"?: str} | {"mpfb": {age, gender, weight, ...}}
-              | {"studio": {gender}}: Blender Studio's drawn stylised body (studio.py)
-              | {"game": abs} | "none": the skeleton, its proportions and clips with no body (the
-              studio body sets the joints, then goes), for parts modelled on the joints. A game body's
-              ledger is the sidecar beside its file.
-              A game body keeps its own clips, and every body its own skinned bone chains (cloth,
-              hair) as spring chains.
-    standard  abs path of the standard armature's GLB (STANDARD_ARMATURE)
-    clips     [{pack, name, path, licence?}]
-    chains    [{name, parent, bones, direction, length, mirror?}]
-    replace   rebuild the body and armature of an existing <name>, re-binding its other objects
-    fit       {arms?, calm?, walk?} | None: fit.fit() on every library clip, after the conform (its
-              gaits are strode out on short legs with or without it)
-    style     {head?, legs?, arms?, hands?, feet?, girth?, limbs?}: factors (1 keeps it) the body and
-              its rig are restyled by before the conform (proportions.py)
-    height    metres: the body and its rig scaled to it before the conform
-    heightRange [lo, hi]: the height gate's range (default: height ±10%, or a human's 1.5-2.0 m)
+              | {"studio": {gender}}: Blender Studio's drawn stylised body (studio.py) | {"game": abs}:
+              an earlier export, its ledger the sidecar beside it
+    height    metres: the body scaled to it, standing on the floor
+    objects   more of the scene's meshes rigged with the body (clothes, hair)
+    rigid     {object: bone}: parts that ride one bone (a sword in hand_r)
+    joints, clips, pack: as rig() takes them
 
-A made body (mpfb or studio) comes with no material of its own: it gets one, "<name> skin",
-in SKIN, so it never ships the export's default white. Recolour that material; a replace keeps it.
+A body's own skeleton and clips are dropped: it is rigged as any static model is. A made body (mpfb or
+studio) comes with no material of its own: it gets one, "<name> skin", in SKIN, so it never ships the
+export's default white.
 """
 import importlib
 import json
-import math
 import os
-import re
 
 import bpy
-from mathutils import Vector
 
-from . import fit, helpers, proportions, skeleton, studio
+from . import helpers, skeleton, studio
+from .rig import rig as rig_model
 from .protocol import Refused, entry
 
 SKIN = "#e0a882"
@@ -40,13 +30,11 @@ SKIN = "#e0a882"
 MPFB_LICENCE = "CC0 1.0 (bodies made by MPFB2; its GPL-3.0 code is not in the game)"
 LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_assets op search lists them) need no install."
 
-
 MADE_BODY = {"what": "body", "from": "made", "licence": "made in this game", "ai": False, "credits": None}
 
-# Where a body's face is (its eye helpers and lips), kept on the armature.
+# Where a drawn body's eyes and lips are (studio.py marks them).
 EYES = {"l": "face_eye_l", "r": "face_eye_r"}
 LIPS = "face_lips"
-LANDMARKS = "kurambit_face"
 
 WHATS = {"body", "clips", "mesh", "parts", "texture"}
 
@@ -76,6 +64,8 @@ def _bake_shape_keys(obj):
 
 
 def _mpfb_body(spec):
+    """An MPFB2 human as one static mesh: its macro targets baked, its helper geometry gone but the
+    eyeballs."""
     mod = _mpfb_module()
     human = importlib.import_module(mod + ".services.humanservice").HumanService
     targets = importlib.import_module(mod + ".services.targetservice").TargetService
@@ -85,98 +75,34 @@ def _mpfb_body(spec):
             macro[k] = float(spec[k])
     body = human.create_human(mask_helpers=True, detailed_helpers=True, extra_vertex_groups=True,
                               feet_on_ground=True, scale=0.1, macro_detail_dict=macro)
-    # The base mesh carries where its face is: an eyeball in each socket (helper geometry its mask
-    # hides) and its lips' vertices. Both stay through the restyle and the conform, weighted to the
-    # head, so take_landmarks finds them on the finished body.
     shown = body.vertex_groups.new(name="kurambit_shown")
-    marked = {g.index: EYES[g.name[7]] for g in body.vertex_groups if g.name in ("helper-l-eye", "helper-r-eye")}
-    skin = body.vertex_groups.get("body")
-    eye_verts = {}
-    for v in body.data.vertices:
-        groups = {e.group for e in v.groups}
-        if skin is not None and skin.index in groups:
-            shown.add([v.index], 1.0, "REPLACE")
-        for gi, name in marked.items():
-            if gi in groups:
-                shown.add([v.index], 1.0, "REPLACE")
-                eye_verts.setdefault(name, []).append(v.index)
+    keep = {g.index for g in body.vertex_groups if g.name in ("body", "helper-l-eye", "helper-r-eye")}
+    shown.add([v.index for v in body.data.vertices if any(e.group in keep for e in v.groups)], 1.0, "REPLACE")
     for m in body.modifiers:
         if m.type == "MASK":
             m.vertex_group = shown.name
-    for name, idx in eye_verts.items():
-        body.vertex_groups.new(name=name).add(idx, 1.0, "REPLACE")
-    lips = body.vertex_groups.get("lips")
-    if lips is not None:
-        lips.name = LIPS
-    # MPFB fits its rig to the vertex coordinates: bake the targets first, or an adult skeleton
-    # ends up inside a child's mesh.
     _bake_shape_keys(body)
-    rig = human.add_builtin_rig(body, "game_engine", import_weights=True)
-    skeleton.baked_mesh(body, keep=lambda m: m.type == "ARMATURE")
-    bones = {b.name for b in rig.data.bones}
-    for vg in list(body.vertex_groups):
-        if vg.name not in bones and vg.name not in (LIPS, *EYES.values()):
-            body.vertex_groups.remove(vg)
-    head = body.vertex_groups.get("head")
-    for name in EYES.values():
-        g = body.vertex_groups.get(name)
-        if g is not None and head is not None:
-            head.add([v.index for v in body.data.vertices if any(e.group == g.index for e in v.groups)], 1.0, "REPLACE")
-    return rig, [body], skeleton.NAME_MAPS["mpfb_game_engine"]
+    skeleton.baked_mesh(body)
+    body.vertex_groups.clear()
+    return [body]
 
 
-def _file_body(path, keep_clips=False):
-    """(armature, meshes, name map, the body's own clips when keep_clips, else none)."""
+def _file_body(path):
+    """The meshes of a rigged or static model file, at rest, with its skeleton and clips gone."""
     if not os.path.isfile(path):
         raise Refused("invalid-input", f"no body file at {path}")
     new, actions = skeleton.import_model(path)
-    if not keep_clips:
-        bpy.data.batch_remove(set(actions))
-        actions = []
-    rigs = [o for o in new if o.type == "ARMATURE"]
-    if len(rigs) != 1:
-        bpy.data.batch_remove(set(actions))
+    bpy.data.batch_remove(set(actions))
+    meshes = [o for o in new if o.type == "MESH"]
+    if not meshes:
         skeleton.remove_objects(new)
-        raise Refused("invalid-input", f"{os.path.basename(path)} holds {len(rigs)} armatures: a body is one rigged humanoid on the standard skeleton")
-    rig = rigs[0]
-    meshes = [o for o in new if o.type == "MESH" and (o.parent == rig or rig in helpers._deforming(o))]
-    for o in [rig] + meshes:
-        if o.parent is not None and o.parent not in (rig,):
-            mw = o.matrix_world.copy()
-            o.parent = None
-            o.matrix_world = mw
-    skeleton.remove_objects([o for o in new if o is not rig and o not in meshes])
-    return rig, meshes, skeleton.humanoid_map({b.name: b.parent.name if b.parent else None for b in rig.data.bones}), actions
-
-
-def _body_clips(actions, rig, name_map, reference, bones, notes):
-    """The clips a body came with (a hand-keyed cut, a dodge), on the standard names: [(action,
-    label)]. glTF keys absolute joint rotations, so they play as made only when the body's rest
-    frames are the standard's; off them they are dropped with a note. Keys on bones that do not
-    stay (merged into a joint) go."""
-    if not actions:
-        return []
-    frames = {name_map.get(n, n): q for n, q in skeleton.local_frames(rig).items()}
-    worst = max(((math.degrees(frames[n].rotation_difference(q).angle), n) for n, q in reference.items() if n in frames), default=(0.0, None))
-    if worst[0] > MAX_REST_DEVIATION:
-        notes.append(f"the body's own clips ({', '.join(sorted(a.name for a in actions))[:200]}) were left out: its {worst[1]} rest frame is {worst[0]:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°), so they would play twisted on it")
-        bpy.data.batch_remove(set(actions))
-        return []
-    out = []
-    for act in actions:
-        fcs = skeleton.action_fcurves(act)
-        for fc in list(fcs):
-            m = re.match(r'^pose\.bones\["(.+?)"\](.*)$', fc.data_path)
-            joint = name_map.get(m.group(1), m.group(1)) if m else None
-            if joint not in bones:
-                fcs.remove(fc)
-            elif joint != m.group(1):
-                fc.data_path = f'pose.bones["{joint}"]{m.group(2)}'
-        if len(fcs) == 0:
-            bpy.data.actions.remove(act)
-            continue
-        out.append((act, re.sub(r"\.\d{3}$", "", act.name)))
-    return out
+        raise Refused("invalid-input", f"{os.path.basename(path)} holds no mesh")
+    for o in meshes:
+        mw = o.matrix_world.copy()
+        o.parent = None
+        o.matrix_world = mw
+    skeleton.remove_objects([o for o in new if o not in meshes])
+    return meshes
 
 
 def _part(p):
@@ -217,417 +143,55 @@ def _game_source(path):
     return (body if body is not None else dict(MADE_BODY)), rest
 
 
-# The most a clip's skeleton may differ from the standard's rest frames, as the export allows.
-MAX_REST_DEVIATION = 2.0
-# The most spring chains a model's sidecar holds (GameModelSpring).
-MAX_SPRINGS = 32
+def _to_height(meshes, height):
+    """Scales the meshes about the middle of their floor so they stand height metres tall."""
+    co = [o.matrix_world @ v.co for o in meshes for v in o.data.vertices]
+    lo, hi = min(c.z for c in co), max(c.z for c in co)
+    if hi - lo < 1e-6:
+        return
+    k = height / (hi - lo)
+    cx, cy = (min(c.x for c in co) + max(c.x for c in co)) / 2, (min(c.y for c in co) + max(c.y for c in co)) / 2
+    from mathutils import Matrix, Vector
 
-
-def _take_clips(clips, standard, standard_actions):
-    """The requested library clips as actions owned by name; every other imported action goes."""
-    by_path, taken = {}, []
-    for c in clips:
-        by_path.setdefault(c["path"], []).append(c)
-    counts = {}
-    for c in clips:
-        counts[c["name"]] = counts.get(c["name"], 0) + 1
-    for path, wanted in by_path.items():
-        if path == standard:
-            actions = standard_actions
-        else:
-            if not os.path.isfile(path):
-                raise Refused("invalid-input", f"no clip file at {path}")
-            new, actions = skeleton.import_gltf(path)
-            skeleton.remove_objects(new)
-        base = {re.sub(r"\.\d{3}$", "", a.name): a for a in actions}
-        for c in wanted:
-            act = base.pop(c["name"], None)
-            if act is None:
-                raise Refused("invalid-input", f"{c['pack']} has no clip {c['name']}; it has {', '.join(sorted(base))[:300]}")
-            label = c["name"] if counts[c["name"]] == 1 else f"{c['pack']}:{c['name']}"
-            taken.append((act, label, c, 1.0))
-        for a in base.values():
-            bpy.data.actions.remove(a)
-    return taken
-
-
-def _alive(idb):
-    try:
-        idb.name
-        return True
-    except ReferenceError:
-        return False
-
-
-def _old_parts(old):
-    """Objects bound to an existing character's armature other than its body."""
-    out = []
-    for o in bpy.data.objects:
-        if o is old:
-            continue
-        bound = o.parent == old or old in helpers._deforming(o)
-        src = json.loads(o.get("kurambit_source", "{}"))
-        if bound and src.get("what") != "body":
-            out.append(o)
-    return out
-
-
-def _std_of(body_arm, name_map):
-    """Each body bone's standard name, or its nearest mapped ancestor's region for one that maps to none."""
-    region = {}
-    for b in body_arm.data.bones:
-        r, x = None, b
-        while x is not None and r is None:
-            r = proportions.region_of(name_map.get(x.name, x.name))
-            x = x.parent
-        region[b.name] = r or "torso"
-    return region
-
-
-def _stylise(body_arm, meshes, name_map, style, height):
-    """Restyles the body and its rig in place (proportions.py), then scales both to height metres.
-    Returns a note."""
-    import numpy as np
-
-    region = _std_of(body_arm, name_map)
-    mw_arm = np.array(body_arm.matrix_world)
-    need = ("pelvis", "spine_03", "neck_01", "Head", "thigh_l", "thigh_r", "calf_l", "calf_r", "foot_l", "foot_r",
-            "upperarm_l", "upperarm_r", "hand_l", "hand_r")
-    marks = {}
-    for b in body_arm.data.bones:
-        std = name_map.get(b.name, b.name)
-        if std in need:
-            marks[std] = (mw_arm @ np.append(np.array(b.head_local), 1.0))[:3]
-    factors = proportions.resolve(style) if style else None
-    if factors is not None:
-        missing = [n for n in need if n not in marks]
-        if missing:
-            raise Refused("invalid-input", f"style needs the body's {', '.join(missing)} joints, which its rig does not name")
-        moves = proportions.maps(marks, factors)
-    index = {r: i for i, r in enumerate(proportions.REGIONS)}
-    moved = []
+    m = Matrix.Translation(Vector((cx, cy, lo))) @ Matrix.Scale(k, 4) @ Matrix.Translation(-Vector((cx, cy, lo)))
     for o in meshes:
-        me = o.data
-        mw = np.array(o.matrix_world)
-        co = np.empty(len(me.vertices) * 3)
-        me.vertices.foreach_get("co", co)
-        co = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
-        if factors is not None:
-            groups = {g.index: region.get(g.name) for g in o.vertex_groups}
-            w = np.zeros((len(co), len(proportions.REGIONS)))
-            for v in me.vertices:
-                for g in v.groups:
-                    r = groups.get(g.group)
-                    if r is not None:
-                        w[v.index, index[r]] += g.weight
-            w[w.sum(axis=1) < 1e-6, index["torso"]] = 1.0
-            co = proportions.blend(co, w, moves)
-        moved.append((o, mw, co))
-    bones = {}
-    for b in body_arm.data.bones:
-        h = (mw_arm @ np.append(np.array(b.head_local), 1.0))[:3]
-        t = (mw_arm @ np.append(np.array(b.tail_local), 1.0))[:3]
-        if factors is not None:
-            f = moves[region[b.name]]
-            h, t = f(h[None])[0], f(t[None])[0]
-        bones[b.name] = (h, t)
-    zs = np.concatenate([co[:, 2] for _, _, co in moved]) if moved else np.zeros(1)
-    ground, current = float(zs.min()), float(zs.max() - zs.min())
-    k = 1.0
-    if height:
-        k = float(height) / max(1e-9, current)
-        moved = [(o, mw, proportions.to_height(co, ground, current, height)[0]) for o, mw, co in moved]
-        bones = {n: tuple(proportions.to_height(np.array([h, t]), ground, current, height)[0]) for n, (h, t) in bones.items()}
-    for o, mw, co in moved:
-        inv = np.linalg.inv(mw)
-        o.data.vertices.foreach_set("co", (co @ inv[:3, :3].T + inv[:3, 3]).ravel())
-        o.data.update()
-    inv_arm = np.linalg.inv(mw_arm)
-    skeleton.object_mode()
-    bpy.context.view_layer.objects.active = body_arm
-    bpy.ops.object.mode_set(mode="EDIT")
-    for eb in body_arm.data.edit_bones:
-        h, t = bones[eb.name]
-        roll = eb.roll
-        eb.head = Vector((inv_arm @ np.append(h, 1.0))[:3])
-        eb.tail = Vector((inv_arm @ np.append(t, 1.0))[:3])
-        eb.roll = roll
-    bpy.ops.object.mode_set(mode="OBJECT")
-    parts = []
-    if factors is not None:
-        parts.append("restyled " + ", ".join(f"{k_} {v:g}" for k_, v in factors.items() if abs(v - 1) > 1e-6) if any(abs(v - 1) > 1e-6 for v in factors.values()) else "style realistic")
-    if height:
-        parts.append(f"scaled {k:.3f} to {float(height):.2f} m")
-    return "body " + "; ".join(parts)
+        o.matrix_world = m @ o.matrix_world
 
 
-def take_landmarks(arm, meshes):
-    """Reads a body's face off its marked vertices at rest (an MPFB2 body's eye helpers and lips),
-    keeps it on the armature and removes the eye helpers: {eye_l, eye_r: [x, y, z, radius], mouth:
-    [x, y, z, width]} in world metres."""
-    import bmesh
-    import json
-
-    from . import helpers
-
-    found = {}
-    for o in meshes:
-        co, _ = helpers.rest_coords(o)
-        if len(co) != len(o.data.vertices):
-            continue
-        gone = set()
-        for key, name in (*EYES.items(), ("mouth", LIPS)):
-            g = o.vertex_groups.get(name)
-            if g is None:
-                continue
-            idx = [v.index for v in o.data.vertices if any(e.group == g.index and e.weight > 0.5 for e in v.groups)]
-            if not idx:
-                continue
-            pts = co[idx]
-            lo, hi = pts.min(axis=0), pts.max(axis=0)
-            c = (lo + hi) / 2
-            if key == "mouth":
-                found["mouth"] = [float(c[0]), float(lo[1]), float(c[2]), float(hi[0] - lo[0])]
-            else:
-                found[f"eye_{key}"] = [*map(float, c), float(max(hi - lo)) / 2]
-                gone |= set(idx)
-                o.vertex_groups.remove(g)
-        if gone:
-            bm = bmesh.new()
-            bm.from_mesh(o.data)
-            bm.verts.ensure_lookup_table()
-            bmesh.ops.delete(bm, geom=[bm.verts[i] for i in gone], context="VERTS")
-            bm.to_mesh(o.data)
-            bm.free()
-    if found:
-        arm[LANDMARKS] = json.dumps(found)
-    return found
-
-
-
+@entry
 def character(params):
     name = params["name"]
-    replace = bool(params.get("replace"))
-    old = bpy.data.objects.get(name)
-    if old is not None and not replace:
-        raise Refused("invalid-input", f"{name} already exists in the live scene: pass replace: true to rebuild its body and armature and keep your parts, or pick another name")
-    if old is not None and old.type != "ARMATURE":
-        raise Refused("invalid-input", f"{name} is a {old.type.lower()}, not a character's armature: pick another name")
+    spec = params["body"]
     skeleton.object_mode()
-    body_spec = params["body"]
-    bare = body_spec == "none"
-    if bare:
-        body_spec = {"studio": {"gender": 0.5}}
-    notes = []
-    carried = []
-
-    # The clips keep their own frame rate: imported at another, a 30 fps clip lands between frames
-    # and the export resamples it (a 28-frame jog became 22 frames, its last cut off the loop).
-    rates = {skeleton.clip_rate(skeleton.gltf_json(p)) for p in {c["path"] for c in params.get("clips", [])} if os.path.isfile(p)} - {None}
-    render = bpy.context.scene.render
-    if rates:
-        rate = min(rates)
-        if render.fps != rate or render.fps_base != 1.0:
-            was = render.fps / render.fps_base
-            # Every clip already in the scene keeps its seconds: its keys move to the new rate.
-            for act in bpy.data.actions:
-                skeleton.retime(act, rate / was)
-            notes.append(f"the scene now runs at {rate} fps, the library clips' own rate (it was {was:g}; clips already here keep their timing): key your own clips at {rate} fps")
-            render.fps, render.fps_base = rate, 1.0
-        if len(rates) > 1:
-            notes.append(f"the clips were made at {', '.join(str(r) for r in sorted(rates))} fps: those not at {rate} are resampled")
-
-    # The standard armature first: every check below reads its joints.
-    standard = params["standard"]
-    std_new, std_actions = skeleton.import_gltf(standard)
-    std_arm = next(o for o in std_new if o.type == "ARMATURE")
-    skeleton.remove_objects([o for o in std_new if o is not std_arm])
-    reference = skeleton.local_frames(std_arm)
-    taken, body_arm, meshes, own_actions, own, extra, unit = [], None, [], [], [], [], 1.0
-    joints = set(std_arm.data.bones.keys())
-    try:
-        asked_bones = set()
-        for chain in params.get("chains", []):
-            if chain["parent"] not in std_arm.data.bones:
-                raise Refused("invalid-input", f"chain {chain['name']}: the standard skeleton has no joint {chain['parent']} (a tail hangs from pelvis, ears from Head)")
-            labels = [f"{chain['name']}_l", f"{chain['name']}_r"] if chain.get("mirror") else [chain["name"]]
-            asked_bones |= {f"{label}_{i + 1:02d}" for label in labels for i in range(int(chain["bones"]))}
-        taken = _take_clips(params.get("clips", []), standard, std_actions)
-        if "studio" in body_spec:
-            body_arm, meshes, name_map = studio.body(body_spec["studio"].get("gender", 0.5))
-            body_part = {**MADE_BODY, "from": "blender-studio-human-base-meshes", "licence": studio.LICENCE}
-        elif "mpfb" in body_spec:
-            body_arm, meshes, name_map = _mpfb_body(body_spec["mpfb"])
-            body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
-        else:
-            path = body_spec.get("library") or body_spec.get("game")
-            body_arm, meshes, name_map, own_actions = _file_body(path, keep_clips="game" in body_spec)
-            # The body's own cloth, hair and tails stay as spring chains, as many as a model springs.
-            extra = skeleton.body_chains(meshes, body_arm, name_map, joints)
-            room = MAX_SPRINGS - sum(2 if c.get("mirror") else 1 for c in params.get("chains", []))
-            if len(extra) > room:
-                notes.append(f"the body's own {len(extra)} bone chains ({', '.join(n for n, _, _ in extra)[:200]}) were merged into their joints: a model springs at most {MAX_SPRINGS} chains, and {MAX_SPRINGS - room} are asked for in chains")
-                extra = []
-            clash = sorted(asked_bones & {b for _, bones, _ in extra for b in bones})
-            if clash:
-                raise Refused("invalid-input", f"the body already has bones {', '.join(clash[:6])}, which it keeps as its own spring chains: leave that chain out of chains, or name it another way")
-            skeleton.merge_unmapped(meshes, body_arm, name_map, joints | {b for _, bones, _ in extra for b in bones})
-            if "game" in body_spec:
-                body_part, carried = _game_source(path)
-            else:
-                body_part = {**MADE_BODY, "from": body_spec.get("pack", "library"), "licence": body_spec.get("licence", "")}
-        has = {name_map.get(b.name, b.name) for b in body_arm.data.bones}
-        missing = [j for j in ("pelvis", "Head", "foot_l", "hand_l") if j not in has]
-        if missing:
-            raise Refused("invalid-input", f"the body's rig has no {', '.join(missing)} under any name the kit knows (UE, Mixamo, KayKit and similar): it is not a humanoid, or its bones are named another way. A creature keeps its own rig: import it with game_blender op asset_import instead. Its bones: {', '.join(b.name for b in body_arm.data.bones)[:600]}")
-        if params.get("style") or params.get("height"):
-            notes.append(_stylise(body_arm, meshes, name_map, params.get("style"), params.get("height")))
-        own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
-        # Its clips move the pelvis in the body's own units.
-        unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z
-        height_ratio, ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
-    except BaseException:
-        # a refused or failed build leaves the live scene as it was
-        bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken), *own_actions] if _alive(a)})
-        skeleton.remove_objects([o for o in [std_arm, body_arm, *meshes] if o is not None and _alive(o)])
-        raise
-
-    if ("mpfb" in body_spec or "studio" in body_spec) and not bare:
-        skin = bpy.data.materials.get(f"{name} skin") or helpers.material(SKIN, name=f"{name} skin")
-        for o in meshes:
-            if not any(s.material for s in o.material_slots):
-                o.data.materials.clear()
-                o.data.materials.append(skin)
-
-    # The face the body brought.
-    take_landmarks(std_arm, meshes)
-
-    parts, old_chains = [], {}
-    if old is not None:
-        parts = _old_parts(old)
-        old_body = [o for o in bpy.data.objects if (o.parent == old or old in helpers._deforming(o)) and o not in parts]
-        for a in list(bpy.data.actions):
-            if a.get("kurambit_owner") == name and "kurambit_from" in a:
-                bpy.data.actions.remove(a)
-        old_chains = {k: [old.matrix_world @ old.data.bones[b].head_local for b in v] + [old.matrix_world @ old.data.bones[v[-1]].tail_local]
-                      for k, v in helpers.chains_of(old).items() if all(b in old.data.bones for b in v)}
-        for o in [old] + old_body:
-            o.name = f"{o.name}.replaced"
-
-    arm = std_arm
-    arm.name = name
-    arm.data.name = name
-    coll = bpy.data.collections.get(name)
-    if coll is None:
-        coll = bpy.data.collections.new(name)
-        bpy.context.scene.collection.children.link(coll)
-    for o in [arm] + meshes:
-        for c in list(o.users_collection):
-            c.objects.unlink(o)
-        coll.objects.link(o)
+    parts = []
+    if "studio" in spec:
+        arm, meshes, _ = studio.body(spec["studio"].get("gender", 0.5))
+        skeleton.remove_objects([arm])
+        body_part = {**MADE_BODY, "from": "blender-studio-human-base-meshes", "licence": studio.LICENCE}
+    elif "mpfb" in spec:
+        meshes = _mpfb_body(spec["mpfb"])
+        body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
+    elif "game" in spec:
+        body_part, parts = _game_source(spec["game"])
+        meshes = _file_body(spec["game"])
+    else:
+        meshes = _file_body(spec["library"])
+        body_part = {**MADE_BODY, "from": spec.get("pack", "library"), "licence": spec.get("licence", "")}
     for i, o in enumerate(meshes):
-        o.name = f"{name}_body" if len(meshes) == 1 else f"{name}_body_{i + 1}"
+        o.name = f"{name}_body" if len(meshes) == 1 else f"{name}_body_{i}"
         o.data.name = o.name
         o["kurambit_source"] = json.dumps(body_part)
-        if carried:
-            o["kurambit_parts"] = json.dumps(carried)  # the ledger's other parts this body brings
-
-    names = {label for _, label, _, _ in taken}
-    for act, label in own:
-        if label in names:
-            notes.append(f"the body's own clip {label} was left out: a clip asked for in clips has its name")
-            bpy.data.actions.remove(act)
-            continue
-        names.add(label)
-        taken.append((act, label, {"pack": "body", "own": True}, ratio / unit))
-    if own:
-        notes.append(f"kept the body's own clips: {', '.join(label for _, label, c, _ in taken if c.get('own'))}")
-    for act, label, c, made in taken:
-        # A clip made on this body already moves its pelvis this body's distances; a library
-        # clip's hips travel by this body's legs.
-        skeleton.fit_clip(act, ratio / made)
-        act.use_fake_user = True
-        act["kurambit_from"] = c["pack"]
-        act["kurambit_owner"] = name
-        act["kurambit_clip"] = label
-        if c.get("own"):
-            act["kurambit_source"] = json.dumps({**body_part, "what": "clips"})  # credited as the body is
-        # Clip names are per character; in Blender every action needs its own name, so a second
-        # character's Idle_Loop would read Idle_Loop.001. The export names it by kurambit_clip.
-        act.name = helpers.action_name(name, label)
-    packs = []
-    for _, _, c, _ in taken:
-        if c.get("motion") or c.get("own"):
-            continue
-        if all(p["from"] != c["pack"] for p in packs):
-            packs.append({"from": c["pack"], "licence": c.get("licence", "")})
-    if packs:
-        stamp(arm, "clips", packs[0]["from"], packs[0]["licence"])
-    arm["kurambit_clips"] = json.dumps(packs)
-    notes += fit.fit(arm, meshes, [a for a, _, c, _ in taken if not c.get("own")], params.get("fit") or {}, legs=ratio / height_ratio)
-    arm["kurambit_standard_rest"] = json.dumps(skeleton.local_rest(skeleton.gltf_json(standard)))
-    # The height gate's range: as asked, else around the height it was scaled to, else a human's.
-    if params.get("heightRange"):
-        arm["kurambit_height"] = json.dumps([float(x) for x in params["heightRange"]])
-    elif params.get("height"):
-        h = float(params["height"])
-        arm["kurambit_height"] = json.dumps([round(h * 0.9, 3), round(h * 1.1, 3)])
-
-    chains = {n: bones for n, bones, _ in extra}
-    if extra:
-        arm["kurambit_chains"] = json.dumps(chains)
-    for chain in params.get("chains", []):
-        sides = [("", Vector(chain["direction"]))]
-        if chain.get("mirror"):
-            d = Vector(chain["direction"])
-            first = "l" if d.x >= 0 else "r"
-            sides = [(first, d), ("r" if first == "l" else "l", Vector((-d.x, d.y, d.z)))]
-        for side, d in sides:
-            d = d.normalized()
-            joint = arm.matrix_world @ arm.data.bones[chain["parent"]].head_local
-            hit = helpers.surface_hit(meshes, joint, d, 1.0)
-            start = hit[0] if hit is not None else joint
-            n = int(chain["bones"])
-            points = [start + d * chain["length"] * i / n for i in range(n + 1)]
-            label = chain["name"] if not side else f"{chain['name']}_{side}"
-            if label in old_chains and len(old_chains[label]) == n + 1:
-                points = old_chains[label]  # where place_chain put it before, so the parts on it fit
-            chains[label] = helpers.add_chain(arm, label, chain["parent"], points)
-
-    if old is not None:
-        gone = set()
-        for o in parts:
-            if o.parent == old:
-                mw = o.matrix_world.copy()
-                o.parent = arm
-                if o.parent_type == "BONE" and o.parent_bone not in arm.data.bones:
-                    gone.add(o.parent_bone)
-                o.matrix_world = mw
-            for m in o.modifiers:
-                if m.type == "ARMATURE" and m.object == old:
-                    m.object = arm
-            gone |= {vg.name for vg in o.vertex_groups if vg.name in old.data.bones and vg.name not in arm.data.bones}
-        skeleton.remove_objects(old_body + [old])
-        notes.append(f"re-bound {len(parts)} parts to the new armature")
-        if gone:
-            notes.append(f"bones the parts use are gone: {', '.join(sorted(gone))} (add them again, or make them chains)")
-
-    idle = next((a for a, _, _, _ in taken if "idle" in a.name.lower()), None)
-    skeleton.assign_action(arm, idle)
-    deviation = skeleton.frame_deviation(arm, reference)
-    zs = [z for o in meshes for z in helpers.rest_coords(o)[0][:, 2]]
-    height = max(zs) - min(zs) if zs else 0.0
-    if bare:
-        skeleton.remove_objects(meshes)
-        meshes = []
-    notes.append(f"body {height:.2f} m; clips play with the pelvis translation scaled by {ratio:.3f} and no other bone translation")
-    return {
-        "armature": arm.name,
-        "meshes": [o.name for o in meshes],
-        "clips": [label for _, label, _, _ in taken],
-        "chains": chains,
-        "restDeviation": round(deviation or 0.0, 2),
-        "height": round(height, 3),
-        "joints": helpers.joints(arm),
-        "notes": notes,
-    }
+        if parts:
+            o["kurambit_parts"] = json.dumps(parts)
+        for c in list(o.users_collection):
+            c.objects.unlink(o)
+        bpy.context.scene.collection.objects.link(o)
+    if "mpfb" in spec or "studio" in spec:
+        skin = bpy.data.materials.get(f"{name} skin") or helpers.material(SKIN, name=f"{name} skin")
+        for o in meshes:
+            o.data.materials.clear()
+            o.data.materials.append(skin)
+    if params.get("height"):
+        _to_height(meshes, float(params["height"]))
+    return rig_model([*meshes, *(params.get("objects") or [])], "human", None, params.get("joints"), params.get("rigid") or {},
+                   params.get("clips") or (), name, params.get("pack"))
