@@ -93,12 +93,31 @@ def _human_landmarks(P):
     L = {"H": H, "crotch": crotch, "half": half, "ymid": ymid, "ankle_y": {k: v.y for k, v in ankles.items()},
          "legx": 0.7 * max(abs(c.x) for c in P.co)}
     for s, sg in (("l", 1), ("r", -1)):
-        arm = [c for c in P.co if sg * c.x > half * 1.25 and c.z > crotch]
-        if len(arm) < 8:
-            raise ValueError("no arm clear of the torso (arms down or touching it)")
-        tip = max(arm, key=lambda c: sg * c.x)
-        L["tip_" + s] = tip
+        L["tip_" + s] = _arm_tip(P, Vector((sg * half * 1.1, ymid, crotch + 0.62 * (P.max.z - crotch))), sg, H)
     return L
+
+
+def _arm_tip(P, start, sg, H):
+    """The fingertip, found by walking down the arm from the shoulder in slabs, each centred on the
+    last, so a hand hanging beside the thigh is followed and the thigh is not."""
+    step, r = 0.025 * H, 0.07 * H
+    c, d = start, Vector((sg, 0, -0.4)).normalized()
+    walked = 0
+    for _ in range(80):
+        ahead = c + d * step
+        slab = [p for p in P.co if abs((p - ahead).dot(d)) < step * 0.6 and ((p - ahead) - d * (p - ahead).dot(d)).length < r]
+        if len(slab) < 3:
+            break
+        cen = sum(slab, Vector()) / len(slab)
+        if (cen - c).length < 1e-6:
+            break
+        d = (d + (cen - c).normalized()).normalized()
+        c = cen
+        walked += 1
+    if walked < 6:
+        raise ValueError("no arm clear of the torso (arms down against it)")
+    end = [p for p in P.co if (p - c).length < r and (p - c).dot(d) > -step]
+    return max(end, key=lambda p: (p - start).length)
 
 
 def _quad_landmarks(P):
@@ -194,23 +213,15 @@ def _fit_human(P, R, th, bones):
 
 
 def _hand_frame(M, wrist, tip):
-    """A hand's axes: along it (wrist to fingertip) and across the knuckles toward the thumb, which
-    points forward (-Y) in an A- or T-pose; and its length."""
+    """A hand's axes: along it (wrist to fingertip) and across it toward the thumb, which points
+    forward (-Y) in an A- or T-pose; and its length."""
     d = tip - wrist
     L = d.length
     d = d.normalized()
-    pts = [c for c in M.co if 0 < (c - wrist).dot(d) < L * 1.05 and _seg(c, wrist, tip) < 0.5 * L]
-    if len(pts) < 12:
+    if sum(1 for c in M.co if 0 < (c - wrist).dot(d) < L * 1.05 and _seg(c, wrist, tip) < 0.5 * L) < 12:
         raise ValueError("no hand at the end of the arm")
-    c = sum(pts, Vector()) / len(pts)
-    cov = [[sum((p[i] - c[i]) * (p[j] - c[j]) for p in pts) for j in range(3)] for i in range(3)]
     w = Vector((0, -1, 0))
-    for _ in range(40):  # the widest axis across the hand: power iteration orthogonal to d
-        w = Vector([sum(cov[i][j] * w[j] for j in range(3)) for i in range(3)])
-        w = (w - d * w.dot(d)).normalized()
-    if w.y > 0:
-        w = -w
-    return d, w, L
+    return d, (w - d * w.dot(d)).normalized(), L
 
 
 def _seg(p, a, b):
