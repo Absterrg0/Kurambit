@@ -16,7 +16,6 @@ import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { refOf } from "./gameBuildRef";
 import { GameBuildStill, GameNowPicture } from "./GameBuildStill";
 import { GameReel } from "./GameReel";
 import { useStageStill } from "./gameStageBridge";
@@ -41,9 +40,9 @@ const sameRef = (ref: GameBuildRef, build: GameBuild) =>
       build.source.threadId === ref.threadId &&
       build.source.runId === ref.runId;
 
-/** The requests the strip answers itself: play or open a build, step, start picking a compare. */
+/** The requests the strip answers itself: play or open a build, step. */
 export type GameStripRequest = {
-  readonly request: Extract<GameStageRequest, { kind: "play" | "detail" | "step" | "compare" }>;
+  readonly request: Extract<GameStageRequest, { kind: "play" | "detail" | "step" }>;
   readonly n: number;
 };
 
@@ -84,11 +83,11 @@ const shortName = (build: GameBuild) => {
 };
 
 /**
- * The game's History, in the popover under the header's build button: Undo, Redo and Compare,
+ * The game's History, in the popover under the header's build button: Undo and Redo,
  * then the builds as pictures in time order, oldest left, the one on the Stage ringed. A picture
  * plays its build and shows it in
  * Checks. It stays mounted while the popover is closed: the chat's cards, the palette and the keys
- * reach it through the Stage's requests, and a compare's pick opens it.
+ * reach it through the Stage's requests.
  */
 export function GameHistory({
   threadRef,
@@ -98,12 +97,10 @@ export function GameHistory({
   request,
   reelOpen,
   open,
-  onOpen,
   undo,
   onPlay,
   onPlayUnlisted,
   onLive,
-  onCompare,
   onInspect,
   onAskAgent,
   onGoBack,
@@ -117,8 +114,6 @@ export function GameHistory({
   reelOpen: boolean;
   /** The popover is open: the row scrolls to the newest when it opens. */
   open: boolean;
-  /** Opens the popover, for a compare's pick. */
-  onOpen: () => void;
   undo: GameStripUndo;
   /** Plays an earlier build from a copy. */
   onPlay: (build: GameBuild) => void;
@@ -126,7 +121,6 @@ export function GameHistory({
   onPlayUnlisted: (ref: GameBuildRef) => void;
   /** Back to the folder's own game. */
   onLive: () => void;
-  onCompare: (pair: readonly [GameBuildRef, GameBuildRef]) => void;
   /** Shows a build in Checks. */
   onInspect: (build: GameBuild) => void;
   /** Puts a request for the agent in the composer. */
@@ -149,8 +143,6 @@ export function GameHistory({
   );
   const [olderCount, setOlderCount] = useState(0);
   const olderPages = useAtomValue(olderBuildPages(threadRef, olderCount));
-  // The first side of a compare waiting for the picture that picks the second.
-  const [picking, setPicking] = useState<GameBuildRef | "any" | null>(null);
   // A build asked for by ref that no loaded page holds: pages back until it does.
   const [sought, setSought] = useState<GameBuildRef | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -195,26 +187,6 @@ export function GameHistory({
     }
   }
 
-  // A compare with one possible other side needs no pick: it opens at once.
-  const startCompare = (start: GameBuildRef | "any") => {
-    const others = marks.filter(
-      (entry) => entry.available && (start === "any" || !sameRef(start, entry)),
-    );
-    const only =
-      start === "any" ? (others.length === 2 ? others : null) : others.length === 1 ? others : null;
-    if (only === null) {
-      setPicking(start);
-      onOpen();
-    } else if (start === "any") onCompare([refOf(only[0]!), refOf(only[1]!)]);
-    else onCompare([start, refOf(only[0]!)]);
-  };
-  const pick = (build: GameBuild) => {
-    if (picking === "any") setPicking(refOf(build));
-    else if (picking !== null && !sameRef(picking, build)) {
-      onCompare([picking, refOf(build)]);
-      setPicking(null);
-    }
-  };
   const play = (build: GameBuild) => {
     setStepped(build.id);
     onInspect(build);
@@ -243,29 +215,13 @@ export function GameHistory({
         setSought(asked.build);
         setNotFound(false);
       }
-    } else
-      startCompare(asked.first ?? (playing !== null ? { _tag: "build", build: playing } : "any"));
+    }
   });
   const requestN = request?.n ?? 0;
   const asked = request?.request ?? null;
   useEffect(() => {
     if (asked !== null && requestN !== mountRequest) answer(asked);
   }, [requestN, asked, mountRequest, answer]);
-
-  // Escape gives a pick up.
-  const firstPicked =
-    picking === null || picking === "any"
-      ? null
-      : (marks.find((entry) => sameRef(picking, entry)) ?? null);
-  const pickingNow = picking !== null;
-  useEffect(() => {
-    if (!pickingNow) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) setPicking(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [pickingNow]);
 
   const undoBuild = async (build: GameBuild) => {
     setUndoing(build.id);
@@ -310,29 +266,23 @@ export function GameHistory({
       gameName={gameName}
       build={build}
       label={label}
-      onStage={onStage === build.id && !pickingNow}
+      onStage={onStage === build.id}
       copy={playing === build.id}
       undone={build.undone}
-      picking={pickingNow}
-      picked={picking !== null && picking !== "any" && sameRef(picking, build)}
-      onClick={() => (pickingNow ? pick(build) : play(build))}
-      {...(undoable(build) && !pickingNow && !build.undone
+      onClick={() => play(build)}
+      {...(undoable(build) && !build.undone
         ? { onUndo: () => void undoBuild(build), undoing: undoing === build.id }
         : {})}
     />
   );
   const note =
-    picking !== null
-      ? firstPicked === null
-        ? "Pick the first build to compare"
-        : `Pick a build to compare with ${firstPicked.name}`
-      : sought !== null
-        ? "Finding that build…"
-        : notFound
-          ? "That build is older than History reads"
-          : slot !== null
-            ? slot.label
-            : null;
+    sought !== null
+      ? "Finding that build…"
+      : notFound
+        ? "That build is older than History reads"
+        : slot !== null
+          ? slot.label
+          : null;
   return (
     <section aria-label="History" className="flex min-w-0 flex-col gap-3" data-game-history="">
       <div className="flex h-8 min-w-0 items-center gap-1">
@@ -356,21 +306,6 @@ export function GameHistory({
         <Text variant="caption" tone="muted" truncate render={<span className="ms-2 flex-1" />}>
           {note}
         </Text>
-        {picking !== null ? (
-          <Button size="xs" variant="ghost-muted" onClick={() => setPicking(null)}>
-            Cancel
-          </Button>
-        ) : marks.length < 2 ? null : (
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            onClick={() =>
-              startCompare(onStage === null ? "any" : { _tag: "build", build: onStage })
-            }
-          >
-            Compare
-          </Button>
-        )}
       </div>
       {undoAnswer === null ? null : (
         <UndoAnswerRow
@@ -388,14 +323,7 @@ export function GameHistory({
         />
       )}
       <GameHistoryCopies threadRef={threadRef} gameName={gameName} />
-      {reelOpen ? (
-        <GameReel
-          threadRef={threadRef}
-          marks={marks}
-          onPlay={play}
-          onCompare={([a, b]) => onCompare([refOf(a), refOf(b)])}
-        />
-      ) : null}
+      {reelOpen ? <GameReel threadRef={threadRef} marks={marks} onPlay={play} /> : null}
       <StripRow open={open} count={marks.length + (showNow ? 1 : 0) + (slot === null ? 0 : 1)}>
         {olderNext !== null ? (
           <Button
@@ -438,7 +366,6 @@ export function GameHistory({
             }
             label="Now"
             active={onStage === null}
-            disabled={pickingNow}
             onClick={onLive}
           />
         ) : null}
@@ -528,8 +455,6 @@ function BuildThumb({
   onStage,
   copy,
   undone,
-  picking,
-  picked,
   onClick,
   onUndo,
   undoing = false,
@@ -542,9 +467,6 @@ function BuildThumb({
   /** It plays on the Stage from a copy, not the folder. */
   copy: boolean;
   undone: boolean;
-  picking: boolean;
-  /** The first side of a compare. */
-  picked: boolean;
   onClick: () => void;
   /** Reverses this build's change, later builds kept; absent where Undo does not reach. */
   onUndo?: (() => void) | undefined;
@@ -561,7 +483,7 @@ function BuildThumb({
             type="button"
             aria-current={onStage ? "true" : undefined}
             aria-label={`${build.name}, ${formatBuildTime(build.at)}${onStage ? ", on the Stage" : ""}`}
-            disabled={!build.available && !picking}
+            disabled={!build.available}
             onClick={onClick}
             className="group/thumb flex w-24 shrink-0 cursor-pointer flex-col items-start gap-1.5 rounded-md text-left outline-none disabled:cursor-default"
           />
@@ -582,7 +504,6 @@ function BuildThumb({
             className={cn(
               "group-hover/thumb:ring-foreground/30 group-focus-visible/thumb:ring-2 group-focus-visible/thumb:ring-ring group-focus-visible/thumb:ring-inset",
               onStage && "ring-2 ring-live group-hover/thumb:ring-live",
-              picked && "ring-2 ring-strong-foreground",
             )}
           />
           {state === "failed" ? (

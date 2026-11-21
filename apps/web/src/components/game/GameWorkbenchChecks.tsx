@@ -24,10 +24,8 @@ import {
   ChevronRightIcon,
   ClipboardCheckIcon,
   ClockIcon,
-  ColumnsIcon,
   FileVideoIcon,
   FlagIcon,
-  GitCompareIcon,
   ImageIcon,
   LoaderCircleIcon,
   MinusIcon,
@@ -52,7 +50,7 @@ import { gameEnvironment, stagePlayTarget } from "../../state/game";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Skeleton } from "../ui/skeleton";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -234,7 +232,7 @@ const RESTORE = {
 
 /**
  * The build's name and where it stands, Play when it is not on the Stage, and in a ⋯ the rest of
- * what can be done with it: compare, and its one restore by the strip's rules.
+ * what can be done with it: its one restore by the strip's rules.
  */
 function BuildHeader({
   threadRef,
@@ -273,10 +271,7 @@ function BuildHeader({
     (index === -1 ? undefined : list.builds[index + 1]);
   const kind = action === null ? null : RESTORE[action.kind];
   const error = action === null ? null : restores.error(action.target);
-  const canCompare = previous !== undefined && build.available && previous.available;
   const canPlay = build.available && build.id !== onStageNow;
-  // Any other build can be its other side: the strip picks it, with this one already first.
-  const canPickCompare = build.available && list.builds.some((entry) => entry.id !== build.id);
   // A build another chat made says whose it is: the top bar, this chat's last line and Checks
   // can each name a different build, and only this relates them.
   const madeIn = build.source._tag === "saved" ? null : build.source.threadId;
@@ -330,7 +325,7 @@ function BuildHeader({
             Play
           </Button>
         ) : null}
-        {(action !== null && kind !== null) || canCompare || canPickCompare ? (
+        {action !== null && kind !== null ? (
           <Menu>
             <MenuTrigger
               render={
@@ -340,31 +335,6 @@ function BuildHeader({
               <MoreHorizontalIcon aria-hidden="true" />
             </MenuTrigger>
             <MenuPopup side="bottom" align="end" sideOffset={4} className="w-64">
-              {canCompare && previous !== undefined ? (
-                <MenuItem
-                  onClick={() =>
-                    requestStage({ kind: "compare", pair: [refOf(previous), refOf(build)] })
-                  }
-                >
-                  {/* Two-line items keep their icon on the title's line, like one-line ones. */}
-                  <ColumnsIcon className="mt-0.5 self-start" />
-                  <span className="flex min-w-0 flex-col">
-                    Compare with the build before
-                    <Text variant="caption" tone="muted" truncate>
-                      {previous.name}
-                    </Text>
-                  </span>
-                </MenuItem>
-              ) : null}
-              {canPickCompare ? (
-                <MenuItem onClick={() => requestStage({ kind: "compare", first: refOf(build) })}>
-                  <GitCompareIcon />
-                  Compare with another build…
-                </MenuItem>
-              ) : null}
-              {(canCompare || canPickCompare) && action !== null && kind !== null ? (
-                <MenuSeparator />
-              ) : null}
               {action !== null && kind !== null ? (
                 <MenuItem
                   disabled={action.blocked !== null || !restores.canRestore || restores.pending}

@@ -296,8 +296,8 @@ width; for a bigger game beside the chat, set **Settings → Appearance → Chat
 Full.
 
 The bar on top has the game's name, which opens its menu (rename, folder, **Export…**, **Art…**),
-then the build on the Stage, such as **Build 4**, which opens **History**: **Undo**, **Redo** and
-**Compare**, then every build as a small picture in time order with the one on the Stage ringed.
+then the build on the Stage, such as **Build 4**, which opens **History**: **Undo** and **Redo**,
+then every build as a small picture in time order with the one on the Stage ringed.
 Click a picture to play that build and show its checks. On the right is the Workbench button.
 
 If a build doesn't start, the game says so in its middle with the error, **Ask the agent to fix
@@ -470,13 +470,6 @@ which open the diff), its videos, and in the **⋯** beside the build's name:
 
 When the game folder has changed since its last build, the tab shows **Now on the Stage** first and
 the checks under **Last measured build**, since they belong to that build, not to what plays now.
-**Compare with** the build
-before it, or **Compare** in the builds list (or **Compare builds…** in the command palette) to pick
-two pictures, shows them side by side in the game's place, each playable, with their checks in a
-table: ↑ and ↓ show which way a check moved, ≠ that it changed without a direction (an ending that
-became another), and = that it did not change; a change is coloured when it is better or worse. A
-check that was not measured on one side reads "not comparable" with the reason. Only the side you are
-playing runs; the other is paused and muted. **Close** returns to the live game.
 
 A turn that changed the game ends in the chat with one line for its build: its name, which plays it;
 its checks, which open its **Build** tab; the files it changed, which open the diff; and **Undo** or
@@ -490,7 +483,7 @@ still rewinds the conversation itself.
 **Keys.** `mod+Alt+Z` undoes the latest turn's change and `mod+Alt+Shift+Z` redoes it; `mod+Alt+[`
 and `mod+Alt+]` play the previous and next build (past the newest, back to the live
 game); `mod+Alt+G` puts the keyboard in the game, and pressed while you play, gives it back to the
-chat. The command palette has each of these, plus **Compare builds…**, **Export…** and **Go back to
+chat. The command palette has each of these, plus **Export…** and **Go back to
 a build…**. A game you clicked into owns every key, Tab, Escape and the number keys included; only
 these `mod+Alt` keys reach Kurambit while you play.
 

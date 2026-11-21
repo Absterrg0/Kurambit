@@ -122,7 +122,6 @@ import {
   FolderPlusIcon,
   Gamepad2Icon,
   MaximizeIcon,
-  ColumnsIcon,
   PersonStandingIcon,
   FastForwardIcon,
   HistoryIcon,
@@ -1833,7 +1832,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:game-history",
       title: "Show the game's history",
-      searchTerms: ["builds", "history", "undo", "redo", "compare"],
+      searchTerms: ["builds", "history", "undo", "redo"],
       icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
       run: async () => useGameWorkspaceStore.getState().requestStage({ kind: "history" }),
     });
@@ -2019,14 +2018,6 @@ function OpenCommandPaletteDialog(props: {
         // The Stage restores, so the palette, the keys and the strip share one path.
         run: requestStage({ kind: turnRestore.kind }),
       });
-    actionItems.push({
-      kind: "action",
-      value: "action:game-build-compare",
-      title: "Compare builds…",
-      searchTerms: ["compare", "diff", "versions", "builds", "side by side", "game"],
-      icon: <ColumnsIcon className={ITEM_ICON_CLASS} />,
-      run: requestStage({ kind: "compare" }),
-    });
     if (characterRoute.canSet)
       actionItems.push({
         kind: "submenu",

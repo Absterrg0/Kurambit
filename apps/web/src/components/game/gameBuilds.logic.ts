@@ -256,46 +256,6 @@ export interface CompareRows {
   }>;
 }
 
-/** A compare's answer: one sentence while it cannot count yet, else its counts by kind. */
-export type CompareHeadline =
-  | { readonly kind: "sentence"; readonly text: string }
-  | {
-      readonly kind: "counts";
-      /** Readings that differ between the two builds. */
-      readonly differ: number;
-      readonly same: number;
-      /** Readings that change from run to run by themselves, outside the count of differences. */
-      readonly varies: number;
-      /** Readings neither build has, so the headline accounts for every row even where the
-       * table's end is out of view. */
-      readonly missing: number;
-    };
-
-/**
- * PURE. A compare's answer: what differs, what is the same, what varies by itself and what
- * neither build measured, or that a side is still being measured so the answer is not in yet.
- */
-export const compareHeadline = (compared: CompareRows): CompareHeadline => {
-  const pending = compared.oneSided.find((entry) => entry.why === "still being measured");
-  if (pending !== undefined)
-    return {
-      kind: "sentence",
-      text: `${pending.side} is still being measured: the comparison fills in as its checks land.`,
-    };
-  const moved = compared.rows.filter((row) => row.mark !== null && row.mark !== "=");
-  const differ = moved.filter((row) => !VARIES_BY_ITSELF.has(row.id)).length;
-  const same = compared.rows.filter((row) => row.mark === "=").length;
-  if (differ === 0 && same === 0)
-    return { kind: "sentence", text: "Nothing measured on both builds to compare yet." };
-  return {
-    kind: "counts",
-    differ,
-    same,
-    varies: moved.length - differ,
-    missing: compared.unmeasured.reduce((sum, group) => sum + group.names.length, 0),
-  };
-};
-
 /** Seconds as the checks write them: a tenth under ten, whole past it. */
 const seconds = (s: number) => `${s < 10 ? s.toFixed(1) : Math.round(s)} s`;
 
@@ -468,32 +428,6 @@ export const compareRows = (
     unmeasured: [...unmeasured].map(([why, names]) => ({ names, why })),
     oneSided: [...oneSided.values()],
   };
-};
-
-/**
- * PURE. A row's change in words: better or worse where the check has a better, else which
- * way the number moved. Null when the readings are the same or cannot be compared.
- */
-export const changeWord = (
-  row: Pick<CompareRow, "id" | "mark" | "tone" | "flips">,
-): string | null => {
-  if (row.mark === null || row.mark === "=") return null;
-  if (VARIES_BY_ITSELF.has(row.id)) return "Varies";
-  // A verdict only where the check passes on one side and is one to look at on the other; any
-  // other move is a direction, the check standing where it was.
-  const verdict = row.flips === true;
-  if (verdict && row.tone === "better") return "Better";
-  if (verdict && row.tone === "worse") return "Worse";
-  if (row.mark === "≠") return "Changed";
-  const up = row.mark === "↑";
-  // A time moves later or earlier; an amount is more or less.
-  return RUN_FACTS.has(row.id) || row.id === "first-response"
-    ? up
-      ? "Later"
-      : "Earlier"
-    : up
-      ? "More"
-      : "Less";
 };
 
 /**

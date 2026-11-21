@@ -14,12 +14,6 @@ export type GameStageRequest =
   | { readonly kind: "live" }
   | { readonly kind: "play"; readonly build: GameBuildRef }
   | { readonly kind: "detail"; readonly build: GameBuildRef }
-  | {
-      readonly kind: "compare";
-      readonly pair?: readonly [GameBuildRef, GameBuildRef];
-      /** Start picking with this build already picked first. */
-      readonly first?: GameBuildRef;
-    }
   | { readonly kind: "step"; readonly by: -1 | 1 }
   | { readonly kind: "focus" }
   /** Freeze the game to point at things, or play on: Tab, the button, the palette and its key. */

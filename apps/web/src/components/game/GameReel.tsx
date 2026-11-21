@@ -1,4 +1,4 @@
-import { ColumnsIcon, PlayIcon } from "lucide-react";
+import { PlayIcon } from "lucide-react";
 import { gameFactsView, type GameBuild, type ScopedThreadRef } from "@kurambit/contracts";
 
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
@@ -16,20 +16,17 @@ const REEL_STEPS = 6;
 /**
  * The build strip opened as a reel: Keep going's newest steps, each as the
  * build it started from and the build it made (the last frame of their
- * measured play), with its verdict. Play plays the step; Compare puts the two
- * side by side, playable, with their facts diffed.
+ * measured play), with its verdict. Play plays the step.
  */
 export function GameReel({
   threadRef,
   marks,
   onPlay,
-  onCompare,
 }: {
   threadRef: ScopedThreadRef;
   /** The strip's builds, oldest to newest. */
   marks: ReadonlyArray<GameBuild>;
   onPlay: (build: GameBuild) => void;
-  onCompare: (pair: readonly [GameBuild, GameBuild]) => void;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
   const steps = marks
@@ -85,12 +82,6 @@ export function GameReel({
                 <PlayIcon className="fill-current" aria-hidden="true" />
                 Play
               </Button>
-              {before === null ? null : (
-                <Button size="xs" variant="ghost" onClick={() => onCompare([before, build])}>
-                  <ColumnsIcon aria-hidden="true" />
-                  Compare
-                </Button>
-              )}
             </div>
           </section>
         );

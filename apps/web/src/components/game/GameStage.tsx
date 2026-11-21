@@ -88,7 +88,6 @@ import { Skeleton } from "../ui/skeleton";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { GameBuildCompare } from "./GameBuildCompare";
 import { GameBuildStill } from "./GameBuildStill";
 import { ArrivalDot } from "./ArrivalDot";
 import { GameCopyActions, GameCopyLabel } from "./GameCopyHeader";
@@ -456,7 +455,7 @@ const playSurfaceOf = (section: HTMLElement | null): HTMLElement | null =>
   ) ?? null;
 
 export function GameStage(props: GameStageProps) {
-  // One stage per thread: a compare, a pick, a held reload or an error of one
+  // One stage per thread: a pick, a held reload or an error of one
   // game never carries into another (ChatView keeps its children mounted).
   return (
     <ThreadGameStage
@@ -502,7 +501,6 @@ function ThreadGameStage({
   const panelOpen =
     useRightPanelStore((state) => state.byThreadKey[scopedThreadKey(threadRef)]?.isOpen === true) ||
     workbenchShown;
-  const workbenchTab = useGameWorkspaceStore((state) => state.workbenchTab);
   const query = useIsGameThreadStatus(threadRef);
   const canAct = useAtomValue(gameEnvironment.action.permissionAtom(threadRef.environmentId));
   const action = useAtomCommand(gameEnvironment.action, { reportFailure: false });
@@ -539,7 +537,6 @@ function ThreadGameStage({
   const [timelineRequest, setTimelineRequest] = useState<GameStripRequest | null>(null);
   const [reelOpen, setReelOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [compare, setCompare] = useState<readonly [GameBuildRef, GameBuildRef] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const threadKey = scopedThreadKey(threadRef);
   // Paused by the person, to point at things.
@@ -744,7 +741,6 @@ function ThreadGameStage({
   } | null>(null);
   // The column the game shares with its chat and composer: the fitted game's width.
   const [column, setColumn] = useState<number | null>(null);
-  const comparing = compare !== null;
   // The responsive view: the game's frame at a device's size, under the device toolbar.
   const stageDevice = useGameWorkspaceStore((state) => state.stageDevice[threadKey] ?? null);
   const setStageDevice = useGameWorkspaceStore((state) => state.setStageDevice);
@@ -771,8 +767,7 @@ function ThreadGameStage({
   }, [hasStatus]);
   useLayoutEffect(() => {
     const section = stageRef.current;
-    // A compare fills the Stage's place: the Stage keeps the fit it had, for when it closes.
-    if (section === null || comparing) return;
+    if (section === null) return;
     const centre = section.closest<HTMLElement>("[data-game-centre]");
     const measure = () => {
       if (centre === null) return;
@@ -820,7 +815,7 @@ function ThreadGameStage({
       ],
       measure,
     );
-  }, [viewportWidth, viewportHeight, comparing, chatShare, chatWidth, hero, deviceOn]);
+  }, [viewportWidth, viewportHeight, chatShare, chatWidth, hero, deviceOn]);
   // The empty chat's Stage has its own shape, and the game takes it; else the game's viewport.
   const frameViewport =
     hero && stageFit !== null && stageFit.height > 0
@@ -853,10 +848,7 @@ function ThreadGameStage({
 
   const perform = async (stageAction: GameAction) => {
     if (stageAction === "preview") stageAfterGameAction(threadRef, stageAction);
-    if (stageAction === "preview" && data?.previewUrl != null) {
-      setCompare(null);
-      return;
-    }
+    if (stageAction === "preview" && data?.previewUrl != null) return;
     if (busy !== null && stageAction !== "stop") return;
     setBusy({ action: stageAction, startedAt: Date.now() });
     setMessage(null);
@@ -879,7 +871,6 @@ function ThreadGameStage({
     refresh();
   };
   const backToLive = () => {
-    setCompare(null);
     if (asked !== null) void stopBuild(asked.build);
     // The Inspector follows the Stage back: Now's summary, not the build last clicked.
     if (useGameWorkspaceStore.getState().inspectedBuild?.threadKey === threadKey)
@@ -889,7 +880,6 @@ function ThreadGameStage({
   const playBuild = async (build: GameBuild | GameBuildRef) => {
     const ref: GameBuildRef = "id" in build ? { _tag: "build", build: build.id } : build;
     if (ref._tag !== "build") return;
-    setCompare(null);
     setPlayRef(ref);
     const result = await plays.send(ref);
     if (result === null) return;
@@ -911,12 +901,7 @@ function ThreadGameStage({
       case "play":
       case "detail":
       case "step":
-        setCompare(null);
         setTimelineRequest({ request, n });
-        return;
-      case "compare":
-        if (request.pair === undefined) setTimelineRequest({ request, n });
-        else setCompare(request.pair);
         return;
       case "focus":
         setFocusRequest({ n, frame: asked !== null ? "copy" : "folder" });
@@ -1133,8 +1118,8 @@ function ThreadGameStage({
     operation.revision !== dismissedRevision &&
     seenRevision !== null &&
     operation.revision > seenRevision;
-  // The folder's frame is not on screen: a copy, a compare, or another pane.
-  const frameHidden = hidden || collapsed || playTarget !== null || compare !== null;
+  // The folder's frame is not on screen: a copy, or another pane.
+  const frameHidden = hidden || collapsed || playTarget !== null;
   // Fold the served identity across reads: a live change or a replaced
   // export remounts the game, unless the person is in it (the chip asks) or
   // it is not on screen (it loads when shown). Absorbed reads return the same
@@ -1537,7 +1522,6 @@ function ThreadGameStage({
                   request={timelineRequest}
                   reelOpen={reelOpen}
                   open={historyOpen}
-                  onOpen={() => setHistoryOpen(true)}
                   undo={{
                     canUndo: turnUndoAllowed("undo"),
                     canRedo: turnUndoAllowed("redo"),
@@ -1552,10 +1536,6 @@ function ThreadGameStage({
                   onPlay={(build) => void playBuild(build)}
                   onPlayUnlisted={(ref) => void playBuild(ref)}
                   onLive={backToLive}
-                  onCompare={(pair) => {
-                    setHistoryOpen(false);
-                    setCompare(pair);
-                  }}
                   // Checks follows the build picked here.
                   onInspect={(build) =>
                     inspectBuild({ threadKey, build: build.id, snapshot: build })
@@ -1601,48 +1581,21 @@ function ThreadGameStage({
       </header>
       {/* Hidden, the game stays mounted out of sight, so showing it again keeps its progress. */}
       <div className={collapsed ? "hidden" : "contents"}>
-        {compare !== null ? (
-          // In the game's own place and size, so the chat under it never moves.
-          <div
-            className="mx-auto flex w-full flex-col"
-            style={
-              stageFit === null
-                ? undefined
-                : { height: stageFit.height, maxWidth: stageFit.width, marginTop: stageFit.pad }
-            }
-          >
-            <GameBuildCompare
-              threadRef={threadRef}
-              pair={compare}
-              viewport={data.viewport}
-              gameName={gameName}
-              hidden={hidden}
-              inspectorOpen={workbenchShown && workbenchTab === "checks"}
-              onPair={setCompare}
-              onClose={() => setCompare(null)}
-            />
-          </div>
-        ) : null}
         {/*
-        The folder's game stays mounted under a copy or a compare, so it keeps
+        The folder's game stays mounted under a copy, so it keeps
         its progress. The engine cannot see CSS hiding (an iframe's document
         stays visible with its parent), so the frame tells the game over
         postMessage to pause and mute while it is not shown.
       */}
         {playTarget !== null ? (
           <div
-            aria-hidden={compare !== null}
             data-game-play-surface="build"
             data-stage-fit=""
-            className={
-              compare === null
-                ? cn(
-                    "group/stage relative flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
-                    stageFit === null ? "flex-1" : "shrink-0",
-                  )
-                : "hidden"
-            }
-            style={compare === null && stageFit !== null ? stageFitStyle : undefined}
+            className={cn(
+              "group/stage relative flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
+              stageFit === null ? "flex-1" : "shrink-0",
+            )}
+            style={stageFit !== null ? stageFitStyle : undefined}
           >
             <GameFrameBox viewport={frameViewport ?? data.viewport} gameName={gameName} playing>
               {playTarget.result._tag === "web" ? (
@@ -1651,7 +1604,7 @@ function ThreadGameStage({
                   url={playTarget.result.url}
                   title={`${gameName}, ${playTarget.label}`}
                   gameName={gameName}
-                  hidden={hidden || collapsed || compare !== null}
+                  hidden={hidden || collapsed}
                   drawsReady={engine?.stageBridge === true}
                   focusRequest={focusRequest?.frame === "copy" ? focusRequest.n : 0}
                   onFrame={setCopyFrame}
@@ -1666,10 +1619,10 @@ function ThreadGameStage({
           </div>
         ) : null}
         <div
-          aria-hidden={playTarget !== null || compare !== null}
+          aria-hidden={playTarget !== null}
           data-stage-fit=""
           className={
-            playTarget === null && compare === null
+            playTarget === null
               ? cn(
                   "relative flex min-h-0 flex-col self-center",
                   stageFit === null
@@ -1678,7 +1631,7 @@ function ThreadGameStage({
                 )
               : "hidden"
           }
-          style={playTarget === null && compare === null ? stageFitStyle : undefined}
+          style={playTarget === null ? stageFitStyle : undefined}
         >
           {noWebGl ? <NoWebGlCard /> : null}
           {/* Inside the Stage's own edges: a build that does not start says so in the Stage's
@@ -1783,15 +1736,10 @@ function ThreadGameStage({
           <GameStageBar
             threadRef={threadRef}
             canLose={data.canLose !== false}
-            playing={phase.kind === "playing" && compare === null && stageKind !== "window"}
-            live={stageKind === "live" && playTarget === null && compare === null}
+            playing={phase.kind === "playing" && stageKind !== "window"}
+            live={stageKind === "live" && playTarget === null}
             stopped={folderDoesNotStart && failureVisible !== null && playTarget === null}
-            canReload={
-              stageKind === "live" &&
-              playTarget === null &&
-              compare === null &&
-              data.previewUrl !== null
-            }
+            canReload={stageKind === "live" && playTarget === null && data.previewUrl !== null}
             rewind={rewind}
             runs={runs}
             onRestart={() => setFrameFold(reloadFrame(frame, Date.now()))}
