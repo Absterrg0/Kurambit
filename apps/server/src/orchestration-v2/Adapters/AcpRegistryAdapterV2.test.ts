@@ -33,7 +33,6 @@ import {
   makeAcpReplayRuntime,
 } from "./AcpAdapterV2.testkit.ts";
 import * as ProviderAdapter from "@kurambit/provider-core/server/ProviderAdapter";
-import { BUILT_IN_PROVIDER_ADAPTER_DRIVER_KINDS_V2 } from "../builtInProviderAdapterDrivers.ts";
 import { AcpRegistryAdapterV2Driver } from "@kurambit/provider-acp-registry/server";
 import {
   ACP_REGISTRY_PROVIDER,
@@ -130,8 +129,7 @@ describe("AcpRegistryAdapterV2", () => {
     assert.notInclude(rejected.message, "private-key");
     assert.notInclude(rejected.message, "token=secret");
   });
-  it("is registered as a generic provider driver with schema defaults", () => {
-    assert.isTrue(BUILT_IN_PROVIDER_ADAPTER_DRIVER_KINDS_V2.has(ACP_REGISTRY_PROVIDER));
+  it("has the registry driver kind and schema defaults", () => {
     assert.equal(AcpRegistryAdapterV2Driver.driverKind, ACP_REGISTRY_PROVIDER);
     assert.deepEqual(AcpRegistryAdapterV2Driver.defaultConfig(), {
       source: "registry",

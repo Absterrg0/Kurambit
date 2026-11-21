@@ -258,7 +258,6 @@
   "src/provider/CodexChatGptSessionLock.test.ts": 0.5,
   "src/provider/CodexDeveloperInstructions.test.ts": 0.1,
   "src/provider/CodexInstallation.test.ts": 0.9,
-  "src/provider/CodexManagedErrors.test.ts": 0.2,
   "src/provider/CodexManagedRuntime.test.ts": 0.4,
   "src/provider/CodexMcpElicitation.test.ts": 0.1,
   "src/provider/CodexProvider.catalog.test.ts": 1.1,
