@@ -317,15 +317,9 @@ what fills it:
   built from named parts (an island's cabin, dock and trees) is followed by its parts, each with
   its own picture. A model your agent is making in Blender is listed from its first review, as
   its sheet, marked **Being made**, and becomes the model when it is exported; a model in code
-  that holds its place until then is marked **Stand-in**. Open a model to inspect it: it turns as you drag it, and under it are its
-  parts, its **Transform** (scale on each axis, together while the lock is on, its turn, and its
-  size), its **Materials** (colour and opacity, an eye to hide one, and glow, roughness, metalness,
-  flat shading and its texture behind **⋯**; a model painted in several colours under one
-  material lists each colour under it, to change on its own), its **Shadows** and its tuned **Values**. A model file the game uses shows that thing's changes in its view too.
-  Double-click a part's name or a material's to rename it; an empty name gives back the game's
-  own. Every change shows at once in the view and in the game, and saves as a build
-  like Tune's values: **Keep as a build**, **Put all back**, and Undo work the same. **Bake into
-  the code** asks your agent to make the changes part of the model's code. An image shows at full
+  that holds its place until then is marked **Stand-in**. Open a model to see it: it turns as you
+  drag it, and under it are its parts and its size. Double-click a model's name to rename it; an
+  empty name gives back the game's own. An image shows at full
   size with its alpha and a sprite sheet's frames; a sound shows its waveform. **Ask about this** adds the asset to your message with
   a picture of the view, and **Show on the Stage** points at it in the paused game. Pointing at a
   thing in the paused game opens it here while Art is showing (or says it has no model); click the

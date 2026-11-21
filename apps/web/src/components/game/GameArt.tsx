@@ -14,7 +14,6 @@ import {
   type GameHeroSheet,
   type GameThing,
   type GameThingFacts,
-  type GameThingValue,
   type ScopedThreadRef,
 } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
@@ -63,8 +62,8 @@ import {
 } from "./GameArtViewers";
 import { GameKeyArt } from "./GameKeyArt";
 import { GameThingPicture, useStageBuild, useThingFacts } from "./GameThingPicture";
-import { colourHex, PropertyReading, PropertyRow, PropertySection } from "../ui/property-field";
-import { GameLookInspector, LabelInput, renameLook, SizeRow } from "./GameLookInspector";
+import { PropertyReading, PropertyRow, PropertySection } from "../ui/property-field";
+import { LabelInput, renameLook, SizeRow } from "./GameArtFields";
 import { useThreadGameName } from "./GameName";
 import { KIND_WORDS, namesOf, useTuneSaver } from "./GameTune";
 import { Workbench } from "./GameWorkbenchParts";
@@ -1077,20 +1076,6 @@ const assetContext = (
     .join("\n");
 };
 
-/** What "Bake into the code" asks: the look's edits made the code's own, then the entry gone. */
-const bakeContext = (thing: GameThing, changed: ReadonlyArray<GameThingValue>) => {
-  const said = (value: number | boolean | undefined, colour: boolean) =>
-    typeof value === "number" && colour ? colourHex(value) : String(value);
-  return [
-    `Bake the person's look edits for "${thing.name}"${thing.path === undefined ? "" : ` (at ${thing.path})`} into the code that builds it, so it looks this way with no override:`,
-    ...changed.map(
-      (value) =>
-        `- ${value.label ?? value.key}: ${said(value.default, value.colour === true)} → ${said(value.value, value.colour === true)} (key \`${value.key}\`)`,
-    ),
-    `They are kept in web/tune.json under \`${gameLookId(thing.id)}\`. Once the code makes it look this way, remove that entry, so nothing applies twice. Change only this thing's code.`,
-  ].join("\n");
-};
-
 const ASSET_KIND_WORDS: Record<GameArtAsset["kind"], string> = {
   model: "model",
   texture: "texture",
@@ -1197,19 +1182,6 @@ function ArtDetail({
           bytesWords(entry.asset.bytes),
         ]
   ).filter((word): word is string => word !== null && word !== "");
-  // "Bake into the code": the look's edits as a chip asking the agent to make them the code's own.
-  const bake = (changed: ReadonlyArray<GameThingValue>) => {
-    if (stageThing === null) return;
-    void attachAssetToComposer(
-      threadRef,
-      {
-        key: `bake:${stageThing.id}`,
-        label: `Bake ${name}'s look`,
-        context: bakeContext(stageThing, changed),
-      },
-      orbit?.png ?? null,
-    );
-  };
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
       <div className="flex h-14 shrink-0 items-center gap-1 ps-2 pe-2">
@@ -1288,11 +1260,8 @@ function ArtDetail({
           threadRef={threadRef}
           build={build}
           entry={entry}
-          thing={stageThing}
-          saver={saver}
           parts={code.filter((model) => model.parent === entry.id)}
           onOpen={onOpen}
-          onBake={bake}
           onDrawn={setOrbit}
           facts={orbit?.facts ?? null}
         />
@@ -1314,8 +1283,6 @@ function ArtDetail({
           info={info}
           onInfo={setInfo}
           onHandle={setHandle}
-          saver={saver}
-          onBake={bake}
         />
       )}
       {heroSheet === undefined ? null : (
@@ -1344,24 +1311,17 @@ function CodeModelDetail({
   threadRef,
   build,
   entry,
-  thing,
-  saver,
   parts,
   facts,
   onOpen,
-  onBake,
   onDrawn,
 }: {
   threadRef: ScopedThreadRef;
   build: string | null;
   entry: GameArtCodeModel;
-  /** The thing as the game on the Stage reports it: its values, for the inspector. */
-  thing: GameThing | null;
-  saver: ReturnType<typeof useTuneSaver>;
   parts: ReadonlyArray<GameArtCodeModel>;
   facts: GameThingFacts | null;
   onOpen: (entry: GameArtEntry) => void;
-  onBake: (changed: ReadonlyArray<GameThingValue>) => void;
   onDrawn: (view: { png: string; facts: GameThingFacts | null }) => void;
 }) {
   const [angle, setAngle] = useState({ yaw: 0.7, pitch: 0.55 });
@@ -1396,15 +1356,6 @@ function CodeModelDetail({
     wanted.current = angle;
     void draw();
   }, [angle, draw]);
-  // A new run names its things again: the inspector stays on the thing as last seen meanwhile.
-  const [lastThing, setLastThing] = useState(thing);
-  if (thing !== null && thing !== lastThing) setLastThing(thing);
-  const shownThing = thing ?? lastThing;
-  // An edit in the inspector draws the view again, from where it stands.
-  const redrawView = () => {
-    wanted.current = { ...wanted.current };
-    void draw();
-  };
   return (
     <>
       <div
@@ -1458,21 +1409,10 @@ function CodeModelDetail({
         ) : null}
       </div>
       <div className="flex flex-col pb-2">
-        {shownThing === null ? (
-          facts === null ? null : (
-            <PropertySection title="Transform">
-              <SizeRow size={facts.size} />
-            </PropertySection>
-          )
-        ) : (
-          <GameLookInspector
-            threadRef={threadRef}
-            thing={shownThing}
-            saver={saver}
-            size={facts?.size ?? null}
-            onEdit={redrawView}
-            onBake={onBake}
-          />
+        {facts === null ? null : (
+          <PropertySection title="Transform">
+            <SizeRow size={facts.size} />
+          </PropertySection>
         )}
         {parts.length === 0 ? null : (
           <PropertySection title="Parts" count={parts.length} collapsible>
@@ -1544,8 +1484,6 @@ function FileDetail({
   info,
   onInfo,
   onHandle,
-  saver,
-  onBake,
 }: {
   threadRef: ScopedThreadRef;
   root: string;
@@ -1558,8 +1496,6 @@ function FileDetail({
   info: ViewerModelInfo | null;
   onInfo: (info: ViewerModelInfo | null) => void;
   onHandle: (handle: ModelViewerHandle | null) => void;
-  saver: ReturnType<typeof useTuneSaver>;
-  onBake: (changed: ReadonlyArray<GameThingValue>) => void;
 }) {
   // The asset's look values as the game on the Stage holds them: ASSETS models carry them.
   const lookValues = (stageThing?.values ?? []).filter(
@@ -1606,15 +1542,7 @@ function FileDetail({
         <FontViewer environmentId={threadRef.environmentId} root={root} asset={asset} />
       )}
       <div className="flex flex-col pb-2">
-        {asset.kind === "model" && stageThing !== null ? (
-          <GameLookInspector
-            threadRef={threadRef}
-            thing={stageThing}
-            saver={saver}
-            size={info?.size ?? null}
-            onBake={onBake}
-          />
-        ) : asset.kind === "model" && info !== null ? (
+        {asset.kind === "model" && info !== null ? (
           <PropertySection title="Transform">
             <SizeRow size={info.size} />
           </PropertySection>
