@@ -38,7 +38,6 @@
   "src/cliAuthFormat.test.ts": 0.2,
   "src/codexModelOptions.test.ts": 0.6,
   "src/compileCache.test.ts": 0.3,
-  "src/desktopUpdate/DesktopAppUpdate.test.ts": 0.3,
   "src/diagnostics/ProcessDiagnostics.test.ts": 0.3,
   "src/diagnostics/ProcessResourceMonitor.test.ts": 0.4,
   "src/diagnostics/TraceDiagnostics.test.ts": 0.4,

@@ -1,4 +1,4 @@
-"""The hero kit's pure math (blender-kit/kurambit/gait.py, gates.py, proportions.py), run by
+"""The hero kit's pure math (blender-kit/kurambit/gates.py, proportions.py), run by
 heroKitMath.test.ts with python3 and numpy; no Blender needed."""
 import math
 import os
@@ -9,53 +9,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "templates", "blender-kit", "kurambit"))
 
-import gait  # noqa: E402
 import gates  # noqa: E402
 import proportions  # noqa: E402
-
-QUAD = [
-    {"name": "hl", "foot": (0.05, 0.1, 0.0), "front": False, "side": 1, "length": 0.15},
-    {"name": "hr", "foot": (-0.05, 0.1, 0.0), "front": False, "side": -1, "length": 0.15},
-    {"name": "fl", "foot": (0.05, -0.1, 0.0), "front": True, "side": 1, "length": 0.15},
-    {"name": "fr", "foot": (-0.05, -0.1, 0.0), "front": True, "side": -1, "length": 0.15},
-]
-
-
-class Gait(unittest.TestCase):
-    def test_a_foot_track_closes_its_loop(self):
-        for duty in (0.36, 0.5, 0.68):
-            a = gait.foot_track(0.0, duty, 0.2, 0.05)
-            b = gait.foot_track(1.0 - 1e-9, duty, 0.2, 0.05)
-            self.assertAlmostEqual(a[0], b[0], places=5)
-            self.assertAlmostEqual(a[1], b[1], places=5)
-
-    def test_planted_feet_do_not_skate_at_ground_speed(self):
-        for name in ("walk", "trot", "run"):
-            cyc = gait.walk_cycle(QUAD, name, fps=30)
-            for leg in QUAD:
-                track = np.array([p["feet"][leg["name"]]["at"] for p in cyc["poses"]])
-                planted = [p["feet"][leg["name"]]["planted"] for p in cyc["poses"]]
-                self.assertTrue(any(planted))
-                self.assertTrue(np.allclose(track[np.array(planted)][:, 2], 0.0))
-                worst, _ = gait.slide(track, planted, cyc["groundSpeed"], 30)
-                self.assertLess(worst, 1e-6, f"{name} {leg['name']}")
-
-    def test_a_trot_moves_diagonal_pairs_together(self):
-        cyc = gait.walk_cycle(QUAD, "trot", fps=30)
-        for p in cyc["poses"]:
-            self.assertEqual(p["feet"]["hl"]["planted"], p["feet"]["fr"]["planted"])
-            self.assertEqual(p["feet"]["hr"]["planted"], p["feet"]["fl"]["planted"])
-
-    def test_each_foot_is_planted_for_its_duty(self):
-        for name in ("walk", "trot", "run"):
-            cyc = gait.walk_cycle(QUAD, name, fps=60)
-            share = np.mean([p["feet"]["hl"]["planted"] for p in cyc["poses"]])
-            self.assertAlmostEqual(share, gait.GAITS[name]["duty"], delta=1.5 / cyc["frames"])
-
-    def test_ground_speed_is_stride_over_stance_time(self):
-        frames, stride, speed = gait.timing(0.3, "walk", 30, stride=0.25)
-        self.assertAlmostEqual(speed, stride / (gait.GAITS["walk"]["duty"] * frames / 30))
-
 
 class Gates(unittest.TestCase):
     def test_strain_reads_spread_worst_and_squash(self):

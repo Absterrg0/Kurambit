@@ -1306,7 +1306,7 @@ function normalizeComposerTarget(
   return target;
 }
 
-export function resolveComposerDraftKey(
+function resolveComposerDraftKey(
   state: ComposerThreadLookupState,
   target: ComposerThreadTarget,
 ): string | null {
