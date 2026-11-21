@@ -12,6 +12,10 @@ modelled.
   cooler at the bottom (`shading.hue` 10° each way). Painters shift 15 to 25° across a ramp;
   about 20° per step is the most they go.
 - Saturation peaks mid-ramp; very bright, very saturated ends burn.
+- Keep swatch values between about sRGB 30 and 240 (`#1e1e1e` to `#f0f0f0`), glow aside: pure
+  black and white lose the ramp.
+- Light and shadow that survive one atlas: bevel faces one step lighter, recesses one step darker,
+  in the same hue (`art-prop`).
 - A painted cell is a 64 x 64 picture in the same atlas: eyes, brows, a mouth, an emblem.
 
 ## Steps
@@ -46,6 +50,11 @@ modelled.
   shading into the colours.
 - Colour by separate parts (a bib, a jaw, a cuff), never by testing each face's position.
 - A decal whose background differs from the surface shows as a patch.
+- Only a material's base colour and glow ship: metallic, roughness, procedural nodes and vertex
+  colours do not (the atlas is matte, `shading.roughness` 0.62). Metal is a light, cool swatch
+  beside a dark one; grain and relief are a baked `kurambit.surface`.
+- A textured or see-through material keeps itself only when the lock has no hex palette; under
+  one it snaps face by face.
 
 ## Checks
 
@@ -63,4 +72,6 @@ Kit only: `kurambit.material`, `kurambit.decal`; the export's style pass builds 
 ## Sources
 
 Pack measurements (ART-RESEARCH §3: KayKit 1024² and Kenney 512² gradient atlases, one material);
-Slynyrd Pixelblog 1 on hue-shifted ramps (read); 80.lv on gradient texturing (read).
+Slynyrd Pixelblog 1 on hue-shifted ramps (read); 80.lv on gradient texturing (read); EL4CTEO's
+blender-skills (MIT) `blender-pbr-materials` (albedo range) and `blender-texturing` (edge wear and
+grime as light and dark), read.

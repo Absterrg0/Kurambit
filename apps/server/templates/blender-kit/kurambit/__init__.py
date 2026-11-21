@@ -9,7 +9,8 @@ weights_along keeps it on its own bones through skin_rigid, joints prints a skel
 paints a face or emblem into the model's atlas, hold, pivot, place_on_surface and grid place things,
 material colours them. blender holds Rigify's meta-rigs (an animal's skeleton), bake_ik_walk and
 Blender's bundled node groups; look is the game's lock as made things read it; voxels makes a voxel
-model from a grid or a .vox; surface bakes a tiling material and wrap maps it in metres.
+model from a grid or a .vox; surface bakes a tiling material and wrap maps it in metres; qa counts the
+faults the game shows that a review's pictures hide (inward faces, flicker).
 
 The earlier craft kits (hero, world, carve) are gone. A model made with them still exports and plays
 from its .blend, but its script no longer rebuilds: kurambit.hero or kurambit.world says so."""
@@ -21,12 +22,13 @@ from .generated import generated
 from .helpers import (aim, decal, eye_lid, eye_squash, grid, hold, key_pose, material, mirror_pose, joints, loft, palette_of, pivot, place_chain, place_on_surface,
                       ring_around, skin_rigid, surface_hit, tube_along_bones, turn, weights_along)
 from .protocol import Refused
+from .qa import qa
 from .review import model_views, motion_strip, review
 from .surfaces import surface, wrap
 from .voxels import voxels
 
 __all__ = ["aim", "animate", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "generated", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "model_views", "motion_strip", "palette_of", "pivot",
-           "place_chain", "place_on_surface", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "voxels", "weights_along", "wrap"]
+           "place_chain", "place_on_surface", "qa", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "voxels", "weights_along", "wrap"]
 
 GONE = ("hero", "world", "carve", "face", "hair", "garment", "cloth", "footwear", "trim", "zones", "anatomy", "creature", "gait")
 

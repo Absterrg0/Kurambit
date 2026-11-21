@@ -1,16 +1,16 @@
 # Studio skills
 
-Craft advice, one skill per file, for the game's engine. A game's first
+Craft advice, a skill per file, for the game's engine. A game's first
 turn needs only what "The first turn" in its first message names.
 
 - `three`: three.js lane: the rules beside the bridge contract, the Stage's Ask.
-- `art-pipeline`: the look kept in STYLE.json, the review loop, making in Blender, generated art, sprites.
+- `art-pipeline`: STYLE.json's look, reviews, Blender, generated art, sprites.
 
 ## Recipes
 
-How people who ship games make one part well: numbers, steps, pitfalls and checks, a page each,
-in `recipes/<id>.md`. Pick at most 3 for this turn, read only those, and name them in game.json
-`"recipes": [...]`; `game_check` then prints each one's numbers.
+How shipped games make one part well, a page each: `recipes/<id>.md`. Pick at most 3 for
+this turn, read only those, and name them in game.json `"recipes": [...]`; `game_check` then
+prints each one's numbers.
 
 - `block-out-first`: the first turn: a moving scene within minutes, improved in place.
 - `opens-on-the-game`: every game's first frame; a title only when asked for.
@@ -29,10 +29,12 @@ in `recipes/<id>.md`. Pick at most 3 for this turn, read only those, and name th
 - `retry-one-press`: any game that can be lost; pause.
 - `art-silhouette`: every made model: masses first, against a reference.
 - `art-palette`: a model's colours: one atlas, painted cells.
+- `art-prop`: crates, barrels, weapons, tables: edges that catch light.
 - `art-humanoid`: a hero or NPC on the standard skeleton.
 - `art-quadruped`: an animal the library lacks.
 - `art-vehicle`: cars, carts, boats.
 - `art-ruin`: walls, arches, houses: pieces on the grid.
 - `art-trees-rocks`: trees, rocks and their scatter.
+- `art-budget`: too many triangles or draws, far copies.
 - `pictures-2d`: cards, tiles, icons, UI art, 2D effects and characters.
 - `voxels`: blocky models, characters and worlds, .vox files.

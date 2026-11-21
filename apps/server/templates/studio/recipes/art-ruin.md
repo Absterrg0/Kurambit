@@ -12,6 +12,8 @@
   bricks (KayKit's broken wall is 784).
 - A KayKit building spends 828 triangles on windows, a door, an awning: detail where the player looks.
 - A third-person camera wants low partitions, about 1.8 m in a 4 m cell.
+- Openings for a 1.8 m hero: doors at least 1 x 2.2 m; rooms 3-4 m to the ceiling; stairs
+  0.18 m rise and 0.28 m tread.
 
 ## Steps
 
@@ -36,7 +38,12 @@
   unsupported line names it.
 - Jitter on end pillars breaks the grid by 2 cm.
 - Rubble inside the piece moves its base and breaks the grid.
-- One unique mesh per wall kills instancing: variety from broken variants and rotation.
+- One unique mesh per wall kills instancing: variety from broken variants, rotation and a trim
+  piece over the joint.
+- A variant mirrored by a negative scale: apply the scale, then `kurambit.qa([piece])` for faces
+  turned inward.
+- A cut edge of a piece that never meets a neighbour (a window's reveal, a broken top) left open
+  is a hole seen from behind; `kurambit.qa` counts open edges.
 
 ## Checks
 
@@ -53,6 +60,7 @@ Plain `bpy` and `bmesh`; `kurambit.grid`, `kurambit.material`.
 
 ## Sources
 
-KayKit Dungeon Remastered `wall_broken`, `wall_arched` (4 x 1 x 4 m, measured); KayKit City
-Builder building (828 triangles); Kurambit's asset study 2026-11-20 (ruin: 1,892 triangles,
-fits the grid); TF2 on repetition (RECIPES A6, read).
+KayKit Dungeon Remastered `wall_broken`, `wall_arched` (4 x 1 x 4 m, measured); KayKit City Builder
+building (828 triangles); Kurambit's asset study 2026-11-20 (ruin: 1,892 triangles, fits the grid);
+TF2 on repetition (RECIPES A6, read); EL4CTEO's blender-skills (MIT) `blender-environment-kits` (kit
+metrics, pivots, mirrored variants), read.

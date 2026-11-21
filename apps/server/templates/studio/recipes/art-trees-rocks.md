@@ -14,6 +14,9 @@ Quaternius Stylized Nature and Kenney Nature come first).
 - Rocks: an icosphere (subdivisions 2-3) displaced by Voronoi at 0.2-0.3 of its radius, decimated
   to 0.3, flat shaded; squash it (z 0.6-0.8) so it sits.
 - Scatter: 3 sizes, scale 0.8-1.2 within a size, rotation about z at random.
+- Scatter density: trees 0.01-0.05 a m² with 4-8 m between trunks, bushes 0.05-0.2, rocks
+  0.01-0.1 tilted most of the way to the slope; no trees on slopes over 25°. Place big to small,
+  bushes kept off the trunks.
 
 ## Steps
 
@@ -62,4 +65,5 @@ Blender's own: Displace with a procedural texture, Decimate, `object.randomize_t
 
 Quaternius Stylized Nature and Kenney Nature triangle counts, measured (ART-RESEARCH §3);
 Quaternius' "Rocks without modeling" and "Easiest Tree Ever" titles (read); Sapling and Generate
-Tree install refusals on 4.5.16, verified 2026-11-20.
+Tree install refusals on 4.5.16, verified 2026-11-20; EL4CTEO's blender-skills (MIT)
+`blender-environment-kits` (scatter densities, slope limits, layering), read.

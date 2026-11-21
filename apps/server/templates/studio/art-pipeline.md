@@ -21,8 +21,8 @@ your yardstick in the review.
 
 ## Art recipes
 
-How the packs build each kind of model is in `recipes/art-*.md` (the index is
-`studio-skills/AGENTS.md`): read the one or two your model needs, no more.
+Each kind of model is a `recipes/art-*.md`, indexed in `studio-skills/AGENTS.md`:
+read the one or two your model needs.
 
 ## The loop
 
@@ -33,9 +33,10 @@ key art, `art/concepts/<name>.png`, or a library model as yardstick
 sets it beside the model at the same framing and reports the overlap, the
 look (materials, hue families, flat share, triangles of the role's budget:
 name it with `obj["kurambit_role"]`), floating and unsupported parts, and a
-character's gates. Fix what the export would refuse first, then silhouette,
-game distance, colour and craft. Write each defect numbered, with its fix,
-before changing anything; "looks good" is not a review. A defect back after
+character's gates; `kurambit.qa([...])` counts what it cannot see (inward
+faces, flicker). Fix what the export would refuse
+first, then silhouette, game distance, colour and craft. Write each defect
+numbered, with its fix, before changing anything; "looks good" is not a review. A defect back after
 two fixes needs another method. Stop when nothing blocking is left, or two
 rounds fixed nothing, and name what is left. `game_blender` op `export`
 writes exactly the reviewed model and its sidecar; name it in the game by
@@ -43,10 +44,11 @@ its sidecar (TEMPLATE.md).
 
 ## Making in Blender
 
+Code for 4.5 and 5.x, or a failed call: `recipes/art-bpy.md`.
 Build parts on a structure, never one sculpted blob: a skeleton's joints, a
 side profile, the 4 m grid. Primitives, `kurambit.loft` (rings on joints),
-bevel, mirror, array, boolean; apply modifiers before export
-(`bpy.ops.object.convert(target="MESH")`). Place features by raycast:
+bevel, mirror, array, boolean; the export applies modifiers (not Armature),
+so leave them live. Place features by raycast:
 `kurambit.place_on_surface(obj, target, (0, 1, 0))`. Models face -Y, +X is
 their left, feet on z 0.
 
@@ -61,12 +63,12 @@ with `kurambit.hold(prop, "r", grip=, tip=)`. A move the library lacks: op
 
 An animal: `kurambit.blender.metarig(kind, height=)` is its skeleton
 (`basic_quadruped`, `horse`, ...); `kurambit.blender.bake_ik_walk` keys its
-clips. A vehicle needs no rig: `kurambit.pivot(wheel, hub, parent=body)`.
+clips.
 
 Set pieces that snap are each their own export, origin where the game
-places them; `kurambit.grid(pieces, 4)` names any gap. What repeats is drawn
-as instances in the game (`M.scatter`, shell/model.js); the ground is code
-(`M.ground`). With the library on, the lock's packs come first. A prop
+places them (`art-ruin`). What repeats is drawn as instances in the game
+(`M.scatter`, shell/model.js); the ground is code (`M.ground`). With the
+library on, the lock's packs come first. A prop
 painted from a turnaround sheet: `game_blender` op `paint`, after the
 model's overlap with the sheet passes about 0.75. Realistic textures (Poly
 Haven, ambientCG) belong only in a realistic lock.
