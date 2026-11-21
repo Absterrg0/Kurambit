@@ -19,6 +19,7 @@ import { RUN_STATE_IGNORES } from "./scaffold.ts";
 import { failureText } from "./run/handBack.ts";
 import { runtimesDirectory } from "./gameRuntime.ts";
 import { insideGame, staysInsideGame } from "./gamePath.ts";
+import { RUNTIME_DTS_MODULES } from "./runtimeDts.ts";
 import { ensureGameDir } from "./gameKeptSaves.ts";
 
 const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManifest));
@@ -52,9 +53,10 @@ const commentBlock = (source: string) => {
 };
 
 /**
- * `studio-skills/runtime.md`: every runtime module's own comment block, each under its import
- * path, after a contents line per module (its first sentence). Written from the modules, so it
- * says what the shipped runtime does and never drifts from it.
+ * `studio-skills/runtime.md`: the comment block of each module a game may import (the ones
+ * runtime.d.ts types, so the two pages offer the same API), each under its import path, after a
+ * contents line per module (its first sentence). Written from the modules, so it says what the
+ * shipped runtime does and never drifts from it.
  */
 const runtimePage = async (runtime: string): Promise<string> => {
   const shell = NodePath.join(runtime, "shell");
@@ -62,13 +64,12 @@ const runtimePage = async (runtime: string): Promise<string> => {
     .then((text) => String((JSON.parse(text) as { version?: unknown }).version ?? ""))
     .catch(() => "");
   const modules = await Promise.all(
-    (await NodeFSP.readdir(shell))
-      .filter((name) => name.endsWith(".js"))
-      .toSorted()
-      .map(async (name) => ({
-        name: `shell/${name}`,
-        block: commentBlock(await NodeFSP.readFile(NodePath.join(shell, name), "utf8")),
-      })),
+    RUNTIME_DTS_MODULES.toSorted().map(async (name) => ({
+      name: `shell/${name}.js`,
+      block: commentBlock(
+        await NodeFSP.readFile(NodePath.join(shell, `${name}.js`), "utf8").catch(() => ""),
+      ),
+    })),
   );
   const documented = modules.filter((module) => module.block !== "");
   const first = (block: string) => {
