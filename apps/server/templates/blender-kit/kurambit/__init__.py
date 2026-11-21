@@ -1,7 +1,7 @@
 """Kurambit's Blender kit: the helpers and entry points the live scene imports as kurambit.
 
-Entry points (each prints one KURAMBIT_RESULT line, or KURAMBIT_REFUSED): animate, character, digest
-and review; paint.paint runs in the one-shot pass, and
+Entry points (each prints one KURAMBIT_RESULT line, or KURAMBIT_REFUSED): animate, character, digest,
+review and rig (a static model rigged on a Mesh2Motion template or on chains, with its clips); paint.paint runs in the one-shot pass, and
 paint.adopt takes its result into the live scene. resolve returns names.
 
 Models are dense surfaces matched to a reference (studio-skills/art-pipeline.md): ref_planes stands
@@ -26,13 +26,14 @@ from .helpers import (aim, decal, eye_lid, eye_squash, grid, hold, key_pose, mat
 from .protocol import Refused
 from .qa import qa
 from .refplanes import ref_planes
+from .rig import run as rig
 from .review import review
 from .skin import one_skin
 from .surfaces import surface, wrap
 from .sweep import sweep
 
 __all__ = ["aim", "animate", "bake_down", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "grid", "hard_surface", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "one_skin", "palette_of", "pivot",
-           "place_chain", "place_on_surface", "qa", "ref_planes", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "sweep", "tube_along_bones", "turn", "weights_along", "wrap"]
+           "place_chain", "place_on_surface", "qa", "ref_planes", "Refused", "resolve", "review", "rig", "ring_around", "skin_rigid", "surface", "surface_hit", "sweep", "tube_along_bones", "turn", "weights_along", "wrap"]
 
 GONE = ("hero", "world", "carve", "face", "hair", "garment", "cloth", "footwear", "trim", "zones", "anatomy", "creature", "gait")
 
