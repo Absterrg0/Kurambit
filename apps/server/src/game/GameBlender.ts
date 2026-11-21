@@ -51,6 +51,7 @@ import {
 } from "@kurambit/contracts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
 import * as GameFreshEyes from "./GameFreshEyes.ts";
+import { pythonFailure } from "./blenderFailure.ts";
 import type { PackClips } from "./GameAssetLibrary.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import {
@@ -1347,7 +1348,9 @@ const make = Effect.gen(function* () {
           )
             ? `${STILL_WORKING}\n`
             : "") +
-            (text.trim() === "" ? `Blender reported an error for '${name}'.` : text.slice(0, 4000)),
+            (text.trim() === ""
+              ? `Blender reported an error for '${name}'.`
+              : `${pythonFailure(text) ?? ""}${text.slice(0, 4000)}`),
         );
       return result;
     });
