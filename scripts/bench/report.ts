@@ -257,9 +257,11 @@ function checkLines(game: BenchGame): Array<string> {
     return [
       `game_check ran ${game.check.calls}×; the last gave no result: ${game.check.refused ?? "unreadable"}`,
     ];
+  // A look's answer carries no errors or warnings list; the bench read the last check either way.
+  const errors = result.errors ?? [];
   const lines = [
-    `game_check ran ${game.check.calls}×; the last: ${result.ok ? "ok" : "not ok"}, ${result.errors.length} error(s), ${result.warnings.length} warning(s).`,
-    ...result.errors.slice(0, 3).map((issue) => `error: ${issue.message.slice(0, 200)}`),
+    `game_check ran ${game.check.calls}×; the last: ${result.ok ? "ok" : "not ok"}, ${errors.length} error(s), ${(result.warnings ?? []).length} warning(s).`,
+    ...errors.slice(0, 3).map((issue) => `error: ${issue.message.slice(0, 200)}`),
   ];
   // Whatever else a newer check reports (the scene report) is shown as it came.
   const extra = Object.entries(result).filter(
