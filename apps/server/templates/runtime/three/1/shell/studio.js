@@ -4,6 +4,17 @@
 // the hidden-stage hold. Extend GameState, not this bridge.
 import { GameState, SHELL_KEYS } from "./run-state.js";
 
+/**
+ * Whether the page, as written, is the older demo shell's: all of its screens as section.screen
+ * elements in index.html. Read here, before any game code runs (shell.js imports the game's
+ * main.js, which may build menus of its own with the same ids): a new match-3 game that made
+ * title, pause and end screens in code was refused as an old one.
+ */
+const OLD_SHELL_SCREENS = ["loading", "title", "pause", "settings", "end", "credits", "controls"];
+export const oldShellPage = OLD_SHELL_SCREENS.every(
+  (id) => document.getElementById(id)?.matches("section.screen") === true,
+);
+
 const MAX_KEYS = 64;
 const MAX_HUD_CHARS = 2000;
 

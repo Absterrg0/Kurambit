@@ -42,7 +42,7 @@
 // its end. A page made on the older demo shell (index.html with its section.screen elements) is
 // not supported: it says so and runs nothing.
 import * as THREE from "../vendor/three.module.js";
-import { errors as studioErrors, installStudio } from "./studio.js";
+import { errors as studioErrors, installStudio, oldShellPage } from "./studio.js";
 import { createQa } from "./qa.js";
 import { createStageBridge, loadTuning } from "./stage-bridge.js";
 import { createSceneReport } from "./scene-report.js";
@@ -84,13 +84,12 @@ const byId = (id) => document.getElementById(id);
 const canvas = byId("game");
 
 /**
- * The older demo shell's page: all of its screens, as section.screen elements. Its games relied on
+ * The older demo shell's page (studio.js reads it before the game's code runs). Its games relied on
  * screens, a HUD kit and a default look this runtime no longer has, so the page says so and runs
  * nothing; the throw is the page's error, which a check or play reports at once. Kurambit tells
  * the person the same before it loads the page (carriesOldShell).
  */
-const OLD_SHELL_SCREENS = ["loading", "title", "pause", "settings", "end", "credits", "controls"];
-if (OLD_SHELL_SCREENS.every((id) => byId(id)?.matches("section.screen") === true)) {
+if (oldShellPage) {
   const message = "This game was made with an older Kurambit and is not supported in this version.";
   const note = document.createElement("p");
   note.textContent = message;
