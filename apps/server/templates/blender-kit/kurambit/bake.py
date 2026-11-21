@@ -11,12 +11,30 @@ MAPS = {"normal": ("NORMAL", set(), False), "ao": ("AO", set(), False), "color":
 GLTF_GROUP = "glTF Material Output"  # the node group Blender's glTF exporter reads occlusion from
 
 
+def _gltf_settings():
+    """Blender's own maker of its glTF settings group (its module moved in Blender 4.3)."""
+    try:
+        from io_scene_gltf2.blender.com.material_helpers import create_settings_group
+    except ImportError:
+        from io_scene_gltf2.blender.com.gltf2_blender_material_helpers import create_settings_group
+    return create_settings_group
+
+
 def _gltf_output():
+    """The group Blender's glTF exporter reads occlusion from, with every input this Blender's glTF
+    importer expects: a group of that name missing one (an earlier kit made it with two) crashed
+    every later import into the scene, the review's included. One made before is completed in place,
+    so the materials using it keep their links."""
     ng = bpy.data.node_groups.get(GLTF_GROUP)
     if ng is None:
-        ng = bpy.data.node_groups.new(GLTF_GROUP, "ShaderNodeTree")
-        ng.interface.new_socket("Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
-        ng.interface.new_socket("Thickness", in_out="INPUT", socket_type="NodeSocketFloat")
+        return _gltf_settings()(GLTF_GROUP)
+    whole = _gltf_settings()("kurambit_gltf_settings")
+    have = {i.name for i in ng.interface.items_tree if getattr(i, "in_out", None) == "INPUT"}
+    for item in whole.interface.items_tree:
+        if getattr(item, "in_out", None) == "INPUT" and item.name not in have:
+            added = ng.interface.new_socket(item.name, in_out="INPUT", socket_type=item.socket_type)
+            added.default_value = item.default_value
+    bpy.data.node_groups.remove(whole)
     return ng
 
 
