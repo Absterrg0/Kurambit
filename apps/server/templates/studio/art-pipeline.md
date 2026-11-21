@@ -50,7 +50,9 @@ low-sided tubes on a skeleton read as a toy robot.
    `game_blender` op `asset_import` `{source: "polyhaven", id, applyTo}`
    (op `asset_search` with assetType `textures` finds one). Procedural
    nodes do not ship: bake them.
-7. Look at the pictures and refine; then export.
+7. Look at the pictures and refine; then export. Your own looks show what
+   you meant: a look with `fresh: true` and `about` shows the picture to a
+   separate model that names the biggest visible defects.
 8. Bake down only if the running game's Performance row says the scene is
    too heavy: `kurambit.bake_down(high, low=)` puts the dense detail into
    normal and AO maps on a light mesh (`recipes/art-budget.md`).

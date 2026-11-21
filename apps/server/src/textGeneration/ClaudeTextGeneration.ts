@@ -132,6 +132,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     outputSchema: outputSchemaJson,
     modelSelection,
     investigate,
+    imagePaths,
   }: TextGenerationOperations.Request<S>): Effect.fn.Return<
     S["Type"],
     TextGenerationError,
@@ -183,11 +184,12 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       "Failed to encode Claude CLI settings.",
     );
 
+    const images = imagePaths ?? [];
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
       const workingDirectory =
-        // A title or a name reads only the prompt: an empty folder keeps any project's own
-        // instructions out of it.
-        operation === "generateThreadTitle" || operation === "generateGameName"
+        // A title, a name or an image review reads only the prompt (and its images): an empty
+        // folder keeps any project's own instructions out of it.
+        operation === "generateThreadTitle" || operation === "generateGameName" || images.length > 0
           ? yield* fileSystem
               .makeTempDirectoryScoped({ prefix: "kurambit-claude-title-" })
               .pipe(
@@ -196,6 +198,24 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
                 ),
               )
           : cwd;
+      // Claude sees an image by reading it: each is copied beside the prompt, and Read is the
+      // one tool it gets, so the answer comes from the pictures and nothing else.
+      const names = images.map(
+        (path, index) => `image-${index + 1}${/\.[a-z0-9]+$/i.exec(path)?.[0] ?? ".png"}`,
+      );
+      yield* Effect.forEach(images, (path, index) =>
+        fileSystem
+          .copyFile(path, `${workingDirectory}/${names[index]}`)
+          .pipe(
+            Effect.mapError((cause) =>
+              normalizeCliError("claude", operation, cause, "Failed to copy an image to review"),
+            ),
+          ),
+      );
+      const asked =
+        images.length === 0
+          ? prompt
+          : `${prompt}\n\nThe images, in the order above: ${names.join(", ")}. Look at every one with the Read tool before answering.`;
       const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
       const spawnCommand = yield* resolveSpawnCommand(
         claudeSettings.binaryPath || "claude",
@@ -219,7 +239,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
                 "--disallowedTools",
                 CLAUDE_INVESTIGATION_DENIED,
               ]
-            : ["--tools", ""]),
+            : images.length > 0
+              ? ["--tools", "Read", "--allowedTools", "Read"]
+              : ["--tools", ""]),
           "--disable-slash-commands",
           // Claude refuses this flag next to a managed-mcp.json, which already keeps the
           // user's own MCP servers out.
@@ -234,7 +256,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         cwd: workingDirectory,
         shell: spawnCommand.shell,
         stdin: {
-          stream: Stream.encodeText(Stream.make(prompt)),
+          stream: Stream.encodeText(Stream.make(asked)),
         },
       });
 
@@ -322,5 +344,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
   });
 
-  return TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson);
+  return TextGenerationOperations.fromRunner("ClaudeTextGeneration", runClaudeJson, {
+    images: true,
+  });
 });

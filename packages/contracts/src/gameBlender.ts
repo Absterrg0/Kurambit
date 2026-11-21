@@ -50,6 +50,13 @@ export const GameBlenderLookInput = Schema.Struct({
         "review: a picture set beside the model to look at (the person's, or a sheet drawn for this subject). A game-relative PNG, JPEG or WebP.",
     }),
   ),
+  /**
+   * Fresh eyes: a separate model that knows only `about` and the game's brief sees the picture
+   * and names its biggest visible defects. Your own looks show what you meant; this shows what is there.
+   */
+  fresh: Schema.optionalKey(Schema.Boolean),
+  /** With fresh: what the picture is meant to show ("the goblin thief, the game's main enemy"). */
+  about: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(300))),
 });
 export type GameBlenderLookInput = typeof GameBlenderLookInput.Type;
 export const GameBlenderLookScreenshot = Schema.Struct({

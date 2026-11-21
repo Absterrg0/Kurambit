@@ -50,6 +50,7 @@ import {
   type ThreadId,
 } from "@kurambit/contracts";
 import * as GameAssetLibrary from "./GameAssetLibrary.ts";
+import * as GameFreshEyes from "./GameFreshEyes.ts";
 import type { PackClips } from "./GameAssetLibrary.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import {
@@ -689,6 +690,7 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
+  const freshEyes = yield* GameFreshEyes.GameFreshEyes;
   const sessions = new Map<string, Session>();
   /**
    * Blender's user folder (the pinned addon, MPFB2, preferences), one per Blender version for
@@ -1882,6 +1884,45 @@ const make = Effect.gen(function* () {
    * Look's review mode: digest the objects, reuse the pass of that key or run it, then
    * render its composite in a throwaway scene of the live session.
    */
+  /**
+   * With fresh, the look's picture also goes to a separate model (GameFreshEyes), whose defects
+   * follow the look's own text. The picture is kept under builds/logs/fresh-eyes.
+   */
+  const freshLook = (
+    threadId: ThreadId,
+    root: string,
+    input: GameBlenderLookInput,
+    result: GameBlenderLookResult,
+  ) =>
+    input.fresh !== true
+      ? Effect.succeed(result)
+      : Effect.gen(function* () {
+          const image =
+            result.review !== undefined
+              ? NodePath.join(root, result.review.image)
+              : result.screenshot !== undefined
+                ? yield* Effect.promise(async () => {
+                    const dir = NodePath.join(root, "builds", "logs", "fresh-eyes");
+                    await NodeFSP.mkdir(dir, { recursive: true });
+                    const file = NodePath.join(dir, `look-${Date.now()}.png`);
+                    await NodeFSP.writeFile(file, Buffer.from(result.screenshot!.data, "base64"));
+                    return file;
+                  })
+                : null;
+          if (image === null)
+            return {
+              ...result,
+              text: `${result.text}\nFresh eyes need a picture, and this look made none.`,
+            };
+          const seen = yield* freshEyes.review({
+            threadId,
+            root,
+            images: [image],
+            about: input.about,
+          });
+          return { ...result, text: `${result.text}\n\n${seen}` };
+        });
+
   const review = (root: string, input: GameBlenderLookInput) =>
     Effect.gen(function* () {
       const short = yield* memoryShortfall(
@@ -2184,7 +2225,7 @@ const make = Effect.gen(function* () {
                 height: size.height,
               },
             };
-          }),
+          }).pipe(Effect.flatMap((result) => freshLook(threadId, root, input, result))),
         ),
       ),
     animate: (threadId, input) =>

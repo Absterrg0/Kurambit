@@ -1,5 +1,6 @@
 import * as GameAssetLibrary from "./game/GameAssetLibrary.ts";
 import * as GameBlender from "./game/GameBlender.ts";
+import * as GameFreshEyes from "./game/GameFreshEyes.ts";
 import * as GameBot from "./game/GameBot.ts";
 import * as GameBuildCopies from "./game/GameBuildCopies.ts";
 import * as GameEngine from "./game/GameEngine.ts";
@@ -538,6 +539,7 @@ const layerGameOperations = GameStage.layer.pipe(
   Layer.provideMerge(GameExport.layer),
   Layer.provideMerge(GameEngine.layer),
   Layer.provideMerge(GameBlender.layer),
+  Layer.provide(GameFreshEyes.layer),
   // After the editors, so every heavy start, editor opens included, shares one gate.
   Layer.provide(GameMemoryGate.layer),
   Layer.provideMerge(GameAssetLibrary.layer),
