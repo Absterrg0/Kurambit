@@ -209,15 +209,13 @@ check that matters.
   only under `finish: "flat"`: the export flattening every model to one matte pack look was the
   harness deciding taste (judges read it as "plain, flat-shaded"), so only the person's lock asks
   for it. Voxel models, a material per colour, take an atlas of their own colours either way.
-  Budgets by role are taken from the packs, and the review's
-  numbers (`review.py`, `compare.py`: silhouette overlap against a reference picture or a library
-  model, width by tenths of height, thin parts at game distance) as the loop's eyes. Every subject
-  is built as parts on a structure, the way the packs' own files are split (KayKit's Rogue is a
-  head rigid to one bone plus separate torso, arm and leg parts): lofted rings on a skeleton's
-  joints, a side profile extruded, coursed blocks on the grid. One sculpted blob decimated to
-  budget has no edge loops and shades as noise. The recipes in `templates/studio/recipes/` carry
-  the method; the kit adds only `loft`, `weights_along`, `bake_ik_walk`, `decal` and the joint
-  print.
+  The art method is the one that wins against a bare agent (art-pipeline.md): a reference first,
+  one continuous dense surface per body region (a base body, or `sweep` regions fused by
+  `one_skin`), rigid pieces only for what is rigid (`hard_surface`), and `bake_down` only when the
+  running scene is too heavy. Parts of low-sided lofted tubes on a skeleton, the earlier method,
+  measured like the packs and judged against a library yardstick's silhouette, came out as "a
+  pile of unmodified primitives" (2/10 on the model bench); nothing in the harness sets a model's
+  triangles or proportions now. The review's pictures (`review.py`) are the loop's eyes.
 - Recipes (`templates/studio/recipes/`) are indexed in the studio `AGENTS.md`, which the game's
   AGENTS.md points at, never left for the agent to discover: Vercel's evals saw an available
   skill go unopened in 56% of tasks, and an index always in view score 100%. They are advice the

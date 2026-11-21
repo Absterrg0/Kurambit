@@ -26,7 +26,7 @@ const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(GameManife
 
 // The pack's own AGENTS.md is the one index, so this line cannot drift from the pack.
 const SKILLS_HEADING = "## Studio skills (read the ones this turn needs)";
-const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md with its recipes: read the index, then the recipes you pick.\n`;
+const SKILLS_LINE = `\n\n${SKILLS_HEADING}\n\nCraft advice lives in ./studio-skills, indexed in ./studio-skills/AGENTS.md: read the index, then the notes the work needs.\n`;
 
 const readText = (path: string): Promise<string | null> =>
   NodeFSP.readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -96,9 +96,42 @@ const ioError = (operation: string, path: string, cause: unknown) =>
     cause,
   });
 
-/** Skills that became recipes (studio/recipes/): a refresh takes the old copies out of a game. */
-/** Recipes Kurambit no longer ships: a refresh takes them out of a game too. */
-const RETIRED_SKILLS = ["playtest.md", "audio.md", "pictures.md", "voxels.md", "recipes/voxels.md"];
+/** Skills and recipes Kurambit no longer ships: a refresh takes the old copies out of a game. */
+const RETIRED_SKILLS = [
+  "playtest.md",
+  "audio.md",
+  "pictures.md",
+  "voxels.md",
+  ...[
+    "voxels",
+    "art-humanoid",
+    "art-palette",
+    "art-prop",
+    "art-quadruped",
+    "art-ruin",
+    "art-silhouette",
+    "art-trees-rocks",
+    "art-vehicle",
+    "attack-telegraph",
+    "block-out-first",
+    "boat-buoyancy",
+    "controller-feel",
+    "hit-feel",
+    "hud-that-reads",
+    "light-rig",
+    "opens-on-the-game",
+    "pictures-2d",
+    "readable-boss",
+    "retry-one-press",
+    "sky-fog",
+    "sound-set-mix",
+    "stylised-sea",
+    "tension-release",
+    "third-person-camera",
+    "time-of-day",
+    "weather-fx",
+  ].map((id) => `recipes/${id}.md`),
+];
 
 /**
  * The studio skills as this server ships them, for the game's engine only (a role told to read

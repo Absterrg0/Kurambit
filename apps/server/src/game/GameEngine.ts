@@ -679,7 +679,7 @@ const make = Effect.gen(function* () {
               operation: "game-pictures",
               path: root,
               reason: "invalid-input",
-              detail: `pictures takes output, template, rows [{name, ...}], size [w, h], and for animations frames, fps, loop; pivot [x, y] (studio-skills/recipes/pictures-2d.md): ${decoded.failure.message.slice(0, 800)}`,
+              detail: `pictures takes output, template, rows [{name, ...}], size [w, h], and for animations frames, fps, loop; pivot [x, y]: ${decoded.failure.message.slice(0, 800)}`,
             });
           const manifest = yield* projects.read(root);
           const realRoot = yield* Effect.tryPromise({

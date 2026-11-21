@@ -26,6 +26,7 @@ import { publishedInputSchema } from "../mcp/McpHttpServer.ts";
 
 /** The model choices whose first turns differ. */
 const CHOICES = {
+  any: { characters: "any", library: false },
   blender: { characters: "blender", library: false },
   code: { characters: "code", library: false },
   "code with the library": { characters: "code", library: true },
@@ -40,12 +41,14 @@ const CHOICES = {
  * On 2026-11-20 three.md sent the API to runtime.d.ts: Blender reads 11,071, code 10,759 and the
  * library 10,837. These left out studio-skills/AGENTS.md (745), which the
  * game's AGENTS.md points at; it is counted since it holds the recipe index (2026-11-20, 2,069
- * with all 24 recipes): Blender 13,140, code 12,828, the library 12,906.
+ * with all 24 recipes): Blender 13,140, code 12,828, the library 12,906. On 2026-11-21 the index
+ * shrank to six notes and the default became the agent's choice ("any"), which reads 11,574.
  */
 const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
-  blender: 13_300,
-  code: 13_300,
-  "code with the library": 13_300,
+  any: 12_000,
+  blender: 12_000,
+  code: 12_000,
+  "code with the library": 12_000,
 };
 /**
  * Bytes a three.js chat's agent reads of its game tools with every call, descriptions and input
@@ -58,7 +61,8 @@ const FIRST_TURN_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
  * On 2026-11-20 the ops went from 45 to 29 (the copy's ops moved to game_copy, listed only in a
  * copy): code reads 8,692 and the Blender listings 15,852.
  */
-const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", number>> = {
+const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES, number>> = {
+  any: 16_000,
   code: 8_800,
   "code with the library": 16_000,
   blender: 16_000,
@@ -69,9 +73,11 @@ const LISTED_TOOLS_BUDGET: Readonly<Record<keyof typeof CHOICES | "blender", num
  * a model. It was 36,030 (5,483 words, a recipe per craft helper) until 2026-11-20, when it became
  * the packs' rules, each naming the number the review reports for it (10,373). Later that day the
  * craft moved into the art recipes it indexes, read one or two at a time (7,627), and the index
- * moved to the studio AGENTS.md with every recipe's (6,994).
+ * moved to the studio AGENTS.md with every recipe's (6,994). On 2026-11-21 it became the method
+ * that wins (reference, dense surfaces, rigid only what is rigid) with its notes read on demand
+ * (4,617).
  */
-const ART_SKILL_BUDGET = 7_100;
+const ART_SKILL_BUDGET = 5_000;
 
 const template = (path: string) =>
   NodeFS.readFileSync(new URL(`../../templates/${path}`, import.meta.url), "utf8");

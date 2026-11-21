@@ -4,36 +4,15 @@ Craft advice, a skill per file. A game's first turn needs only what
 "The first turn" in its first message names.
 
 - `three`: three.js rules beside the bridge contract; the Stage's Ask.
-- `art-pipeline`: STYLE.json's look, reviews, Blender, sprites.
+- `art-pipeline`: how good models are made, STYLE.json's look, the Blender loop.
 
-## Recipes
+## Notes
 
-How shipped games make one part well: `recipes/<id>.md`. Read only the ones the work needs.
+Technique notes, `recipes/<id>.md`, read when the work needs one:
 
-- `block-out-first`: the first turn: a moving scene in minutes, improved in place.
-- `opens-on-the-game`: every game's first frame; a title only when asked.
-- `light-rig`: a lit 3D scene by day: sun, bounce, tone mapping, shadows.
-- `sky-fog`: outdoors: sky, sun-tinted fog, distance.
-- `time-of-day`: dusk, night, any mood: glowing lamps and windows, bloom.
-- `weather-fx`: rain, snow, wet ground, lightning, mist.
-- `stylised-sea`: open water: swell, depth colour, foam.
-- `boat-buoyancy`: a hull on water: float, steer, wake.
-- `third-person-camera`: a character steered from behind.
-- `hit-feel`: any hit: hit stop, flash, knockback, shake.
-- `attack-telegraph`: enemy attacks: windup, active, recovery.
-- `controller-feel`: run, jump, dash.
-- `readable-boss`: a duel or one foe the game is about.
-- `hud-that-reads`: HUD, prompts, menus: text size, placement.
-- `sound-set-mix`: every game: its sounds and their mix.
-- `tension-release`: threats over time: waves, a boss, a chase.
-- `retry-one-press`: any game that can be lost; pause.
-- `art-silhouette`: every made model: masses first, to a reference.
-- `art-palette`: one atlas, when the person locks a palette.
-- `art-prop`: crates, barrels, weapons: edges that catch light.
-- `art-humanoid`: a hero or NPC on the standard skeleton.
-- `art-quadruped`: an animal the library lacks.
-- `art-vehicle`: cars, carts, boats.
-- `art-ruin`: walls, arches, houses: pieces on the grid.
-- `art-trees-rocks`: trees, rocks, their scatter.
-- `art-budget`: too many triangles or draws, far copies.
-- `pictures-2d`: cards, tiles, icons, UI art, 2D effects, characters.
+- `art-bpy`: Blender 5 bpy traps, before the first Blender call.
+- `art-characters`: people and creatures, one skin to a reference.
+- `art-hard-surface`: props, vehicles, buildings.
+- `art-rigging`: skeletons, weights, clips.
+- `art-budget`: too heavy for the scene: bake and thin.
+- `light`: light, sky, time of day, weather.

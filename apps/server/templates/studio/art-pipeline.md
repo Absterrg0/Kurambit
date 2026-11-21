@@ -1,75 +1,89 @@
 # Art pipeline
 
 Adapted from OhMyGame's sprite-pipeline and game-ui-frontend skills (Apache-2.0).
-The live Blender behind `game_blender` is your renderer and modeller; you
-have no other. Its `code` op runs plain `bpy`, relative paths from the game
-root (`~` is its own home); print every path you write. `<assets>` is
-`web/assets/` for three.js. Every file's source and licence is in ASSETS.md
-(the tools write their own lines); unknown-source files do not ship.
+The live Blender behind `game_blender` is your modeller and renderer. Its
+`code` op runs plain `bpy` (Blender 5.x: `recipes/art-bpy.md` before your
+first call), relative paths from the game root; print every path you write.
+`<assets>` is `web/assets/` for three.js. Every file's source and licence is
+in ASSETS.md (the tools write their own lines); unknown-source files do not
+ship.
 
 ## The look: STYLE.json
 
 `game_assets` op `lock` records `view`, `scale.character` (metres),
-`budget`, `shape.edges`. Models ship with your own materials (metal, glass,
-glow). A `palette` with `finish: "flat"` is the pack look, every model on
-one atlas (`recipes/art-palette.md`): only when the person chose it.
-Change direction by locking again, never by drift. How models are made is
-the person's choice in game.json: `characters` (`blender` or `code`) and
-`library` (off by default). Read both before any model; an
-unrigged model is a prop on every route. With the library off its models
-are refused, but its clips and sounds come in.
+`budget` and `shape.edges`. Models ship with your own materials and
+textures. A `palette` with `finish: "flat"` puts every model on one atlas:
+only when the person chose it. How models are made is in game.json:
+`characters` `any` (you choose per model; Blender is recommended for
+anything sculpted or hard-surface), or `blender` or `code` when the person
+locked one, and `library` (off by default: its models stay out, its clips
+and sounds come in).
 
-## Art recipes
+## The method
 
-Each kind of model is a `recipes/art-*.md`, indexed in `studio-skills/AGENTS.md`:
-read the one or two your model needs.
+Good models are one continuous, dense surface per body region, matched to
+a reference, with rigid pieces only where the thing is rigid. Parts of
+low-sided tubes on a skeleton read as a toy robot.
+
+1. Reference first. The person's picture, the brief's key art, or a front
+   and side sheet you draw for this subject (`art/concepts/<name>.png`).
+   `kurambit.ref_planes(front=, side=, height=)` stands them behind the
+   model with an orthographic camera each; match proportions before any
+   detail.
+2. Block the masses at real size (a 1.8 m person, a 0.9 m door), facing
+   -Y, +X their left, feet on z 0.
+3. Dense form, one surface per region:
+   - a body from a base: `game_blender` op `character` with `body`
+     `{studio: {gender}}` (a drawn stylised body, no install), `mpfb`
+     (a realistic human), `library` or `game`, reshaped by `style` factors;
+   - or from scratch: `kurambit.sweep(path, stations, sides=48-96)` per
+     region (torso, limb, neck, tail, hull, trunk), fused with
+     `kurambit.one_skin([...], voxel=, smooth=)`, then a Subdivision
+     modifier.
+4. Rigid only what is rigid: armour plates, weapons, buckles, wheels,
+   doors, each a `kurambit.hard_surface(obj, cutters=, bevel=)` piece
+   (boolean, bevel by angle, weighted normals).
+5. Cloth as shells of the body: a copy of the body's faces, shrinkwrapped
+   and solidified 1-3 cm, so it bends with it. Hair as a sweep or cards.
+6. Materials: Principled with real roughness and metal, variation and
+   wear (a darker recess, a lighter worn edge, a tiling surface from
+   `kurambit.surface`). Procedural nodes do not ship: bake them.
+7. Look at the pictures and refine; then export.
+8. Bake down only if the running game's Performance row says the scene is
+   too heavy: `kurambit.bake_down(high, low=)` puts the dense detail into
+   normal and AO maps on a light mesh (`recipes/art-budget.md`).
+
+Notes on demand: `recipes/art-characters.md` (people, animals),
+`recipes/art-hard-surface.md` (props, vehicles, buildings),
+`recipes/art-rigging.md` (skeletons, weights, clips),
+`recipes/art-budget.md`, `recipes/light.md`.
+
+## Characters and creatures
+
+Model them in an A-pose (arms 30-45° down, clear of the body; legs apart),
+facing -Y, with every prop (sword, shield, bag) a separate object, and four
+legs separated down to the feet: a rig is fitted to the joints, and weights
+come from Blender's automatic weights on the body, with props rigid on one
+bone. Keep the joint positions you built on (shoulder, elbow, wrist, hip,
+knee, ankle, neck, head top, tail root) where your code can print them.
 
 ## The loop
 
 Model, then look: `game_blender` op `look` with `mode: "review"` renders a
-turnaround, clay, game distance and a character's clips, with `reference`
-(the brief's picture, the person's, or `art/concepts/<name>.png`) beside it,
-and prints what it measured; `kurambit.qa([...])` counts what it cannot see
-(inward faces, flicker). Change what the picture shows is wrong, and look
-again. `game_blender` op `export` runs the same pass, writes the model and
-its sidecar and prints the same facts; it refuses only a file that would be
-broken in the game. Name it in the game by its sidecar (TEMPLATE.md).
+turnaround, clay, silhouettes, game distance, a character's clips and the
+`reference` picture beside it, and prints what it measured;
+`kurambit.qa([...])` counts what pictures hide (inward faces, flicker).
+Change what the picture shows is wrong and look again; you decide when it
+is good. `game_blender` op `export` runs the same pass, writes the GLB and
+its sidecar and prints the same facts; it refuses only a file that would
+be broken in the game. Load it in the game by its sidecar (TEMPLATE.md).
+The export applies every modifier but Armature: leave them live.
 
-## Making in Blender
-
-Code for 4.5 and 5.x, or a failed call: `recipes/art-bpy.md`.
-Build parts on a structure, never one sculpted blob: a skeleton's joints, a
-side profile, the 4 m grid. Primitives, `kurambit.loft` (rings on joints),
-bevel, mirror, array, boolean; the export applies modifiers (not Armature),
-so leave them live. Place features by raycast:
-`kurambit.place_on_surface(obj, target, (0, 1, 0))`. Models face -Y, +X is
-their left, feet on z 0.
-
-A humanoid: `game_blender` op `character` puts the standard skeleton, sized,
-with the library's clips (`clips` by name; the standard set has no attack:
-`Sword_Attack`, `Punch_Jab` or `Spell_Simple_Shoot`). `body: "none"` gives the
-skeleton and its joint print to model parts on; a body (`library`, `mpfb`,
-`game`) comes painted in the material `<name> skin`. Parts bind with
-`kurambit.skin_rigid(part, "Head")` or `kurambit.weights_along`; a hand holds
-with `kurambit.hold(prop, "r", grip=, tip=)`. A move the library lacks: op
-`animate`, poses on beats from a library pose.
-
-An animal: `kurambit.blender.metarig(kind, height=)` is its skeleton
-(`basic_quadruped`, `horse`, ...); `kurambit.blender.bake_ik_walk` keys its
-clips.
-
-Set pieces that snap are each their own export, origin where the game
-places them (`art-ruin`). What repeats is drawn as instances in the game
-(`M.scatter`, shell/model.js); the ground is code (`M.ground`). With the
-library on, the lock's packs come first. A prop
-painted from a turnaround sheet: `game_blender` op `paint`, after the
-model's overlap with the sheet passes about 0.75. Realistic textures (Poly
-Haven, ambientCG) belong only in a realistic lock.
+What repeats is drawn as instances in the game (`M.scatter`,
+shell/model.js); the ground is code (`M.ground`). A model painted from a
+turnaround sheet: `game_blender` op `paint`.
 
 ## Key art
 
-Render it from the game's real assets at
-1280x720 in a throwaway scene removed in `finally`, view transform
-`Standard`. Open every PNG you render.
-
-Other kinds of art: `recipes/pictures-2d.md` (cards, tiles, icons, UI art, 2D characters).
+Render it from the game's real assets at 1280x720 in a throwaway scene
+removed in `finally`, view transform `Standard`. Open every PNG you render.

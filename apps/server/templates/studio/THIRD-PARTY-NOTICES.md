@@ -8,11 +8,11 @@
 Copyright (c) 2026 EL4CTEO, https://github.com/EL4CTEO/blender-skills, read through Patch's fork
 cloud-blender-skills (https://github.com/patch-gg/cloud-blender-skills, MIT, the same licence) at
 commit d659b96. It is not vendored and none of its scripts run here. These recipes rewrite its
-technique and numbers for the atlas export and three.js; their Sources line names the skill each
+technique and numbers for Kurambit's export and three.js; their Sources line names the skill each
 drew on:
 
-- `recipes/art-prop.md`, `recipes/art-bpy.md` and `recipes/art-budget.md`;
-- additions to `recipes/art-palette.md`, `recipes/art-ruin.md` and `recipes/art-trees-rocks.md`.
+- `recipes/art-bpy.md`, `recipes/art-hard-surface.md`, `recipes/art-budget.md` and
+  `recipes/light.md`.
 
 ```
 MIT License

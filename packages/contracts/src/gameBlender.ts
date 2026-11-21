@@ -269,7 +269,7 @@ export const GameAnimateInput = Schema.Struct({
   character: BlenderName,
   /** The clip's name in the game; animating it again replaces it. */
   clip: Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,47}$/)),
-  /** The move: {start?, poses?, craft?, beats: [{at, pose?, ease?, ...pose keys}]}, as studio-skills/art-pipeline.md describes it. */
+  /** The move: {start?, poses?, craft?, beats: [{at, pose?, ease?, ...pose keys}]}, as the kit's animate module describes it (op code: print(sys.modules["kurambit.animate"].__doc__)). */
   spec: Schema.Record(Schema.String, Schema.Unknown),
   /**
    * The library clip measured beside it: "Sword_Regular_Combo" or "<pack-id>:<clip>". Omitted:

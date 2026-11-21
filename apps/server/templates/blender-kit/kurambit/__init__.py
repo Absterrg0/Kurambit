@@ -4,10 +4,12 @@ Entry points (each prints one KURAMBIT_RESULT line, or KURAMBIT_REFUSED): animat
 and review; paint.paint runs in the one-shot pass, and
 paint.adopt takes its result into the live scene. resolve returns names.
 
-Models are parts on a structure (studio-skills/recipes): loft makes a part as rings on its joints,
-weights_along keeps it on its own bones through skin_rigid, joints prints a skeleton's joints, decal
-paints a face or emblem onto the model, hold, pivot, place_on_surface and grid place things,
-material colours them. blender holds Rigify's meta-rigs (an animal's skeleton), bake_ik_walk and
+Models are dense surfaces matched to a reference (studio-skills/art-pipeline.md): ref_planes stands
+the reference behind the model, sweep makes one continuous surface along a centreline, one_skin
+fuses regions into one, hard_surface cuts and bevels rigid parts, bake_down puts a dense model's
+detail onto a light one. skin_rigid binds a rigid part to a bone (weights_along keeps a part on its
+own bones), joints prints a skeleton's joints, decal paints a face or emblem onto the model, hold,
+pivot, place_on_surface and grid place things, material colours them; loft is a coarse sweep. blender holds Rigify's meta-rigs (an animal's skeleton), bake_ik_walk and
 Blender's bundled node groups; look is the game's lock as made things read it; surface bakes a tiling material and wrap maps it in metres; qa counts the
 faults the game shows that a review's pictures hide (inward faces, flicker).
 
@@ -41,5 +43,5 @@ def __getattr__(name):
         # bare "cannot import name", and that is how the old scripts imported these.
         raise ImportError(
             f"kurambit.{name} was removed: the craft helpers it held are gone. A model made with it still exports from its "
-            ".blend; to make it again, build it as parts with loft, skin_rigid and weights_along (studio-skills/recipes).")
+            ".blend; to make it again, build it with sweep, one_skin and hard_surface (studio-skills/art-pipeline.md).")
     raise AttributeError(f"module 'kurambit' has no attribute {name!r}")

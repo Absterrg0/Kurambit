@@ -21,9 +21,11 @@ on a name, a context or a missing attribute.
   - the compositor is `scene.compositing_node_group`, not `scene.node_tree`; a mix node's
     sockets share names (`A`, `B`): index them.
 - Principled inputs: `Emission Color`, `Specular IOR Level`, `Transmission Weight`, `Coat Weight`,
-  `Subsurface Weight`. They ship in the GLB unless a palette is locked; procedural nodes never
-  do: bake them to textures.
-- A review costs about 40 s; printing numbers in the same code call costs nothing.
+  `Subsurface Weight`. They ship in the GLB with UVs, image textures and normal maps unless a
+  palette is locked; procedural nodes never do: bake them to textures.
+- Sculpt Mode operators crash in background Blender: shape with modifiers (Remesh, Smooth,
+  Displace, Shrinkwrap), bmesh or numpy, or `kurambit.one_skin`.
+- A review renders for tens of seconds; printing numbers in the same code call costs nothing.
 
 ## Steps
 
@@ -44,7 +46,7 @@ on a name, a context or a missing attribute.
 6. Find nodes by `type` (`"BSDF_PRINCIPLED"`), never by name; read an enum's values instead of
    guessing: `[i.identifier for i in T.bl_rna.properties["x"].enum_items]`.
 7. End each building call with the numbers it changed: `o.dimensions`, triangles,
-   `kurambit.qa([...])`. Review when the shape or colour changed, not to find out whether code ran.
+   `kurambit.qa([...])`. Look when the shape or colour changed, not to find out whether code ran.
 
 ## Pitfalls
 
