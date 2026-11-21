@@ -147,6 +147,9 @@ export const LIBRARY_RIG_JOINTS: Readonly<Record<string, ReadonlyArray<string>>>
   ],
 };
 
+/** The pack game_blender op character's rigs and clips come from. */
+export const MESH2MOTION_PACK = "mesh2motion-rigs";
+
 /** The skeleton made characters are conformed to. */
 export const STANDARD_RIG = STANDARD_SKELETON;
 
@@ -201,6 +204,11 @@ export const LIBRARY_FAMILIES: ReadonlyArray<LibraryFamily> = [
     id: "quaternius-universal",
     title: "Quaternius universal animation",
     look: "humanoid bodies and two animation libraries on one standard skeleton; game_blender op character conforms any body to it",
+  },
+  {
+    id: "mesh2motion",
+    title: "Mesh2Motion rigs",
+    look: "skeletons with hand-keyed clips for people, four-legged animals, horses, birds, dragons, kaiju, spiders, snakes and fish; game_blender op character rigs a model on them",
   },
   {
     id: "kenney-pixel",
@@ -823,6 +831,31 @@ export const CURATED_PACKS: ReadonlyArray<LibraryPack> = [
     family: "quaternius-universal",
     rig: STANDARD_RIG,
     root: "Universal Base Characters[Standard]",
+  },
+  {
+    // Mirrored from Mesh2Motion's built assets (the app repository has no release archive);
+    // only the base rigs, reference bodies and clips, all CC0. The variation bodies stay out:
+    // some are CC-BY or CC-SA (the pack's NOTICE.md names them).
+    id: MESH2MOTION_PACK,
+    title: "Mesh2Motion rigs and clips",
+    author: "Scott Petrovic (Mesh2Motion)",
+    source:
+      "https://github.com/scottpetrovic/mesh2motion-app/tree/017169ae6f7574d8fa75d893c38c2776386ca40b/static/assets",
+    download:
+      "https://github.com/Absterrg0/Kurambit/releases/download/library-mirror-2026-11/mesh2motion-rigs-2026-11.zip",
+    sha256: "95a4175d351cce58c80d8cc1befaddf074285937514b546c1664a002c74bb916",
+    bytes: 6798785,
+    licence: "CC0-1.0",
+    licenceEvidence:
+      "https://github.com/scottpetrovic/mesh2motion-app/blob/017169ae6f7574d8fa75d893c38c2776386ca40b/LICENSE-CC0.MD",
+    kinds: ["animation"],
+    formats: ["glb", "json"],
+    style: "rigs with hand-keyed clips",
+    tags: "3d rig skeleton animation clips human fox dog horse bird dragon kaiju spider snake fish idle walk run attack",
+    description:
+      "Nine rigs with about 326 clips (human 234, fox 21, horse 14, dragon 12, spider 11, kaiju 10, bird 9, snake 8, fish 7); game_blender op character rigs a model on one.",
+    family: "mesh2motion",
+    root: "mesh2motion",
   },
   {
     id: "quaternius-universal-animation-library-2",
