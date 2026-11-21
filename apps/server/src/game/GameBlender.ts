@@ -344,6 +344,16 @@ const decodeRigged = Schema.decodeUnknownEffect(
   }),
 );
 /** What kurambit.scan prints: the materials that took the scan, and at what size. */
+/**
+ * A model's parts in a sentence: the first few named, the rest counted. The whole list rides in a
+ * result's details; spelled out in its text, 94 armour pieces filled an answer's byte cap and cut
+ * what came after them (73 export and review texts across 68 bench transcripts).
+ */
+const someNames = (names: ReadonlyArray<string>, most = 8) =>
+  names.length <= most
+    ? names.join(", ")
+    : `${names.slice(0, most).join(", ")} and ${names.length - most} more (${names.length} objects)`;
+
 const decodeScanned = Schema.decodeUnknownEffect(
   Schema.Struct({
     materials: Schema.Array(Schema.String),
@@ -1438,7 +1448,7 @@ const make = Effect.gen(function* () {
       const credited = yield* library.credit(root, pack, "Blender assets import");
       return {
         text: [
-          `${pack.title} (${pack.id}, ${LIBRARY_LICENCES[pack.licence].name}) is under ${made.materials.join(", ")} on ${made.objects.join(", ")}: its grain at ${made.metres} m a tile over each material's own colour and roughness, ${made.size} px maps shared by every material that takes it, on a "scan" UV map the export ships.`,
+          `${pack.title} (${pack.id}, ${LIBRARY_LICENCES[pack.licence].name}) is under ${made.materials.join(", ")} on ${someNames(made.objects)}: its grain at ${made.metres} m a tile over each material's own colour and roughness, ${made.size} px maps shared by every material that takes it, on a "scan" UV map the export ships.`,
           ...(made.dimmed.length === 0
             ? []
             : [
@@ -1947,7 +1957,7 @@ const make = Effect.gen(function* () {
           : null;
       const notes = rigNotes(candidate);
       const text = [
-        `Review of ${candidate.objects.join(", ")} (key ${key.slice(0, 12)}), exactly what game_blender op export would write. Image: ${imageRel}.`,
+        `Review of ${someNames(candidate.objects)} (key ${key.slice(0, 12)}), exactly what game_blender op export would write. Image: ${imageRel}.`,
         ...(concept.section === null
           ? []
           : [`Concept (${candidate.concept}):\n${concept.section}`]),
@@ -2127,7 +2137,7 @@ const make = Effect.gen(function* () {
         .join(", ");
       return {
         text: [
-          `Painted ${adopted.objects.join(", ")} from ${sheet.path}, ${sheetCredit(sheet)}.`,
+          `Painted ${someNames(adopted.objects)} from ${sheet.path}, ${sheetCredit(sheet)}.`,
           `Views read: ${views}${painted.mirrored === null ? "" : `; the ${painted.mirrored} side is the other side mirrored`}. Each view's outline of the model over the sheet: ${alignment}.`,
           `${Math.round(painted.seen * 100)}% of the surface was painted from a view; the rest (inside sleeves, tops of shoulders) took its material's colour.`,
           `${painted.head ? `Textures: ${size} px for the body and ${Math.max(Math.floor(size / 2), 256)} px for the head (its own atlas)` : `Textures: ${size} px`}${input.size !== undefined && input.size > budget ? ` (${GAME_STYLE_FILE}'s budget.texture is ${budget})` : ""}: albedo, a detail normal map and ORM, under ${TEXTURES_DIR}/${name}/.`,
@@ -2454,7 +2464,7 @@ const make = Effect.gen(function* () {
             const rigid = Object.entries(made.rigid);
             return {
               text: [
-                `${made.armature}: ${made.meshes.join(", ")} on ${made.template === "chains" ? "chains" : `the ${made.template} template`}, ${made.bones} bones, weighted by ${made.weights}.`,
+                `${made.armature}: ${someNames(made.meshes)} on ${made.template === "chains" ? "chains" : `the ${made.template} template`}, ${made.bones} bones, weighted by ${made.weights}.`,
                 ...(rigid.length === 0
                   ? []
                   : [`Rigid: ${rigid.map(([part, bone]) => `${part} on ${bone}`).join(", ")}.`]),
@@ -2816,7 +2826,7 @@ const make = Effect.gen(function* () {
             return {
               text:
                 [
-                  `Exported ${candidate.objects.join(", ")} (pass ${key.slice(0, 12)}): ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
+                  `Exported ${someNames(candidate.objects)} (pass ${key.slice(0, 12)}): ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
                   ...(input.simplify === undefined
                     ? []
                     : simplify === undefined
