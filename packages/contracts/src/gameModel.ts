@@ -181,26 +181,8 @@ export const GameModelMeasure = Schema.Struct({
       rows: PositiveInt.check(Schema.isLessThanOrEqualTo(64)),
     }),
   ),
-  /** The look's facts: the model's role and the packs' triangle budget for it, its hue families and flat-shaded share. */
-  style: Schema.optionalKey(
-    Schema.Struct({
-      role: Schema.Literals([
-        "prop",
-        "rock",
-        "plant",
-        "tree",
-        "building",
-        "vehicle",
-        "creature",
-        "hero",
-      ]),
-      /** False when the role was guessed from the model's kind. */
-      roleNamed: Schema.Boolean,
-      roleBudget: NonNegativeInt,
-      hues: NonNegativeInt,
-      flat: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
-    }),
-  ),
+  /** The look's facts: its hue families. A sidecar written earlier may carry more; it is ignored. */
+  style: Schema.optionalKey(Schema.Struct({ hues: NonNegativeInt })),
   /** A character's gates, measured on its clips before the style pass joins its meshes. */
   gates: Schema.optionalKey(Schema.Array(GameModelGate).check(Schema.isMaxLength(8))),
 });

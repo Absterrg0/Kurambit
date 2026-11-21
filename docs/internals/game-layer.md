@@ -157,21 +157,21 @@ check that matters.
   round trip; the ground also stays code because the game needs its height function. The
   official extensions lost every kind at a game's budget, so none is on the add-ons list for
   them. A game.json with no key stays code, whatever the default becomes.
-- A character or creature is done when its sheet is kept in `art/sheets/` and the agent's critique
-  of it sits beside it ([heroSheets.ts](../../apps/server/src/game/heroSheets.ts)). The tools keep
-  the sheet (the Blender review and export, the code model sheet), `game_check` op `final` lists
-  what is open, and Art shows both. It is a final check's item rather than a build fact: a fact is
-  something the harness measures, and a critique is the agent's reading, which only its presence
-  can be checked for. Keeping a new sheet moves the old critique aside, so a critique always
-  answers the picture beside it, even after an undo restores both; nothing reads file times.
+- A character's or creature's review picture is kept in `art/sheets/` for Art
+  ([heroSheets.ts](../../apps/server/src/game/heroSheets.ts)). Nothing asks for a critique of it:
+  a written critique quoting numbers was bookkeeping the picture never showed, and agents spent
+  turns on it.
 - Made characters are conformed, not retargeted: `game_blender` op `character` fits the standard
-  armature to the body once, keeping the standard rest frames, so library clips play unchanged
-  and a body off those frames is refused at export rather than playing broken. An asset ships
-  only as reviewed: `game_blender` op `look` mode review runs the style pass and measurement in a
-  separate one-shot Blender on a saved copy of the live scene, and `game_blender` op `export` writes
-  exactly that candidate or refuses when the scene changed since; a refusal is only for what the
-  agent or person must change, while the pass fixes what it can (it scales over-budget textures
-  and says so). With no palette lock it also folds a model's flat colours that share a finish into
+  armature to the body once, keeping the standard rest frames, so library clips play unchanged.
+  The style pass and measurement run in a separate one-shot Blender on a saved copy of the live
+  scene, keyed by the objects' digests and the lock (not the kit: a pass an older kit made is run
+  again, but nothing else goes stale). `game_blender` op `look` mode review renders that pass;
+  `game_blender` op `export` ships it, running it first when no review did, and returns the same
+  facts. The review is eyes, never a toll: the export refuses only a file that would be broken in
+  the game (an over-limit texture the pass cannot scale, clips that move nothing, skin following no
+  bone). Everything else measured (budgets, gates, rest frames off the standard skeleton, a missing
+  idle) is a note, because the harness measures and the agent decides; the pass fixes what it can
+  (it scales over-budget textures and says so). With no palette lock it also folds a model's flat colours that share a finish into
   one material painted per vertex, and the sidecar keeps each colour's material name (`paints`)
   for Art: a colour must cost nothing, or a material count becomes a reason to drop a detail. Where the player downloads the GLB itself (three.js, `compressedModels` in the
   profile) the pass writes WebP images and the export then meshopt-compresses the geometry with

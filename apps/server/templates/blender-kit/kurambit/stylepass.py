@@ -642,35 +642,6 @@ def _cloth_ratio(o, m, sink=0.003):
     return 1.0
 
 
-# Triangles by role, from the CC0 packs measured on 2026-11-20 (Kenney Nature median 76, KayKit City
-# Builder 586 with an 828-triangle building, Quaternius Stylized Nature 698, Quaternius animals
-# 2,079, KayKit Adventurers 6,377, KayKit cars 1,222-1,256): a fact the review reports, not a refusal.
-ROLE_BUDGETS = {"prop": 600, "rock": 400, "plant": 1000, "tree": 1000, "building": 2000, "vehicle": 1500, "creature": 3000, "hero": 7000}
-
-
-def role_of(objects):
-    """(role, named): the role an object names (obj["kurambit_role"]), else a guess by kind: an
-    armature on its own rig is a creature, one on the lock's rig a hero, anything else a prop."""
-    for o in objects:
-        r = o.get("kurambit_role")
-        if isinstance(r, str) and r in ROLE_BUDGETS:
-            return r, True
-    arms = [o for o in objects if o.type == "ARMATURE"]
-    if arms:
-        return ("creature" if any(a.get("kurambit_rig") for a in arms) else "hero"), False
-    return "prop", False
-
-
-def flat_share(meshes):
-    n = flat = 0
-    for o in meshes:
-        smooth = np.empty(len(o.data.polygons), bool)
-        o.data.polygons.foreach_get("use_smooth", smooth)
-        n += len(smooth)
-        flat += int((~smooth).sum())
-    return flat / n if n else 1.0
-
-
 def atlas_style(style):
     """The hex palette the person locked, which asks for the atlas, or None."""
     palette = (style or {}).get("palette")
@@ -679,7 +650,7 @@ def atlas_style(style):
 
 def style_pass(objects, style, out_dir, texture_side):
     """Runs the pass on objects (the resolved candidate, in this one-shot copy). Returns
-    {kind, meshes, armatures, usedPalette, scaled, notes, paints, atlas, hues, flat}: paints are the
+    {kind, meshes, armatures, usedPalette, scaled, notes, paints, atlas, hues}: paints are the
     atlas's swatches in its order, which the sidecar carries so Art lists and edits each one;
     without the atlas there are none, and Art edits each material as the game loads it."""
     style = style or {}
@@ -713,5 +684,4 @@ def style_pass(objects, style, out_dir, texture_side):
         o.data.validate()
     atlas = {"columns": COLS, "rows": rows} if swatches else None
     return {"kind": "character" if arms else "prop", "meshes": meshes, "armatures": arms, "usedPalette": used,
-            "scaled": scaled, "notes": notes, "paints": swatches[:64], "atlas": atlas, "hues": hues,
-            "flat": round(flat_share(meshes), 3)}
+            "scaled": scaled, "notes": notes, "paints": swatches[:64], "atlas": atlas, "hues": hues}

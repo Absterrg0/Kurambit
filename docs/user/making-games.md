@@ -174,20 +174,13 @@ never your Blender settings, and the bodies it makes are CC0. **Remove** deletes
 Blender view already open keeps it until it reopens. Without MPFB2, Blender characters use library
 bodies. Add-ons are tools that make things, not finished models or textures.
 
-A character or creature is finished only once its sheet (its turnaround and every move in one
-image) is kept in `art/sheets/`, it passes its measured gates, and the agent has written its
-critique beside the sheet, quoting those numbers; the agent's final check lists each hero's gates
-and anything still open. The gates are numbers, not taste: its height within the range the brief
-means (an adult 1.5 to 2 m unless the brief says a child, a chibi or a cat), no part torn or
-crushed in any move, clothes staying outside the body, feet planted without sliding on its walk
-and run, and its triangles and textures within budget. Open the model in **Art** to see
-the sheet and the critique.
-
-Before a character or prop made in Blender reaches the game, the agent reviews it: one image with a
-turnaround, silhouettes, the model at the size it appears in play, its walk, run and jump, the
-palette, and the concept art when the game has one, beside the measurements (height, triangles,
-texture size) and anything the export would refuse. An export is refused unless the model was
-reviewed exactly as it is now, so change anything and the agent reviews again. Each export writes the
+The agent looks at a model made in Blender through a review: one image with a turnaround, clay,
+silhouettes, the model at the size it appears in play, its walk, run and jump, and your reference
+picture or the concept art beside it, with what was measured (height, triangles, texture size,
+whether its feet stay planted). A character's review is kept in `art/sheets/`; open the model in
+**Art** to see it. The measurements inform the agent; they never block a model that looks right.
+An export only refuses a model that would be broken in the game, such as clips that move nothing.
+Each export writes the
 model and a `.asset.json` file beside it that records its measurements and where every part came
 from; three.js games play its animations at the speed the character moves, so its feet stay
 planted, and swing its tail, ears, coat hems and scarf ends. Select the character on the stage to

@@ -2,12 +2,8 @@ import type { EnvironmentId, GameHeroSheet } from "@kurambit/contracts";
 
 import { useAssetUrlState } from "../../assets/assetUrls";
 import { PropertySection } from "../ui/property-field";
-import { Text } from "../ui/text";
 
-/**
- * A character's kept sheet (art/sheets/) and the agent's critique of it: what the hero sheet gate
- * asked for before the model counted as done.
- */
+/** A character's kept sheet (art/sheets/): its review picture, beside the model. */
 export function GameArtHeroSheet({
   environmentId,
   root,
@@ -31,11 +27,6 @@ export function GameArtHeroSheet({
             <img src={url} alt={`${sheet.name}'s sheet`} className="w-full rounded-sm" />
           </a>
         )}
-        <Text variant="caption" tone={sheet.critique === undefined ? "muted" : "default"}>
-          <span className="whitespace-pre-wrap">
-            {sheet.critique ?? "No critique of this sheet yet: the agent writes one after looking."}
-          </span>
-        </Text>
       </div>
     </PropertySection>
   );

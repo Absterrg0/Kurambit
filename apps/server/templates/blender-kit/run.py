@@ -7,11 +7,10 @@ params: {objects (resolved names), expectedDigest: {name: sha1}, style: STYLE.js
          standard?: abs path of the standard armature's GLB, rig?: the lock's rig id,
          glb?: abs path to write the GLB to (default <out>/candidate.glb)}
 Writes the GLB and prints KURAMBIT_RESULT {kind, objects, measured, refusals, parts,
-usedPalette, armatures, creatures, ownClips, notes}: armatures are those the
-lock's rig governs; creatures (name to its own rig id) those marked kurambit_rig, which keep their
-own skeleton, with each one's clips
-(ownClips: its own, and those from the clip library), from which the server decides whether the
-mark stands. It works on its own copy of the scene: the live scene and the game folder
+usedPalette, armatures, creatures, ownClips, notes}: refusals are only what breaks the file in the
+game, and everything else measured is a fact or a note; armatures are those the lock's rig
+governs; creatures (name to its own rig id) those marked kurambit_rig, which keep their own
+skeleton, with each one's clips (ownClips: its own, and those from the clip library). It works on its own copy of the scene: the live scene and the game folder
 are never touched, and what it measures is the GLB it wrote, so the review, the export and
 the sidecar all describe the same bytes."""
 import json
@@ -84,9 +83,26 @@ def parts_of(objects):
     return parts
 
 
-def refusals_of(measured, info, params, creatures=()):
-    """creatures: armatures on their own rig (kurambit_rig), which the lock's rig, made so library
-    clips fit every character, does not govern."""
+def refusals_of(measured, info, params):
+    """What makes the file broken in the game, the only things the export refuses: a texture over
+    the limit the pass could not scale, clips that move nothing, skin that follows no bone."""
+    out = []
+    kind = measured["kind"]
+    side = params["budgets"]["texture"]
+    big = [t for t in measured["textures"] if max(t["width"], t["height"]) > side]
+    if big:
+        out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
+    clips = measured["clips"]
+    if kind == "character" and clips and len(info["frozen"]) == len(clips):
+        out.append({"code": "frozen-clips", "text": "no clip moves a bone in the exported model, so the character would slide around in one pose. If the armature was left in rest position (Armature > Pose Position: Rest), the pass already exports it posed; otherwise check that each action keys this armature's bones."})
+    if kind == "character" and info["unweighted"]:
+        out.append({"code": "unweighted", "text": f"{info['unweighted']} vertices are weighted to no bone (no vertex group, or groups naming no bone): they stay where they are while the character moves. Weight them to its bones (an Armature modifier with automatic weights, or Data Transfer from a weighted body), or parent a rigid part to a bone."})
+    return out
+
+
+def facts_of(measured, info, params, creatures=()):
+    """What the export measured that the agent may want to know, never a refusal. creatures:
+    armatures on their own rig (kurambit_rig), which the lock's rig does not govern."""
     out = []
     kind = measured["kind"]
     joints = params.get("standardJoints")
@@ -96,25 +112,15 @@ def refusals_of(measured, info, params, creatures=()):
                 continue
             missing = [j for j in joints if j not in bones]
             if missing:
-                out.append({"code": "off-rig", "text": f"{name} lacks {len(missing)} joints of STYLE.json's rig ({', '.join(missing[:4])}), so library clips would not fit it. For those, build it with game_blender op character. If it carries its own clips, mark it on its own rig: armature['kurambit_rig'] = '<rig name>'."})
+                out.append(f"{name} lacks {len(missing)} joints of the standard skeleton ({', '.join(missing[:4])}): library clips will not fit it, its own clips play as keyed.")
     dev = measured["restDeviation"]
     if dev is not None and dev > MAX_REST_DEVIATION:
-        out.append({"code": "rest-frames", "text": f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton (at most {MAX_REST_DEVIATION:.0f}°): library clips would play twisted. Build the body with game_blender op character, which conforms it."})
+        out.append(f"{info['worstJoint']}'s rest frame is {dev:.1f}° off the standard skeleton: library clips may play twisted on it (game_blender op character conforms a body).")
     budget = params["budgets"][kind]
     if measured["triangles"] > budget:
-        out.append({"code": "triangles", "text": f"{measured['triangles']} triangles, over STYLE.json's budget.{kind} of {budget}: raise that budget if the model needs them (the game's Performance row counts the scene), or thin a dense part (a decimate modifier on it)."})
-    side = params["budgets"]["texture"]
-    big = [t for t in measured["textures"] if max(t["width"], t["height"]) > side]
-    if big:
-        out.append({"code": "texture", "text": f"a {big[0]['width']}x{big[0]['height']} texture is over STYLE.json's budget.texture of {side} px a side and the pass could not scale it: replace it, or use the palette."})
-    # A creature with no clips ships posed as it came; one with clips needs one to stand in.
+        out.append(f"{measured['triangles']} triangles, over STYLE.json's budget.{kind} of {budget}; the game's Performance row says whether the scene can carry them.")
     if kind == "character" and not any("idle" in c["name"].lower() for c in measured["clips"]) and (measured["clips"] or not creatures):
-        out.append({"code": "no-idle", "text": "a character needs an idle clip to stand: add Idle_Loop through game_blender op character's clips, or key one."})
-    clips = measured["clips"]
-    if kind == "character" and clips and len(info["frozen"]) == len(clips):
-        out.append({"code": "frozen-clips", "text": "no clip moves a bone in the exported model, so the character would slide around in one pose. If the armature was left in rest position (Armature > Pose Position: Rest), the pass already exports it posed; otherwise check that each action keys this armature's bones."})
-    if kind == "character" and info["unweighted"]:
-        out.append({"code": "unweighted", "text": f"{info['unweighted']} vertices are weighted to no bone (no vertex group, or groups naming no bone): they stay where they are while the character moves. Weight them to its bones with helpers.skin_rigid, or parent the part to a bone."})
+        out.append("no idle clip: the character stands in its rest pose when it is not moving.")
     return out
 
 
@@ -229,7 +235,6 @@ def run_pass(params):
     # Skin a garment covers does not ship (the earlier dress helper marked it). The gates read the whole body and
     # leave that skin out of what can show.
     deform.drop_under(objects)
-    role, role_named = stylepass.role_of(objects)
     styled = stylepass.style_pass(objects, params.get("style"), out, params["budgets"]["texture"])
     # The server names the file (a temporary one it renames into place), so nothing reads half of it.
     candidate = params.get("glb") or os.path.join(out, "candidate.glb")
@@ -261,8 +266,7 @@ def run_pass(params):
         measured["paints"] = styled["paints"]
     if styled["atlas"]:
         measured["atlas"] = {"columns": styled["atlas"]["columns"], "rows": styled["atlas"]["rows"]}
-    measured["style"] = {"role": role, "roleNamed": role_named, "roleBudget": stylepass.ROLE_BUDGETS[role],
-                         "hues": styled["hues"], "flat": styled["flat"]}
+    measured["style"] = {"hues": styled["hues"]}
     k = styled["scaled"] or 1.0  # in the shipped size
     if gaps is not None:
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]
@@ -272,20 +276,17 @@ def run_pass(params):
     if influences is not None:
         measured["influences"] = influences
     still = ["clips that move no bone: " + ", ".join(info["frozen"])[:300]] if info["frozen"] else []
-    refused = refusals_of(measured, info, params, set(creatures))
     return {
         "kind": styled["kind"],
         "objects": names,
         "measured": measured,
-        "refusals": refused + [{"code": f"hero-{g['name']}", "text": g["text"][:400]} for g in gates if not g["pass"]
-                               # the budget's triangles and texture refusals already say it
-                               and not (g["name"] == "budget" and {r["code"] for r in refused} & {"triangles", "texture"})],
+        "refusals": refusals_of(measured, info, params),
         "parts": parts,
         "usedPalette": styled["usedPalette"],
         "armatures": {n: b for n, b in info["armatures"].items() if n not in creatures},
         "creatures": creatures,
         "ownClips": own_clips,
-        "notes": [n[:400] for n in notes + styled["notes"] + still],
+        "notes": [n[:400] for n in notes + styled["notes"] + still + facts_of(measured, info, params, set(creatures))],
     }
 
 

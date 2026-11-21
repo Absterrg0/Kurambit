@@ -534,7 +534,7 @@ def character(params):
         own = _body_clips(own_actions, body_arm, name_map, reference, joints | {b for _, bones, _ in extra for b in bones}, notes)
         # Its clips move the pelvis in the body's own units.
         unit = body_arm.matrix_world.to_scale().z / std_arm.matrix_world.to_scale().z
-        _, ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
+        height_ratio, ratio = skeleton.conform(std_arm, body_arm, meshes, name_map, extra)
     except BaseException:
         # a refused or failed build leaves the live scene as it was
         bpy.data.batch_remove({a for a in [*std_actions, *(t[0] for t in taken), *own_actions] if _alive(a)})

@@ -10,10 +10,8 @@ import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
 import {
   inLook,
   lockSpriteInput,
-  ownRigRefusal,
   readGameStyle,
   characterRoute,
-  lockCharacterRouteRefusal,
   modelChoice,
   styleBudgets,
   styleFromLock,
@@ -92,17 +90,6 @@ it("marks the packs of the recorded look, and never keeps one out", () => {
   expect(inLook(pack("kenney-tiny-dungeon"), pixel)).toBe(true);
 });
 
-it("lets a rig marked as its own in only on clips of its own", () => {
-  // A creature rigged and animated here: its clips are its own, so library clips are never needed.
-  expect(ownRigRefusal("Owl", { own: ["Idle", "Wake", "Peck"], library: [] })).toBeNull();
-  // No clips at all: it could only borrow library clips, which fit the lock's rig alone.
-  expect(ownRigRefusal("Owl", { own: [], library: [] })).toMatch(/carries no clips/);
-  // A conformed character's library clips do not ride along on a mark, even beside its own.
-  expect(ownRigRefusal("Hero", { own: ["Wave"], library: ["Idle_Loop"] })).toMatch(
-    /library clips \(Idle_Loop\)/,
-  );
-});
-
 it("fills what a sprite render leaves out from a pixel lock, and what it names wins", () => {
   const pixel: GameStyle = {
     version: 1,
@@ -169,24 +156,9 @@ it("hashes a lock by its content, not its key order, and fills budgets from defa
   });
 });
 
-it("makes in Blender what the library lacks", () => {
-  // A game from before the library was opt-in keeps its library and its Blender fallback.
-  expect(lockCharacterRouteRefusal("mpfb-body", modelChoice({}))).toBeNull();
-  expect(
-    lockCharacterRouteRefusal("unstamped-mesh", modelChoice({ characters: "library" })),
-  ).toBeNull();
-  // The removed generated route reads as Blender.
+it("reads every route an earlier game.json names", () => {
+  // The removed generated route reads as Blender, the removed library route as code.
   expect(characterRoute({ characters: "generated" })).toBe("blender");
-  expect(
-    lockCharacterRouteRefusal("mpfb-body", modelChoice({ characters: "blender", library: false })),
-  ).toBeNull();
-  // Code with the library off builds its characters in code.
-  expect(
-    lockCharacterRouteRefusal(
-      "unstamped-mesh",
-      modelChoice({ characters: "code", library: false }),
-    ),
-  ).toMatch(/three\.js code/);
   expect(characterRoute({ characters: "library" })).toBe("code");
 });
 

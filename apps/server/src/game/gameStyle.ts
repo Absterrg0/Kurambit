@@ -449,19 +449,18 @@ export const loudnessTargets = (style: GameStyle | null) => ({
 });
 
 /**
- * Why an armature may not enter on its own rig, or null. The lock's rig exists so library clips
- * fit every character; a rigged model carrying clips of its own needs none, so it enters on its
- * own rig: the rig never governs it and it plays only its own clips. One with no clips would need
- * library clips, and one carrying them is the rig's.
+ * A note on an armature marked on its own rig, or null. The lock's rig exists so library clips
+ * fit every character; a rigged model carrying clips of its own plays only those. One with none,
+ * or with library clips, would play clips that fit only the lock's rig.
  */
-export const ownRigRefusal = (
+export const ownRigNote = (
   name: string,
   clips: { readonly own: ReadonlyArray<string>; readonly library: ReadonlyArray<string> },
 ): string | null => {
   if (clips.library.length > 0)
-    return `${name} is marked on its own rig (kurambit_rig) but carries library clips (${clips.library.slice(0, 6).join(", ")}), which fit only ${GAME_STYLE_FILE}'s rig. A model on its own rig plays only clips keyed on it: remove those, or leave the mark off and keep the character on the rig.`;
+    return `${name} is marked on its own rig (kurambit_rig) but carries library clips (${clips.library.slice(0, 6).join(", ")}), which fit only ${GAME_STYLE_FILE}'s rig: they may play twisted on it.`;
   if (clips.own.length === 0)
-    return `${name} is marked on its own rig (kurambit_rig) but carries no clips, so it could only play library clips, which fit only ${GAME_STYLE_FILE}'s rig. Key its clips on it as named actions (an idle first: Idle, Walk, Attack, or its own moves), or build the character with game_blender op character.`;
+    return `${name} is marked on its own rig (kurambit_rig) but carries no clips: key its own as named actions (an idle first), or build it with game_blender op character to play library clips.`;
   return null;
 };
 
@@ -498,32 +497,3 @@ export type GameModelChoice = ReturnType<typeof gameModelChoice>;
 /** How the person chose to make this game's models. */
 export const characterRoute = (manifest: Pick<GameManifest, "characters" | "library">) =>
   gameModelChoice(manifest).route;
-
-/**
- * Whether characters may be made in Blender: on the Blender route, and wherever the library is on,
- * which means the library first and Blender for a subject it has no model of (a robot, a cat), as
- * the old library route did. Code with the library off makes them in code.
- */
-const makesInBlender = (choice: GameModelChoice) =>
-  choice.route === "blender" || (choice.route === "code" && choice.library);
-
-const ROUTE_USE: Record<GameCharacterRoute, string> = {
-  code: "build it in three.js code (shell/model.js)",
-  blender: "make it in Blender",
-};
-
-/**
- * Why the person's model choice refuses a character, or null: on the code route with the library
- * off, a Blender-made one is not theirs to ship.
- */
-export const lockCharacterRouteRefusal = (
-  what: "mpfb-body" | "unstamped-mesh",
-  choice: GameModelChoice,
-): string | null => {
-  if (makesInBlender(choice)) return null;
-  const thing =
-    what === "mpfb-body"
-      ? "An MPFB2 body is a Blender-made character"
-      : "A character mesh with no library or import source is a Blender-made character";
-  return `${thing}, and the person chose to make this game's models with ${choice.route}${choice.library ? " and the library" : ""}. Instead ${ROUTE_USE[choice.route]}${choice.library ? " or use a library model" : ""}. If the request needs another kind of model, say so in your reply: the person changes how models are made in the game's "Make models with" setting.`;
-};

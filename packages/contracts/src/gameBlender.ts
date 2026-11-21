@@ -47,7 +47,7 @@ export const GameBlenderLookInput = Schema.Struct({
   reference: Schema.optionalKey(
     Schema.NonEmptyString.check(Schema.isMaxLength(300)).annotate({
       description:
-        "review: set beside the model with its silhouette overlap. A game-relative PNG or GLB, or <pack id>:<file> for a library model.",
+        "review: a picture set beside the model to look at (the person's, or a sheet drawn for this subject). A game-relative PNG, JPEG or WebP.",
     }),
   ),
 });
@@ -60,13 +60,13 @@ export const GameBlenderLookScreenshot = Schema.Struct({
 });
 export type GameBlenderLookScreenshot = typeof GameBlenderLookScreenshot.Type;
 export const GameBlenderReview = Schema.Struct({
-  /** The candidate's key; game_blender op export promotes exactly this. */
+  /** The pass's key: game_blender op export of the same objects, unchanged, ships exactly this. */
   key: Schema.String,
   objects: Schema.Array(Schema.String),
   /** Game-relative composite PNG under builds/logs/blender-pipeline/<key>/ (also the screenshot). */
   image: Schema.String,
   measured: GameModelMeasure,
-  /** Empty when the export would go through. */
+  /** What would make the file broken in the game; empty when the export goes through. */
   refusals: Schema.Array(GameModelRefusal),
   /** The concept set beside it, or null. */
   concept: Schema.NullOr(Schema.String),

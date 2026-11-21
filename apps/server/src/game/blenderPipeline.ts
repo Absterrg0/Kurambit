@@ -1,10 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off -- The pipeline's candidates are files under the game's logs, and the kit speaks one JSON line on stdout.
-// The asset pipeline's server side, beside GameBlender: a review is a candidate GLB the
-// one-shot pass wrote under builds/logs/blender-pipeline/<key>/, keyed by exactly what was
-// reviewed (each object's digest, the style lock and the kit), and an export promotes that
-// candidate as it is, or refuses. The pass's result (pass.json) is kept so a retried review
-// skips the pass; only a review whose image was rendered leaves candidate.json, the one record
-// an export promotes. Nothing here runs Blender; GameBlender does.
+// The asset pipeline's server side, beside GameBlender: a pass is a candidate GLB the one-shot
+// run wrote under builds/logs/blender-pipeline/<key>/, keyed by the objects as they are (each
+// one's digest) and the style lock. A review renders it, an export ships it; the pass's result
+// (pass.json) is kept so the next review or export of the same objects skips the pass, unless the
+// kit changed since. Nothing here runs Blender; GameBlender does.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -35,8 +34,8 @@ const MAX_CANDIDATE_BYTES = 4 * 1024 * 1024;
 const MAX_REVIEWS = 200;
 
 /**
- * The kit's version: every kit file's path and bytes, so a changed kit makes every review
- * stale by construction and nothing is bumped by hand. Python's caches are not the kit.
+ * The kit's version: every kit file's path and bytes, so a pass a changed kit made is run again
+ * and nothing is bumped by hand. Python's caches are not the kit.
  */
 export const kitVersion = async (kitDir: string): Promise<string> => {
   const files = await walkFiles(kitDir, {
@@ -103,22 +102,15 @@ export const KitDigest = Schema.Struct({
   perObject: Schema.Record(Schema.String, Schema.String),
 });
 
-/**
- * A review's key: the objects as they are (name and digest each, in name order), the lock and
- * the kit. A change to any of them since a review leaves the export no candidate to promote.
- */
-export const reviewKey = (
-  perObject: Readonly<Record<string, string>>,
-  styleHash: string,
-  kit: string,
-): string =>
+/** A pass's key: the objects as they are (name and digest each, in name order) and the lock. */
+export const reviewKey = (perObject: Readonly<Record<string, string>>, styleHash: string): string =>
   NodeCrypto.createHash("sha256")
     .update(
       JSON.stringify(
         Object.entries(perObject).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
       ),
     )
-    .update(`\0${styleHash}\0${kit}`)
+    .update(`\0${styleHash}`)
     .digest("hex");
 
 /** What `run.py pass` prints: one JSON result line. */
@@ -136,8 +128,7 @@ export const PassResult = Schema.Struct({
   creatures: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   /**
    * Each marked armature's clips by name: its own (made here or brought with its body) and those
-   * game_blender op character brought from the clip library. A mark no generation delivered stands
-   * only on its own clips (ownRigRefusal).
+   * game_blender op character brought from the clip library (ownRigNote).
    */
   ownClips: Schema.optionalKey(
     Schema.Record(
@@ -163,7 +154,7 @@ export type PassRecord = typeof PassRecord.Type;
 const PassRecordJson = Schema.fromJsonString(PassRecord);
 export const encodePassRecord = Schema.encodeSync(PassRecordJson);
 
-/** `candidate.json`: a pass record whose review was rendered, its ledger fit to a sidecar. */
+/** `candidate.json`: a pass record, its ledger fit to a sidecar. */
 const Candidate = Schema.Struct({
   ...PassRecord.fields,
   parts: Schema.Array(GameAssetPart).check(Schema.isMinLength(1), Schema.isMaxLength(LEDGER_PARTS)),
@@ -193,9 +184,9 @@ const readRecord = async <A>(
 };
 const decodeCandidate = Schema.decodeUnknownOption(CandidateJson);
 const decodePassRecord = Schema.decodeUnknownOption(PassRecordJson);
-/** The candidate a rendered review left at `dir`: the only thing an export promotes. */
-export const readCandidate = (dir: string) => readRecord(dir, CANDIDATE_JSON, decodeCandidate);
-/** The pass a review of this key already ran, rendered or not. */
+/** The candidate a review or export left at `dir`. */
+const readCandidate = (dir: string) => readRecord(dir, CANDIDATE_JSON, decodeCandidate);
+/** The pass a review or export of this key already ran. */
 export const readPassRecord = (dir: string) => readRecord(dir, PASS_JSON, decodePassRecord);
 export const candidateJsonPath = (dir: string) => NodePath.join(dir, CANDIDATE_JSON);
 /** The sheet a rendered review drew, in its candidate's folder. */
@@ -359,20 +350,19 @@ const metres = (value: number) => `${value.toFixed(2)} m`;
 /** The review's measurement, as the agent reads it. */
 export const measurementText = (
   candidate: Candidate,
-  budgets: { readonly character: number; readonly prop: number; readonly texture: number },
+  budgets: { readonly texture: number },
   bytes: number,
 ) => {
   const m = candidate.measured;
-  const budget = m.kind === "character" ? budgets.character : budgets.prop;
   const lines = [
     ...(candidate.notes ?? []).map((note) => `The pass: ${note}`),
     `Measured: a ${m.kind}${m.skeleton === null ? "" : ` on ${m.skeleton}`}${m.restDeviation === null ? "" : `, rest frames ${m.restDeviation.toFixed(1)}° off the standard skeleton at most`}.`,
-    `- ${m.triangles.toLocaleString("en-US")} triangles of ${budget.toLocaleString("en-US")}; ${m.materials} material${m.materials === 1 ? "" : "s"}; textures ${m.textures.length === 0 ? "none" : m.textures.map((t) => `${t.width}x${t.height}`).join(", ")} (largest side allowed ${budgets.texture}); ${(bytes / 1048576).toFixed(2)} MB.`,
+    `- ${m.triangles.toLocaleString("en-US")} triangles; ${m.materials} material${m.materials === 1 ? "" : "s"}; textures ${m.textures.length === 0 ? "none" : m.textures.map((t) => `${t.width}x${t.height}`).join(", ")} (largest side allowed ${budgets.texture}); ${(bytes / 1048576).toFixed(2)} MB.`,
     `- ${metres(m.height)} tall, footprint ${metres(m.footprint.width)} x ${metres(m.footprint.depth)}.`,
     ...(m.style === undefined
       ? []
       : [
-          `- Look: ${m.atlas === undefined ? `${m.materials} material${m.materials === 1 ? "" : "s"} as made (no palette locked)` : `${m.paints?.length ?? 0} swatch${m.paints?.length === 1 ? "" : "es"} on one gradient atlas`}, ${m.style.hues} hue famil${m.style.hues === 1 ? "y" : "ies"}, ${Math.round(m.style.flat * 100)}% of faces flat-shaded; role ${m.style.role}${m.style.roleNamed ? "" : " (guessed: name it with kurambit_role)"}, ${m.triangles.toLocaleString("en-US")} triangles of the packs' ${m.style.roleBudget.toLocaleString("en-US")}.`,
+          `- Look: ${m.atlas === undefined ? `${m.materials} material${m.materials === 1 ? "" : "s"} as made (no palette locked)` : `${m.paints?.length ?? 0} swatch${m.paints?.length === 1 ? "" : "es"} on one gradient atlas`}, ${m.style.hues} hue famil${m.style.hues === 1 ? "y" : "ies"}.`,
         ]),
   ];
   if (m.clips.length > 0)
@@ -448,7 +438,7 @@ export const measurementText = (
     );
   if (m.gates !== undefined && m.gates.length > 0)
     lines.push(
-      `Gates (quote these numbers in the hero's critique):\n${m.gates.map((gate) => `- ${gate.name} ${gate.pass ? "passes" : "FAILS"}: ${gate.text}`).join("\n")}`,
+      `Gates, measured:\n${m.gates.map((gate) => `- ${gate.name}: ${gate.text}`).join("\n")}`,
     );
   return lines.join("\n");
 };

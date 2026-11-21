@@ -47,14 +47,13 @@ import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
 import {
   availableEngine,
-  gamePaths,
   unavailableEngine,
   type GameEngineProfile,
   type GameExportTarget,
 } from "./engineProfile.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./checkIssues.ts";
-import { HERO_KINDS, heroSheetProblems, keepHeroSheet } from "./heroSheets.ts";
+import { HERO_KINDS, keepHeroSheet } from "./heroSheets.ts";
 import { hashFile } from "./hashFile.ts";
 import { comparedSource, makeSourceIdentity, sourceIdentityError } from "./sourceTree.ts";
 import { gameReference } from "./gameReference.ts";
@@ -649,16 +648,6 @@ const make = Effect.gen(function* () {
       if (key !== null) replayedSaved.set(root, { key, savedPlays: reading });
       return { savedPlays: reading };
     });
-  /** The hero sheet gate's open items, for a final check (heroSheets.ts). */
-  const heroSheetsOn = (root: string) =>
-    Effect.gen(function* () {
-      const manifest = yield* projects.read(root);
-      if (!isAvailableEngine(manifest.engine.name)) return { problems: [], gates: [] };
-      const paths = gamePaths(manifest.engine.name, manifestProject(manifest));
-      return yield* Effect.promise(() =>
-        heroSheetProblems(root, paths).catch(() => ({ problems: [], gates: [] })),
-      );
-    });
   return GameEngine.of({
     backendFor,
     context,
@@ -673,13 +662,7 @@ const make = Effect.gen(function* () {
           owner,
         });
         if (!final) return result;
-        const heroes = yield* heroSheetsOn(root);
-        return {
-          ...result,
-          ...(result.ok ? yield* savedPlaysOn(root) : {}),
-          ...(heroes.problems.length === 0 ? {} : { heroSheets: heroes.problems }),
-          ...(heroes.gates.length === 0 ? {} : { heroGates: heroes.gates }),
-        };
+        return { ...result, ...(result.ok ? yield* savedPlaysOn(root) : {}) };
       }),
     checkIn: (root, owner) =>
       Effect.flatMap(checkLabel(root), (label) =>

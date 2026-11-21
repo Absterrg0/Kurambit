@@ -145,16 +145,12 @@ export const GameArtAsset = Schema.Struct({
 });
 export type GameArtAsset = typeof GameArtAsset.Type;
 
-/**
- * A character's or creature's kept sheet (art/sheets/<name>.png) and the agent's critique of it
- * (<name>.md), when written: the hero sheet gate's record, shown by Art beside the model.
- */
+/** A character's or creature's kept sheet (art/sheets/<name>.png), shown by Art beside the model. */
 export const GameHeroSheet = Schema.Struct({
   /** Its file name's stem: a model file's stem, or a code thing's name (gameHeroSheetName). */
   name: Schema.String,
   /** Game-relative. */
   image: AssetPathText,
-  critique: Schema.optionalKey(Schema.String),
 });
 export type GameHeroSheet = typeof GameHeroSheet.Type;
 /** The hero sheet name for a model file's stem or a thing's name. */

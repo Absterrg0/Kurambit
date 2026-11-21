@@ -80,7 +80,6 @@ import {
   ledgerParts,
   measurementText,
   passJsonPath,
-  readCandidate,
   readPassRecord,
   reviewKey,
   sidecarOf,
@@ -102,12 +101,10 @@ import { recordProvenance, renderSprites } from "./blenderSprites.ts";
 import { LIBRARY_LICENCES } from "./assetLibraryFiles.ts";
 import {
   characterRoute,
-  type GameModelChoice,
   isClipPack,
   LIBRARY_OFF_REFUSAL,
   modelChoice,
-  lockCharacterRouteRefusal,
-  ownRigRefusal,
+  ownRigNote,
   lockedCharacterStyle,
   readGameStyle,
   resolveRig,
@@ -386,21 +383,8 @@ const LIBRARY_BODY = `{library: {pack: "quaternius-universal-base-characters", f
  */
 const addonAsk = (need: string, addon: GameToolchain.BlenderAddon, meanwhile: string) =>
   `${need} needs ${addon.name}, an add-on that is not installed. ${GameToolchain.addonAbout(addon)} Ask the person whether to add it; on their yes, call game_blender op addon {"install": "${addon.id}", "asked": true} and try again. They can remove it in Settings → Game tools. ${meanwhile}`;
-/**
- * The person's choice refuses a Blender-made character on code with the library off: an MPFB2
- * body, or a mesh no library or import stamped. Props are modelled on every route, and a clip keyed here is no mesh.
- */
-const routeRefusalOf = (candidate: Candidate, route: GameModelChoice) =>
-  candidate.kind !== "character"
-    ? null
-    : candidate.parts.some((part) => part.from === "mpfb2")
-      ? lockCharacterRouteRefusal("mpfb-body", route)
-      : // A texture painted from the person's own sheet makes no mesh.
-        candidate.parts.some(
-            (part) => part.from === "made" && part.what !== "clips" && part.what !== "texture",
-          )
-        ? lockCharacterRouteRefusal("unstamped-mesh", route)
-        : null;
+const refusalLines = (candidate: Candidate) =>
+  candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`).join("\n");
 
 const STILL_WORKING =
   "Blender may still be finishing this call. Inspect the scene with game_blender op code (printing what it needs) or op look before retrying, so the work is not done twice.";
@@ -1669,37 +1653,25 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The lock's rig check skips an armature marked on its own rig (kurambit_rig), and any scene
-   * code can set that mark. It stands when the armature carries clips of its own and none from
-   * the library (a model rigged and animated here). Anything else is refused here, at the review
-   * and again at the export. The route is routeRefusalOf's.
+   * The lock's rig check skips an armature marked on its own rig (kurambit_rig). One that carries
+   * library clips, or none of its own, gets a note: those clips fit only the lock's rig.
    */
-  const creatureRefusal = (candidate: Candidate) => {
-    for (const name of Object.keys(candidate.creatures ?? {})) {
-      const refused = ownRigRefusal(name, candidate.ownClips?.[name] ?? { own: [], library: [] });
-      if (refused !== null) return refused;
-    }
-    return null;
-  };
+  const rigNotes = (candidate: Candidate) =>
+    Object.keys(candidate.creatures ?? {}).flatMap((name) => {
+      const note = ownRigNote(name, candidate.ownClips?.[name] ?? { own: [], library: [] });
+      return note === null ? [] : [note];
+    });
 
-  /**
-   * A review's reference: a picture or model in the game, or a library model as yardstick
-   * (`<pack id>:<pack-relative file>`), which is only looked at, so the library switch does not
-   * govern it.
-   */
+  /** A review's reference: a picture in the game (the person's, or a sheet drawn for this subject). */
   const referenceOf = (realRoot: string, reference: string) =>
     Effect.gen(function* () {
-      const pack = /^([a-z0-9][a-z0-9-]*):(.+)$/.exec(reference);
-      const path =
-        pack === null
-          ? yield* inGame(realRoot, reference)
-          : yield* library.packFile(pack[1]!, pack[2]!);
-      if (!/\.(png|jpe?g|webp|glb|gltf)$/i.test(path))
+      const path = yield* inGame(realRoot, reference);
+      if (!/\.(png|jpe?g|webp)$/i.test(path))
         return yield* opError(
           "blender-review",
           reference,
           "invalid-input",
-          "A reference is a picture (PNG, JPEG, WebP) or a model (GLB).",
+          "A reference is a picture (PNG, JPEG, WebP).",
         );
       const exists = yield* Effect.promise(() =>
         NodeFSP.stat(path).then(
@@ -1718,10 +1690,84 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * The locked part of a review: the pass of this key (run now, or the one a review already ran,
-   * kept as pass.json), its composite rendered in a throwaway scene of the live session, and only
-   * then candidate.json, so an export never follows a review nobody saw.
+   * The pass of these objects as they are now: the one an earlier review or export of this key
+   * ran with this kit (pass.json), or a new one; its ledger fit to a sidecar and its concept read,
+   * kept as candidate.json. A review renders it, an export ships it. Runs under the pipeline lock.
    */
+  const passed = (
+    root: string,
+    realRoot: string,
+    style: GameStyle | null,
+    target: ReadonlyArray<string> | null,
+    operation: "blender-review" | "blender-export",
+  ) =>
+    Effect.gen(function* () {
+      const kit = yield* kitVersionOf;
+      const digest = yield* liveDigest(root, target);
+      const key = reviewKey(digest.perObject, styleHash(style));
+      const out = yield* candidateDir(realRoot, key);
+      const found = yield* Effect.promise(() => readPassRecord(out));
+      const record: PassRecord =
+        // A pass the kit has changed since measures what the kit no longer makes: run it again.
+        found !== null && found.kit === kit
+          ? found
+          : yield* Effect.gen(function* () {
+              // A new pass replaces the GLB: nothing may promote what an earlier pass wrote.
+              yield* Effect.promise(() => NodeFSP.rm(candidateJsonPath(out), { force: true }));
+              const glb = NodePath.join(out, `candidate.${NodeCrypto.randomUUID()}.glb`);
+              return yield* Effect.gen(function* () {
+                const rig = style?.rig === undefined ? null : resolveRig(style.rig);
+                const engine = yield* availableEngine((yield* projects.read(root)).engine.name);
+                const pass = yield* runPass(root, out, glb, {
+                  images: engineProfile(engine).compressedModels ? "WEBP" : "AUTO",
+                  objects: digest.objects,
+                  expectedDigest: digest.perObject,
+                  style,
+                  budgets: styleBudgets(style),
+                  standardJoints: rig === null ? null : (LIBRARY_RIG_JOINTS[rig] ?? null),
+                  rig,
+                  standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
+                });
+                // The scene's own armatures too: one deforming no skinned mesh leaves none in the GLB.
+                const live = armaturesIn(
+                  yield* callText(root, "execute_blender_code", {
+                    code: [
+                      "import bpy, json",
+                      ARMATURES_OF,
+                      `studio_armatures([bpy.data.objects[n] for n in ${pyJson(digest.objects)}])`,
+                    ].join("\n"),
+                  }),
+                );
+                const armatures = Object.keys({ ...live, ...pass.armatures });
+                const made: PassRecord = {
+                  ...pass,
+                  key,
+                  kit,
+                  digest: digest.perObject,
+                  at: DateTime.formatIso(yield* DateTime.now),
+                  subject: subjectName(
+                    armatures.length === 1 ? armatures[0]! : (target?.[0] ?? digest.objects[0]!),
+                  ),
+                };
+                yield* Effect.tryPromise({
+                  try: () => NodeFSP.rename(glb, NodePath.join(out, CANDIDATE_GLB)),
+                  catch: (cause) => opError(operation, out, "io", undefined, cause),
+                });
+                yield* writeText(passJsonPath(out), encodePassRecord(made), operation);
+                return made;
+              }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(glb, { force: true }))));
+            });
+      const ledger = ledgerParts(record.parts);
+      if ("refusal" in ledger)
+        return yield* opError(operation, root, "invalid-input", ledger.refusal);
+      // The concept is read every time, so one added since is beside the next render.
+      const concept = yield* Effect.promise(() => conceptOf(realRoot, record.subject));
+      const candidate: Candidate = { ...record, parts: ledger.parts, concept: concept.ref };
+      yield* writeText(candidateJsonPath(out), encodeCandidate(candidate), operation);
+      return { key, out, candidate, concept };
+    });
+
+  /** The locked part of a review: the pass of this key, its composite rendered in a throwaway scene of the live session. */
   const reviewed = (
     root: string,
     realRoot: string,
@@ -1729,65 +1775,13 @@ const make = Effect.gen(function* () {
     input: GameBlenderLookInput,
   ) =>
     Effect.gen(function* () {
-      const kit = yield* kitVersionOf;
-      const digest = yield* liveDigest(root, input.target ?? null);
-      const key = reviewKey(digest.perObject, styleHash(style), kit);
-      const out = yield* candidateDir(realRoot, key);
-      const found = yield* Effect.promise(() => readPassRecord(out));
-      const passed: PassRecord =
-        found ??
-        (yield* Effect.gen(function* () {
-          // A new pass replaces the GLB: nothing may promote what an earlier review rendered.
-          yield* Effect.promise(() => NodeFSP.rm(candidateJsonPath(out), { force: true }));
-          const glb = NodePath.join(out, `candidate.${NodeCrypto.randomUUID()}.glb`);
-          return yield* Effect.gen(function* () {
-            const rig = style?.rig === undefined ? null : resolveRig(style.rig);
-            const engine = yield* availableEngine((yield* projects.read(root)).engine.name);
-            const pass = yield* runPass(root, out, glb, {
-              images: engineProfile(engine).compressedModels ? "WEBP" : "AUTO",
-              objects: digest.objects,
-              expectedDigest: digest.perObject,
-              style,
-              budgets: styleBudgets(style),
-              standardJoints: rig === null ? null : (LIBRARY_RIG_JOINTS[rig] ?? null),
-              rig,
-              standard: yield* library.packFile(STANDARD_ARMATURE.pack, STANDARD_ARMATURE.file),
-            });
-            // The scene's own armatures too: one deforming no skinned mesh leaves none in the GLB.
-            const live = armaturesIn(
-              yield* callText(root, "execute_blender_code", {
-                code: [
-                  "import bpy, json",
-                  ARMATURES_OF,
-                  `studio_armatures([bpy.data.objects[n] for n in ${pyJson(digest.objects)}])`,
-                ].join("\n"),
-              }),
-            );
-            const armatures = Object.keys({ ...live, ...pass.armatures });
-            const record: PassRecord = {
-              ...pass,
-              key,
-              kit,
-              digest: digest.perObject,
-              at: DateTime.formatIso(yield* DateTime.now),
-              subject: subjectName(
-                armatures.length === 1 ? armatures[0]! : (input.target?.[0] ?? digest.objects[0]!),
-              ),
-            };
-            yield* Effect.tryPromise({
-              try: () => NodeFSP.rename(glb, NodePath.join(out, CANDIDATE_GLB)),
-              catch: (cause) => opError("blender-review", out, "io", undefined, cause),
-            });
-            yield* writeText(passJsonPath(out), encodePassRecord(record), "blender-review");
-            return record;
-          }).pipe(Effect.ensuring(Effect.promise(() => NodeFSP.rm(glb, { force: true }))));
-        }));
-      const ledger = ledgerParts(passed.parts);
-      if ("refusal" in ledger)
-        return yield* opError("blender-review", root, "invalid-input", ledger.refusal);
-      // The concept is read at every review, so one added since is beside the next render.
-      const concept = yield* Effect.promise(() => conceptOf(realRoot, passed.subject));
-      const candidate: Candidate = { ...passed, parts: ledger.parts, concept: concept.ref };
+      const { key, out, candidate, concept } = yield* passed(
+        root,
+        realRoot,
+        style,
+        input.target ?? null,
+        "blender-review",
+      );
       const image = NodePath.join(out, REVIEW_PNG);
       const view = style?.view ?? "perspective";
       const reference =
@@ -1814,7 +1808,6 @@ const make = Effect.gen(function* () {
       const bytes = yield* Effect.promise(() =>
         NodeFSP.stat(NodePath.join(out, CANDIDATE_GLB)).then((stat) => stat.size),
       );
-      yield* writeText(candidateJsonPath(out), encodeCandidate(candidate), "blender-review");
       return { key, candidate, concept, rendered, png, bytes };
     });
 
@@ -1838,7 +1831,7 @@ const make = Effect.gen(function* () {
         reviewed(root, realRoot, style, input),
       );
       const imageRel = `${PIPELINE_DIR}/${key}/${NodePath.basename(rendered.image)}`;
-      // A character's review is its hero sheet (heroSheets.ts), kept where Art and the check read it.
+      // A character's review is its hero sheet (heroSheets.ts), kept where Art shows it.
       const heroSheet =
         candidate.measured.kind === "character"
           ? yield* Effect.tryPromise({
@@ -1846,12 +1839,7 @@ const make = Effect.gen(function* () {
               catch: (cause) => opError("blender-review", root, "io", undefined, cause),
             })
           : null;
-      const route = modelChoice(yield* projects.read(root));
-      const routeRefusal = routeRefusalOf(candidate, route) ?? creatureRefusal(candidate);
-      const refusing = [
-        ...candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`),
-        ...(routeRefusal === null ? [] : [`- [route] ${routeRefusal}`]),
-      ];
+      const notes = rigNotes(candidate);
       const text = [
         `Review of ${candidate.objects.join(", ")} (key ${key.slice(0, 12)}), exactly what game_blender op export would write. Image: ${imageRel}.`,
         ...(concept.section === null
@@ -1866,14 +1854,11 @@ const make = Effect.gen(function* () {
           : [
               `The image has errors:\n${rendered.problems.map((problem) => `- ${problem}`).join("\n")}`,
             ]),
-        refusing.length === 0
-          ? "Would refuse: nothing; game_blender op export would write it."
-          : `Would refuse:\n${refusing.join("\n")}`,
-        ...(heroSheet === null
-          ? []
-          : [
-              `Kept as the hero sheet ${heroSheet}: write your critique of it at ${heroSheet.replace(/\.png$/, ".md")} (studio-skills/art-pipeline.md, The hero sheet).`,
-            ]),
+        ...notes.map((note) => `Note: ${note}`),
+        candidate.refusals.length === 0
+          ? "game_blender op export writes exactly this."
+          : `The export refuses it, as the file would be broken in the game:\n${refusalLines(candidate)}`,
+        ...(heroSheet === null ? [] : [`Kept for Art as ${heroSheet}.`]),
       ].join("\n\n");
       return {
         text,
@@ -2267,11 +2252,6 @@ const make = Effect.gen(function* () {
                 licence: pack.licence,
               };
             } else if ("mpfb" in input.body) {
-              const refused = lockCharacterRouteRefusal(
-                "mpfb-body",
-                modelChoice(yield* projects.read(root)),
-              );
-              if (refused !== null) return yield* fail("invalid-input", refused);
               // A cartoon or chibi starts from the drawn bodies the kit ships (studio.py), not MPFB2.
               const drawn = input.style?.preset === "cartoon" || input.style?.preset === "chibi";
               if (!drawn) {
@@ -2470,7 +2450,7 @@ const make = Effect.gen(function* () {
                 `Blender did not list the import's armatures: ${rigged.slice(0, 500)}`,
               );
             // An armature the import brings with clips of its own (an animated Poly Pizza
-            // animal) enters on its own rig under the one own-rig rule (ownRigRefusal): it is
+            // animal) enters on its own rig under the one own-rig rule (ownRigNote): it is
             // marked, so STYLE.json's rig no longer governs it and the review checks it again.
             const clipsOf = /STUDIO_IMPORT_CLIPS (\{.*\})/.exec(
               yield* callText(root, "execute_blender_code", {
@@ -2495,7 +2475,7 @@ const make = Effect.gen(function* () {
             const ownRig = Object.keys(armatures).filter(
               (name) =>
                 (importedClips[name]?.length ?? 0) > 0 &&
-                ownRigRefusal(name, { own: importedClips[name] ?? [], library: [] }) === null,
+                ownRigNote(name, { own: importedClips[name] ?? [], library: [] }) === null,
             );
             // The import stays in the live scene, stamped with its source and licence: the
             // export composes the ledger from the stamps, after a review like anything built here.
@@ -2553,35 +2533,26 @@ const make = Effect.gen(function* () {
         holding(
           root,
           Effect.gen(function* () {
-            // An export promotes the candidate its review left for these objects as they are now:
-            // nothing is passed, measured or refused again here, so it ships what was reviewed.
+            // The export ships the pass of these objects as they are now, the one a review rendered
+            // or a new one; a review is only for looking at it.
             const manifest = yield* projects.read(root);
             const engineDir = manifestProject(manifest);
             const realRoot = yield* realRootOf(root);
             const style = yield* readGameStyle(realRoot);
-            const digest = yield* liveDigest(root, input.objects ?? null);
-            const key = reviewKey(digest.perObject, styleHash(style), yield* kitVersionOf);
-            const out = NodePath.join(realRoot, PIPELINE_DIR, key);
-            const candidate = yield* Effect.promise(() => readCandidate(out));
-            if (candidate === null)
-              return yield* opError(
-                "blender-export",
-                root,
-                "invalid-input",
-                `No review of these objects as they are now (${digest.objects.join(", ")}): call game_blender op look with mode review first. A change to them, or to ${GAME_STYLE_FILE}, since a review needs a new one, and a review covers exactly the objects it named.`,
-              );
+            const { key, out, candidate } = yield* passed(
+              root,
+              realRoot,
+              style,
+              input.objects ?? null,
+              "blender-export",
+            );
             if (candidate.refusals.length > 0)
               return yield* opError(
                 "blender-export",
                 root,
                 "invalid-input",
-                `The review measured what the lock refuses; fix it and review again:\n${candidate.refusals.map((refusal) => `- [${refusal.code}] ${refusal.text}`).join("\n")}`,
+                `The file would be broken in the game; fix it and export again:\n${refusalLines(candidate)}`,
               );
-            // The person's route is read now, not at the review: they may have changed it since.
-            const routeRefusal =
-              routeRefusalOf(candidate, modelChoice(manifest)) ?? creatureRefusal(candidate);
-            if (routeRefusal !== null)
-              return yield* opError("blender-export", root, "invalid-input", routeRefusal);
             const file = input.file ?? `${yield* assetDirOf(manifest)}/${candidate.subject}.glb`;
             if (
               !file.startsWith(`${engineDir}/`) ||
@@ -2682,14 +2653,19 @@ const make = Effect.gen(function* () {
               }),
               "blender-export",
             );
-            if (candidate.measured.kind === "character")
+            // A rendered review of what shipped is kept for Art under the file's name.
+            const sheet = NodePath.join(out, REVIEW_PNG);
+            if (
+              candidate.measured.kind === "character" &&
+              (yield* Effect.promise(() =>
+                NodeFSP.lstat(sheet).then(
+                  (stat) => stat.isFile(),
+                  () => false,
+                ),
+              ))
+            )
               yield* Effect.tryPromise({
-                try: () =>
-                  keepHeroSheet(
-                    realRoot,
-                    NodePath.posix.basename(file, ".glb"),
-                    NodePath.join(out, REVIEW_PNG),
-                  ),
+                try: () => keepHeroSheet(realRoot, NodePath.posix.basename(file, ".glb"), sheet),
                 catch: (cause) => opError("blender-export", file, "io", undefined, cause),
               });
             // Shipped: Art stops listing this review as a model still being made.
@@ -2703,7 +2679,7 @@ const make = Effect.gen(function* () {
             return {
               text:
                 [
-                  `Exported the review ${key.slice(0, 12)} of ${candidate.objects.join(", ")}: ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
+                  `Exported ${candidate.objects.join(", ")} (pass ${key.slice(0, 12)}): ${file} (${(glb.bytes / 1048576).toFixed(2)} MB${compress ? `, compressed from ${(reviewedBytes.byteLength / 1048576).toFixed(2)} MB: ${decodes ? "meshopt geometry and clips" : "quantized geometry"}, WebP images` : ""}) and its sidecar ${sidecar}.`,
                   ...(input.simplify === undefined
                     ? []
                     : simplify === undefined
@@ -2716,7 +2692,13 @@ const make = Effect.gen(function* () {
                   ...(decoderNote === null ? [] : [decoderNote]),
                   credited,
                 ].join(" ") +
-                `\nSaved .blend source: ${blend}\n${afterAddingArt(profile)}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
+                `\n${measurementText(candidate, styleBudgets(style), reviewedBytes.byteLength)}${rigNotes(
+                  candidate,
+                )
+                  .map((note) => `\nNote: ${note}`)
+                  .join(
+                    "",
+                  )}\nSaved .blend source: ${blend}\n${afterAddingArt(profile)}${profile.sidecarLoad === null ? "" : ` ${profile.sidecarLoad(candidate.subject, sidecar.slice(engineDir.length + 1))}`}`,
               blend,
               export: file,
               sidecar,

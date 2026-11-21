@@ -17,8 +17,7 @@ Change direction by locking again, never by drift. How models are made is
 the person's choice in game.json: `characters` (`blender` or `code`) and
 `library` (off by default). Read both before any model; an
 unrigged model is a prop on every route. With the library off its models
-are refused, but its clips and sounds come in, and any library model can be
-your yardstick in the review.
+are refused, but its clips and sounds come in.
 
 ## Art recipes
 
@@ -27,21 +26,14 @@ read the one or two your model needs.
 
 ## The loop
 
-Model, `game_blender` op `look` with `mode: "review"`, read the numbers,
-change one thing, review again. Pass `reference`: the brief's picture, the
-key art, `art/concepts/<name>.png`, or a library model as yardstick
-(`<pack id>:<file>`, a file `game_assets` op `search` lists). The review
-sets it beside the model at the same framing and reports the overlap, the
-look (materials, hue families, flat share, triangles of the role's budget:
-name it with `obj["kurambit_role"]`), floating and unsupported parts, and a
-character's gates; `kurambit.qa([...])` counts what it cannot see (inward
-faces, flicker). Fix what the export would refuse
-first, then silhouette, game distance, colour and craft. Write each defect
-numbered, with its fix, before changing anything; "looks good" is not a review. A defect back after
-two fixes needs another method. Stop when nothing blocking is left, or two
-rounds fixed nothing, and name what is left. `game_blender` op `export`
-writes exactly the reviewed model and its sidecar; name it in the game by
-its sidecar (TEMPLATE.md).
+Model, then look: `game_blender` op `look` with `mode: "review"` renders a
+turnaround, clay, game distance and a character's clips, with `reference`
+(the brief's picture, the person's, or `art/concepts/<name>.png`) beside it,
+and prints what it measured; `kurambit.qa([...])` counts what it cannot see
+(inward faces, flicker). Change what the picture shows is wrong, and look
+again. `game_blender` op `export` runs the same pass, writes the model and
+its sidecar and prints the same facts; it refuses only a file that would be
+broken in the game. Name it in the game by its sidecar (TEMPLATE.md).
 
 ## Making in Blender
 
@@ -73,14 +65,6 @@ library on, the lock's packs come first. A prop
 painted from a turnaround sheet: `game_blender` op `paint`, after the
 model's overlap with the sheet passes about 0.75. Realistic textures (Poly
 Haven, ambientCG) belong only in a realistic lock.
-
-## The hero sheet
-
-A character or creature is done when the review keeps its sheet in
-`art/sheets/` and your critique is beside it (`game_check` op `final` lists
-the rest): `art/sheets/<sheet name>.md`, the brief's words for the subject,
-the review's numbers, then each defect numbered, biggest first, with what
-you fixed or why not.
 
 ## 2D sprites from 3D
 
