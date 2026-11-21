@@ -29,7 +29,7 @@ name them in game.json `"recipes": [...]`; `game_check` prints their numbers.
 - `tension-release`: threats over time: waves, a boss, a chase.
 - `retry-one-press`: any game that can be lost; pause.
 - `art-silhouette`: every made model: masses first, to a reference.
-- `art-palette`: a model's colours: one atlas, painted cells.
+- `art-palette`: one atlas, when the person locks a palette.
 - `art-prop`: crates, barrels, weapons: edges that catch light.
 - `art-humanoid`: a hero or NPC on the standard skeleton.
 - `art-quadruped`: an animal the library lacks.
