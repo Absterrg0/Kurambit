@@ -31,8 +31,8 @@ voxel=height/200, smooth=10, target_faces=)`, then Subdivision 1.
   (`kurambit.blender.scatter`), each card one feather or tuft, with size and colour jitter.
 - An animal: build it static with its legs apart, then rig it on a template (`fox`, `horse`,
   `dragon`…) or chains (`recipes/art-rigging.md`).
-- Materials: skin with subsurface and roughness 0.4-0.6; cloth matte with a weave or noise;
-  metal metallic 1 with worn, lighter edges; eyes glossy. Variation everywhere: no part one
+- Materials: skin with subsurface and roughness 0.4-0.6; eyes glossy; cloth, leather and
+  metal with a scan's grain (`art-pipeline.md` step 6). Variation everywhere: no part one
   flat colour.
 
 ## Pitfalls

@@ -27,7 +27,8 @@ cars, boats, houses, walls, set pieces.
 - Rocks: boxes and spheres fused with `kurambit.one_skin`, then Displace with a noise texture;
   trees: the trunk and boughs as sweeps, leaves as cards in clumps.
 - Materials: metal metallic 1, roughness 0.2-0.5; paint, wood, stone metallic 0, roughness
-  0.5-0.9; glass Transmission Weight 1. Wear: worn edges lighter and rougher, recesses darker;
+  0.5-0.9; glass Transmission Weight 1; a scan's grain under each (`art-pipeline.md` step 6).
+  Wear: worn edges lighter and rougher, recesses darker;
   `kurambit.bake_down(..., maps=("normal", "ao"))` bakes contact shadow where parts meet.
 
 ## Pitfalls

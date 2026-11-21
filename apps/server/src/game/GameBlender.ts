@@ -341,6 +341,16 @@ const decodeRigged = Schema.decodeUnknownEffect(
     notes: Schema.Array(Schema.String),
   }),
 );
+/** What kurambit.scan prints: the materials that took the scan, and at what size. */
+const decodeScanned = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    materials: Schema.Array(Schema.String),
+    objects: Schema.Array(Schema.String),
+    metres: Schema.Number,
+    size: Schema.Number,
+    dimmed: Schema.Array(Schema.String),
+  }),
+);
 /** What kurambit.animate prints; the full bundle is its bundle.json. */
 const decodeAnimated = Schema.decodeUnknownEffect(
   Schema.Struct({
@@ -1378,6 +1388,60 @@ const make = Effect.gen(function* () {
    * One kit entry in the live scene: its one result line, decoded; its refusal as the
    * reason it names; anything it raised fails the call with the traceback already.
    */
+  /**
+   * A Poly Haven texture laid on parts goes under their own materials (kurambit.scan), from the
+   * library's index and its pinned files; null when the id is no indexed texture, which the
+   * add-on then imports as it does models and skies.
+   */
+  const scanTexture = (
+    root: string,
+    id: string,
+    applyTo: ReadonlyArray<string>,
+    tile: number | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const libraryId = id.startsWith("polyhaven-")
+        ? id
+        : `polyhaven-${id.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      const found = yield* library.entry(libraryId).pipe(Effect.option);
+      if (found._tag === "None" || !found.value.kinds.includes("texture")) return null;
+      const pack = found.value;
+      const pick = (pattern: RegExp) => pack.files?.find((file) => pattern.test(file.path))?.path;
+      const maps = [pick(/_(albedo|diff|diffuse|color|col)_/i), pick(/_nor_gl_/i), pick(/_arm_/i)];
+      if (maps.some((path) => path === undefined))
+        return yield* opError(
+          "blender-assets-import",
+          root,
+          "tool-failed",
+          `${pack.id} has no colour, OpenGL normal and ARM maps to scan with; pick another texture.`,
+        );
+      const [color, normal, arm] = yield* Effect.forEach(maps, (path) =>
+        library.packFile(pack.id, path!),
+      );
+      const made = yield* kitCall(
+        root,
+        "blender-assets-import",
+        decodeScanned,
+        `from kurambit.protocol import entry\nentry(kurambit.scan)(${pyJson(applyTo)}, ${pyJson(color)}, ${pyJson(normal)}, ${pyJson(arm)}, ${tile ?? pack.tileMetres ?? 1})`,
+      );
+      const blend = yield* saveBlend(root);
+      const credited = yield* library.credit(root, pack, "Blender assets import");
+      return {
+        text: [
+          `${pack.title} (${pack.id}, ${LIBRARY_LICENCES[pack.licence].name}) is under ${made.materials.join(", ")} on ${made.objects.join(", ")}: its grain at ${made.metres} m a tile over each material's own colour and roughness, ${made.size} px maps shared by every material that takes it, on a "scan" UV map the export ships.`,
+          ...(made.dimmed.length === 0
+            ? []
+            : [
+                `${made.dimmed.join(", ")} ${made.dimmed.length === 1 ? "is" : "are"} lighter than the scan can carry and come out a little darker.`,
+              ]),
+          "targetSize sets the metres a tile covers (a small or stylised model often wants it larger than life). To change a scanned material's colour or roughness: kurambit.scan(names, off=True) in op code puts it back, change it, then import again.",
+          credited,
+          `Saved .blend source: ${blend}`,
+        ].join("\n"),
+        blend,
+      };
+    });
+
   const kitCall = <A>(
     root: string,
     operation: string,
@@ -2406,6 +2470,10 @@ const make = Effect.gen(function* () {
                 `source ${input.source} takes id: the asset id game_blender op asset_search listed.`,
               );
             const source = input.source;
+            if (source === "polyhaven" && input.applyTo !== undefined) {
+              const scanned = yield* scanTexture(root, id, input.applyTo, input.targetSize);
+              if (scanned !== null) return scanned;
+            }
             // A library file is fetched and checked against its pin before the live scene changes.
             const libraryFile =
               source === "library"

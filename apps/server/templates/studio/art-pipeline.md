@@ -45,9 +45,11 @@ low-sided tubes on a skeleton read as a toy robot.
    (boolean, bevel by angle, weighted normals).
 5. Cloth as shells of the body: a copy of the body's faces, shrinkwrapped
    and solidified 1-3 cm, so it bends with it. Hair as a sweep or cards.
-6. Materials: Principled with real roughness and metal, variation and
-   wear (a darker recess, a lighter worn edge, a tiling surface from
-   `kurambit.surface`). Procedural nodes do not ship: bake them.
+6. Materials: Principled with real roughness and metal. Cloth, leather,
+   metal, wood and stone take a photo scan's grain under their own colour:
+   `game_blender` op `asset_import` `{source: "polyhaven", id, applyTo}`
+   (op `asset_search` with assetType `textures` finds one). Procedural
+   nodes do not ship: bake them.
 7. Look at the pictures and refine; then export.
 8. Bake down only if the running game's Performance row says the scene is
    too heavy: `kurambit.bake_down(high, low=)` puts the dense detail into

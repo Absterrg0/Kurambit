@@ -151,6 +151,8 @@ export interface LibraryPack {
   readonly animated?: number;
   /** The source's picture of it, shown before anything is fetched. */
   readonly preview?: string;
+  /** A tileable texture: the metres one tile covers. */
+  readonly tileMetres?: number;
   readonly kinds: ReadonlyArray<GameLibraryKind>;
   readonly formats: ReadonlyArray<string>;
   readonly style: string;

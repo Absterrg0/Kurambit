@@ -121,6 +121,7 @@ const polyHavenEntry = (base: string, row: PolyHavenRow): LibraryPack | null => 
     family: "photo-pbr",
     group: "polyhaven",
     preview: `https://cdn.polyhaven.com/asset_img/thumbs/${encodeURIComponent(row.id)}.png?width=256&height=256`,
+    ...(kind === "texture" && row.size?.[0] !== undefined ? { tileMetres: row.size[0] } : {}),
   };
 };
 
