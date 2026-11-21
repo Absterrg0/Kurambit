@@ -1,20 +1,23 @@
-"""The style pass every exported model goes through: the packs' gradient atlas, scale and budgets.
+"""The style pass every exported model goes through: scale, texture budget, a character's one mesh,
+and, when the person chose it, the packs' gradient atlas.
 
 It runs only in the one-shot pass, on its own copy of the scene, so the live scene keeps the
-agent's materials and modifiers. What KayKit and Kenney do, measured from their files: one
-material on one small atlas of vertical-gradient swatches, each face sampling its swatch by its
-height in the model, so every part gets the same soft top light (shading.gradient) and a ramp
-that warms toward the top (shading.hue). From STYLE.json:
-  palette  a hex list: every material snaps to its nearest colour (in Lab; a textured one face by
-           face, by the texture under each face), and the atlas is the whole palette, one for the
-           game. Without a hex list the swatches are the model's own plain colours, and a
-           textured or see-through material keeps itself, its textures scaled to budget.texture.
-           A glowing colour samples the same atlas through a second material, Glow.
+agent's materials and modifiers. By default every material ships as Blender's glTF exporter writes
+it (base colour, metallic, roughness, emission, normal maps, transmission, alpha, culling), its
+textures scaled to budget.texture. From STYLE.json:
+  palette  a hex list, which a lock keeps only for the flat finish the person picked: the pack look
+           of KayKit and Kenney, measured from their files. Every material snaps to its nearest
+           colour (in Lab; a textured one face by face, by the texture under each face) on one
+           small atlas of vertical-gradient swatches, the whole palette, one for the game; each
+           face samples its swatch by its height in the model, so every part gets the same soft
+           top light (shading.gradient) and a ramp that warms toward the top (shading.hue). A
+           glowing colour samples the same atlas through a second material, Glow. A voxel model
+           (a material per colour) goes on an atlas of its own colours without a palette too.
   scale    scale.character: a character is scaled to that standing height on its armature's
            object, so clip units are unchanged. Props, models on their own rig (kurambit_rig: a
            creature, a vehicle) and characters with a declared height keep their modelled metres.
-A character's meshes are joined into one skinned mesh: one mesh, one draw call. Exports made
-before the atlas (colours painted per vertex with a baked shade) still load as they were."""
+A character's meshes are joined into one skinned mesh: one mesh, one draw call (a primitive per
+material). Exports made before (colours painted per vertex with a baked shade) still load as they were."""
 import colorsys
 import math
 import os
@@ -275,17 +278,6 @@ def _palette_material(name, img, shading, glow):
     return m
 
 
-def _plain(m):
-    """True when a material is one colour the atlas can hold: no texture or see-through, one
-    Principled with nothing plugged in (it may glow)."""
-    if m is None or m.node_tree is None:
-        return True
-    bsdfs = [n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"]
-    if len(bsdfs) != 1 or any(i.is_linked for i in bsdfs[0].inputs):
-        return False
-    return bsdfs[0].inputs["Alpha"].default_value >= 0.999
-
-
 def _hexed(c):
     return "#%02x%02x%02x" % tuple(round(max(0.0, min(1.0, x)) * 255) for x in c)
 
@@ -313,15 +305,14 @@ def _project(points, axis):
 
 
 def atlas_pass(meshes, shading, out_dir, hexes=None):
-    """Every plain colour onto one atlas of gradient swatches, in one material (and Glow, when
+    """Every material onto one atlas of gradient swatches, in one material (and Glow, when
     something glows): the packs' method. With a locked hex palette every material snaps to its
     nearest entry (in Lab; a textured face by the texture under it) and the atlas is the whole
-    palette, one for the game; without one the swatches are the model's own colours and a
-    textured or see-through material keeps itself. Each face samples its swatch by its height in
-    the model; a decal's faces sample its painted cell, projected along its axis over their
-    bounds. Returns (palette entries used, swatches [{colour, name}] in atlas order, rows)."""
-    locked = bool(hexes)
-    colours = [_hex(h) for h in hexes] if locked else []
+    palette, one for the game; without one (voxel models, whose materials are plain colours) the
+    swatches are the model's own colours. Each face samples its swatch by its height in the model;
+    a decal's faces sample its painted cell, projected along its axis over their bounds. Returns
+    (palette entries used, swatches [{colour, name}] in atlas order, rows)."""
+    colours = [_hex(h) for h in hexes] if hexes else []
     names = [None] * len(colours)
     plab = [_lab(c) for c in colours]
     slots_of = []
@@ -336,62 +327,55 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
                     decals.append(m)
                 infos.append(("decal", decals.index(m)))
                 continue
-            if not locked and not _plain(m):
-                infos.append(None)
-                continue
             c, glow = material_colour(m)
-            if locked:
+            if hexes:
                 k = min(range(len(colours)), key=lambda i: sum((a - b) ** 2 for a, b in zip(_lab(c), plab[i])))
             else:
-                key = _hexed(c)
-                k = next((i for i, x in enumerate(colours) if _hexed(x) == key), None)
+                k = next((i for i, x in enumerate(colours) if _hexed(x) == _hexed(c)), None)
                 if k is None:
-                    colours.append(_hex(key))
+                    colours.append(_hex(_hexed(c)))
                     names.append(None)
                     k = len(colours) - 1
             if names[k] is None and m is not None:
                 names[k] = m.name.split(".")[0][:64]
             infos.append((k, glow))
         slots_of.append(infos)
-    if not colours and not decals:
-        return [], [], 0
     img, rows = _atlas(colours, shading, out_dir, [_decal_image(m) for m in decals])
     flat, glow_mat = _palette_material("Palette", img, shading, False), None
     used, seen, pixel_cache = set(), set(), {}
     for o, infos in zip(meshes, slots_of):
         me = o.data
-        if me.as_pointer() in seen or all(i is None for i in infos):  # a shared mesh is styled once
+        if me.as_pointer() in seen:  # a shared mesh is styled once
             continue
         seen.add(me.as_pointer())
-        is_decal = lambda i: i is not None and i[0] == "decal"
-        if any(i is not None and not is_decal(i) and i[1] for i in infos) and glow_mat is None:
+        is_decal = lambda i: i[0] == "decal"
+        if any(not is_decal(i) and i[1] for i in infos) and glow_mat is None:
             glow_mat = _palette_material("Glow", img, shading, True)
         np_ = len(me.polygons)
         mat_index = np.empty(np_, np.int32)
         me.polygons.foreach_get("material_index", mat_index)
         mat_index = np.minimum(mat_index, len(infos) - 1)
-        atlased = np.array([i is not None for i in infos])[mat_index]
-        swatch = np.array([i[0] if i is not None and not is_decal(i) else 0 for i in infos])[mat_index]
-        glows = np.array([bool(i is not None and not is_decal(i) and i[1]) for i in infos])[mat_index]
+        swatch = np.array([0 if is_decal(i) else i[0] for i in infos])[mat_index]
+        glows = np.array([bool(not is_decal(i) and i[1]) for i in infos])[mat_index]
         decal = np.array([i[1] if is_decal(i) else -1 for i in infos])[mat_index]
         loop_poly = np.repeat(np.arange(np_), [p.loop_total for p in me.polygons])
-        if locked:
-            # A textured material (a generator's baked texture, a pack's colormap) is many colours:
-            # each face snaps by what its texture shows under it, not by the mean.
-            images = []
-            for slot in o.material_slots:
-                m = slot.material
-                if _decal_image(m) is not None:
-                    images.append(None)  # painted, never snapped
-                    continue
-                bsdf = next((nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED"), None) if m is not None and m.node_tree is not None else None
-                image = _feeding_image(bsdf.inputs["Base Color"]) if bsdf is not None else None
-                if image is not None and image.name not in pixel_cache:
-                    pixel_cache[image.name] = _srgb_pixels(image)
-                images.append(pixel_cache.get(image.name) if image is not None else None)
+        # A textured material (a generator's baked texture, a pack's colormap) is many colours:
+        # each face snaps by what its texture shows under it, not by the mean.
+        images = []
+        for slot in o.material_slots:
+            m = slot.material
+            if _decal_image(m) is not None:
+                images.append(None)  # painted, never snapped
+                continue
+            bsdf = next((nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED"), None) if m is not None and m.node_tree is not None else None
+            image = _feeding_image(bsdf.inputs["Base Color"]) if bsdf is not None else None
+            if image is not None and image.name not in pixel_cache:
+                pixel_cache[image.name] = _srgb_pixels(image)
+            images.append(pixel_cache.get(image.name) if image is not None else None)
+        if hexes:
             snapped, textured = _face_swatches(me, images, mat_index, loop_poly, plab)
             swatch[textured] = snapped[textured]
-        used.update(int(k) for k in np.unique(swatch[atlased & (decal < 0)]))
+        used.update(int(k) for k in np.unique(swatch[decal < 0]))
         co = np.empty(len(me.vertices) * 3)
         me.vertices.foreach_get("co", co)
         mw = np.array(o.matrix_world)
@@ -419,31 +403,44 @@ def atlas_pass(meshes, shading, out_dir, hexes=None):
                 u[sel] = pad + (1 - 2 * pad) * du
                 y0 = (len(decals) - 1 - j) * DECAL_ROWS
                 v[sel] = (y0 + DECAL_ROWS * (pad + (1 - 2 * pad) * dv)) / rows
-        kept = [o.material_slots[i].material for i, info in enumerate(infos) if info is None]
-        loop_atlas = atlased[loop_poly]
-        if kept and me.uv_layers.active is not None:
-            # A kept textured material reads its own UVs: only the atlas faces' corners move.
-            layer = me.uv_layers.active
-            uv = np.empty(len(me.loops) * 2, np.float32)
-            layer.data.foreach_get("uv", uv)
-            uv = uv.reshape(-1, 2)
-            uv[loop_atlas] = np.stack([u, v], 1)[loop_atlas]
-            layer.data.foreach_set("uv", uv.ravel())
-        else:
-            for name in [layer.name for layer in me.uv_layers]:  # removing a layer invalidates the others' references
-                me.uv_layers.remove(me.uv_layers[name])
-            me.uv_layers.new(name="palette").data.foreach_set("uv", np.stack([u, v], 1).ravel().astype(np.float32))
-        new_slots = [flat] + ([glow_mat] if glow_mat is not None else []) + kept
-        index = np.where(atlased, np.where(glows, 1, 0),
-                         np.array([len(new_slots) - len(kept) + kept.index(o.material_slots[i].material) if infos[i] is None else 0
-                                   for i in range(len(infos))])[mat_index])
+        for name in [layer.name for layer in me.uv_layers]:  # removing a layer invalidates the others' references
+            me.uv_layers.remove(me.uv_layers[name])
+        me.uv_layers.new(name="palette").data.foreach_set("uv", np.stack([u, v], 1).ravel().astype(np.float32))
         me.materials.clear()  # this resets every face's material index: set them again below
-        for m in new_slots:
+        for m in [flat] + ([glow_mat] if glow_mat is not None else []):
             me.materials.append(m)
-        me.polygons.foreach_set("material_index", index.astype(np.int32))
-    order = range(len(colours)) if not locked else sorted(used)
+        me.polygons.foreach_set("material_index", glows.astype(np.int32))
     swatches = [{"colour": _hexed(colours[k]), "name": (names[k] or _hexed(colours[k]))[:64]} for k in range(len(colours))]
-    return [hexes[k] for k in order] if locked else [], swatches, rows
+    return [hexes[k] for k in sorted(used)] if hexes else [], swatches, rows
+
+
+def decal_uvs(meshes):
+    """Without the atlas a decal keeps its own material: its faces' corners get UVs over its picture,
+    projected along its axis over their bounds, as the atlas would place them in its cell."""
+    for o in meshes:
+        axes = [_decal_image(s.material) is not None and s.material["kurambit_decal"] for s in o.material_slots]
+        if not any(axes):
+            continue
+        me = o.data
+        index = np.empty(len(me.polygons), np.int32)
+        me.polygons.foreach_get("material_index", index)
+        loop_poly = np.repeat(np.arange(len(me.polygons)), [p.loop_total for p in me.polygons])
+        loop_v = np.empty(len(me.loops), np.int32)
+        me.loops.foreach_get("vertex_index", loop_v)
+        co = np.empty(len(me.vertices) * 3)
+        me.vertices.foreach_get("co", co)
+        mw = np.array(o.matrix_world)
+        world = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+        layer = me.uv_layers.active or me.uv_layers.new(name="UVMap")
+        uv = np.zeros(len(me.loops) * 2, np.float32)
+        layer.data.foreach_get("uv", uv)
+        uv = uv.reshape(-1, 2)
+        for k, axis in enumerate(axes):
+            sel = (np.minimum(index, len(axes) - 1) == k)[loop_poly]
+            if axis and sel.any():
+                du, dv = _project(world[loop_v[sel]], axis)
+                uv[sel] = np.stack([du, dv], 1)
+        layer.data.foreach_set("uv", uv.ravel())
 
 
 def hue_families(swatches):
@@ -674,10 +671,17 @@ def flat_share(meshes):
     return flat / n if n else 1.0
 
 
+def atlas_style(style):
+    """The hex palette the person locked, which asks for the atlas, or None."""
+    palette = (style or {}).get("palette")
+    return palette if isinstance(palette, list) and palette else None
+
+
 def style_pass(objects, style, out_dir, texture_side):
     """Runs the pass on objects (the resolved candidate, in this one-shot copy). Returns
-    {kind, meshes, armatures, usedPalette, scaled, notes, paints, atlas}: paints are the atlas's
-    swatches in its order, which the sidecar carries so Art lists and edits each one."""
+    {kind, meshes, armatures, usedPalette, scaled, notes, paints, atlas, hues, flat}: paints are the
+    atlas's swatches in its order, which the sidecar carries so Art lists and edits each one;
+    without the atlas there are none, and Art edits each material as the game loads it."""
     style = style or {}
     objects = [realize(o) if o.type in helpers.GEOMETRY else o for o in objects]
     arms = [o for o in objects if o.type == "ARMATURE"]
@@ -687,11 +691,19 @@ def style_pass(objects, style, out_dir, texture_side):
     for arm in arms:
         meshes = join_character(arm, meshes)
     shading = {**DEFAULT_SHADING, **(style.get("shading") or {})}
-    palette = style.get("palette")
-    hexes = palette if isinstance(palette, list) and palette else None
+    hexes = atlas_style(style)
     notes = [] if hexes else fit_textures(meshes, texture_side)
     notes += [f"{n} has no material, so it ships the default white: give it one" for n in unpainted[:8]]
-    used, swatches, rows = atlas_pass(meshes, shading, out_dir, hexes)
+    if hexes:
+        used, swatches, rows = atlas_pass(meshes, shading, out_dir, hexes)
+        hues = hue_families(swatches)
+    else:
+        # A voxel model is a material per colour: on its own colours' atlas it is one draw call.
+        voxels = [o for o in meshes if o.get("kurambit_voxel")]
+        used, swatches, rows = atlas_pass(voxels, shading, out_dir) if voxels else ([], [], 0)
+        decal_uvs([o for o in meshes if o not in voxels])
+        mats = {s.material for o in meshes for s in o.material_slots if s.material is not None}
+        hues = hue_families([{"colour": _hexed(material_colour(m)[0])} for m in mats])
     scaled = character_scale(arms, meshes, style)
     if scaled is not None:
         for arm in arms:
@@ -699,6 +711,7 @@ def style_pass(objects, style, out_dir, texture_side):
         bpy.context.view_layer.update()
     for o in meshes:
         o.data.validate()
-    atlas = {"columns": COLS, "rows": rows, "hues": hue_families(swatches), "flat": round(flat_share(meshes), 3)} if swatches else None
+    atlas = {"columns": COLS, "rows": rows} if swatches else None
     return {"kind": "character" if arms else "prop", "meshes": meshes, "armatures": arms, "usedPalette": used,
-            "scaled": scaled, "notes": notes, "paints": swatches[:64], "atlas": atlas}
+            "scaled": scaled, "notes": notes, "paints": swatches[:64], "atlas": atlas, "hues": hues,
+            "flat": round(flat_share(meshes), 3)}

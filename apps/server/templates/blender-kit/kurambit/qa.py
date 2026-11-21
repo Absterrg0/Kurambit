@@ -1,9 +1,10 @@
 """Mesh faults the review's pictures hide, counted in one code call: print(kurambit.qa(["Crate", "Lid"])).
 
-The export draws every face one-sided (the atlas material culls back faces), so in the game a part
-whose faces point inward, or faces wound against their neighbours, are holes; two surfaces facing
-the same way within a millimetre flicker as the camera moves. Each object is read as the export
-reads it: modifiers applied, in world space, at the rest pose.
+A material that culls back faces (Backface Culling on it, or every material under STYLE.json's
+palette, whose atlas culls) is drawn one-sided, so in the game a part of it whose faces point
+inward, or faces wound against their neighbours, are holes (double-sided they show: a note). Two
+surfaces facing the same way within a millimetre flicker as the camera moves. Each object is read
+as the export reads it: modifiers applied, in world space, at the rest pose.
 
 Adapted from blender-skills' asset check (MIT, see THIRD-PARTY-NOTICES.md),
 `skills/blender-asset-qa/scripts/qa_check.py`: the signed volume of each closed part, the directed
@@ -21,7 +22,7 @@ import bpy
 from mathutils import geometry
 from mathutils.bvhtree import BVHTree
 
-from . import helpers
+from . import helpers, look
 
 FLICKER = 0.001  # metres: same-facing surfaces closer than this fight in the depth buffer
 MOST = 60000  # triangles past which the flicker check is skipped (it samples every triangle)
@@ -75,6 +76,7 @@ def qa(objects):
     problems, notes, per = [], [], {}
     verts, tris, meta = [], [], []  # meta: (object index, the normal the game draws)
     low = None
+    atlas = bool(look.read()["palette"])  # the atlas material culls back faces
     for oi, o in enumerate(objs):
         # A mirrored object (negative scale) has its winding reversed in world space; Blender and
         # three.js both draw it flipped back, so its parts are judged in their own space.
@@ -86,7 +88,7 @@ def qa(objects):
         if bm.verts:
             z = min(v.co.z for v in bm.verts)
             low = z if low is None else min(low, z)
-        closed, volume, ref = {}, Counter(), {}
+        closed, volume, ref, culled = {}, Counter(), {}, set()
         for e in bm.edges:
             if len(e.link_faces) != 2:
                 closed[isl[e.verts[0].index]] = False
@@ -101,24 +103,30 @@ def qa(objects):
             for lp in f.loops:
                 directed[(lp.vert.index, lp.link_loop_next.vert.index)] += 1
             degenerate += f.calc_area() < 1e-10
-            empty += f.material_index >= len(slots) or slots[f.material_index].material is None
+            m = slots[f.material_index].material if f.material_index < len(slots) else None
+            empty += m is None
+            if atlas or (m is not None and m.use_backface_culling):
+                culled.add(g)
             tris.append(tuple(base + v.index for v in f.verts))
             meta.append((oi, f.normal * sign))
-        inward = sum(1 for g, vol in volume.items() if closed.get(g, True) and vol * sign < -1e-9)
+        inward = [g for g, vol in volume.items() if closed.get(g, True) and vol * sign < -1e-9]
+        holes = sum(1 for g in inward if g in culled)
         crossed = sum(1 for n in directed.values() if n > 1)
         open_edges = sum(1 for e in bm.edges if len(e.link_faces) == 1)
         per[o.name] = {"triangles": len(bm.faces), "parts": len(set(isl)), "openEdges": open_edges}
         bm.free()
-        if inward:
-            problems.append(f"{o.name}: {inward} closed part(s) face inward, invisible in the game: flip them (bmesh.ops.reverse_faces, or recalc_face_normals on that part)")
+        if holes:
+            problems.append(f"{o.name}: {holes} closed part(s) face inward and their material culls back faces, so they are invisible in the game: flip them (bmesh.ops.reverse_faces, or recalc_face_normals on that part)")
+        if len(inward) > holes:
+            notes.append(f"{o.name}: {len(inward) - holes} closed part(s) face inward; their material is double-sided, so they show, but culled (Backface Culling, or a palette locked later) they vanish: flip them (bmesh.ops.reverse_faces, or recalc_face_normals on that part)")
         if crossed:
-            problems.append(f"{o.name}: {crossed} edges join faces wound opposite ways, so one side is a hole: bmesh.ops.recalc_face_normals")
+            problems.append(f"{o.name}: {crossed} edges join faces wound opposite ways, so where back faces are culled one side is a hole: bmesh.ops.recalc_face_normals")
         if degenerate:
             problems.append(f"{o.name}: {degenerate} zero-area triangles: bmesh.ops.dissolve_degenerate(dist=1e-4)")
         if empty:
             problems.append(f"{o.name}: {empty} triangles have no material and ship white: give each slot one")
         if open_edges:
-            notes.append(f"{o.name}: {open_edges} open edges; a one-sided face is invisible from behind: close it or give it thickness (Solidify) where the camera can see its back")
+            notes.append(f"{o.name}: {open_edges} open edges; where its material culls back faces, an open face is invisible from behind: close it, give it thickness (Solidify), or leave Backface Culling off on that material where the camera sees its back")
 
     if len(tris) > MOST:
         notes.append(f"{len(tris)} triangles: the flicker check was skipped (it runs under {MOST})")

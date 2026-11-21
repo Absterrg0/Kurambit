@@ -1,7 +1,8 @@
-# One gradient-swatch atlas, hue-shifted ramps, painted cells
+# The pack look: one gradient-swatch atlas, hue-shifted ramps, painted cells
 
-**When.** Every made model: its colours, and a face or emblem that should be painted, not
-modelled.
+**When.** The person chose the KayKit and Kenney look: STYLE.json holds a hex `palette` (op
+`lock` with `finish: "flat"`). Without one, models keep their own materials; a face or emblem
+as paint (step 2) works on both.
 
 ## Numbers
 
@@ -21,8 +22,8 @@ modelled.
 ## Steps
 
 1. Give each part a flat colour: `kurambit.material("#RRGGBB", name="Tunic")`. The export
-   packs every plain colour into one atlas of vertical-gradient swatches, and Art lists and
-   edits each swatch by its name, so name them for what they colour.
+   snaps every colour to the palette's nearest, on one atlas of vertical-gradient swatches, and
+   Art lists and edits each swatch by its name, so name them for what they colour.
 2. A face or emblem as paint: draw it in code and make it a decal.
    ```python
    import numpy as np
@@ -38,10 +39,9 @@ modelled.
            p.material_index = len(head.data.materials) - 1
    ```
    The picture stretches over the bounds of the faces that use it, seen along `axis` (`-y` is the
-   front), top row first.
-3. A locked palette (`STYLE.json` `palette`) snaps every plain colour to its nearest entry;
-   decals are never snapped.
-4. Review: read materials, textures, hue families in the review's Look line.
+   front), top row first: a cell of the atlas, or its own texture without one. Decals are
+   never snapped.
+3. Review: read materials, textures, hue families in the review's Look line.
 
 ## Pitfalls
 
@@ -53,8 +53,7 @@ modelled.
 - Only a material's base colour and glow ship: metallic, roughness, procedural nodes and vertex
   colours do not (the atlas is matte, `shading.roughness` 0.62). Metal is a light, cool swatch
   beside a dark one; grain and relief are a baked `kurambit.surface`.
-- A textured or see-through material keeps itself only when the lock has no hex palette; under
-  one it snaps face by face.
+- A textured or see-through material snaps too, face by face, by the texture under each face.
 
 ## Checks
 
@@ -67,7 +66,8 @@ modelled.
 
 ## Code
 
-Kit only: `kurambit.material`, `kurambit.decal`; the export's style pass builds the atlas.
+Kit only: `kurambit.material`, `kurambit.decal`; the export's style pass builds the atlas when
+STYLE.json has a hex palette.
 
 ## Sources
 

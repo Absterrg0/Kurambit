@@ -207,8 +207,13 @@ check that matters.
   Blender's procedural nodes on a flat torus (no seam), and the colour map holds only the
   pattern's light and dark, multiplied by the material's colour, so Art's one colour field
   recolours a whole surface on a model and on what the game's code tiles it over.
-- Made art follows the CC0 packs' method rather than a hand-written craft kit: one material on a
-  gradient-swatch atlas (`stylepass.py`), budgets by role taken from the packs, and the review's
+- Made art ships the agent's own materials as Blender's glTF exporter writes them (metal, glass,
+  emission, normal maps, baked AO as `COLOR_0`). The CC0 packs' one material on a gradient-swatch
+  atlas (`stylepass.py`) runs only when STYLE.json holds a hex `palette`, which op `lock` keeps
+  only under `finish: "flat"`: the export flattening every model to one matte pack look was the
+  harness deciding taste (judges read it as "plain, flat-shaded"), so only the person's lock asks
+  for it. Voxel models, a material per colour, take an atlas of their own colours either way.
+  Budgets by role are taken from the packs, and the review's
   numbers (`review.py`, `compare.py`: silhouette overlap against a reference picture or a library
   model, width by tenths of height, thin parts at game distance) as the loop's eyes. Every subject
   is built as parts on a structure, the way the packs' own files are split (KayKit's Rogue is a
@@ -224,7 +229,7 @@ check that matters.
   helped and long ones hurt, so a game names at most three in game.json `recipes`, and a check
   prints one line of numbers per pick (`recipes.ts`). Those lines report; style numbers bind only
   through STYLE.json's lock, so the harness measures and the creator decides taste.
-- A decal is a painted cell in the model's one atlas, the atlas's width and two swatch rows tall,
+- Under a palette, a decal is a painted cell in the model's one atlas, the atlas's width and two swatch rows tall,
   below the swatches: the runtime recolours a swatch by cutting the atlas into rows of equal
   height (`look-edits.js`), so a cell of any other height would shift every swatch it recolours.
   A made body (MPFB2 or the drawn bodies) carries no material, so op `character` paints it

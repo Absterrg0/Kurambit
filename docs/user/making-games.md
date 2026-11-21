@@ -142,7 +142,9 @@ it was added to keep their copies.
 A game's look can be recorded in `STYLE.json` at the game's root. For what the game makes itself:
 a colour for each kind of thing (bark, leaf, stone, wall, roof and so on), how things are shaped
 (faceted or soft, how chunky, how detailed) and whether surfaces are flat colour, painted or
-realistic. With the library on: which family of the built-in CC0 art library it uses (KayKit,
+realistic. Models keep the materials they were made with (metal, glass, glow) unless you choose a
+flat finish with a palette: then every model shares one small atlas of those colours, the look of
+the low-poly packs. With the library on: which family of the built-in CC0 art library it uses (KayKit,
 Kenney low-poly, Kenney pixel art and others) and the packs its art and sound come from. Also
 pixel art or smooth, the view, the skeleton its characters share, and loudness targets for music
 and effects. The art tools fill their defaults from it, and searches show its

@@ -171,7 +171,10 @@ export const GameModelMeasure = Schema.Struct({
       }),
     ).check(Schema.isMaxLength(64)),
   ),
-  /** The gradient atlas the plain colours were packed into: `paints` fill its cells row by row from the top. */
+  /**
+   * The gradient atlas a palette lock (or a voxel model) packed the colours into: `paints` fill
+   * its cells row by row from the top. Absent, the model keeps its own materials.
+   */
   atlas: Schema.optionalKey(
     Schema.Struct({
       columns: PositiveInt.check(Schema.isLessThanOrEqualTo(64)),

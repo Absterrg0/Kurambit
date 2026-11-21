@@ -259,7 +259,7 @@ def run_pass(params):
         if speeds.get(clip["name"]):
             clip["groundSpeed"], clip["groundSpeedFrom"] = round(speeds[clip["name"]] * (styled["scaled"] or 1.0), 3), "stride"
     if gates:
-        # The budget is the shipped model's: the style pass merges materials and scales textures,
+        # The budget is the shipped model's: the style pass joins meshes, scales textures and, for the atlas, merges materials,
         # so it is read off the candidate, not the scene before the pass.
         budgets = params["budgets"]
         gates = [g for g in gates if g["name"] != "budget"] + [gates_rules.budget(
@@ -271,8 +271,7 @@ def run_pass(params):
     if styled["atlas"]:
         measured["atlas"] = {"columns": styled["atlas"]["columns"], "rows": styled["atlas"]["rows"]}
     measured["style"] = {"role": role, "roleNamed": role_named, "roleBudget": stylepass.ROLE_BUDGETS[role],
-                         "hues": styled["atlas"]["hues"] if styled["atlas"] else 0,
-                         "flat": styled["atlas"]["flat"] if styled["atlas"] else round(stylepass.flat_share(styled["meshes"]), 3)}
+                         "hues": styled["hues"], "flat": styled["flat"]}
     k = styled["scaled"] or 1.0  # in the shipped size
     if gaps is not None:
         measured["floating"] = [{"part": n[:128], "gap": round(g * k, 4)} for n, g in gaps[:32]]

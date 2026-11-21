@@ -90,8 +90,8 @@ def use_nodes(idb):
 
 def material(hex_colour, glow=0.0, name=None, roughness=0.55):
     """A material of one sRGB colour ("#RRGGBB"), or of a role of the game's look ("wall", "leaf":
-    kurambit.look); glow > 0 makes it emissive (the style pass turns emissive materials into the
-    Glow material and snaps every colour to STYLE.json's palette)."""
+    kurambit.look); glow > 0 makes it emissive. It ships as made, unless STYLE.json locks a hex
+    palette: then the style pass snaps it onto the palette's atlas (a glowing one onto Glow)."""
     if not hex_colour.startswith("#"):
         from . import look
 
@@ -112,9 +112,9 @@ def material(hex_colour, glow=0.0, name=None, roughness=0.55):
 def decal(name, pixels, axis="-y"):
     """A painted material for faces that need a picture, not geometry: eyes and brows on a face, an
     emblem on a shield. pixels: rows of RGB or RGBA in 0..1 (sRGB), top row first, drawn in code
-    (numpy). Give it to the faces it covers: the export paints it as one cell of the model's one
-    atlas, seen along axis ("-y" is the front) and stretched over those faces' bounds, so paint
-    the cell's background in the surface's own colour. Returns the material."""
+    (numpy). Give it to the faces it covers: the export maps it, seen along axis ("-y" is the
+    front), stretched over those faces' bounds, as its own texture or as a cell of a palette
+    lock's atlas, so paint its background in the surface's own colour. Returns the material."""
     px = np.asarray(pixels, np.float32)
     if px.ndim != 3 or px.shape[2] not in (3, 4) or min(px.shape[:2]) < 2:
         raise ValueError("pixels: rows of RGB or RGBA values, at least 2 x 2")

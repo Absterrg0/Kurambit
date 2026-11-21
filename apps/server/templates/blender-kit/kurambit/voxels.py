@@ -1,6 +1,6 @@
 """Voxel models: a grid of palette keys becomes one mesh of cubes, hidden faces gone and coplanar
-faces of a colour merged, one material per colour (the export folds them into vertex colours: one
-draw call). The meshing and the .vox reader are the MagicaVoxel add-on's (blender_magicavoxel, on
+faces of a colour merged, one material per colour (the export puts them on one atlas: one draw
+call). The meshing and the .vox reader are the MagicaVoxel add-on's (blender_magicavoxel, on
 the add-ons list as "magicavoxel"), called at the version the list pins, so nothing here parses a
 file or merges faces by hand.
 

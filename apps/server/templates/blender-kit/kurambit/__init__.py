@@ -6,7 +6,7 @@ paint.adopt takes its result into the live scene. resolve returns names.
 
 Models are parts on a structure (studio-skills/recipes): loft makes a part as rings on its joints,
 weights_along keeps it on its own bones through skin_rigid, joints prints a skeleton's joints, decal
-paints a face or emblem into the model's atlas, hold, pivot, place_on_surface and grid place things,
+paints a face or emblem onto the model, hold, pivot, place_on_surface and grid place things,
 material colours them. blender holds Rigify's meta-rigs (an animal's skeleton), bake_ik_walk and
 Blender's bundled node groups; look is the game's lock as made things read it; voxels makes a voxel
 model from a grid or a .vox; surface bakes a tiling material and wrap maps it in metres; qa counts the

@@ -9,9 +9,10 @@ root (`~` is its own home); print every path you write. `<assets>` is
 
 ## The look: STYLE.json
 
-Before the first model, `game_assets` op `lock` writes the look from the
-brief: `view`, `palette` (hex colours, or a PNG such as the key art),
-`shape.edges` (`faceted` or `smooth`), `scale.character` (metres), `budget`.
+`game_assets` op `lock` records `view`, `scale.character` (metres),
+`budget`, `shape.edges`. Models ship with your own materials (metal, glass,
+glow). A `palette` with `finish: "flat"` is the pack look, every model on
+one atlas (`recipes/art-palette.md`): only when the person chose it.
 Change direction by locking again, never by drift. How models are made is
 the person's choice in game.json: `characters` (`blender`, `code` or
 `generated`) and `library` (off by default). Read both before any model; an
@@ -97,7 +98,7 @@ piece arrives: start a generation, keep building, pick it up with op
    picture; KayKit none), or the person's reference.
 2. **After the pick**, copy it to `art/key-art.png`, read its colours with
    `kurambit.palette_of("art/key-art.png", 8)` and lock them as `palette`
-   (leave `palette` out for a painted or realistic key art) with `anchor`.
+   with `finish` `painted` or `real` (the roles take them) and `anchor`.
    Pass it in `references` of every later image.
 3. **Characters and props.** If the status line of `game_check` op `final` shows the lane
    null in `artLanes`, tell the person what Settings → Art providers needs.

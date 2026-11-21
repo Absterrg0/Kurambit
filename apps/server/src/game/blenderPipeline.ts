@@ -385,7 +385,7 @@ export const measurementText = (
     ...(m.style === undefined
       ? []
       : [
-          `- Look: ${m.atlas === undefined ? "no atlas" : `${m.paints?.length ?? 0} swatch${m.paints?.length === 1 ? "" : "es"} on one gradient atlas`}, ${m.style.hues} hue famil${m.style.hues === 1 ? "y" : "ies"}, ${Math.round(m.style.flat * 100)}% of faces flat-shaded; role ${m.style.role}${m.style.roleNamed ? "" : " (guessed: name it with kurambit_role)"}, ${m.triangles.toLocaleString("en-US")} triangles of the packs' ${m.style.roleBudget.toLocaleString("en-US")}.`,
+          `- Look: ${m.atlas === undefined ? `${m.materials} material${m.materials === 1 ? "" : "s"} as made (no palette locked)` : `${m.paints?.length ?? 0} swatch${m.paints?.length === 1 ? "" : "es"} on one gradient atlas`}, ${m.style.hues} hue famil${m.style.hues === 1 ? "y" : "ies"}, ${Math.round(m.style.flat * 100)}% of faces flat-shaded; role ${m.style.role}${m.style.roleNamed ? "" : " (guessed: name it with kurambit_role)"}, ${m.triangles.toLocaleString("en-US")} triangles of the packs' ${m.style.roleBudget.toLocaleString("en-US")}.`,
         ]),
   ];
   if (m.clips.length > 0)
