@@ -1,5 +1,5 @@
 // How a game tool answers an agent: text first and short. Line 1 is the verdict with its numbers,
-// then the findings with repeats folded, then a `next:` line the server writes from the state,
+// then the findings with repeats folded, then a `next:` line when an error must be fixed first,
 // then the op's details as JSON under a byte cap that names what it cut. A refusal is
 // `{refused, next}` in at most REFUSAL_MOST characters, naming the real cause. T3's preview tools
 // are the model: a bounded snapshot that says what it omitted, and errors that say what to do.
@@ -126,13 +126,14 @@ const capDetails = (details: Record<string, Json>, budget: number) => {
     : { ...(value as Record<string, Json>), omitted: [...omitted.values()] };
 };
 
-/** An op's verdict: its first line, the findings under it, and the one call or edit that follows. */
+/** An op's verdict: its first line, the findings under it, and the error to fix first, if any. */
 export interface Verdict {
   readonly line: string;
   readonly findings?: ReadonlyArray<string>;
-  /** Readings that are not problems (a picked recipe's numbers), shown after the findings. */
+  /** Readings that are not problems (the first minute), shown after the findings. */
   readonly notes?: ReadonlyArray<string>;
-  readonly next: string;
+  /** Only when there is an error to fix first: the agent decides what follows. */
+  readonly next?: string;
   /** Detail fields the line and findings already say ("qa.problems"): said once, not twice. */
   readonly said?: ReadonlyArray<string>;
 }
@@ -160,7 +161,7 @@ export const present = (
       ? [`- and ${findings.length - FINDINGS_SHOWN} more (in the details)`]
       : []),
     ...(verdict.notes ?? []),
-    `next: ${verdict.next}`,
+    ...(verdict.next === undefined ? [] : [`next: ${verdict.next}`]),
   ].join("\n");
   const json = (verdict.said ?? []).reduce<Json>(
     (value, path) => without(value, path.split(".")),

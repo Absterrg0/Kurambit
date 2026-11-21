@@ -230,11 +230,6 @@ export const GameManifest = Schema.Struct({
    * patch of that major reaches the game. Absent on a game that carries its own copy.
    */
   runtime: Schema.optionalKey(GameRuntimes),
-  /**
-   * The recipes (studio-skills/recipes/<id>.md) the agent works from this turn, its own pick:
-   * a check reports each one's numbers, and reads at most three.
-   */
-  recipes: Schema.optionalKey(Schema.Array(Schema.String)),
 }).check(
   Schema.makeFilter((manifest) => (manifest.project ?? manifest.godotProject) !== undefined, {
     description: "a game.json that names its engine project folder (project)",

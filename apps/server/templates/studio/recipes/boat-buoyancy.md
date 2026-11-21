@@ -30,19 +30,6 @@
 - No damping: endless bobbing. Too much: the boat ignores the swell.
 - A wake drawn as a static texture that does not follow speed.
 
-## Checks
-
-```yaml
-- agent: "waterline within 10% of hull height of height() at 4 points (game_play eval)"
-- agent: "pitch and roll settle within 3 s in calm water"
-- fact: scene.report.player.heightPx
-  label: boat px high
-  want: ">= 50"
-- fact: perf.drawCalls
-  label: draw calls
-  want: "<= 300"
-```
-
 ## Code
 
 None maintained in JS for the hydrostatics. `@dimforge/rapier3d-compat` (Apache-2.0) only if

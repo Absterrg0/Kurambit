@@ -33,17 +33,6 @@
 - Knockback through walls; two hits in one freeze need a counter per fighter.
 - No feedback at all: the duel on bench 4 lost on it.
 
-## Checks
-
-```yaml
-- agent: "each hit freezes 80-200 ms (log the time-scale dips)"
-- agent: "the target flashes white on the hit frame"
-- agent: "shake is back to 0 within 1.5 s of the last hit"
-- probe: player.sound.firstInput
-  label: sound on first input
-  want: "== true"
-```
-
 ## Code
 
 The runtime's `juice.js` (`hitPause`, `shake`, `flash`). SpriteCook pages state no licence:

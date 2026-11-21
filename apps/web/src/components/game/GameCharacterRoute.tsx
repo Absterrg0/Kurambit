@@ -20,6 +20,11 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
   readonly description: string;
 }> = [
   {
+    route: "any",
+    label: "Agent's choice",
+    description: "The agent picks Blender or code for each model, Blender recommended",
+  },
+  {
     route: "code",
     label: "Code",
     description: "The agent builds each model in three.js code, in the game itself",
@@ -27,7 +32,7 @@ export const CHARACTER_ROUTES: ReadonlyArray<{
   {
     route: "blender",
     label: "Blender",
-    description: "Characters, creatures, trees, rocks and buildings in Blender; the rest in code",
+    description: "Characters, creatures and the models that matter in Blender",
   },
 ];
 

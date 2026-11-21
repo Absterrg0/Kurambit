@@ -42,21 +42,6 @@
 - Constant lightning reads as a strobe; eased flashes read as a lamp.
 - Weather hiding the player: keep the player's ΔE.
 
-## Checks
-
-```yaml
-- fact: perf.drawCalls
-  label: draw calls
-  want: "<= 300"
-- fact: scene.report.player.contrast
-  label: player ΔE
-  want: ">= 20"
-- probe: player.frame.median
-  label: median light
-  want: ">= 0.12"
-- agent: "rain is one draw call; it is backlit somewhere in the first frame"
-```
-
 ## Code
 
 ```js

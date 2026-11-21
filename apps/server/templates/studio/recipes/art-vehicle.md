@@ -43,15 +43,6 @@
 - Rails and masts under 3 px at game distance vanish: make them slabs.
 - A pivot not at the hub: the wheel wobbles.
 
-## Checks
-
-```yaml
-- review: "triangles <= 1500 (style.roleBudget (vehicle))"
-- review: "floating == [] (contact)"
-- agent: "each wheel its own object, origin at the hub"
-- review: "overlap with a pack vehicle >= 0.7 same height (review)"
-```
-
 ## Code
 
 Plain `bpy` and `bmesh`; `kurambit.pivot`, `kurambit.loft`.

@@ -35,21 +35,6 @@
 - Hazing the play layer: the player must read at full contrast.
 - A sky light that disagrees with the drawn sky; the sun at the horizon at noon.
 
-## Checks
-
-```yaml
-- fact: scene.report.player.contrast
-  label: player ΔE
-  want: ">= 20"
-- fact: scene.report.empty.share
-  label: empty view
-  want: "<= 0.25"
-- probe: player.frame.median
-  label: median light
-  want: ">= 0.35"
-- agent: "horizon colour equals the fog colour within ΔE 10"
-```
-
 ## Code
 
 three's `Sky`, `FogExp2` (MIT); the runtime's `look` has height fog and derives light from

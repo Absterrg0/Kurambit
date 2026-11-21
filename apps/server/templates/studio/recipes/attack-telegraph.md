@@ -31,16 +31,6 @@
 - Active frames so short the hitbox misses between steps.
 - Restarting invincibility on every touch.
 
-## Checks
-
-```yaml
-- agent: "from windup start to hit at least 340 ms (read GameState in eval)"
-- agent: "a recovery window of 0.6 s or more after each boss attack"
-- probe: player.lost
-  label: can be lost early
-  want: "== true"
-```
-
 ## Code
 
 None.

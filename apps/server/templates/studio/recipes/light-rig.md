@@ -44,21 +44,6 @@ Inigo Quilez's three-light outdoor rig, in linear space:
 - A shadow frustum over the whole level: blurry. Bias too low: acne; too high: floating.
 - Bloom on white UI or on the whole frame (three's UnrealBloom example is a showcase).
 
-## Checks
-
-```yaml
-- probe: player.frame.median
-  label: median light
-  want: ">= 0.35"
-- probe: player.frame.clipped
-  label: clipped share
-  want: "<= 0.02"
-- fact: scene.report.player.contrast
-  label: player ΔE
-  want: ">= 20"
-- agent: "shadow side at least 25% darker than the sun side"
-```
-
 ## Code
 
 three.js lights, `CSM` addon and the runtime's `look` (MIT). pmndrs `postprocessing` (Zlib)

@@ -34,23 +34,6 @@
 - Keyboard glyphs while a pad is in use.
 - Text drawn into the canvas: the harness cannot measure it.
 
-## Checks
-
-```yaml
-- probe: player.text1080
-  label: smallest text at 1080p px
-  want: ">= 18"
-- probe: player.text800
-  label: smallest text at 1280x800 px
-  want: ">= 9"
-- probe: player.textWall.words
-  label: longest text block before 10 s
-  want: "<= 30"
-- probe: player.pause
-  label: Esc pauses
-  want: "== true"
-```
-
 ## Code
 
 DOM text. `troika-three-text` (MIT) for text in the world.

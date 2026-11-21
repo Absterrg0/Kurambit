@@ -34,21 +34,6 @@
 - Guessing a scale per model: size each one to the box it replaces.
 - Dressing a level before walking it with the real controller and camera.
 
-## Checks
-
-```yaml
-- probe: stageMinutes
-  label: minutes to the Stage moving
-  want: "<= 6"
-- probe: player.moves
-  label: opening frame moves
-  want: "== true"
-- probe: player.lost
-  label: can be lost early
-  want: "== true"
-- agent: "each model replaces its box at the box's size"
-```
-
 ## Code
 
 None: the runtime's `start`, `update`, `ctx.thing` and `ctx.tune` (TEMPLATE.md).

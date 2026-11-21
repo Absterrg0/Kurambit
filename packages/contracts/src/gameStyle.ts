@@ -8,13 +8,15 @@ export const GAME_STYLE_FILE = "STYLE.json";
  * How a game's models are made: in three.js code or in Blender. The person picks it in game.json,
  * never the harness; the free library is a separate opt-in (GameManifest `library`).
  */
-export const GameCharacterRoute = Schema.Literals(["code", "blender"]);
+/** "any": the agent picks per model, Blender recommended; "code" or "blender": the person locked one. */
+export const GameCharacterRoute = Schema.Literals(["any", "code", "blender"]);
 export type GameCharacterRoute = typeof GameCharacterRoute.Type;
 /**
  * game.json's `characters` as stored: "library" is the old default, read as code with the library
  * on; "generated" is the removed generated-art route, read as Blender.
  */
 export const GameStoredCharacterRoute = Schema.Literals([
+  "any",
   "code",
   "blender",
   "generated",
@@ -244,11 +246,10 @@ export type GameLook = typeof GameLook.Type;
 export const GAME_STYLE_DEFAULT_MUSIC_LUFS = -23;
 export const GAME_STYLE_DEFAULT_SFX_PEAK_DBTP = -1;
 /**
- * How a new game's models are made unless the person picks otherwise: Blender, where heroes and
- * creatures are modelled and the rest is built in code (the AQ bake-off: Blender's characters beat
- * code's and the library's). A game.json with no route stays code (gameModelChoice).
+ * How a new game's models are made unless the person locks a route: the agent picks per model,
+ * with Blender available and recommended. A game.json with no route stays code (gameModelChoice).
  */
-export const GAME_STYLE_DEFAULT_CHARACTERS: GameCharacterRoute = "blender";
+export const GAME_STYLE_DEFAULT_CHARACTERS: GameCharacterRoute = "any";
 /** Whether a new game may take models from the free library; the person turns it on. */
 export const GAME_STYLE_DEFAULT_LIBRARY = false;
 

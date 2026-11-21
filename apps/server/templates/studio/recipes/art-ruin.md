@@ -45,15 +45,6 @@
 - A cut edge of a piece that never meets a neighbour (a window's reveal, a broken top) left open
   is a hole seen from behind; `kurambit.qa` counts open edges.
 
-## Checks
-
-```yaml
-- review: "grid(4).fits == true (kurambit.grid)"
-- review: "triangles <= 2000 (style.roleBudget)"
-- review: "floating == []; unsupported == [] (contact)"
-- review: "style.flat >= 0.9 when faceted (style pass)"
-```
-
 ## Code
 
 Plain `bpy` and `bmesh`; `kurambit.grid`, `kurambit.material`.

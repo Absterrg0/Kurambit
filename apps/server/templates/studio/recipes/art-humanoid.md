@@ -47,17 +47,6 @@ play on it.
 - A hair cap without a face cut is a helmet.
 - Starting from a dense base body and dressing it: 30-39k triangles, toes through boots.
 
-## Checks
-
-```yaml
-- review: "gates: [height, deformation, feet, budget] all pass (gates)"
-- review: "triangles <= 7000 (style.roleBudget)"
-- review: "materials <= 4 (one skinned mesh, a primitive each); style.hues <= 5 (style pass)"
-- review: "floating == []; influences <= 4 (contact, pass)"
-- review: "review.thinShare_gamePx < 0.05 (review)"
-- review: "clips loop back to rest (clip seams)"
-```
-
 ## Code
 
 Kit only: op `character` (`body: "none"`), `kurambit.loft`, `weights_along`, `skin_rigid`,

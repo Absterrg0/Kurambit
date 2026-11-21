@@ -175,6 +175,8 @@ export const GameBlenderBody = Schema.Union([
       proportions: Schema.optionalKey(Unit),
     }),
   }),
+  /** Blender Studio's drawn stylised human (CC0, ships with the kit, no install): a big skull, simple hands. gender 0 female, 1 male. */
+  Schema.Struct({ studio: Schema.Struct({ gender: Unit }) }),
   /** A rigged humanoid in this game, such as an earlier export (UE, Mixamo or other common bone names). */
   Schema.Struct({ game: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500)) }),
   /** No body: the skeleton at the style's proportions and height, with its clips, for parts modelled on its joints. */
@@ -227,13 +229,9 @@ export const GameBlenderCharacterInput = Schema.Struct({
       walk: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0.2, maximum: 4 }))),
     }),
   ),
-  /**
-   * The body and its rig restyled before they are conformed: a preset (realistic, heroic, cartoon,
-   * chibi) and any factor beside it (head, legs, arms, hands, feet, girth, limbs; 1 keeps it).
-   */
+  /** The body and its rig restyled before they are conformed, by factor (1 keeps it). */
   style: Schema.optionalKey(
     Schema.Struct({
-      preset: Schema.optionalKey(Schema.Literals(["realistic", "heroic", "cartoon", "chibi"])),
       head: Schema.optionalKey(StyleFactor),
       legs: Schema.optionalKey(StyleFactor),
       arms: Schema.optionalKey(StyleFactor),

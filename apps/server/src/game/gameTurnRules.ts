@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import { GameManifest, isAvailableEngine, keptRunTag, playOutcomeWords } from "@kurambit/contracts";
 
 import { decisionsForTurn } from "./GameDecisions.ts";
-import { keptSince, savedPlays, type KeptPlay } from "./playFiles.ts";
+import { keptSince, type KeptPlay } from "./playFiles.ts";
 import { gameTurnRules } from "./scaffold.ts";
 import { fill, STUDIO_TEXT } from "./studioText.ts";
 
@@ -84,17 +84,14 @@ const gameEngine = (cwd: string) =>
 
 /**
  * The harness rules for a turn that runs in `cwd`: its game's turn rules when the folder holds a
- * game, by the engine in its game.json; none for any other thread. They ask for a winning test
- * play while none is saved. It reads the folder rather than asking GameProjectService, which
- * launches threads through orchestration and so cannot be a dependency of run execution.
+ * game, by the engine in its game.json; none for any other thread. It reads the folder rather than
+ * asking GameProjectService, which launches threads through orchestration and so cannot be a
+ * dependency of run execution.
  */
 export const turnRulesForWorkspace = (cwd: string | null) =>
-  Effect.gen(function* () {
-    const engine = cwd === null ? null : yield* gameEngine(cwd);
-    if (cwd === null || engine === null || gameTurnRules(engine) === undefined) return undefined;
-    const saved = yield* read(() => savedPlays(cwd), { plays: [], set: "" });
-    return gameTurnRules(engine, { winSaved: saved.plays.some((each) => each.play.outcome.won) });
-  });
+  Effect.map(cwd === null ? Effect.succeed(null) : gameEngine(cwd), (engine) =>
+    engine === null ? undefined : gameTurnRules(engine),
+  );
 
 /**
  * The person's runs on the game in `cwd` kept after `lastTurnEndedAt` (an ISO time; the thread's

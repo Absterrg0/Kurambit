@@ -27,23 +27,6 @@
 - A pause that keeps the simulation running.
 - An ending with no end screen.
 
-## Checks
-
-```yaml
-- probe: player.retry.inputs
-  label: inputs to retry
-  want: "<= 1"
-- probe: player.retry.seconds
-  label: seconds to retry
-  want: "<= 3"
-- probe: player.pause
-  label: Esc pauses
-  want: "== true"
-- probe: player.lost
-  label: can be lost early
-  want: "== true"
-```
-
 ## Code
 
 `GameState.play()`, `pause()`, `resume()` (TEMPLATE.md item 3).

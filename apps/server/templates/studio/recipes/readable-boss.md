@@ -36,19 +36,6 @@
 - Windups that cannot be read: punish poor timing, not poor visual design.
 - All foes attacking at once; at most one or two melee attackers at a time.
 
-## Checks
-
-```yaml
-- probe: player.lost
-  label: can be lost early
-  want: "== true"
-- probe: player.retry.inputs
-  label: inputs to retry
-  want: "<= 1"
-- agent: "a skilled bot wins, reading windups, and its play is saved"
-- agent: "boss name and bar on screen at top centre"
-```
-
 ## Code
 
 None.

@@ -47,15 +47,6 @@ their trees are realistic or heavy anyway (21k and 5k triangles).
 - A crown floating off the trunk: sink it in.
 - Alpha leaf cards sort and overdraw; keep solid crowns.
 
-## Checks
-
-```yaml
-- review: "triangles <= 1000 (tree), <= 400 (rock) (style.roleBudget)"
-- review: "floating == [] (contact)"
-- review: "review.thinShare_gamePx < 0.05 (review)"
-- review: "style.hues <= 3 (style pass)"
-```
-
 ## Code
 
 Blender's own: Displace with a procedural texture, Decimate, `object.randomize_transform`;

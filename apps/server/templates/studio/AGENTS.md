@@ -8,8 +8,7 @@ Craft advice, a skill per file. A game's first turn needs only what
 
 ## Recipes
 
-How shipped games make one part well: `recipes/<id>.md`. Pick at most 3, read only those,
-name them in game.json `"recipes": [...]`; `game_check` prints their numbers.
+How shipped games make one part well: `recipes/<id>.md`. Read only the ones the work needs.
 
 - `block-out-first`: the first turn: a moving scene in minutes, improved in place.
 - `opens-on-the-game`: every game's first frame; a title only when asked.

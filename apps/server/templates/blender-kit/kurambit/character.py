@@ -3,8 +3,9 @@
 params (the server resolves every path):
     name      the collection, the armature's name and the export's default stem
     body      {"library": abs, "pack"?: id, "licence"?: str} | {"mpfb": {age, gender, weight, ...}}
+              | {"studio": {gender}}: Blender Studio's drawn stylised body (studio.py)
               | {"game": abs} | "none": the skeleton, its proportions and clips with no body (the
-              drawn body sets the joints, then goes), for parts modelled on the joints. A game body's
+              studio body sets the joints, then goes), for parts modelled on the joints. A game body's
               ledger is the sidecar beside its file.
               A game body keeps its own clips, and every body its own skinned bone chains (cloth,
               hair) as spring chains.
@@ -14,12 +15,12 @@ params (the server resolves every path):
     replace   rebuild the body and armature of an existing <name>, re-binding its other objects
     fit       {arms?, calm?, walk?} | None: fit.fit() on every library clip, after the conform (its
               gaits are strode out on short legs with or without it)
-    style     {preset?: realistic|heroic|cartoon|chibi, head?, legs?, arms?, hands?, feet?, girth?, limbs?}:
-              the body and its rig restyled before the conform (proportions.py)
+    style     {head?, legs?, arms?, hands?, feet?, girth?, limbs?}: factors (1 keeps it) the body and
+              its rig are restyled by before the conform (proportions.py)
     height    metres: the body and its rig scaled to it before the conform
     heightRange [lo, hi]: the height gate's range (default: height ±10%, or a human's 1.5-2.0 m)
 
-A made body (mpfb, or a drawn preset) comes with no material of its own: it gets one, "<name> skin",
+A made body (mpfb or studio) comes with no material of its own: it gets one, "<name> skin",
 in SKIN, so it never ships the export's default white. Recolour that material; a replace keeps it.
 """
 import importlib
@@ -42,14 +43,10 @@ LIBRARY_HELP = "Library bodies (quaternius-universal-base-characters, as game_as
 
 MADE_BODY = {"what": "body", "from": "made", "licence": "made in this game", "ai": False, "credits": None}
 
-# Where a body's face is (its eye helpers and lips), kept on the armature; and how far each style
-# smooths a sculpted head's features so a drawn style reads as drawn.
+# Where a body's face is (its eye helpers and lips), kept on the armature.
 EYES = {"l": "face_eye_l", "r": "face_eye_r"}
 LIPS = "face_lips"
 LANDMARKS = "kurambit_face"
-BASE = "kurambit_base"
-STYLE = "kurambit_style"
-SOFTEN = {"realistic": 0.0, "heroic": 0.0, "cartoon": 0.7, "chibi": 1.0}
 
 WHATS = {"body", "clips", "mesh", "parts", "texture"}
 
@@ -407,48 +404,7 @@ def take_landmarks(arm, meshes):
     return found
 
 
-def soften(arm, meshes, amount):
-    """Smooths the face's sculpted features (lids, the brow ridge, the nose's wings) by amount
-    (0..1): a drawn eye on a sculpted adult face reads as a sticker. Only the front of the head
-    moves, fading out toward the ears, and the lips keep their shape so the mouth stays shut."""
-    import bmesh
 
-    rounds = int(round(36 * amount))
-    if rounds <= 0:
-        return
-    for o in meshes:
-        g = o.vertex_groups.get("Head")
-        if g is None:
-            continue
-        lips = o.vertex_groups.get(LIPS)
-        bm = bmesh.new()
-        bm.from_mesh(o.data)
-        layer = bm.verts.layers.deform.active
-        if layer is None:
-            bm.free()
-            continue
-        head = [v for v in bm.verts if v[layer].get(g.index, 0.0) > 0.98]
-        if len(head) > 8:
-            ys = [v.co.y for v in head]
-            front, back = min(ys), max(ys)
-            mid = front + (back - front) * 0.45
-            was = {v: v.co.copy() for v in head}
-            for _ in range(rounds):
-                bmesh.ops.smooth_vert(bm, verts=head, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
-            mouth = [v for v in head if lips is not None and v[layer].get(lips.index, 0.0) > 0.5]
-            # The lips go back with the face around them as one piece, never each vertex its own way.
-            sink = sum((v.co - was[v] for v in mouth), Vector()) / len(mouth) if mouth else Vector()
-            for v in mouth:
-                v.co = was[v] + sink
-            for v in set(head) - set(mouth):
-                t = max(0.0, min(1.0, (mid - was[v].y) / max(1e-9, (mid - front) * 0.5)))
-                v.co = was[v].lerp(v.co, t * t * (3 - 2 * t))
-            bm.to_mesh(o.data)
-            o.data.update()
-        bm.free()
-
-
-@entry
 def character(params):
     name = params["name"]
     replace = bool(params.get("replace"))
@@ -461,7 +417,7 @@ def character(params):
     body_spec = params["body"]
     bare = body_spec == "none"
     if bare:
-        body_spec = {"mpfb": {"gender": 0.5}}
+        body_spec = {"studio": {"gender": 0.5}}
     notes = []
     carried = []
 
@@ -487,7 +443,7 @@ def character(params):
     std_arm = next(o for o in std_new if o.type == "ARMATURE")
     skeleton.remove_objects([o for o in std_new if o is not std_arm])
     reference = skeleton.local_frames(std_arm)
-    taken, body_arm, meshes, own_actions, own, extra, unit, base = [], None, [], [], [], [], 1.0, None
+    taken, body_arm, meshes, own_actions, own, extra, unit = [], None, [], [], [], [], 1.0
     joints = set(std_arm.data.bones.keys())
     try:
         asked_bones = set()
@@ -497,14 +453,9 @@ def character(params):
             labels = [f"{chain['name']}_l", f"{chain['name']}_r"] if chain.get("mirror") else [chain["name"]]
             asked_bones |= {f"{label}_{i + 1:02d}" for label in labels for i in range(int(chain["bones"]))}
         taken = _take_clips(params.get("clips", []), standard, std_actions)
-        preset = (params.get("style") or {}).get("preset")
-        drawn = "mpfb" in body_spec and (preset in studio.PRESETS or bare)
-        if drawn:
-            body_arm, meshes, name_map = studio.body(body_spec["mpfb"].get("gender", 0.5))
-            if preset in studio.PRESETS:
-                studio.soften(meshes[0], preset)
+        if "studio" in body_spec:
+            body_arm, meshes, name_map = studio.body(body_spec["studio"].get("gender", 0.5))
             body_part = {**MADE_BODY, "from": "blender-studio-human-base-meshes", "licence": studio.LICENCE}
-            base = "studio"
         elif "mpfb" in body_spec:
             body_arm, meshes, name_map = _mpfb_body(body_spec["mpfb"])
             body_part = {**MADE_BODY, "from": "mpfb2", "licence": MPFB_LICENCE}
@@ -541,21 +492,15 @@ def character(params):
         skeleton.remove_objects([o for o in [std_arm, body_arm, *meshes] if o is not None and _alive(o)])
         raise
 
-    if "mpfb" in body_spec and not bare:
+    if ("mpfb" in body_spec or "studio" in body_spec) and not bare:
         skin = bpy.data.materials.get(f"{name} skin") or helpers.material(SKIN, name=f"{name} skin")
         for o in meshes:
             if not any(s.material for s in o.material_slots):
                 o.data.materials.clear()
                 o.data.materials.append(skin)
 
-    # The face the body brought, and the head drawn as far as its style is.
+    # The face the body brought.
     take_landmarks(std_arm, meshes)
-    if preset:
-        std_arm[STYLE] = preset
-        if base == "studio":
-            std_arm[BASE] = base
-        # A drawn (studio) body's head already has its style's skull; a sculpted one is smoothed.
-        soften(std_arm, meshes, 0.0 if base == "studio" else SOFTEN.get(preset, 0.0))
 
     parts, old_chains = [], {}
     if old is not None:

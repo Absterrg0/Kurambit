@@ -16,7 +16,6 @@ import {
   GAME_STYLE_FILE,
   GAME_STYLE_ROLES,
   type GameBlenderRenderSpritesInput,
-  type GameCharacterRoute,
   type GameManifest,
   GameOperationError,
   GameStyle,
@@ -414,18 +413,6 @@ const gameLook = (style: GameStyle | null): GameLook => ({
   ...(style?.finish === undefined ? {} : { finish: style.finish }),
   ...(style?.surfaces === undefined ? {} : { surfaces: style.surfaces }),
 });
-
-/**
- * The character preset a lock's proportions ask for, for a character made with no style named:
- * the same `shape.chunky` the world's trunks and roofs are built by. Null when the lock names none.
- */
-export const lockedCharacterStyle = (style: GameStyle | null) => {
-  const chunky = style?.shape?.chunky;
-  if (chunky === undefined) return null;
-  const preset =
-    chunky < 0.2 ? "realistic" : chunky < 0.45 ? "heroic" : chunky < 0.75 ? "cartoon" : "chibi";
-  return { preset } as const;
-};
 
 /** Where a game's page finds its look, beside the runtime it loads (and inside an export). */
 export const LOOK_ROUTE = "_kurambit/look.json";

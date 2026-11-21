@@ -34,15 +34,6 @@ set piece.
 - Thin wrists, legs, railings and branches vanish at game distance: make them chunky.
 - One sculpted blob decimated to budget gives random facets and no edge loops: build parts.
 
-## Checks
-
-```yaml
-- review: "review.overlap.sameHeight >= 0.7 on the views shared with the reference (review)"
-- review: "review.thinShare_gamePx < 0.05 (review)"
-- review: "floating == [] (contact)"
-- review: "problems: [] (review)"
-```
-
 ## Code
 
 Kit only: `kurambit.loft`, the review's `reference`.

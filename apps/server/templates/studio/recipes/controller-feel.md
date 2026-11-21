@@ -33,16 +33,6 @@ ticks, never drawn frames.
 - Windows counted in drawn frames.
 - Correcting corners on the ground.
 
-## Checks
-
-```yaml
-- agent: "coyote: a jump 6 ticks after leaving a ledge works, 7 does not"
-- agent: "top speed reached within 0.2 s holding forward (game_play eval of ctx.player)"
-- probe: player.pause
-  label: Esc pauses
-  want: "== true"
-```
-
 ## Code
 
 Celeste's `Player.cs` (MIT) for constants. `@dimforge/rapier3d-compat` (Apache-2.0) has a

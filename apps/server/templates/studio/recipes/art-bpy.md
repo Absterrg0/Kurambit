@@ -57,13 +57,6 @@ on a name, a context or a missing attribute.
 - Geometry Nodes output loses smooth shading and UVs unless the tree sets them.
 - Printing whole objects or long lists floods the result: print rounded numbers.
 
-## Checks
-
-```yaml
-- agent: "every building call prints what it changed (dimensions, triangles, kurambit.qa problems)"
-- agent: "no call failed on a name the table lists"
-```
-
 ## Code
 
 ```python

@@ -59,7 +59,6 @@ import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
 import * as GameProjectService from "../../../game/GameProjectService.ts";
-import { recipeLines } from "../../../game/recipes.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -197,8 +196,6 @@ const GameCheckAnswer = Schema.Struct({
   screenshots: Schema.optionalKey(Schema.Array(GameBlenderLookScreenshot)),
   /** Which picture is the reference, once per session, when the game has one. */
   review: Schema.optionalKey(Schema.String),
-  /** One line of numbers per recipe game.json `recipes` picks (recipes.ts). */
-  recipes: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Minutes from the game's creation to the first build (or this check) that moved. */
   stageMinutes: Schema.optionalKey(Schema.Number),
 });
@@ -258,19 +255,6 @@ const stageMinutes = (store: CheckpointStore["Service"], root: string, moves: bo
     return (now - born) / 60_000;
   }).pipe(Effect.orElseSucceed(() => undefined));
 
-/** game.json's `recipes`, read leniently: a game without the field, or a bad one, picked none. */
-const pickedRecipes = (root: string) =>
-  Effect.promise(() =>
-    NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")
-      .then((text) => {
-        const recipes: unknown = (JSON.parse(text) as { recipes?: unknown }).recipes;
-        return Array.isArray(recipes)
-          ? recipes.filter((each): each is string => typeof each === "string")
-          : [];
-      })
-      .catch((): ReadonlyArray<string> => []),
-  );
-
 /**
  * A check, with its views as images: the agent sees its game before it ends the turn. When the
  * game has a reference picture, play's frame comes stacked above it at the same size, every check:
@@ -287,10 +271,8 @@ const check = (store: CheckpointStore["Service"], final: boolean) =>
     const moved = result.player?.status === "measured" && result.player.report.moves === true;
     const minutes = final ? yield* stageMinutes(store, root, moved) : undefined;
     const measured = minutes === undefined ? result : { ...result, stageMinutes: minutes };
-    const picked = yield* pickedRecipes(root);
-    const recipes = picked.length === 0 ? [] : yield* recipeLines(root, picked, measured);
     const views = result.views ?? [];
-    if (views.length === 0) return recipes.length === 0 ? measured : { ...measured, recipes };
+    if (views.length === 0) return measured;
     const reference = yield* gameReference(root);
     const screenshots = yield* Effect.promise(() =>
       Promise.all(
@@ -311,7 +293,6 @@ const check = (store: CheckpointStore["Service"], final: boolean) =>
     const review = shown.length > 0 && reference !== null && firstReview(session);
     return {
       ...measured,
-      ...(recipes.length === 0 ? {} : { recipes }),
       ...(shown.length === 0 ? {} : { screenshots: shown }),
       ...(review
         ? {

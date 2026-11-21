@@ -1,11 +1,11 @@
 """A stylised human body from Blender Studio's Human Base Meshes bundle (CC0), rigged here.
 
 The two stylised bodies ship in the kit (bodies/stylised.blend, 0.6 MB: the bundle's v1.4.1 stripped
-to their positions, faces and face sets; see THIRD-PARTY-NOTICES.md), so these styles need no install.
+to their positions, faces and face sets; see THIRD-PARTY-NOTICES.md), so it needs no install.
 
 The bundle's stylised bodies are drawn characters: a big skull with eye sockets, a short nose, simple
-hands with five fingers. A cartoon or chibi made by smoothing a realistic adult head reads as an
-adult with big eyes stuck on; these are the start those styles need. They come unrigged, in an
+hands with five fingers: a base for a drawn character, which a realistic adult head smoothed
+down never reads as. They come unrigged, in an
 A-pose, with sculpt face sets that cut the body where it bends (upper arm, forearm, each phalanx,
 thigh, shin, foot). The joints are read off those cuts: a joint is the centre of the loop between
 two face sets. The body is then bound to an armature of the standard joints' names with automatic
@@ -23,11 +23,6 @@ from .protocol import Refused
 
 LICENCE = "CC0 1.0 (Blender Studio Human Base Meshes)"
 OBJECTS = {"male": "GEO-body_male_stylized", "female": "GEO-body_female_stylized"}
-PRESETS = ("cartoon", "chibi")
-# How far each style rubs the anatomy out of the trunk and limbs (0..1), and how big it keeps the nose.
-SOFT = {"cartoon": 0.35, "chibi": 1.0}
-NOSE = {"cartoon": 0.9, "chibi": 0.6}
-SOFT_KEPT = ("Head", "hand", "thumb", "index", "middle", "ring", "pinky", "ball")
 BODIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bodies", "stylised.blend")
 
 # Face sets by what they cover (.sculpt_face_set), the same on both bodies.
@@ -211,60 +206,6 @@ def _smooth_weights(o, rounds, keep):
             vg.add([int(i)], float(w[i, k]), "REPLACE")
 
 
-def _taubin(co, edges, move, rounds):
-    """Smooths co where move (0..1 per vertex) says, without shrinking it: each round relaxes
-    toward the neighbours' mean and then pushes back out a little further (Taubin's lambda and mu)."""
-    n = len(co)
-    a, b = edges[:, 0], edges[:, 1]
-    count = np.maximum(np.bincount(np.concatenate([a, b]), minlength=n), 1)[:, None]
-    for _ in range(rounds):
-        for k in (0.53, -0.56):
-            mean = np.zeros_like(co)
-            np.add.at(mean, a, co[b])
-            np.add.at(mean, b, co[a])
-            co = co + (mean / count - co) * (k * move)[:, None]
-    return co
-
-
-def soften(mesh, preset):
-    """The style's softness on a bound body: muscles, ribs and kneecaps rubbed out of the trunk and
-    limbs (a chibi shows no anatomy), the head, hands and toes kept as drawn; and the nose sized."""
-    me = mesh.data
-    n = len(me.vertices)
-    co = np.empty(n * 3)
-    me.vertices.foreach_get("co", co)
-    co = co.reshape(-1, 3)
-    edges = np.empty(len(me.edges) * 2, np.int64)
-    me.edges.foreach_get("vertices", edges)
-    edges = edges.reshape(-1, 2)
-    kept = {g.index for g in mesh.vertex_groups if g.name.startswith(SOFT_KEPT)}
-    move = np.ones(n)
-    for v in me.vertices:
-        move[v.index] = 1.0 - min(1.0, sum(e.weight for e in v.groups if e.group in kept))
-    amount = SOFT.get(preset, 0.0)
-    if amount > 0:
-        co = _taubin(co, edges, move, int(round(40 * amount)))
-    nose = mesh.vertex_groups.get(NOSE_GROUP)
-    k = NOSE.get(preset, 1.0)
-    if nose is not None and abs(k - 1.0) > 1e-6:
-        w = np.zeros(n)
-        for v in me.vertices:
-            for e in v.groups:
-                if e.group == nose.index:
-                    w[v.index] = e.weight
-        inside = w > 0
-        if inside.sum() >= 8:
-            # About where the nose leaves the face: the middle of its rim, at the rim's depth.
-            rim = inside & (w < 0.999)
-            base = co[rim].mean(axis=0) if rim.sum() >= 3 else co[inside].mean(axis=0)
-            co[inside] = base + (co[inside] - base) * (1 - (1 - k) * w[inside])[:, None]
-    me.vertices.foreach_set("co", co.ravel())
-    me.update()
-
-
-NOSE_GROUP = "face_nose"
-
-
 def body(gender=0.5, path=BODIES):
     """(rig, [mesh], name map): the stylised body for gender (0 female .. 1 male), standing at the
     origin facing -Y, bound to a rig of the standard joints' names in its own A-pose, its eye sockets
@@ -317,22 +258,6 @@ def body(gender=0.5, path=BODIES):
     keep = np.zeros(len(me.vertices), bool)
     keep[rigid] = True
     _smooth_weights(mesh, 2, keep)
-    # The nose, 1 at its tip fading to 0 at its rim, by rings of vertices in from the rim.
-    nose_v = vert_sets[SETS["nose"]]
-    inside = np.zeros(len(me.vertices), bool)
-    inside[nose_v] = True
-    e = np.empty(len(me.edges) * 2, np.int64)
-    me.edges.foreach_get("vertices", e)
-    e = e.reshape(-1, 2)
-    depth = np.where(inside, 99, 0)
-    for r in range(1, 12):
-        lo = np.minimum(depth[e[:, 0]], depth[e[:, 1]]) + 1
-        np.minimum.at(depth, e[:, 0], lo)
-        np.minimum.at(depth, e[:, 1], lo)
-    top = max(1, int(depth[nose_v].max()))
-    g = mesh.vertex_groups.new(name=NOSE_GROUP)
-    for i in nose_v:
-        g.add([int(i)], min(1.0, float(depth[i]) / min(top, 4)), "REPLACE")
     lips = mesh.vertex_groups.new(name=LIPS)
     lips.add(np.unique(np.concatenate([vert_sets[SETS["lip_top"]], vert_sets[SETS["lip_low"]]])).tolist(), 1.0, "REPLACE")
     # The eyes come as their own spheres in the sockets: joined in as marked helper geometry, which

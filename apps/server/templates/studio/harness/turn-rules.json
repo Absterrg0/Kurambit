@@ -33,7 +33,6 @@
   ],
   "playtest": "- Play it yourself (`game_play` op `act` opens a session, `close` ends it) when the check's play cannot reach your change (late content, an ending, a feel only steady input shows) or the person asks; the harness measures every build.",
   "undo": "- The person can undo any turn. When files you wrote are back to an earlier state, they undid it on purpose (`game_builds` shows the restore). Do not put the change back unless they ask.",
-  "firstWin": "- **No saved play wins this game yet.** Once it can be won, win it with a `game_play` bot or session and save that run (op `replay` `save`), so every later build replays it.",
   "keepGoing": [
     "## Keep going",
     "",

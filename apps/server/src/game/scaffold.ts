@@ -91,13 +91,11 @@ const everyTurnSection = (engine: GameEngineId): string | undefined => {
 };
 
 /**
- * The person's model route and library choice, said once: how the game's models are made. The
- * default Blender route goes by kind of model: the AQ bake-off's sculpted and tailored Blender
- * characters beat code's, and round 6B's side-by-side gave trees, rocks and buildings to
- * Blender's kit and left ground, furniture and clutter to code.
+ * The person's model route and library choice, said once: how the game's models are made. With no
+ * route locked the agent picks per model, Blender recommended; a locked route is said as theirs.
  */
 const routeLine = (route: GameCharacterRoute, library: boolean): string => {
-  if (route === "blender" && !library) return FIRST.blenderRoute;
+  if (route === "any" && !library) return FIRST.anyRoute;
   return fill(library ? FIRST.library : FIRST.chosen, { made: FIRST.made[route] });
 };
 
@@ -138,13 +136,10 @@ export const firstTurnMessage = (
  * `harnessInstructions`) rather than writing them into the game, so a change to them reaches
  * every game at once.
  */
-export const gameTurnRules = (
-  engine: GameEngineId,
-  game: { readonly winSaved: boolean } = { winSaved: false },
-): string | undefined => {
+export const gameTurnRules = (engine: GameEngineId): string | undefined => {
   const everyTurn = everyTurnSection(engine);
   if (everyTurn === undefined) return undefined;
-  return `${everyTurn}${game.winSaved ? "" : `${TURN.firstWin}\n`}\n${TURN.keepGoing}`;
+  return `${everyTurn}\n${TURN.keepGoing}`;
 };
 
 /**

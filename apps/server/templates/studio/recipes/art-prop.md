@@ -49,15 +49,6 @@ player sees up close.
 - A STYLE.json hex `palette` (the pack look) snaps all this to one matte atlas (`art-palette`).
 - Ten loose parts are ten draw calls for every copy in the game.
 
-## Checks
-
-```yaml
-- review: "triangles <= 600 (style.roleBudget (prop))"
-- review: "floating == [] (contact)"
-- agent: "kurambit.qa(parts) problems == []"
-- agent: "one object per part that moves; the rest joined"
-```
-
 ## Code
 
 ```python

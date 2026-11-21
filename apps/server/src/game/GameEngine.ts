@@ -67,7 +67,7 @@ import { replaySavedPlays, savedPlays } from "./playFiles.ts";
  * when it is needed and costs the turn's instructions nothing.
  */
 const MODEL_REVIEW =
-  "Before you change the model, write a numbered critique of these sheets against the brief, biggest difference first: 1. silhouette (the side profile, then the plan: a bow's rake, a roof line, how a shape tapers), 2. proportions (length to height to width, each part against the 1.8 m figure), 3. the main parts and how they meet (fronts that curve and step back, bands that follow the walls they sit on), 4. surface (materials, glass, rails, small details). Fix the first item, call game_play op model_sheet again, and repeat until the critique finds nothing major. Draw from curves, not boxes: the side profile first (curve), then the plan (mirrored, outline, inset), then the sections (loft, wall), so every part follows the same lines.";
+  "Look at these sheets against the brief, biggest difference first: silhouette (the side profile, then the plan), proportions (each part against the 1.8 m figure), how the main parts meet, then surface.";
 
 /** The same review against a reference picture, drawn from the side and from the picture's angle. */
 const REFERENCE_REVIEW = MODEL_REVIEW.replace(

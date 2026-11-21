@@ -36,26 +36,6 @@
 - Sound before the first gesture: the browser blocks it; the runtime unlocks audio on the
   first key or click.
 
-## Checks
-
-```yaml
-- probe: player.open.inputs
-  label: inputs to play
-  want: "<= 1"
-- probe: player.open.seconds
-  label: seconds to play
-  want: "<= 10"
-- probe: player.cover
-  label: first frame covered
-  want: "<= 0.3"
-- probe: player.load.ready
-  label: seconds to first frame
-  want: "<= 1"
-- probe: player.textWall.words
-  label: longest text block before 10 s
-  want: "<= 30"
-```
-
 ## Code
 
 None: `GameState.title()` and `GameState.play()` (TEMPLATE.md item 3).

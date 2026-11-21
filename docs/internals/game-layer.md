@@ -147,16 +147,12 @@ check that matters.
   is written as no `characters` key, so an older install, which knows only `library`, `blender` and
   `generated`, still opens the game; a game.json with no `library` key predates the switch and
   keeps its library on, and one that says `generated` (the removed generated-art route) reads as
-  `blender` (`gameModelChoice`). New games default to `blender`, which routes by kind
-  of model: characters, creatures, trees, rocks and buildings in Blender, ground, furniture
-  and clutter in code. The AQ bake-off (the same hero brief through every route on Opus) chose
-  Blender for characters: sculpted and tailored ones beat code's capsules and reshaped library
-  bodies. Round 6B's side-by-side (each subject in code, with Blender's own modifiers and
-  geometry nodes, and with an official extension, in one running game) gave the kit's `world`
-  helpers trees, rocks and buildings, and left code the kinds that came out the same with no
-  round trip; the ground also stays code because the game needs its height function. The
-  official extensions lost every kind at a game's budget, so none is on the add-ons list for
-  them. A game.json with no key stays code, whatever the default becomes.
+  `blender` (`gameModelChoice`). New games default to `any`: the agent picks per model, told
+  that Blender is there and recommended for characters, creatures and anything sculpted or
+  hard-surface. A route the harness chose by kind of model was the harness deciding how a
+  model is made; the person can still lock `code` or `blender`, and that lock is said in the
+  first turn as theirs, never enforced by refusing a model halfway. A game.json with no key
+  stays code, whatever the default becomes.
 - A character's or creature's review picture is kept in `art/sheets/` for Art
   ([heroSheets.ts](../../apps/server/src/game/heroSheets.ts)). Nothing asks for a critique of it:
   a written critique quoting numbers was bookkeeping the picture never showed, and agents spent
@@ -222,13 +218,12 @@ check that matters.
   budget has no edge loops and shades as noise. The recipes in `templates/studio/recipes/` carry
   the method; the kit adds only `loft`, `weights_along`, `bake_ik_walk`, `decal` and the joint
   print.
-- Recipes (`templates/studio/recipes/`, one part made well with sourced numbers, at most about
-  800 words) are indexed in the studio `AGENTS.md`, which the game's AGENTS.md points at, never
-  left for the agent to discover: Vercel's evals saw an available skill go unopened in 56% of
-  tasks, and an index always in view score 100%. SkillsBench found 2 to 3 curated skills per task
-  helped and long ones hurt, so a game names at most three in game.json `recipes`, and a check
-  prints one line of numbers per pick (`recipes.ts`). Those lines report; style numbers bind only
-  through STYLE.json's lock, so the harness measures and the creator decides taste.
+- Recipes (`templates/studio/recipes/`) are indexed in the studio `AGENTS.md`, which the game's
+  AGENTS.md points at, never left for the agent to discover: Vercel's evals saw an available
+  skill go unopened in 56% of tasks, and an index always in view score 100%. They are advice the
+  agent opens on demand, never graded: a recipe's numbers turned into targets (`game.json`
+  `recipes` and a check line per pick) and steered every model toward the pack look, so neither
+  exists any more.
 - Under a palette, a decal is a painted cell in the model's one atlas, the atlas's width and two swatch rows tall,
   below the swatches: the runtime recolours a swatch by cutting the atlas into rows of equal
   height (`look-edits.js`), so a cell of any other height would shift every swatch it recolours.

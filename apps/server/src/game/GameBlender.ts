@@ -105,7 +105,6 @@ import {
   LIBRARY_OFF_REFUSAL,
   modelChoice,
   ownRigNote,
-  lockedCharacterStyle,
   readGameStyle,
   resolveRig,
   standardClipPacks,
@@ -2251,34 +2250,32 @@ const make = Effect.gen(function* () {
                 pack: id,
                 licence: pack.licence,
               };
+            } else if ("studio" in input.body) {
+              body = { studio: input.body.studio };
             } else if ("mpfb" in input.body) {
-              // A cartoon or chibi starts from the drawn bodies the kit ships (studio.py), not MPFB2.
-              const drawn = input.style?.preset === "cartoon" || input.style?.preset === "chibi";
-              if (!drawn) {
-                const mpfb = (yield* tools.addon("mpfb"))!;
-                if (mpfb.zip === null) {
-                  // A small official add-on a route needs installs on first need; the rest ask
-                  // first, as does one the person removed.
-                  if (GameToolchain.addonAsksFirst(mpfb.entry) || mpfb.removed)
-                    return yield* fail(
-                      "tool-missing",
-                      addonAsk(
-                        "An mpfb body",
-                        mpfb.entry,
-                        `Meanwhile use a library body: ${LIBRARY_BODY}.`,
-                      ),
-                    );
-                  yield* tools.install(mpfb.entry.id);
-                }
-                // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
-                if (!(yield* ensure(root)).addons.has("mpfb")) {
-                  yield* drop(root);
-                  if (!(yield* ensure(root)).addons.has("mpfb"))
-                    return yield* fail(
-                      "tool-failed",
-                      "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
-                    );
-                }
+              const mpfb = (yield* tools.addon("mpfb"))!;
+              if (mpfb.zip === null) {
+                // A small official add-on a route needs installs on first need; the rest ask
+                // first, as does one the person removed.
+                if (GameToolchain.addonAsksFirst(mpfb.entry) || mpfb.removed)
+                  return yield* fail(
+                    "tool-missing",
+                    addonAsk(
+                      "An mpfb body",
+                      mpfb.entry,
+                      `Meanwhile use {studio: {gender}} or a library body: ${LIBRARY_BODY}.`,
+                    ),
+                  );
+                yield* tools.install(mpfb.entry.id);
+              }
+              // A session opened before the install has no MPFB2 yet; its scene is saved, so reopen it.
+              if (!(yield* ensure(root)).addons.has("mpfb")) {
+                yield* drop(root);
+                if (!(yield* ensure(root)).addons.has("mpfb"))
+                  return yield* fail(
+                    "tool-failed",
+                    "MPFB2 is installed, but it could not be installed into this game's live Blender; see the blender-live-mpfb log under builds/logs. Library bodies work meanwhile.",
+                  );
               }
               body = { mpfb: input.body.mpfb };
             } else {
@@ -2311,8 +2308,7 @@ const make = Effect.gen(function* () {
                 chains: input.chains ?? [],
                 replace: input.replace ?? false,
                 fit: input.fit ?? null,
-                // A character with no style named takes the lock's proportions, as the world does.
-                style: input.style ?? lockedCharacterStyle(lock),
+                style: input.style ?? null,
                 height: input.height ?? null,
                 heightRange: input.heightRange ?? null,
               })})`,
@@ -2647,7 +2643,8 @@ const make = Effect.gen(function* () {
                     sha256: glb.sha256,
                     bytes: glb.bytes,
                   },
-                  characterRoute(manifest),
+                  // Made in Blender whichever way the agent was free to choose.
+                  characterRoute(manifest) === "code" ? "code" : "blender",
                 ),
                 triangles: shippedTriangles,
               }),

@@ -56,21 +56,6 @@ the rest judgement from the measured sun colours.
 - Adding or removing a light recompiles every material: make lights once, change `intensity`.
 - One colour family everywhere ("one shade of brown"): warm key, cool fill.
 
-## Checks
-
-```yaml
-- probe: player.frame.median
-  label: median light
-  want: ">= 0.15"
-- probe: player.frame.clipped
-  label: clipped share
-  want: "<= 0.02"
-- fact: scene.report.player.contrast
-  label: player ΔE
-  want: ">= 20"
-- agent: "windows and lamps bloom; walls and sky do not"
-```
-
 ## Code
 
 Three's own chain, for a game without `LOOK`:

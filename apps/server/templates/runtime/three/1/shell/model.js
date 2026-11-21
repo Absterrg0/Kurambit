@@ -4,9 +4,9 @@
 //   import * as M from "./shell/model.js";
 //   const paint = M.palette({ hull: ["#e8e2d4", { kind: "paint" }], trim: "#24364a",
 //     glass: ["#1d2a33", { kind: "glass" }], deck: ["#9a7650", { kind: "wood" }] });
-//     // one shared material per name: kind matte (default, flat facets), plastic, paint (clear
-//     // coat), metal, chrome, glass, wood, rubber, cloth, stone, water; or { rough, metal, coat,
-//     // glow, smooth, opacity, map }. They mirror the look's sky. Every model drawing with
+//     // one shared material per name: kind matte (default), plastic, paint (clear coat), metal,
+//     // chrome, glass, wood, rubber, cloth, stone, water; or { rough, metal, coat, glow, flat,
+//     // opacity, map }: smooth shaded, flat: true shows facets. They mirror the look's sky. Every model drawing with
 //     // paint.hull is one world, and merges into one draw.
 //   M.paintOf("wall"); M.role("leaf"); // a role of the game's look (STYLE.json): its material, its
 //     // colour. M.lock() is the lock: { palette, roles, shape: { edges, bevel, chunky, detail },
@@ -50,19 +50,6 @@
 //     { length: [4, 12, 0.25, "m"], beam: [1.5, 4, 0.1, "m"], seed: [1, 99, 1] },
 //     (p) => M.merge(buildBoat(p, M.seeded(p.seed))), { kind: "character" });
 //   ctx.scene.add(boat); // a Group; move and turn it, its insides are rebuilt in place
-//
-// A character in code, on the standard humanoid skeleton the animation library's clips play on
-// (ASSETS names the library's clip file: game_assets op add quaternius-universal-animation-library
-// with Unreal-Godot/UAL1_Standard.glb, allowed with the library off). Parts are placed in the
-// body's own metres, feet at y 0, facing +z, at the skeleton's rest pose; each rides one bone.
-//   const body = M.rig(ctx.assets.model("rig"));  // the clips' copy, its mannequin taken off
-//   body.joint("hand_r");                          // a joint's rest position (Vector3, body metres)
-//   body.limb("thigh_l", "calf_l", 0.09, paint.cloth, { end: 0.07 }); // a capsule along a bone
-//   body.part(geometry, paint.skin, { at: [0, 1.62, 0.02] }); // nearest bone, or { bone: "Head" }
-//   body.part(swordGeometry, paint.metal, { at: [...], bone: "hand_r", rigid: true }); // never bends
-//   const hero = animate(body.done());             // skinned to the bones by distance, bending at
-//     // the joints, one draw per material; done({ skin: "rigid" }) hangs each part on its bone
-//   // body.bones lists the bone names; hero.play("run") plays the library's clips on it.
 //
 // Name every model's root before you merge or scatter it (`cabin.name = "Cabin"`). Named parts
 // are what the person can pick, see in Art and ask about: an island's cabin, dock and trees.
@@ -123,8 +110,8 @@ const KINDS = {
 /**
  * A shared material: `colour` a CSS colour or 0xrrggbb; `kind` one of matte (default), plastic,
  * paint, metal, chrome, glass, wood, rubber, cloth, stone, water; over it `rough` 0..1, `metal`
- * 0..1, `coat` 0..1 (a clear coat), `glow` the emissive strength of the colour itself, `smooth`
- * for smooth shading (flat facets by default), `opacity` below 1, `map` a texture (canvasTexture),
+ * 0..1, `coat` 0..1 (a clear coat), `glow` the emissive strength of the colour itself, `flat`
+ * for faceted shading (smooth by default; a lock with faceted edges flattens all), `opacity` below 1, `map` a texture (canvasTexture),
  * `reflect` how strongly it mirrors the sky.
  */
 export function paintOf(value, options = {}) {
@@ -139,11 +126,8 @@ export function paintOf(value, options = {}) {
     map,
     reflect = 1,
   } = o;
-  // A soft-edged look shades everything smooth; otherwise matte and stone show their facets.
-  const smooth =
-    o.smooth ??
-    (look?.shape?.edges === "soft" ||
-      (o.kind !== undefined && o.kind !== "matte" && o.kind !== "stone"));
+  // Smooth unless asked flat (or the earlier `smooth: false`), or the person locked faceted edges.
+  const smooth = o.flat === true ? false : (o.smooth ?? look?.shape?.edges !== "faceted");
   const key = `${colour(value).getHexString()}|${rough}|${metal}|${coat}|${coatRough}|${glow}|${smooth}|${opacity}|${reflect}|${map?.uuid ?? ""}`;
   let material = paints.get(key);
   if (material === undefined) {

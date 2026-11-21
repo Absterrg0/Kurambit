@@ -57,18 +57,6 @@ true })`; `object.flipbook.restart()` plays it again.
   op `sprites`.
 - Fonts from the computer: refused.
 
-## Checks
-
-```yaml
-- agent: "every picture in the contact sheet read before use"
-- fact: perf.drawCalls
-  label: draw calls
-  want: "<= 300"
-- probe: player.text1080
-  label: smallest text at 1080p px
-  want: ">= 18"
-```
-
 ## Code
 
 `game_assets` op `pictures`, `game_blender` op `sprites`, `ctx.assets.sheet` (the runtime's

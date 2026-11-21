@@ -46,19 +46,6 @@
 - A Decimate ratio on a textured model tears its UVs; `simplify` keeps seams.
 - Triangles spent on what reads under 3 px at game distance; colour it instead.
 
-## Checks
-
-```yaml
-- review: "triangles <= style.roleBudget (style pass)"
-- agent: "a static model is one object with one material (two with Glow)"
-- fact: perf.drawCalls
-  label: draw calls
-  want: "<= 300"
-- fact: perf.triangles
-  label: triangles
-  want: "<= 1500000"
-```
-
 ## Code
 
 ```python

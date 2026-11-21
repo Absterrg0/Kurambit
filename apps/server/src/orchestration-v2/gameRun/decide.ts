@@ -491,7 +491,7 @@ const referenceProposal = (look: LookResult): GameRunProposal | null => {
   return {
     why: "reference",
     text: clip(
-      `${difference}. This is what still differs most from the picture the person asked this game to match (its reference). Close it, looking at the game beside the picture with game_check until it is gone, and on your final check pass critique: the biggest major difference still left, or none.`,
+      `${difference}. This is what still differs most from the picture the person asked this game to match (its reference). Make one change that closes it, and on your final check pass critique: the biggest major difference still left, or none.`,
       TEXT_MAX,
     ),
     target: null,

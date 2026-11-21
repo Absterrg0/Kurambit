@@ -1,5 +1,5 @@
-"""A body restyled before it is conformed: head, legs, arms, hands, feet and girth scaled by a
-preset (realistic, heroic, cartoon, chibi) or by hand, then the whole to a height.
+"""A body restyled before it is conformed: head, legs, arms, hands, feet and girth scaled by the
+factors asked for, then the whole to a height.
 
 Each region of the body (legs, feet, torso, arms, hands, head) has its own map, and the maps agree
 at the joints between regions (a hip, a shoulder, the base of the neck), so blending them by the
@@ -11,12 +11,6 @@ Space: Z up, the body facing -Y, feet on z = 0, metres.
 """
 import numpy as np
 
-PRESETS = {
-    "realistic": {},
-    "heroic": {"head": 0.9, "legs": 1.08, "hands": 1.05, "girth": 1.1, "limbs": 1.08},
-    "cartoon": {"head": 1.35, "legs": 0.82, "arms": 0.9, "hands": 1.25, "feet": 1.25, "girth": 1.05, "limbs": 1.12},
-    "chibi": {"head": 2.0, "legs": 0.55, "arms": 0.72, "hands": 1.35, "feet": 1.35, "girth": 1.12, "limbs": 1.3},
-}
 KEYS = ("head", "legs", "arms", "hands", "feet", "girth", "limbs")
 REGIONS = ("torso", "legs", "feet", "arms", "hands", "neck", "head")
 # Standard joints by region; a joint not named falls to its nearest named ancestor's region.
@@ -32,17 +26,11 @@ _REGION_OF = {
 
 
 def resolve(style):
-    """The factors for a style: {preset?, head?, legs?, arms?, hands?, feet?, girth?, limbs?}; a factor
-    given beside a preset overrides the preset's."""
-    style = dict(style or {})
-    preset = style.pop("preset", "realistic")
-    if preset not in PRESETS:
-        raise ValueError(f"style preset {preset!r}: one of {', '.join(PRESETS)}")
+    """The factors for a style: {head?, legs?, arms?, hands?, feet?, girth?, limbs?}, each 1 unless named."""
     out = {k: 1.0 for k in KEYS}
-    out.update(PRESETS[preset])
-    for k, v in style.items():
+    for k, v in (style or {}).items():
         if k not in KEYS:
-            raise ValueError(f"style {k!r}: one of preset, {', '.join(KEYS)}")
+            raise ValueError(f"style {k!r}: one of {', '.join(KEYS)}")
         out[k] = float(v)
     for k, v in out.items():
         if not 0.3 <= v <= 3.0:

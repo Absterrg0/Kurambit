@@ -50,18 +50,6 @@ quality" (Mark Brown).
 - Too many voices: give cues priority over ambience.
 - Information carried by sound alone (GAG).
 
-## Checks
-
-```yaml
-- probe: player.sound.firstInput
-  label: sound on first input
-  want: "== true"
-- probe: player.sound.peakDb
-  label: mix peak dBFS
-  want: "<= -1"
-- agent: "music or a bed starts within 5 s of play"
-```
-
 ## Code
 
 The runtime's `audio.js` (buses, `playSfx`); Web Audio. Kenney's Impact and Interface Sounds

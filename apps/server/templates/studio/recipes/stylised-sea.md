@@ -32,18 +32,6 @@
 - Foam bands that copy the coastline exactly unless wobbled with noise.
 - Flat water with no wake: it read as a picture on bench 4.
 
-## Checks
-
-```yaml
-- agent: "sum of steepness < 1 (print it)"
-- agent: "height(x, z) equals the drawn surface within 5 cm at 8 points (game_play eval)"
-- fact: perf.drawCalls
-  label: draw calls
-  want: "<= 300"
-- fact: perf.fps
-  label: fps
-```
-
 ## Code
 
 three's `Water` and `Water2` (MIT), already in the runtime's three. Gerstner is a few shader

@@ -28,16 +28,6 @@ duel the boss backs off and circles for **2 to 4 s** after a combo.
 - Constant pressure; peaks with no release; release with nothing in it.
 - Intensity that never decays while the player hides.
 
-## Checks
-
-```yaml
-- agent: "GameState.intensity over a bot run has peaks and troughs"
-- probe: player.lost
-  label: can be lost early
-  want: "== true"
-- agent: "after a peak, at least 20 s with no attack"
-```
-
 ## Code
 
 Booth's director is about 40 lines; nothing to import.

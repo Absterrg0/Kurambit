@@ -141,12 +141,14 @@ those defaults.
 
 ## Models
 
-Each game has one setting for how its models are made, **Make models with**: **Blender** (the
-default) or **Code**, and a separate **Library models** switch, off by default.
+Each game has one setting for how its models are made, **Make models with**: **Agent's choice**
+(the default), **Blender** or **Code**, and a separate **Library models** switch, off by default.
 Pick them under the home screen box's options button, so the first turn builds your way, and change
 them later in the Scene tab's **Models** row or the command palette's **Make models with…**. You can
 also ask your agent in chat to switch; it never switches on its own.
 
+- **Agent's choice**: the agent decides for each model, making characters, creatures and the
+  models that matter most in Blender when it is installed, and quick or simple things in code.
 - **Code**: the agent builds every model in three.js code inside the game: hulls, buildings,
   vehicles, props, terrain, and characters on the same skeleton the animation library's clips play
   on. They cost nothing to install and download tiny. The agent looks at each model alone (from
@@ -154,8 +156,8 @@ also ask your agent in chat to switch; it never switches on its own.
   Give it a picture to aim for and it compares its work against it, the model from the picture's
   angle and the game's frame beside the picture at the same size: the key art you picked, or any
   picture you attach, which it saves as `art/reference.png`.
-- **Blender**: it makes the player, characters, creatures, trees, rocks and buildings in Blender,
-  and builds the ground, furniture and small props in code. A person is a body on the shared skeleton, then the head, clothes
+- **Blender**: it makes the player, characters, creatures and the models that matter in Blender,
+  and builds the ground and small things in code. A person is a body on the shared skeleton, then the head, clothes
   and props it models itself, with the library's animations already fitted; an animal is sculpted
   with its own skeleton and moves. Without Blender installed, it builds the characters in code
   and tells you.
@@ -375,7 +377,7 @@ what fills it:
   offered as one. Every build from then on replays it, and its checks say whether each test play
   still ends the same way, or for a run that never ended, whether it plays the same for its length. A run that does not replay
   the same on its own build is refused, with what differed: usually the game timing itself
-  outside its update. Your agent saves its own winning runs the same way, and both of you can
+  outside its update. Your agent can save runs the same way, and both of you can
   list and delete them.
 - **Back where you were (three.js).** When your agent changes the game while you play, **Reload**
   brings the new game back to the moment you were at, frozen, replaying your run on the changed

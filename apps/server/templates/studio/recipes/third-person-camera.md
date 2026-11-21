@@ -33,21 +33,6 @@ camera's avoidance.
 - Tall clutter between camera and player; a camera inside a wall.
 - Shake applied to the camera's real position instead of only the drawn view.
 
-## Checks
-
-```yaml
-- fact: scene.report.player.heightPx
-  label: player px high
-  want: ">= 50"
-- fact: scene.report.player.hidden
-  label: player hidden share
-  want: "<= 0.25"
-- fact: scene.report.player.offscreen
-  label: player off-screen share
-  want: "<= 0.25"
-- agent: "in a fight, the foe on screen at least 80% of the time"
-```
-
 ## Code
 
 Cinemachine is under the Unity Companion License: learn, do not copy.

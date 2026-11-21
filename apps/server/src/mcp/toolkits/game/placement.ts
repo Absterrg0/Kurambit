@@ -127,8 +127,7 @@ export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
   game_blender_export: "game_blender op export",
   game_blender_character: "game_blender op character",
   game_blender_paint: "game_blender op paint",
-  game_blender_carve:
-    "game_blender op code: model the prop in bpy as parts (studio-skills/recipes)",
+  game_blender_carve: "game_blender op code: model it in bpy (studio-skills/art-pipeline.md)",
   game_blender_render_sprites: "game_blender op sprites",
   game_animate: "game_blender op animate",
   game_build_restore: "game_builds op undo {build, to: true}",
@@ -160,8 +159,7 @@ const RETIRED_GAME_OPS: Readonly<Record<string, string>> = {
   "game_assets.import": "nothing: a three.js game loads web/ files as they are",
   "game_assets.mine": "nothing: the personal Library is gone",
   "game_blender.scene": "game_blender op code, printing what it needs",
-  "game_blender.carve":
-    "game_blender op code: model the prop in bpy as parts (studio-skills/recipes)",
+  "game_blender.carve": "game_blender op code: model it in bpy (studio-skills/art-pipeline.md)",
   "game_builds.compare": "game_builds op list {build} for each",
   "game_builds.restore": "game_builds op undo {build, to: true}",
   "game_builds.saved": "nothing for agents: the person keeps media in the Game panel",

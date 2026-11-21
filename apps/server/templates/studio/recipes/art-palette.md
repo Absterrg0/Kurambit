@@ -55,15 +55,6 @@ as paint (step 2) works on both.
   beside a dark one; grain and relief are a baked `kurambit.surface`.
 - A textured or see-through material snaps too, face by face, by the texture under each face.
 
-## Checks
-
-```yaml
-- review: "materials == 1 (2 with Glow) (style pass)"
-- review: "textures == 1 (style pass)"
-- review: "style.hues <= 5 (style pass)"
-- review: "style.flat matches shape.edges (style pass (faceted >= 0.9, smooth <= 0.1))"
-```
-
 ## Code
 
 Kit only: `kurambit.material`, `kurambit.decal`; the export's style pass builds the atlas when

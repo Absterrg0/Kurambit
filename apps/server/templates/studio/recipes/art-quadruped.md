@@ -49,15 +49,6 @@ horse, cow, husky and more), on the library route.
 - Round tube legs on straight joints read as stilts; give the hock its angle.
 - Wolf and cat meta-rigs carry 181-197 deform bones: use `basic_quadruped` or `horse`.
 
-## Checks
-
-```yaml
-- review: "gates: [height, deformation, feet, budget] all pass (gates)"
-- review: "triangles <= 3000 (style.roleBudget)"
-- review: "detachedChains == [] (measure (limbs reach the spine))"
-- review: "walk ground speed > 0; seams loop (clip facts)"
-```
-
 ## Code
 
 Rigify's meta-rigs (bundled with Blender, GPL; only the skeleton data ships), `kurambit.loft`,
