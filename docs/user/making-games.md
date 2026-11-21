@@ -51,7 +51,8 @@ judges or undoes a step on it, and **Resume** goes on once the cause is fixed. K
 your other apps to make room. If free memory falls under about 1 GB while an editor sits idle,
 Kurambit closes it and reopens it on the next request; it never closes one mid-task. `KURAMBIT_BLENDER_MEMORY_MB`,
 `KURAMBIT_EXPLORE_WEB_MEMORY_MB`, `KURAMBIT_BLENDER_RENDER_MEMORY_MB` (sprite renders and rendered looks) and
-`KURAMBIT_BOT_MEMORY_MB` change the requirement, and 0 turns the check off.
+`KURAMBIT_BOT_MEMORY_MB` change the requirement, and 0 turns the check off. On Linux, Blender's looks
+use every core; `KURAMBIT_BLENDER_THREADS` gives each game's Blender fewer when you run several games at once.
 
 You also need a signed-in agent. Codex and Claude are enabled by default; enable others in
 **Settings → Providers**.

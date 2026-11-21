@@ -497,8 +497,13 @@ const sessionEnv = (
   env.BLENDER_USER_RESOURCES = userResources;
   env.LIBGL_ALWAYS_SOFTWARE = "1";
   // Software GL renders every look on the CPU: with two threads, four looks took 47 s on an
-  // 8-core machine against 28 s on all of them.
-  env.LP_NUM_THREADS = String(NodeOS.availableParallelism());
+  // 8-core machine against 28 s on all of them. A machine running several games at once gives
+  // each fewer (KURAMBIT_BLENDER_THREADS), or seven live Blenders fight over every core.
+  env.LP_NUM_THREADS = String(
+    Number(process.env.KURAMBIT_BLENDER_THREADS) > 0
+      ? Number(process.env.KURAMBIT_BLENDER_THREADS)
+      : NodeOS.availableParallelism(),
+  );
   env.DISABLE_TELEMETRY = "true";
   return env;
 };
