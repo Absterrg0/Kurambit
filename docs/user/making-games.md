@@ -18,8 +18,8 @@ way you install your coding agents: Kurambit finds them, checks their versions, 
 button for the vendor's download page when it is missing or the wrong version. After installing
 something, press **Check again**.
 
-- **Blender** makes game art on the Blender route. Use Blender 4.2 or later from
-  [blender.org/download](https://www.blender.org/download/).
+- **Blender** makes game art on the Blender route. Use Blender 5.3 (5.0 or later works; 4.2 to
+  4.5 still run) from [blender.org/download](https://www.blender.org/download/).
 - **MPFB2** is optional: it gives characters built in Blender a human body. See
   [Models](#models).
 - **ffmpeg** records bot plays. Install it with your package manager (`sudo apt install ffmpeg`

@@ -163,14 +163,19 @@ const validToolVersion = (tool: BinaryTool, version: string) => {
   if (tool === "uv") return major === 0 && minor >= 7;
   return major > 4 || (major === 4 && minor >= 2);
 };
-/** The copies earlier Kurambit versions installed, before it stopped installing tools. */
-const LEGACY_INSTALLS = {
-  blender: "blender-4.5.14/blender",
-  uv: `uv-${UV_VERSION}/uv`,
+/**
+ * Copies in Kurambit's tools folder, newest first: the Blender 5.3 the kit is made for, then the
+ * 4.5 earlier Kurambit versions installed before they stopped installing tools.
+ */
+const KURAMBIT_INSTALLS = {
+  blender: ["blender-5.3.0/blender", "blender-4.5.14/blender"],
+  uv: [`uv-${UV_VERSION}/uv`],
 } as const;
-const legacyInstall = (tool: BinaryTool, platform: Platform) =>
+const kurambitInstalls = (tool: BinaryTool, platform: Platform): ReadonlyArray<string> =>
   // Only uv is still fetched; its Windows build is uv.exe.
-  tool === "uv" && platform === "win32" ? `${LEGACY_INSTALLS.uv}.exe` : LEGACY_INSTALLS[tool];
+  tool === "uv" && platform === "win32"
+    ? KURAMBIT_INSTALLS.uv.map((path) => `${path}.exe`)
+    : KURAMBIT_INSTALLS[tool];
 const ENV_OVERRIDES = {
   blender: "KURAMBIT_BLENDER",
   uv: "KURAMBIT_UV",
@@ -181,7 +186,7 @@ export interface ToolCandidate {
 }
 /**
  * Detection order, as for providers: the Settings path, the env override,
- * a copy an earlier Kurambit installed, then PATH. An explicit path is the
+ * a copy in Kurambit's tools folder (newest first), then PATH. An explicit path is the
  * only candidate, so a wrong override is reported instead of skipped.
  */
 const toolCandidates = (
@@ -196,7 +201,10 @@ const toolCandidates = (
   if (environment?.trim()) return [{ path: NodePath.resolve(environment.trim()), source: "env" }];
   const names = [platform === "win32" ? `${tool}.exe` : tool];
   return [
-    { path: NodePath.join(directory, legacyInstall(tool, platform)), source: "kurambit" },
+    ...kurambitInstalls(tool, platform).map((path): ToolCandidate => ({
+      path: NodePath.join(directory, path),
+      source: "kurambit",
+    })),
     ...searchPath
       .split(NodePath.delimiter)
       .filter(Boolean)
@@ -206,7 +214,7 @@ const toolCandidates = (
   ];
 };
 const describeCandidates = (tool: BinaryTool) =>
-  `the path in Settings > Game tools, ${ENV_OVERRIDES[tool]}, an earlier Kurambit install, then PATH (${tool})`;
+  `the path in Settings > Game tools, ${ENV_OVERRIDES[tool]}, a copy in Kurambit's tools folder, then PATH (${tool})`;
 export interface ResolvedTool {
   readonly path: string;
   readonly version: string;

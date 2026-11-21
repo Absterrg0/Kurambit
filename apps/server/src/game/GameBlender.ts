@@ -1176,7 +1176,10 @@ const make = Effect.gen(function* () {
                             String(BLENDER_WINDOW.height),
                             "--no-window-focus",
                           ]
-                        : []),
+                        : // Blender 5.3 defaults to Vulkan on Linux, which cannot open a
+                          // window on Xvfb (the X connection drops at start); OpenGL there
+                          // is the software GL sessionEnv asks for.
+                          ["--gpu-backend", "opengl"]),
                       "--python",
                       bootPy,
                       "--",

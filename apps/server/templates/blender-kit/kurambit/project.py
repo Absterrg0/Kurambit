@@ -24,6 +24,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
+from . import helpers
 from . import sheet as sheets
 from . import stylepass
 from .protocol import Refused
@@ -224,13 +225,13 @@ class Depth:
         sc.render.image_settings.file_format = "OPEN_EXR"
         sc.render.image_settings.color_depth = "32"
         world = bpy.data.worlds.new("kurambit_depth_world")
-        world.use_nodes = True
+        helpers.use_nodes(world)
         world.node_tree.nodes["Background"].inputs[0].default_value = (1e4, 1e4, 1e4, 1)
         world.node_tree.nodes["Background"].inputs[1].default_value = 1.0
         keep_world = sc.world
         sc.world = world
         m = bpy.data.materials.new("kurambit_depth")
-        m.use_nodes = True
+        helpers.use_nodes(m)
         nt = m.node_tree
         nt.nodes.clear()
         cd = nt.nodes.new("ShaderNodeCameraData")
@@ -436,7 +437,7 @@ def uv_unwrap(objs, groups, layer="paint", margin=0.004):
 
 def _bake_material(name, image):
     m = bpy.data.materials.new(name)
-    m.use_nodes = True
+    helpers.use_nodes(m)
     nt = m.node_tree
     nt.nodes.clear()
     tex = nt.nodes.new("ShaderNodeTexImage")
@@ -623,7 +624,7 @@ def to_atlas(shape, idx, values, background):
 
 def textured_material(name, albedo, normal, orm, normal_strength=1.0):
     m = bpy.data.materials.new(name)
-    m.use_nodes = True
+    helpers.use_nodes(m)
     nt = m.node_tree
     nt.nodes.clear()
     out = nt.nodes.new("ShaderNodeOutputMaterial")

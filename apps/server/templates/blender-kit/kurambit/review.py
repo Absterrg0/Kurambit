@@ -50,6 +50,8 @@ CLOSE = (300, 300)
 HEAD = 0.45  # the close-up: the top of a character's height
 CLOSE_AZ = 18  # a standing person's close-up: nearly face on, turned enough to show the nose
 MIN_COVER = 0.01
+# Blender 5.0 renamed EEVEE Next back to EEVEE.
+EEVEE = "BLENDER_EEVEE" if bpy.app.version >= (5, 0) else "BLENDER_EEVEE_NEXT"
 # Where the game's camera sees a character from (azimuth, elevation) per STYLE.json view.
 GAME_VIEWS = {"perspective": (35, 22), "side": (90, 0), "top-down": (20, 55), "isometric": (45, 35.26)}
 STRIP_WORDS = ("walk", "jog", "run", "sprint", "jump")
@@ -124,7 +126,10 @@ def _setup(sc, engine, size):
         sc.display.shading.show_cavity = False
         sc.display.render_aa = "8"
     else:
-        sc.eevee.taa_render_samples = 16
+        # The live session renders on software GL, where every sample redraws the key light's
+        # shadow maps (about 3 s a sample at a turnaround's size on Blender 5.3): 4 samples
+        # anti-alias these small tiles, and the key's sharp sun keeps its shadow clean in so few.
+        sc.eevee.taa_render_samples = 4
 
 
 def _clay(sc):
@@ -173,7 +178,7 @@ def _studio(sc, made):
     lights = []
     for name, energy, shadow in (("key", 3.2, True), ("fill", 1.0, False), ("rim", 2.4, False)):
         data = bpy.data.lights.new("kurambit_review_" + name, "SUN")
-        data.energy, data.use_shadow, data.angle = energy, shadow, math.radians(8)
+        data.energy, data.use_shadow, data.angle = energy, shadow, math.radians(2)
         ob = bpy.data.objects.new(data.name, data)
         sc.collection.objects.link(ob)
         made.append(ob)
@@ -369,7 +374,7 @@ def _model_reference(sc, cam, lights, ref, meshes, points, folder):
     try:
         for o in meshes:
             o.hide_render = True
-        _setup(sc, "BLENDER_EEVEE_NEXT", TURN)
+        _setup(sc, EEVEE, TURN)
         for i, (name, az) in enumerate(TURN_VIEWS):
             _camera(cam, az, 8, exts[i], span)
             _aim_lights(lights, az, 8)
@@ -490,7 +495,7 @@ def review(params):
                 problems.append(f"the {what} tile shows the model over {100 * _cover(tile):.2f}% of it (under {100 * MIN_COVER:.0f}%): it is out of frame or too small to judge there")
             return tile
 
-        _setup(sc, "BLENDER_EEVEE_NEXT", TURN)
+        _setup(sc, EEVEE, TURN)
         turns = []
         for i, (name, az) in enumerate(TURN_VIEWS):
             _camera(cam, az, 8, exts[i], span)
@@ -503,7 +508,7 @@ def review(params):
             head = points[points[:, 2] >= hi - HEAD * (hi - lo)]
             caz = CLOSE_AZ if standing else 40
             he = _extent(head, caz, 8)
-            _setup(sc, "BLENDER_EEVEE_NEXT", CLOSE)
+            _setup(sc, EEVEE, CLOSE)
             _camera(cam, caz, 8, he, max(he[1] - he[0], he[3] - he[2]) * 1.08)
             _aim_lights(lights, caz, 8)
             close = covered(_render(sc, os.path.join(folder, "close.png")), "head close-up")
@@ -528,7 +533,7 @@ def review(params):
             per_m = game_px / height
             game_label = f"at game distance ({height:g} m character = {game_px} px)"
         size = max(16, int(round(span_g * per_m * 1.25)))
-        _setup(sc, "BLENDER_EEVEE_NEXT", (size, size))
+        _setup(sc, EEVEE, (size, size))
         _camera(cam, gaz, gel, ge, size / per_m)
         _aim_lights(lights, gaz, gel)
         game = covered(_render(sc, os.path.join(folder, "game.png")), "game-distance")

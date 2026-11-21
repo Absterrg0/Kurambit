@@ -1,27 +1,28 @@
-# Blender code that runs the first time, on 4.5 and 5.x
+# Blender code that runs the first time, on Blender 5.x
 
 **When.** Any `game_blender` op `code`: before a chat's first Blender call, and whenever one fails
 on a name, a context or a missing attribute.
 
 ## Numbers
 
-- The person's Blender is 4.5 LTS or 5.x; `bpy.app.version` says which. Write for both:
-  - a new material has no nodes on 4.5 until `use_nodes`, and has them on 5.x: use
-    `kurambit.material(...)`, or `if m.node_tree is None: m.use_nodes = True`;
-  - Boolean solvers are `FAST`, `EXACT`, `MANIFOLD` on 4.5 and `FLOAT`, `EXACT`, `MANIFOLD` on
-    5.x: use `EXACT` or `MANIFOLD`;
-  - `action.fcurves` works on 4.5 and is gone on 5.x: key with `obj.keyframe_insert(...)`,
+- Kurambit runs Blender 5.x (5.3 by default; `bpy.app.version` says which). What older
+  tutorials and memory get wrong:
+  - a new material and world already have their nodes: use `kurambit.material(...)`, or
+    `kurambit.helpers.use_nodes(m)` (`use_nodes` is deprecated);
+  - Boolean solvers are `EXACT`, `FLOAT` (was `FAST`) and `MANIFOLD`;
+  - actions are layered: `action.fcurves` is gone. Key with `obj.keyframe_insert(...)`,
     `pose_bone.keyframe_insert(...)`, or op `animate`;
-  - `use_auto_smooth` is gone on both (since 4.1): `me.shade_smooth()`,
-    `me.set_sharp_from_angle(angle=)`, `me.shade_flat()`;
-  - bones select through `bone.select` on 4.5 and `pose_bone.select` on 5.x: edit data and
-    select nothing;
-  - a node group's input on a modifier is `mod["Socket_2"]` before 5.2 and
-    `getattr(mod.properties.inputs, "Socket_2").value` from 5.2: branch on `bpy.app.version`;
-  - EEVEE is `BLENDER_EEVEE_NEXT` on 4.5 and `BLENDER_EEVEE` on 5.x: render only through ops
-    `look` and `sprites`.
-- Principled inputs carry their 4.0 names on both: `Emission Color`, `Specular IOR Level`,
-  `Transmission Weight`, `Coat Weight`, `Subsurface Weight`.
+  - no `use_auto_smooth` (since 4.1): `me.shade_smooth()`, `me.set_sharp_from_angle(angle=)`,
+    `me.shade_flat()`;
+  - bones select through `pose_bone.select`, not `bone.select`: edit data and select nothing;
+  - a node group's input on a modifier is `getattr(mod.properties.inputs, sock.identifier).value`
+    (5.2), not `mod["Socket_2"]`;
+  - EEVEE is `BLENDER_EEVEE`; `blend_method` is `surface_render_method` (`BLENDED` for glass);
+  - the compositor is `scene.compositing_node_group`, not `scene.node_tree`; a mix node's
+    sockets share names (`A`, `B`): index them.
+- Principled inputs: `Emission Color`, `Specular IOR Level`, `Transmission Weight`, `Coat Weight`,
+  `Subsurface Weight`. They ship in the GLB unless a palette is locked; procedural nodes never
+  do: bake them to textures.
 - A review costs about 40 s; printing numbers in the same code call costs nothing.
 
 ## Steps
@@ -81,5 +82,5 @@ print([round(d, 3) for d in o.dimensions], kurambit.qa([o])["problems"])
 
 EL4CTEO's blender-skills (MIT): `blender-core` and its 5.x migration table and bpy patterns
 (verified there on 5.2-5.3), `blender-geometry-nodes`, `blender-character-rigging` and
-`blender-animation` notes; Kurambit's kit (`helpers.use_nodes`, the export pass). The 4.5
-columns from Blender's 4.1-5.0 release notes.
+`blender-animation` notes; Kurambit's kit (`helpers.use_nodes`, the export pass); Blender's
+5.0-5.3 Python API release notes.
