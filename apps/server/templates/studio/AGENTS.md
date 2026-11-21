@@ -38,4 +38,3 @@ name them in game.json `"recipes": [...]`; `game_check` prints their numbers.
 - `art-trees-rocks`: trees, rocks, their scatter.
 - `art-budget`: too many triangles or draws, far copies.
 - `pictures-2d`: cards, tiles, icons, UI art, 2D effects, characters.
-- `voxels`: blocky models and worlds, .vox files.

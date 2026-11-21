@@ -97,7 +97,8 @@ const ioError = (operation: string, path: string, cause: unknown) =>
   });
 
 /** Skills that became recipes (studio/recipes/): a refresh takes the old copies out of a game. */
-const RETIRED_SKILLS = ["playtest.md", "audio.md", "pictures.md", "voxels.md"];
+/** Recipes Kurambit no longer ships: a refresh takes them out of a game too. */
+const RETIRED_SKILLS = ["playtest.md", "audio.md", "pictures.md", "voxels.md", "recipes/voxels.md"];
 
 /**
  * The studio skills as this server ships them, for the game's engine only (a role told to read

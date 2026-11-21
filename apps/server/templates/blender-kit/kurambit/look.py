@@ -8,7 +8,7 @@ family. game_assets op lock writes it; the game's code reads the same lock (shel
 roles: a colour per role, the lock's over ROLES. finish: "flat" (plain colours), "painted" (soft
 hand-painted surfaces) or "real" (full grain and relief); flat under a hex palette, real without.
 facets: flat faces and hard edges (shape.edges "faceted", the default under a hex palette, or
-"voxel": facets, no bevel, and voxel is True; a voxel model is kurambit.voxels). bevel:
+"voxel": facets, no bevel, and voxel is True). bevel:
 metres an edge is rounded by. chunky: 0 true to life, 1 thick trunks, big crowns and roofs. detail:
 0 bare forms, 1 every beam, sill and tuft. surfaces: the made surface each role wears where the
 finish is not flat, the lock's over SURFACES. character: a character's height in metres, which a

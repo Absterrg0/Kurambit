@@ -70,23 +70,6 @@ export const BLENDER_ADDONS: ReadonlyArray<BlenderAddon> = [
     without: "Characters can still use library bodies.",
     env: "KURAMBIT_MPFB",
   },
-  {
-    id: "magicavoxel",
-    extension: "blender_magicavoxel",
-    name: "MagicaVoxel VOX format",
-    makes: "Voxel models",
-    purpose: "Meshes voxel models and reads .vox files.",
-    source: "extensions.blender.org",
-    official: true,
-    licence: "GPL-3.0-or-later or MIT",
-    version: "1.6.0",
-    download:
-      "https://extensions.blender.org/download/sha256:12f75a437ac820604692717cc9325eb0c201f05af6b0b15031856f2d817dc8ef/add-on-blender-magicavoxel-v1.6.0.zip",
-    sha256: "12f75a437ac820604692717cc9325eb0c201f05af6b0b15031856f2d817dc8ef",
-    bytes: 27_187,
-    without: "Voxel models cannot be made or imported.",
-    env: "KURAMBIT_MAGICAVOXEL",
-  },
 ];
 /**
  * Past this an add-on is a download worth a yes: the official extensions a route could need are

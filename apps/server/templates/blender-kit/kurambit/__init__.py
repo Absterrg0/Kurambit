@@ -8,8 +8,7 @@ Models are parts on a structure (studio-skills/recipes): loft makes a part as ri
 weights_along keeps it on its own bones through skin_rigid, joints prints a skeleton's joints, decal
 paints a face or emblem onto the model, hold, pivot, place_on_surface and grid place things,
 material colours them. blender holds Rigify's meta-rigs (an animal's skeleton), bake_ik_walk and
-Blender's bundled node groups; look is the game's lock as made things read it; voxels makes a voxel
-model from a grid or a .vox; surface bakes a tiling material and wrap maps it in metres; qa counts the
+Blender's bundled node groups; look is the game's lock as made things read it; surface bakes a tiling material and wrap maps it in metres; qa counts the
 faults the game shows that a review's pictures hide (inward faces, flicker).
 
 The earlier craft kits (hero, world, carve) are gone. A model made with them still exports and plays
@@ -24,10 +23,9 @@ from .protocol import Refused
 from .qa import qa
 from .review import review
 from .surfaces import surface, wrap
-from .voxels import voxels
 
 __all__ = ["aim", "animate", "blender", "character", "decal", "digest", "eye_lid", "eye_squash", "grid", "hold", "joints", "key_pose", "look", "loft", "material", "mirror_pose", "palette_of", "pivot",
-           "place_chain", "place_on_surface", "qa", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "voxels", "weights_along", "wrap"]
+           "place_chain", "place_on_surface", "qa", "Refused", "resolve", "review", "ring_around", "skin_rigid", "surface", "surface_hit", "tube_along_bones", "turn", "weights_along", "wrap"]
 
 GONE = ("hero", "world", "carve", "face", "hair", "garment", "cloth", "footwear", "trim", "zones", "anatomy", "creature", "gait")
 

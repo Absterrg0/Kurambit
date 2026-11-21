@@ -97,5 +97,4 @@ Render it from the game's real assets at
 1280x720 in a throwaway scene removed in `finally`, view transform
 `Standard`. Open every PNG you render.
 
-Other kinds of art: `recipes/voxels.md` (blocky worlds, .vox),
-`recipes/pictures-2d.md` (cards, tiles, icons, UI art, 2D characters).
+Other kinds of art: `recipes/pictures-2d.md` (cards, tiles, icons, UI art, 2D characters).
