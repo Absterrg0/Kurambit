@@ -53,3 +53,9 @@
   makes as a GLB, `shell/stage-bridge.js`): the same release's `examples/jsm` file from the npm
   tarball three-0.180.0.tgz (sha512 integrity matches the registry), added 2026-11-17. It passes
   through the repository's formatter like the files above.
+- `addons/` beyond the files above: the rest of the same release's `examples/jsm`, unmodified, from
+  three-0.180.0.tgz (registry integrity checked) on 2026-11-21, so a game imports any addon a
+  three.js developer would (EffectComposer and its passes, Water2, CSM, …). Left out: the
+  decoders under `libs/` that are megabytes of WebAssembly (`draco/`, `basis/`, `rhino3dm/`,
+  `ammo.wasm.*`) and `libs/lottie_canvas.module.js`; their loaders fail only if a game uses them.
+  MIT License, the same notice as three.js.
