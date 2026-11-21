@@ -17,18 +17,20 @@ clips     names from the template's clips (Mesh2Motion's, e.g. Idle_A, Walk, Swo
           chains, from default_clips' roles; empty: Idle, a move and an attack
 pack      the Mesh2Motion pack's folder (the server resolves it)
 
-Body parts are weighted by Blender's bone heat; a part heat cannot weight (overlapping or open
-parts) is weighted on a voxel copy and the weights carried back. The facts are notes, never refusals:
+Body parts are weighted by Blender's bone heat (auto_weights). The facts are notes, never refusals:
 each clip's worst edge stretch, how fast planted feet slide, parts other than feet going under the
 floor, and chains passing through each other.
 """
+import contextlib
 import json
 import math
 import os
 
+import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
+from mathutils.kdtree import KDTree
 
 from . import rigchains, rigfit
 from .helpers import action_name
@@ -37,7 +39,10 @@ from .protocol import Refused, entry
 LICENCE = "CC0 1.0 (Mesh2Motion rigs and clips)"
 PACK = "mesh2motion-rigs"
 POSE_MISMATCH_DEG = 20
-UNWEIGHTED_SHARE = 0.002
+# Bone heat grows much faster than the vertex count (a 160k-vertex outfit took over eight minutes),
+# and its weights reach each part by interpolation anyway: past this, heat runs on a decimated copy.
+HEAT_VERTS = 15000
+PART = "kurambit_part"  # each face's part, through the join and the decimation
 FACT_FRAMES = 10
 # What a clip-less call gets, first name found in the template's clips.
 DEFAULT_CLIPS = {
@@ -111,19 +116,28 @@ def _heat(target, arm):
     return _unweighted(target)
 
 
-def auto_weights(meshes, arm, deform):
-    """Bone heat for meshes from the deform bones only, done on one joined copy so layered parts
-    (a cape over a body) take matching weights; when heat leaves part of the copy unweighted, on a
-    voxel remesh of it. The weights reach each mesh by nearest-face interpolation. Says which ran."""
-    for b in arm.data.bones:
-        b.use_deform = b.name in deform
+def _clean(o):
+    """Zero-area faces and zero-length edges dissolved: one makes bone heat fail for every bone of
+    the whole mesh (two in a hair mesh left a whole outfit unweighted)."""
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bmesh.ops.dissolve_degenerate(bm, dist=max(o.dimensions) * 1e-5, edges=bm.edges)
+    bm.to_mesh(o.data)
+    bm.free()
+
+
+def _joined(objs, tags=None):
+    """One plain copy of objs: no modifiers or weights, each face tagged with its part's index in
+    tags, degenerate faces dissolved, decimated past HEAT_VERTS. With its vertex count before."""
     copies = []
-    for o in meshes:
+    for o in objs:
         c = o.copy()
         c.data = o.data.copy()
         c.modifiers.clear()
         c.vertex_groups.clear()
         bpy.context.scene.collection.objects.link(c)
+        if tags is not None:
+            c.data.attributes.new(PART, "INT", "FACE").data.foreach_set("value", [tags[o]] * len(c.data.polygons))
         copies.append(c)
     rigchains.active(copies[0])
     for c in copies:
@@ -132,34 +146,109 @@ def auto_weights(meshes, arm, deform):
         bpy.ops.object.join()
     src = bpy.context.view_layer.objects.active
     n = len(src.data.vertices)
-    miss = _heat(src, arm)
-    how = "heat"
-    if miss > UNWEIGHTED_SHARE * n:
-        proxy = src.copy()
-        proxy.data = src.data.copy()
-        bpy.context.scene.collection.objects.link(proxy)
-        proxy.parent = None
-        proxy.modifiers.clear()
-        proxy.vertex_groups.clear()
-        r = proxy.modifiers.new("remesh", "REMESH")
-        r.mode, r.voxel_size = "VOXEL", max(proxy.dimensions) / 120
-        rigchains.active(proxy)
-        bpy.ops.object.modifier_apply(modifier="remesh")
-        _heat(proxy, arm)
+    _clean(src)
+    if n > HEAT_VERTS:
+        d = src.modifiers.new("kurambit_heat", "DECIMATE")
+        d.ratio = HEAT_VERTS / n
+        bpy.ops.object.modifier_apply(modifier=d.name)
+        _clean(src)
+    return src, n
+
+
+def _weighted(o):
+    return [v for v in o.data.vertices if sum(g.weight for g in v.groups) >= 1e-3]
+
+
+def _part(src, i):
+    """A copy of src holding only part i's faces, or None when the decimation left it none."""
+    c = src.copy()
+    c.data = src.data.copy()
+    bpy.context.scene.collection.objects.link(c)
+    bm = bmesh.new()
+    bm.from_mesh(c.data)
+    tag = bm.faces.layers.int.get(PART)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f[tag] != i], context="FACES")
+    bm.to_mesh(c.data)
+    bm.free()
+    if not c.data.vertices:
+        bpy.data.objects.remove(c)
+        return None
+    return c
+
+
+def _fill(o, src):
+    """o's unweighted vertices take the weights of src's nearest weighted vertex (src may be o)."""
+    weighted = _weighted(src)
+    empty = [v for v in o.data.vertices if sum(g.weight for g in v.groups) < 1e-3]
+    if not weighted or not empty:
+        return
+    kd = KDTree(len(weighted))
+    for i, v in enumerate(weighted):
+        kd.insert(src.matrix_world @ v.co, i)
+    kd.balance()
+    names = {g.index: g.name for g in src.vertex_groups}
+    for v in empty:
+        for g in weighted[kd.find(o.matrix_world @ v.co)[1]].groups:
+            group = o.vertex_groups.get(names[g.group]) or o.vertex_groups.new(name=names[g.group])
+            group.add([v.index], g.weight, "REPLACE")
+
+
+def auto_weights(meshes, arm, deform):
+    """Bone heat from the deform bones only, on one joined copy of the meshes so layered parts (a
+    cape over a body) take matching weights. One part heat cannot solve (tangled hair cards) fails
+    the whole join for every bone, so heat then runs without the parts it cannot solve alone. Each
+    mesh takes its weights from its own faces of that copy by nearest-face interpolation; a part
+    heat missed there (a cuff the skin hides from its bone) is heated alone, and what is still
+    unweighted takes the nearest weighted vertex's weights. Says which ran."""
+    for b in arm.data.bones:
+        b.use_deform = b.name in deform
+    tags = {o: i for i, o in enumerate(meshes)}
+    src, n = _joined(meshes, tags)
+    how = "heat" if len(src.data.vertices) == n else f"heat on a {len(src.data.vertices)}-vertex copy of the {n}"
+    failed = []
+    if _heat(src, arm) > len(src.data.vertices) / 2 and len(meshes) > 1:
         bpy.data.objects.remove(src)
-        src = proxy
-        how = f"heat on a voxel copy ({miss} of {n} vertices unweighted by heat)"
+        for o in meshes:
+            part, _ = _joined([o])
+            if _heat(part, arm) > len(part.data.vertices) / 2:
+                failed.append(o)
+            bpy.data.objects.remove(part)
+        good = [o for o in meshes if o not in failed] or meshes
+        src, _ = _joined(good, tags)
+        _heat(src, arm)
+        how = "heat without the parts it cannot solve" if len(good) < len(meshes) else "nothing: heat could not solve any part"
+    alone, borrowed = [], []
     for o in meshes:
+        part = None if o in failed else _part(src, tags[o])
+        if part is not None and len(_weighted(part)) < len(part.data.vertices) / 2:
+            bpy.data.objects.remove(part)
+            part = None
+        if part is None:
+            part, _ = _joined([o])
+            if o in failed or _heat(part, arm) > len(part.data.vertices) / 2:
+                part.vertex_groups.clear()
+            else:
+                alone.append(o.name)
+        if _weighted(part):
+            _fill(part, part)
+        else:
+            borrowed.append(o.name)
+            _fill(part, src)
         o.vertex_groups.clear()
         dt = o.modifiers.new("kurambit_weights", "DATA_TRANSFER")
-        dt.object, dt.use_vert_data = src, True
+        dt.object, dt.use_vert_data = part, True
         dt.data_types_verts, dt.vert_mapping = {"VGROUP_WEIGHTS"}, "POLYINTERP_NEAREST"
         dt.layers_vgroup_select_src, dt.layers_vgroup_select_dst = "ALL", "NAME"
         rigchains.active(o)
         bpy.ops.object.datalayout_transfer(modifier=dt.name)
         bpy.ops.object.modifier_apply(modifier=dt.name)
+        bpy.data.objects.remove(part)
         _skin(o, arm)
     bpy.data.objects.remove(src)
+    if alone:
+        how += f"; heated alone, as the others hide them from their bones: {', '.join(alone)}"
+    if borrowed:
+        how += f"; heat cannot weight {', '.join(borrowed)}: the nearest weighted part's weights"
     return how
 
 
@@ -275,6 +364,20 @@ def _build_fitted(T, heads, s, name, collection, limbs, turns):
     return F, world
 
 
+@contextlib.contextmanager
+def _bones_only(arm):
+    """While frames are stepped and only bones read, the parts arm moves have their modifiers off:
+    a Decimate on a hair mesh, re-run every baked frame, took three minutes."""
+    off = [m for o in arm.children_recursive if o.type == "MESH" for m in o.modifiers if m.show_viewport]
+    for m in off:
+        m.show_viewport = False
+    try:
+        yield
+    finally:
+        for m in off:
+            m.show_viewport = True
+
+
 def _bake_template(T, F, world, clips, track, action_for, renamed):
     """Each fitted bone copies its template bone's rotation (world for `world`, rest-relative for the
     rest), the tracking bone and root its world location, with the template scaled so its tracking
@@ -295,29 +398,30 @@ def _bake_template(T, F, world, clips, track, action_for, renamed):
             c.target, c.subtarget = T, pb.name
             c.target_space = c.owner_space = "WORLD"
     made = []
-    try:
-        for name, act in clips:
-            T.animation_data_create()
-            T.animation_data.action = act
-            if act.slots:
-                T.animation_data.action_slot = act.slots[0]
-            f0, f1 = int(act.frame_range[0]), int(act.frame_range[1])
-            out = action_for(name)
-            F.animation_data_create()
-            F.animation_data.action = out
-            rigchains.active(F)
-            bpy.ops.object.mode_set(mode="POSE")
-            bpy.ops.pose.select_all(action="SELECT")
-            bpy.ops.nla.bake(frame_start=f0, frame_end=f1, only_selected=True, visual_keying=True,
-                             clear_constraints=False, use_current_action=True, bake_types={"POSE"})
-            bpy.ops.object.mode_set(mode="OBJECT")
-            made.append((name, out, None, True))
-    finally:
-        if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
-            bpy.ops.object.mode_set(mode="OBJECT")
-        for pb in F.pose.bones:
-            for c in list(pb.constraints):
-                pb.constraints.remove(c)
+    with _bones_only(F):
+        try:
+            for name, act in clips:
+                T.animation_data_create()
+                T.animation_data.action = act
+                if act.slots:
+                    T.animation_data.action_slot = act.slots[0]
+                f0, f1 = int(act.frame_range[0]), int(act.frame_range[1])
+                out = action_for(name)
+                F.animation_data_create()
+                F.animation_data.action = out
+                rigchains.active(F)
+                bpy.ops.object.mode_set(mode="POSE")
+                bpy.ops.pose.select_all(action="SELECT")
+                bpy.ops.nla.bake(frame_start=f0, frame_end=f1, only_selected=True, visual_keying=True,
+                                 clear_constraints=False, use_current_action=True, bake_types={"POSE"})
+                bpy.ops.object.mode_set(mode="OBJECT")
+                made.append((name, out, None, True))
+        finally:
+            if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            for pb in F.pose.bones:
+                for c in list(pb.constraints):
+                    pb.constraints.remove(c)
     return made
 
 
@@ -478,12 +582,14 @@ def _coords(objs, dg):
     return out
 
 
-def _dominant(o, arm):
+def _dominant(o, arm, dg):
+    """Each evaluated vertex's heaviest bone, "" for none: counted as _coords counts them, after
+    modifiers such as Decimate or Bevel change the vertex count."""
     groups = {g.index: g.name for g in o.vertex_groups if g.name in arm.data.bones}
-    dom = []
-    for v in o.data.vertices:
-        best = max(((g.weight, groups[g.group]) for g in v.groups if g.group in groups), default=(0, ""))
-        dom.append(best[1])
+    e = o.evaluated_get(dg)
+    me = e.to_mesh()
+    dom = [max(((g.weight, groups[g.group]) for g in v.groups if g.group in groups), default=(0, ""))[1] for v in me.vertices]
+    e.to_mesh_clear()
     return dom
 
 
@@ -498,9 +604,21 @@ def _seg_seg(a0, a1, b0, b1):
 
 
 def facts(arm, meshes, made, legs, chains, kinds, rigid=()):
-    """Per clip: the worst edge stretch (posed length over rest, either way) with its frame and bone,
-    how fast planted feet slide, the deepest a non-leg part goes under the floor, and chain pairs
-    that come much closer than at rest. Measured on the scene as it stands."""
+    """Per clip: the worst edge stretch (posed length over rest, either way) with its frame, part
+    and bone, how fast planted feet slide, the deepest a non-leg part goes under the floor, and
+    chain pairs that come much closer than at rest. Measured on the skin as weighted: the parts'
+    other modifiers (a Decimate re-run every frame took minutes) are off meanwhile."""
+    off = [m for o in meshes for m in o.modifiers if m.type != "ARMATURE" and m.show_viewport]
+    for m in off:
+        m.show_viewport = False
+    try:
+        return _facts(arm, meshes, made, legs, chains, kinds, rigid)
+    finally:
+        for m in off:
+            m.show_viewport = True
+
+
+def _facts(arm, meshes, made, legs, chains, kinds, rigid):
     sc, dg = bpy.context.scene, bpy.context.evaluated_depsgraph_get()
     keep_frame, keep_act = sc.frame_current, arm.animation_data.action if arm.animation_data else None
     fps = sc.render.fps / sc.render.fps_base
@@ -510,7 +628,7 @@ def facts(arm, meshes, made, legs, chains, kinds, rigid=()):
     arm.data.pose_position = "POSE"
     floor = min(float(c[:, 2].min()) for c, _ in rest if len(c))
     height = max(float(c[:, 2].max()) for c, _ in rest if len(c)) - floor
-    dom = [_dominant(o, arm) for o in meshes]
+    dom = [_dominant(o, arm, dg) for o in meshes]
     leg_bones = {b for n, bs in chains.items() if kinds.get(n) == "leg" for b in bs}
     for b in list(leg_bones):  # what hangs below a leg (toes, hooves) is leg too
         stack = list(arm.data.bones[b].children) if b in arm.data.bones else []
@@ -542,7 +660,7 @@ def facts(arm, meshes, made, legs, chains, kinds, rigid=()):
             arm.animation_data.action_slot = act.slots[0]
         f0, f1 = int(act.frame_range[0]), int(act.frame_range[1])
         sample = sorted({round(f0 + (f1 - f0) * i / (FACT_FRAMES - 1)) for i in range(FACT_FRAMES)})
-        worst, under, cross = (1.0, f0, ""), (0.0, f0, ""), {}
+        worst, under, cross = (1.0, f0, "", ""), (0.0, f0, ""), {}
         for f in sample:
             sc.frame_set(f)
             dg = bpy.context.evaluated_depsgraph_get()
@@ -557,7 +675,7 @@ def facts(arm, meshes, made, legs, chains, kinds, rigid=()):
                 # The 99.9th percentile edge: one bad edge is noise, a thousandth of them shows.
                 j = int(np.argsort(r)[max(0, int(0.999 * (len(r) - 1)))])
                 if r[j] > worst[0]:
-                    worst = (float(r[j]), f, dom[k][int(ed[j, 0])] or meshes[k].name)
+                    worst = (float(r[j]), f, dom[k][int(ed[j, 0])], meshes[k].name)
                 low = [i for i in np.argsort(co[:, 2])[:64] if dom[k][i] and dom[k][i] not in leg_bones]
                 if low and floor - co[low[0], 2] > under[0]:
                     under = (float(floor - co[low[0], 2]), f, meshes[k].name if meshes[k] in rigid else dom[k][low[0]])
@@ -566,7 +684,7 @@ def facts(arm, meshes, made, legs, chains, kinds, rigid=()):
                 d = min(_seg_seg(*P[x], *P[y]) for x in ba for y in bb)
                 if d < 0.15 * d0 and d < 0.03 * height and d < cross.get((a, b), (d0, 0))[0]:
                     cross[(a, b)] = (d, f, d0)
-        fact = {"clip": name, "frames": f1 - f0 + 1, "stretch": round(worst[0], 2), "stretchFrame": worst[1], "stretchBone": worst[2]}
+        fact = {"clip": name, "frames": f1 - f0 + 1, "stretch": round(worst[0], 2), "stretchFrame": worst[1], "stretchBone": worst[2], "stretchPart": worst[3]}
         if speed is not None:
             fact["groundSpeed"] = round(speed, 3)
         if under[0] > 0.01 * height:
@@ -576,10 +694,11 @@ def facts(arm, meshes, made, legs, chains, kinds, rigid=()):
         tips = [b for b in legs if b in arm.pose.bones]
         if tips and f1 > f0:
             track = {b: [] for b in tips}
-            for f in range(f0, f1 + 1):
-                sc.frame_set(f)
-                for b in tips:
-                    track[b].append(arm.matrix_world @ arm.pose.bones[b].tail)
+            with _bones_only(arm):
+                for f in range(f0, f1 + 1):
+                    sc.frame_set(f)
+                    for b in tips:
+                        track[b].append(arm.matrix_world @ arm.pose.bones[b].tail)
             ground = min(p.z for t in track.values() for p in t)
             slides = []
             for t in track.values():
@@ -600,7 +719,8 @@ def fact_lines(fs):
     """The facts as sentences for the agent."""
     out = []
     for f in fs:
-        bits = [f"stretch at most ×{f['stretch']} (frame {f['stretchFrame']}, {f['stretchBone'] or 'unweighted'})"]
+        where = ", ".join(x for x in (f.get("stretchPart"), f"on {f['stretchBone']}" if f["stretchBone"] else "unweighted") if x)
+        bits = [f"stretch at most ×{f['stretch']} (frame {f['stretchFrame']}, {where})"]
         if "groundSpeed" in f:
             bits.append(f"walks at {f['groundSpeed']} m/s")
         if "plantedFeet" in f:
@@ -669,6 +789,10 @@ def rig(objects, template=None, chains=None, joints=None, rigid=(), clips=(), na
     idle = next((a for c, a, _, _ in made if "idle" in c.lower()), made[0][1] if made else None)
     arm.animation_data_create()
     arm.animation_data.action = idle
+    for o in body:
+        miss = _unweighted(o)
+        if miss:
+            notes.append(f"{o.name}: {miss} of {len(o.data.vertices)} vertices have no weight and stay put when the rig moves")
     measured = facts(arm, meshes, made, legs, table, kinds, rigid)
     rigchains.active(arm)
     return {

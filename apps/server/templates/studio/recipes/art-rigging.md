@@ -44,9 +44,11 @@ move (Walk with planted feet, Fly, Slither or Crawl) and Attack.
 
 ## Pitfalls
 
-- `stretch ×N` at a bone: up to about ×3 is normal at a bent knee, curled fingers ×3-5. Higher
+- `stretch ×N` (part, bone): up to about ×3 is normal at a bent knee, curled fingers ×3-5. Higher
   on a limb tears or folds the skin: the joint is misplaced (pass it in `joints` or `points`),
-  or the joint needs edge loops.
+  or the joint needs edge loops. On a cape or long skirt hanging past the legs, a stride pulls
+  it apart: ride it on one bone in `rigid` (`spine_03`, `pelvis`).
+- `no weight and stay put`: that part can't follow; look at it, then rejoin or rebuild it.
 - Without `points` a chain's joints are spaced evenly and the knee bends in the wrong place.
 - `planted feet move X m/s`: for Walk or Run, move the body at that speed in the game so the feet
   don't slide; for Idle it should be about 0.
@@ -55,5 +57,4 @@ move (Walk with planted feet, Fly, Slither or Crawl) and Attack.
 
 ## Sources
 
-The Mesh2Motion proof (2026-11-21): CC0 rigs and clips, Blender's automatic weights with a voxel
-copy where bone heat fails.
+Mesh2Motion's CC0 rigs and clips; Blender's automatic weights.

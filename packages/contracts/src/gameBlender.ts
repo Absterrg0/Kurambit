@@ -309,6 +309,8 @@ export const GameBlenderRigFact = Schema.Struct({
   stretch: Schema.Number,
   stretchFrame: Schema.Number,
   stretchBone: Schema.String,
+  /** The mesh that edge belongs to. */
+  stretchPart: Schema.optionalKey(Schema.String),
   /** An IK gait's speed over the ground, m/s. */
   groundSpeed: Schema.optionalKey(Schema.Number),
   /** Feet on the ground: the share of frames, and how fast they move then (m/s, median and 90th percentile). */

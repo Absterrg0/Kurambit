@@ -329,7 +329,7 @@ const decodeRigged = Schema.decodeUnknownEffect(
     meshes: Schema.Array(Schema.String),
     template: Schema.String,
     bones: Schema.Number,
-    /** Which weighting ran: bone heat, or heat on a voxel copy for parts heat could not weight. */
+    /** Which weighting ran: bone heat on the joined parts, or without the parts heat cannot solve. */
     weights: Schema.String,
     rigid: Schema.Record(Schema.String, Schema.String),
     chains: Schema.Record(Schema.String, Schema.Array(Schema.String)),
