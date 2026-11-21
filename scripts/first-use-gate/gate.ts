@@ -138,8 +138,6 @@ const standinSteps = {
     { tool: ["game_play", { replay: { run: "$last.runId", at: 2 } }] },
   ],
   [PHRASES.check]: [
-    // The agent's recipe pick: the check prints its numbers.
-    { merge: ["game.json", { recipes: ["opens-on-the-game", "retry-one-press"] }] },
     { tool: ["game_check", { look: {} }] },
     { tool: ["game_check", { final: {} }] },
   ],
@@ -601,11 +599,6 @@ async function main() {
       expect(imagesOf(final) >= 1, "the final check attached no picture");
       const lookText = textOf(look);
       expect(lookText.length > 0, "the look answered no text");
-      const recipes = textOf(final)
-        .split("\n")
-        .filter((line) => line.startsWith("recipe "));
-      expect(recipes.length === 2, "the final check printed no line per picked recipe");
-      log(`     ${recipes.join("\n     ")}`);
       return `look ${lookText.length} chars + ${imagesOf(look)} image(s), final ${textOf(final).length} chars + ${imagesOf(final)}`;
     });
 

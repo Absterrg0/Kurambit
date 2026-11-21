@@ -63,7 +63,7 @@ async function prompt(id, params) {
       NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
       NodeFS.writeFileSync(file, step.write[1]);
     } else if (step.merge) {
-      // Keys merged into a JSON file the game already has (game.json's recipes).
+      // Keys merged into a JSON file the game already has.
       const file = NodePath.join(session.cwd, step.merge[0]);
       const json = JSON.parse(NodeFS.readFileSync(file, "utf8"));
       NodeFS.writeFileSync(file, `${JSON.stringify({ ...json, ...step.merge[1] }, null, 2)}\n`);
