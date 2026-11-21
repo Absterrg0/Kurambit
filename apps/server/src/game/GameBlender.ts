@@ -2,6 +2,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import * as Clock from "effect/Clock";
@@ -483,7 +484,9 @@ const sessionEnv = (
   // Support/Blender are never read or written. Unverified on Windows and macOS.
   env.BLENDER_USER_RESOURCES = userResources;
   env.LIBGL_ALWAYS_SOFTWARE = "1";
-  env.LP_NUM_THREADS = "2";
+  // Software GL renders every look on the CPU: with two threads, four looks took 47 s on an
+  // 8-core machine against 28 s on all of them.
+  env.LP_NUM_THREADS = String(NodeOS.availableParallelism());
   env.DISABLE_TELEMETRY = "true";
   return env;
 };
