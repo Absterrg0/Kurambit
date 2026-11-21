@@ -31,8 +31,7 @@ screen_height_px`. A 0.63 m card seen from 1.2 m with a 45° camera on a 1080 px
    picture: `size` pixels, background clear.
 2. Nothing from the network: images, fonts and styles load from paths in the game; text needs
    a font the game ships via `@font-face` (`game_assets` op `search` "font").
-3. Art on a card: `game_blender` op `sprites` from the game's models,
-   placed with `<img src>`.
+3. Art on a card: a picture in the game, placed with `<img src>`.
 4. Look at the contact sheet the answer returns, every picture, before using them.
 5. In the game:
    ```js
@@ -53,14 +52,12 @@ true })`; `object.flipbook.restart()` plays it again.
 - Smoke drawn as soft round gradients reads as blur: draw billows of round lobes, lit on top,
   soft only at the rim; a burst is many sparks or lines over time.
 - A 2D character redrawn frame by frame loses its shape: cut it into rigid SVG parts turned
-  about joints in `window.frame`, one row per clip, `pivot` at its feet; or render a model with
-  op `sprites`.
+  about joints in `window.frame`, one row per clip, `pivot` at its feet.
 - Fonts from the computer: refused.
 
 ## Code
 
-`game_assets` op `pictures`, `game_blender` op `sprites`, `ctx.assets.sheet` (the runtime's
-`sheets.js`).
+`game_assets` op `pictures`, `ctx.assets.sheet` (the runtime's `sheets.js`).
 
 ## Sources
 

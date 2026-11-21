@@ -20,7 +20,6 @@ import {
   GameBlenderLookResult,
   GameBlenderLookScreenshot,
   GameBlenderPaintResult,
-  GameBlenderRenderSpritesResult,
   GameBlenderSceneResult,
   GameBotRunResult,
   GameBuildFacts,
@@ -510,10 +509,6 @@ const blenderHandlers = {
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.paint(threadId, paint),
             ).pipe(as(GameBlenderPaintResult)),
-          sprites: (sprites) =>
-            withGame(GameBlender.GameBlender, (blender, threadId) =>
-              blender.renderSprites(threadId, sprites),
-            ).pipe(as(GameBlenderRenderSpritesResult)),
           animate: (move) =>
             withGame(GameBlender.GameBlender, (blender, threadId) =>
               blender.animate(threadId, move),

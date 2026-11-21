@@ -33,7 +33,6 @@ export const GAME_TOOL_OPS = {
     export: ["blender"],
     character: ["blender"],
     paint: ["blender"],
-    sprites: ["blender"],
     animate: ["blender"],
     asset_search: ["blender"],
     asset_import: ["blender"],
@@ -128,7 +127,8 @@ export const RETIRED_GAME_TOOLS: Readonly<Record<string, string>> = {
   game_blender_character: "game_blender op character",
   game_blender_paint: "game_blender op paint",
   game_blender_carve: "game_blender op code: model it in bpy (studio-skills/art-pipeline.md)",
-  game_blender_render_sprites: "game_blender op sprites",
+  game_blender_render_sprites:
+    "nothing: sprites from 3D are gone; draw 2D art with game_assets op pictures, or render it in three.js",
   game_animate: "game_blender op animate",
   game_build_restore: "game_builds op undo {build, to: true}",
   game_saved: "nothing for agents: the person keeps media in the Game panel",
@@ -160,6 +160,8 @@ const RETIRED_GAME_OPS: Readonly<Record<string, string>> = {
   "game_assets.mine": "nothing: the personal Library is gone",
   "game_blender.scene": "game_blender op code, printing what it needs",
   "game_blender.carve": "game_blender op code: model it in bpy (studio-skills/art-pipeline.md)",
+  "game_blender.sprites":
+    "nothing: sprites from 3D are gone; draw 2D art with game_assets op pictures, or render it in three.js",
   "game_builds.compare": "game_builds op list {build} for each",
   "game_builds.restore": "game_builds op undo {build, to: true}",
   "game_builds.saved": "nothing for agents: the person keeps media in the Game panel",

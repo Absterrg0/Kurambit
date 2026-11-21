@@ -9,10 +9,8 @@ import type { GameStyle } from "@kurambit/contracts";
 import { LIBRARY_CATALOG } from "./assetLibraryCatalog.ts";
 import {
   inLook,
-  lockSpriteInput,
   readGameStyle,
   characterRoute,
-  modelChoice,
   styleBudgets,
   styleFromLock,
   styleFromLook,
@@ -88,32 +86,6 @@ it("marks the packs of the recorded look, and never keeps one out", () => {
   expect(inLook(pack("kenney-pixel-platformer"), null)).toBe(false);
   const pixel = { ...kaykit, mode: "pixel" as const, tile: 16, palette: "kenney-tiny-dungeon" };
   expect(inLook(pack("kenney-tiny-dungeon"), pixel)).toBe(true);
-});
-
-it("fills what a sprite render leaves out from a pixel lock, and what it names wins", () => {
-  const pixel: GameStyle = {
-    version: 1,
-    mode: "pixel",
-    tile: 16,
-    palette: "kenney-tiny-dungeon",
-    outline: true,
-    view: "top-down",
-    packs: ["kenney-tiny-dungeon"],
-  };
-  const filled = lockSpriteInput({ output: "godot/assets/sprites/hero" }, pixel);
-  expect(filled).toMatchObject({
-    input: {
-      pixelArt: { palette: "kenney-tiny-dungeon", outline: true },
-      size: 32,
-      views: ["front", "back", "left", "right"],
-      elevation: 35,
-    },
-  });
-  expect(
-    lockSpriteInput({ output: "x", pixelArt: { palette: "kenney-1-bit-platformer" } }, pixel).input
-      .pixelArt?.palette,
-  ).toBe("kenney-1-bit-platformer");
-  expect(lockSpriteInput({ output: "x", pixelArt: {} }, kaykit).input.pixelArt).toEqual({});
 });
 
 it.effect("reads an old rig id through its alias and refuses a retired one with the edit", () =>

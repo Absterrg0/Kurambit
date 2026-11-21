@@ -18,9 +18,8 @@ import {
 } from "@kurambit/contracts";
 import { chromiumChildEnv, type GameBrowser } from "./gameChromium.ts";
 import { gamePaths } from "./engineProfile.ts";
-import { recordProvenance, writeOwn } from "./blenderSprites.ts";
-import { contactSheet, downscale, encodePng } from "./spriteRender.ts";
-import type { Rgba } from "./run/spriteFacts.ts";
+import { recordProvenance, writeOwn } from "./assetProvenance.ts";
+import { contactSheet, downscale, encodePng, type Rgba } from "./rgba.ts";
 
 const OP = "game-pictures";
 const TOOL = "game_assets op pictures";

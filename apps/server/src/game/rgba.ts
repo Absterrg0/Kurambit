@@ -1,10 +1,202 @@
-// Pure pixel work on decoded PNGs; pngjs encodes.
-// The deterministic half of game_blender op sprites: Blender renders large, this turns the
-// renders into pixel art (downscale, hard alpha, a palette shared by every frame, an outline) and
-// draws the contact sheet. Same input, same bytes.
+// @effect-diagnostics nodeBuiltinImport:off -- PNGs decode in process with node:zlib.
+// Pure pixel work on RGBA images: PNGs decode in process (node:zlib) and encode with pngjs;
+// downscale, OKLab colour, a shared palette and a contact sheet. Same input, same bytes.
+import * as NodeUtil from "node:util";
+import * as NodeZlib from "node:zlib";
 import { PNG } from "pngjs";
-import type { Rgba } from "./run/spriteFacts.ts";
-import type { SpriteCamera, SpriteFit } from "./spriteRenderPy.ts";
+
+const MAX_IMAGE_PIXELS = 2048 * 2048;
+// Unfiltered bytes of a 2048x2048 8-bit RGBA image: a 16-bit image of that size is over it.
+const MAX_RAW_BYTES = 2048 * (2048 * 4 + 1);
+
+const inflate = NodeUtil.promisify(NodeZlib.inflate);
+
+export interface Rgba {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array;
+}
+
+type Skip = { readonly skip: string };
+type Decoded = Rgba | Skip;
+
+interface Header {
+  readonly width: number;
+  readonly height: number;
+  readonly depth: number;
+  readonly type: number;
+}
+
+const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+// The bit depths the PNG spec allows for each colour type; any other pair is a broken file.
+const DEPTHS: Record<number, ReadonlyArray<number>> = {
+  0: [1, 2, 4, 8, 16],
+  2: [8, 16],
+  3: [1, 2, 4, 8],
+  4: [8, 16],
+  6: [8, 16],
+};
+const UNREADABLE: Skip = { skip: "unreadable PNG" };
+// A real PNG has a few thousand chunks at most; a file of millions of empty ones is not walked.
+const MAX_CHUNKS = 65536;
+// Rows of unfiltered bytes decoded between yields, so a big image never holds the event loop long.
+const YIELD_BYTES = 1024 * 1024;
+
+const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+const crcOk = (file: Buffer, at: number, length: number) =>
+  NodeZlib.crc32(file.subarray(at + 4, at + 8 + length)) === file.readUInt32BE(at + 8 + length);
+const rawBytes = ({ width, height, depth, type }: Header) =>
+  height * (Math.ceil((width * CHANNELS[type]! * depth) / 8) + 1);
+
+/** The IHDR, read from the first 33 bytes, or why the file is not a PNG this decoder reads. */
+const pngHeader = (file: Buffer): Header | Skip => {
+  if (file.length < 8 || file.readUInt32BE(0) !== 0x89504e47 || file.readUInt32BE(4) !== 0x0d0a1a0a)
+    return { skip: "not a PNG" };
+  if (file.length < 33 || file.readUInt32BE(8) !== 13 || file.toString("latin1", 12, 16) !== "IHDR")
+    return UNREADABLE;
+  if (!crcOk(file, 8, 13)) return UNREADABLE;
+  const width = file.readUInt32BE(16);
+  const height = file.readUInt32BE(20);
+  const depth = file[24]!;
+  const type = file[25]!;
+  if (width === 0 || height === 0 || file[26] !== 0 || file[27] !== 0 || file[28]! > 1)
+    return UNREADABLE;
+  if (DEPTHS[type]?.includes(depth) !== true) return UNREADABLE;
+  if (file[28] === 1) return { skip: "interlaced PNG" };
+  return { width, height, depth, type };
+};
+
+/** Whether a header fits one image's caps: pixels, and unfiltered bytes so 16-bit counts double. */
+const overCap = (header: Header) =>
+  header.width * header.height > MAX_IMAGE_PIXELS || rawBytes(header) > MAX_RAW_BYTES;
+
+/** Non-interlaced PNG of any colour type and bit depth to 8-bit RGBA; anything else is a named skip.
+ * A corrupt, truncated or invalid file is a skip, never a failure or invented numbers. */
+export const decodePng = (file: Buffer, maxPixels = MAX_IMAGE_PIXELS): Promise<Decoded> =>
+  decode(file, maxPixels).catch(() => UNREADABLE);
+
+const decode = async (file: Buffer, maxPixels: number): Promise<Decoded> => {
+  const header = pngHeader(file);
+  if ("skip" in header) return header;
+  const { width, height, depth, type } = header;
+  if (overCap(header) || width * height > maxPixels) return { skip: "over the pixel cap" };
+  let palette: Buffer | null = null;
+  let trns: Buffer | null = null;
+  const idat: Buffer[] = [];
+  let chunks = 0;
+  for (let at = 33; at < file.length;) {
+    if (at + 12 > file.length || ++chunks > MAX_CHUNKS) return UNREADABLE;
+    const length = file.readUInt32BE(at);
+    if (at + 12 + length > file.length) return UNREADABLE;
+    const name = file.toString("latin1", at + 4, at + 8);
+    const body = file.subarray(at + 8, at + 8 + length);
+    // Critical chunks and tRNS feed the pixels, so their CRCs are checked; ancillary ones are skipped.
+    if (["IHDR", "PLTE", "tRNS", "IDAT", "IEND"].includes(name) && !crcOk(file, at, length))
+      return UNREADABLE;
+    if (name === "IHDR") return UNREADABLE;
+    if (name === "PLTE") {
+      if (length === 0 || length % 3 !== 0 || length > 768) return UNREADABLE;
+      palette = body;
+    } else if (name === "tRNS") trns = body;
+    else if (name === "IDAT") idat.push(body);
+    else if (name === "IEND") break;
+    at += 12 + length;
+  }
+  if (idat.length === 0 || (type === 3 && palette === null)) return UNREADABLE;
+  const entries = palette === null ? 0 : palette.length / 3;
+  // As libpng: tRNS is ignored where the pixels carry alpha (types 4 and 6),
+  // and an over-long palette tRNS is cut to the palette.
+  if (type === 4 || type === 6) trns = null;
+  else if (type === 3 && trns !== null && trns.length > entries) trns = trns.subarray(0, entries);
+  if (trns !== null && (type === 0 ? trns.length !== 2 : type === 2 ? trns.length !== 6 : false))
+    return UNREADABLE;
+  const channels = CHANNELS[type]!;
+  const bits = channels * depth;
+  const stride = Math.ceil((width * bits) / 8);
+  const step = Math.max(1, bits >> 3);
+  let raw: Buffer;
+  try {
+    // The output cap stops a small file from inflating past its declared size.
+    raw = await inflate(Buffer.concat(idat), { maxOutputLength: height * (stride + 1) + 1024 });
+  } catch {
+    return UNREADABLE;
+  }
+  if (raw.length < height * (stride + 1)) return UNREADABLE;
+  const out = new Uint8Array(width * height * 4);
+  let prev = new Uint8Array(stride);
+  let row = new Uint8Array(stride);
+  const max = (1 << depth) - 1;
+  const sample = (line: Uint8Array, index: number): number => {
+    if (depth === 8) return line[index]!;
+    if (depth === 16) return (line[index * 2]! << 8) | line[index * 2 + 1]!;
+    const bit = index * depth;
+    return (line[bit >> 3]! >> (8 - depth - (bit & 7))) & max;
+  };
+  const to8 = (v: number) =>
+    depth === 16 ? Math.round(v / 257) : depth === 8 ? v : Math.round((v * 255) / max);
+  const key = (body: Buffer | null, i: number) => (body === null ? -1 : body.readUInt16BE(i));
+  let sinceYield = 0;
+  for (let y = 0; y < height; y++) {
+    sinceYield += stride;
+    if (sinceYield > YIELD_BYTES) {
+      sinceYield = 0;
+      await yieldLoop();
+    }
+    const base = y * (stride + 1);
+    const filter = raw[base]!;
+    if (filter > 4) return UNREADABLE;
+    for (let x = 0; x < stride; x++) {
+      const v = raw[base + 1 + x]!;
+      const left = x >= step ? row[x - step]! : 0;
+      const up = prev[x]!;
+      const corner = x >= step ? prev[x - step]! : 0;
+      let p = v;
+      if (filter === 1) p = v + left;
+      else if (filter === 2) p = v + up;
+      else if (filter === 3) p = v + ((left + up) >> 1);
+      else if (filter === 4) {
+        const e = left + up - corner;
+        const da = Math.abs(e - left);
+        const db = Math.abs(e - up);
+        const dc = Math.abs(e - corner);
+        p = v + (da <= db && da <= dc ? left : db <= dc ? up : corner);
+      }
+      row[x] = p & 0xff;
+    }
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4;
+      const s = x * channels;
+      if (type === 3) {
+        const index = sample(row, x);
+        if (index >= entries) return UNREADABLE;
+        out[o] = palette![index * 3]!;
+        out[o + 1] = palette![index * 3 + 1]!;
+        out[o + 2] = palette![index * 3 + 2]!;
+        out[o + 3] = trns !== null && index < trns.length ? trns[index]! : 255;
+      } else if (type === 0 || type === 4) {
+        const g = sample(row, s);
+        out[o] = out[o + 1] = out[o + 2] = to8(g);
+        out[o + 3] =
+          type === 4 ? to8(sample(row, s + 1)) : trns !== null && g === key(trns, 0) ? 0 : 255;
+      } else {
+        const r = sample(row, s);
+        const g = sample(row, s + 1);
+        const b = sample(row, s + 2);
+        out[o] = to8(r);
+        out[o + 1] = to8(g);
+        out[o + 2] = to8(b);
+        out[o + 3] =
+          type === 6
+            ? to8(sample(row, s + 3))
+            : trns !== null && r === key(trns, 0) && g === key(trns, 2) && b === key(trns, 4)
+              ? 0
+              : 255;
+      }
+    }
+    [prev, row] = [row, prev];
+  }
+  return { width, height, data: out };
+};
 
 /** Pixels at or above this alpha are kept when alpha goes hard; the rest become clear. */
 const HARD_ALPHA = 128;
@@ -52,14 +244,6 @@ export const downscale = (img: Rgba, k: number, mode: "area" | "nearest"): Rgba 
   return { width, height, data };
 };
 
-/** Pixel art has no soft edges: each pixel is fully there or clear. */
-export const hardAlpha = (img: Rgba): void => {
-  for (let i = 0; i < img.data.length; i += 4) {
-    if (img.data[i + 3]! >= HARD_ALPHA) img.data[i + 3] = 255;
-    else img.data.fill(0, i, i + 4);
-  }
-};
-
 const linear = (v: number) => {
   const s = v / 255;
   return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
@@ -81,7 +265,7 @@ export const oklab = (c: number): readonly [number, number, number] => {
 };
 
 /** Distinct opaque colours across images with their pixel counts, most used first (ties by value). */
-export const colourCounts = (images: ReadonlyArray<Rgba>): Array<[number, number]> => {
+const colourCounts = (images: ReadonlyArray<Rgba>): Array<[number, number]> => {
   const counts = new Map<number, number>();
   for (const img of images)
     for (let i = 0; i < img.data.length; i += 4) {
@@ -198,39 +382,6 @@ export const quantize = (
   return [...new Set(map.values())];
 };
 
-/** OKLab lightness, 0 black to 1 white. */
-export const lightness = (c: number) => oklab(c)[0];
-
-/** The darkest colour as seen, for an outline that reads against the palette. */
-export const darkest = (colours: ReadonlyArray<number>): number | null => {
-  let best: number | null = null;
-  let lightness = Infinity;
-  for (const c of colours) {
-    const l = oklab(c)[0];
-    if (l < lightness || (l === lightness && best !== null && c < best)) {
-      lightness = l;
-      best = c;
-    }
-  }
-  return best;
-};
-
-/** A 1 px outline: every clear pixel beside an opaque one (4-neighbour) takes the colour. In place. */
-export const outline = (img: Rgba, colour: number): void => {
-  const { width, height, data } = img;
-  const solid = (x: number, y: number) =>
-    x >= 0 && y >= 0 && x < width && y < height && data[(y * width + x) * 4 + 3]! >= HARD_ALPHA;
-  const edge: number[] = [];
-  for (let y = 0; y < height; y++)
-    for (let x = 0; x < width; x++)
-      if (
-        !solid(x, y) &&
-        (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1))
-      )
-        edge.push((y * width + x) * 4);
-  for (const i of edge) data.set([red(colour), green(colour), blue(colour), 255], i);
-};
-
 export const hexColour = (hex: string): number | null => {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   return m === null ? null : Number.parseInt(m[1]!, 16);
@@ -242,28 +393,6 @@ export const encodePng = (img: Rgba): Buffer => {
   const png = new PNG({ width: img.width, height: img.height });
   png.data = Buffer.from(img.data.buffer, img.data.byteOffset, img.data.byteLength);
   return PNG.sync.write(png, { filterType: 0, deflateLevel: 9, deflateStrategy: 0 });
-};
-
-/** Frames side by side, one row per view: the strip as an engine loads a sheet. */
-export const sheet = (rows: ReadonlyArray<ReadonlyArray<Rgba>>): Rgba => {
-  const w = rows[0]![0]!.width;
-  const h = rows[0]![0]!.height;
-  const columns = Math.max(...rows.map((r) => r.length));
-  const out: Rgba = {
-    width: w * columns,
-    height: h * rows.length,
-    data: new Uint8Array(w * columns * h * rows.length * 4),
-  };
-  rows.forEach((row, ry) =>
-    row.forEach((img, cx) => {
-      for (let y = 0; y < h; y++)
-        out.data.set(
-          img.data.subarray(y * w * 4, (y + 1) * w * 4),
-          ((ry * h + y) * out.width + cx * w) * 4,
-        );
-    }),
-  );
-  return out;
 };
 
 /**
@@ -312,127 +441,4 @@ export const contactSheet = (
     }),
   );
   return { image: { width, height, data }, zoom };
-};
-
-export interface Framing {
-  /** World units per output pixel, the same in every frame and view. */
-  readonly unitsPerPixel: number;
-  /** Output pixels per world unit: the one asked for, or the fitted scale rounded down to 3 figures. */
-  readonly pixelsPerUnit: number;
-  /** The canvas this scale needs to hold the subject with the inset, which may exceed the one asked for. */
-  readonly need: { readonly width: number; readonly height: number };
-  readonly orthoScale: number;
-  readonly cameras: ReadonlyArray<SpriteCamera>;
-  /** Per view: the output pixel row the subject stands on (feet) or is centred on, and the centre column. */
-  readonly anchors: ReadonlyArray<{
-    readonly x: number;
-    readonly y: number;
-    readonly kind: "feet" | "center";
-    /** The centre column is the anchor object's origin, not the middle of the silhouette. */
-    readonly onOrigin: boolean;
-  }>;
-}
-
-const floorFigures = (x: number, figures: number) => {
-  const step = 10 ** (Math.floor(Math.log10(x)) - figures + 1);
-  return Number((Math.floor(x / step) * step).toPrecision(figures));
-};
-
-/** The anchor on one axis: the anchor object's projected origin when it lies over the subject, else the middle. */
-const over = (lo: number, hi: number, origin: number | undefined): origin is number =>
-  origin !== undefined && origin >= lo && origin <= hi;
-const anchorAt = (lo: number, hi: number, origin: number | undefined) =>
-  over(lo, hi, origin) ? origin : (lo + hi) / 2;
-
-/**
- * Fixed orthographic cameras fitted to the union of the subject's extents across every frame:
- * nothing is cut off, one scale serves every frame and view, and the anchor never moves. The
- * anchor column (and centre row) is the anchor object's origin, so a strip whose silhouette grows
- * to one side, like an attack reaching forward, does not shift the body. `inset` is the clear
- * border in output pixels on every side; `pixelsPerUnit` fixes the scale instead of fitting it.
- */
-export const frameCameras = (
-  fit: SpriteFit,
-  width: number,
-  height: number,
-  inset: number,
-  anchors: ReadonlyArray<"feet" | "center">,
-  pixelsPerUnit?: number,
-): Framing | null => {
-  const room = { x: width - 2 * inset, y: height - 2 * inset };
-  if (room.x < 1 || room.y < 1) return null;
-  const spans = fit.views.map((v, i) => {
-    const cx = anchorAt(v.x0, v.x1, v.origin?.[0]);
-    const cy = anchors[i] === "feet" ? v.y0 : anchorAt(v.y0, v.y1, v.origin?.[1]);
-    const x = 2 * Math.max(cx - v.x0, v.x1 - cx);
-    const y = anchors[i] === "feet" ? v.y1 - v.y0 : 2 * Math.max(cy - v.y0, v.y1 - cy);
-    return { cx, cy, x, y };
-  });
-  const fitted = Math.max(...spans.map((s) => Math.max(s.x / room.x, s.y / room.y)));
-  if (!(fitted > 0) || !Number.isFinite(fitted)) return null;
-  const ppu = pixelsPerUnit ?? floorFigures(1 / fitted, 3);
-  const unitsPerPixel = 1 / ppu;
-  const need = {
-    width: Math.ceil(Math.max(...spans.map((s) => s.x)) * ppu - 1e-6) + 2 * inset,
-    height: Math.ceil(Math.max(...spans.map((s) => s.y)) * ppu - 1e-6) + 2 * inset,
-  };
-  const cameras = fit.views.map((v, i) => {
-    const { right: r, up: u, forward: f } = fit.basis[i]!;
-    const { cx } = spans[i]!;
-    const cy = anchors[i] === "feet" ? v.y0 + (height / 2 - inset) * unitsPerPixel : spans[i]!.cy;
-    const depth = v.d1 - v.d0;
-    const pad = Math.max(0.5, depth * 0.1);
-    const at = (k: number) => cx * r[k]! + cy * u[k]! + (v.d0 - pad) * f[k]!;
-    return {
-      view: v.name,
-      matrix: [0, 1, 2].map((k) => [r[k]!, u[k]!, -f[k]!, at(k)]).concat([[0, 0, 0, 1]]),
-      clipEnd: depth + 2 * pad,
-    };
-  });
-  return {
-    unitsPerPixel,
-    pixelsPerUnit: ppu,
-    need,
-    orthoScale: unitsPerPixel * Math.max(width, height),
-    cameras,
-    anchors: anchors.map((kind, i) => ({
-      x: width / 2,
-      y: kind === "feet" ? height - inset : height / 2,
-      kind,
-      onOrigin: over(fit.views[i]!.x0, fit.views[i]!.x1, fit.views[i]!.origin?.[0]),
-    })),
-  };
-};
-
-/**
- * How far a view's whole silhouette moves from the first frame to the last, both edges the same
- * way, as root motion does. A stride or an attack reaching forward moves one edge, or both apart;
- * a lunge that steps out and back ends where it began. Horizontal for side views; top views also
- * vertical.
- */
-export const travel = (
-  fit: SpriteFit,
-  anchors: ReadonlyArray<"feet" | "center">,
-): { view: string; distance: number; size: number } | null => {
-  for (const [i, v] of fit.views.entries()) {
-    const first = v.perFrame[0];
-    const last = v.perFrame.at(-1);
-    if (first === undefined || last === undefined) continue;
-    const axes: ReadonlyArray<readonly [number, number]> =
-      anchors[i] === "center"
-        ? [
-            [0, 1],
-            [2, 3],
-          ]
-        : [[0, 1]];
-    for (const [lo, hi] of axes) {
-      const d0 = last[lo]! - first[lo]!;
-      const d1 = last[hi]! - first[hi]!;
-      const distance = Math.sign(d0) === Math.sign(d1) ? Math.min(Math.abs(d0), Math.abs(d1)) : 0;
-      const size =
-        v.perFrame.reduce((s, f) => s + f[hi]! - f[lo]!, 0) / Math.max(1, v.perFrame.length);
-      if (distance > size / 2) return { view: v.name, distance, size };
-    }
-  }
-  return null;
 };

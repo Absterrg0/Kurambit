@@ -687,14 +687,6 @@ cannot both find none.
   again on resume. A step turn T3 carried over a restart that its run no longer wants (Off, an
   ended run, a step moved past) is interrupted, so nothing edits a game the person stopped.
 
-`game_blender` op `sprites` exists because weak models cannot write sprite framing: their
-renders cropped heads, drifted across a walk cycle and came out near-black. It fits one fixed
-orthographic camera per view to the subject's evaluated geometry across every frame, renders in a
-throwaway scene that links the live objects (the live scene and its .blend never change), and
-batches renders because the pinned server gives each Blender command 180 s. The pixel-art pass
-(downscale, hard alpha, one palette for the whole strip, outline) runs in the server in
-`spriteRender.ts`, so the same renders always give the same bytes.
-
 ## Why this shape
 
 A model left alone grades its own work, stops when it feels done, and says it tested things. The

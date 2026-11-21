@@ -20,7 +20,7 @@ Every tile's coverage is checked: one where the subject fills under 1% of it is 
 result's problems, never left as a silently empty picture.
 
 The candidate is imported into its own scene and every datablock the review added is removed in
-`finally`, so the live scene never changes (the spriteRenderPy precedent). The turnaround and the
+`finally`, so the live scene never changes. The turnaround and the
 game-distance view and the close-up render in EEVEE; the clay row, the strips and the labels in
 Workbench, which is about fifty times faster on the live session's software GL and keeps the
 review inside one tool call."""

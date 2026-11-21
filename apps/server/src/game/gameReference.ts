@@ -7,7 +7,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as Effect from "effect/Effect";
 import { PNG } from "pngjs";
 import { insideGame } from "./gamePath.ts";
-import { downscale } from "./spriteRender.ts";
+import { downscale } from "./rgba.ts";
 import { readGameStyle } from "./gameStyle.ts";
 
 const PNG_SIGNATURE = "89504e470d0a1a0a";

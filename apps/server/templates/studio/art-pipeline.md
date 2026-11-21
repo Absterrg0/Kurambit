@@ -66,15 +66,6 @@ painted from a turnaround sheet: `game_blender` op `paint`, after the
 model's overlap with the sheet passes about 0.75. Realistic textures (Poly
 Haven, ambientCG) belong only in a realistic lock.
 
-## 2D sprites from 3D
-
-Render sprites and strips with `game_blender` op `sprites`, never your own
-render code, and look at its contact sheet; the game plays its
-`.sheet.json` (`recipes/pictures-2d.md`). A library character: import its GLB, then
-render with `"objects": ["<rig>"], "action": "Walking_A"` once per clip. Pixel art: leave out `pixelArt`, `size` and `views`. Pass the first strip's
-`pixelsPerUnit` to every other strip of that character. Views: side-scroller `right`; top-down `front`, `back`,
-`left`, `right` with `elevation` 35, or `top`; `isometric`.
-
 ## Key art
 
 Render it from the game's real assets at

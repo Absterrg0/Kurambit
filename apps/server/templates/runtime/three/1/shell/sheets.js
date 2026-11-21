@@ -1,6 +1,6 @@
 // Pictures and flipbooks from texture sheets: cards, tiles, tokens, icons, drawn effects and 2D
 // characters. One format for every sheet (`<name>.sheet.json`, written by game_assets op pictures
-// and game_blender op sprites; an older sprites `.sprite.json` reads the same), one player.
+// and the earlier game_blender op sprites; an older sprites `.sprite.json` reads the same), one player.
 //
 //   export const ASSETS = { cards: "assets/sheets/cards.sheet.json", fx: "assets/sheets/fx.sheet.json" };
 //   const cards = ctx.assets.sheet("cards");
@@ -72,7 +72,7 @@ export async function loadSheet(path, loader) {
   return makeSheet({ ...info, pivot: info.pivot ?? [0.5, 0.5], textures });
 }
 
-/** game_blender op sprites' manifest before sheets: one PNG per frame, one strip per view. */
+/** The earlier game_blender op sprites' manifest before sheets: one PNG per frame, one strip per view. */
 async function spriteManifest(manifest, folder, loader) {
   const views = Object.entries(manifest.views ?? {});
   const w = manifest.frameWidth;

@@ -15,7 +15,6 @@ import {
   GAME_STYLE_DEFAULT_SFX_PEAK_DBTP,
   GAME_STYLE_FILE,
   GAME_STYLE_ROLES,
-  type GameBlenderRenderSpritesInput,
   type GameManifest,
   GameOperationError,
   GameStyle,
@@ -27,7 +26,7 @@ import {
 import { awaitsMirror, type LibraryPack } from "./assetLibraryFiles.ts";
 import { stableStringify } from "@kurambit/shared/stableJson";
 import { LIBRARY_SOURCES } from "./assetLibrarySources.ts";
-import { colourHex, hexColour, oklab } from "./spriteRender.ts";
+import { colourHex, hexColour, oklab } from "./rgba.ts";
 import {
   CURATED_PACKS,
   LIBRARY_CATALOG,
@@ -151,60 +150,6 @@ export const readGameStyle = (
       );
     return decoded.success;
   });
-
-const SPRITE_VIEWS: Record<GameStyle["view"], GameBlenderRenderSpritesInput["views"] | undefined> =
-  {
-    side: ["right"],
-    "top-down": ["front", "back", "left", "right"],
-    isometric: ["isometric"],
-    perspective: undefined,
-  };
-
-/**
- * A sprite render with what it leaves out filled from STYLE.json: pixel-art settings, size and
- * views (each said in `notes`). What the input names always wins.
- */
-export const lockSpriteInput = (
-  input: GameBlenderRenderSpritesInput,
-  style: GameStyle | null,
-): { readonly input: GameBlenderRenderSpritesInput; readonly notes: ReadonlyArray<string> } => {
-  if (style === null) return { input, notes: [] };
-  const notes: string[] = [];
-  let locked = input;
-  if (style.mode === "pixel") {
-    // STYLE.json's filter refuses a hex list in pixel mode, so only a pack id or a path reaches sprites.
-    const palette =
-      input.pixelArt?.palette ?? (typeof style.palette === "string" ? style.palette : undefined);
-    const outline = input.pixelArt?.outline ?? style.outline;
-    locked = {
-      ...locked,
-      pixelArt: {
-        ...input.pixelArt,
-        ...(palette === undefined ? {} : { palette }),
-        ...(outline === undefined ? {} : { outline }),
-      },
-    };
-    if (input.pixelArt === undefined)
-      notes.push(
-        `${GAME_STYLE_FILE}: pixel art, palette ${palette}${outline === undefined || outline === false ? "" : ", outlined"}.`,
-      );
-    if (input.size === undefined && style.tile !== undefined) {
-      const size = Math.min(512, Math.max(8, style.tile * 2));
-      locked = { ...locked, size };
-      notes.push(`${GAME_STYLE_FILE}: ${size} px canvas, twice its ${style.tile} px tile.`);
-    }
-  }
-  const views = SPRITE_VIEWS[style.view];
-  if (input.views === undefined && views !== undefined) {
-    locked = {
-      ...locked,
-      views,
-      ...(style.view === "top-down" && input.elevation === undefined ? { elevation: 35 } : {}),
-    };
-    notes.push(`${GAME_STYLE_FILE}: ${style.view} views (${views.join(", ")}).`);
-  }
-  return { input: locked, notes };
-};
 
 /** Which of a STYLE.json's pack lists a pack belongs in: sound-only packs go in audio.packs. */
 const soundOnly = (pack: LibraryPack) =>

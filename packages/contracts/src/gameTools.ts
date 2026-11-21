@@ -12,7 +12,6 @@ import {
   GameBlenderExportInput,
   GameBlenderLookInput,
   GameBlenderPaintInput,
-  GameBlenderRenderSpritesInput,
 } from "./gameBlender.ts";
 import { GameBotRunInput } from "./gameBot.ts";
 import { ThreadId } from "./baseSchemas.ts";
@@ -85,7 +84,6 @@ export const GameBlenderToolInput = Schema.Struct({
   character: op(GameBlenderCharacterInput),
   // The art helpers stay until the art phase measures Blender's own tools against them (TOOLS §4).
   paint: op(GameBlenderPaintInput),
-  sprites: op(GameBlenderRenderSpritesInput),
   animate: op(GameAnimateInput),
   asset_search: op(GameBlenderAssetsSearchInput),
   asset_import: op(GameBlenderAssetsImportInput),

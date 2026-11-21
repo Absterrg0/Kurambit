@@ -37,8 +37,6 @@ import {
   type GameBlenderLookResult,
   type GameBlenderPaintInput,
   type GameBlenderPaintResult,
-  type GameBlenderRenderSpritesInput,
-  type GameBlenderRenderSpritesResult,
   type GameBlenderSceneInput,
   type GameBlenderSceneResult,
   type GameManifest,
@@ -97,7 +95,7 @@ import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import * as GameToolchain from "./GameToolchain.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { recordProvenance, renderSprites } from "./blenderSprites.ts";
+import { recordProvenance } from "./assetProvenance.ts";
 import { LIBRARY_LICENCES } from "./assetLibraryFiles.ts";
 import {
   characterRoute,
@@ -646,11 +644,6 @@ export class GameBlender extends Context.Service<
       threadId: ThreadId,
       input: GameBlenderExportInput,
     ) => Effect.Effect<GameBlenderExportResult, GameOperationError>;
-    /** Live Blender scene: render named objects to a strip of sprite PNGs with a fitted camera. */
-    readonly renderSprites: (
-      threadId: ThreadId,
-      input: GameBlenderRenderSpritesInput,
-    ) => Effect.Effect<GameBlenderRenderSpritesResult, GameOperationError>;
     /** Installs an add-on of the list, as Settings → Game tools does, and reopens this game's Blender with it. */
     readonly addon: (
       threadId: ThreadId,
@@ -2701,24 +2694,6 @@ const make = Effect.gen(function* () {
               sidecar,
             };
           }).pipe(pipelineLocked(root)),
-        ),
-      ),
-    renderSprites: (threadId, input) =>
-      projects.exclusive(threadId, "Blender sprites", (root) =>
-        holding(
-          root,
-          Effect.gen(function* () {
-            const short = yield* memoryShortfall(
-              memory,
-              "sprite render",
-              RENDER_NEEDED_MB,
-              "KURAMBIT_BLENDER_RENDER_MEMORY_MB",
-            );
-            if (short !== null)
-              return yield* opError("blender-render-sprites", root, "low-memory", short);
-            // Renders in a throwaway scene and changes nothing in the live one, so no .blend save.
-            return yield* renderSprites({ callText, manifest: projects.read }, root, input);
-          }),
         ),
       ),
     addon: (threadId, input) =>

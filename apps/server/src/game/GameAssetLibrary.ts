@@ -45,8 +45,7 @@ import {
   modelChoice,
 } from "./gameStyle.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
-import { decodePng } from "./run/spriteFacts.ts";
-import { colourHex, quantize } from "./spriteRender.ts";
+import { colourHex, decodePng, quantize } from "./rgba.ts";
 import { hashFile } from "./hashFile.ts";
 import { readGltfJson } from "./gltfJson.ts";
 import {
