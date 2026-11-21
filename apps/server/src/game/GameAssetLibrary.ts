@@ -273,10 +273,6 @@ const readSaved = (pack: LibraryPack, dir: string) =>
 // share this cache, and each must only ever replace a folder of its own version.
 const packKey = (pack: LibraryPack) => `${pack.id}-${pinKey(pack)}-i${INDEX_VERSION}`;
 
-/** Where a pack's files are once fetched on this machine (`files/` and `index.json` inside). */
-export const cachedPackFolder = (pack: LibraryPack) =>
-  NodePath.join(libraryDirectory(), "packs", packKey(pack));
-
 /**
  * The library cache's ceiling: least recently used packs go past it. Every server on the
  * machine shares the folder and each keeps its own ledger of it, so this bounds what one

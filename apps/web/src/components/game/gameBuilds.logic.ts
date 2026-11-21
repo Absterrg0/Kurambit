@@ -290,7 +290,7 @@ export const changedReadings = (compared: {
   }).rows.filter((row) => row.mark !== null && row.mark !== "=" && !VARIES_BY_ITSELF.has(row.id));
 
 /** Every check of a build, the lead ones and the rest, as the Inspector words them. */
-export const allChecks = (facts: GameBuildFacts) => {
+const allChecks = (facts: GameBuildFacts) => {
   const view = gameChecksView(facts);
   return view.checks;
 };
@@ -481,19 +481,6 @@ export const checksLine = (facts: GameBuild["facts"]): string =>
 export const undoOutcome = (base: string | null, changes: boolean): string =>
   `The game goes back to ${base === null ? "before this build" : buildPhrase(base)}. This build${changes ? " and the changes since stay" : " stays"} on the strip.`;
 
-/**
- * PURE. A request short enough for a caption (`fits` characters), ended at a word: a
- * deliberate short form rather than a line clamp's cut mid-word. A tooltip gives it whole.
- */
-export const requestShortForm = (request: string, fits: number) => {
-  if (request.length <= fits) return request;
-  const cut = request.slice(0, fits - 1);
-  const word = cut.lastIndexOf(" ");
-  // Ended on a word that carries something: never on "a" or "the" with nothing after it.
-  return `${(word > fits / 2 ? cut.slice(0, word) : cut)
-    .replace(/(\s+(a|an|the|to|of|and|or))+$/i, "")
-    .replace(/[\s,;:.]+$/, "")}…`;
-};
 /** PURE. A build's name inside a sentence: "build 5", "build 6 · Keep going", a saved build's label. */
 export const buildPhrase = (name: string): string =>
   name.replace(/^Build /, "build ").replace(/^The game /, "the game ");

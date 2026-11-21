@@ -414,7 +414,7 @@ const putBack = (
  * A thing's values as inspector rows, the body of its Tune section and of Art's Values: each plays
  * as it moves (`onEdit` hears it too) and is kept as it is let go.
  */
-export function GameThingValueRows({
+function GameThingValueRows({
   id,
   values,
   disabled,

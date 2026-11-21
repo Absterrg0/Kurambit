@@ -17,7 +17,7 @@ import { Button } from "../ui/button";
  * Open and Show in folder for a file in the game: the system's own apps
  * through the server's file manager when it has one, else the app's file panel.
  */
-export function GameFileActions({
+function GameFileActions({
   threadRef,
   path,
   relativePath,

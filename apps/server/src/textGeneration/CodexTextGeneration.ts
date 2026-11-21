@@ -496,7 +496,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 });
 
 /** Why a `codex exec --json` turn failed, as Codex said it; null when it said nothing. */
-export const codexTurnFailure = (stdout: string): string | null => {
+const codexTurnFailure = (stdout: string): string | null => {
   let reason: string | null = null;
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.includes("failed") && !line.includes('"error"')) continue;
