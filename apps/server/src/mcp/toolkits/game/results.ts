@@ -18,6 +18,8 @@ const CAPS: Readonly<Record<string, number>> = {
   "game_play.bot": 4_096,
   "game_play.eval": 16_384,
   "game_play.model_sheet": 1_536,
+  // What the agent printed from Blender: 97% of 1,283 bench answers were under 6 KB, 99% under 9.3 KB.
+  "game_blender.code": 12_288,
 };
 export const resultCap = (tool: string, op: string) => CAPS[`${tool}.${op}`] ?? DEFAULT_CAP;
 /** Findings shown under the verdict; the rest are counted. */
@@ -26,6 +28,13 @@ const FINDINGS_SHOWN = 8;
 const bytes = (text: string) => Buffer.byteLength(text, "utf8");
 const cut = (text: string, most: number) =>
   text.length <= most ? text : `${text.slice(0, Math.max(0, most - 1)).trimEnd()}…`;
+/** A long text kept at both ends: what a printout or a log ends with is often what it is for. */
+const cutMiddle = (text: string, most: number) => {
+  if (text.length <= most) return text;
+  const head = Math.floor(most * 0.6);
+  const tail = Math.max(0, most - head - 40);
+  return `${text.slice(0, head).trimEnd()}\n… ${text.length - head - tail} characters cut …\n${text.slice(text.length - tail).trimStart()}`;
+};
 const sentences = (text: string) =>
   text
     .replace(/\s+/g, " ")
@@ -102,7 +111,7 @@ const textSize = (value: Json) =>
 
 /**
  * `details` within `budget` bytes of JSON: the largest list is halved or the longest string cut
- * until it fits, and `omitted` names each cut.
+ * from its middle until it fits, and `omitted` names each cut.
  */
 const capDetails = (details: Record<string, Json>, budget: number) => {
   let value: Json = details;
@@ -117,7 +126,7 @@ const capDetails = (details: Record<string, Json>, budget: number) => {
       value = replaceAt(value, path, found.node.slice(0, keep));
       omitted.set(general, `${general}: ${found.node.length - keep} more not shown`);
     } else if (typeof found.node === "string") {
-      value = replaceAt(value, path, cut(found.node, Math.floor(found.node.length / 2)));
+      value = replaceAt(value, path, cutMiddle(found.node, Math.floor(found.node.length / 2)));
       omitted.set(general, `${general}: cut`);
     }
   }
