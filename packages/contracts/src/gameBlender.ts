@@ -201,20 +201,104 @@ export const GameBlenderChain = Schema.Struct({
   mirror: Schema.optionalKey(Schema.Boolean),
 });
 
+/** The Mesh2Motion skeletons a model is rigged on, and "chains" for one no template fits. */
+const GAME_BLENDER_RIGS = [
+  "human",
+  "fox",
+  "horse",
+  "bird",
+  "dragon",
+  "kaiju",
+  "spider",
+  "snake",
+  "fish",
+  "chains",
+] as const;
+export const GameBlenderRig = Schema.Literals(GAME_BLENDER_RIGS);
+
+/** An object in the live scene, as Blender names it. */
+const SceneObject = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(63));
+const Point = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number]);
+
+/** One chain of a model no template fits; parents come before their children, the body first. */
+export const GameBlenderRigChain = Schema.Struct({
+  /** Its bones are <name>_0, <name>_1, ... */
+  name: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,23}$/)),
+  /** What it is, which picks its motion. */
+  kind: Schema.Literals([
+    "spine",
+    "neck",
+    "tail",
+    "tentacle",
+    "leg",
+    "arm",
+    "wing",
+    "fin",
+    "jaw",
+    "antenna",
+    "rigid",
+  ]),
+  /** The chain it hangs from (its bone nearest this chain's first point); none for the body. */
+  parent: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(24))),
+  /** The objects it moves, each weighted only to this chain and the bone it hangs from. */
+  part: Schema.optionalKey(
+    Schema.Union([SceneObject, Schema.Array(SceneObject).check(Schema.isMaxLength(16))]),
+  ),
+  /** Joint positions in Blender axes (Z up, facing -Y), root first: hip, knee, ankle, toe. */
+  points: Schema.optionalKey(
+    Schema.Array(Point).check(Schema.isMinLength(2), Schema.isMaxLength(33)),
+  ),
+  /** Without points: how many bones to place along the part. */
+  bones: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 32 }))),
+  /** Each part moves with one bone and never bends (a robot's plates). */
+  rigid: Schema.optionalKey(Schema.Boolean),
+});
+export type GameBlenderRigChain = typeof GameBlenderRigChain.Type;
+
 export const GameBlenderCharacterInput = Schema.Struct({
   /** The collection, the armature's name and the export's default stem. */
   name: BlenderName,
-  body: GameBlenderBody,
   /**
-   * "Walk_Loop" or "<pack-id>:Walk_Loop", from the lock's packs on standard-humanoid, or the
-   * game path of a motion-lane GLB (every clip it holds). Omitted: STANDARD_CLIPS.
+   * Rig a model already in the scene: a Mesh2Motion template whose layout matches it (its
+   * skeleton fitted inside, its clips by name), or "chains" for one none fits.
+   */
+  rig: Schema.optionalKey(GameBlenderRig),
+  /** With rig: the model's meshes or collections in the scene. Omitted: the object or collection called name. */
+  objects: Schema.optionalKey(
+    Schema.Array(SceneObject).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  ),
+  /** With rig: where template joints are, by bone name ({hand_r: [x, y, z]}); the fit moves the rest with them. */
+  joints: Schema.optionalKey(Schema.Record(Schema.String.check(Schema.isMaxLength(40)), Point)),
+  /** With rig: parts moved by one bone, never bent (props, armour plates): {object: bone}, or names for the nearest bone. */
+  rigid: Schema.optionalKey(
+    Schema.Union([
+      Schema.Array(SceneObject).check(Schema.isMaxLength(64)),
+      Schema.Record(
+        SceneObject,
+        Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(40)),
+      ),
+    ]),
+  ),
+  /** Without rig: the body to build and conform to the standard skeleton. */
+  body: Schema.optionalKey(GameBlenderBody),
+  /**
+   * With rig: the template's clips by name (Idle_A, Walk, Sword_Attack; Walk, Run, Bite), or on
+   * chains the roles (Idle, Walk, Attack). Without: "Walk_Loop" or "<pack-id>:Walk_Loop", from the
+   * lock's packs on standard-humanoid, or the game path of a motion-lane GLB. Omitted: idle, a move
+   * and an attack.
    */
   clips: Schema.optionalKey(
     Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(160))).check(
       Schema.isMaxLength(48),
     ),
   ),
-  chains: Schema.optionalKey(Schema.Array(GameBlenderChain).check(Schema.isMaxLength(16))),
+  /** With rig "chains": the chain spec (none: guessed from the parts). Without rig: spring chains on the standard skeleton. */
+  chains: Schema.optionalKey(
+    Schema.Union([
+      Schema.Array(GameBlenderRigChain).check(Schema.isMinLength(1), Schema.isMaxLength(48)),
+      Schema.Array(GameBlenderChain).check(Schema.isMaxLength(16)),
+    ]),
+  ),
   /** Rebuild the body and armature of an existing <name>, re-binding its other objects by parent bone. */
   replace: Schema.optionalKey(Schema.Boolean),
   /**
@@ -248,6 +332,38 @@ export const GameBlenderCharacterInput = Schema.Struct({
 });
 export type GameBlenderCharacterInput = typeof GameBlenderCharacterInput.Type;
 
+/** How one baked clip moves the model: notes for the agent, never a refusal. */
+export const GameBlenderRigFact = Schema.Struct({
+  clip: Schema.String,
+  frames: Schema.Number,
+  /** The worst edge's length over its rest length, either way (the 99.9th percentile edge). */
+  stretch: Schema.Number,
+  stretchFrame: Schema.Number,
+  stretchBone: Schema.String,
+  /** An IK gait's speed over the ground, m/s. */
+  groundSpeed: Schema.optionalKey(Schema.Number),
+  /** Feet on the ground: the share of frames, and how fast they move then (m/s, median and 90th percentile). */
+  plantedFeet: Schema.optionalKey(
+    Schema.Struct({ share: Schema.Number, slide: Schema.Number, slideMax: Schema.Number }),
+  ),
+  /** The deepest part other than a leg goes under the floor. */
+  underFloor: Schema.optionalKey(
+    Schema.Struct({ depth: Schema.Number, frame: Schema.Number, bone: Schema.String }),
+  ),
+  /** Chains that come far closer than at rest (through each other). */
+  crossing: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        chains: Schema.Array(Schema.String),
+        gap: Schema.Number,
+        rest: Schema.Number,
+        frame: Schema.Number,
+      }),
+    ),
+  ),
+});
+export type GameBlenderRigFact = typeof GameBlenderRigFact.Type;
+
 export const GameBlenderCharacterResult = Schema.Struct({
   text: Schema.String,
   armature: Schema.String,
@@ -255,8 +371,11 @@ export const GameBlenderCharacterResult = Schema.Struct({
   clips: Schema.Array(Schema.String),
   /** Chain name to its bones. */
   chains: Schema.Record(Schema.String, Schema.Array(Schema.String)),
-  restDeviation: Schema.Number,
-  height: Schema.Number,
+  /** Without rig: the worst rest frame's angle off the standard skeleton, degrees. */
+  restDeviation: Schema.optionalKey(Schema.Number),
+  height: Schema.optionalKey(Schema.Number),
+  /** With rig: per clip, how it moves the model. */
+  facts: Schema.optionalKey(Schema.Array(GameBlenderRigFact)),
 });
 export type GameBlenderCharacterResult = typeof GameBlenderCharacterResult.Type;
 
