@@ -6,7 +6,6 @@ import {
   remarkCodexDirectives,
   renderCodexDirectivesForCopy,
   renderCodexInlineDirectivesAsMarkdown,
-  splitCodexArtifactTemplateMarkdown,
 } from "./codexMarkdownDirectives.ts";
 import { parseMarkdownFileLink } from "./markdownLinks.ts";
 
@@ -152,38 +151,6 @@ describe("native Markdown adapters", () => {
     `[See ${FILE_CITATION}](https://example.com)`,
   ])("does not render excluded citation syntax: %s", (markdown) => {
     expect(renderCodexInlineDirectivesAsMarkdown(markdown)).toBe(markdown);
-  });
-
-  it("splits artifact cards from surrounding native Markdown", () => {
-    expect(splitCodexArtifactTemplateMarkdown(`Before\n\n${ARTIFACT_TEMPLATE}\n\nAfter`)).toEqual([
-      { kind: "markdown", markdown: "Before\n\n", sourceOffset: 0 },
-      {
-        kind: "artifact-template",
-        sourceOffset: 8,
-        template: {
-          artifactKind: "document",
-          displayName: "Hello World",
-          skillDirectory: "/Users/test/.codex/skills/artifact-template-hello-world",
-          skillName: "artifact-template-hello-world",
-        },
-      },
-      {
-        kind: "markdown",
-        markdown: "\n\nAfter",
-        sourceOffset: 8 + ARTIFACT_TEMPLATE.length,
-      },
-    ]);
-  });
-
-  it("leaves malformed and code artifact-template examples in Markdown", () => {
-    const malformed = '::artifact-template{display_name="Hello World"}';
-    const code = `\`${ARTIFACT_TEMPLATE}\``;
-    expect(splitCodexArtifactTemplateMarkdown(malformed)).toEqual([
-      { kind: "markdown", markdown: malformed, sourceOffset: 0 },
-    ]);
-    expect(splitCodexArtifactTemplateMarkdown(code)).toEqual([
-      { kind: "markdown", markdown: code, sourceOffset: 0 },
-    ]);
   });
 });
 

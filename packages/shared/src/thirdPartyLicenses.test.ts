@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   decodeThirdPartyLicenseManifest,
   filterThirdPartyLicenseEntries,
-  findThirdPartyLicenseEntry,
   formatLicenseBundles,
   thirdPartyLicenseEntryKey,
   type ThirdPartyLicenseEntry,
@@ -69,11 +68,6 @@ describe("third-party license manifests", () => {
     expect(
       formatLicenseBundles(["android", "assets", "ios", "mobile", "plugin", "constructor"]),
     ).toBe("Android, Assets, iOS, Mobile, plugin, constructor");
-  });
-
-  it("finds an entry by its stable navigation key", () => {
-    const entry = ENTRIES[0]!;
-    expect(findThirdPartyLicenseEntry(ENTRIES, thirdPartyLicenseEntryKey(entry))).toBe(entry);
   });
 
   it("uses path-safe navigation keys for scoped packages", () => {

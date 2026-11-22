@@ -46,17 +46,3 @@ export function encodeOAuthScope(scopes: ReadonlyArray<string>): string {
   }
   return scopes.join(" ");
 }
-
-export function parseAllowedOAuthScope<Scope extends string>(input: {
-  readonly value: string;
-  readonly allowedScopes: ReadonlySet<Scope>;
-}): ReadonlyArray<Scope> | null {
-  const scopes = parseOAuthScope(input.value);
-  if (
-    scopes === null ||
-    !scopes.every((scope): scope is Scope => input.allowedScopes.has(scope as Scope))
-  ) {
-    return null;
-  }
-  return scopes;
-}

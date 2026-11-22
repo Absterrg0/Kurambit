@@ -118,15 +118,6 @@ export function collectComposerContextReferences(
 export const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more files without additional text. Respond using the conversation context and the attached files.]";
 
-export function isImageReferencesOnly(text: string): boolean {
-  const references = collectComposerContextReferences(text);
-  return (
-    references.length > 0 &&
-    references.every((reference) => reference.kind === "image") &&
-    replaceComposerContextReferences(text, () => "").trim() === ""
-  );
-}
-
 export function replaceComposerContextReferences(
   text: string,
   replace: (occurrence: ComposerContextReferenceOccurrence) => string,

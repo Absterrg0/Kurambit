@@ -75,7 +75,6 @@ import { HtmlToolkit } from "./html/tools.ts";
 import {
   resolveKurambitMcpToolDefinition,
   resolveKurambitMcpToolPresentation,
-  resolveKurambitMcpToolSummaryAction,
 } from "@kurambit/shared/kurambitMcpToolPresentation";
 import { htmlRenderFromToolItem } from "@kurambit/shared/toolOutput";
 
@@ -114,7 +113,6 @@ it("publishes unique tool names with reference-free object-root inputs", () => {
       ).toBe(true);
       for (const name of [tool.name, `mcp__kurambit__${tool.name}`, `kurambit.${tool.name}`]) {
         expect(resolveKurambitMcpToolPresentation(name)?.logo, name).toBe("kurambit");
-        expect(resolveKurambitMcpToolSummaryAction(name), name).not.toBeNull();
       }
     }
   }

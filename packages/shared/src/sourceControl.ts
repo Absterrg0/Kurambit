@@ -1,5 +1,5 @@
 import { SourceControlProviderKind } from "@kurambit/contracts";
-import type { RepositoryIdentity, SourceControlProviderInfo } from "@kurambit/contracts";
+import type { SourceControlProviderInfo } from "@kurambit/contracts";
 
 export interface ChangeRequestPresentation {
   readonly icon:
@@ -121,28 +121,7 @@ export function resolveChangeRequestPresentation(
   }
 }
 
-function resolveChangeRequestPresentationForKind(
-  kind: SourceControlProviderKind,
-): ChangeRequestPresentation {
-  return resolveChangeRequestPresentation({ kind, name: "", baseUrl: "" });
-}
-
-export function getChangeRequestTerminologyForKind(
-  kind: SourceControlProviderKind,
-): ChangeRequestTerminology {
-  const presentation = resolveChangeRequestPresentationForKind(kind);
-  return {
-    shortLabel: presentation.shortName,
-    singular: presentation.longName,
-  };
-}
-
 const SCP_SSH_REMOTE_PATTERN = /^[a-zA-Z0-9._-]+@([^:/]+):/;
-
-export function isSshRemoteUrl(remoteUrl: string): boolean {
-  const trimmed = remoteUrl.trim();
-  return SCP_SSH_REMOTE_PATTERN.test(trimmed) || trimmed.toLowerCase().startsWith("ssh://");
-}
 
 function parseRemoteHost(remoteUrl: string): string | null {
   const trimmed = remoteUrl.trim();
@@ -283,20 +262,6 @@ export function detectSourceControlProviderFromRemoteUrl(
  * `org/project/_git/repo` path is refused outright and the whole repository reads as
  * unavailable. Its name is the last segment, which is what this hands over.
  */
-export function sourceControlRepositorySelector(
-  identity:
-    | Pick<RepositoryIdentity, "provider" | "displayName" | "owner" | "name">
-    | null
-    | undefined,
-): string | null {
-  if (!identity) return null;
-  if (identity.provider === "azure-devops") {
-    const segments = (identity.displayName ?? "").split("/").filter((part) => part !== "_git");
-    return identity.name || segments.at(-1) || null;
-  }
-  if (identity.displayName) return identity.displayName;
-  return identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null;
-}
 
 export function canonicalRepositoryKey(key: string): string {
   return key

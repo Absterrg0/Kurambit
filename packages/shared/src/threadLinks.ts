@@ -4,9 +4,6 @@ import * as Schema from "effect/Schema";
 
 export const THREAD_LINK_PROTOCOL = "kurambit-thread";
 const THREAD_LINK_HREF_PREFIX = `${THREAD_LINK_PROTOCOL}://v1/`;
-// Code comes first in the alternation so a link written inside a code span or fence is skipped.
-const THREAD_LINK_OUTSIDE_CODE =
-  /(?<fence>(`{3,}|~{3,})[\s\S]*?(?:\2|$))|(?<span>(`+)[^\n]*?\4)|\[[^\]\n]*\]\((?<href>kurambit-thread:\/\/v1\/[^\s)]+)\)/g;
 
 const decodeThreadId = Schema.decodeUnknownOption(ThreadId);
 
@@ -31,28 +28,4 @@ export function formatThreadLink(threadId: string, label: string): string {
     .replace(/\s+/g, " ")
     .trim();
   return `[${cleaned || threadId}](${THREAD_LINK_HREF_PREFIX}${threadId})`;
-}
-
-function hasThreadLinks(markdown: string): boolean {
-  return markdown.includes(`](${THREAD_LINK_HREF_PREFIX}`);
-}
-
-export function relabelThreadLinks(
-  markdown: string,
-  title: (threadId: ThreadId) => string | undefined,
-): string {
-  if (!hasThreadLinks(markdown)) return markdown;
-  return markdown.replace(THREAD_LINK_OUTSIDE_CODE, (source, ...args) => {
-    const href = (args.at(-1) as { href?: string }).href;
-    if (href === undefined) return source;
-    const written = parseThreadLinkHref(href);
-    if (written === null) return source;
-    const decoded = percentDecodedThreadLinkId(written);
-    const threadId =
-      title(written) === undefined && decoded !== null && title(decoded) !== undefined
-        ? decoded
-        : written;
-    const label = title(threadId)?.trim();
-    return label ? formatThreadLink(threadId, label) : source;
-  });
 }

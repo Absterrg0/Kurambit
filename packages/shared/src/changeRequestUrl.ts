@@ -1,5 +1,4 @@
 import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@kurambit/contracts";
-import { canonicalRepositoryKey } from "./sourceControl.ts";
 
 /**
  * The two strings are what `pullRequestHostOf` and the project's `repositoryIdentity` produce
@@ -62,82 +61,8 @@ function claim(host: string, match: RegExpExecArray | null): ChangeRequestLink |
     : null;
 }
 
-export function changeRequestUrlFor(
-  kind: string | null | undefined,
-  host: string,
-  repository: string,
-  number: number,
-  remoteUrl?: string,
-): string | null {
-  switch (kind) {
-    case "github":
-      return `https://${host}/${repository}/pull/${number}`;
-    case "gitcafe":
-      return `https://${host}/${repository}/pulls/${number}`;
-    case "forgejo": {
-      try {
-        const remote = new URL(remoteUrl ?? "");
-        if (
-          (remote.protocol === "http:" || remote.protocol === "https:") &&
-          (remote.hostname.toLowerCase() === host.toLowerCase() ||
-            remote.host.toLowerCase() === host.toLowerCase())
-        ) {
-          return `${remote.origin}/${repository}/pulls/${number}`;
-        }
-      } catch {
-        // SSH remotes do not specify the server's web origin.
-      }
-      return `https://${host}/${repository}/pulls/${number}`;
-    }
-    case "gitlab":
-      return `https://${host}/${repository}/-/merge_requests/${number}`;
-    case "bitbucket":
-      return `https://${host}/${repository}/pull-requests/${number}`;
-    case "azure-devops":
-      return `https://${canonicalRepositoryKey(`${host}/${repository}`.toLowerCase())}/pullrequest/${number}`;
-    default:
-      return null;
-  }
-}
-
 /**
  * The pull-request URL a GitHub-style `#123` autolink might name. GitHub writes every bare
  * reference through `/issues/`, including pull requests, so this only builds a candidate: the
  * caller must successfully read it as a pull request before treating it as one.
  */
-export function pullRequestCandidateUrlFromReferenceAutolink(targetUrl: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(targetUrl);
-  } catch {
-    return null;
-  }
-  if (
-    (url.protocol !== "https:" && url.protocol !== "http:") ||
-    !(
-      url.hostname.toLowerCase() === "github.com" ||
-      url.hostname.toLowerCase().endsWith(".github.com") ||
-      url.hostname.toLowerCase().split(".").includes("github")
-    )
-  ) {
-    return null;
-  }
-  const match = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u.exec(url.pathname);
-  if (match?.[1] === undefined || match[2] === undefined) return null;
-  url.pathname = `/${match[1]}/pull/${match[2]}`;
-  return url.toString();
-}
-
-export function siblingPullRequestUrl(url: string, number: number): string | null {
-  const reference = parseChangeRequestUrl(url);
-  if (reference === null || !Number.isSafeInteger(number) || number < 1) return null;
-  const sibling = new URL(url);
-  const route = /^\/(-\/merge_requests|pulls?|pull-requests|pullrequest)\/\d+(?:\/|$)/u.exec(
-    sibling.pathname.slice(reference.repository.length + 1),
-  )?.[1];
-  if (route === undefined) return null;
-  sibling.pathname = `/${reference.repository}/${route}/${number}`;
-  sibling.search = "";
-  sibling.hash = "";
-  return sibling.toString();
-}
