@@ -319,7 +319,7 @@ check that matters.
   takes T3's pinned headless shell from `PreviewBrowser` (installed on first use, sandboxed as
   preview is, so three.js needs no browser on the machine) and holds the `__studio` snippets; `gameWebServer` serves a game-relative directory over loopback for check/explore/bot
   without touching Preview state.
-- `game_play` op `start` plays the game's own lane. The same content-addressed export machinery
+- The Stage's Play ([`GameStage`](../../apps/server/src/game/GameStage.ts)) plays the game's own lane. The same content-addressed export machinery
   (hash, compare, move into place, select) serves exploration and Play; the expected-files check
   is engine-aware.
 

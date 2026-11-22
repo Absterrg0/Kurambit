@@ -107,5 +107,4 @@ that time a stall survive it; records drop only while the disk stays stuck. Prov
 retains backpressure. Shutdown drains accepted writes before closing their scope.
 
 Focused coverage: `ProjectionSettlement.test.ts`, `ThreadSettlementService.test.ts`,
-`runtimeLayer.test.ts`, `GitVcsDriverCore.test.ts`,
-`ThreadStatusIndicators.subscriptions.browser.test.tsx`, and `desktopLocal.test.ts`.
+`runtimeLayer.test.ts`, `GitVcsDriverCore.test.ts`, and `ThreadStatusIndicators.test.ts`.
