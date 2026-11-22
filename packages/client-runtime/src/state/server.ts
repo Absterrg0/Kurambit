@@ -4,7 +4,6 @@ import {
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
   type ServerLifecycleStreamReadyEvent,
-  type ServerSelfUpdateProgressEvent,
   type ServerSelfUpdateInput,
   type ServerSelfUpdateResult,
   WS_METHODS,
@@ -137,73 +136,6 @@ export function matchesServerUpdateReadyEvent(
     : event.payload.updateOutcome?.id === result.updateId;
 }
 
-export function matchesServerUpdateResumeEvent(
-  result: ServerSelfUpdateResult,
-  event: ServerLifecycleStreamReadyEvent,
-): boolean {
-  return (
-    (result.method === "desktop-app" && result.desktopUpdateToken !== undefined) ||
-    matchesServerUpdateReadyEvent(result, event)
-  );
-}
-
-export function validateServerUpdateReadyEvent(
-  result: ServerSelfUpdateResult,
-  event: ServerLifecycleStreamReadyEvent,
-): Effect.Effect<void, ServerUpdateTerminalError> {
-  if (result.updateId === undefined) return Effect.void;
-  const outcome = event.payload.updateOutcome;
-  if (
-    outcome?.id === result.updateId &&
-    outcome.status === "committed" &&
-    outcome.targetVersion === result.targetVersion &&
-    event.payload.environment.serverVersion === result.targetVersion
-  ) {
-    return Effect.void;
-  }
-  return Effect.fail(
-    new ServerUpdateTerminalError({
-      targetVersion: result.targetVersion,
-      status: outcome?.status ?? "failed",
-      reason:
-        outcome?.reason ??
-        "The service launcher resumed without committing the requested server version.",
-    }),
-  );
-}
-
-/**
- * The sleep before each nudge is the pacer: a connection that fails instantly
- * re-enters backoff immediately and would otherwise spin a tight retry loop.
- *
- * Callers fork this as a child of the update command so it is interrupted as
- * soon as the update settles, whether it succeeds, fails, or times out.
- */
-export function nudgeReconnectDuringUpdateRestart(input: {
-  readonly stateChanges: Stream.Stream<
-    {
-      readonly phase: string;
-      readonly lastFailure?: { readonly reason: string } | null;
-    },
-    unknown
-  >;
-  readonly retryNow: Effect.Effect<void>;
-  readonly interval?: Duration.Duration;
-}): Effect.Effect<void> {
-  return input.stateChanges.pipe(
-    Stream.filter(
-      (state) =>
-        state.phase === "backoff" ||
-        (state.phase === "blocked" && state.lastFailure?.reason === "authentication"),
-    ),
-    Stream.runForEach(() =>
-      Effect.sleep(input.interval ?? Duration.seconds(1)).pipe(Effect.andThen(input.retryNow)),
-    ),
-    Effect.timeoutOption(SERVER_UPDATE_RESUME_TIMEOUT),
-    Effect.ignore,
-  );
-}
-
 export function waitForNextEnvironmentReconnect<E>(
   stateChanges: Stream.Stream<{ readonly phase: string }, E>,
 ): Effect.Effect<void, E> {
@@ -269,24 +201,6 @@ export const waitForDesktopUpdateTarget = Effect.fn("waitForDesktopUpdateTarget"
   });
 });
 
-export function serverUpdateStateForProgressEvent(
-  fromVersion: string,
-  targetVersion: string,
-  event: ServerSelfUpdateProgressEvent,
-): Extract<ServerUpdateState, { status: "running" }> {
-  return {
-    status: "running",
-    stage:
-      event.type !== "complete"
-        ? event.stage
-        : event.result.method === "desktop-app" && event.result.desktopUpdateToken !== undefined
-          ? "installing"
-          : "resuming",
-    fromVersion,
-    targetVersion,
-  };
-}
-
 export function serverUpdateStateForServerVersion(
   state: ServerUpdateState,
   serverVersion: string | null,
@@ -321,23 +235,6 @@ export function isLegacyUpdateHandoffLoss(cause: Cause.Cause<unknown>): boolean 
     cause.reasons.length > 0 &&
     cause.reasons.every((reason) => Cause.isFailReason(reason) && isRpcSocketError(reason.error))
   );
-}
-
-export function resolveServerUpdateProgressResult<E>(
-  targetVersion: string,
-  terminal: Option.Option<ServerSelfUpdateResult>,
-  streamExit: Exit.Exit<void, E>,
-): Effect.Effect<ServerSelfUpdateResult, E | ServerUpdateProgressIncompleteError> {
-  if (
-    Option.isSome(terminal) &&
-    (Exit.isSuccess(streamExit) || isLegacyUpdateHandoffLoss(streamExit.cause))
-  ) {
-    return Effect.succeed(terminal.value);
-  }
-  if (Exit.isFailure(streamExit)) {
-    return Effect.failCause(streamExit.cause);
-  }
-  return Effect.fail(new ServerUpdateProgressIncompleteError({ targetVersion }));
 }
 
 const cachedConfigSnapshotEvent = (config: ServerConfig): ServerConfigStreamEvent => ({

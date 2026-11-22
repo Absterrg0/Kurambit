@@ -8,7 +8,6 @@ import * as Fiber from "effect/Fiber";
 import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -31,10 +30,8 @@ import {
   environmentRpcKey,
   createAtomCommandScheduler,
   createEnvironmentQueryAtomFamily,
-  selectEnvironmentQueryData,
   createEnvironmentSubscriptionAtomFamily,
   createRuntimeCommand,
-  scheduleAtomCommandEffect,
   executeAtomCommand,
   executeAtomQuery,
   isAtomCommandInterrupted,
@@ -392,40 +389,6 @@ describe("environment query lifecycle", () => {
         const changed = yield* readEnvironmentQuery(registry, harness.atom);
         expect(changed).not.toBe(first);
         expect(changed.checks[0]?.status).toBe("failed");
-      }),
-    ),
-  );
-
-  it.effect("does not notify a data-only reader when a refetch returns equal content", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        let status = "passed";
-        const execute = Effect.sync(() => ({ checks: [{ name: "ci", status }] }));
-        const harness = yield* makeEnvironmentQueryHarness(execute);
-        const registry = yield* mountEnvironmentQuery(harness.atom);
-        yield* readEnvironmentQuery(registry, harness.atom);
-
-        const data = Atom.map(harness.atom, selectEnvironmentQueryData);
-        const seen: Array<unknown> = [];
-        let resultNotifications = 0;
-        const unsubscribeData = registry.subscribe(data, (value) => seen.push(value), {
-          immediate: true,
-        });
-        yield* Effect.addFinalizer(() => Effect.sync(unsubscribeData));
-        const unsubscribeResult = registry.subscribe(harness.atom, () => resultNotifications++);
-        yield* Effect.addFinalizer(() => Effect.sync(unsubscribeResult));
-
-        registry.refresh(harness.atom);
-        yield* readEnvironmentQuery(registry, harness.atom);
-        // The result itself still moves (timestamp, `waiting`), which SWR relies on.
-        expect(resultNotifications).toBeGreaterThan(0);
-        expect(seen).toHaveLength(1);
-
-        status = "failed";
-        registry.refresh(harness.atom);
-        yield* readEnvironmentQuery(registry, harness.atom);
-        expect(seen).toHaveLength(2);
-        expect(seen[1]).toEqual({ checks: [{ name: "ci", status: "failed" }] });
       }),
     ),
   );
@@ -1066,103 +1029,6 @@ describe("runtime command runner", () => {
     expect(events).toEqual(["first:start", "first:end", "second:start"]);
     registry.dispose();
   });
-
-  it.effect("releases a shared scheduler lane before the outer command finishes", () =>
-    Effect.gen(function* () {
-      const handoffStarted = Latch.makeUnsafe();
-      const handoffComplete = Latch.makeUnsafe();
-      const resumeComplete = Latch.makeUnsafe();
-      const runtime = Atom.runtime(Layer.empty);
-      const scheduler = createAtomCommandScheduler();
-      const concurrency = { mode: "serial" as const, key: () => "shared" };
-      const updateCommand = createRuntimeCommand(runtime, {
-        label: "test.update",
-        execute: (_input: void, registry) =>
-          scheduleAtomCommandEffect(
-            registry,
-            scheduler,
-            concurrency,
-            undefined,
-            Effect.sync(() => handoffStarted.openUnsafe()).pipe(
-              Effect.andThen(handoffComplete.await),
-            ),
-          ).pipe(Effect.andThen(resumeComplete.await)),
-      });
-      const configCommand = createRuntimeCommand(runtime, {
-        label: "test.config",
-        scheduler,
-        concurrency,
-        execute: () => Effect.succeed("configured"),
-      });
-      const registry = AtomRegistry.make();
-
-      const update = updateCommand.run(registry, undefined);
-      yield* handoffStarted.await;
-      const config = configCommand.run(registry, undefined);
-      handoffComplete.openUnsafe();
-
-      expect(yield* Effect.promise(() => config)).toMatchObject({
-        _tag: "Success",
-        value: "configured",
-        waiting: false,
-      });
-      resumeComplete.openUnsafe();
-      expect(yield* Effect.promise(() => update)).toMatchObject({
-        _tag: "Success",
-        waiting: false,
-      });
-      registry.dispose();
-    }),
-  );
-
-  it.effect("keeps an outer reconnect observer alive after a scheduled handoff returns", () =>
-    Effect.gen(function* () {
-      const commitStarting = yield* Deferred.make<void>();
-      const observerArmed = yield* Deferred.make<void>();
-      const reconnected = yield* Deferred.make<void>();
-      const states = yield* Queue.unbounded<{ readonly phase: string }>();
-      yield* Queue.offer(states, { phase: "connected" });
-      const runtime = Atom.runtime(Layer.empty);
-      const scheduler = createAtomCommandScheduler();
-      const concurrency = { mode: "serial" as const, key: () => "shared" };
-      const command = createRuntimeCommand(runtime, {
-        label: "test.desktop-update-handoff",
-        execute: (_input: void, registry) =>
-          Effect.gen(function* () {
-            yield* Deferred.await(commitStarting).pipe(
-              Effect.andThen(
-                Stream.fromQueue(states).pipe(
-                  Stream.tap(() => Deferred.succeed(observerArmed, undefined)),
-                  Stream.dropWhile((state) => state.phase === "connected"),
-                  Stream.filter((state) => state.phase === "connected"),
-                  Stream.runHead,
-                ),
-              ),
-              Effect.andThen(Deferred.succeed(reconnected, undefined)),
-              Effect.forkChild,
-            );
-            yield* scheduleAtomCommandEffect(
-              registry,
-              scheduler,
-              concurrency,
-              undefined,
-              Deferred.succeed(commitStarting, undefined).pipe(
-                Effect.andThen(Deferred.await(observerArmed)),
-              ),
-            );
-            yield* Queue.offer(states, { phase: "backoff" });
-            yield* Queue.offer(states, { phase: "connected" });
-            yield* Deferred.await(reconnected);
-          }),
-      });
-      const registry = AtomRegistry.make();
-
-      expect(yield* Effect.promise(() => command.run(registry, undefined))).toMatchObject({
-        _tag: "Success",
-      });
-      registry.dispose();
-    }),
-  );
 
   it("deduplicates single-flight commands by key", async () => {
     const latch = Latch.makeUnsafe();

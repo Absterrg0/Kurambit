@@ -274,27 +274,6 @@ export function createAtomCommandScheduler(): AtomCommandScheduler {
   };
 }
 
-export function scheduleAtomCommandEffect<W, A, E, R>(
-  registry: AtomRegistry.AtomRegistry,
-  scheduler: AtomCommandScheduler,
-  concurrency: AtomCommandConcurrency<W>,
-  input: W,
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> {
-  return Effect.gen(function* () {
-    const context = yield* Effect.context<R>();
-    const result = yield* Effect.promise((signal) =>
-      scheduler.schedule<W, A, E>(registry, concurrency, input, async () => {
-        const exit = await Effect.runPromiseExitWith(context)(effect, { signal });
-        return Exit.isSuccess(exit)
-          ? AsyncResult.success(exit.value)
-          : AsyncResult.failure(exit.cause);
-      }),
-    );
-    return result._tag === "Success" ? result.value : yield* Effect.failCause(result.cause);
-  });
-}
-
 export async function runAtomCommand<W, A, E>(
   registry: AtomRegistry.AtomRegistry,
   command: AtomCommand<W, A, E>,
@@ -514,14 +493,6 @@ const refreshEveryUntilFinal =
       },
       { initialValueTarget: self },
     );
-
-/**
- * A query result's data alone. A refetch always publishes a new result (a new
- * timestamp, `waiting` on and off), while equal data keeps its identity, so a
- * reader of only this skips the refetches that changed nothing.
- */
-export const selectEnvironmentQueryData = <A, E>(result: AsyncResult.AsyncResult<A, E>): A | null =>
-  Option.getOrNull(AsyncResult.value(result));
 
 export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
