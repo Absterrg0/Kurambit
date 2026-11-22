@@ -129,7 +129,7 @@ function StepFrame({
   return (
     <figure className="flex min-w-0 flex-col gap-0.5">
       {frame === null ? (
-        <span className="flex aspect-video items-center justify-center rounded-md bg-muted/60 text-2xs text-muted-foreground">
+        <span className="flex aspect-video items-center justify-center rounded-md bg-muted/60 text-micro text-muted-foreground">
           {build === null ? "—" : "No frame yet"}
         </span>
       ) : (
@@ -141,7 +141,7 @@ function StepFrame({
           className={cn("aspect-video", dim && "opacity-55 saturate-50")}
         />
       )}
-      <figcaption className="truncate text-2xs text-muted-foreground">
+      <figcaption className="truncate text-micro text-muted-foreground">
         {label} · {build === null ? "none" : build.name}
       </figcaption>
     </figure>
