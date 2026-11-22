@@ -310,34 +310,6 @@ def _stand(arm):
     return True
 
 
-def _import_into(sc, path):
-    """A GLB's objects, moved into sc (the importer writes into the context's scene); what the
-    import changed in that scene's timing and selection is put back."""
-    live, layer = bpy.context.scene, bpy.context.view_layer
-    kept = (live.frame_start, live.frame_end, live.frame_current, live.render.fps, live.render.fps_base)
-    active, selected = layer.objects.active, [o for o in layer.objects if o.select_get()]
-    try:
-        new, _ = skeleton.import_gltf(path)
-    finally:
-        live.frame_start, live.frame_end, _, live.render.fps, live.render.fps_base = kept
-        live.frame_set(kept[2])
-        for o in layer.objects:
-            o.select_set(o in selected)
-        layer.objects.active = active
-    if live is not sc:
-        for o in new:
-            for c in list(o.users_collection):
-                c.objects.unlink(o)
-            sc.collection.objects.link(o)
-    for o in new:
-        if o.type == "ARMATURE":  # its rest pose: the turnaround shows it standing
-            if o.animation_data is not None:
-                o.animation_data.action = None
-            for pb in o.pose.bones:
-                pb.matrix_basis = Matrix()
-    return new
-
-
 def _thin_share(tile, r=1):
     """Share of a silhouette in parts under 2r + 1 px across: what an opening by r removes."""
     mask = tile[:, :, 3] > 0.5

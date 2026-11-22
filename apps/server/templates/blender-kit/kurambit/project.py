@@ -546,29 +546,6 @@ def bake_normal_from_height(objs, groups, heights, strength=1.0, distance=0.004)
     return out
 
 
-def bake_normal_from_high(low, high, size, extrusion):
-    """Tangent-space normal map of a sculpted high mesh onto its game mesh."""
-    sc = bpy.context.scene
-    cycles(sc)
-    sc.render.bake.normal_space = "TANGENT"
-    sc.render.bake.use_selected_to_active = True
-    sc.render.bake.cage_extrusion = extrusion
-    sc.render.bake.max_ray_distance = extrusion * 2
-    tgt = new_image("kurambit_normal_high", size, colour=(0.5, 0.5, 1, 1))
-    m, nt, tex, out = _bake_material("kurambit_nhigh", tgt)
-    low.data.materials.clear()
-    low.data.materials.append(m)
-    select([high, low], active=low)
-    try:
-        bpy.ops.object.bake(type="NORMAL")
-    finally:
-        sc.render.bake.use_selected_to_active = False
-    arr = image_array(tgt)
-    bpy.data.materials.remove(m)
-    bpy.data.images.remove(tgt)
-    return arr
-
-
 # ----------------------------------------------------------------------------- projection
 
 def project(bake, views, depths, read, detail, tol):

@@ -157,8 +157,6 @@ const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _q1 = new THREE.Quaternion();
-const _q2 = new THREE.Quaternion();
-const _q3 = new THREE.Quaternion();
 const AXES = {
   x: new THREE.Vector3(1, 0, 0),
   y: new THREE.Vector3(0, 1, 0),
