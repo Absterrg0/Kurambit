@@ -92,7 +92,8 @@ export const gamePlayerLines = (report: GamePlayerReport): ReadonlyArray<string>
       "cover",
       "title covers",
       (v) => `${percent(v)} of the first frame`,
-      (v) => v <= 0.3,
+      // No mark: a title or rules screen is a game's choice, and judges read it as finish.
+      () => null,
     ),
     line(
       "open",
