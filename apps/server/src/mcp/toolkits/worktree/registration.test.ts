@@ -6,6 +6,7 @@ import * as GameBot from "../../../game/GameBot.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
+import * as GameFreshEyes from "../../../game/GameFreshEyes.ts";
 import * as GameSavedMediaService from "../../../game/GameSavedMediaService.ts";
 import * as GameStage from "../../../game/GameStage.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
@@ -59,6 +60,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(GameAssetLibrary.GameAssetLibrary)({}),
   Layer.mock(GameEngine.GameEngine)({}),
   Layer.mock(GameExport.GameExport)({}),
+  Layer.mock(GameFreshEyes.GameFreshEyes)({}),
   Layer.mock(GameSavedMediaService.GameSavedMediaService)({}),
   Layer.mock(GameExplore.GameExplore)({}),
   Layer.mock(GameBot.GameBot)({}),
