@@ -244,9 +244,6 @@ export const GameExploreCloseResult = Schema.Struct({
 });
 export type GameExploreCloseResult = typeof GameExploreCloseResult.Type;
 
-/** Capture width/height bounds for exploration viewports. */
-const EXPLORE_CAPTURE_BOUNDS = { minDimension: 320, maxDimension: 1920 } as const;
-
 /** Everything wrong with an exploration open request. Empty means the session may open. */
 export const exploreCaptureIssues = (input: {
   readonly bootTimeoutMs?: number | undefined;

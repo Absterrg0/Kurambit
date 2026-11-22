@@ -10,12 +10,6 @@ const BASE_TARGET = {
   workspaceRoot: "/workspace/project",
 };
 
-const EMPTY_CAPABILITIES = {
-  revealLabel: undefined,
-  canOpenDefault: false,
-  editorIds: [],
-};
-
 describe("resolveFileContextMenuAbsolutePath", () => {
   it("joins workspace-relative diff paths onto the workspace root", () => {
     expect(resolveFileContextMenuAbsolutePath(BASE_TARGET)).toBe("/workspace/project/src/index.ts");

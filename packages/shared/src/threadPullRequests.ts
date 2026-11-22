@@ -1,7 +1,5 @@
 import type {
   OrchestrationV2AppThread,
-  RepositoryIdentity,
-  SourceControlProviderKind,
   ThreadLinkedPullRequest,
   ThreadPullRequestKey,
   ThreadPullRequestLink,

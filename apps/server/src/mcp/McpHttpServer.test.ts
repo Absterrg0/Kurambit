@@ -14,9 +14,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import { PNG } from "pngjs";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import {

@@ -6,8 +6,6 @@ import {
 import type {
   EnvironmentId,
   PullRequestDiffFileContentsInput,
-  PullRequestDiffFileContentsResult,
-  PullRequestRef,
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
   ReviewDiffPreviewSourceKind,
@@ -24,22 +22,10 @@ interface GitDiffFileContentsSource {
   readonly cacheKey: string;
 }
 
-interface PullRequestDiffFileContentsSource {
-  readonly environmentId: EnvironmentId;
-  readonly reference: PullRequestRef;
-  readonly commit: string | null;
-  readonly cacheKey: string;
-}
-
 type GetDiffFileContents<E> = (request: {
   readonly environmentId: EnvironmentId;
   readonly input: ReviewDiffFileContentsInput;
 }) => Promise<AtomCommandResult<ReviewDiffFileContentsResult, E>>;
-
-type GetPullRequestDiffFileContents<E> = (request: {
-  readonly environmentId: EnvironmentId;
-  readonly input: PullRequestDiffFileContentsInput;
-}) => Promise<AtomCommandResult<PullRequestDiffFileContentsResult, E>>;
 
 function createDiffFileContentsLoader(
   load: (input: {

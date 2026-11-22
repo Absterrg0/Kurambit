@@ -1,8 +1,4 @@
-import type {
-  GitRunStackedActionInput,
-  GitStackedAction,
-  VcsStatusResult,
-} from "@kurambit/contracts";
+import type { GitRunStackedActionInput, GitStackedAction } from "@kurambit/contracts";
 
 export type GitActionIconName = "commit" | "push" | "pr";
 

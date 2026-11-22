@@ -1,5 +1,3 @@
-import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@kurambit/contracts";
-
 /**
  * The two strings are what `pullRequestHostOf` and the project's `repositoryIdentity` produce
  * from a git remote — lower case, no port, the full path below the host — because links are
