@@ -7,7 +7,6 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import * as BotEvidence from "./botEvidence.ts";
-import { recordPath } from "./exploreEvidence.ts";
 
 const run = (runId: string, mode: string) => ({
   runId,
@@ -27,7 +26,7 @@ describe("bot evidence", () => {
       for (let i = 0; i < BotEvidence.KEPT_RUNS; i++)
         record = BotEvidence.add(record, "/g", run(`p${i}`, "play"));
       // The record as the atomic writer leaves it (its own tests cover the write).
-      NodeFS.writeFileSync(recordPath(dir, "t"), JSON.stringify(record));
+      NodeFS.writeFileSync(BotEvidence.recordPath(dir, "t"), JSON.stringify(record));
       const reloaded = await BotEvidence.read(dir, "t");
       expect(reloaded).toEqual(record);
       expect(record.count).toBe(BotEvidence.KEPT_RUNS + 1);
@@ -39,7 +38,7 @@ describe("bot evidence", () => {
       // A record written while runs named their decider, with exploration runs after its
       // play run, still reads, and its play run is still the one the skilled fact plays.
       NodeFS.writeFileSync(
-        recordPath(dir, "old"),
+        BotEvidence.recordPath(dir, "old"),
         JSON.stringify({
           ...BotEvidence.add(BotEvidence.empty("old", "/g"), "/g", run("p", "play")),
           runs: [run("p", "play"), run("e", "explore")],
@@ -51,7 +50,7 @@ describe("bot evidence", () => {
         ".studio/bot/play.mjs",
       );
       // Another thread's record under this thread's name is no run of its own.
-      NodeFS.copyFileSync(recordPath(dir, "t"), recordPath(dir, "u"));
+      NodeFS.copyFileSync(BotEvidence.recordPath(dir, "t"), BotEvidence.recordPath(dir, "u"));
       expect(await BotEvidence.read(dir, "u")).toBe("damaged");
       // Moved aside, not overwritten: its count stays readable for a person.
       const aside = await BotEvidence.setAside(dir, "u", 1);

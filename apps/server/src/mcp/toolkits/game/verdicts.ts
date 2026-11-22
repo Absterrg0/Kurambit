@@ -91,7 +91,7 @@ const VERDICTS: Readonly<Record<string, (answer: Answer) => Verdict>> = {
   "game_check.look": check(false),
   "game_check.final": check(true),
   "game_play.act": (answer) => ({
-    line: `${num(answer.nominalMs)} ms of play · ${answer.callsLeft ?? "?"} acts left${
+    line: `${num(answer.nominalMs)} ms of play${
       answer.probe?.gameState?.state === undefined ? "" : ` · state ${answer.probe.gameState.state}`
     }`,
     findings: (answer.consoleMessages ?? [])

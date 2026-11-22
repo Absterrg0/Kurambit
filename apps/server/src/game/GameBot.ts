@@ -30,7 +30,6 @@ import {
 import * as ServerConfig from "../config.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as BotEvidence from "./botEvidence.ts";
-import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
 import { unavailableEngine } from "./engineProfile.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -205,11 +204,10 @@ const make = Effect.gen(function* () {
     );
   const evidenceDir = NodePath.join((yield* ServerConfig.ServerConfig).stateDir, "bot-evidence");
   const evidenceLock = Semaphore.makeUnsafe(1);
-  // Records untouched as long as explore evidence's belong to runs long finished.
   const prune = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     yield* evidenceLock
-      .withPermits(1)(Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)))
+      .withPermits(1)(Effect.tryPromise(() => BotEvidence.prune(evidenceDir, now)))
       .pipe(
         Effect.catchCause((cause) => Effect.logWarning("Pruning bot evidence failed.", { cause })),
       );

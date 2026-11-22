@@ -1,13 +1,9 @@
 import * as Schema from "effect/Schema";
-import { GamePlaytestProbe, GamePlaytestStep, GameConsoleMessage, GameViewport } from "./game.ts";
+import { GamePlaytestProbe, GamePlaytestStep, GameConsoleMessage } from "./game.ts";
 
 /**
- * Bounded persistent exploration: short act/observe cycles against one frozen
- * export, saved as a server-owned trace, then independently replayed. One
- * live browser session exists globally (a 16 GB host cannot hold two
- * headless Chromes beside a dev server); exploration never qualifies,
- * promotes or passes quality — only a fresh replay of the saved sequence
- * counts as independent confirmation, and only of the traced steps.
+ * Exploration: short act/observe cycles in one browser session on the game's
+ * current sources. It never qualifies, promotes or passes quality.
  */
 export const GAME_EXPLORE_BOUNDS = {
   /** Input steps one act call may carry. Short cycles stay observable. */
@@ -17,16 +13,6 @@ export const GAME_EXPLORE_BOUNDS = {
    * timer or a lap in one act, which agents asked for (12-30 s) and split across calls when refused.
    */
   maxSequenceMsPerCall: 30_000,
-  /** Act calls one session may make. */
-  maxCalls: 16,
-  /** Input steps one session may execute in total. */
-  maxTotalSteps: 48,
-  /** Nominal game milliseconds one session may advance in total. */
-  maxTotalNominalMs: 60_000,
-  /** Persisted screenshots one session may keep. One per act. */
-  maxImages: 24,
-  /** Serialized trace bytes one session may keep. */
-  maxTraceBytes: 256 * 1024,
   /** Wall time a session may stay open before it is expired and saved. */
   wallTtlMs: 20 * 60_000,
   /** Idle time before an untouched session is expired and saved. */
@@ -69,22 +55,6 @@ export const GameExploreStartInput = Schema.Struct({
   saves: Schema.optionalKey(GameSaves),
 });
 export type GameExploreStartInput = typeof GameExploreStartInput.Type;
-
-export const GameExploreStartResult = Schema.Struct({
-  sessionId,
-  /** The current source snapshot id. */
-  buildId: Schema.String,
-  sourceId: Schema.NullOr(Schema.String),
-  /** The project window every act plays in. */
-  viewport: GameViewport,
-  booted: Schema.Boolean,
-  bootMs: Schema.NullOr(Schema.Number),
-  message: Schema.String,
-  callsLeft: Schema.Int,
-  wallTtlMs: Schema.Int,
-  idleTtlMs: Schema.Int,
-});
-export type GameExploreStartResult = typeof GameExploreStartResult.Type;
 
 export const GameExploreUiStep = Schema.Struct({
   ui: Schema.Struct({
@@ -228,8 +198,6 @@ export const GameExploreActResult = Schema.Struct({
   consoleMessages: Schema.Array(GameConsoleMessage),
   consoleTruncated: Schema.Int,
   message: Schema.String,
-  callsLeft: Schema.Int,
-  totalNominalMs: Schema.Number,
 });
 export type GameExploreActResult = typeof GameExploreActResult.Type;
 
@@ -240,9 +208,7 @@ export const GameExploreCloseResult = Schema.Struct({
   sessionId,
   reason: Schema.String,
   actions: Schema.Int,
-  executedInputSteps: Schema.Int,
   totalNominalMs: Schema.Number,
-  images: Schema.Int,
   message: Schema.String,
 });
 export type GameExploreCloseResult = typeof GameExploreCloseResult.Type;

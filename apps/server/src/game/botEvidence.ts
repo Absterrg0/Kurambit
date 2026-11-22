@@ -1,13 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Bot evidence records are files the server owns.
 // The play bot's runs per thread: the skilled fact plays the game's latest one
 // (`latestPlay`). The bot service records each run here, under the server state
-// dir and outside every game folder, the way explore evidence is kept; the
-// game's .studio/bot-results.jsonl is a copy for people and decides nothing.
+// dir and outside every game folder; the game's .studio/bot-results.jsonl is a
+// copy for people and decides nothing.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import { writeFileStringAtomically } from "@kurambit/shared/atomicWrite";
-import { keyOf, recordPath } from "./exploreEvidence.ts";
 
 const BotRun = Schema.Struct({
   runId: Schema.String,
@@ -42,6 +42,19 @@ const encode = Schema.encodeSync(ThreadBotsJson);
 
 /** A call makes up to ten runs; far more than a turn's worth stays. */
 export const KEPT_RUNS = 100;
+
+/** Records untouched this long belong to runs long finished. */
+const RETAIN_MS = 14 * 24 * 60 * 60_000;
+
+/** One readable, collision-free file stem per thread id. */
+const keyOf = (threadId: string) =>
+  `${threadId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)}-${NodeCrypto.createHash("sha256")
+    .update(threadId)
+    .digest("hex")
+    .slice(0, 12)}`;
+
+export const recordPath = (dir: string, threadId: string) =>
+  NodePath.join(dir, `${keyOf(threadId)}.json`);
 
 export const empty = (threadId: string, root: string): ThreadBots => ({
   version: 1,
@@ -116,3 +129,16 @@ export const write = (dir: string, record: ThreadBots) =>
     filePath: recordPath(dir, record.threadId),
     contents: encode(record),
   });
+
+/** Removes records untouched for `RETAIN_MS`, and writes a crash cut short. */
+export const prune = async (dir: string, nowMs: number) => {
+  const names = await NodeFSP.readdir(dir).catch(() => [] as string[]);
+  for (const name of names) {
+    const file = NodePath.join(dir, name);
+    const stat = await NodeFSP.stat(file).catch(() => null);
+    if (stat === null || nowMs - stat.mtimeMs < RETAIN_MS) continue;
+    // A write cut short leaves a `.tmp` file (older servers) or the atomic writer's directory.
+    if (/\.(?:json|tmp)$/.test(name) || (stat.isDirectory() && /\.json\.[^.]+$/.test(name)))
+      await NodeFSP.rm(file, { recursive: true, force: true });
+  }
+};

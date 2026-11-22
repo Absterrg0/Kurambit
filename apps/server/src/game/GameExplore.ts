@@ -25,22 +25,14 @@ import {
   type GameEvalInput,
   type GameEvalResult,
   type GamePlayActInput,
-  GameExploreStartResult,
   GameExploreActResult,
   GameExploreCloseResult,
   type GameExploreStep,
-  type GameExploreInspection,
-  type GameExploreUiControl,
-  type GameExploreUiResult,
-  type GameConsoleMessage,
-  type GamePlaytestProbe,
-  type GameViewport,
   GamePlay,
 } from "@kurambit/contracts";
 import * as ServerConfig from "../config.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { runtimesFor } from "./gameRuntime.ts";
-import * as ExploreEvidence from "./exploreEvidence.ts";
 import * as GameEngine from "./GameEngine.ts";
 import * as GameMemoryGate from "./GameMemoryGate.ts";
 import type { MemoryRoom } from "./GameMemoryGate.ts";
@@ -56,7 +48,6 @@ import { keptSavesFor, keptWebStorage, writeKeptStorage } from "./gameKeptSaves.
 import { makeGameBrowser } from "./gameChromium.ts";
 import { openPagePlay, type PlayDidNotBoot, type PlayLaunch } from "./playLaunch.ts";
 import { WebBrowserGone, WebPageCrashed } from "./webPlaySession.ts";
-import { makeSourceIdentity } from "./sourceTree.ts";
 import { keepPlay } from "./playFiles.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 
@@ -87,9 +78,8 @@ const exploreStepsNominalMs = (steps: readonly GameExploreStep[]): number => {
 };
 
 /**
- * Bounded, persistent exploration sessions on the current game sources:
- * short act/observe cycles on one runner, with the frames and input each
- * thread spent kept as evidence. A session plays the game's page in headless
+ * Exploration sessions on the current game sources: short act/observe cycles
+ * on one runner. A session plays the game's page in headless
  * Chromium, speaking the play-session protocol (playSession.ts) an engine's
  * runner would speak too.
  * Descriptive only: a session never qualifies or passes quality.
@@ -97,14 +87,6 @@ const exploreStepsNominalMs = (steps: readonly GameExploreStep[]): number => {
 export class GameExplore extends Context.Service<
   GameExplore,
   {
-    readonly start: (
-      threadId: ThreadId,
-      input: typeof GameExploreStartInput.Type,
-    ) => Effect.Effect<typeof GameExploreStartResult.Type, GameOperationError>;
-    readonly act: (
-      threadId: ThreadId,
-      input: typeof GameExploreActInput.Type,
-    ) => Effect.Effect<typeof GameExploreActResult.Type, GameOperationError>;
     readonly close: (
       threadId: ThreadId,
       input: typeof GameExploreCloseInput.Type,
@@ -134,12 +116,15 @@ const make = Effect.gen(function* () {
   const gate = yield* GameMemoryGate.GameMemoryGate;
   const stateDir = (yield* ServerConfig.ServerConfig).stateDir;
   const templates = yield* GameTemplates.GameTemplates;
-  const evidenceDir = NodePath.join(stateDir, "explore-evidence");
   // Each session's pictures. Kept off the temp
   // dir (it may be RAM-backed) and gone with the session; none outlives a
   // restart, so whatever an earlier server left is removed now.
   const scratchBase = NodePath.join(stateDir, "game-explore");
   yield* Effect.promise(() => NodeFSP.rm(scratchBase, { recursive: true, force: true }));
+  // Per-thread play records earlier servers kept; nothing reads them now.
+  yield* Effect.promise(() =>
+    NodeFSP.rm(NodePath.join(stateDir, "explore-evidence"), { recursive: true, force: true }),
+  );
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const fileServices = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
@@ -164,68 +149,25 @@ const make = Effect.gen(function* () {
         detail: `The game did not boot: ${error.detail}`.slice(0, 4000),
       }),
     );
-  const startedMs = yield* Clock.currentTimeMillis;
-  yield* Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, startedMs)).pipe(
-    Effect.catchCause((cause) => Effect.logWarning("Pruning explore evidence failed.", { cause })),
-  );
-  const identify = yield* makeSourceIdentity;
-  const snapshot = (root: string, project: string) => identify(root, project);
   interface ExploreSession {
     readonly id: string;
     readonly root: string;
     readonly threadId: ThreadId;
-    readonly buildId: string;
-    readonly sourceId: string | null;
-    readonly viewport: GameViewport;
-    /** Honest boot timing, frozen with the session. */
-    readonly bootMs: number | null;
+    /** Each act's picture; removed on close. */
     readonly traceDir: string;
     readonly play: PlaySession;
     /** Ends what the launch started (browser page, served folder), after the session closed. */
     readonly release: Effect.Effect<void>;
-    /** Removed on close; pictures in the trace dir stay as evidence. */
-    readonly scratch: ReadonlyArray<string>;
     readonly lock: Semaphore.Semaphore;
     lastActiveMs: number;
     readonly wallDeadlineMs: number;
+    /** Acts started, the failed one included. */
     calls: number;
-    totalSteps: number;
     totalNominalMs: number;
-    images: number;
-    /**
-     * Budgets granted: the session's acts, steps, input time and pictures are this many times
-     * GAME_EXPLORE_BOUNDS'. A start on the thread's own open session grants another, so a run
-     * longer than one budget plays to its end.
-     */
-    budgets: number;
-    readonly actions: ExploreActAction[];
     closed: boolean;
-    closeReason: string | null;
-    closedAt: string | null;
     /** How the game ended an act, when it did: the session's close reason. */
     endedBy: "unresponsive" | "crashed" | "host-lost" | null;
   }
-  interface ExploreActAction {
-    readonly index: number;
-    readonly steps: readonly GameExploreStep[];
-    readonly executedInputSteps: number;
-    readonly nominalMs: number;
-    readonly probe: GamePlaytestProbe | null;
-    readonly screenshot: string;
-    readonly consoleMessages: readonly GameConsoleMessage[];
-    readonly consoleTruncated: number;
-    readonly failure?: string;
-    readonly execution?: "unknown";
-    readonly screenText?: Record<string, string>;
-    readonly ui?: ReadonlyArray<GameExploreUiControl>;
-    readonly errors?: ReadonlyArray<{ readonly message: string; readonly where: string }>;
-    readonly uiResults?: ReadonlyArray<GameExploreUiResult>;
-    readonly inspections?: ReadonlyArray<GameExploreInspection>;
-    readonly screenshotReason?: string;
-  }
-  /** The acts a session ran: index 0 is the boot observation, not an act. */
-  const actsOf = (session: ExploreSession) =>
-    session.actions.filter((action) => action.index > 0).length;
   /** The control-tree fields of an observation, copied where the runner sent them. */
   const observedFields = (
     o: PlayObservation & Pick<Partial<PlayActObservation>, "uiResults" | "inspections">,
@@ -238,7 +180,6 @@ const make = Effect.gen(function* () {
       ? {}
       : { inspections: o.inspections.map((e) => ({ ...e, values: { ...e.values } })) }),
   });
-  const exploreScratchBase = () => scratchBase;
   const exploreInvalid = (path: string, detail: string) =>
     new GameOperationError({ operation: "Explore session", path, reason: "invalid-input", detail });
   /** What this session's runner cannot play, before any input goes out. */
@@ -283,9 +224,7 @@ const make = Effect.gen(function* () {
     }
     return issues;
   };
-  // Worktree judges own different roots; a session in one game must not
-  // consume another game's play budget. The thread lease still owns input.
-  // A root's entry is claimed in the same step that finds it free (a start's
+  // One session per game root; the thread lease owns its input. A root's entry is claimed in the same step that finds it free (a start's
   // placeholder), so two starts on one game never both open a session.
   const exploreLive = new Map<string, ExploreSession | "starting">();
   const liveSessions = () =>
@@ -295,120 +234,6 @@ const make = Effect.gen(function* () {
     room: MemoryRoom,
     start: Effect.Effect<A, E, R>,
   ) => gate.admit("Explore session", root, room, start);
-  // A write-through cache of the records under `evidenceDir`; a restart
-  // reloads them, so a sample's earlier play still counts. A record enters it
-  // only once it is on disk, so the cache never claims more than a restart reads.
-  const exploreEvidence = new Map<string, ExploreEvidence.ThreadEvidence>();
-  const evidenceLock = Semaphore.makeUnsafe(1);
-  const rememberEvidence = (record: ExploreEvidence.ThreadEvidence) => {
-    exploreEvidence.delete(record.threadId);
-    exploreEvidence.set(record.threadId, record);
-    if (exploreEvidence.size > 128) {
-      const oldest = exploreEvidence.keys().next().value;
-      if (oldest !== undefined) exploreEvidence.delete(oldest);
-    }
-  };
-  const evidenceError = (detail: string) => (cause: unknown) =>
-    new GameOperationError({
-      operation: "Explore evidence",
-      path: evidenceDir,
-      reason: "io",
-      detail,
-      cause,
-    });
-  /** On disk, then in the cache; a failed write fails whatever made it. */
-  const writeEvidence = (record: ExploreEvidence.ThreadEvidence) =>
-    fileServices(ExploreEvidence.write(evidenceDir, record)).pipe(
-      Effect.mapError(evidenceError("The thread's explore evidence could not be written.")),
-      Effect.tap(() => Effect.sync(() => rememberEvidence(record))),
-    );
-  /** The caller holds `evidenceLock`. */
-  const loadEvidence = (threadId: string, root: string) =>
-    Effect.gen(function* () {
-      const cached = exploreEvidence.get(threadId);
-      if (cached !== undefined) return cached;
-      const disk = yield* Effect.tryPromise({
-        try: () => ExploreEvidence.read(evidenceDir, threadId),
-        catch: evidenceError("The thread's explore evidence could not be read."),
-      });
-      if (disk === null) return ExploreEvidence.empty(threadId, root);
-      if (disk === "damaged") {
-        // Set aside, never overwritten: what it counted is lost, and the fresh
-        // record says so until the thread's next explore start.
-        const now = yield* Clock.currentTimeMillis;
-        const aside = yield* Effect.tryPromise({
-          try: () => ExploreEvidence.setAside(evidenceDir, threadId, now),
-          catch: evidenceError("A damaged explore record could not be moved aside."),
-        });
-        yield* Effect.logWarning("A thread's explore evidence was unreadable; it is kept aside.", {
-          threadId,
-          aside,
-        });
-        const fresh = { ...ExploreEvidence.empty(threadId, root), damaged: true };
-        yield* writeEvidence(fresh);
-        return fresh;
-      }
-      const record = ExploreEvidence.closeOrphans(
-        disk,
-        new Set(liveSessions().map((live) => live.id)),
-      );
-      if (record.sessions.some((s, i) => s !== disk.sessions[i])) yield* writeEvidence(record);
-      else rememberEvidence(record);
-      return record;
-    });
-  /** Records the session's play so far; called after its start, every act and its close. */
-  const persistSession = (session: ExploreSession) =>
-    evidenceLock.withPermits(1)(
-      Effect.gen(function* () {
-        const owner = String(session.threadId);
-        const record = yield* loadEvidence(owner, session.root);
-        const next = ExploreEvidence.upsert(record, {
-          id: session.id,
-          actions: actsOf(session),
-          executedInputSteps: session.actions.reduce(
-            (sum, action) => sum + action.executedInputSteps,
-            0,
-          ),
-          nominalMs: session.totalNominalMs,
-          images: session.images,
-          closed: session.closed,
-          closeReason: session.closeReason,
-        });
-        yield* writeEvidence(next);
-      }),
-    );
-  /** A session's bound: one budget's, times the budgets it was granted. */
-  const bound = (
-    session: ExploreSession,
-    key: "maxCalls" | "maxTotalSteps" | "maxTotalNominalMs" | "maxImages",
-  ) => GAME_EXPLORE_BOUNDS[key] * session.budgets;
-  const goOn = "the next act goes on with another budget; close ends it.";
-  const exploreBudget =
-    `This session holds ${GAME_EXPLORE_BOUNDS.maxCalls} acts and ` +
-    `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, about ` +
-    `${(GAME_EXPLORE_BOUNDS.maxTotalNominalMs / GAME_EXPLORE_BOUNDS.maxCalls / 1000).toFixed(1)} s per act.`;
-  // Weak players held ~0.8 s per step and ran out of acts at 13-30 s of a
-  // 60 s session even with acts-left shown; the seconds per remaining act
-  // that would spend the rest is the number they can act on.
-  const inputUsedBefore = (threadId: ThreadId, sessionId: string | null) => {
-    const record = exploreEvidence.get(String(threadId));
-    return record === undefined ? 0 : ExploreEvidence.totals(record, sessionId ?? "").nominalMs;
-  };
-  const explorePace = (session: ExploreSession) => {
-    const s = (ms: number) => (ms / 1000).toFixed(1);
-    const actsLeft = bound(session, "maxCalls") - session.calls;
-    const stepsLeft = bound(session, "maxTotalSteps") - session.totalSteps;
-    const earlierMs = inputUsedBefore(session.threadId, session.id);
-    const leftMs = bound(session, "maxTotalNominalMs") - session.totalNominalMs;
-    const used =
-      `input used: ${s(session.totalNominalMs)} s of this session's ` +
-      `${bound(session, "maxTotalNominalMs") / 1000} s` +
-      (earlierMs > 0 ? ` (${s(earlierMs + session.totalNominalMs)} s across your sessions)` : "");
-    if (actsLeft <= 0 || leftMs <= 0 || stepsLeft <= 0)
-      return `${used}; this budget is spent: ${goOn}`;
-    const perAct = Math.min(leftMs / actsLeft, GAME_EXPLORE_BOUNDS.maxSequenceMsPerCall);
-    return `${used}, ${s(leftMs)} s left over ${actsLeft} act(s) and ${stepsLeft} step(s): about ${s(perAct)} s of input per act spends it.`;
-  };
   /**
    * The runs the agent played to an end in the session, kept as the Stage keeps a person's, so
    * `game_play` op `save` can make one a test. Played on the folder as it was: no build.
@@ -443,8 +268,6 @@ const make = Effect.gen(function* () {
         if (session.closed) return null;
         yield* keepFinishedPlays(session);
         session.closed = true;
-        session.closeReason = reason;
-        session.closedAt = DateTime.formatIso(yield* DateTime.now);
         yield* Effect.promise(() => session.play.close()).pipe(
           Effect.andThen(session.release),
           Effect.catchCause((cause) =>
@@ -455,13 +278,8 @@ const make = Effect.gen(function* () {
           ),
         );
         if (exploreLive.get(session.root) === session) exploreLive.delete(session.root);
-        // Recorded first: a capped thread's kept frames are copied out of the
-        // scratch as it is persisted, and the scratch goes after.
-        const persisted = yield* persistSession(session).pipe(Effect.exit);
         yield* Effect.promise(() =>
-          Promise.all(
-            session.scratch.map((dir) => NodeFSP.rm(dir, { recursive: true, force: true })),
-          ),
+          NodeFSP.rm(session.traceDir, { recursive: true, force: true }),
         ).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Removing exploration scratch failed.", {
@@ -470,19 +288,13 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
-        if (persisted._tag === "Failure") return yield* Effect.failCause(persisted.cause);
         const result = {
           sessionId: session.id,
           reason,
-          actions: actsOf(session),
-          executedInputSteps: session.actions.reduce(
-            (sum, action) => sum + action.executedInputSteps,
-            0,
-          ),
+          actions: session.calls,
           totalNominalMs: session.totalNominalMs,
-          images: session.images,
           message:
-            `Exploration ${reason}: ${actsOf(session)} act(s), ` +
+            `Exploration ${reason}: ${session.calls} act(s), ` +
             `${session.totalNominalMs}ms nominal. ` +
             `This session never qualified the build.`,
         } satisfies typeof GameExploreCloseResult.Type;
@@ -522,96 +334,32 @@ const make = Effect.gen(function* () {
       );
     return null;
   };
-  interface OpenedPlay {
-    readonly play: PlaySession;
-    readonly release: Effect.Effect<void>;
-    readonly scratch: ReadonlyArray<string>;
-    readonly bootMs: number;
-  }
-  /** Registers an opened session and says what it is. */
+  /** Registers an opened session. */
   const exploreRegister = (
     threadId: ThreadId,
     root: string,
-    opened: OpenedPlay,
-    input: {
-      readonly id: string;
-      readonly traceDir: string;
-      readonly sourceId: string;
-      readonly viewport: GameViewport;
-      /** The kept save location, or null when the session started with no saved data. */
-      readonly saves: string | null;
-    },
+    input: Pick<ExploreSession, "id" | "traceDir" | "play" | "release">,
   ) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
-      const { play } = opened;
       const live: ExploreSession = {
-        id: input.id,
+        ...input,
         root,
         threadId,
-        buildId: input.sourceId,
-        sourceId: input.sourceId,
-        viewport: { ...input.viewport },
-        bootMs: opened.bootMs,
-        traceDir: input.traceDir,
-        play,
-        release: opened.release,
-        scratch: [...opened.scratch, input.traceDir],
         lock: Semaphore.makeUnsafe(1),
         lastActiveMs: now,
         wallDeadlineMs: now + GAME_EXPLORE_BOUNDS.wallTtlMs,
         calls: 0,
-        totalSteps: 0,
         totalNominalMs: 0,
-        images: 0,
-        budgets: 1,
-        actions: [],
         closed: false,
-        closeReason: null,
-        closedAt: null,
         endedBy: null,
       };
-      const boot = play.boot;
-      if (boot.probe !== null)
-        live.actions.push({
-          index: 0,
-          steps: [],
-          executedInputSteps: 0,
-          nominalMs: 0,
-          probe: {
-            gameState: { ...boot.probe.gameState },
-            player: boot.probe.player === null ? null : { ...boot.probe.player },
-          },
-          screenshot: "",
-          consoleMessages: [...(boot.consoleMessages ?? [])],
-          consoleTruncated: 0,
-          ...observedFields(boot),
-        });
       exploreLive.set(root, live);
-      const savesNote =
-        input.saves === null
-          ? ""
-          : `Saved data is kept in ${NodePath.relative(root, input.saves)}/: what this session saves, the next kept session reads. `;
-      return {
-        sessionId: input.id,
-        buildId: input.sourceId,
-        sourceId: input.sourceId,
-        viewport: { ...input.viewport },
-        booted: true,
-        bootMs: opened.bootMs,
-        message:
-          `Exploration session ${input.id.slice(0, 8)} opened on the current sources ${input.sourceId.slice(0, 12)} ` +
-          `at ${input.viewport.width}x${input.viewport.height} (real time: the game keeps running between calls). ` +
-          `${savesNote}${exploreBudget} Act with input steps${play.capabilities.has("ui") ? " plus ui and inspect steps" : ""}, then game_play op close. ` +
-          `This session never qualifies the build.`,
-        callsLeft: GAME_EXPLORE_BOUNDS.maxCalls,
-        wallTtlMs: GAME_EXPLORE_BOUNDS.wallTtlMs,
-        idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
-      } satisfies typeof GameExploreStartResult.Type;
+      return live;
     });
   /**
    * Opens a session on the current sources of a browser game: the static
-   * folder served over loopback, played in headless Chromium in real time.
+   * folder served over loopback, played in headless Chromium.
    */
   const exploreStartWeb = (
     threadId: ThreadId,
@@ -622,12 +370,6 @@ const make = Effect.gen(function* () {
       const manifest = yield* projects.read(root);
       const { backend, ctx } = yield* engines.context(root);
       const viewport = backend.profile.viewport;
-      const before = yield* snapshot(root, ctx.projectName);
-      if (before.kind !== "known")
-        return yield* exploreInvalid(
-          root,
-          "The game sources could not be identified before the web session ran; the result would not be current.",
-        );
       const bootTimeoutMs = input.bootTimeoutMs ?? 90_000;
       const browser = yield* gameBrowser("Explore session", root);
       const saves = yield* keptSavesFor({
@@ -637,7 +379,7 @@ const make = Effect.gen(function* () {
         operation: "Explore session",
       });
       const id = NodeCrypto.randomUUID();
-      const traceDir = NodePath.join(exploreScratchBase(), id);
+      const traceDir = NodePath.join(scratchBase, id);
       yield* Effect.tryPromise({
         try: () => NodeFSP.mkdir(traceDir, { recursive: true }),
         catch: (cause) =>
@@ -653,74 +395,21 @@ const make = Effect.gen(function* () {
         keptStorage: keptWebStorage(saves),
         runtimes: yield* runtimesFor(templates, manifest),
       }).pipe(Effect.catchTags({ PlayDidNotBoot: notBooted(root) }));
-      return yield* exploreRegister(
-        threadId,
-        root,
-        {
-          play: launched.play,
-          release: releaseOf(launched),
-          scratch: [],
-          bootMs: launched.bootMs,
-        },
-        { id, traceDir, sourceId: before.sourceId, viewport, saves },
-      );
+      return yield* exploreRegister(threadId, root, {
+        id,
+        traceDir,
+        play: launched.play,
+        release: releaseOf(launched),
+      });
     });
-  /**
-   * The thread's own open session, granted another budget: the game plays on where it is, so a
-   * run longer than one budget reaches its end, and its ending is kept for a test play.
-   */
-  const exploreContinue = (session: ExploreSession) =>
-    session.lock.withPermits(1)(
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        if (session.closed || now >= session.wallDeadlineMs)
-          return yield* exploreInvalid(
-            session.id,
-            "That exploration session is closed or expired; act without a sessionId to open a new one.",
-          );
-        session.budgets += 1;
-        session.lastActiveMs = now;
-        return {
-          sessionId: session.id,
-          buildId: session.buildId,
-          sourceId: session.sourceId,
-          viewport: { ...session.viewport },
-          booted: true,
-          bootMs: session.bootMs,
-          message: `Exploration session ${session.id.slice(0, 8)} goes on where the game is, with another budget; ${explorePace(session)}`,
-          callsLeft: bound(session, "maxCalls") - session.calls,
-          wallTtlMs: Math.max(0, session.wallDeadlineMs - now),
-          idleTtlMs: GAME_EXPLORE_BOUNDS.idleTtlMs,
-        } satisfies typeof GameExploreStartResult.Type;
-      }),
-    );
   const exploreStart = (threadId: ThreadId, input: typeof GameExploreStartInput.Type) =>
     Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
-      // The cache, else disk: right after a restart the cache is cold. A record
-      // found damaged before this start begins a fresh count now.
-      yield* evidenceLock.withPermits(1)(
-        Effect.gen(function* () {
-          const wasDamaged = exploreEvidence.get(String(threadId))?.damaged === true;
-          const record = yield* loadEvidence(String(threadId), root);
-          if (!wasDamaged || record.damaged !== true) return record;
-          const { damaged: _cleared, ...fresh } = record;
-          yield* writeEvidence(fresh);
-          return fresh;
-        }),
-      );
       const bootIssues = exploreCaptureIssues({ bootTimeoutMs: input.bootTimeoutMs });
       if (bootIssues.length > 0) return yield* exploreInvalid(root, bootIssues.join("\n"));
       // Claimed in the step that finds the game free: a second start on it is
       // refused at once, never after both opened a runner.
       const existing = exploreLive.get(root);
-      if (
-        existing !== undefined &&
-        existing !== "starting" &&
-        existing.threadId === threadId &&
-        !existing.closed
-      )
-        return yield* exploreContinue(existing);
       if (existing !== undefined)
         return yield* exploreInvalid(
           existing === "starting" ? root : existing.id,
@@ -730,23 +419,11 @@ const make = Effect.gen(function* () {
       const unclaim = Effect.sync(() => {
         if (exploreLive.get(root) === "starting") exploreLive.delete(root);
       });
-      return yield* Effect.gen(function* () {
-        const started = yield* withExploreRoom(
-          root,
-          EXPLORE_WEB_ROOM,
-          exploreStartWeb(threadId, root, input),
-        );
-        const live = exploreLive.get(root);
-        // A session whose start cannot be recorded is closed, not left open
-        // with nothing on disk to count it.
-        if (live !== undefined && live !== "starting" && live.id === started.sessionId)
-          yield* persistSession(live).pipe(
-            Effect.tapError(() =>
-              live.lock.withPermits(1)(exploreFinalize(live, "act-failed")).pipe(Effect.ignore),
-            ),
-          );
-        return started;
-      }).pipe(Effect.onExit(() => unclaim));
+      return yield* withExploreRoom(
+        root,
+        EXPLORE_WEB_ROOM,
+        exploreStartWeb(threadId, root, input),
+      ).pipe(Effect.onExit(() => unclaim));
     });
   /**
    * Runs one act through the session and keeps the picture the runner wrote,
@@ -813,20 +490,7 @@ const make = Effect.gen(function* () {
       const observed = observedFields(reply);
       const consoleMessages = [...(reply.consoleMessages ?? [])];
       const consoleTruncated = reply.consoleTruncated ?? 0;
-      session.actions.push({
-        index: callIndex,
-        steps: [...input.steps],
-        executedInputSteps: reply.executedInputSteps,
-        nominalMs,
-        probe,
-        screenshot: keptScreenshot,
-        consoleMessages,
-        consoleTruncated,
-        ...observed,
-        ...(screenshotReason === undefined ? {} : { screenshotReason }),
-      });
       session.totalNominalMs += nominalMs;
-      if (keptScreenshot !== "") session.images += 1;
       session.lastActiveMs = yield* Clock.currentTimeMillis;
       const uiResults = observed.uiResults ?? [];
       const received = uiResults.filter((result) => result.received).length;
@@ -839,40 +503,21 @@ const make = Effect.gen(function* () {
         screenshotPath:
           keptScreenshot === "" ? null : NodePath.join(session.traceDir, keptScreenshot),
         ...(screenshotReason === undefined ? {} : { screenshotReason }),
-        ...observedFields(reply),
+        ...observed,
         consoleMessages,
         consoleTruncated,
         message:
           `Act ${callIndex} ran ${input.steps.length} step(s) ` +
           `(${reply.executedInputSteps} input, +${nominalMs}ms nominal); ` +
           (uiResults.length > 0 ? `${received}/${uiResults.length} ui action(s) received; ` : "") +
-          `${explorePace(session)} ` +
           `This observation is descriptive only, never a verdict.`,
-        callsLeft: bound(session, "maxCalls") - callIndex,
-        totalNominalMs: session.totalNominalMs,
       } satisfies typeof GameExploreActResult.Type;
     }).pipe(
       Effect.onExit((exit) =>
         exit._tag === "Failure" && !session.closed
-          ? Effect.gen(function* () {
-              if (session.actions.some((action) => action.index === callIndex)) return;
-              session.actions.push({
-                index: callIndex,
-                steps: [...input.steps],
-                executedInputSteps: 0,
-                nominalMs: 0,
-                probe: null,
-                screenshot: "",
-                consoleMessages: [],
-                consoleTruncated: 0,
-                execution: "unknown",
-                failure:
-                  "Act failed or was interrupted after possible partial execution. Exact input progress is unknown.",
-              });
-              yield* exploreFinalize(session, session.endedBy ?? "act-failed").pipe(
-                Effect.ignore({ log: true }),
-              );
-            })
+          ? exploreFinalize(session, session.endedBy ?? "act-failed").pipe(
+              Effect.ignore({ log: true }),
+            )
           : Effect.void,
       ),
     );
@@ -888,7 +533,7 @@ const make = Effect.gen(function* () {
       const lease = exploreLease(session, root, threadId);
       if (lease !== null) return yield* lease;
       // Direct service callers bypass the tool schema, so the per-call shape
-      // is enforced here too, before any budget or browser work.
+      // is enforced here too, before any browser work.
       if (input.steps.length === 0 || input.steps.length > GAME_EXPLORE_BOUNDS.maxStepsPerCall)
         return yield* exploreInvalid(
           session.id,
@@ -926,24 +571,8 @@ const make = Effect.gen(function* () {
               `That exploration session ${reason}. Act without a sessionId to open a new one.`,
             );
           }
-          // Budgets are counted under the session lock so concurrent acts cannot each pass
-          // before either one accounts for itself. A spent budget is never a refusal: the game
-          // plays on where it is with another, as an act without a sessionId already does, so a
-          // run longer than one budget reaches its end without the agent losing its place.
-          const spent = () =>
-            session.calls >= bound(session, "maxCalls") ||
-            session.totalSteps + input.steps.length > bound(session, "maxTotalSteps") ||
-            session.totalNominalMs + nominalMs > bound(session, "maxTotalNominalMs") ||
-            session.images + 1 > bound(session, "maxImages");
-          if (spent()) session.budgets += 1;
-          const callIndex = session.calls + 1;
-          session.calls = callIndex;
-          session.totalSteps += input.steps.length;
-          return yield* exploreActOnce(session, input, callIndex, nominalMs).pipe(
-            // A failed act was recorded as it closed the session; a recorded act
-            // that cannot be persisted fails, so disk never falls behind.
-            Effect.tap(() => persistSession(session)),
-          );
+          session.calls += 1;
+          return yield* exploreActOnce(session, input, session.calls, nominalMs);
         }),
       );
     });
@@ -984,24 +613,6 @@ const make = Effect.gen(function* () {
   // Idle and wall-clock expiry without a caller; every act/close also
   // checks the same deadlines lazily.
   yield* scheduler.register("game-explore-expiry", yield* Scheduler.every(30_000, exploreReap));
-  // A server that runs for weeks never restarts to prune; once an hour.
-  yield* scheduler.register(
-    "game-explore-evidence",
-    yield* Scheduler.every(
-      3_600_000,
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        // Locked: a thread resuming mid-prune must not lose its fresh write.
-        yield* evidenceLock
-          .withPermits(1)(Effect.tryPromise(() => ExploreEvidence.prune(evidenceDir, now)))
-          .pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Pruning explore evidence failed.", { cause }),
-            ),
-          );
-      }),
-    ),
-  );
   /** The thread's open session on its game, else a new one opened with `start`'s options. */
   const sessionFor = (
     threadId: ThreadId,
@@ -1019,7 +630,7 @@ const make = Effect.gen(function* () {
         String(live.threadId) === String(threadId)
       )
         return live.id;
-      return (yield* exploreStart(threadId, start)).sessionId;
+      return (yield* exploreStart(threadId, start)).id;
     });
   const explorePlay = (threadId: ThreadId, input: GamePlayActInput) =>
     Effect.gen(function* () {
@@ -1057,8 +668,6 @@ const make = Effect.gen(function* () {
       return { sessionId, value: answered.value };
     });
   return GameExplore.of({
-    start: exploreStart,
-    act: exploreAct,
     close: exploreClose,
     play: explorePlay,
     evaluate: exploreEvaluate,
