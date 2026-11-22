@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 
 const PAIRING_TOKEN_PARAM = "token";
 
-export const readHashParams = (url: URL): URLSearchParams =>
+const readHashParams = (url: URL): URLSearchParams =>
   new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
 
 export class RemoteBackendUrlMissingError extends Schema.TaggedError<RemoteBackendUrlMissingError>()(

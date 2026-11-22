@@ -220,7 +220,6 @@ export type SidebarV2TopStatusKind =
   | "working";
 
 export { pinOrderKeyBetween } from "@kurambit/client-runtime/state/thread-sort";
-export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@kurambit/client-runtime/state/thread-sort";
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
