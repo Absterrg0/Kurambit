@@ -69,21 +69,3 @@ export function deriveThreadTurnSubagents(
   }
   return { runId, turnActive: activeRun !== null, subagents, liveCount, settledCount };
 }
-
-export function resolveSubagentPillSegment(
-  turn: ThreadTurnSubagents | null,
-): SubagentPillSegment | null {
-  if (turn === null) return null;
-  if (!turn.turnActive && turn.liveCount === 0) return null;
-  const total = turn.subagents.length;
-  if (turn.liveCount > 0) {
-    return {
-      label: `${turn.liveCount}/${total}`,
-      accessibilityLabel: `${turn.liveCount} of ${total} agents working`,
-    };
-  }
-  return {
-    label: `${total} done`,
-    accessibilityLabel: `${total} ${total === 1 ? "agent" : "agents"} done`,
-  };
-}

@@ -39,7 +39,6 @@ interface QueuedThreadShell {
  * such threads would be permanently unsettleable.
  */
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
-const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export function hasQueuedTurnStart(
   shell: QueuedThreadShell,
@@ -239,17 +238,6 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
   }
 
   return presets;
-}
-
-export function snoozeWakeLabel(snoozedUntil: string, options: { readonly now: string }): string {
-  const wakeMs = Date.parse(snoozedUntil);
-  const nowMs = Date.parse(options.now);
-  if (Number.isNaN(wakeMs) || Number.isNaN(nowMs)) return "now";
-  const remainingMs = wakeMs - nowMs;
-  if (remainingMs <= 0) return "now";
-  if (remainingMs < HOUR_MS) return `${Math.max(1, Math.ceil(remainingMs / 60_000))}m`;
-  if (remainingMs < DAY_MS) return `${Math.ceil(remainingMs / HOUR_MS)}h`;
-  return `${Math.ceil(remainingMs / DAY_MS)}d`;
 }
 
 export type CustomSnoozeInput =

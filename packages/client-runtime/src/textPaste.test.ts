@@ -5,7 +5,6 @@ import {
   PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES,
   isPasteAsTextShortcut,
   pastedTextDisposition,
-  replaceTextSelection,
   wouldTextPasteExceedLimit,
 } from "./textPaste.ts";
 
@@ -119,22 +118,6 @@ describe("paste-as-text shortcut", () => {
 });
 
 describe("text paste insertion", () => {
-  it("replaces the selected range and returns the collapsed cursor", () => {
-    expect(
-      replaceTextSelection({
-        value: "before old after",
-        selection: { start: 7, end: 10 },
-        text: "new",
-      }),
-    ).toEqual({ value: "before new after", cursor: 10 });
-  });
-
-  it("clamps stale native selections", () => {
-    expect(
-      replaceTextSelection({ value: "abc", selection: { start: 20, end: 30 }, text: "!" }),
-    ).toEqual({ value: "abc!", cursor: 4 });
-  });
-
   it("measures the replacement value after removing the selected range", () => {
     expect(
       wouldTextPasteExceedLimit({

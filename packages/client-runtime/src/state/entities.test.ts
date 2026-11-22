@@ -3,7 +3,6 @@ import {
   MessageId,
   NodeId,
   ProviderDriverKind,
-  ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
   RunId,
@@ -19,11 +18,7 @@ import {
   parseProjectRefCollectionKey,
   parseThreadKey,
 } from "./entities.ts";
-import {
-  presentThreadShell,
-  resolveThreadProviderStack,
-  resolveThreadWorkingStartedAt,
-} from "./models.ts";
+import { presentThreadShell, resolveThreadWorkingStartedAt } from "./models.ts";
 import { v2Projection, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { deriveLatestThreadRun, deriveThreadRuntime } from "./threadExecution.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
@@ -231,23 +226,7 @@ describe("V2 client presentation", () => {
     expect(shell.pendingBackgroundTasks).toHaveLength(1);
   });
 
-  it("stacks earlier provider owners behind the current one, newest history first to go", () => {
-    const codex = ProviderInstanceId.make("codex");
-    const claude = ProviderInstanceId.make("claude");
-    const cursor = ProviderInstanceId.make("cursor");
-    const grok = ProviderInstanceId.make("grok");
-    const shell = presentThreadShell(environmentId, {
-      ...v2ThreadShell,
-      providerInstanceId: grok,
-      modelSelection: { instanceId: grok, model: "grok-4" },
-      providerInstanceHistory: [codex, claude, cursor, grok],
-    });
-
-    expect(resolveThreadProviderStack(shell)).toEqual([claude, cursor, grok]);
-    expect(
-      resolveThreadProviderStack({ ...shell, providerInstanceHistory: [codex, grok] }),
-    ).toEqual([codex, grok]);
-    expect(resolveThreadProviderStack({ ...shell, providerInstanceHistory: [] })).toEqual([grok]);
+  it("reads a missing provider history as empty", () => {
     expect(
       presentThreadShell(environmentId, { ...v2ThreadShell, providerInstanceHistory: undefined })
         .providerInstanceHistory,

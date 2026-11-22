@@ -9,7 +9,7 @@ import {
 } from "@kurambit/contracts";
 import * as DateTime from "effect/DateTime";
 
-import { deriveThreadTurnSubagents, resolveSubagentPillSegment } from "./threadSubagents.ts";
+import { deriveThreadTurnSubagents } from "./threadSubagents.ts";
 
 const at = (iso: string) => DateTime.makeUnsafe(iso);
 
@@ -118,7 +118,6 @@ describe("deriveThreadTurnSubagents", () => {
     });
 
     expect(turn?.subagents.map((entry) => entry.id)).toEqual(["bg-103", "bg-105", "bg-107"]);
-    expect(resolveSubagentPillSegment(turn)?.label).toBe("3/3");
   });
 
   it("keeps the active turn's roster and adds a live agent from an earlier turn", () => {
@@ -139,7 +138,6 @@ describe("deriveThreadTurnSubagents", () => {
     expect(turn?.runId).toBe("run-1");
     expect(turn?.turnActive).toBe(true);
     expect(turn?.subagents.map((entry) => entry.id)).toEqual(["background", "working", "done"]);
-    expect(resolveSubagentPillSegment(turn)?.label).toBe("2/3");
   });
 
   it("leaves out a live agent whose turn was rolled back", () => {
@@ -196,7 +194,6 @@ describe("deriveThreadTurnSubagents", () => {
     });
 
     expect(turn?.subagents.map((entry) => entry.id)).toEqual(["member-0", "member-1"]);
-    expect(resolveSubagentPillSegment(turn)?.label).toBe("1/2");
   });
 
   it("counts idle as neither working nor done", () => {
@@ -212,54 +209,5 @@ describe("deriveThreadTurnSubagents", () => {
     expect(turn?.liveCount).toBe(1);
     expect(turn?.settledCount).toBe(1);
     expect(turn?.subagents).toHaveLength(3);
-  });
-});
-
-describe("resolveSubagentPillSegment", () => {
-  it("shows how many of the turn's agents are still working", () => {
-    const turn = deriveThreadTurnSubagents({
-      runs: [activeRun],
-      subagents: [
-        subagent({ id: "a", status: "running" }),
-        subagent({ id: "b", status: "waiting" }),
-        subagent({ id: "c", status: "completed" }),
-      ],
-    });
-
-    expect(resolveSubagentPillSegment(turn)).toEqual({
-      label: "2/3",
-      accessibilityLabel: "2 of 3 agents working",
-    });
-  });
-
-  it("reports the finished roster while the turn is still running", () => {
-    const turn = deriveThreadTurnSubagents({
-      runs: [activeRun],
-      subagents: [subagent({ id: "a", status: "completed" })],
-    });
-
-    expect(resolveSubagentPillSegment(turn)).toEqual({
-      label: "1 done",
-      accessibilityLabel: "1 agent done",
-    });
-  });
-
-  it("hides itself once the turn is over and nothing is working", () => {
-    const turn = deriveThreadTurnSubagents({
-      runs: [finishedRun],
-      subagents: [subagent({ id: "a", status: "completed" })],
-    });
-
-    expect(resolveSubagentPillSegment(turn)).toBeNull();
-    expect(resolveSubagentPillSegment(null)).toBeNull();
-  });
-
-  it("stays visible after the turn ends while an agent is still working", () => {
-    const turn = deriveThreadTurnSubagents({
-      runs: [finishedRun],
-      subagents: [subagent({ id: "a", status: "running" })],
-    });
-
-    expect(resolveSubagentPillSegment(turn)?.label).toBe("1/1");
   });
 });

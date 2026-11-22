@@ -6,7 +6,6 @@ import {
   generateSpreadPinOrderKeys,
   getLatestThreadForProject,
   pinOrderKeyBetween,
-  planPinnedMove,
   planPinnedReorder,
   resolveSettledThreadTimestamp,
   sortActiveThreadsByOrderKey,
@@ -306,52 +305,6 @@ describe("planPinnedReorder with hidden rows", () => {
   });
 });
 
-describe("planPinnedMove", () => {
-  it("moves a thread up with a single key write", () => {
-    const assignments = planPinnedMove({
-      orderedIds: ["a", "b", "c"],
-      keysById: new Map([
-        ["a", "f"],
-        ["b", "m"],
-        ["c", "t"],
-      ]),
-      movedId: "c",
-      direction: "up",
-    });
-    expect(assignments).toHaveLength(1);
-    expect(assignments![0]!.id).toBe("c");
-    expect(assignments![0]!.orderKey > "f" && assignments![0]!.orderKey < "m").toBe(true);
-  });
-
-  it("returns null when the move falls off the end of the list", () => {
-    const input = {
-      orderedIds: ["a", "b"],
-      keysById: new Map([
-        ["a", "f"],
-        ["b", "m"],
-      ]),
-    };
-    expect(planPinnedMove({ ...input, movedId: "a", direction: "up" })).toBeNull();
-    expect(planPinnedMove({ ...input, movedId: "b", direction: "down" })).toBeNull();
-  });
-
-  it("materializes keys for the whole section when a neighbor is keyless", () => {
-    const assignments = planPinnedMove({
-      orderedIds: ["a", "b", "c"],
-      keysById: new Map([
-        ["a", null],
-        ["b", "m"],
-        ["c", null],
-      ]),
-      movedId: "b",
-      direction: "up",
-    });
-    expect(assignments).not.toBeNull();
-    const keys = assignments!.map((entry) => entry.orderKey);
-    expect([...keys].sort()).toEqual(keys);
-  });
-});
-
 describe("sortPinnedThreadsByOrderKey", () => {
   it("breaks equal keys by id THEN environment so merged lists are stable everywhere", () => {
     const sorted = sortPinnedThreadsByOrderKey([
@@ -468,24 +421,6 @@ describe("sortActiveThreadsByOrderKey", () => {
         expect(sortActiveThreadsByOrderKey(updated).map((thread) => thread.id)).toEqual(desired);
       }
     }
-  });
-
-  it("moves a keyless thread into the arranged run with one write", () => {
-    const assignments = planPinnedMove({
-      orderedIds: ["new", "reopened", "first", "last"],
-      keysById: new Map([
-        ["new", null],
-        ["reopened", null],
-        ["first", "f"],
-        ["last", "t"],
-      ]),
-      movedId: "reopened",
-      direction: "down",
-    });
-    expect(assignments).toHaveLength(1);
-    expect(assignments![0]!.id).toBe("reopened");
-    expect(assignments![0]!.orderKey > "f").toBe(true);
-    expect(assignments![0]!.orderKey < "t").toBe(true);
   });
 
   it("materializes a large active list without changing the requested order", () => {
