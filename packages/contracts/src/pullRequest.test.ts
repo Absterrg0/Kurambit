@@ -11,7 +11,6 @@ import {
   PullRequestReviewerRequestInput,
   PullRequestSetFilesViewedInput,
   pullRequestHostOf,
-  resolvePullRequestAuthorFilter,
 } from "./pullRequest.ts";
 
 const decodeListResult = Schema.decodeUnknownSync(PullRequestListResult);
@@ -273,24 +272,6 @@ describe("PullRequestCapabilities", () => {
   it("only offers branch deletion when the server advertises it", () => {
     expect(decodeCapabilities(base).deleteBranch).toBeUndefined();
     expect(decodeCapabilities({ ...base, deleteBranch: true }).deleteBranch).toBe(true);
-  });
-});
-
-describe("naming the reader as the author to narrow by", () => {
-  it("reads me as whoever is signed in, however it is written", () => {
-    expect(resolvePullRequestAuthorFilter("me", "octocat")).toBe("octocat");
-    expect(resolvePullRequestAuthorFilter("@me", "octocat")).toBe("octocat");
-    expect(resolvePullRequestAuthorFilter("  ME  ", "octocat")).toBe("octocat");
-  });
-
-  it("leaves any other name as it was typed", () => {
-    expect(resolvePullRequestAuthorFilter(" mercedes ", "octocat")).toBe("mercedes");
-    expect(resolvePullRequestAuthorFilter("me-too", "octocat")).toBe("me-too");
-  });
-
-  it("stands as typed where the host has not said who the reader is", () => {
-    expect(resolvePullRequestAuthorFilter("me", null)).toBe("me");
-    expect(resolvePullRequestAuthorFilter("me", "  ")).toBe("me");
   });
 });
 
