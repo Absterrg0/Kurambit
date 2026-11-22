@@ -16,8 +16,6 @@ import {
 } from "@kurambit/shared/projectSettings";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 
-import type { ResolvedSettingsScope } from "./settingsScope";
-
 export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   return {
     ...(typeof raw.environmentId === "string" && raw.environmentId.trim()

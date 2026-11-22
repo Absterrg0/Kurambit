@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
-import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as NodeOS from "node:os";
 
 import { assert, expect, it } from "@effect/vitest";

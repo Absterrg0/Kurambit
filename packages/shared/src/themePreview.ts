@@ -75,5 +75,3 @@ export const THEME_PREVIEW_RENDER_SPECS: Readonly<Record<ThemeAppearance, ThemeP
       blurAt56Px: 3,
     },
   };
-
-type Oklab = Readonly<{ l: number; a: number; b: number }>;
