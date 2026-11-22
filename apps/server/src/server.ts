@@ -539,7 +539,8 @@ const layerGameOperations = GameStage.layer.pipe(
   Layer.provideMerge(GameExport.layer),
   Layer.provideMerge(GameEngine.layer),
   Layer.provideMerge(GameBlender.layer),
-  Layer.provide(GameFreshEyes.layer),
+  // Blender's looks and game_check's frames both show pictures to fresh eyes.
+  Layer.provideMerge(GameFreshEyes.layer),
   // After the editors, so every heavy start, editor opens included, shares one gate.
   Layer.provide(GameMemoryGate.layer),
   Layer.provideMerge(GameAssetLibrary.layer),

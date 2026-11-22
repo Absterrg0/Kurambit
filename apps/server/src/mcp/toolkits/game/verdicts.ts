@@ -64,7 +64,10 @@ const check =
     return {
       line: numbers.join(" · "),
       findings: [...errors.map(issueLine), ...problems, ...(final ? scene : [])],
-      notes: final ? firstMinute(answer) : [],
+      notes: [
+        ...(final ? firstMinute(answer) : []),
+        ...(typeof answer.fresh === "string" ? answer.fresh.split("\n") : []),
+      ],
       ...(next === undefined ? {} : { next }),
       said: [
         "errors",
@@ -74,6 +77,7 @@ const check =
         "scene.lines",
         "player.report",
         "stageMinutes",
+        "fresh",
       ],
     };
   };

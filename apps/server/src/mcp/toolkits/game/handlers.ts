@@ -57,6 +57,7 @@ import { GameCaller } from "../../../game/GameCaller.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
+import * as GameFreshEyes from "../../../game/GameFreshEyes.ts";
 import * as GameProjectService from "../../../game/GameProjectService.ts";
 import * as GameRunControl from "../../../game/GameRunControl.ts";
 import * as GameStatusService from "../../../game/GameStatusService.ts";
@@ -197,6 +198,8 @@ const GameCheckAnswer = Schema.Struct({
   review: Schema.optionalKey(Schema.String),
   /** Minutes from the game's creation to the first build (or this check) that moved. */
   stageMinutes: Schema.optionalKey(Schema.Number),
+  /** With fresh: a separate model's view of the frames' biggest visible problems. */
+  fresh: Schema.optionalKey(Schema.String),
 });
 
 const png = (bytes: Buffer) => ({
@@ -259,7 +262,7 @@ const stageMinutes = (store: CheckpointStore["Service"], root: string, moves: bo
  * game has a reference picture, play's frame comes stacked above it at the same size, every check:
  * matching a picture is a loop of looks, and each look needs both.
  */
-const check = (store: CheckpointStore["Service"], final: boolean) =>
+const check = (store: CheckpointStore["Service"], final: boolean, fresh = false) =>
   Effect.gen(function* () {
     const result = yield* withGame(GameEngine.GameEngine, (engines, threadId) =>
       engines.check(threadId, undefined, { final }),
@@ -271,7 +274,10 @@ const check = (store: CheckpointStore["Service"], final: boolean) =>
     const minutes = final ? yield* stageMinutes(store, root, moved) : undefined;
     const measured = minutes === undefined ? result : { ...result, stageMinutes: minutes };
     const views = result.views ?? [];
-    if (views.length === 0) return measured;
+    if (views.length === 0)
+      return fresh
+        ? { ...measured, fresh: "Fresh eyes need a frame, and this check made none." }
+        : measured;
     const reference = yield* gameReference(root);
     const screenshots = yield* Effect.promise(() =>
       Promise.all(
@@ -287,12 +293,27 @@ const check = (store: CheckpointStore["Service"], final: boolean) =>
       ),
     );
     const shown = screenshots.filter((shot) => shot !== null);
-    const session = (yield* caller).thread.providerSessionId;
+    const scope = yield* caller;
+    const session = scope.thread.providerSessionId;
+    // The frames themselves, never the reference stacked on them: fresh eyes judge the game as a
+    // player sees it, against the brief.
+    const seen = fresh
+      ? yield* (yield* GameFreshEyes.GameFreshEyes).review({
+          threadId: scope.thread.threadId,
+          root,
+          images: views.map((view) => NodePath.join(root, view.path)),
+          about:
+            views.length > 1 && views[0]?.entry === "boot"
+              ? "a browser game: first the page as a player opens it, then a moment of play"
+              : "a moment of play in a browser game",
+        })
+      : undefined;
     // A brief alone needs no words beside the frames; a reference says which picture is which.
     const review = shown.length > 0 && reference !== null && firstReview(session);
     return {
       ...measured,
       ...(shown.length === 0 ? {} : { screenshots: shown }),
+      ...(seen === undefined ? {} : { fresh: seen }),
       ...(review
         ? {
             review: `${views[0]?.entry === "boot" && shown.length > 1 ? REVIEW.openingReview : ""}${REVIEW.frameReview}`,
@@ -323,7 +344,7 @@ const checkHandlers = (store: CheckpointStore["Service"]) =>
         "game_check",
         input,
         {
-          look: () => check(store, false),
+          look: (look) => check(store, false, look?.fresh === true),
           // The critique is read back from this call's input by keep going (GameRunStepRunner).
           final: () =>
             check(store, true).pipe(
