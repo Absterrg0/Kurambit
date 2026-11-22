@@ -78,13 +78,11 @@ import {
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
   resolveDraftPromotionNavigationTarget,
-  resolveEffectiveInteractionMode,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldShowPlanFollowUpPrompt,
-  shouldWriteThreadErrorToCurrentServerThread,
   waitForRevertedMessage,
 } from "./ChatView.logic";
 
@@ -214,28 +212,6 @@ describe("resolveDraftPromotionNavigationTarget", () => {
         backgroundSubmissionPending: true,
       }),
     ).toBeNull();
-  });
-});
-
-describe("resolveEffectiveInteractionMode", () => {
-  it("forces build mode when legacy plan mode is disabled", () => {
-    expect(
-      resolveEffectiveInteractionMode({
-        planModeEnabled: false,
-        composerInteractionMode: "plan",
-        threadInteractionMode: "plan",
-      }),
-    ).toBe("default");
-  });
-
-  it("uses the saved mode while legacy plan mode is enabled", () => {
-    expect(
-      resolveEffectiveInteractionMode({
-        planModeEnabled: true,
-        composerInteractionMode: null,
-        threadInteractionMode: "plan",
-      }),
-    ).toBe("plan");
   });
 });
 
@@ -533,27 +509,6 @@ describe("reconcileMountedTerminalThreadIds", () => {
         activeThreadTerminalOpen: false,
       }),
     ).toEqual(ids.slice(-MAX_HIDDEN_MOUNTED_TERMINAL_THREADS));
-  });
-});
-
-describe("shouldWriteThreadErrorToCurrentServerThread", () => {
-  it("requires the environment, route thread, and target thread to match", () => {
-    const routeThreadRef = { environmentId, threadId };
-
-    expect(
-      shouldWriteThreadErrorToCurrentServerThread({
-        serverThread: { environmentId, id: threadId },
-        routeThreadRef,
-        targetThreadId: threadId,
-      }),
-    ).toBe(true);
-    expect(
-      shouldWriteThreadErrorToCurrentServerThread({
-        serverThread: null,
-        routeThreadRef,
-        targetThreadId: threadId,
-      }),
-    ).toBe(false);
   });
 });
 

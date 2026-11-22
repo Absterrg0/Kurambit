@@ -1,9 +1,4 @@
-import type {
-  EnvironmentId,
-  ServerConfig,
-  ServerInstallation,
-  ServerSelfUpdateCapability,
-} from "@kurambit/contracts";
+import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from "@kurambit/contracts";
 import type { ServerUpdateState } from "@kurambit/client-runtime/state/server";
 import { compareSemverVersions, parseSemver } from "@kurambit/shared/semver";
 import * as Schema from "effect/Schema";
@@ -101,19 +96,6 @@ export function supportsServerUpdateThreadContinuation(
   return serverConfig?.environment.capabilities.serverUpdateThreadContinuation === true;
 }
 
-export function manualServerUpdateCommand(
-  targetVersion: string,
-  installation?: ServerInstallation,
-): string {
-  if (installation?.kind === "npm-global") {
-    const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
-    return `npm install --global --prefix ${prefix} kurambit@${targetVersion}`;
-  }
-  const runner =
-    installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";
-  return `${runner} kurambit@${targetVersion}`;
-}
-
 export function serverUpdateGuidance(capability: ServerSelfUpdateCapability): string {
   return capability === "desktop-managed" ? "Update the desktop app" : "Update to stay in sync";
 }
@@ -169,18 +151,4 @@ export function dismissVersionMismatch(dismissalKey: string | null | undefined):
   writeVersionMismatchDismissals({
     keys: [...document.keys, dismissalKey],
   });
-}
-
-export function appendVersionMismatchHint(
-  message: string | null | undefined,
-  mismatch: VersionMismatch | null | undefined,
-): string | null {
-  const normalizedMessage = normalizeVersion(message);
-  if (!normalizedMessage) {
-    return mismatch?.hint ?? null;
-  }
-  if (!mismatch) {
-    return normalizedMessage;
-  }
-  return `${normalizedMessage} Hint: ${mismatch.hint}`;
 }

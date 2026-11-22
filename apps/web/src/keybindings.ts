@@ -11,11 +11,9 @@ import {
 import {
   isMacPlatform,
   matchesKeybindingShortcut,
-  matchesKeybindingShortcutModifiers,
   normalizeEventKey,
   resolveEventKeys,
   type ShortcutEventLike,
-  type ShortcutModifierStateLike,
 } from "@kurambit/shared/keybindings";
 import { isElectron } from "./env";
 import { projectScriptIdFromCommand } from "./projectScripts";
@@ -268,10 +266,6 @@ export function simplestShortcutLabelForCommand(
   return simplest ? formatShortcutLabel(simplest, resolvePlatform(undefined)) : null;
 }
 
-export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
-  return THREAD_JUMP_KEYBINDING_COMMANDS[index] ?? null;
-}
-
 export function threadJumpIndexFromCommand(command: string): number | null {
   const index = THREAD_JUMP_KEYBINDING_COMMANDS.indexOf(command as ThreadJumpKeybindingCommand);
   return index === -1 ? null : index;
@@ -283,31 +277,6 @@ export function threadTraversalDirectionFromCommand(
   if (command === "thread.previous") return "previous";
   if (command === "thread.next") return "next";
   return null;
-}
-
-export function shouldShowThreadJumpHintsForModifiers(
-  modifiers: ShortcutModifierStateLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): boolean {
-  // The embedded terminal owns keystrokes while it has focus: the Ghostty surface encodes the
-  // keydown and can write the pressed key into the shell before our window-level shortcut handling
-  // ever runs, regardless of any configured `when` clause on the jump command.
-  if (resolveContext(options).terminalFocus) {
-    return false;
-  }
-
-  const platform = resolvePlatform(options);
-
-  for (const command of THREAD_JUMP_KEYBINDING_COMMANDS) {
-    const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
-    if (!shortcut) continue;
-    if (matchesKeybindingShortcutModifiers(modifiers, shortcut, platform)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 export function modelPickerJumpCommandForIndex(

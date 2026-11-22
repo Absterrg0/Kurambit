@@ -12,7 +12,6 @@ import {
   buildProviderInstanceOverridePatch,
   classifyProviderEnvironmentAccess,
   isProviderSettingsEnvironmentAvailable,
-  resolvePrimaryOperateAccess,
   resolveRemoteOperateAccess,
   resolveSelectedProviderEnvironmentId,
 } from "./ProviderSettingsPanel.logic";
@@ -137,100 +136,6 @@ describe("provider environment access", () => {
         operateAccess: "granted",
       }),
     ).toEqual({ kind: "error" });
-  });
-});
-
-describe("primary operate access", () => {
-  const authenticated = {
-    authenticated: true as const,
-    scopes: [AuthProvidersManageScope],
-  };
-
-  it("keeps cached session data authoritative while SWR revalidates", () => {
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: false,
-        session: authenticated,
-        isPending: true,
-        hasError: false,
-      }),
-    ).toBe("granted");
-  });
-
-  it("reports pending only before any session has resolved", () => {
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: false,
-        session: null,
-        isPending: true,
-        hasError: false,
-      }),
-    ).toBe("pending");
-  });
-
-  it("denies writes when the session fetch fails", () => {
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: false,
-        session: null,
-        isPending: false,
-        hasError: true,
-      }),
-    ).toBe("denied");
-  });
-
-  it("denies unauthenticated sessions and sessions without the operate scope", () => {
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: false,
-        session: { authenticated: false },
-        isPending: false,
-        hasError: false,
-      }),
-    ).toBe("denied");
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: false,
-        session: { authenticated: true, scopes: ["orchestration:read"] },
-        isPending: false,
-        hasError: false,
-      }),
-    ).toBe("denied");
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: false,
-        session: null,
-        isPending: false,
-        hasError: false,
-      }),
-    ).toBe("denied");
-  });
-
-  it("waits for explicit grants on desktop and remote environments", () => {
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: true,
-        hasDesktopBridge: true,
-        session: null,
-        isPending: true,
-        hasError: false,
-      }),
-    ).toBe("pending");
-    expect(
-      resolvePrimaryOperateAccess({
-        isPrimary: false,
-        hasDesktopBridge: false,
-        session: null,
-        isPending: true,
-        hasError: false,
-      }),
-    ).toBe("pending");
   });
 });
 

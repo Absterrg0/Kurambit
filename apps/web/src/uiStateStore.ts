@@ -340,19 +340,6 @@ function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMetho
     : { ...state, pullRequestMergeMethod: method };
 }
 
-export function resolveProjectExpanded(
-  projectExpandedById: Readonly<Record<string, boolean>>,
-  preferenceKeys: readonly string[],
-): boolean {
-  for (const key of preferenceKeys) {
-    const expanded = projectExpandedById[key];
-    if (expanded !== undefined) {
-      return expanded;
-    }
-  }
-  return projectExpandedById[LEGACY_PROJECT_EXPANSION_DEFAULT_KEY] ?? true;
-}
-
 export function setProjectExpanded(
   state: UiState,
   projectIds: string | readonly string[],

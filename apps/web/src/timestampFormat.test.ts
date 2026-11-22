@@ -2,14 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   formatDayAwareTimestamp,
-  formatElapsedDurationLabel,
-  formatExpiresInLabel,
   formatRelativeTime,
   formatRelativeTimeLabel,
   formatRelativeTimeUntil,
   formatRelativeTimeUntilLabel,
   formatShortTimestamp,
-  formatTimestamp,
   formatUpcomingTimestamp,
   msUntilRelativeTimeChange,
   relativeTimeElapsedMs,
@@ -126,35 +123,6 @@ describe("formatRelativeTimeUntilLabel", () => {
   });
 });
 
-describe("formatExpiresInLabel", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("returns Expired when the instant is in the past", () => {
-    expect(formatExpiresInLabel("2026-04-07T11:59:00.000Z")).toBe("Expired");
-  });
-
-  it("uses sub-minute second count", () => {
-    expect(formatExpiresInLabel("2026-04-07T12:00:45.000Z")).toBe("Expires in 45s");
-  });
-
-  it("uses minutes and seconds under one hour", () => {
-    expect(formatExpiresInLabel("2026-04-07T12:04:12.000Z")).toBe("Expires in 4m 12s");
-    expect(formatExpiresInLabel("2026-04-07T12:15:00.000Z")).toBe("Expires in 15m");
-  });
-
-  it("uses hours with minute and second remainder", () => {
-    expect(formatExpiresInLabel("2026-04-07T14:02:03.000Z")).toBe("Expires in 2h 2m 3s");
-    expect(formatExpiresInLabel("2026-04-07T18:00:00.000Z")).toBe("Expires in 6h");
-  });
-});
-
 describe("formatDayAwareTimestamp", () => {
   // Instants are built with the local-time Date constructor so the
   // calendar-day boundaries hold in any test timezone or locale.
@@ -241,10 +209,6 @@ describe("formatUpcomingTimestamp", () => {
 });
 
 describe("invalid timestamp inputs", () => {
-  it("returns an empty timestamp instead of throwing", () => {
-    expect(formatTimestamp("not-a-date", "12-hour")).toBe("");
-  });
-
   it("returns an empty short timestamp instead of throwing", () => {
     expect(formatShortTimestamp("not-a-date", "12-hour")).toBe("");
   });
@@ -259,17 +223,9 @@ describe("invalid timestamp inputs", () => {
     expect(msUntilRelativeTimeChange("not-a-date")).toBeNull();
   });
 
-  it("returns an empty elapsed duration instead of a NaN label", () => {
-    expect(formatElapsedDurationLabel("not-a-date")).toBe("");
-  });
-
   it("returns an empty relative time until label instead of a NaN label", () => {
     expect(formatRelativeTimeUntil("not-a-date")).toBeNull();
     expect(formatRelativeTimeUntilLabel("not-a-date")).toBe("");
-  });
-
-  it("returns an empty expires-in label instead of a NaN label", () => {
-    expect(formatExpiresInLabel("not-a-date")).toBe("");
   });
 });
 
@@ -296,28 +252,5 @@ describe("relative time boundaries", () => {
     expect(relativeTimeElapsedMs(at, nowMs)).toBe(2 * 60_000);
     expect(relativeTimeElapsedMs(at, nowMs + 29_999)).toBe(2 * 60_000);
     expect(relativeTimeElapsedMs(at, nowMs + 30_000)).toBe(3 * 60_000);
-  });
-});
-
-describe("formatElapsedDurationLabel", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("returns just now when the instant is current or in the future", () => {
-    expect(formatElapsedDurationLabel("2026-04-07T12:00:00.000Z")).toBe("just now");
-    expect(formatElapsedDurationLabel("2026-04-07T12:01:00.000Z")).toBe("just now");
-  });
-
-  it("formats seconds, minutes, hours, and days", () => {
-    expect(formatElapsedDurationLabel("2026-04-07T11:59:45.000Z")).toBe("15s");
-    expect(formatElapsedDurationLabel("2026-04-07T11:45:00.000Z")).toBe("15m");
-    expect(formatElapsedDurationLabel("2026-04-07T06:00:00.000Z")).toBe("6h");
-    expect(formatElapsedDurationLabel("2026-04-03T12:00:00.000Z")).toBe("4d");
   });
 });

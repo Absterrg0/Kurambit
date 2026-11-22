@@ -97,49 +97,6 @@ export function timelineContentOverflowsViewport(
   return lastBottom > visibleScrollLength;
 }
 
-export function getAnchoredTurnMetrics({
-  state,
-  anchorIndex,
-  composerOverlayHeight,
-  anchorOffset,
-}: {
-  readonly state: TimelineListMeasurementState;
-  readonly anchorIndex: number;
-  readonly composerOverlayHeight: number;
-  readonly anchorOffset: number;
-}): AnchoredTurnMetrics | null {
-  if (state.data.length === 0) {
-    return null;
-  }
-
-  const boundedAnchorIndex = Math.max(0, Math.min(anchorIndex, state.data.length - 1));
-  const anchorTop = state.positionAtIndex(boundedAnchorIndex);
-  const lastBottom = getRowBottom(state, state.data.length - 1);
-  if (typeof anchorTop !== "number" || !Number.isFinite(anchorTop) || lastBottom === null) {
-    return null;
-  }
-
-  const usableViewportHeight = Math.max(
-    0,
-    state.scrollLength - composerOverlayHeight - anchorOffset,
-  );
-  const turnHeight = Math.max(0, lastBottom - anchorTop);
-  const visibleUsableBottom = state.scroll + usableViewportHeight;
-  const targetScrollToRevealEnd = Math.max(0, lastBottom - usableViewportHeight);
-  const scrollDeltaToRevealEnd = Math.max(0, targetScrollToRevealEnd - state.scroll);
-
-  return {
-    anchorTop,
-    lastBottom,
-    turnHeight,
-    usableViewportHeight,
-    visibleUsableBottom,
-    overflowsUsableViewport: turnHeight > usableViewportHeight,
-    targetScrollToRevealEnd,
-    scrollDeltaToRevealEnd,
-  };
-}
-
 export interface RememberedTimelinePosition {
   readonly rowId: string;
   readonly offsetWithinRow: number;

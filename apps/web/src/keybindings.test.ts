@@ -27,12 +27,9 @@ import {
   isTerminalToggleShortcut,
   resolveChatShortcutCommand,
   resolveShortcutCommand,
-  shouldShowThreadJumpHintsForModifiers,
   shortcutLabelForCommand,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
-  threadJumpCommandForIndex,
-  threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
   type ShortcutEventLike,
 } from "./keybindings";
@@ -554,94 +551,11 @@ describe("shortcutLabelForCommand", () => {
 });
 
 describe("thread navigation helpers", () => {
-  it("maps jump commands to visible thread indices", () => {
-    assert.strictEqual(threadJumpCommandForIndex(0), "thread.jump.1");
-    assert.strictEqual(threadJumpCommandForIndex(2), "thread.jump.3");
-    assert.isNull(threadJumpCommandForIndex(9));
-    assert.strictEqual(threadJumpIndexFromCommand("thread.jump.1"), 0);
-    assert.strictEqual(threadJumpIndexFromCommand("thread.jump.3"), 2);
-    assert.isNull(threadJumpIndexFromCommand("thread.next"));
-  });
-
   it("maps traversal commands to directions", () => {
     assert.strictEqual(threadTraversalDirectionFromCommand("thread.previous"), "previous");
     assert.strictEqual(threadTraversalDirectionFromCommand("thread.next"), "next");
     assert.isNull(threadTraversalDirectionFromCommand("thread.jump.1"));
     assert.isNull(threadTraversalDirectionFromCommand(null));
-  });
-
-  it("shows jump hints only when configured modifiers match", () => {
-    assert.isTrue(
-      shouldShowThreadJumpHintsForModifiers(event({ metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-      }),
-    );
-    assert.isFalse(
-      shouldShowThreadJumpHintsForModifiers(
-        event({ metaKey: true, shiftKey: true }),
-        DEFAULT_BINDINGS,
-        {
-          platform: "MacIntel",
-        },
-      ),
-    );
-    assert.isTrue(
-      shouldShowThreadJumpHintsForModifiers(event({ ctrlKey: true }), DEFAULT_BINDINGS, {
-        platform: "Linux",
-      }),
-    );
-  });
-
-  it("never shows jump hints while the terminal is focused, even with an unrestricted binding", () => {
-    assert.isFalse(
-      shouldShowThreadJumpHintsForModifiers(event({ metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-        context: { terminalFocus: true },
-      }),
-    );
-    assert.isTrue(
-      shouldShowThreadJumpHintsForModifiers(event({ metaKey: true }), DEFAULT_BINDINGS, {
-        platform: "MacIntel",
-        context: { terminalFocus: false },
-      }),
-    );
-  });
-
-  it("keeps default thread jumps off the web so the browser can switch tabs", () => {
-    const input = event({ key: "1", metaKey: true });
-    assert.isNull(
-      resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
-        platform: "MacIntel",
-        context: { isDesktop: false },
-      }),
-    );
-    assert.strictEqual(
-      resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
-        platform: "MacIntel",
-        context: { isDesktop: true },
-      }),
-      "thread.jump.1",
-    );
-    assert.isFalse(
-      shouldShowThreadJumpHintsForModifiers(
-        event({ metaKey: true }),
-        DEFAULT_RESOLVED_KEYBINDINGS,
-        {
-          platform: "MacIntel",
-          context: { isDesktop: false },
-        },
-      ),
-    );
-    assert.isTrue(
-      shouldShowThreadJumpHintsForModifiers(
-        event({ metaKey: true }),
-        DEFAULT_RESOLVED_KEYBINDINGS,
-        {
-          platform: "MacIntel",
-          context: { isDesktop: true },
-        },
-      ),
-    );
   });
 });
 

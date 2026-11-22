@@ -1,13 +1,6 @@
 import { backgroundWorkHoldsCompletion } from "@kurambit/shared/orchestrationV2PendingBackgroundWork";
-import { threadPullRequestSearchTerms } from "@kurambit/shared/threadPullRequests";
 import * as React from "react";
-import {
-  isAtomCommandInterrupted,
-  type AtomCommandResult,
-} from "@kurambit/client-runtime/state/runtime";
-import { isNestedUnderLiveParent, type ContextMenuItem } from "@kurambit/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@kurambit/contracts/settings";
-import type { AsyncResult } from "effect/reactivity";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -15,17 +8,8 @@ import {
   type ThreadSortInput,
 } from "../lib/threadSort";
 import type { SidebarThreadSummary, Thread } from "../types";
-import { normalizeSearchText } from "../lib/utils";
 import { isLatestRunSettled } from "../session-logic";
-import { resolveServerBackedAppStageLabel } from "../branding.logic";
 
-const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
-
-// Each prewarmed thread holds a live, fully hydrated detail subscription (all
-// messages and activities, growing as agents work) for as long as the row stays
-// visible, so this limit is a direct renderer-heap and server-load multiplier —
-// keep it small; cold opens still render instantly from the cached snapshot.
-const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 const SIDEBAR_ROW_SUBSCRIPTION_OVERSCAN_PX = 160;
 
 export function useSidebarRowSubscriptionLease(isActive: boolean): {
@@ -91,94 +75,6 @@ type LogicalSidebarProject = SidebarProject & {
 
 export type ThreadTraversalDirection = "previous" | "next";
 
-/**
- * Shared-worktree checks must exclude only successful deletions, never the
- * whole batch.
- */
-export async function deleteSelectedThreadEntries<
-  TEntry extends { readonly threadKey: string },
->(input: {
-  entries: readonly TEntry[];
-  delete: (
-    entry: TEntry,
-    deletedThreadKeys: ReadonlySet<string>,
-  ) => Promise<AtomCommandResult<unknown, unknown> | null>;
-}) {
-  const deletedThreadKeys = new Set<string>();
-  let firstFailure: AsyncResult.Failure<unknown, unknown> | null = null;
-
-  for (const entry of input.entries) {
-    const result = await input.delete(entry, deletedThreadKeys);
-    if (result === null) continue;
-    if (result._tag === "Failure") {
-      if (isAtomCommandInterrupted(result)) break;
-      firstFailure ??= result;
-      continue;
-    }
-    deletedThreadKeys.add(entry.threadKey);
-  }
-
-  return { deletedThreadKeys, firstFailure };
-}
-
-export async function archiveSelectedThreadEntries<
-  TEntry extends { readonly threadKey: string },
-  TResult extends { readonly _tag: "Success" | "Failure" },
->(input: {
-  entries: readonly TEntry[];
-  archive: (entry: TEntry, onArchived: () => void) => Promise<TResult>;
-}): Promise<{
-  archivedThreadKeys: readonly string[];
-  mutationFailure: Extract<TResult, { readonly _tag: "Failure" }> | null;
-  followupFailures: readonly Extract<TResult, { readonly _tag: "Failure" }>[];
-}> {
-  const archivedThreadKeys: string[] = [];
-  const followupFailures: Extract<TResult, { readonly _tag: "Failure" }>[] = [];
-
-  for (const entry of input.entries) {
-    let didArchive = false;
-    const result = await input.archive(entry, () => {
-      didArchive = true;
-    });
-    if (didArchive || result._tag === "Success") archivedThreadKeys.push(entry.threadKey);
-    if (result._tag === "Success") continue;
-    const failure = result as Extract<TResult, { readonly _tag: "Failure" }>;
-    if (didArchive) {
-      followupFailures.push(failure);
-      continue;
-    }
-    return { archivedThreadKeys, mutationFailure: failure, followupFailures };
-  }
-
-  return { archivedThreadKeys, mutationFailure: null, followupFailures };
-}
-
-export function buildMultiSelectThreadContextMenuItems(input: {
-  count: number;
-  hasRunningThread: boolean;
-}): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
-  return [
-    { id: "mark-unread", label: `Mark unread (${input.count})` },
-    {
-      id: "archive",
-      label: `Archive (${input.count})`,
-      disabled: input.hasRunningThread,
-    },
-    { id: "delete", label: `Delete (${input.count})`, destructive: true },
-  ];
-}
-
-export function getSidebarForkParentThreadId(
-  thread: Pick<SidebarThreadSummary, "forkedFrom" | "lineage">,
-) {
-  if (thread.lineage.relationshipToParent !== "fork") {
-    return null;
-  }
-  return thread.forkedFrom?.type === "run"
-    ? thread.forkedFrom.threadId
-    : thread.lineage.parentThreadId;
-}
-
 export interface ThreadStatusPill {
   label:
     | "Working"
@@ -193,16 +89,6 @@ export interface ThreadStatusPill {
   pulse: boolean;
 }
 
-const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
-  Working: 3,
-  Connecting: 3,
-  Waiting: 2.5,
-  "Plan Ready": 2,
-  Completed: 1,
-};
-
 type ThreadStatusInput = Pick<
   SidebarThreadSummary,
   | "hasActionableProposedPlan"
@@ -216,13 +102,6 @@ type ThreadStatusInput = Pick<
   lastVisitedAt?: string | null | undefined;
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
 };
-
-export function resolveSidebarStageBadgeLabel(input: {
-  primaryServerVersion: string | null | undefined;
-  fallbackStageLabel: string;
-}): string {
-  return resolveServerBackedAppStageLabel(input);
-}
 
 export function resolveThreadLastVisitedAt(
   serverLastVisitedAt: string | null | undefined,
@@ -244,11 +123,6 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
   if (Number.isNaN(lastVisitedAt)) return true;
   return completedAt > lastVisitedAt;
-}
-
-export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
-  if (target === null) return true;
-  return !target.closest(THREAD_SELECTION_SAFE_SELECTOR);
 }
 
 // A double-click dispatches two `click` events before `dblclick`: the first has
@@ -299,49 +173,6 @@ export function orderItemsByPreferredIds<TItem, TId>(input: {
   return [...ordered, ...remaining];
 }
 
-export function getSidebarThreadIdsToPrewarm<TThreadId>(
-  visibleThreadIds: readonly TThreadId[],
-  limit = SIDEBAR_THREAD_PREWARM_LIMIT,
-): TThreadId[] {
-  return visibleThreadIds.slice(0, Math.max(0, limit));
-}
-
-export function resolveAdjacentThreadId<T>(input: {
-  threadIds: readonly T[];
-  currentThreadId: T | null;
-  direction: ThreadTraversalDirection;
-}): T | null {
-  const { currentThreadId, direction, threadIds } = input;
-
-  if (threadIds.length === 0) {
-    return null;
-  }
-
-  if (currentThreadId === null) {
-    return direction === "previous" ? (threadIds.at(-1) ?? null) : (threadIds[0] ?? null);
-  }
-
-  const currentIndex = threadIds.indexOf(currentThreadId);
-  if (currentIndex === -1) {
-    return null;
-  }
-
-  if (direction === "previous") {
-    return currentIndex > 0 ? (threadIds[currentIndex - 1] ?? null) : null;
-  }
-
-  return currentIndex < threadIds.length - 1 ? (threadIds[currentIndex + 1] ?? null) : null;
-}
-
-export function isContextMenuPointerDown(input: {
-  button: number;
-  ctrlKey: boolean;
-  isMac: boolean;
-}): boolean {
-  if (input.button === 2) return true;
-  return input.isMac && input.button === 0 && input.ctrlKey;
-}
-
 export type SidebarThreadStatus =
   | "approval"
   | "input"
@@ -388,48 +219,8 @@ export type SidebarV2TopStatusKind =
   | "woke"
   | "working";
 
-export function resolveSidebarV2TopStatus(input: {
-  readonly status: SidebarThreadStatus;
-  readonly isUnread: boolean;
-  readonly isWoke: boolean;
-}): SidebarV2TopStatusKind | null {
-  if (input.status === "working") {
-    return "working";
-  }
-  if (input.status === "waiting") {
-    return "waiting";
-  }
-  if (input.status === "approval") {
-    return "approval";
-  }
-  if (input.status === "input") {
-    return "input";
-  }
-  if (input.status === "failed" || input.status === "limited") {
-    return input.status;
-  }
-  if (input.isWoke) {
-    return "woke";
-  }
-  return input.isUnread ? "done" : null;
-}
-
-export function shouldShowSidebarV2Duration(status: SidebarThreadStatus): boolean {
-  return status === "working";
-}
-
 export { pinOrderKeyBetween } from "@kurambit/client-runtime/state/thread-sort";
 export { sortPinnedThreadsByOrderKey as sortPinnedThreadsForSidebar } from "@kurambit/client-runtime/state/thread-sort";
-
-export function pullRequestMatchesSearchQuery(
-  pullRequest: Parameters<typeof threadPullRequestSearchTerms>[0],
-  query: string,
-): boolean {
-  const normalizedQuery = normalizeSearchText(query);
-  if (normalizedQuery.length === 0) return false;
-  const haystack = normalizeSearchText(threadPullRequestSearchTerms(pullRequest).join(" "));
-  return normalizedQuery.split(" ").every((token) => haystack.includes(token));
-}
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
@@ -511,24 +302,6 @@ export function resolveThreadStatusPill(input: {
   return null;
 }
 
-export function resolveProjectStatusIndicator(
-  statuses: ReadonlyArray<ThreadStatusPill | null>,
-): ThreadStatusPill | null {
-  let highestPriorityStatus: ThreadStatusPill | null = null;
-
-  for (const status of statuses) {
-    if (status === null) continue;
-    if (
-      highestPriorityStatus === null ||
-      THREAD_STATUS_PRIORITY[status.label] > THREAD_STATUS_PRIORITY[highestPriorityStatus.label]
-    ) {
-      highestPriorityStatus = status;
-    }
-  }
-
-  return highestPriorityStatus;
-}
-
 export function getFallbackThreadIdAfterDelete<
   T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
 >(input: {
@@ -598,46 +371,6 @@ function sortProjectsByActivity<TProject extends SidebarProject>(
     .map(({ project }) => project);
 }
 
-export function sortProjectsForSidebar<
-  TProject extends SidebarProject,
-  TThread extends Pick<Thread, "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
->(
-  projects: readonly TProject[],
-  threads: readonly TThread[],
-  sortOrder: SidebarProjectSortOrder,
-): TProject[] {
-  const threadsByProjectId = new Map<string, TThread[]>();
-  for (const thread of threads) {
-    const existing = threadsByProjectId.get(thread.projectId) ?? [];
-    existing.push(thread);
-    threadsByProjectId.set(thread.projectId, existing);
-  }
-
-  return sortProjectsByActivity(
-    projects,
-    sortOrder,
-    (project) => threadsByProjectId.get(project.id) ?? [],
-    (left, right) => left.title.localeCompare(right.title) || left.id.localeCompare(right.id),
-  );
-}
-
-function filterSidebarV2VisibleThreads<
-  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
-    id: string;
-    environmentId: string;
-    projectId: string;
-  },
->(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
-  const listed = new Set<string>(threads.map((thread) => thread.id));
-  return threads.filter(
-    (thread) =>
-      thread.archivedAt === null &&
-      !isNestedUnderLiveParent(thread, listed) &&
-      (scopedProjectKeys === null ||
-        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-  );
-}
-
 export function sortLogicalProjectsForSidebar<
   TProject extends LogicalSidebarProject,
   TThread extends ScopedSidebarThread,
@@ -673,21 +406,6 @@ export function sortLogicalProjectsForSidebar<
     (project) => threadsByProjectKey.get(project.projectKey) ?? [],
     (left, right) =>
       left.title.localeCompare(right.title) || left.projectKey.localeCompare(right.projectKey),
-  );
-}
-
-export function sortSidebarV2ProjectGroups<
-  TProject extends LogicalSidebarProject,
-  TThread extends ScopedSidebarThread & Pick<SidebarThreadSummary, "lineage"> & { id: string },
->(
-  projects: readonly TProject[],
-  threads: readonly TThread[],
-  sortOrder: SidebarProjectSortOrder,
-): TProject[] {
-  return sortLogicalProjectsForSidebar(
-    projects,
-    filterSidebarV2VisibleThreads(threads, null),
-    sortOrder,
   );
 }
 

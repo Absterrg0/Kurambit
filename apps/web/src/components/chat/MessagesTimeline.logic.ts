@@ -57,7 +57,6 @@ import {
 import type { ThreadRunSummary } from "@kurambit/client-runtime/state/shell";
 import {
   resolveKurambitMcpToolDefinition,
-  resolveKurambitMcpToolPresentation,
   type KurambitMcpToolPresentation,
 } from "@kurambit/shared/kurambitMcpToolPresentation";
 import { compactDynamicToolOutput } from "@kurambit/shared/toolOutput";
@@ -639,7 +638,6 @@ function workGroupId(timelineEntryId: string): string {
 }
 
 export type TimelineToolPresentation = KurambitMcpToolPresentation;
-export const resolveTimelineToolPresentation = resolveKurambitMcpToolPresentation;
 
 function expandedWorkGroupRow(
   groupId: string,
@@ -2003,20 +2001,6 @@ type MessagesTimelineRowsInput = Parameters<typeof deriveMessagesTimelineRows>[0
 export interface MessagesTimelineRowsProjection {
   readonly input: MessagesTimelineRowsInput;
   readonly rows: MessagesTimelineRow[];
-}
-
-/**
- * Runless (imported V1) turns fold under a synthetic key, so the entry's own
- * run id is not enough to open them.
- */
-export function timelineEntryTurnFoldRunId(
-  input: Pick<
-    MessagesTimelineRowsInput,
-    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
-  >,
-  entryId: string,
-): RunId | null {
-  return timelineTurnFoldRunIdsByEntryId(input).get(entryId) ?? null;
 }
 
 export function timelineTurnFoldRunIdsByEntryId(

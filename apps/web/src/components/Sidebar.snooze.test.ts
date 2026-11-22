@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveSnoozePresets, snoozeWakeDescription } from "./Sidebar.snooze";
+import { resolveSnoozePresets } from "./Sidebar.snooze";
 
 function localDate(year: number, month: number, day: number, hour: number, minute = 0): Date {
   return new Date(year, month - 1, day, hour, minute, 0, 0);
@@ -62,30 +62,5 @@ describe("resolveSnoozePresets", () => {
 
     expect(twelveHour.find((preset) => preset.id === "evening")!.whenLabel).toMatch(/PM/i);
     expect(twentyFourHour.find((preset) => preset.id === "evening")!.whenLabel).toBe("18:00");
-  });
-});
-
-describe("snoozeWakeDescription", () => {
-  const now = localDate(2026, 4, 8, 10);
-
-  it("uses bare time today, 'tomorrow' next day, weekday within the week", () => {
-    expect(
-      snoozeWakeDescription(localDate(2026, 4, 8, 18).toISOString(), now, "locale"),
-    ).not.toContain("tomorrow");
-    expect(snoozeWakeDescription(localDate(2026, 4, 9, 9).toISOString(), now, "locale")).toContain(
-      "tomorrow",
-    );
-    expect(snoozeWakeDescription(localDate(2026, 4, 13, 9).toISOString(), now, "locale")).toMatch(
-      /Mon/,
-    );
-  });
-
-  it("formats wake descriptions with the selected clock preference", () => {
-    expect(snoozeWakeDescription(localDate(2026, 4, 8, 18).toISOString(), now, "12-hour")).toMatch(
-      /PM/i,
-    );
-    expect(snoozeWakeDescription(localDate(2026, 4, 8, 18).toISOString(), now, "24-hour")).toBe(
-      "18:00",
-    );
   });
 });

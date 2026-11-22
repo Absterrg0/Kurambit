@@ -28,10 +28,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
 import { environmentPresentations } from "./presentation";
 import { environmentServerConfigsAtom } from "./server";
-import {
-  allEnvironmentProjectSnapshotsReadyAtom,
-  allEnvironmentShellsBootstrappedAtom,
-} from "./shell";
+import { allEnvironmentShellsBootstrappedAtom } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
 import { waitForAtomValue } from "./waitForAtomValue";
 
@@ -112,10 +109,6 @@ export function useAllEnvironmentShellsBootstrapped(): boolean {
   return useAtomValue(allEnvironmentShellsBootstrappedAtom);
 }
 
-export function useAllEnvironmentProjectSnapshotsReady(): boolean {
-  return useAtomValue(allEnvironmentProjectSnapshotsReadyAtom);
-}
-
 export function useThreadShellsForProjectRefs(
   refs: ReadonlyArray<ScopedProjectRef>,
 ): ReadonlyArray<EnvironmentThreadShell> {
@@ -149,21 +142,6 @@ export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThr
   return useAtomValue(
     ref === null ? EMPTY_THREAD_PROJECTION_ATOM : environmentThreadDetails.threadAtom(ref),
   );
-}
-
-const ZERO_ATOM = Atom.make(0).pipe(Atom.withLabel("web-empty-count"));
-const sentCountAtomFamily = Atom.family((key: string) =>
-  Atom.make(
-    (get) =>
-      get(environmentThreadDetails.threadAtom(parseThreadKey(key)))?.projection.messages.filter(
-        (message) => message.role === "user",
-      ).length ?? 0,
-  ).pipe(Atom.withLabel(`web-thread-sent-count:${key}`)),
-);
-
-/** How many messages the person has sent in a chat: a number, so a streaming reply re-renders nothing. */
-export function useThreadSentCount(ref: ScopedThreadRef | null): number {
-  return useAtomValue(ref === null ? ZERO_ATOM : sentCountAtomFamily(threadKey(ref)));
 }
 
 export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadStatus {

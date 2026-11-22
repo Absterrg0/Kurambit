@@ -2,13 +2,11 @@ import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ku
 import { describe, expect, it } from "vite-plus/test";
 import {
   applyProviderInstanceSettings,
-  deriveProviderEntriesByEnvironment,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
   resolveDefaultProviderModelSelection,
-  resolveProviderCatalogAvailability,
   resolveSelectableProviderInstance,
 } from "./providerInstances";
 
@@ -72,46 +70,6 @@ describe("isProviderInstancePickerReady", () => {
     ]);
 
     expect(entry && isProviderInstancePickerReady(entry)).toBe(true);
-  });
-});
-
-describe("resolveProviderCatalogAvailability", () => {
-  const [entry] = deriveProviderInstanceEntries([
-    provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),
-  ]);
-
-  it("keeps the initial reactive config state distinct from an empty catalogue", () => {
-    expect(
-      resolveProviderCatalogAvailability({
-        catalogLoaded: false,
-        entries: [],
-        selectedEntry: undefined,
-      }),
-    ).toBe("loading");
-    expect(
-      resolveProviderCatalogAvailability({
-        catalogLoaded: true,
-        entries: [],
-        selectedEntry: undefined,
-      }),
-    ).toBe("unconfigured");
-  });
-
-  it("distinguishes a selected provider from configured but unusable providers", () => {
-    expect(
-      resolveProviderCatalogAvailability({
-        catalogLoaded: true,
-        entries: entry ? [entry] : [],
-        selectedEntry: entry,
-      }),
-    ).toBe("ready");
-    expect(
-      resolveProviderCatalogAvailability({
-        catalogLoaded: true,
-        entries: entry ? [entry] : [],
-        selectedEntry: undefined,
-      }),
-    ).toBe("unavailable");
   });
 });
 
@@ -270,81 +228,6 @@ describe("deriveProviderInstanceEntries", () => {
     expect(entry?.instanceId).toBe("codex_personal");
     expect(entry?.driverKind).toBe("codex");
     expect(entry?.isDefault).toBe(false);
-  });
-});
-
-describe("deriveProviderEntriesByEnvironment", () => {
-  it("resolves registry branding from each environment's settings", () => {
-    const instanceId = "custom-acp";
-    const snapshot = provider({ provider: ProviderDriverKind.make("acpRegistry"), instanceId });
-    const byEnvironment = deriveProviderEntriesByEnvironment(
-      ["devin", "other-agent"].map(
-        (agentId) =>
-          [
-            agentId,
-            [snapshot],
-            {
-              providerInstances: {
-                [instanceId]: {
-                  driver: ProviderDriverKind.make("acpRegistry"),
-                  enabled: true,
-                  config: { agentId, registryIconUrl: `https://example.com/${agentId}.svg` },
-                },
-              },
-              projectSettingsOverrides: {},
-            },
-          ] as const,
-      ),
-    );
-    expect(byEnvironment.get("devin")?.get(instanceId)?.acpRegistryAgentId).toBe("devin");
-    expect(byEnvironment.get("devin")?.get(instanceId)?.acpRegistryIconUrl).toBe(
-      "https://example.com/devin.svg",
-    );
-    expect(byEnvironment.get("other-agent")?.get(instanceId)?.acpRegistryAgentId).toBe(
-      "other-agent",
-    );
-  });
-
-  it("keeps same-id default instances distinct per environment", () => {
-    const byEnvironment = deriveProviderEntriesByEnvironment([
-      [
-        "local",
-        [
-          provider({
-            provider: ProviderDriverKind.make("claude"),
-            instanceId: "claude",
-            displayName: "Claude Local",
-            accentColor: "#112233",
-          }),
-        ],
-      ],
-      [
-        "remote",
-        [
-          provider({
-            provider: ProviderDriverKind.make("claude"),
-            instanceId: "claude",
-            displayName: "Claude Remote",
-            accentColor: "#445566",
-          }),
-        ],
-      ],
-    ]);
-
-    expect(byEnvironment.get("local")?.get("claude")?.displayName).toBe("Claude Local");
-    expect(byEnvironment.get("local")?.get("claude")?.accentColor).toBe("#112233");
-    expect(byEnvironment.get("remote")?.get("claude")?.displayName).toBe("Claude Remote");
-    expect(byEnvironment.get("remote")?.get("claude")?.accentColor).toBe("#445566");
-  });
-
-  it("never falls back to another environment's instances", () => {
-    const byEnvironment = deriveProviderEntriesByEnvironment([
-      ["local", [provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" })]],
-      ["empty", []],
-    ]);
-
-    expect(byEnvironment.get("empty")?.get("codex")).toBeUndefined();
-    expect(byEnvironment.get("empty")?.size).toBe(0);
   });
 });
 
