@@ -445,9 +445,3 @@ export function resolveKurambitMcpToolPresentation(
   const definition = resolveKurambitMcpToolDefinition(toolName);
   return definition === null ? null : { displayName: definition.displayName, logo: "kurambit" };
 }
-
-export function resolveKurambitMcpToolSummaryAction(
-  toolName: string | null | undefined,
-): KurambitMcpToolSummaryAction | null {
-  return resolveKurambitMcpToolDefinition(toolName)?.summaryAction ?? null;
-}

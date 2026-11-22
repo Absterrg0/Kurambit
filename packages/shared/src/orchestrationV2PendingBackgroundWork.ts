@@ -42,12 +42,6 @@ void TERMINAL_RUN_STATUSES;
 
 export type PendingBackgroundWorkTask = OrchestrationV2PendingBackgroundTask;
 
-export function turnItemUpdateCanEndBackgroundWork(
-  item: Pick<OrchestrationV2TurnItem, "type" | "status">,
-): boolean {
-  return BACKGROUND_TURN_ITEM_TYPES.has(item.type) && !isOrchestrationV2WorkActive(item.status);
-}
-
 export function backgroundWorkHoldsCompletion(
   tasks: ReadonlyArray<Pick<PendingBackgroundWorkTask, "kind">>,
 ): boolean {

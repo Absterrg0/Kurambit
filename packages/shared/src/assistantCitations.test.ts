@@ -14,7 +14,6 @@ import {
   expandAssistantCitationsForProvider,
   formatAssistantCitationHref,
   parseAssistantCitationHref,
-  renderAssistantCitationsAsText,
   serializeAssistantCitation,
   withAssistantCitationComment,
 } from "./assistantCitations.ts";
@@ -111,7 +110,6 @@ describe("assistant citation references", () => {
     expect(collectAssistantCitations(prompt)).toEqual([]);
     expect(assistantCitationsToPlainText(prompt)).toBe(prompt);
     expect(expandAssistantCitationsForProvider(prompt)).toBe(prompt);
-    expect(renderAssistantCitationsAsText(prompt)).toBe(prompt);
   });
 
   it("bounds selected text and surrounding context", () => {
@@ -145,7 +143,6 @@ describe("assistant citation references", () => {
     expect(collectAssistantCitations(prompt)).toEqual([]);
     expect(assistantCitationsToPlainText(prompt)).toBe(prompt);
     expect(expandAssistantCitationsForProvider(prompt)).toBe(prompt);
-    expect(renderAssistantCitationsAsText(prompt)).toBe(prompt);
   });
 
   it("accepts complete 8k CJK quotes and comments with maximum-sized source selectors", () => {
@@ -174,9 +171,6 @@ describe("assistant citation references", () => {
     ]);
     expect(assistantCitationsToPlainText(marker)).toBe(
       `${largeCitation.text}\nComment: ${largeCitation.comment}`,
-    );
-    expect(renderAssistantCitationsAsText(marker)).toBe(
-      `\n\n> Assistant quote:\n> ${largeCitation.text}\n\nComment: ${largeCitation.comment}\n\n`,
     );
   });
 
@@ -309,41 +303,5 @@ describe("assistant citation references", () => {
 
     expect(assistantCitationsToPlainText("")).toBe("");
     expect(assistantCitationsToPlainText(prompt)).toBe(prompt);
-  });
-
-  it("shows the full quote in clients without source navigation and leaves regular messages alone", () => {
-    expect(renderAssistantCitationsAsText("ordinary text")).toBe("ordinary text");
-    const rendered = renderAssistantCitationsAsText(serializeAssistantCitation(citation));
-    expect(rendered).toContain("> Assistant quote:");
-    expect(rendered).toContain("日本語 🚀");
-    expect(rendered).not.toContain("kurambit-citation:");
-    expect(rendered).not.toContain("</assistant_citations>");
-  });
-
-  it("renders escaped user comments outside the assistant quote block", () => {
-    const commented = {
-      ...citation,
-      text: "Assistant answer.\nSecond line.",
-      comment:
-        "Please change [x](url) & <tag>.\n> *Not assistant speech*\n\n# Request\n`code` \\path",
-    };
-
-    expect(renderAssistantCitationsAsText(serializeAssistantCitation(commented))).toBe(
-      [
-        "",
-        "",
-        "> Assistant quote:",
-        "> Assistant answer\\.",
-        "> Second line\\.",
-        "",
-        "Comment: Please change \\[x\\]\\(url\\) &amp; &lt;tag&gt;\\.",
-        "&gt; \\*Not assistant speech\\*",
-        "",
-        "\\# Request",
-        "\\`code\\` \\\\path",
-        "",
-        "",
-      ].join("\n"),
-    );
   });
 });

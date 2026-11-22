@@ -1,5 +1,3 @@
-const CLI_RELEASE_REPOSITORY = "Absterrg0/Kurambit";
-
 /**
  * Kept in step with the build_linux_cli matrix, build_windows_arm64_cli, and
  * the `cli_archive` rows in .github/workflows/release.yml: a key here without a
@@ -43,26 +41,6 @@ export function cliArchiveFileName(version: string, platformKey: CliArchivePlatf
   return `kurambit-${version}-${platformKey}.${platformKey.startsWith("win32") ? "zip" : "tar.gz"}`;
 }
 
-const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;
-
-export function cliReleaseDownloadBaseUrl(
-  version: string,
-  baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
-): string {
-  return `${(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL).replace(/\/+$/, "")}/v${version}`;
-}
-
-export function parseChecksums(text: string): ReadonlyMap<string, string> {
-  const checksums = new Map<string, string>();
-  for (const line of text.split(/\r?\n/)) {
-    const match = /^([0-9a-fA-F]{64})\s+\*?(\S.*)$/.exec(line.trim());
-    if (match?.[1] !== undefined && match[2] !== undefined) {
-      checksums.set(match[2], match[1].toLowerCase());
-    }
-  }
-  return checksums;
-}
-
 export type CliReleaseChannel = "stable" | "nightly" | "preview";
 
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {
@@ -74,25 +52,7 @@ export function cliReleaseChannelOf(version: string): CliReleaseChannel {
  * Callers walk pages until a channel match turns up; a busy nightly train can push the newest
  * preview or stable release past any single page.
  */
-export function cliReleaseIndexPageUrl(page: number): string {
-  return `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
-}
 
 /**
  * Drafts are skipped because their assets are not downloadable.
  */
-export function newestCliReleaseVersion(
-  releases: ReadonlyArray<{
-    readonly tag_name: string;
-    readonly draft?: boolean | undefined;
-  }>,
-  channel: CliReleaseChannel,
-): string | undefined {
-  for (const release of releases) {
-    if (release.draft) continue;
-    const version = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(release.tag_name)?.[1];
-    if (version === undefined) continue;
-    if (cliReleaseChannelOf(version) === channel) return version;
-  }
-  return undefined;
-}

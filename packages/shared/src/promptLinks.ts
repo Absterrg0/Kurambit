@@ -205,9 +205,3 @@ export function promptLinkAppPath(
   const thread = url.searchParams.has("prompt") ? THREAD_PATH.exec(url.pathname) : null;
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
 }
-
-export function promptLinkDeepLink(appPath: string, scheme = "kurambit"): string {
-  const url = new URL(appPath, "https://app.invalid");
-  const host = url.pathname === "/new" ? "new" : `threads${url.pathname}`;
-  return `${scheme}://${host}${url.search}`;
-}

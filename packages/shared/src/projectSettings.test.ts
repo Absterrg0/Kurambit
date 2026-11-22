@@ -14,7 +14,6 @@ import {
   resolveProjectFileBackedSetting,
   resolveProjectSettings,
   resolveWorktreeCleanup,
-  withProjectSettingsOverrides,
 } from "./projectSettings.ts";
 import { applyServerSettingsPatch } from "./serverSettings.ts";
 
@@ -400,13 +399,6 @@ describe("projectSettingsOverrides patches", () => {
       ]),
     ).toBeNull();
     expect(clearProjectSettingsOverrides(settings, otherProjectId, ["defaultAutoPull"])).toBeNull();
-    expect(withProjectSettingsOverrides(settings, projectId, null)).toEqual({});
-    expect(
-      withProjectSettingsOverrides(settings, otherProjectId, { defaultThreadEnvMode: "worktree" }),
-    ).toEqual({
-      ...settings.projectSettingsOverrides,
-      [otherProjectId]: { defaultThreadEnvMode: "worktree" },
-    });
   });
 });
 
