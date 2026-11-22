@@ -294,9 +294,6 @@ export const stepVerdictText = (step: StepSource): string => {
   }
 };
 
-/** PURE. The strip's line for a step turn: "Step 3 · undone: Random input now crashes at 12 s". */
-export const stepLine = (step: StepSource): string => `Step ${step.n} · ${stepVerdictText(step)}`;
-
 /** Without a run to scope it, the reel shows this many of Keep going's newest steps. */
 const REEL_STEPS = 6;
 

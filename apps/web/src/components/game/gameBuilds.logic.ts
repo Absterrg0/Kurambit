@@ -12,7 +12,6 @@ import {
   type GameCheck,
   type GameFactDelta,
   type GameFactNotMeasuredCause,
-  type GameFactTone,
   type GameFactId,
   type GameFactView,
 } from "@kurambit/contracts";
@@ -67,26 +66,6 @@ const factsSummaryLine = (summary: GameBuildFactsSummary): string | null => {
       return `${summary.notMeasured} not measured`;
     case "measured":
       return summary.chips.length === 0 ? "Measured" : null;
-  }
-};
-
-export interface FactLine {
-  readonly label: string;
-  readonly text: string;
-  /** Only a measured fact has a tone: a missing reading is never good or bad. */
-  readonly tone: GameFactTone | null;
-}
-
-/** One fact row as drawn: its reading, or why it has none. */
-export const factLine = (view: GameFactView): FactLine => {
-  const reading = view.reading;
-  switch (reading._tag) {
-    case "measured":
-      return { label: view.label, text: reading.text, tone: reading.tone };
-    case "not-measured":
-      return { label: view.label, text: `Not measured: ${notMeasuredWhy(reading)}`, tone: null };
-    case "pending":
-      return { label: view.label, text: "Not measured yet", tone: null };
   }
 };
 
@@ -448,20 +427,6 @@ export const factsSettled = (summary: Pick<GameBuildFactsSummary, "state">): boo
  * either build has not settled, or they share no measured check, so a build being measured
  * is never shown as better or worse.
  */
-export const passDelta = (
-  build: Pick<GameBuild, "facts">,
-  before: Pick<GameBuild, "facts"> | null,
-): number | null => {
-  if (before === null || !factsSettled(build.facts) || !factsSettled(before.facts)) return null;
-  const now = build.facts.lead;
-  const then = before.facts.lead;
-  if (now?.measured === undefined || then?.measured === undefined) return null;
-  const both = new Set(now.measured.filter((id) => then.measured!.includes(id)));
-  if (both.size === 0) return null;
-  const passes = (ids: ReadonlyArray<string> | undefined) =>
-    (ids ?? []).filter((id) => both.has(id as never)).length;
-  return passes(now.passing) - passes(then.passing);
-};
 
 /**
  * PURE. A build's checks in one line, as every surface says them: the count once they have

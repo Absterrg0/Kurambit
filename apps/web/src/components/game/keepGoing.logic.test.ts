@@ -19,7 +19,7 @@ import {
   keepGoingRequest,
   reelHeading,
   reelSteps,
-  stepLine,
+  stepVerdictText,
 } from "./keepGoing.logic";
 
 const clock = (at: string) => at.slice(11, 16);
@@ -181,27 +181,27 @@ describe("the keep-going banner", () => {
   });
 });
 
-describe("a step's strip line", () => {
-  const line = (verdict: Parameters<typeof stepLine>[0]["verdict"], reason = "") =>
-    stepLine({ n: 3, verdict, reason, move: "" });
+describe("a step's verdict", () => {
+  const line = (verdict: Parameters<typeof stepVerdictText>[0]["verdict"], reason = "") =>
+    stepVerdictText({ n: 3, verdict, reason, move: "" });
   it("words every verdict", () => {
-    expect(line(null)).toBe("Step 3 · measuring before keeping it");
-    expect(line("kept", "no fact got worse")).toBe("Step 3 · kept: no fact got worse");
+    expect(line(null)).toBe("measuring before keeping it");
+    expect(line("kept", "no fact got worse")).toBe("kept: no fact got worse");
     expect(line("undone", "Random input now crashes at 12 s")).toBe(
-      "Step 3 · undone: Random input now crashes at 12 s",
+      "undone: Random input now crashes at 12 s",
     );
     // Only the server's moved-on refusal blames a later change; a failed undo says what failed.
     expect(line("kept-moved-on", "the game changed after it (Masher: crashed at 12 s)")).toBe(
-      "Step 3 · not undone: the game changed after it (Masher: crashed at 12 s)",
+      "not undone: the game changed after it (Masher: crashed at 12 s)",
     );
     expect(line("kept-moved-on", "the restore failed: git is busy (Masher: crashed at 12 s)")).toBe(
-      "Step 3 · not undone: the restore failed: git is busy (Masher: crashed at 12 s)",
+      "not undone: the restore failed: git is busy (Masher: crashed at 12 s)",
     );
     expect(line("not-measured", "the facts took over 10 min")).toBe(
-      "Step 3 · kept: not measured (the facts took over 10 min)",
+      "kept: not measured (the facts took over 10 min)",
     );
-    expect(line("no-change")).toBe("Step 3 · changed no game files");
-    expect(line("stopped")).toBe("Step 3 · stopped by you");
+    expect(line("no-change")).toBe("changed no game files");
+    expect(line("stopped")).toBe("stopped by you");
   });
 });
 

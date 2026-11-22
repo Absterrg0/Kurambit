@@ -1,29 +1,4 @@
-import {
-  engineDisplayName,
-  isAvailableEngine,
-  templateEngine,
-  type GameSummary,
-} from "@kurambit/contracts";
-
-export interface GameTemplateAppearance {
-  readonly label: string;
-  readonly initialClassName: string;
-  readonly coverClassName: string;
-}
-
-export const gameTemplateAppearance = (
-  template: GameSummary["template"],
-): GameTemplateAppearance => {
-  const engine = templateEngine(template);
-  return {
-    // A game in an engine this version does not have says so on its card, not only once it is opened.
-    label: isAvailableEngine(engine)
-      ? engineDisplayName(engine)
-      : `${engineDisplayName(engine)} · not available`,
-    initialClassName: "bg-foreground/8 text-foreground/80",
-    coverClassName: "from-foreground/10 via-foreground/5 to-transparent",
-  };
-};
+import { type GameSummary } from "@kurambit/contracts";
 
 /** Traditional ink pigments for game covers: indigo, moss, ochre, vermilion, wisteria, sumi. */
 const GAME_PIGMENTS = [
@@ -158,16 +133,6 @@ export const draftGameName = (brief: string): string => {
   return name.map(titleWord).join(" ").slice(0, 60).trim();
 };
 
-export const gameInitial = (name: string): string => {
-  const letters = name
-    .trim()
-    .split(/\s+/)
-    .map((word) => word[0])
-    .filter((letter): letter is string => letter !== undefined)
-    .join("");
-  return (letters || "G").slice(0, 2).toUpperCase();
-};
-
 export const sortGameSummaries = <T extends GameSummary>(games: readonly T[]): T[] =>
   [...games].sort(
     (left, right) =>
@@ -187,19 +152,4 @@ export const chatTitle = (
   const title = chat.title.trim();
   if (title !== "" && title !== gameName.trim()) return title;
   return chat.latestUserMessageAt === null ? "New chat" : "First chat";
-};
-
-/** Newest session per game, the row a game click should open. */
-export const newestThreadByProject = <
-  T extends { readonly projectId: string; readonly updatedAt: string },
->(
-  threads: readonly T[],
-): ReadonlyMap<string, T> => {
-  const newest = new Map<string, T>();
-  for (const thread of threads) {
-    const current = newest.get(thread.projectId);
-    if (current === undefined || Date.parse(thread.updatedAt) > Date.parse(current.updatedAt))
-      newest.set(thread.projectId, thread);
-  }
-  return newest;
 };
