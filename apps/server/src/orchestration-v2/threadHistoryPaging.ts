@@ -440,20 +440,6 @@ export function computeLatestLocalTurnOrdinal(
   return latest;
 }
 
-export function boundedTimelineEncodedBytes(input: {
-  readonly visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
-  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
-}): number {
-  let total = 0;
-  for (const row of input.visibleTurnItems) {
-    total += projectedRowEncodedBytes(row);
-  }
-  for (const item of input.turnItems) {
-    total += bytesOfJson(item);
-  }
-  return total;
-}
-
 export function buildBoundedThreadProjection(input: {
   readonly projection: OrchestrationV2ThreadProjection;
   readonly snapshotSequence: number;
