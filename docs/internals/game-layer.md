@@ -343,6 +343,10 @@ clamped deltas).
   shell's `window.__studio` bridge, which the game owns and may have edited, so the protocol stays in
   the server instead of the page. Pages read no control tree: no ui or inspect steps, and a bot's
   id-clicks are skipped and counted.
+- A page's acts hold the shell's harness clock (`holdClock`, the QA play's clock too): input goes
+  in as real browser events, and each wait or hold steps the game by its game time as fast as the
+  page allows (`advanceClock`), never in real time, so a page drawing at 2 fps in software plays the
+  same act, only sooner. A shell without the clock plays the act in real time.
 
 Pictures and video belong to the engine, never the OS: from protocol 2 a bot run asks `realtime`
 for frames, which the browser host streams from the CDP screencast. Each frame carries the

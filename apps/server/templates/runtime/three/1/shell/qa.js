@@ -14,7 +14,7 @@
 //
 // A page a player opens never runs this: the harness calls window.__studio.qa on a page it
 // opened with its counters on (studio.js). The play moves the run on the game's own clock
-// (shell.js qaClock), stepped as fast as the page allows: a slow machine makes it no longer and
+// (shell.js harnessClock), stepped as fast as the page allows: a slow machine makes it no longer and
 // no different. Only a run compiling and the count of frames a game asks for outside its run
 // take real time.
 import { sfxAsked } from "./audio.js";

@@ -168,26 +168,39 @@ const STAGE_REPLAY_MAX_MS = 20_000;
 /** A stepped bot's run keeps one frame in this many on the canvas while it hurries. */
 const BOT_DRAW_EVERY = 30;
 /**
- * The QA play's clock (shell/qa.js): while it plays, the run moves only by the game time it asks
- * for, stepped as fast as the page allows, so a slow machine makes the play no longer and no
- * different. `until`: the run's time it is stepping to; `run`: the run it was asked on.
+ * The harness's clock (the QA play, an agent's play session): while it is held, play moves only
+ * by the game time the harness asks for, stepped as fast as the page allows, so a slow machine
+ * makes the play no longer and no different. `left`: game seconds still to step, across a run
+ * the game starts in between; null when none was asked for.
  */
-let qaClock = null;
-const qaHold = (on) => {
-  qaClock?.reached?.();
-  qaClock = on ? { until: null, run: null, reached: null } : null;
+let harnessClock = null;
+/** Holding an already held clock keeps it, and what it was asked. */
+const holdClock = (on) => {
+  if (on && harnessClock !== null) return;
+  harnessClock?.reached?.();
+  harnessClock = on ? { left: null, reached: null } : null;
 };
-/** Steps the run by `seconds` of game time; settles at once when nothing can move it. */
-const qaAdvance = (seconds) =>
+/** Real time an advance may take past twice its game time; a page slower than that stops short. */
+const ADVANCE_WALL_MS = 10_000;
+/**
+ * Steps play by `seconds` of game time, then draws a frame; settles with the game seconds it
+ * stepped. Settles at once when nothing can move it (no run, paused, or the clock not held) and
+ * after `wallMs` of real time at most.
+ */
+const advanceClock = (seconds, wallMs = 2 * seconds * 1000 + ADVANCE_WALL_MS) =>
   new Promise((resolve) => {
     // Nothing to step: settles on the next task, so a waiting loop never spins the page.
-    if (qaClock === null || run === null) return setTimeout(resolve, 0);
-    qaClock.reached?.();
-    qaClock.until = run.time + seconds;
-    qaClock.run = run;
-    qaClock.reached = () => {
-      if (qaClock !== null) Object.assign(qaClock, { until: null, run: null, reached: null });
-      resolve();
+    if (harnessClock === null || run === null) return setTimeout(() => resolve(0), 0);
+    harnessClock.reached?.();
+    const clock = harnessClock;
+    const timer = setTimeout(() => clock.reached?.(), wallMs);
+    clock.left = seconds;
+    clock.reached = () => {
+      clearTimeout(timer);
+      const stepped = seconds - Math.max(0, clock.left);
+      Object.assign(clock, { left: null, reached: null });
+      redraw = true;
+      resolve(stepped);
     };
   });
 /** A loss Can't lose kept from ending the run is noted at most this often (play seconds). */
@@ -1192,9 +1205,11 @@ const studio = installStudio({
     eachThing: (fn) => bridge.eachThing(fn),
     openTitle: () => startRun({ title: true }),
     errors: studioErrors,
-    hold: qaHold,
-    advance: qaAdvance,
+    hold: holdClock,
+    advance: advanceClock,
   }),
+  holdClock,
+  advanceClock,
 });
 
 loadSettings();
@@ -1262,24 +1277,24 @@ renderer.setAnimationLoop((now) => {
     const { id, live: before } = handover;
     freshRun(before, true);
     bridge.replayed({ id, slow: STAGE_REPLAY_MAX_MS / 1000 });
-  } else if (qaClock !== null) {
-    // The QA play: the run moves only to the time it asked for, never on real time.
-    const stepping = run;
-    if (qaClock.until !== null) {
+  } else if (harnessClock !== null) {
+    // The harness's clock: play moves only by the time it asked for, never on real time.
+    const clock = harnessClock;
+    if (clock.left !== null) {
       const until = performance.now() + REPLAY_FRAME_MS;
-      for (;;) {
-        // A step can end the run, or start another.
-        if (!moving || run !== stepping || stepping !== qaClock.run) break;
-        if (stepping.stopped === true || !live() || stepping.time >= qaClock.until) break;
-        if (performance.now() >= until) break;
-        dt += step();
+      // A step can end the run, or start another (a title's Start): the time left goes on in it.
+      const movable = () =>
+        run !== null && !run.compiling && !held && run.stopped !== true && live();
+      while (clock.left > 0 && movable() && performance.now() < until) {
+        const stepped = step();
+        dt += stepped;
+        clock.left -= stepped;
       }
-      // Reached, or nothing will move it further: a new run, or an ended or paused one.
-      if (run !== qaClock.run || run.time >= qaClock.until || (!moving && run?.compiling !== true))
-        qaClock.reached();
+      // Reached, or nothing will move it further: an ended run, or a paused one.
+      if (clock.left <= 0 || (!movable() && run?.compiling !== true)) clock.reached();
     }
     replayFrames += 1;
-    redraw = replayFrames % BOT_DRAW_EVERY === 0;
+    redraw ||= replayFrames % BOT_DRAW_EVERY === 0;
   } else if (run?.bot !== undefined && nativeNow.call(performance) > run.bot.wallUntil) {
     // A page too slow for the bot's budget, or a game that paused itself: it ends on wall time.
     botBudgetEnds(run);

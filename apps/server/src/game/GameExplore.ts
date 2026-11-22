@@ -427,9 +427,8 @@ const make = Effect.gen(function* () {
     });
   /**
    * Runs one act through the session and keeps the picture the runner wrote,
-   * when it is really there. A held runner kept the game frozen while the
-   * caller thought; a browser game kept running, so waits and holds in the
-   * steps already advanced it.
+   * when it is really there. The game stands still between acts; its waits
+   * and holds advanced it by their game time.
    */
   const exploreActOnce = (
     session: ExploreSession,

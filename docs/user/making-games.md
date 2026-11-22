@@ -411,8 +411,8 @@ what fills it:
   answers a resize; in Responsive, drag the frame's edges. Esc or the same toggle returns to the
   normal Stage. A test play saved here replays at the size it was played at.
 - **Check and playtest on three.js.** `game_check` on a three.js game loads the page headless and
-  reports console and page errors instead of script errors; `game_play` ops `start`, `act` and `close` play it in real time
-  with real keys and clicks (see the `three` studio skill for the bridge contract).
+  reports console and page errors instead of script errors; `game_play` ops `act` and `close` play it
+  with real keys and clicks, its waits and holds stepped on the game's own clock (see the `three` studio skill for the bridge contract).
 
 To change the game, write a follow-up in the chat, for example "make the rocks taller and spread
 the trees out". The agent edits the same Blender sources and re-exports to the same paths, so scenes

@@ -55,6 +55,14 @@ const HOLD_RUN = `(hold) => new Promise((done) => {
   window.postMessage({ type: "studio-visibility", visible: !hold }, "*");
 })`;
 
+/** Holds the shell's harness clock (shell.js holdClock): false on a shell without one. */
+const HOLD_CLOCK = `typeof window.__studio?.holdClock === "function" && (window.__studio.holdClock(true), true)`;
+/**
+ * Real time one advance may take: twice its game time and some, so a page slower than real time
+ * still plays it, and one that cannot ends the step short rather than holding the act.
+ */
+const advanceWallMs = (ms: number) => 2 * ms + 10_000;
+
 const looksFlat = (png: Buffer) => {
   const { width, height, data } = PNG.sync.read(png);
   const counts = new Map<number, number>();
@@ -512,8 +520,10 @@ export interface WebPlaySession extends PlaySession {
  * The browser host of the play-session protocol: headless Chromium on a
  * served static folder, real keyboard and mouse through the browser, and the
  * page's read-only `window.__studio` bridge (ready, getState, setState) for
- * what the game sees. A page is never held: the game runs between acts, and
- * waits and holds advance it as they run. Pages read no control tree, so the
+ * what the game sees. An act holds the shell's clock (holdClock) and its
+ * waits and holds step the game by that much game time as fast as the page
+ * allows, so the game stands still between acts; a shell without the clock
+ * plays in real time. Pages read no control tree, so the
  * session has no ui or inspect steps; the caller owns the served URL. Every
  * call into the page is bounded (PLAY_BOUNDS): a game whose main thread is
  * stuck never holds a caller.
@@ -895,6 +905,25 @@ export const openWebPlaySession = async (input: {
     ) => {
       let executedInputSteps = 0;
       const held: string[] = [];
+      // Held again each act: the game may have reloaded its page since the last.
+      const clocked = await bounded(
+        page.evaluate(HOLD_CLOCK).catch(() => false),
+        PLAY_BOUNDS.webCallMs,
+      );
+      if (clocked === TIMED_OUT) throw unresponsive();
+      /** `ms` of game time: stepped on the held clock, else played in real time. */
+      const pass = async (ms: number) => {
+        if (clocked !== true) return sleep(ms, signal);
+        const wallMs = advanceWallMs(ms);
+        const done = await bounded(
+          page
+            .evaluate(`window.__studio.advanceClock(${ms / 1000}, ${wallMs})`)
+            .catch(() => undefined),
+          wallMs + PLAY_BOUNDS.webCallMs,
+        );
+        if (done === TIMED_OUT) throw unresponsive();
+        signal?.throwIfAborted();
+      };
       // Each step releases its own keys, as the process runners do: a key held
       // into the next step would move the player through it, and pressing the
       // same key again would arrive as auto-repeat, which games ignore.
@@ -904,7 +933,7 @@ export const openWebPlaySession = async (input: {
           await page.keyboard.down(key);
           held.push(key);
         }
-        await sleep(ms, signal);
+        await pass(ms);
         for (const key of mapped) {
           await page.keyboard.up(key);
           held.splice(held.indexOf(key), 1);
@@ -915,7 +944,7 @@ export const openWebPlaySession = async (input: {
         for (const step of steps) {
           signal?.throwIfAborted();
           if ("waitMs" in step) {
-            await sleep(step.waitMs, signal);
+            await pass(step.waitMs);
           } else if ("screenshot" in step) {
             // The act's single persisted frame is the observation; a labelled
             // mid-route capture adds no second persisted image.
@@ -934,7 +963,7 @@ export const openWebPlaySession = async (input: {
             const { from, to } = step.drag;
             await page.mouse.move(from.x, from.y);
             await page.mouse.down();
-            await sleep(step.holdMs, signal);
+            await pass(step.holdMs);
             await page.mouse.move(to.x, to.y, { steps: 8 });
             await page.mouse.up();
             pointer = { x: to.x, y: to.y };
@@ -1006,7 +1035,8 @@ export const openWebPlaySession = async (input: {
           actBody(steps, screenshotPath, signal).catch((cause: unknown) => {
             throw classify(cause);
           }),
-          stepMs + PLAY_BOUNDS.webActGraceMs,
+          // Each step's advance may take its own wall bound on a slow page.
+          steps.length * advanceWallMs(0) + 2 * stepMs + PLAY_BOUNDS.webActGraceMs,
         ),
         ended.then((end) => ({ end })),
       ]);

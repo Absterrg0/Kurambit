@@ -234,6 +234,8 @@ export function installStudio({
   replay,
   bot,
   takePlays,
+  holdClock,
+  advanceClock,
   sheet,
   play,
   blank,
@@ -290,6 +292,10 @@ export function installStudio({
     // The runs this page played to an end since the last call (shell/replay.js), for a harness
     // session, which no Stage holds, to keep as the Stage keeps a person's.
     takePlays: () => takePlays(),
+    // The harness's clock (shell.js): held, play moves only as `advanceClock(seconds)` steps it,
+    // as fast as the page allows; the promise settles once that much game time has played.
+    holdClock: (on) => holdClock(on),
+    advanceClock: (seconds, wallMs) => advanceClock(seconds, wallMs),
     // The model sheet (shell/sheet.js): one named thing alone, from four sides, with its
     // size, triangles and draw calls; names() lists the things with a body.
     ...(sheet === undefined
