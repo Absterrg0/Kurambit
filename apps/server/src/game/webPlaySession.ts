@@ -188,8 +188,8 @@ export class WebBrowserGone extends Error {
 /** Set before any script runs: the shell's QA counters (shell/studio.js) wrap what it watches. */
 const QA_COUNTERS = "window.__studioQa = true;";
 /**
- * The QA play: every control, then Retry. A slow machine makes it longer, never different: a
- * game drawn in software at a few frames a second takes about a minute.
+ * The QA play: every control, then Retry, stepped on the game's own clock (shell/qa.js): a few
+ * seconds on any machine. Its bound covers a run that compiles slowly.
  */
 const QA_PLAY_MS = 120_000;
 const RUN_QA = `(async () => {

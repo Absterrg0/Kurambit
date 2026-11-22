@@ -13,8 +13,10 @@
 //   - the HUD fits: the page's text stays inside the view and does not overlap.
 //
 // A page a player opens never runs this: the harness calls window.__studio.qa on a page it
-// opened with its counters on (studio.js). Every wait is real time, so a slow machine only
-// makes the play longer.
+// opened with its counters on (studio.js). The play moves the run on the game's own clock
+// (shell.js qaClock), stepped as fast as the page allows: a slow machine makes it no longer and
+// no different. Only a run compiling and the count of frames a game asks for outside its run
+// take real time.
 import { sfxAsked } from "./audio.js";
 import { Juice } from "./juice.js";
 import { GameState, SHELL_KEYS } from "./run-state.js";
@@ -32,19 +34,6 @@ const ACTIONS_PER_RUN = 3;
 const START_MS = 4000;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// A press's spans in frames too: on a slow machine a few frames outlast the span, and a press
-// the game updated once on answers too little to see. Never past FRAME_WAIT times the span.
-const HOLD_FRAMES = 4;
-const AFTER_FRAMES = 6;
-const BASE_FRAMES = HOLD_FRAMES + AFTER_FRAMES;
-const FRAME_WAIT = 4;
-const span = async (ms, frames) => {
-  const from = outsideRun.frames;
-  const started = performance.now();
-  await wait(ms);
-  while (outsideRun.frames - from < frames && performance.now() - started < ms * FRAME_WAIT)
-    await wait(30);
-};
 
 const positionOf = (player) => {
   if (player == null) return null;
@@ -68,7 +57,19 @@ const angle = (a, b) => {
  * a loss end the run, `eachThing(fn)` walks the Stage's things and `openTitle()` starts a run
  * that may open on the game's own title.
  */
-export function createQa({ controls, current, restart, canLose, eachThing, errors, openTitle }) {
+export function createQa({
+  controls,
+  current,
+  restart,
+  canLose,
+  eachThing,
+  errors,
+  openTitle,
+  hold,
+  advance,
+}) {
+  /** Game time on the run's own clock. */
+  const span = (ms) => advance(ms / 1000);
   // Juice effects asked for, counted by wrapping its methods once the QA play first runs.
   let juice = 0;
   let counting = false;
@@ -137,14 +138,14 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
   };
 
   const press = async (run, name, noisy) => {
-    await wait(SETTLE_MS);
+    await span(SETTLE_MS);
     const s0 = signature(run);
-    await span(BASE_MS, BASE_FRAMES);
+    await span(BASE_MS);
     const s1 = signature(run);
     run.input.force(name, true);
-    await span(HOLD_MS, HOLD_FRAMES);
+    await span(HOLD_MS);
     run.input.force(name, false);
-    await span(AFTER_MS, AFTER_FRAMES);
+    await span(AFTER_MS);
     if (current() !== run) return null;
     return answers(s0, s1, signature(run), noisy);
   };
@@ -185,7 +186,7 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
     openTitle();
     const started = performance.now();
     while (current()?.compiling === true && performance.now() - started < START_MS) await wait(50);
-    await span(SETTLE_MS, HOLD_FRAMES);
+    await span(SETTLE_MS);
     const run = current();
     return run !== null && GameState.state === "title" ? new Set(run.input.reads) : new Set();
   };
@@ -206,7 +207,7 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
         run = await playing();
         onRun = 0;
         if (run === null) break;
-        await wait(OPENING_MS);
+        await span(OPENING_MS);
       }
       onRun += 1;
       const errorsFrom = errors.length;
@@ -245,20 +246,20 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
   const retry = async () => {
     const first = await playing();
     if (first === null) return null;
-    await wait(800);
+    await span(800);
     const before = await count(first);
     const errorsBefore = errors.length;
     // Ended as a loss ends it, then retried as GameState.play() retries it.
     canLose(true);
     GameState.lose("QA play");
     const ended = performance.now();
-    while (GameState.state !== "ended" && performance.now() - ended < START_MS) await wait(50);
+    while (GameState.state !== "ended" && performance.now() - ended < START_MS) await span(50);
     if (GameState.state !== "ended") return { before, after: null, errors: [] };
-    await wait(300);
+    await span(300);
     restart();
     const again = await playing();
     if (again === null) return { before, after: null, errors: [] };
-    await wait(800);
+    await span(800);
     const after = await count(again);
     return {
       before,
@@ -272,11 +273,13 @@ export function createQa({ controls, current, restart, canLose, eachThing, error
       countJuice();
       // A loss would end the run between presses; games that read ctx.cannotLose take no damage.
       canLose(false);
+      hold(true);
       try {
         const controlsFound = await everyControl();
         const retried = await retry();
         return { version: 1, controls: controlsFound, retry: retried, errors: thrown };
       } finally {
+        hold(false);
         canLose(true);
       }
     },

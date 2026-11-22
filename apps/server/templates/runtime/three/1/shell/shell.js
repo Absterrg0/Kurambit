@@ -167,6 +167,29 @@ const STAGE_REPLAY_DRAW_EVERY = 30;
 const STAGE_REPLAY_MAX_MS = 20_000;
 /** A stepped bot's run keeps one frame in this many on the canvas while it hurries. */
 const BOT_DRAW_EVERY = 30;
+/**
+ * The QA play's clock (shell/qa.js): while it plays, the run moves only by the game time it asks
+ * for, stepped as fast as the page allows, so a slow machine makes the play no longer and no
+ * different. `until`: the run's time it is stepping to; `run`: the run it was asked on.
+ */
+let qaClock = null;
+const qaHold = (on) => {
+  qaClock?.reached?.();
+  qaClock = on ? { until: null, run: null, reached: null } : null;
+};
+/** Steps the run by `seconds` of game time; settles at once when nothing can move it. */
+const qaAdvance = (seconds) =>
+  new Promise((resolve) => {
+    // Nothing to step: settles on the next task, so a waiting loop never spins the page.
+    if (qaClock === null || run === null) return setTimeout(resolve, 0);
+    qaClock.reached?.();
+    qaClock.until = run.time + seconds;
+    qaClock.run = run;
+    qaClock.reached = () => {
+      if (qaClock !== null) Object.assign(qaClock, { until: null, run: null, reached: null });
+      resolve();
+    };
+  });
 /** A loss Can't lose kept from ending the run is noted at most this often (play seconds). */
 const LOSS_NOTE_EVERY_S = 1;
 
@@ -1169,6 +1192,8 @@ const studio = installStudio({
     eachThing: (fn) => bridge.eachThing(fn),
     openTitle: () => startRun({ title: true }),
     errors: studioErrors,
+    hold: qaHold,
+    advance: qaAdvance,
   }),
 });
 
@@ -1237,6 +1262,24 @@ renderer.setAnimationLoop((now) => {
     const { id, live: before } = handover;
     freshRun(before, true);
     bridge.replayed({ id, slow: STAGE_REPLAY_MAX_MS / 1000 });
+  } else if (qaClock !== null) {
+    // The QA play: the run moves only to the time it asked for, never on real time.
+    const stepping = run;
+    if (qaClock.until !== null) {
+      const until = performance.now() + REPLAY_FRAME_MS;
+      for (;;) {
+        // A step can end the run, or start another.
+        if (!moving || run !== stepping || stepping !== qaClock.run) break;
+        if (stepping.stopped === true || !live() || stepping.time >= qaClock.until) break;
+        if (performance.now() >= until) break;
+        dt += step();
+      }
+      // Reached, or nothing will move it further: a new run, or an ended or paused one.
+      if (run !== qaClock.run || run.time >= qaClock.until || (!moving && run?.compiling !== true))
+        qaClock.reached();
+    }
+    replayFrames += 1;
+    redraw = replayFrames % BOT_DRAW_EVERY === 0;
   } else if (run?.bot !== undefined && nativeNow.call(performance) > run.bot.wallUntil) {
     // A page too slow for the bot's budget, or a game that paused itself: it ends on wall time.
     botBudgetEnds(run);
