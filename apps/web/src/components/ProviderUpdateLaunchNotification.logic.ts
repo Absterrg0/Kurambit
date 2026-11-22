@@ -502,12 +502,6 @@ export interface LocalEnvironmentUpdateGroup {
   readonly providers: ReadonlyArray<ServerProvider>;
 }
 
-export function environmentGroupsWithUpdates(
-  groups: ReadonlyArray<LocalEnvironmentUpdateGroup>,
-): LocalEnvironmentUpdateGroup[] {
-  return groups.filter((group) => group.candidates.length > 0);
-}
-
 export type ProviderUpdateRowStatusKind = "idle" | "loading" | "success" | "failed" | "unchanged";
 
 export interface ProviderUpdateRowStatus {

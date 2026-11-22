@@ -142,7 +142,7 @@ function retainBackgroundScope(environmentId: EnvironmentId, scope: BackgroundSc
   };
 }
 
-export function observeBackgroundActivitySubscription(
+function observeBackgroundActivitySubscription(
   observation: EnvironmentRpcSubscriptionObservation,
 ): Effect.Effect<Effect.Effect<void>> {
   const scope = scopeForSubscription(observation);

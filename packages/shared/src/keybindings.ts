@@ -81,7 +81,7 @@ export function resolveEventKeys(event: ShortcutEventLike): Set<string> {
   return keys;
 }
 
-export function matchesKeybindingShortcutModifiers(
+function matchesKeybindingShortcutModifiers(
   event: ShortcutModifierStateLike,
   shortcut: KeybindingShortcut,
   platform: string,

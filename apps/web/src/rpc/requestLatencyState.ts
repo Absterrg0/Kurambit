@@ -4,14 +4,14 @@ import { Atom } from "effect/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";
 
-export const SLOW_RPC_ACK_THRESHOLD_MS = 15_000;
+const SLOW_RPC_ACK_THRESHOLD_MS = 15_000;
 /**
  * Some requests are slow by design — they shell out to a package manager on the
  * server and only respond once the install finishes. Warning about those after
  * 15s is noise, so they get a much longer leash.
  */
-export const LONG_RUNNING_RPC_ACK_THRESHOLD_MS = 120_000;
-export const MAX_TRACKED_RPC_ACK_REQUESTS = 256;
+const LONG_RUNNING_RPC_ACK_THRESHOLD_MS = 120_000;
+const MAX_TRACKED_RPC_ACK_REQUESTS = 256;
 let slowRpcAckThresholdMs = SLOW_RPC_ACK_THRESHOLD_MS;
 
 export interface SlowRpcAckRequest {
@@ -99,14 +99,6 @@ export function acknowledgeRpcRequest(requestId: string): void {
   setSlowRpcAckRequests(slowRequests.filter((request) => request.requestId !== requestId));
 }
 
-function clearAllTrackedRpcRequests(): void {
-  for (const pending of pendingRpcAckRequests.values()) {
-    clearTimeout(pending.timeoutId);
-  }
-  pendingRpcAckRequests.clear();
-  setSlowRpcAckRequests([]);
-}
-
 function clearTrackedRpcRequest(requestId: string): void {
   const pending = pendingRpcAckRequests.get(requestId);
   if (!pending) {
@@ -136,11 +128,6 @@ function evictOldestPendingRpcRequestIfNeeded(): void {
 
     clearTrackedRpcRequest(oldestRequestId);
   }
-}
-
-export function resetRequestLatencyStateForTests(): void {
-  slowRpcAckThresholdMs = SLOW_RPC_ACK_THRESHOLD_MS;
-  clearAllTrackedRpcRequests();
 }
 
 export function useSlowRpcAckRequests(): ReadonlyArray<SlowRpcAckRequest> {

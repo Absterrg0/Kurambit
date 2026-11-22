@@ -176,9 +176,6 @@ export const unavailableEngineMessage = (engine: GameEngineName): string =>
  */
 export const OLD_SHELL_MESSAGE =
   "This game was made with an older Kurambit and is not supported in this version: its chat, builds and history still open, but nothing plays it.";
-/** The engine a game made from a template runs on; games from before templates were Godot games. */
-export const templateEngine = (template: GameTemplateId | null): GameEngineName =>
-  template === "blank-three" ? "three" : template === "blank-unity" ? "unity" : "godot";
 /** The starter template a create request's engine maps to. */
 export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
   GAME_ENGINES[engine].template;
