@@ -3,10 +3,8 @@ import {
   RESTORE_BEFORE_LABEL,
   ThreadId,
   type GameBuild,
-  type GameBuildFacts,
   type GameBuildsResult,
   type GameFactDelta,
-  type GameFactView,
 } from "@kurambit/contracts";
 
 /**
@@ -188,28 +186,6 @@ export const FAKE_UNDONE_RESULT: GameBuildsResult = {
     outcome: { restored: true, message: "Turn 4's build is back in the folder." },
   },
 };
-
-export const FAKE_FACT_VIEWS: ReadonlyArray<GameFactView> = [
-  {
-    id: "boots",
-    label: "Boots",
-    reading: { _tag: "measured", text: "Reached play in 2.1 s", value: 2.1, tone: "good" },
-    evidence: [],
-  },
-  {
-    id: "masher",
-    label: "Masher",
-    reading: { _tag: "measured", text: "Won at 9.4 s", value: 9.4, tone: "bad" },
-    evidence: [{ kind: "video", label: "Masher run", path: "builds/logs/bot-1/video.mp4" }],
-  },
-  {
-    id: "skilled",
-    label: "Skilled",
-    reading: { _tag: "not-measured", why: "this game has no skilled bot" },
-    evidence: [],
-  },
-  { id: "first-response", label: "First response", reading: { _tag: "pending" }, evidence: [] },
-];
 
 export const FAKE_DELTAS: ReadonlyArray<GameFactDelta> = [
   {

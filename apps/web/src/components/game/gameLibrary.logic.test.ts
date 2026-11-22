@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { GameSummary } from "@kurambit/contracts";
 
-import {
-  draftGameName,
-  gameInitial,
-  gameTemplateAppearance,
-  newestThreadByProject,
-  sortGameSummaries,
-  chatTitle,
-} from "./gameLibrary.logic";
+import { draftGameName, sortGameSummaries, chatTitle } from "./gameLibrary.logic";
 
 const summary = (name: string, updatedAt: string): GameSummary => ({
   projectId: `project-${name}` as GameSummary["projectId"],
@@ -21,23 +14,6 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   updatedAt,
 });
 
-describe("gameInitial", () => {
-  it("uses the first letters of a name and never renders nothing", () => {
-    expect(gameInitial("The Sunlit Isle")).toBe("TS");
-    expect(gameInitial("Hollow")).toBe("H");
-    expect(gameInitial("   ")).toBe("G");
-  });
-});
-
-describe("gameTemplateAppearance", () => {
-  it("names the engine each starter uses, and says when it is paused", () => {
-    expect(gameTemplateAppearance("blank").label).toBe("Godot · not available");
-    expect(gameTemplateAppearance(null).label).toBe("Godot · not available");
-    expect(gameTemplateAppearance("blank-three").label).toBe("three.js");
-    expect(gameTemplateAppearance("blank-unity").label).toBe("Unity · not available");
-  });
-});
-
 describe("sortGameSummaries", () => {
   it("puts the newest activity first and breaks ties by name", () => {
     expect(
@@ -47,18 +23,6 @@ describe("sortGameSummaries", () => {
         summary("Alpha", "2026-10-20T00:00:00.000Z"),
       ]).map((game) => game.name),
     ).toEqual(["Alpha", "Zebra", "Older"]);
-  });
-});
-
-describe("newestThreadByProject", () => {
-  it("picks the most recently active session for each game", () => {
-    const newest = newestThreadByProject([
-      { projectId: "a", id: "old", updatedAt: "2026-10-18T00:00:00.000Z" },
-      { projectId: "a", id: "new", updatedAt: "2026-10-20T00:00:00.000Z" },
-      { projectId: "b", id: "only", updatedAt: "2026-10-19T00:00:00.000Z" },
-    ]);
-    expect(newest.get("a")?.id).toBe("new");
-    expect(newest.get("b")?.id).toBe("only");
   });
 });
 

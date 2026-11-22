@@ -3,7 +3,6 @@ import {
   type GameBuild,
   type GameBuildId,
   type GameBuildsResult,
-  type GameFactTone,
 } from "@kurambit/contracts";
 
 /**
@@ -34,12 +33,6 @@ export const timelineMarks = (
   return newestFirst
     .filter((build) => !isRestoreBefore(build) || build.id === newestBefore || build.id === current)
     .toReversed();
-};
-
-/** PURE. The worst tone among a build's chips: one bad fact marks it, then a good one; else none. */
-export const markTone = (build: GameBuild): GameFactTone => {
-  const tones = new Set(build.facts.chips.map((chip) => chip.tone));
-  return tones.has("bad") ? "bad" : tones.has("good") ? "good" : "neutral";
 };
 
 /**
