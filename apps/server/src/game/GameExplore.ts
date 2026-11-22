@@ -382,7 +382,7 @@ const make = Effect.gen(function* () {
     session: ExploreSession,
     key: "maxCalls" | "maxTotalSteps" | "maxTotalNominalMs" | "maxImages",
   ) => GAME_EXPLORE_BOUNDS[key] * session.budgets;
-  const goOn = "game_play op act with this sessionId goes on with another budget; close ends it.";
+  const goOn = "the next act goes on with another budget; close ends it.";
   const exploreBudget =
     `This session holds ${GAME_EXPLORE_BOUNDS.maxCalls} acts and ` +
     `${GAME_EXPLORE_BOUNDS.maxTotalNominalMs / 1000} s of input, about ` +
@@ -894,11 +894,6 @@ const make = Effect.gen(function* () {
           session.id,
           `Use 1–${GAME_EXPLORE_BOUNDS.maxStepsPerCall} steps per act; this act has ${input.steps.length}.`,
         );
-      if (session.calls >= bound(session, "maxCalls"))
-        return yield* exploreInvalid(
-          session.id,
-          `This session used its ${bound(session, "maxCalls")} act calls: ${goOn}`,
-        );
       const nominalMs = exploreStepsNominalMs(input.steps);
       if (!Number.isFinite(nominalMs) || nominalMs < 0)
         return yield* exploreInvalid(session.id, "The act has an invalid duration.");
@@ -931,28 +926,16 @@ const make = Effect.gen(function* () {
               `That exploration session ${reason}. Act without a sessionId to open a new one.`,
             );
           }
-          // Budgets are checked under the session lock so concurrent acts
-          // cannot each pass before either one accounts for itself.
-          if (session.calls >= bound(session, "maxCalls"))
-            return yield* exploreInvalid(
-              session.id,
-              `This session used its ${bound(session, "maxCalls")} act calls: ${goOn}`,
-            );
-          if (session.totalSteps + input.steps.length > bound(session, "maxTotalSteps"))
-            return yield* exploreInvalid(
-              session.id,
-              `This act would exceed the session's ${bound(session, "maxTotalSteps")} total steps: ${goOn}`,
-            );
-          if (session.totalNominalMs + nominalMs > bound(session, "maxTotalNominalMs"))
-            return yield* exploreInvalid(
-              session.id,
-              `This act would exceed the session's ${bound(session, "maxTotalNominalMs")}ms total nominal time: ${goOn}`,
-            );
-          if (session.images + 1 > bound(session, "maxImages"))
-            return yield* exploreInvalid(
-              session.id,
-              `This act would exceed the session's ${bound(session, "maxImages")} persisted images: ${goOn}`,
-            );
+          // Budgets are counted under the session lock so concurrent acts cannot each pass
+          // before either one accounts for itself. A spent budget is never a refusal: the game
+          // plays on where it is with another, as an act without a sessionId already does, so a
+          // run longer than one budget reaches its end without the agent losing its place.
+          const spent = () =>
+            session.calls >= bound(session, "maxCalls") ||
+            session.totalSteps + input.steps.length > bound(session, "maxTotalSteps") ||
+            session.totalNominalMs + nominalMs > bound(session, "maxTotalNominalMs") ||
+            session.images + 1 > bound(session, "maxImages");
+          if (spent()) session.budgets += 1;
           const callIndex = session.calls + 1;
           session.calls = callIndex;
           session.totalSteps += input.steps.length;

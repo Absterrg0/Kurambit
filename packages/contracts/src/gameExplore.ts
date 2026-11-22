@@ -12,8 +12,11 @@ import { GamePlaytestProbe, GamePlaytestStep, GameConsoleMessage, GameViewport }
 export const GAME_EXPLORE_BOUNDS = {
   /** Input steps one act call may carry. Short cycles stay observable. */
   maxStepsPerCall: 6,
-  /** Nominal game time one act call may advance. */
-  maxSequenceMsPerCall: 10_000,
+  /**
+   * Nominal game time one act call may advance: long enough to watch an opponent's turn, a
+   * timer or a lap in one act, which agents asked for (12-30 s) and split across calls when refused.
+   */
+  maxSequenceMsPerCall: 30_000,
   /** Act calls one session may make. */
   maxCalls: 16,
   /** Input steps one session may execute in total. */
