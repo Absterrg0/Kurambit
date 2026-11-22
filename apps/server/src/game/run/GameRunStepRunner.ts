@@ -53,6 +53,8 @@ import * as ThreadManagement from "../../orchestration-v2/ThreadManagementServic
 import * as TurnAdmission from "../../orchestration-v2/TurnAdmission.ts";
 import * as GameBot from "../GameBot.ts";
 import * as GameBuilds from "../GameBuilds.ts";
+import * as GameEngine from "../GameEngine.ts";
+import * as GameFreshEyes from "../GameFreshEyes.ts";
 import * as GameProjectService from "../GameProjectService.ts";
 import { decidedKeys } from "../GameDecisions.ts";
 import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
@@ -97,6 +99,8 @@ const make = Effect.gen(function* () {
   const builds = yield* GameBuilds.GameBuilds;
   const bots = yield* GameBot.GameBot;
   const projects = yield* GameProjectService.GameProjectService;
+  const engines = yield* GameEngine.GameEngine;
+  const freshEyes = yield* GameFreshEyes.GameFreshEyes;
   const jobs = yield* GameRunJobs.GameRunJobs;
   const turns = yield* GameRunTurnReactor.GameRunTurnReactor;
 
@@ -241,6 +245,35 @@ const make = Effect.gen(function* () {
       return null;
     });
 
+  /**
+   * The biggest problem fresh eyes see in the game as it is now: a quick check's frames (the page
+   * as opened, then play), shown to a separate model with only the brief. Without it a step with
+   * nothing measured to fix was the agent's own plan, never what a player sees: steps went to
+   * sound and pause menus while judges marked the games down for empty scenes and unreadable
+   * HUDs. Null when there is no frame or the review could not run.
+   */
+  const freshLook = (threadId: ThreadId, root: string) =>
+    Effect.gen(function* () {
+      const checked = yield* Effect.option(engines.check(threadId));
+      const views = Option.isSome(checked) ? (checked.value.views ?? []) : [];
+      if (views.length === 0) return null;
+      const seen = yield* freshEyes.defects({
+        threadId,
+        root,
+        images: views.map((view) => NodePath.join(root, view.path)),
+        about: GameFreshEyes.checkFramesAbout(views.map((view) => view.entry)),
+      });
+      if (seen._tag === "failed") {
+        yield* Effect.logWarning("Fresh eyes could not look at the game.", {
+          threadId,
+          reason: seen.reason,
+        });
+        return null;
+      }
+      const biggest = seen.defects[0];
+      return biggest === undefined ? ("none" as const) : { text: biggest.slice(0, 600) };
+    });
+
   const look = (located: GameRunTurnReactor.Located, rounds: ReadonlyArray<GameRunRound>) =>
     Effect.gen(function* () {
       const step = located.record.step;
@@ -262,13 +295,18 @@ const make = Effect.gen(function* () {
         facts !== null && facts.masher.status !== "measured" && made != null
           ? yield* factsSoFar(threadId, made)
           : null;
+      const critique = yield* referenceCritique(threadId);
+      // The person's picture says what to change while it still differs; fresh eyes go after it.
+      const fresh =
+        critique !== null && critique !== "none" ? undefined : yield* freshLook(threadId, root);
       yield* complete(located, {
         kind: "look",
         current: build,
         facts,
         ...(earlier === null ? {} : { earlier }),
         next: yield* nextLine(threadId),
-        critique: yield* referenceCritique(threadId),
+        critique,
+        ...(fresh === undefined ? {} : { fresh }),
         bot: (yield* bots.latestPlayBot(root)) !== null,
         edited,
         decided: yield* decidedKeys(root).pipe(

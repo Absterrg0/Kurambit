@@ -182,6 +182,7 @@ const WHY_LABEL: Readonly<Record<GameRunStepWhy, string>> = {
   bot: "a bot for the skilled fact",
   fact: "a failing fact",
   reference: "your picture",
+  fresh: "fresh eyes",
   next: "your agent's next step",
 };
 const STEER_INTRO = "The person asked for this, in their words:";
@@ -242,6 +243,7 @@ export const proposalSummary = (
         : (FACT_GOAL[proposal.target] ?? `Fix a failing fact (${proposal.target})`);
     case "steer":
     case "reference":
+    case "fresh":
     case "next":
       return headline(proposal, 100);
   }
@@ -500,9 +502,31 @@ const referenceProposal = (look: LookResult): GameRunProposal | null => {
 };
 
 /**
+ * The biggest problem fresh eyes saw in the game as it is (the look's frames, shown to a separate
+ * model with only the brief): what a player would notice first, where the agent's own next line
+ * is its plan.
+ */
+const freshProposal = (look: LookResult): GameRunProposal | null => {
+  const fresh = look.fresh;
+  if (fresh === undefined || fresh === null || fresh === "none") return null;
+  const problem = fresh.text.trim().replace(/[.\s]+$/, "");
+  if (problem.length === 0) return null;
+  return {
+    why: "fresh",
+    text: clip(
+      `${problem}. This is the biggest problem a fresh pair of eyes saw in screenshots of the game as it is now, shown only BRIEF.md. Make the one change that fixes it.`,
+      TEXT_MAX,
+    ),
+    target: null,
+    key: `fresh:${fnv(normalized(problem))}`,
+  };
+};
+
+/**
  * The order of evidence, the person's first: their notes, a blocker, a retry
  * of an undone step, the picture they asked to match while it still differs,
- * a failing fact, then the agent's own next line. Every
+ * a failing fact, the biggest problem fresh eyes saw, then the agent's own
+ * next line. Every
  * candidate whose key is set aside is passed over. Null: nothing left to
  * propose. The play bot is no candidate: a step must change what a person
  * sees or fix a measured fault.
@@ -550,6 +574,7 @@ export const propose = (state: RunState, look: LookResult): GameRunProposal | nu
         (["controls", "retry", "hud", "screens", "saved-plays"] as const)
           .filter((id) => toneOf(views, id) === "bad")
           .map((id) => () => factStep("fact", id, views))),
+    () => freshProposal(look),
     () => {
       if (look.next === "none") return null;
       const text = look.next === null ? "" : look.next.text.trim();

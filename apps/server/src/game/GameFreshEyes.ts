@@ -23,6 +23,12 @@ const Defects = Schema.Struct({
 
 const BRIEF_MOST = 1500;
 
+/** What a check's frames show, in their order: the page as opened (boot), then play. */
+export const checkFramesAbout = (entries: ReadonlyArray<string>) =>
+  entries.length > 1 && entries[0] === "boot"
+    ? "a browser game: first the page as a player opens it, then a moment of play"
+    : "a moment of play in a browser game";
+
 const prompt = (about: string, brief: string) =>
   [
     "You are seeing these pictures for the first time. They show " + about + ".",
@@ -32,16 +38,28 @@ const prompt = (about: string, brief: string) =>
     .filter((line) => line !== "")
     .join("\n\n");
 
+interface ReviewInput {
+  readonly threadId: ThreadId;
+  readonly root: string;
+  readonly images: ReadonlyArray<string>;
+  readonly about: string | undefined;
+}
+
 export class GameFreshEyes extends Context.Service<
   GameFreshEyes,
   {
     /** The defects, as lines for the agent; a review that cannot run says why, never fails. */
-    readonly review: (input: {
-      readonly threadId: ThreadId;
-      readonly root: string;
-      readonly images: ReadonlyArray<string>;
-      readonly about: string | undefined;
-    }) => Effect.Effect<string>;
+    readonly review: (input: ReviewInput) => Effect.Effect<string>;
+    /**
+     * The defects themselves, biggest first (empty: nothing worth naming), or why the review
+     * could not run.
+     */
+    readonly defects: (
+      input: ReviewInput,
+    ) => Effect.Effect<
+      | { readonly _tag: "seen"; readonly defects: ReadonlyArray<string> }
+      | { readonly _tag: "failed"; readonly reason: string }
+    >;
   }
 >()("kurambit/game/GameFreshEyes") {}
 
@@ -49,15 +67,10 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration.TextGeneration;
   const threads = yield* ThreadManagement.ThreadManagementService;
 
-  const review = (input: {
-    readonly threadId: ThreadId;
-    readonly root: string;
-    readonly images: ReadonlyArray<string>;
-    readonly about: string | undefined;
-  }) =>
+  const defects = (input: ReviewInput) =>
     Effect.gen(function* () {
       const shell = yield* threads.getThreadShell(input.threadId);
-      if (shell === null) return "Fresh eyes could not look: the thread is gone.";
+      if (shell === null) return { _tag: "failed" as const, reason: "the thread is gone" };
       const brief = yield* Effect.promise(() =>
         NodeFSP.readFile(NodePath.join(input.root, "BRIEF.md"), "utf8").catch(() => ""),
       );
@@ -71,23 +84,34 @@ const make = Effect.gen(function* () {
         outputSchema: Defects,
         modelSelection: shell.modelSelection,
       });
-      const { defects } = yield* Schema.decodeUnknownEffect(Defects)(answer);
-      return defects.length === 0
-        ? "Fresh eyes (a separate model shown only the picture, what it shows and the brief) saw no problem worth naming."
-        : [
-            "Fresh eyes (a separate model shown only the picture, what it shows and the brief):",
-            ...defects.map((defect, index) => `${index + 1}. ${defect}`),
-          ].join("\n");
+      const decoded = yield* Schema.decodeUnknownEffect(Defects)(answer);
+      return { _tag: "seen" as const, defects: decoded.defects };
     }).pipe(
       Effect.catch((error) =>
-        Effect.succeed(
-          `Fresh eyes could not look: ${("detail" in error && typeof error.detail === "string" ? error.detail : error.message).slice(0, 300)}`,
-        ),
+        Effect.succeed({
+          _tag: "failed" as const,
+          reason: ("detail" in error && typeof error.detail === "string"
+            ? error.detail
+            : error.message
+          ).slice(0, 300),
+        }),
       ),
-      Effect.withSpan("GameFreshEyes.review"),
+      Effect.withSpan("GameFreshEyes.defects"),
     );
 
-  return GameFreshEyes.of({ review });
+  const review = (input: ReviewInput) =>
+    Effect.map(defects(input), (seen) =>
+      seen._tag === "failed"
+        ? `Fresh eyes could not look: ${seen.reason}`
+        : seen.defects.length === 0
+          ? "Fresh eyes (a separate model shown only the picture, what it shows and the brief) saw no problem worth naming."
+          : [
+              "Fresh eyes (a separate model shown only the picture, what it shows and the brief):",
+              ...seen.defects.map((defect, index) => `${index + 1}. ${defect}`),
+            ].join("\n"),
+    );
+
+  return GameFreshEyes.of({ review, defects });
 });
 
 export const layer = Layer.effect(GameFreshEyes, make);

@@ -62,6 +62,7 @@ const WHY_LABEL: Record<GameRunStepWhy, string> = {
   bot: "a play bot",
   fact: "a check to look at",
   reference: "your picture",
+  fresh: "what fresh eyes saw",
   next: "your agent's next step",
 };
 const stepWhyLabel = (why: GameRunStepWhy): string => WHY_LABEL[why];

@@ -323,6 +323,20 @@ describe("the proposal", () => {
     expect(Loop.propose(state(), look({ facts: crashing, critique }))?.why).toBe("blocker");
   });
 
+  // With nothing measured to fix, what a player would notice first comes before the agent's own
+  // plan; a failing fact and the person's picture still come first, and "none" falls through.
+  it("takes the biggest problem fresh eyes saw before the agent's own next line", () => {
+    const fresh = { text: "The player's ship is a small pale blob against the wall glow" };
+    const step = Loop.propose(state(), look({ fresh }));
+    expect(step).toMatchObject({ why: "fresh" });
+    expect(step?.text).toContain("The player's ship is a small pale blob against the wall glow.");
+    expect(Loop.propose(state(), look({ fresh: "none" }))?.why).toBe("next");
+    expect(Loop.propose(state(), look({ fresh: null }))?.why).toBe("next");
+    expect(Loop.propose(state(), look({ facts: deadControls(1), fresh }))?.why).toBe("fact");
+    const critique = { text: "The camera sits higher than the picture's" };
+    expect(Loop.propose(state(), look({ critique, fresh }))?.why).toBe("reference");
+  });
+
   it("never proposes a play bot", () => {
     expect(Loop.propose(state(), look({ bot: false }))?.why).toBe("next");
   });

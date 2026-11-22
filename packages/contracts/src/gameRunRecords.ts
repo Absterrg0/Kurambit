@@ -251,6 +251,12 @@ export const GameRunStepResult = Schema.Union([
      * picture the person asked the game to match: its text, "none", or null when none declared.
      */
     critique: Schema.optionalKey(NextLine),
+    /**
+     * The biggest problem a separate model saw in the current build's frames, shown only the
+     * brief (GameFreshEyes): its text, "none" when it named none, or null when it could not look.
+     * Absent when the look did not ask (a reference picture's difference comes first).
+     */
+    fresh: Schema.optionalKey(NextLine),
     /** A play bot exists (GameBot.latestPlayBot). */
     bot: Schema.Boolean,
     /** The folder's game files are not `current`'s: edited outside any build. */

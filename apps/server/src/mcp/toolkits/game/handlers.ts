@@ -302,10 +302,7 @@ const check = (store: CheckpointStore["Service"], final: boolean, fresh = false)
           threadId: scope.thread.threadId,
           root,
           images: views.map((view) => NodePath.join(root, view.path)),
-          about:
-            views.length > 1 && views[0]?.entry === "boot"
-              ? "a browser game: first the page as a player opens it, then a moment of play"
-              : "a moment of play in a browser game",
+          about: GameFreshEyes.checkFramesAbout(views.map((view) => view.entry)),
         })
       : undefined;
     // A brief alone needs no words beside the frames; a reference says which picture is which.
