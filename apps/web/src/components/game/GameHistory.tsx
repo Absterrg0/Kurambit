@@ -96,6 +96,7 @@ export function GameHistory({
   slot,
   request,
   reelOpen,
+  firstStep,
   open,
   undo,
   onPlay,
@@ -112,6 +113,8 @@ export function GameHistory({
   slot: GameBuildSlot | null;
   request: GameStripRequest | null;
   reelOpen: boolean;
+  /** The game's latest keep going run's first step: the reel reads pages back to it. */
+  firstStep: number | null;
   /** The popover is open: the row scrolls to the newest when it opens. */
   open: boolean;
   undo: GameStripUndo;
@@ -171,6 +174,19 @@ export function GameHistory({
       : lastPage !== undefined && AsyncResult.isSuccess(lastPage)
         ? lastPage.value.next
         : null;
+  // The open reel reads pages back while the oldest loaded build is still one of the run's steps.
+  const oldestStep = marks[0]?.source._tag === "turn" ? marks[0].source.step : null;
+  const reelWaiting = lastPage !== undefined && !AsyncResult.isSuccess(lastPage);
+  if (
+    reelOpen &&
+    firstStep !== null &&
+    oldestStep !== null &&
+    oldestStep.n >= firstStep &&
+    olderNext !== null &&
+    !reelWaiting &&
+    olderCount < SEEK_PAGES
+  )
+    setOlderCount(olderCount + 1);
   // An older turn's "Open build": read pages back until it is in the strip, then show it.
   if (sought !== null) {
     const found = marks.find((entry) => sameRef(sought, entry));
@@ -323,7 +339,9 @@ export function GameHistory({
         />
       )}
       <GameHistoryCopies threadRef={threadRef} gameName={gameName} />
-      {reelOpen ? <GameReel threadRef={threadRef} marks={marks} onPlay={play} /> : null}
+      {reelOpen ? (
+        <GameReel threadRef={threadRef} marks={marks} firstStep={firstStep} onPlay={play} />
+      ) : null}
       <StripRow open={open} count={marks.length + (showNow ? 1 : 0) + (slot === null ? 0 : 1)}>
         {olderNext !== null ? (
           <Button

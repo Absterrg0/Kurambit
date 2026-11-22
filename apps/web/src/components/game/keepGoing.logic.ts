@@ -1,4 +1,5 @@
 import type {
+  GameBuild,
   GameBuildSource,
   GameKeepGoingInput,
   GameKeepGoingMode,
@@ -41,6 +42,8 @@ export const KEEP_GOING_BUDGETS: ReadonlyArray<{
   { minutes: 30, label: "30 min" },
   { minutes: 60, label: "1 hour" },
   { minutes: 120, label: "2 hours" },
+  { minutes: 240, label: "4 hours" },
+  { minutes: 480, label: "8 hours" },
   { minutes: null, label: "No limit" },
 ];
 const DEFAULT_BUDGET = 60;
@@ -292,3 +295,44 @@ export const stepVerdictText = (step: StepSource): string => {
 
 /** PURE. The strip's line for a step turn: "Step 3 · undone: Random input now crashes at 12 s". */
 export const stepLine = (step: StepSource): string => `Step ${step.n} · ${stepVerdictText(step)}`;
+
+/** Without a run to scope it, the reel shows this many of Keep going's newest steps. */
+const REEL_STEPS = 6;
+
+const stepOf = (build: GameBuild) => (build.source._tag === "turn" ? build.source.step : null);
+
+/**
+ * PURE. The reel's steps, oldest first: the run's from its first step, else the newest few.
+ * Each step's before is the build it was made from, else the build before it in the strip.
+ */
+export const reelSteps = (marks: ReadonlyArray<GameBuild>, firstStep: number | null) => {
+  const steps = marks
+    .map((build, index) => ({
+      build,
+      before:
+        marks.find((entry) => entry.id === build.base) ??
+        (index > 0 ? (marks[index - 1] ?? null) : null),
+    }))
+    .filter(({ build }) => {
+      const step = stepOf(build);
+      return step !== null && (firstStep === null || step.n >= firstStep);
+    });
+  return firstStep === null ? steps.slice(-REEL_STEPS) : steps;
+};
+
+/** PURE. The reel's heading: what the run's listed steps came to. */
+export const reelHeading = (marks: ReadonlyArray<GameBuild>, firstStep: number | null) => {
+  const steps = reelSteps(marks, firstStep).flatMap(({ build }) => stepOf(build) ?? []);
+  const first = steps[0];
+  const last = steps.at(-1);
+  if (first === undefined || last === undefined) return null;
+  const undone = steps.filter((step) => step.verdict === "undone").length;
+  const kept = steps.filter(
+    (step) =>
+      step.verdict === "kept" ||
+      step.verdict === "kept-moved-on" ||
+      step.verdict === "not-measured",
+  ).length;
+  const range = first.n === last.n ? `Step ${first.n}` : `Steps ${first.n}–${last.n}`;
+  return `${range} · ${kept} kept · ${undone} undone`;
+};

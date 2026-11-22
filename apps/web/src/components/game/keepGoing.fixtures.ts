@@ -21,6 +21,7 @@ export const NEVER_RAN: GameKeepGoingStatus = {
   budgetMinutes: null,
   endsAt: null,
   steps: [],
+  firstStep: null,
   steer: [],
   setAside: [],
   ending: null,

@@ -8,31 +8,29 @@ import { useEnvironmentQuery } from "../../state/query";
 import { Button } from "../ui/button";
 import { refOf } from "./gameBuildRef";
 import { GameImage } from "./GameImage";
-import { stepVerdictText } from "./keepGoing.logic";
-
-/** The reel shows this many of Keep going's newest steps. */
-const REEL_STEPS = 6;
+import { reelHeading, reelSteps, stepVerdictText } from "./keepGoing.logic";
 
 /**
- * The build strip opened as a reel: Keep going's newest steps, each as the
- * build it started from and the build it made (the last frame of their
- * measured play), with its verdict. Play plays the step.
+ * The build strip opened as a reel: Keep going's run, step by step, each as the
+ * build it started from and the build it made (the last frame of their measured
+ * play), what it changed and its verdict, so a run left going overnight reads in
+ * the morning. Play plays the step.
  */
 export function GameReel({
   threadRef,
   marks,
+  firstStep,
   onPlay,
 }: {
   threadRef: ScopedThreadRef;
   /** The strip's builds, oldest to newest. */
   marks: ReadonlyArray<GameBuild>;
+  /** The game's latest run's first step; null shows the newest few. */
+  firstStep: number | null;
   onPlay: (build: GameBuild) => void;
 }) {
   const root = useIsGameThreadStatus(threadRef).data?.root ?? null;
-  const steps = marks
-    .map((build, index) => ({ build, before: index > 0 ? (marks[index - 1] ?? null) : null }))
-    .filter(({ build }) => build.source._tag === "turn" && build.source.step !== null)
-    .slice(-REEL_STEPS);
+  const steps = reelSteps(marks, firstStep);
   if (steps.length === 0)
     return (
       <p className="py-2 text-xs text-muted-foreground">
@@ -40,53 +38,63 @@ export function GameReel({
       </p>
     );
   return (
-    <div className="flex min-w-0 overflow-x-auto pb-1" aria-label="Keep going's steps">
-      {steps.map(({ build, before }) => {
-        const step = build.source._tag === "turn" ? build.source.step : null;
-        const undone = step?.verdict === "undone";
-        return (
-          <section
-            key={build.id}
-            aria-label={build.name}
-            className="flex w-64 shrink-0 flex-col gap-1.5 border-border px-3 first:ps-0 [&+&]:border-l"
-          >
-            <div className="grid grid-cols-2 gap-1.5">
-              <StepFrame threadRef={threadRef} root={root} build={before} label="Before" />
-              <StepFrame
-                threadRef={threadRef}
-                root={root}
-                build={build}
-                label="After"
-                dim={undone}
-              />
-            </div>
-            <p className="truncate text-xs font-medium">
-              <span className="me-1.5 font-mono font-normal text-muted-foreground">{step?.n}</span>
-              {build.summary}
-            </p>
-            <p
-              className={cn(
-                "line-clamp-2 text-xs",
-                step?.verdict === "kept" ? "text-success-foreground" : "text-muted-foreground",
-              )}
+    <section aria-label="Keep going's steps" className="flex min-w-0 flex-col gap-2">
+      <p className="text-xs text-muted-foreground">{reelHeading(marks, firstStep)}</p>
+      <ol className="flex max-h-[26rem] min-w-0 flex-col overflow-y-auto">
+        {steps.map(({ build, before }) => {
+          const step = build.source._tag === "turn" ? build.source.step : null;
+          const undone = step?.verdict === "undone";
+          return (
+            <li
+              key={build.id}
+              aria-label={build.name}
+              className="grid grid-cols-[13rem_minmax(0,1fr)] gap-3 border-border py-2 first:pt-0 [&+&]:border-t"
             >
-              {step === null ? "" : stepVerdictText(step)}
-            </p>
-            <div className="-ms-2 flex gap-0.5">
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={!build.available || build.noPlay !== null}
-                onClick={() => onPlay(build)}
-              >
-                <PlayIcon className="fill-current" aria-hidden="true" />
-                Play
-              </Button>
-            </div>
-          </section>
-        );
-      })}
-    </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <StepFrame threadRef={threadRef} root={root} build={before} label="Before" />
+                <StepFrame
+                  threadRef={threadRef}
+                  root={root}
+                  build={build}
+                  label="After"
+                  dim={undone}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="line-clamp-2 text-xs font-medium">
+                  <span className="me-1.5 font-mono font-normal text-muted-foreground">
+                    {step?.n}
+                  </span>
+                  {step?.move || build.summary}
+                </p>
+                {step?.move && build.summary !== "" ? (
+                  <p className="line-clamp-2 text-xs text-muted-foreground">{build.summary}</p>
+                ) : null}
+                <p
+                  className={cn(
+                    "line-clamp-2 text-xs",
+                    step?.verdict === "kept" ? "text-success-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {step === null ? "" : stepVerdictText(step)}
+                </p>
+                <div className="-ms-2 flex gap-0.5">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={!build.available || build.noPlay !== null}
+                    onClick={() => onPlay(build)}
+                  >
+                    <PlayIcon className="fill-current" aria-hidden="true" />
+                    Play
+                  </Button>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 

@@ -5,6 +5,7 @@ import type { ScopedThreadRef } from "@kurambit/contracts";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 import { KEEP_GOING_MODES, keepGoingBannerView, keepGoingHidesNext } from "./keepGoing.logic";
 import { useKeepGoing } from "./useKeepGoing";
 
@@ -23,7 +24,7 @@ const endingTitle = (text: string) => (
 /**
  * Keep going above the composer, in its own chat: what
  * the live run is doing with Stop, a Guided proposal with Start now, Edit
- * and Skip, or why it paused with Resume. Times are clock times; nothing
+ * and Skip, or why it paused with Resume and what it did. Times are clock times; nothing
  * ticks, and it re-renders only on run pushes. `hidesNext` says when keep
  * going takes the agent's `Next:` line itself. Pass `null` off game threads.
  */
@@ -63,6 +64,17 @@ export function useKeepGoingBanner(
     </Button>
   );
   const icon = <FastForwardIcon />;
+  // A run that stopped says what it did: its reel, step by step, before and after.
+  const recap =
+    status?.firstStep == null ? null : (
+      <Button
+        size="xs"
+        variant="ghost"
+        onClick={() => useGameWorkspaceStore.getState().requestStage({ kind: "reel" })}
+      >
+        See what it did
+      </Button>
+    );
   switch (view.kind) {
     case "proposal":
       return {
@@ -165,14 +177,17 @@ export function useKeepGoingBanner(
           icon,
           title: endingTitle(view.title),
           actions: (
-            <Button
-              size="xs"
-              variant="ghost"
-              disabled={busy || !keepGoing.canOperate}
-              onClick={() => void keepGoing.choose(view.resume)}
-            >
-              Resume ({modeLabel(view.resume)})
-            </Button>
+            <>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={busy || !keepGoing.canOperate}
+                onClick={() => void keepGoing.choose(view.resume)}
+              >
+                Resume ({modeLabel(view.resume)})
+              </Button>
+              {recap}
+            </>
           ),
           dismissLabel: "Dismiss why keep going paused",
           onDismiss: () => setDismissed(view.id),
@@ -189,6 +204,7 @@ export function useKeepGoingBanner(
           layout: "wrap-actions",
           icon,
           title: endingTitle(view.title),
+          ...(recap === null ? {} : { actions: recap }),
           dismissLabel: "Dismiss why keep going ended",
           onDismiss: () => setDismissed(view.id),
         },

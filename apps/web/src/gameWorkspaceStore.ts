@@ -24,7 +24,9 @@ export type GameStageRequest =
   | { readonly kind: "redo" }
   | { readonly kind: "export" }
   /** The header's History popover opens. */
-  | { readonly kind: "history" };
+  | { readonly kind: "history" }
+  /** History opens on Keep going's reel: what its latest run did, step by step. */
+  | { readonly kind: "reel" };
 
 /** The Workbench's sections beside the game: its values, its art, and the build's checks. */
 export const WORKBENCH_TABS = ["tune", "art", "checks"] as const;

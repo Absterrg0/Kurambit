@@ -123,6 +123,7 @@ import {
   MaximizeIcon,
   PersonStandingIcon,
   FastForwardIcon,
+  FilmIcon,
   HistoryIcon,
   MessageSquareDashedIcon,
   LinkIcon,
@@ -1788,6 +1789,15 @@ function OpenCommandPaletteDialog(props: {
       icon: <HistoryIcon className={ITEM_ICON_CLASS} />,
       run: async () => useGameWorkspaceStore.getState().requestStage({ kind: "history" }),
     });
+    if (keepGoing.status?.firstStep != null)
+      actionItems.push({
+        kind: "action",
+        value: "action:game-keep-going-reel",
+        title: "Show what keep going did",
+        searchTerms: ["keep going", "reel", "steps", "recap", "overnight", "autopilot"],
+        icon: <FilmIcon className={ITEM_ICON_CLASS} />,
+        run: async () => useGameWorkspaceStore.getState().requestStage({ kind: "reel" }),
+      });
     const requestStage = (request: GameStageRequest) => async () => {
       useGameWorkspaceStore.getState().requestStage(request);
     };

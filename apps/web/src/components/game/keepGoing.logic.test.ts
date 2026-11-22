@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { GameBuildId, ThreadId, type GameBuild, type GameStepVerdict } from "@kurambit/contracts";
 
 import {
   AUTOPILOT_TURN,
@@ -16,6 +17,8 @@ import {
   keepGoingControlView,
   keepGoingHidesNext,
   keepGoingRequest,
+  reelHeading,
+  reelSteps,
   stepLine,
 } from "./keepGoing.logic";
 
@@ -199,5 +202,67 @@ describe("a step's strip line", () => {
     );
     expect(line("no-change")).toBe("Step 3 · changed no game files");
     expect(line("stopped")).toBe("Step 3 · stopped by you");
+  });
+});
+
+const reelBuild = (
+  id: string,
+  base: string | null,
+  step: { readonly n: number; readonly verdict: GameStepVerdict } | null,
+): GameBuild => ({
+  id: GameBuildId.make(id.repeat(40)),
+  at: "2026-11-22T03:00:00.000Z",
+  source: {
+    _tag: "turn",
+    threadId: ThreadId.make("thread-main"),
+    threadTitle: "Main chat",
+    turn: 1,
+    runId: `run-${id}`,
+    request: "",
+    step: step === null ? null : { ...step, reason: "", move: "" },
+  },
+  number: 1,
+  name: `Build ${id}`,
+  undone: false,
+  summary: "",
+  files: [],
+  fileCount: 0,
+  available: true,
+  noPlay: null,
+  noRestore: null,
+  still: null,
+  base: base === null ? null : GameBuildId.make(base.repeat(40)),
+  facts: { state: "measured", chips: [], notMeasured: 0, good: 0, bad: 0 },
+});
+
+describe("reelSteps", () => {
+  // Oldest first: an earlier run's step, the person's turn, then this run's steps 4 to 6,
+  // where step 6 was made from build b because step 5 was undone.
+  const marks = [
+    reelBuild("1", null, { n: 3, verdict: "kept" }),
+    reelBuild("a", "1", null),
+    reelBuild("b", "a", { n: 4, verdict: "kept" }),
+    reelBuild("c", "b", { n: 5, verdict: "undone" }),
+    reelBuild("d", "b", { n: 6, verdict: "kept" }),
+  ];
+
+  it("lists the whole run from its first step, each beside the build it was made from", () => {
+    expect(
+      reelSteps(marks, 4).map(({ build, before }) => [build.name, before?.name ?? null]),
+    ).toEqual([
+      ["Build b", "Build a"],
+      ["Build c", "Build b"],
+      ["Build d", "Build b"],
+    ]);
+    expect(reelHeading(marks, 4)).toBe("Steps 4–6 · 2 kept · 1 undone");
+  });
+
+  it("shows the newest steps when no run scopes it", () => {
+    expect(reelSteps(marks, null).map(({ build }) => build.name)).toEqual([
+      "Build 1",
+      "Build b",
+      "Build c",
+      "Build d",
+    ]);
   });
 });

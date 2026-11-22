@@ -211,8 +211,8 @@ command palette choose it and start it at once. Its mode is in the same picker:
   your own message.
 - **Autopilot:** the agent takes each step at once.
 
-Pick a budget in the same picker (1 hour unless you change it); while keep going runs, it shows
-when it ends. **Stop** above the box, or `mod+Alt+X`, stops it: a step that is running stops and
+Pick a budget in the same picker, from 30 minutes to 8 hours or no limit (1 hour unless you change
+it); while keep going runs, it shows when it ends. **Stop** above the box, or `mod+Alt+X`, stops it: a step that is running stops and
 still becomes a build.
 
 The first step starts at once, from what you wrote or your agent's latest `Next:` line, and each step starts as soon
@@ -245,7 +245,10 @@ keep going waits for it to end. Stopping a step's turn with the chat's Stop paus
 Keep going stops by itself when your agent says `Next: none`, when two steps in a row are undone or
 change nothing, or when its budget is up. It does not judge whether a change made the game better:
 that is yours to say. The banner above the composer says why in one line, and
-**Resume** (or choosing a mode again) carries on with the same run. After the agent says the game is
+**Resume** (or choosing a mode again) carries on with the same run. **See what it did** there, or
+**Show what keep going did** in the command palette, lists the run's steps: each with a picture of
+the game before and after it, what it set out to change, and whether it was kept or undone, so a
+run left going overnight reads in the morning. **Play** plays any step's build. After the agent says the game is
 done, ask it for more and turn keep going on again. The command palette has **Keep going: Guided**,
 **Keep going: Autopilot**, **Stop Keep going**, and the proposal's **Start the proposed step now** and
 **Skip the proposed step**. Your agent can turn keep going on or off and leave it notes itself.

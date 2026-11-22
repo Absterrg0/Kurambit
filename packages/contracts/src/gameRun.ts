@@ -152,6 +152,8 @@ export const GameKeepGoingStatus = Schema.Struct({
   endsAt: Schema.NullOr(IsoDateTime),
   /** Newest first, at most 10: every push resends it. */
   steps: Schema.Array(GameKeepGoingStepRef).check(Schema.isMaxLength(10)),
+  /** The run's first step's number, so its reel shows the whole run; null before it took one. */
+  firstStep: Schema.NullOr(PositiveInt),
   steer: Schema.Array(Schema.String),
   setAside: Schema.Array(Schema.Struct({ text: Schema.String, why: Schema.String })),
   /** Why it last stopped; null while live or never run. */

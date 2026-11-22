@@ -932,6 +932,10 @@ function ThreadGameStage({
       case "history":
         setHistoryOpen(true);
         return;
+      case "reel":
+        setReelOpen(true);
+        setHistoryOpen(true);
+        return;
     }
   });
   const requestN = stageRequest?.n ?? 0;
@@ -1521,6 +1525,7 @@ function ThreadGameStage({
                   slot={buildSlot}
                   request={timelineRequest}
                   reelOpen={reelOpen}
+                  firstStep={keepGoing.status?.firstStep ?? null}
                   open={historyOpen}
                   undo={{
                     canUndo: turnUndoAllowed("undo"),
