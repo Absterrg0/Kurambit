@@ -32,7 +32,14 @@ const commandId = Schema.optionalKey(
 const op = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema);
 
 export const GameCheckToolInput = Schema.Struct({
-  look: op(Nothing),
+  look: op(
+    Schema.Struct({
+      fresh: Schema.optionalKey(Schema.Boolean).annotate({
+        description:
+          "Also show the frames to a separate model that knows only the game's brief: it names the biggest problems a player would see.",
+      }),
+    }),
+  ),
   final: op(
     Schema.Struct({
       critique: Schema.optionalKey(

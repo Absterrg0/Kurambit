@@ -20,6 +20,7 @@ import * as GameBlender from "../../../game/GameBlender.ts";
 import * as GameBot from "../../../game/GameBot.ts";
 import * as GameBuilds from "../../../game/GameBuilds.ts";
 import * as GameCopies from "../../../game/GameCopies.ts";
+import * as GameFreshEyes from "../../../game/GameFreshEyes.ts";
 import * as GameEngine from "../../../game/GameEngine.ts";
 import * as GameExplore from "../../../game/GameExplore.ts";
 import * as GameExport from "../../../game/GameExport.ts";
@@ -56,6 +57,7 @@ export const GameCheckTool = Tool.make("game_check", {
     GameProjectService.GameProjectService,
     GameStatusService.GameStatusService,
     GameBuilds.GameBuilds,
+    GameFreshEyes.GameFreshEyes,
     ...caller,
   ],
 })
