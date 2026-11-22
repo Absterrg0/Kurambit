@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Kurambit's files in the game folder: skill pack, bot kit, ignores.
 // What a run puts in the game folder before and around its steps.
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Cause from "effect/Cause";
@@ -80,11 +81,38 @@ const runtimePage = async (runtime: string): Promise<string> => {
   return `# Kurambit's three.js runtime${version === "" ? "" : ` ${version}`}
 
 Each module's own documentation, from the comment at its top. main.js imports one as
-\`./shell/<name>.js\`. Read the list, then the section of the module you use.
+\`./shell/<name>.js\`. Read the list, then the section of the module you use. Every module's
+source, the bridge's (\`shell.js\`) included, is beside this page in \`runtime/shell/\`: the
+same files this game runs on. Read them there, not elsewhere on the machine.
 
 ${documented.map((module) => `- \`${module.name}\`: ${first(module.block)}`).join("\n")}
 
 ${documented.map((module) => `## \`${module.name}\`\n\n${module.block}\n`).join("\n")}`;
+};
+
+/**
+ * The runtime's shell sources copied into a game, only when they differ from the copy there: a
+ * hash of the names and contents is kept beside them.
+ */
+const copyRuntimeSources = async (from: string, to: string) => {
+  const names = (await NodeFSP.readdir(from).catch(() => [] as Array<string>))
+    .filter((name) => name.endsWith(".js"))
+    .toSorted();
+  const contents = await Promise.all(
+    names.map((name) => NodeFSP.readFile(NodePath.join(from, name), "utf8")),
+  );
+  const hash = NodeCrypto.createHash("sha256")
+    .update(names.map((name, index) => `${name}\0${contents[index]}`).join("\0"))
+    .digest("hex")
+    .slice(0, 16);
+  const marker = NodePath.join(to, ".source");
+  if ((await readText(marker)) === hash) return;
+  await NodeFSP.rm(to, { recursive: true, force: true });
+  await NodeFSP.mkdir(to, { recursive: true });
+  await Promise.all(
+    names.map((name, index) => NodeFSP.writeFile(NodePath.join(to, name), contents[index]!)),
+  );
+  await NodeFSP.writeFile(marker, hash);
 };
 
 const ioError = (operation: string, path: string, cause: unknown) =>
@@ -158,21 +186,24 @@ const writeSkills = (templates: string, root: string, engine: GameEngineId) =>
           NodeFSP.rm(NodePath.join(skills, file), { force: true }),
         ),
       );
-      // A game that loads Kurambit's runtime reads its modules' comment blocks on one page.
-      // Earlier games got the modules' whole sources (`runtime/`), which agents read through
-      // with sed to learn the API: they go.
+      // A game that loads Kurambit's runtime reads its modules' comment blocks on one page, and
+      // their sources beside it (`runtime/shell/`), copies of exactly what the game runs on.
+      // Without them agents search the disk for the sources and read whatever copy they find,
+      // other checkouts of other versions included.
       const major = await NodeFSP.readFile(NodePath.join(root, "game.json"), "utf8")
         .then((text) => manifestRuntime(decodeManifest(text)))
         .catch(() => null);
-      await NodeFSP.rm(NodePath.join(skills, "runtime"), { recursive: true, force: true });
+      const sources = insideGame(root, "studio-skills/runtime");
       const page = insideGame(root, "studio-skills/runtime.md");
       // Its API, typed: the runtime's own runtime.d.ts (scripts/runtime-dts.ts), beside the page.
       const types = insideGame(root, "studio-skills/runtime.d.ts");
       if (major === null) {
         await NodeFSP.rm(page, { force: true });
         await NodeFSP.rm(types, { force: true });
+        await NodeFSP.rm(sources, { recursive: true, force: true });
       } else {
         const runtime = NodePath.join(runtimesDirectory(templates), engine, String(major));
+        await copyRuntimeSources(NodePath.join(runtime, "shell"), NodePath.join(sources, "shell"));
         const text = await runtimePage(runtime);
         if ((await readText(page)) !== text) await NodeFSP.writeFile(page, text);
         const typed = await readText(NodePath.join(runtime, "runtime.d.ts"));
