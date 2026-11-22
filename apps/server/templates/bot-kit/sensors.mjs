@@ -42,15 +42,6 @@ export function bodyOf(raw) {
   return raw?.body ?? { present: false };
 }
 
-export function speed2d(raw) {
-  const b = bodyOf(raw);
-  return Math.hypot(Number(b.vx) || 0, Number(b.vz ?? b.vy) || 0);
-}
-
-export function dimOf(raw) {
-  return bodyOf(raw).dim === "2d" ? "2d" : "3d";
-}
-
 // Clearance in metres along a world XZ direction, from the room rays
 // (forward=-Z, back=+Z, left=-X, right=+X). Null when unknown (2D games).
 export function clearance(raw, dx, dz) {
@@ -93,18 +84,6 @@ export function floorAhead(raw, dx, dz) {
 export function dropAhead(raw, dx, dz, deeperThan = 2.0) {
   const f = floorAhead(raw, dx, dz);
   return f !== null && f >= deeperThan;
-}
-
-// Nearest 3D landmark whose label matches, or null.
-export function nearestVisible(raw, match) {
-  const vis = Array.isArray(raw?.visible) ? raw.visible : [];
-  let best = null;
-  for (const entry of vis) {
-    if (typeof entry?.dist !== "number" || typeof entry?.label !== "string") continue;
-    if (!match.test(entry.label)) continue;
-    if (best === null || entry.dist < best.dist) best = entry;
-  }
-  return best;
 }
 
 export function distXZ(a, b) {
