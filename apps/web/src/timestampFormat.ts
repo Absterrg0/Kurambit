@@ -98,12 +98,6 @@ export function parseTimestampDate(isoDate: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function formatTimestamp(isoDate: string, timestampFormat: TimestampFormat): string {
-  const date = parseTimestampDate(isoDate);
-  if (!date) return "";
-  return getTimestampFormatter(timestampFormat, true).format(date);
-}
-
 // Deliberately not the host locale: the tooltip's ordinal suffix and
 // day-before-month order below are English, so a localized month alone would
 // read "4th Juni 2026".
@@ -265,26 +259,6 @@ export function formatRelativeTimeLabel(isoDate: string, nowMs: number = Date.no
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
 }
 
-export function formatElapsedDurationLabel(isoDate: string, nowMs: number = Date.now()): string {
-  const date = parseTimestampDate(isoDate);
-  if (!date) return "";
-  const diffMs = nowMs - date.getTime();
-  if (diffMs <= 0) return "just now";
-
-  const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 5) return "just now";
-  if (seconds < 60) return `${seconds}s`;
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
-}
-
 export function formatRelativeTimeUntil(isoDate: string): RelativeTimeParts | null {
   const date = parseTimestampDate(isoDate);
   if (!date) return null;
@@ -305,48 +279,4 @@ export function formatRelativeTimeUntilLabel(isoDate: string): string {
   const relative = formatRelativeTimeUntil(isoDate);
   if (!relative) return "";
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value;
-}
-
-/**
- * Pass `nowMs` when a parent tick drives re-renders so the diff matches that snapshot.
- */
-export function formatExpiresInLabel(isoDate: string, nowMs: number = Date.now()): string {
-  const date = parseTimestampDate(isoDate);
-  if (!date) return "";
-  const diffMs = date.getTime() - nowMs;
-  if (diffMs <= 0) return "Expired";
-
-  const totalSeconds = Math.floor(diffMs / 1000);
-  if (totalSeconds < 5) return "Expires in a moment";
-  if (totalSeconds < 60) return `Expires in ${totalSeconds}s`;
-
-  if (totalSeconds < 3600) {
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return seconds === 0 ? `Expires in ${minutes}m` : `Expires in ${minutes}m ${seconds}s`;
-  }
-
-  if (totalSeconds < 86_400) {
-    const hours = Math.floor(totalSeconds / 3600);
-    const rem = totalSeconds % 3600;
-    const minutes = Math.floor(rem / 60);
-    const seconds = rem % 60;
-    const parts = [`${hours}h`];
-    if (minutes > 0) parts.push(`${minutes}m`);
-    if (seconds > 0) parts.push(`${seconds}s`);
-    return `Expires in ${parts.join(" ")}`;
-  }
-
-  const days = Math.floor(totalSeconds / 86_400);
-  const remAfterDays = totalSeconds % 86_400;
-  if (remAfterDays === 0) return `Expires in ${days}d`;
-  const hours = Math.floor(remAfterDays / 3600);
-  const rem = remAfterDays % 3600;
-  const minutes = Math.floor(rem / 60);
-  const seconds = rem % 60;
-  const tail: string[] = [];
-  if (hours > 0) tail.push(`${hours}h`);
-  if (minutes > 0) tail.push(`${minutes}m`);
-  if (seconds > 0) tail.push(`${seconds}s`);
-  return tail.length > 0 ? `Expires in ${days}d ${tail.join(" ")}` : `Expires in ${days}d`;
 }

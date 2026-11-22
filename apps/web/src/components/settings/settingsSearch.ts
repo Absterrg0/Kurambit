@@ -6,11 +6,7 @@ import type { EnvironmentId } from "@kurambit/contracts";
 import type { EnvironmentConnectionPhase } from "@kurambit/client-runtime/connection";
 import { DEFAULT_KEYBINDINGS } from "@kurambit/shared/keybindings";
 import { commandLabel } from "./KeybindingsSettings.logic";
-import {
-  validateSettingsScopeSearch,
-  type ResolvedSettingsScope,
-  type SettingsScopeSearch,
-} from "./settingsScope";
+import { type ResolvedSettingsScope } from "./settingsScope";
 
 export type SettingsPath =
   | "/settings/projects"
@@ -955,18 +951,6 @@ export function isSettingsSearchScopeAvailable(
         scopeKind === "checkout"
       );
   }
-}
-
-function settingsScopeKindFromSearch(search: SettingsScopeSearch): ResolvedSettingsScope["kind"] {
-  const target = validateSettingsScopeSearch({ ...search });
-  if (target.checkout && !target.project) return "unavailable";
-  if (target.project) return target.checkout ? "checkout" : "project";
-  return target.machine ? "environment" : "all";
-}
-
-export function isSettingsOverviewVisible(search: SettingsScopeSearch): boolean {
-  const kind = settingsScopeKindFromSearch(search);
-  return kind === "project" || kind === "checkout";
 }
 
 export function searchableSetting(id: SettingsSearchItemId): {

@@ -49,21 +49,6 @@ export interface ProviderInstanceEntry {
 export type ProviderCatalogAvailability = "loading" | "ready" | "unavailable" | "unconfigured";
 
 /**
- * Environment config streams are reactive: treating their initial `null` as a
- * final empty list strands otherwise recoverable threads behind a misleading
- * "no providers" state.
- */
-export function resolveProviderCatalogAvailability(input: {
-  readonly catalogLoaded: boolean;
-  readonly entries: ReadonlyArray<ProviderInstanceEntry>;
-  readonly selectedEntry: ProviderInstanceEntry | undefined;
-}): ProviderCatalogAvailability {
-  if (!input.catalogLoaded) return "loading";
-  if (input.selectedEntry !== undefined) return "ready";
-  return input.entries.length === 0 ? "unconfigured" : "unavailable";
-}
-
-/**
  * Disabling an instance updates `enabled` independently, while its previous `ready` probe
  * status can remain in the streamed snapshot until reconciliation.
  */
@@ -101,35 +86,6 @@ export function deriveProviderInstanceEntries(
       models: snapshot.models,
     } satisfies ProviderInstanceEntry;
   });
-}
-
-/**
- * Instance ids are per-environment routing keys, and `defaultInstanceIdForDriver` makes the
- * default id literally the driver slug, so every environment running the same driver reports
- * the same id. Flattening across environments would clobber entries and mis-resolve accent
- * colors; lookups must stay scoped to the thread's own environment.
- */
-export function deriveProviderEntriesByEnvironment(
-  providersByEnvironment: Iterable<
-    readonly [
-      string,
-      ReadonlyArray<ServerProvider>,
-      Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">?,
-    ]
-  >,
-): ReadonlyMap<string, ReadonlyMap<string, ProviderInstanceEntry>> {
-  const byEnvironment = new Map<string, ReadonlyMap<string, ProviderInstanceEntry>>();
-  for (const [environmentId, providers, settings] of providersByEnvironment) {
-    const derived = deriveProviderInstanceEntries(providers);
-    // One map per environment serves every project with a thread there, so
-    // there is no single project to scope `enabled` to; it stays machine-wide.
-    const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
-    byEnvironment.set(
-      environmentId,
-      new Map(entries.map((entry) => [entry.instanceId as string, entry] as const)),
-    );
-  }
-  return byEnvironment;
 }
 
 /**

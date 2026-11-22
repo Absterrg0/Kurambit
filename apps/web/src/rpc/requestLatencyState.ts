@@ -61,10 +61,6 @@ function rpcAckThresholdMs(method: string): number {
     : slowRpcAckThresholdMs;
 }
 
-export function getSlowRpcAckRequests(): ReadonlyArray<SlowRpcAckRequest> {
-  return getSlowRpcAckRequestsValue();
-}
-
 export function trackRpcRequestSent(requestId: string, method: string, tag = method): void {
   if (!shouldTrackRpcAck(method)) {
     return;

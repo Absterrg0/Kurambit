@@ -80,19 +80,3 @@ export function useEnvironmentHttpBaseUrl(environmentId: EnvironmentId | null): 
 export function useEnvironmentIds() {
   return useAtomValue(environmentSummaries.environmentIdsAtom);
 }
-
-export function useEnvironmentIdentities() {
-  return useAtomValue(environmentSummaries.identitiesAtom);
-}
-
-export function usePullRequestsSupported() {
-  return useAtomValue(environmentSummaries.pullRequestsSupportedAtom);
-}
-
-export function useEnvironmentMachines() {
-  return useAtomValue(environmentSummaries.machineByIdAtom);
-}
-
-export function useConnectedEnvironmentIds() {
-  return useAtomValue(environmentSummaries.connectedEnvironmentIdsAtom);
-}

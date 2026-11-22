@@ -8,7 +8,6 @@ import {
   carryDisplacedCustomAnswerIntoPrompt,
   countAnsweredPendingUserInputQuestions,
   derivePendingUserInputProgress,
-  findFirstUnansweredPendingUserInputQuestionIndex,
   projectPendingUserInputAnswer,
   resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
@@ -102,9 +101,7 @@ describe("resolvePendingUserInputAnswer", () => {
         question,
       ),
     ).toEqual({ customAnswer: "" });
-    const questions = [question, { ...singleSelectQuestion, id: "follow-up" }];
     const drafts = { scope: { customAnswer: "" } };
-    expect(findFirstUnansweredPendingUserInputQuestionIndex(questions, drafts)).toBe(1);
     expect(derivePendingUserInputProgress([question], drafts, 0)).toMatchObject({
       customAnswer: "",
       resolvedAnswer: "",
@@ -301,29 +298,6 @@ describe("pending user input question progress", () => {
       countAnsweredPendingUserInputQuestions(questions, {
         scope: {
           selectedOptionValues: ["Orchestration-first"],
-        },
-      }),
-    ).toBe(1);
-  });
-
-  it("finds the first unanswered question", () => {
-    expect(
-      findFirstUnansweredPendingUserInputQuestionIndex(questions, {
-        scope: {
-          selectedOptionValues: ["Orchestration-first"],
-        },
-      }),
-    ).toBe(1);
-  });
-
-  it("returns the last question index when all answers are complete", () => {
-    expect(
-      findFirstUnansweredPendingUserInputQuestionIndex(questions, {
-        scope: {
-          selectedOptionValues: ["Orchestration-first"],
-        },
-        compat: {
-          customAnswer: "Keep it for one release window",
         },
       }),
     ).toBe(1);

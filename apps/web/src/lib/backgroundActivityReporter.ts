@@ -155,14 +155,6 @@ export function observeBackgroundActivitySubscription(
   });
 }
 
-export function retainedBackgroundScopes(
-  environmentId: EnvironmentId,
-): ReadonlyArray<BackgroundScope> {
-  return Array.from(retainedScopes.values(), (entry) =>
-    entry.environmentId === environmentId ? entry.scope : null,
-  ).filter((scope): scope is BackgroundScope => scope !== null);
-}
-
 export const layerObserver = Layer.succeed(
   EnvironmentRpcSubscriptionObserver,
   EnvironmentRpcSubscriptionObserver.of({

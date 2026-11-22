@@ -1,10 +1,5 @@
 import type { EnvironmentId, ScopedProjectRef } from "@kurambit/contracts";
-import {
-  buildProjectGroups,
-  derivePhysicalProjectKey,
-  type ProjectGroupingSettings,
-} from "./logicalProject";
-import { resolveScratchProjectScopeKey } from "@kurambit/client-runtime/state/project-grouping";
+import { buildProjectGroups, type ProjectGroupingSettings } from "./logicalProject";
 import type { Project } from "./types";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
@@ -43,45 +38,6 @@ export interface SidebarProjectPickerEntry {
   group: SidebarProjectSnapshot;
   targetProject: SidebarProjectGroupMember;
   isPreferred: boolean;
-}
-
-export function getSidebarProjectSettingsKey(
-  group: SidebarProjectSnapshot,
-  settings: ProjectGroupingSettings,
-  projects: ReadonlyArray<Project>,
-  projectRef?: ScopedProjectRef,
-): string {
-  if (!group.isScratch) return group.projectKey;
-  const project =
-    group.memberProjects.find(
-      (member) =>
-        member.environmentId === projectRef?.environmentId && member.id === projectRef.projectId,
-    ) ??
-    group.memberProjects.find((member) => member.environmentId === projectRef?.environmentId) ??
-    group;
-  return (
-    buildPhysicalToLogicalProjectKeyMap({ projects, settings, primaryEnvironmentId: null }).get(
-      derivePhysicalProjectKey(project),
-    ) ?? group.projectKey
-  );
-}
-
-export function resolveSidebarProjectScopeKey(input: {
-  readonly groups: ReadonlyArray<SidebarProjectSnapshot>;
-  readonly key: string | null;
-  readonly settings?: ProjectGroupingSettings;
-  readonly canClearMissingScope?: boolean;
-}): string | null {
-  if (input.key === null) return null;
-  const group =
-    input.groups.find((candidate) => candidate.projectKey === input.key) ??
-    input.groups.find(
-      (candidate) =>
-        candidate.isScratch &&
-        resolveScratchProjectScopeKey(input.key, candidate.memberProjects, input.settings) ===
-          candidate.projectKey,
-    );
-  return group?.projectKey ?? (input.canClearMissingScope ? null : input.key);
 }
 
 export function buildPhysicalToLogicalProjectKeyMap(input: {

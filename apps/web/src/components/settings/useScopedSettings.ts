@@ -29,7 +29,6 @@ import {
   planScopedSettingsClear,
   planScopedSettingsPatch,
   scopedSettingsAreMixed,
-  scopedSettingsSource,
   type ProjectOverrideEntry,
   type ScopedSettingsPatch,
 } from "./scopedSettings";
@@ -45,11 +44,6 @@ export function useScopedSettings<T = UnifiedSettings>(
 export function useScopedSettingsMixed(keys: readonly (keyof ServerSettings)[]): boolean {
   const { targets } = useSettingsScope();
   return scopedSettingsAreMixed(targets, keys);
-}
-
-export function useScopedSettingSource(keys: readonly (keyof ServerSettings)[]) {
-  const { targets } = useSettingsScope();
-  return scopedSettingsSource(targets, keys);
 }
 
 function useRunScopedPlan() {

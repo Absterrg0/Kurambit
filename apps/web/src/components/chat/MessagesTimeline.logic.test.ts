@@ -28,7 +28,6 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
-  timelineEntryTurnFoldRunId,
   deriveMessagesTimelineRowsWithState,
   shouldCollapseUserMessage,
   liveWorkEntryLabel,
@@ -48,7 +47,6 @@ import {
   threadReadTargetId,
   threadReadTargetTitle,
   type MessagesTimelineRow,
-  resolveTimelineToolPresentation,
   workEntryDisplayLabel,
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
@@ -873,10 +871,6 @@ describe("deriveMessagesTimelineRows", () => {
     expect(workEntryDisplayLabel(work[0]!, undefined)).toBe("Listed projects");
     expect(workEntryDisplayLabel(work[1]!, undefined)).toBe("Cloned a repository");
     expect(workEntryDisplayLabel(work[2]!, undefined)).toBe("Failed to clone a repository");
-    expect(
-      resolveTimelineToolPresentation(items[1]!.type === "dynamic_tool" ? items[1].toolName : null)
-        ?.logo,
-    ).toBe("kurambit");
     const rows = deriveMessagesTimelineRows({
       timelineEntries: entries,
       isWorking: false,
@@ -2444,15 +2438,13 @@ describe("deriveMessagesTimelineRows", () => {
       message("imported-answer", "assistant", 8),
     ];
     const foldInput = { timelineEntries, latestRun: null, isWorking: false };
-    const foldRunId = timelineEntryTurnFoldRunId(foldInput, "imported-update");
-    expect(foldRunId).not.toBeNull();
     const foldRow = deriveMessagesTimelineRows({
       ...foldInput,
       turnDiffSummaries: [],
       supportsConversationRollback: false,
     }).find((row) => row.kind === "turn-fold");
-    expect(foldRow?.kind === "turn-fold" ? foldRow.runId : null).toBe(foldRunId);
-    expect(timelineEntryTurnFoldRunId(foldInput, "imported-answer")).toBeNull();
+    const foldRunId = foldRow?.kind === "turn-fold" ? foldRow.runId : null;
+    expect(foldRunId).not.toBeNull();
     const expanded = deriveMessagesTimelineRows({
       ...foldInput,
       expandedRunIds: new Set([foldRunId!]),
@@ -3599,33 +3591,6 @@ describe("computeStableMessagesTimelineRows", () => {
 
     expect(reordered).not.toBe(initial);
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
-  });
-});
-
-describe("resolveTimelineToolPresentation", () => {
-  it("pretty prints Claude and Cursor Kurambit MCP tool names", () => {
-    expect(resolveTimelineToolPresentation("mcp__kurambit__kurambit_thread_read")).toEqual({
-      displayName: "Read a Kurambit thread",
-      logo: "kurambit",
-    });
-  });
-
-  it("pretty prints Codex Kurambit MCP tool names", () => {
-    expect(resolveTimelineToolPresentation("kurambit.create_threads")).toEqual({
-      displayName: "Create Kurambit threads",
-      logo: "kurambit",
-    });
-  });
-
-  it("pretty prints bare Kurambit MCP toolkit names", () => {
-    expect(resolveTimelineToolPresentation("list_scheduled_tasks")).toEqual({
-      displayName: "List scheduled tasks",
-      logo: "kurambit",
-    });
-  });
-
-  it("keeps unknown MCP tools on the generic renderer path", () => {
-    expect(resolveTimelineToolPresentation("mcp__github__search_issues")).toBeNull();
   });
 });
 

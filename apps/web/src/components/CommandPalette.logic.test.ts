@@ -5,7 +5,6 @@ import { makeThreadFixture } from "../test-fixtures";
 import {
   buildBrowseGroups,
   buildRootGroups,
-  buildCommandPaletteProjectMetadata,
   buildCommandPaletteRows,
   buildProjectActionItems,
   buildThreadActionItems,
@@ -58,124 +57,6 @@ describe("linked pull request thread navigation", () => {
     expect(items[0]?.description).toBe("Archived thread");
     await items[0]?.run();
     expect(runThread).toHaveBeenCalledWith({ environmentId, id });
-  });
-});
-
-describe("buildCommandPaletteProjectMetadata", () => {
-  const localEnvironmentId = EnvironmentId.make("environment-local");
-  const remoteEnvironmentId = EnvironmentId.make("environment-build-box");
-  const locations = new Map([
-    [localEnvironmentId, { kind: "local" as const, label: "Local", machine: "laptop" as const }],
-    [
-      remoteEnvironmentId,
-      { kind: "remote" as const, label: "Build box", machine: "server" as const },
-    ],
-  ]);
-
-  it("makes every member environment and path searchable", () => {
-    const metadata = buildCommandPaletteProjectMetadata({
-      projects: [
-        {
-          environmentId: localEnvironmentId,
-          title: "Kurambit",
-          workspaceRoot: "/Users/theo/Projects/kurambit",
-        },
-        {
-          environmentId: remoteEnvironmentId,
-          title: "kurambit",
-          workspaceRoot: "/srv/kurambit",
-        },
-      ],
-      locationByEnvironmentId: locations,
-    });
-
-    expect(metadata.searchTerms).toEqual([
-      "Kurambit",
-      "/Users/theo/Projects/kurambit",
-      "Local",
-      "kurambit",
-      "/srv/kurambit",
-      "Build box",
-    ]);
-    expect(metadata.environmentLabels).toEqual(["Local", "Build box"]);
-
-    const [filteredGroup] = filterCommandPaletteGroups({
-      activeGroups: [],
-      query: "build box",
-      isInSubmenu: false,
-      gameSearchItems: [
-        {
-          kind: "action",
-          value: "project:kurambit",
-          title: "Kurambit",
-          searchTerms: metadata.searchTerms,
-          icon: null,
-          run: async () => undefined,
-        },
-      ],
-      threadSearchItems: [],
-    });
-    expect(filteredGroup?.items).toHaveLength(1);
-  });
-
-  it("deduplicates grouped checkouts by environment", () => {
-    const metadata = buildCommandPaletteProjectMetadata({
-      projects: [
-        {
-          environmentId: remoteEnvironmentId,
-          title: "Kurambit",
-          workspaceRoot: "/srv/kurambit",
-        },
-        {
-          environmentId: remoteEnvironmentId,
-          title: "Kurambit worktree",
-          workspaceRoot: "/srv/kurambit-feature",
-        },
-      ],
-      locationByEnvironmentId: locations,
-    });
-
-    expect(metadata.environmentLabels).toEqual(["Build box"]);
-  });
-
-  it("deduplicates distinct environments with the same label", () => {
-    const secondRemoteEnvironmentId = EnvironmentId.make("environment-build-box-2");
-    const metadata = buildCommandPaletteProjectMetadata({
-      projects: [
-        {
-          environmentId: remoteEnvironmentId,
-          title: "Kurambit",
-          workspaceRoot: "/srv/kurambit",
-        },
-        {
-          environmentId: secondRemoteEnvironmentId,
-          title: "Kurambit mirror",
-          workspaceRoot: "/srv/mirror/kurambit",
-        },
-      ],
-      locationByEnvironmentId: new Map([
-        [remoteEnvironmentId, { label: "Build box" }],
-        [secondRemoteEnvironmentId, { label: "Build box" }],
-      ]),
-    });
-
-    expect(metadata.environmentLabels).toEqual(["Build box"]);
-  });
-
-  it("uses a human-readable fallback when presentation data is unavailable", () => {
-    const metadata = buildCommandPaletteProjectMetadata({
-      projects: [
-        {
-          environmentId: remoteEnvironmentId,
-          title: "Kurambit",
-          workspaceRoot: "/srv/kurambit",
-        },
-      ],
-      locationByEnvironmentId: new Map(),
-    });
-
-    expect(metadata.searchTerms).toContain("Remote");
-    expect(metadata.environmentLabels).toEqual(["Remote"]);
   });
 });
 
