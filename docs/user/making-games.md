@@ -245,8 +245,8 @@ list, and its line in the chat says what the step did and what happened to it:
 Your messages always go first: a message you send is an ordinary turn, never judged or undone, and
 keep going waits for it to end. Stopping a step's turn with the chat's Stop pauses keep going.
 
-Keep going stops by itself when your agent says `Next: none`, when two steps in a row are undone or
-change nothing, or when its budget is up. It does not judge whether a change made the game better:
+Keep going stops by itself when two steps in a row are undone or change nothing, when its budget is
+up, or when nothing is left to propose and your agent says `Next: none`. It does not judge whether a change made the game better:
 that is yours to say. The banner above the composer says why in one line, and
 **Resume** (or choosing a mode again) carries on with the same run. **See what it did** there, or
 **Show what keep going did** in the command palette, lists the run's steps: each with a picture of
