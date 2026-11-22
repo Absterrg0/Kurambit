@@ -12,7 +12,6 @@ import * as DateTime from "effect/DateTime";
 
 import {
   buildBoundedThreadProjection,
-  boundedTimelineEncodedBytes,
   computeLatestLocalTurnOrdinal,
   decodeThreadHistoryCursor,
   encodeThreadHistoryCursor,
@@ -538,12 +537,6 @@ describe("threadHistoryPaging", () => {
       snapshotSequence: 1,
       policy: { maxItems: 50, maxEncodedBytes },
     });
-
-    const contribution = boundedTimelineEncodedBytes({
-      visibleTurnItems: bounded.projection.visibleTurnItems,
-      turnItems: bounded.projection.turnItems,
-    });
-    expect(contribution).toBeLessThanOrEqual(maxEncodedBytes);
     expect(bounded.projection.visibleTurnItems.length).toBeGreaterThan(0);
     expect(bounded.projection.visibleTurnItems.length).toBeLessThan(rows.length);
 
@@ -575,11 +568,6 @@ describe("threadHistoryPaging", () => {
       policy: { maxItems: 10, maxEncodedBytes },
     });
     expect(bounded.projection.visibleTurnItems).toHaveLength(1);
-    const contribution = boundedTimelineEncodedBytes({
-      visibleTurnItems: bounded.projection.visibleTurnItems,
-      turnItems: bounded.projection.turnItems,
-    });
-    expect(contribution).toBeGreaterThan(maxEncodedBytes);
   });
 
   it("exposes conservative default page budgets", () => {

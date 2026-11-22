@@ -14,9 +14,6 @@ import * as Effect from "effect/Effect";
  */
 const WINDOWS_SHIM_EXTENSIONS: ReadonlySet<string> = new Set([".cmd", ".bat", ".ps1"]);
 
-export const isWindowsClaudeLauncherShimPath = (filePath: string): boolean =>
-  WINDOWS_SHIM_EXTENSIONS.has(NodePath.win32.extname(filePath).toLowerCase());
-
 /**
  * Newer package versions ship a native `bin/claude.exe`; older versions only ship `cli.js`,
  * which the SDK runs with a JavaScript runtime.

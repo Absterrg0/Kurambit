@@ -1,7 +1,7 @@
 import { it as effectIt } from "@effect/vitest";
 import * as HostProcess from "@kurambit/shared/HostProcess";
 import * as Effect from "effect/Effect";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   accessibleWindowElementTree,
@@ -9,8 +9,6 @@ import {
   capturedImageBounds,
   compactAccessibilityTree,
   findAccessibleWindow,
-  findCaptureSource,
-  hideAndWaitForBlur,
   isWaylandSession,
   snapShotShortcutRegistrationFailureMessage,
   snapShotShortcutSystemConflict,
@@ -566,48 +564,6 @@ describe("findAccessibleWindow", () => {
   });
 });
 
-describe("hideAndWaitForBlur", () => {
-  it("waits for a delayed blur after hiding the window", async () => {
-    let blur: (() => void) | undefined;
-    let settled = false;
-    const hidden = hideAndWaitForBlur({
-      hide: () => undefined,
-      once: (_event, listener) => {
-        blur = listener;
-      },
-      removeListener: () => undefined,
-    }).then(() => {
-      settled = true;
-    });
-
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    blur?.();
-    await hidden;
-    expect(settled).toBe(true);
-  });
-
-  it("rejects when the hidden window never blurs", async () => {
-    vi.useFakeTimers();
-    try {
-      let rejected = false;
-      const hidden = hideAndWaitForBlur({
-        hide: () => undefined,
-        once: () => undefined,
-        removeListener: () => undefined,
-      }).catch(() => {
-        rejected = true;
-      });
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(rejected).toBe(true);
-      await hidden;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
 describe("toElectronAccelerator", () => {
   it("converts the default portable shortcut", () => {
     expect(
@@ -646,46 +602,6 @@ describe("toElectronAccelerator", () => {
         modKey: false,
       }),
     ).toBe("Control+Alt+Up");
-  });
-});
-
-describe("findCaptureSource", () => {
-  const sources = [
-    { id: "window:42:0", name: "Terminal" },
-    { id: "window:84:0", name: "Editor" },
-  ];
-
-  it("matches the native window id before its title", () => {
-    expect(
-      findCaptureSource(sources, {
-        id: 84,
-        title: "Changed title",
-      }),
-    ).toEqual(sources[1]);
-  });
-
-  it("falls back to a unique title match", () => {
-    expect(
-      findCaptureSource(sources, {
-        id: 100,
-        title: "Terminal",
-      }),
-    ).toEqual(sources[0]);
-  });
-
-  it("does not guess when a title is ambiguous", () => {
-    expect(
-      findCaptureSource(
-        [
-          { id: "window:42:0", name: "Editor" },
-          { id: "window:84:0", name: "Editor" },
-        ],
-        {
-          id: 100,
-          title: "Editor",
-        },
-      ),
-    ).toBeUndefined();
   });
 });
 

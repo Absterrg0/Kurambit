@@ -598,15 +598,6 @@ const fitsBudget = (state: RunState, now: number): boolean =>
 const turnCap = (state: RunState, now: number): number =>
   Math.min(CAP_CEILING_MS, remaining(state, now));
 
-// ── Steer and its captured prefix. ──────────────────────────────────────────
-/**
- * How many entries at the front of GameRun.steer the step in flight carries
- * and has not yet taken: a turn step holds them until its turn starts. A
- * note added meanwhile goes after them, so this prefix stays untouched.
- */
-export const capturedSteer = (inFlight: GameRunStep | null): number =>
-  inFlight?.step.kind === "turn" && inFlight.status === "planned" ? inFlight.step.steer.length : 0;
-
 /** A turn that never landed gives back the notes its start took. */
 const giveBackSteer = (state: RunState, turn: GameRunTurnStep, started: boolean): RunState =>
   started && turn.steer.length > 0 ? { ...state, steer: [...turn.steer, ...state.steer] } : state;

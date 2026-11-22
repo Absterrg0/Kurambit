@@ -5,12 +5,8 @@ import {
   type GameBuildFacts,
   GameBuildId,
   type GameRunProposal,
-  type GameRunStep,
   type GameRunTurnStep,
-  GameRunId,
   RunId,
-  ThreadId,
-  gameRunStepId,
 } from "@kurambit/contracts";
 
 import * as Loop from "./decide.ts";
@@ -378,26 +374,7 @@ describe("the proposal", () => {
 });
 
 describe("the captured prefix", () => {
-  const runId = GameRunId.make("run_1");
-  const record = (status: GameRunStep["status"], steer: ReadonlyArray<string>): GameRunStep => ({
-    id: gameRunStepId(runId, 3),
-    runId,
-    threadId: ThreadId.make("thread:chat"),
-    seq: 3,
-    attempt: 1,
-    kind: "turn",
-    step: turnStep({ steer }),
-    status,
-    result: null,
-    logs: [],
-    plannedAt: "2026-11-07T00:00:00.000Z",
-    startedAt: null,
-    completedAt: null,
-  });
-
   it("holds the notes until the turn starts, and gives them back when it never landed", () => {
-    expect(Loop.capturedSteer(record("planned", ["a", "b"]))).toBe(2);
-    expect(Loop.capturedSteer(record("running", ["a", "b"]))).toBe(0);
     const s = state({ steer: ["a", "b"] });
     const turn = Loop.applyLook(s, look(), NOW).plan;
     expect(turn).toMatchObject({ kind: "turn", steer: ["a", "b"], startedBy: "autopilot" });

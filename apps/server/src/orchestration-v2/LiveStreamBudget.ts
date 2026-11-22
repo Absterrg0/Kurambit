@@ -271,11 +271,6 @@ type ReplayLiveInput<A extends { readonly sequence: number }, E, R> = {
   readonly filter?: (event: A) => boolean;
 };
 
-export const replayAndBufferLiveEvents = <A extends { readonly sequence: number }, E, R>(
-  input: ReplayLiveInput<A, E, R>,
-  limits?: LiveStreamLimits,
-) => replayAndBufferProjectedLiveEvents({ ...input, project: (event: A) => event }, limits);
-
 export const replayAndBufferProjectedLiveEvents = <
   A extends { readonly sequence: number },
   B extends { readonly sequence: number },

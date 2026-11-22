@@ -102,17 +102,6 @@ function missingCapability(
     : new McpCapabilityUnavailableError({ capability, ...fields });
 }
 
-export const requireMcpCapability = <const C extends McpCapability>(
-  capability: C,
-): Effect.Effect<McpInvocationScope, McpCapabilityError<C>, McpInvocationContext> =>
-  McpInvocationContext.pipe(
-    Effect.filterOrFail(
-      (invocation) => invocation.capabilities.has(capability),
-      (invocation) => missingCapability(invocation, capability) as McpCapabilityError<C>,
-    ),
-    Effect.withSpan("mcp.requireCapability"),
-  );
-
 export const requireThreadMcpCapability = (
   capability: "preview",
 ): Effect.Effect<
