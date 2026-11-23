@@ -245,7 +245,7 @@ const importLicence = (source: string, id: string, reply: string): string => {
  * Boot lines that put the kit on sys.path and import it; a broken kit is said, not fatal. No
  * bytecode is written: the kit folder is the app's (the repository's in dev), not the game's.
  * kurambit is a builtin too: each op code call runs in a fresh namespace, and agents wrote
- * kurambit.sweep(...) without importing it (10 NameErrors in one 14-run bench).
+ * kurambit helpers without importing them (10 NameErrors in one 14-run bench).
  */
 const kitBoot = (kit: string) =>
   `import sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, ${JSON.stringify(kit)})\ntry:\n    import builtins, kurambit\n    builtins.kurambit = kurambit\nexcept Exception as error:\n    print("KURAMBIT_KIT_FAILED", repr(error))\n`;

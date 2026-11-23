@@ -1,5 +1,4 @@
-"""Helpers for modelling parts and keying clips on a rigged character: loft (a part as rings on its
-joints), skin_rigid (a part added to a rig afterwards, on one bone), place_on_surface, aim, key_pose
+"""Helpers for keying clips on a rigged character: skin_rigid (a part added to a rig afterwards, on one bone), place_on_surface, aim, key_pose
 and mirror_pose, plus material, hold, and the eyes that blink by bones: eye_lid and eye_squash.
 
 Every helper works in world space on the character's rest pose (what the export binds to), even
@@ -547,66 +546,6 @@ def grid(objects, cell):
         out.append({"name": o.name, "size": [round(float(v), 3) for v in hi - lo], "low": [round(float(v), 3) for v in lo],
                     "high": [round(float(v), 3) for v in hi], "fits": not why, "why": "; ".join(why)})
     return out
-
-
-def _ring_frame(t, up):
-    t = t.normalized()
-    u = up - t * up.dot(t)
-    if u.length < 1e-4:  # the path runs along up: any side will do
-        u = Vector((1, 0, 0)) - t * t.x
-    u.normalize()
-    return t, u, t.cross(u)
-
-
-def loft(stations, sides=10, up=(0, 0, 1), squircle=2.0, cap=(True, True), *, name="loft", material=None, smooth=True):
-    """A part as a ring loft, one ring per edge loop: stations [(centre, ru, rv)], ru along up (as
-    seen across the path) and rv across both; up must not run along the path (a trunk or a leg takes
-    up=(0, -1, 0)), or the rings twist. squircle 2 is an ellipse, 2.4-2.6 a rounded box. A
-    station's optional fourth item is its cross-section: sides radius factors going round from up
-    (a hock's teardrop, a ridge), in place of the plain ring. A capped end closes with a smaller
-    ring and a pole, so it is round, not flat. Returns the object."""
-    if len(stations) < 2:
-        raise ValueError("loft needs at least two stations")
-    me = bpy.data.meshes.new(name)
-    ob = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(ob)
-    bm = bmesh.new()
-    pts = [Vector(s[0]) for s in stations]
-    up = Vector(up)
-    e = 2.0 / squircle
-    rings = []
-    for i, (_, ru, rv, *rest) in enumerate(stations):
-        t, u, v = _ring_frame(pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)], up)
-        shape = list(rest[0]) if rest and rest[0] is not None else [1.0] * sides
-        if len(shape) != sides:
-            raise ValueError(f"station {i}: a cross-section of {len(shape)} factors for {sides} sides")
-        ring = []
-        for k in range(sides):
-            a = 2 * math.pi * k / sides
-            c, s = math.cos(a), math.sin(a)
-            ring.append(bm.verts.new(pts[i] + (u * ru * math.copysign(abs(c) ** e, c) + v * rv * math.copysign(abs(s) ** e, s)) * shape[k]))
-        rings.append((ring, t, min(ru, rv)))
-    for (r0, *_), (r1, *_) in zip(rings, rings[1:]):
-        for k in range(sides):
-            bm.faces.new((r0[k], r0[(k + 1) % sides], r1[(k + 1) % sides], r1[k]))
-    for end, i, sign in ((0, 0, -1), (1, -1, 1)):
-        if not cap[end]:
-            continue
-        ring, t, r = rings[i]
-        depth = r * 0.45
-        inner = [bm.verts.new(pts[i] + (p.co - pts[i]) * 0.6 + t * sign * depth * 0.7) for p in ring]
-        pole = bm.verts.new(pts[i] + t * sign * depth)
-        for k in range(sides):
-            for f in ((ring[k], ring[(k + 1) % sides], inner[(k + 1) % sides], inner[k]), (inner[k], inner[(k + 1) % sides], pole)):
-                bm.faces.new(f if sign > 0 else f[::-1])
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    bm.to_mesh(me)
-    bm.free()
-    for p in me.polygons:
-        p.use_smooth = smooth
-    if material is not None:
-        me.materials.append(material)
-    return ob
 
 
 FINGERS = re.compile(r"(thumb|index|middle|ring|pinky)", re.I)

@@ -202,23 +202,19 @@ check that matters.
   its own op (`game_blender` op `addon`), because the server cannot raise a question in a chat:
   a `user_input_request` comes only from a provider. Finished assets are never add-ons: those
   stay under the library switch.
-- A game with the library off makes its textures: `kurambit.surface` bakes a tiling set from
-  Blender's procedural nodes on a flat torus (no seam), and the colour map holds only the
-  pattern's light and dark, multiplied by the material's colour, so Art's one colour field
-  recolours a whole surface on a model and on what the game's code tiles it over.
 - Made art ships the agent's own materials as Blender's glTF exporter writes them (metal, glass,
   emission, normal maps, baked AO as `COLOR_0`). The CC0 packs' one material on a gradient-swatch
   atlas (`stylepass.py`) runs only when STYLE.json holds a hex `palette`, which op `lock` keeps
   only under `finish: "flat"`: the export flattening every model to one matte pack look was the
   harness deciding taste (judges read it as "plain, flat-shaded"), so only the person's lock asks
   for it. Voxel models, a material per colour, take an atlas of their own colours either way.
-  The art method is the one that wins against a bare agent (art-pipeline.md): a reference first,
-  one continuous dense surface per body region (a base body, or `sweep` regions fused by
-  `one_skin`), rigid pieces only for what is rigid (`hard_surface`), and `bake_down` only when the
-  running scene is too heavy. Parts of low-sided lofted tubes on a skeleton, the earlier method,
-  measured like the packs and judged against a library yardstick's silhouette, came out as "a
-  pile of unmodified primitives" (2/10 on the model bench); nothing in the harness sets a model's
-  triangles or proportions now. The review's pictures (`review.py`) are the loop's eyes.
+  The art guide prescribes no modelling method: the agent writes plain bpy its own way. Two
+  prescribed methods lost to a bare agent: low-sided lofted tubes on a skeleton ("a pile of
+  unmodified primitives") and then `sweep` regions fused by `one_skin` with `hard_surface` parts
+  (bare Blender won 6 of 6 model briefs on a neutral four-view render, 2026-11-23). So the guide
+  states only what the game needs from a model, and the kit keeps what bare Blender lacks:
+  export, base bodies, rigging, clips, `qa` and the review. The review's pictures (`review.py`)
+  are the loop's eyes.
 - Recipes (`templates/studio/recipes/`) are indexed in the studio `AGENTS.md`, which the game's
   AGENTS.md points at, never left for the agent to discover: Vercel's evals saw an available
   skill go unopened in 56% of tasks, and an index always in view score 100%. They are advice the
