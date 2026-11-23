@@ -7,8 +7,8 @@ on a name, a context or a missing attribute.
 
 - Kurambit runs Blender 5.x (5.3 by default; `bpy.app.version` says which). What older
   tutorials and memory get wrong:
-  - a new material and world already have their nodes: use `kurambit.material(...)`, or
-    `kurambit.helpers.use_nodes(m)` (`use_nodes` is deprecated);
+  - a new material and world already have their nodes (`use_nodes` is deprecated): find the
+    Principled node by type;
   - Boolean solvers are `EXACT`, `FLOAT` (was `FAST`) and `MANIFOLD`;
   - actions are layered: `action.fcurves` is gone. Key with `obj.keyframe_insert(...)`,
     `pose_bone.keyframe_insert(...)`, or op `animate`;
@@ -24,7 +24,7 @@ on a name, a context or a missing attribute.
   `Subsurface Weight`. They ship in the GLB with UVs, image textures and normal maps unless a
   palette is locked; procedural nodes never do: bake them to textures.
 - Sculpt Mode operators crash in background Blender: shape with modifiers (Remesh, Smooth,
-  Displace, Shrinkwrap), bmesh or numpy, or `kurambit.one_skin`.
+  Displace, Shrinkwrap), bmesh or numpy.
 - A review renders for tens of seconds; printing numbers in the same code call costs nothing.
 
 ## Steps

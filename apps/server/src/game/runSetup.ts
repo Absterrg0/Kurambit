@@ -132,6 +132,8 @@ const RETIRED_SKILLS = [
   "voxels.md",
   ...[
     "voxels",
+    "art-characters",
+    "art-hard-surface",
     "art-humanoid",
     "art-palette",
     "art-prop",

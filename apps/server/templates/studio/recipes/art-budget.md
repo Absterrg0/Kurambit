@@ -12,9 +12,8 @@ near and far, or repeated hundreds of times. Not before: make the model good fir
   that share a material).
 - A dense model too heavy for its scene keeps its look on a light mesh:
   `kurambit.bake_down(high, low=None, maps=("normal", "ao"), size=1024)`. The best low for a hard
-  surface prop is its blockout before the bevels; for a body, a QuadriFlow copy
-  (`kurambit.one_skin(..., target_faces=)`) or a decimated one. Add `"color"` to bake the high's
-  colour onto one material.
+  surface prop is its blockout before the bevels; for a body, a remeshed or decimated copy. Add
+  `"color"` to bake the high's colour onto one material.
 - At export, `game_blender` op `export` with `simplify: <triangles>` thins the shipped copy and
   keeps the outline and UV seams. A big model seen near and far: export a second copy with
   `simplify` at a quarter and swap them with `THREE.LOD` where it is a quarter of the screen tall.

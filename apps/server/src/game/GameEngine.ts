@@ -757,7 +757,7 @@ const make = Effect.gen(function* () {
             review:
               kept.length === 0
                 ? review
-                : `${review} Kept as hero sheets: ${kept.join(", ")}. Write each one's critique beside it (${kept.map((sheet) => sheet.replace(/\.png$/, ".md")).join(", ")}; studio-skills/art-pipeline.md, The hero sheet).`,
+                : `${review} Kept as hero sheets: ${kept.join(", ")}. Write each one's critique beside it (${kept.map((sheet) => sheet.replace(/\.png$/, ".md")).join(", ")}).`,
           };
         }),
       ),

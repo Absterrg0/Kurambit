@@ -11,8 +11,6 @@ Craft advice, a skill per file. A game's first turn needs only what
 Technique notes, `recipes/<id>.md`, read when the work needs one:
 
 - `art-bpy`: Blender 5 bpy traps, before the first Blender call.
-- `art-characters`: people and creatures, one skin to a reference.
-- `art-hard-surface`: props, vehicles, buildings.
 - `art-rigging`: skeletons, weights, clips.
 - `art-budget`: too heavy for the scene: bake and thin.
 - `light`: light, sky, time of day, weather.

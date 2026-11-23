@@ -11,8 +11,7 @@ commit d659b96. It is not vendored and none of its scripts run here. These recip
 technique and numbers for Kurambit's export and three.js; their Sources line names the skill each
 drew on:
 
-- `recipes/art-bpy.md`, `recipes/art-hard-surface.md`, `recipes/art-budget.md` and
-  `recipes/light.md`.
+- `recipes/art-bpy.md`, `recipes/art-budget.md` and `recipes/light.md`.
 
 ```
 MIT License
