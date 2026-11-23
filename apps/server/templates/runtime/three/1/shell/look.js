@@ -1580,8 +1580,9 @@ function createStats() {
   const calls = [];
   const triangles = [];
   return {
+    // Each of the first 30 frames of play, then every 30th: a stepped run draws only a handful.
     draws(callCount, triangleCount) {
-      if (frames % 30 !== 0 || calls.length >= 512) return;
+      if ((frames > 30 && frames % 30 !== 0) || calls.length >= 512) return;
       calls.push(callCount);
       triangles.push(triangleCount);
     },

@@ -12,7 +12,7 @@ run's own clock, as fast as the page allows, instead of in real time:
 
 ```js
 export const goal = "Reach the reeds";
-// obs: { t, step, state (GameState), player ([x, y, z] or null), ctx }
+// obs: { t, step, state (GameState), player ([x, y, z] or null), keys, ctx }
 export function decide(obs) {
   return obs.player && obs.player[0] < 14 ? ["move_right"] : ["jump"];
 }
@@ -22,8 +22,10 @@ export function decide(obs) {
 during it (main.js's `ACTIONS`, as `ctx.input` reads them). The run ends with
 the game's own `GameState.win`/`lose`, or after `seconds` of play. Its run is
 a play with one id: `game_play` op `replay` `{run: <id>, at: <s>}` shows any
-second of it, `{save: <name>, run: <id>}` keeps it as a test play. Keep
-`decide` plain JavaScript with no imports. The kit's format below still runs
+second of it, `{save: <name>, run: <id>}` keeps it as a test play. `obs.keys`
+maps a key code (`"KeyD"`) to the action it presses, for a bot that plays by
+keys. An exported `report()` returns the bot's own evidence, kept with the
+run. Keep `decide` plain JavaScript with no imports. The kit's format below still runs
 (in real time) for files that export `observe` instead.
 
 The kit (`kit/*.mjs`) drives keys and reads the game. Your bot file
@@ -133,16 +135,14 @@ waits for the next tempo beat, too slow for a fast hit.
 
 ## The harness's random-input play (masher)
 
-`kit/masher.mjs` is the bot the harness plays every build with for its
-facts; `kit/idle.mjs` sends nothing. Run either yourself with `game_play`
-op `bot` (`file: ".studio/bot/kit/masher.mjs"`). Both press Enter at the
-title until a run starts, then: idle sends nothing, masher holds each
-direction for a second (its first-response probe) and then presses the
-shell's keys at random with a fixed seed. Both stop when the run ends or
-after their span of play. They read only the shell's run state
-(`GameState.state` and `result`), so a game that keeps those and starts on
-Enter gets its facts. If the masher wins in seconds, the game has no
-challenge; if idle wins, it plays itself.
+`kit/masher.mjs` is the stepped bot the harness plays every build with for
+its facts; `game_check` plays a run with no input besides. Run the masher
+yourself with `game_play` op `bot` (`file: ".studio/bot/kit/masher.mjs"`).
+It starts a fresh run, holds each direction for a second (its
+first-response probe) and then presses the shell's keys at random with a
+fixed seed, until the run ends or after its span of play. Its ending is the
+game's own `win`/`lose`. If the masher wins in seconds, the game has no
+challenge; if no input wins, it plays itself.
 
 ## Proving the game can be won
 

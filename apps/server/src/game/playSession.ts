@@ -70,12 +70,13 @@ export interface PlaySession {
   ) => Promise<{ readonly value: unknown } | { readonly error: string }>;
   /**
    * A stepped bot's run in the page (shell studio.bot): its file's source, played on the run's
-   * own clock as fast as the page allows. The page's answer; null when it did not answer in
-   * time, "no-bot" when the game's runtime has no stepped bots. Absent where the runner has no page.
+   * own clock as fast as the page allows, or at a person's pace with `realTime`. The page's
+   * answer; null when it did not answer in time, "no-bot" when the game's runtime has no
+   * stepped bots. Absent where the runner has no page.
    */
   readonly stepBot?: (
     source: string,
-    options: { readonly seconds: number; readonly wallMs: number },
+    options: { readonly seconds: number; readonly wallMs: number; readonly realTime?: boolean },
   ) => Promise<unknown>;
 }
 

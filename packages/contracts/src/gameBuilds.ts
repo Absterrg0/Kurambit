@@ -20,8 +20,6 @@ export { GameBuildId } from "./gameBuildId.ts";
 
 /** Bounds of one measurement, the same for every engine. */
 export const GAME_FACTS_BOUNDS = {
-  /** No harness play uses it now; kept because the tier bots' bounds file still names it. */
-  idleSeconds: 60,
   masherSeconds: 60,
   skilledSeconds: 60,
   startSeconds: 10,

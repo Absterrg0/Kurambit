@@ -16,7 +16,7 @@ import {
   type GameBotFinding,
   type GameBotRunResult,
 } from "@kurambit/contracts";
-import { END_FRAME } from "./gameBotRuntime.ts";
+import { boundEvidence, END_FRAME } from "./gameBotRuntime.ts";
 import type { BotLaunch } from "./gameBotPlay.ts";
 import { botPlayTag, keepPlay } from "./playFiles.ts";
 
@@ -44,6 +44,8 @@ const BotAnswer = Schema.Struct({
     Schema.String,
     Schema.Union([Schema.String, Schema.Number, Schema.Boolean]),
   ),
+  /** The bot file's own report() of its run; absent from runtimes before 1.35. */
+  report: Schema.optionalKey(Schema.NullOr(Schema.Unknown)),
   play: Schema.NullOr(Schema.Unknown),
 });
 const decodeAnswer = Schema.decodeUnknownOption(BotAnswer);
@@ -58,6 +60,8 @@ export interface SteppedBotArgs {
   readonly source: string;
   /** Seconds of game time the run may play before it ends unended. */
   readonly seconds: number;
+  /** Step at a person's pace, so the page's frame times are a person's (shell studio.bot). */
+  readonly realTime?: boolean;
 }
 
 /** The goal a bot file states (`export const goal = "…"`), else a plain one. */
@@ -102,6 +106,7 @@ export const playSteppedBot = async (
   const raw = await play.stepBot(args.source, {
     seconds: args.seconds,
     wallMs: wallMsFor(args.seconds),
+    ...(args.realTime === true ? { realTime: true } : {}),
   });
   if (raw === "no-bot")
     return unplayed(
@@ -149,6 +154,7 @@ export const playSteppedBot = async (
       "warning",
       `decide named actions the game does not have: ${ran.unknown.join(", ")}`,
     );
+  const report = boundEvidence(ran.report).value;
   const wallSeconds = ran.wallMs / 1000;
   const timeRatio = wallSeconds > 0 ? ran.seconds / wallSeconds : 0;
   // The game's own ending is the run's; past its game seconds it ended unended, and past its
@@ -172,7 +178,12 @@ export const playSteppedBot = async (
       state,
       note,
       // Build facts read the ending's time from here, as from the kit's tier bots.
-      evidence: { playingAt: 0, endedAt: ran.outcome?.seconds ?? null, stepped: true },
+      evidence: {
+        playingAt: 0,
+        endedAt: ran.outcome?.seconds ?? null,
+        stepped: true,
+        ...(report === undefined ? {} : { report }),
+      },
     },
     ticks: ran.steps,
     tickHz: wallSeconds > 0 ? Number((ran.steps / wallSeconds).toFixed(2)) : 0,

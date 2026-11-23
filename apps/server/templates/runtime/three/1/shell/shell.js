@@ -770,6 +770,7 @@ function botInput(stepping) {
       step: stepping.steps,
       state: GameState,
       player: mark(stepping.time, stepping.ctx.player, {}).at,
+      keys: bot.keys,
       ctx: stepping.ctx,
     };
     actions = bot.decide(obs, stepping.time) ?? [];
@@ -811,8 +812,20 @@ function finishBot(play, outcome) {
     unknown: [...bot.unknown],
     where: mark(stepping.time, stepping.ctx.player, GameState),
     values: stateValues(),
+    report: botReport(bot),
     play,
   });
+}
+
+/** What the bot file's own report() says of its run, as plain data; null without one. */
+function botReport(bot) {
+  if (bot.report === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(bot.report() ?? null));
+  } catch (error) {
+    bot.error ??= `report threw: ${error?.message ?? error}`;
+    return null;
+  }
 }
 
 /** A bot's run cut by its budget: what it played so far is its play, kept once. */
@@ -1158,13 +1171,15 @@ const studio = installStudio({
   // A stepped bot (a .studio/bot/ file that exports decide(obs) → the actions held): a fresh run in
   // play, stepped on the run's own clock as fast as the page allows, to the game's ending or
   // `seconds` of play (or `wallMs` of real time). Its answer carries the run's play, recorded as a
-  // person's is, so it replays on any build.
+  // person's is, so it replays on any build. `realTime`: it steps at a person's pace instead, so
+  // the page's frame times are a person's (the facts' performance reading).
   async bot(source, options = {}) {
     let decide;
+    let report;
     try {
       const url = URL.createObjectURL(new Blob([String(source)], { type: "text/javascript" }));
       try {
-        decide = (await import(url)).decide;
+        ({ decide, report } = await import(url));
       } finally {
         URL.revokeObjectURL(url);
       }
@@ -1180,8 +1195,15 @@ const studio = installStudio({
       nextReplay = null;
       startRun();
       const startedAt = nativeNow.call(performance);
+      // Which action each key presses, the shell's pause left out, so a bot can play by keys.
+      const keys = {};
+      for (const [name, action] of controls.actions)
+        if (action.fixed !== true) for (const code of action.keys) keys[code] ??= name;
       run.bot = {
         decide,
+        report: typeof report === "function" ? report : undefined,
+        keys,
+        realTime: options.realTime === true,
         until: seconds,
         wallUntil: startedAt + Math.max(5_000, Number(options.wallMs) || seconds * 1_000 + 30_000),
         startedAt,
@@ -1191,7 +1213,8 @@ const studio = installStudio({
         resolve,
       };
       replayDrawEvery = Math.max(1, Math.floor(Number(options.drawEvery) || BOT_DRAW_EVERY));
-      replayFrames = 0;
+      // Its first tick of play draws, so a run that ends fast still leaves a frame of play.
+      replayFrames = -1;
     });
   },
   // The runs this page played to an end since the last call, for a harness session to keep.
@@ -1300,7 +1323,7 @@ renderer.setAnimationLoop((now) => {
     botBudgetEnds(run);
   } else if (
     moving &&
-    (run.player !== null || run.bot !== undefined) &&
+    (run.player !== null || (run.bot !== undefined && !run.bot.realTime)) &&
     (replayPace === null || run.steps < replayPace)
   ) {
     // A replay or a stepped bot: as many steps as fit in part of a frame, never waiting on real time.
@@ -1349,6 +1372,7 @@ renderer.setAnimationLoop((now) => {
         break;
       }
     }
+    if (run?.bot !== undefined && run.time >= run.bot.until) botBudgetEnds(run);
     redraw = true;
   }
   // A frozen frame stays on the canvas; nothing redraws until something moves.

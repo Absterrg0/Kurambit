@@ -87,7 +87,7 @@ import { replaySavedPlays, savedPlays } from "./playFiles.ts";
 
 /**
  * Changes when the server's reading of a measurement, or how templates/bot-child.mjs plays a
- * bot, changes; the tier bot files are hashed besides.
+ * bot, changes; the masher's file is hashed besides.
  * A new tier needs no bump: planOf measures each fact a stored row lacks, and nothing else.
  */
 const FACTS_VERSION = 5;
@@ -95,8 +95,9 @@ const FACTS_VERSION = 5;
 const OWNER = "game-facts:measure";
 /** Measures started by a person that may wait behind each other. */
 const QUEUE_LIMIT = 3;
-const TIER_FILES = ["tier.mjs", "idle.mjs", "masher.mjs", "sensors.mjs"];
-/** Where a copy holds the harness's own tier bots, apart from the game's kit its bot imports. */
+/** The harness's random-input bot, a stepped one (templates/bot-kit/masher.mjs). */
+const MASHER = "masher.mjs";
+/** Where a copy holds the harness's own masher, apart from the game's kit its bot imports. */
 const HARNESS_KIT = ".studio/bot/harness-kit";
 
 /** How long a tier waits for a busy machine to calm before it plays anyway, as the memory gate waits for memory. */
@@ -393,17 +394,13 @@ const make = Effect.gen(function* () {
     ),
     Effect.orElseSucceed(() => NodePath.join(import.meta.dirname, "missing-templates")),
   );
-  const kit = NodePath.join(templates, "bot-kit");
-  const boundsFile = `// Written by the harness for this measurement (GAME_FACTS_BOUNDS).\nexport const PLAY_SECONDS = { idle: ${GAME_FACTS_BOUNDS.idleSeconds}, masher: ${GAME_FACTS_BOUNDS.masherSeconds} };\nexport const START_SECONDS = ${GAME_FACTS_BOUNDS.startSeconds};\n`;
+  const masher = NodePath.join(templates, "bot-kit", MASHER);
   // Facts are comparable only when the same bots and bounds measured them.
   const harness = yield* Effect.promise(async () => {
     const hash = NodeCrypto.createHash("sha256");
-    const { idleSeconds, masherSeconds, skilledSeconds, startSeconds } = GAME_FACTS_BOUNDS;
-    hash.update(
-      `${FACTS_VERSION}\0${idleSeconds},${masherSeconds},${skilledSeconds},${startSeconds}\0`,
-    );
-    for (const file of TIER_FILES)
-      hash.update(await NodeFSP.readFile(NodePath.join(kit, file)).catch(() => Buffer.from(file)));
+    const { masherSeconds, skilledSeconds, startSeconds } = GAME_FACTS_BOUNDS;
+    hash.update(`${FACTS_VERSION}\0${masherSeconds},${skilledSeconds},${startSeconds}\0`);
+    hash.update(await NodeFSP.readFile(masher).catch(() => Buffer.from(MASHER)));
     return hash.digest("hex").slice(0, 12);
   });
   /** A job per facts key, registered before anything yields, removed when it ends. */
@@ -886,13 +883,12 @@ const make = Effect.gen(function* () {
                 );
           yield* write(browserOnly(build.engine, "qa") === null ? facts : { boots: facts.boots });
         }
-        // The harness's own bots, fresh from the server's templates, never the game's.
+        // The harness's own masher, fresh from the server's templates, never the game's.
         const kitWritten = yield* Effect.promise(async () => {
           const dir = NodePath.join(copy, HARNESS_KIT);
           await NodeFSP.rm(dir, { recursive: true, force: true });
           await NodeFSP.mkdir(dir, { recursive: true });
-          await NodeFSP.cp(kit, dir, { recursive: true, force: true });
-          await NodeFSP.writeFile(NodePath.join(dir, "tier-bounds.mjs"), boundsFile);
+          await NodeFSP.copyFile(masher, NodePath.join(dir, MASHER));
         }).pipe(
           Effect.as(true),
           Effect.catchCause(() => Effect.succeed(false)),
@@ -953,10 +949,10 @@ const make = Effect.gen(function* () {
         // Each bot run says how busy the machine was, so a run slowed by other
         // work is never read as the game's slowness; it waits a while for an
         // idle machine first and holds the copy's one engine step.
-        const runBot = (file: string, seconds: number) =>
+        const runBot = (file: string, seconds: number, options?: { readonly realTime: boolean }) =>
           Effect.andThen(
             idleMachine,
-            withMachine(step(bots.runIn(copy, { file, seconds }))).pipe(
+            withMachine(step(bots.runIn(copy, { file, seconds }, options))).pipe(
               Effect.map(({ value, machine }) => ({ value, machine: { ...machine, software } })),
             ),
           );
@@ -1020,10 +1016,12 @@ const make = Effect.gen(function* () {
             });
           else {
             const playSeconds = GAME_FACTS_BOUNDS.masherSeconds;
-            const run = yield* runBot(
-              `${HARNESS_KIT}/masher.mjs`,
-              tierWallSeconds(playSeconds),
-            ).pipe(
+            // Its span is game seconds on the run's own clock: a slow machine plays the same run,
+            // only later. Drawing on a GPU it steps at a person's pace, so the same play's frame
+            // times are the performance fact; in software they are not read, so it hurries.
+            const run = yield* runBot(`${HARNESS_KIT}/${MASHER}`, playSeconds, {
+              realTime: !software,
+            }).pipe(
               Effect.flatMap(({ value: result, machine }) =>
                 Effect.map(moveEvidence(root, key, "masher", result), (evidence) => ({
                   result,

@@ -80,6 +80,12 @@ const BOT_ROOM: MemoryRoom = {
 const STOP_WAIT_MS = 60_000;
 const STOP_WAIT = Duration.millis(STOP_WAIT_MS);
 
+interface RunOptions {
+  readonly lane?: string;
+  /** A stepped bot steps at a person's pace, so the page's frame times are a person's. */
+  readonly realTime?: boolean;
+}
+
 /** The call a run holds: the checkout's own, or one lane of it when its caller plays it several ways at once. */
 const sessionKey = (root: string, lane: string | undefined) =>
   lane === undefined ? root : `${root}\0${lane}`;
@@ -122,7 +128,7 @@ export class GameBot extends Context.Service<
     readonly runIn: (
       root: string,
       input: GameBotRunInput,
-      options?: { readonly lane?: string },
+      options?: RunOptions,
     ) => Effect.Effect<GameBotRunResult, GameOperationError>;
     /** A quick look at a finished bot run: summary, findings and evidence paths. */
     readonly view: (
@@ -305,7 +311,7 @@ const make = Effect.gen(function* () {
     root: string,
     input: GameBotRunInput,
     owner: ThreadId | undefined,
-    lane: string | undefined,
+    { lane, realTime }: RunOptions,
   ) =>
     Effect.gen(function* () {
       // A bot is a game file under .studio/bot/*.mjs; anything else is refused.
@@ -473,6 +479,7 @@ const make = Effect.gen(function* () {
                                 botFile,
                                 source,
                                 seconds,
+                                ...(realTime === true ? { realTime } : {}),
                               })
                             : playBot(opened, {
                                 host: processHost,
@@ -675,9 +682,9 @@ const make = Effect.gen(function* () {
       };
     });
 
-  const run = (root: string, input: GameBotRunInput, owner?: ThreadId, lane?: string) =>
+  const run = (root: string, input: GameBotRunInput, owner?: ThreadId, options: RunOptions = {}) =>
     botLocks
-      .tryWithLock(sessionKey(root, lane), 0, runLocked(root, input, owner, lane))
+      .tryWithLock(sessionKey(root, options.lane), 0, runLocked(root, input, owner, options))
       .pipe(
         Effect.flatMap((ran) =>
           Option.isSome(ran)
@@ -736,7 +743,7 @@ const make = Effect.gen(function* () {
     // Its video lands in the game folder; the run is recorded on the thread.
     run: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) => run(root, input, threadId)),
-    runIn: (root, input, options) => run(root, input, undefined, options?.lane),
+    runIn: (root, input, options) => run(root, input, undefined, options),
     latestPlayBot,
     view: (threadId, input) =>
       Effect.flatMap(projects.resolve(threadId), (root) => view(root, input)),

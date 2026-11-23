@@ -105,15 +105,16 @@ export const busyReading = (what: string, machine: MachineLoad | null): NotMeasu
     : null;
 
 /**
- * A run below real time: its span of play did not fit the wall budget. In a
- * browser drawing on the CPU it says nothing about the game; on a busy
- * machine neither, so it is retried; only a slow game on an idle machine,
- * drawing on its GPU, is standing (a person's measure tries again).
+ * A run whose span of play did not fit its wall budget: on the run's own clock
+ * that is a page that could barely step at all. In a browser drawing on the CPU
+ * it says nothing about the game; on a busy machine neither, so it is retried;
+ * only a slow game on an idle machine, drawing on its GPU, is standing (a
+ * person's measure tries again).
  */
 const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: MachineLoad | null) =>
   machine?.software === true
     ? notMeasured(
-        `the harness renders in software here, so the game ran at ${result.timeRatio.toFixed(2)}× real time`,
+        `the harness renders in software here, and the game's page stepped only ${round(result.gameSeconds)} s of play, ${result.timeRatio.toFixed(2)}× real time`,
         false,
         true,
         "software",
@@ -132,7 +133,7 @@ const tooSlow = (result: GameBotRunResult, playSeconds: number, machine: Machine
           "slow",
         );
 
-/** What a tier bot reports in its status evidence (templates/bot-kit/tier.mjs). */
+/** What a stepped run reports in its status evidence (gameBotStep.ts). */
 interface TierEvidence {
   readonly playingAt: number | null;
   readonly endedAt: number | null;
@@ -192,8 +193,6 @@ export const tierFact = (
       return measured("did-not-boot", null);
     case "stopped":
       return notMeasured("the measurement was stopped", true);
-    case "never-started":
-      return notMeasured(note, false);
     case "budget":
       return tooSlow(result, playSeconds, machine);
     case "done": {
