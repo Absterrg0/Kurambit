@@ -77,13 +77,11 @@ export const memoryBuildRecords = () => {
       Effect.succeed(
         builds.filter((each) => each.projectId === projectId && ids.includes(each.id)),
       ),
-    getGameBuildTally: (projectId, root) =>
+    getGameBuildTally: (projectId) =>
       Effect.succeed({
         number: Math.max(
           0,
-          ...builds
-            .filter((each) => each.projectId === projectId && each.root === root)
-            .map((each) => each.number ?? 0),
+          ...builds.filter((each) => each.projectId === projectId).map((each) => each.number ?? 0),
         ),
         parks: builds.filter(
           (each) => each.projectId === projectId && each.kind === "restore-before",

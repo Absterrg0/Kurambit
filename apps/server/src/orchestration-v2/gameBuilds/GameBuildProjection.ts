@@ -122,7 +122,10 @@ export interface GameBuildListOptions {
 }
 
 export interface GameBuildTally {
-  /** The folder's highest number so far (0: none). */
+  /**
+   * The game's highest number so far (0: none), across its folder and its copies: a copy numbers
+   * on from its seat in the same series, so no two builds a person sees share a number.
+   */
   readonly number: number;
   /** The game's restore parks so far. */
   readonly parks: number;
@@ -163,11 +166,11 @@ export const reads = (sql: SqlClient.SqlClient) => {
             SELECT payload_json FROM orchestration_v2_projection_game_builds
             WHERE project_id = ${projectId} AND ${sql.in("build_id", ids)}
           `.pipe(Effect.flatMap(decodeRows)),
-    tally: (projectId: ProjectId, root: string) =>
+    tally: (projectId: ProjectId) =>
       sql<{ readonly number: number | null; readonly parks: number }>`
         SELECT
           (SELECT MAX(number) FROM orchestration_v2_projection_game_builds
-            WHERE project_id = ${projectId} AND root = ${root}) AS number,
+            WHERE project_id = ${projectId}) AS number,
           (SELECT COUNT(*) FROM orchestration_v2_projection_game_builds
             WHERE project_id = ${projectId} AND kind = 'restore-before') AS parks
       `.pipe(

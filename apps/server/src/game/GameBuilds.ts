@@ -642,7 +642,6 @@ const make = Effect.gen(function* () {
     options: {
       readonly current: boolean;
       readonly undid?: GameBuildId | undefined;
-      readonly numberFrom?: number | undefined;
       readonly replaces?: GameBuildId | undefined;
       readonly request?: string | undefined;
     },
@@ -655,7 +654,6 @@ const make = Effect.gen(function* () {
           threadId,
           build: toRecord(g, entry, kind, options),
           current: options.current,
-          ...(options.numberFrom === undefined ? {} : { numberFrom: options.numberFrom }),
           ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
         }),
       ),
@@ -1540,17 +1538,6 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => "unknown" as const),
     );
 
-  /** A copy's builds number on from its seat: the game's number for the build it seated on. */
-  const seatNumber = (threadId: ThreadId, g: Game) =>
-    Effect.gen(function* () {
-      const seat = yield* oidAt(g.home, CheckpointRef.make(worktreeSeedRef(threadId)));
-      const [seated] =
-        seat === null || !isGameBuildId(seat)
-          ? []
-          : yield* projections.getGameBuilds(g.projectId, [seat]);
-      return seated?.number ?? (yield* projections.getGameBuildTally(g.projectId, g.home)).number;
-    }).pipe(Effect.orElseSucceed(() => undefined));
-
   /**
    * A turn's build as it lands, or null when the turn changed no game files (no build). T3 diffs
    * a turn against its thread's previous checkpoint, which in a game includes whatever another
@@ -1634,10 +1621,7 @@ const make = Effect.gen(function* () {
       const g = yield* gameOf(threadId);
       const entry = yield* turnEntryOf(g, checkpointRef);
       if (entry === null) return;
-      yield* recordBuild(threadId, g, entry, "turn", {
-        current: true,
-        numberFrom: g.root === g.home ? undefined : yield* seatNumber(threadId, g),
-      });
+      yield* recordBuild(threadId, g, entry, "turn", { current: true });
     }).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("A turn's build could not be recorded.", { threadId, cause }),
@@ -1856,8 +1840,8 @@ const make = Effect.gen(function* () {
 
   /**
    * A chat in a copy: the game's builds up to the copy's seat, then the copy's own builds since it
-   * was made or last brought in, numbered on from the seat. One numbering, never the game's later
-   * builds, its kept edits or another chat's copies. Null for a copy with no seat kept.
+   * was made or last brought in, in the game's one numbering. Never the game's later builds, its
+   * kept edits or another chat's copies. Null for a copy with no seat kept.
    */
   const copyRailOf = (g: Game, limit: number, before: string | undefined) =>
     Effect.gen(function* () {

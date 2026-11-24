@@ -167,8 +167,6 @@ export const OrchestrationV2GameBuildCommand = Schema.Union([
     /** Its number and nth are the decider's: what the command carries is ignored. */
     build: GameBuildRecord,
     current: Schema.Boolean,
-    /** A copy's first build numbers on from its seat's number. */
-    numberFrom: Schema.optionalKey(Schema.Number),
     /** The tuning build this one folds: it takes that build's number, and that build goes. */
     replaces: Schema.optionalKey(GameBuildId),
   }),

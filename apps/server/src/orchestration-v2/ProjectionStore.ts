@@ -504,7 +504,6 @@ export interface ProjectionStoreV2Shape {
   ) => Effect.Effect<ReadonlyArray<GameBuildRecord>, ProjectionStoreV2Error>;
   readonly getGameBuildTally: (
     projectId: ProjectId,
-    root: string,
   ) => Effect.Effect<GameBuildProjection.GameBuildTally, ProjectionStoreV2Error>;
 
   readonly apply: (
@@ -5272,8 +5271,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       gameBuildReads.list(projectId, options).pipe(gameBuildReadError);
     const getGameBuilds: ProjectionStoreV2Shape["getGameBuilds"] = (projectId, ids) =>
       gameBuildReads.get(projectId, ids).pipe(gameBuildReadError);
-    const getGameBuildTally: ProjectionStoreV2Shape["getGameBuildTally"] = (projectId, root) =>
-      gameBuildReads.tally(projectId, root).pipe(gameBuildReadError);
+    const getGameBuildTally: ProjectionStoreV2Shape["getGameBuildTally"] = (projectId) =>
+      gameBuildReads.tally(projectId).pipe(gameBuildReadError);
 
     const getProjectGameRun: ProjectionStoreV2Shape["getProjectGameRun"] = (projectId) =>
       sql<PayloadRow & { readonly deleted_at: string | null }>`
@@ -7033,13 +7032,13 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           ),
         ),
-      getGameBuildTally: (projectId, root) =>
+      getGameBuildTally: (projectId) =>
         Ref.get(replayState).pipe(
           Effect.map((state) => ({
             number: Math.max(
               0,
               ...state.gameBuilds.builds
-                .filter((build) => build.projectId === projectId && build.root === root)
+                .filter((build) => build.projectId === projectId)
                 .map((build) => build.number ?? 0),
             ),
             parks: state.gameBuilds.builds.filter(

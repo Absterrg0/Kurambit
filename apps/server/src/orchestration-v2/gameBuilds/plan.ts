@@ -24,7 +24,6 @@ export type GameBuildEventDraft = Unidentified<
 export interface GameBuildPlanReads {
   readonly tally: (
     projectId: GameBuildRecord["projectId"],
-    root: string,
   ) => Effect.Effect<GameBuildTally, ProjectionStoreV2Error>;
   readonly known: (
     projectId: GameBuildRecord["projectId"],
@@ -41,18 +40,12 @@ export interface GameBuildPlan {
   readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
 }
 
-/** A build as the projection keeps it: numbered on from its folder's last, a park by its place. */
-const numbered = (
-  build: GameBuildRecord,
-  tally: GameBuildTally,
-  numberFrom: number | undefined,
-): GameBuildRecord => {
+/** A build as the projection keeps it: numbered on from the game's last, a park by its place. */
+const numbered = (build: GameBuildRecord, tally: GameBuildTally): GameBuildRecord => {
   const { number: _number, nth: _nth, ...rest } = build;
   return {
     ...rest,
-    number: isNumberedGameBuildKind(build.kind)
-      ? Math.max(tally.number, numberFrom ?? 0) + 1
-      : null,
+    number: isNumberedGameBuildKind(build.kind) ? tally.number + 1 : null,
     ...(build.kind === "restore-before" ? { nth: tally.parks + 1 } : {}),
   };
 };
@@ -76,7 +69,7 @@ export const planGameBuildCommand = (
           known ??
           (replaced !== null
             ? { ...command.build, number: replaced.number }
-            : numbered(command.build, yield* reads.tally(projectId, root), command.numberFrom));
+            : numbered(command.build, yield* reads.tally(projectId)));
         // The folder's build never moves back to an older one: a turn recorded late (a
         // reconcile after a restart) lands after a restore or a keep that came since.
         const folder = command.current ? yield* reads.folder(projectId, root) : null;
@@ -128,11 +121,7 @@ export const planGameBuildCommand = (
           command.landing === undefined
             ? null
             : ((yield* reads.known(command.projectId, command.landing.id)) ??
-              numbered(
-                command.landing,
-                yield* reads.tally(command.projectId, command.root),
-                undefined,
-              ));
+              numbered(command.landing, yield* reads.tally(command.projectId)));
         return {
           events: [
             ...(landing === null
@@ -194,8 +183,7 @@ export const planGameBuildCommand = (
                   files: [],
                   fileCount: null,
                 },
-                yield* reads.tally(command.projectId, command.root),
-                undefined,
+                yield* reads.tally(command.projectId),
               ),
               current: false,
             },
