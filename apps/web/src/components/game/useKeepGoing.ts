@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import type { GameKeepGoingInput, GameKeepGoingMode, ScopedThreadRef } from "@kurambit/contracts";
@@ -10,6 +10,8 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { toastManager } from "../ui/toast";
 import { keepGoingRequest } from "./keepGoing.logic";
+import { scopedThreadKey } from "@kurambit/client-runtime/environment";
+import { useGameWorkspaceStore } from "../../gameWorkspaceStore";
 
 const NO_PERMISSION = Atom.make(false);
 const NO_BUDGET = Atom.make<number | null | undefined>(undefined);
@@ -45,6 +47,21 @@ export function useKeepGoing(threadRef: ScopedThreadRef | null) {
   const decideCommand = useAtomCommand(gameEnvironment.keepGoingDecide, { reportFailure: false });
   const chosenBudget = useAtomValue(threadRef === null ? NO_BUDGET : keepGoingBudget(threadRef));
   const [sending, setSending] = useState(false);
+
+  // A run that ends (Stop, its budget, nothing left to do) puts Send back to once: the picker left
+  // on Keep going made the person's next message resume the run they had just stopped.
+  const mode = query.data?.mode;
+  const threadKey = threadRef === null ? null : scopedThreadKey(threadRef);
+  const seen = useRef<{ readonly key: string | null; readonly on: boolean }>({
+    key: null,
+    on: false,
+  });
+  useEffect(() => {
+    const on = mode !== undefined && mode !== "off";
+    if (seen.current.key === threadKey && seen.current.on && mode === "off" && threadKey !== null)
+      useGameWorkspaceStore.getState().pickRun(threadKey, { kind: "once" });
+    seen.current = { key: threadKey, on };
+  }, [mode, threadKey]);
 
   /** Whether the server took it; a refusal is toasted with its reason. */
   const set = async (
