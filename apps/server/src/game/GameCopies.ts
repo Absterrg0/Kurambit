@@ -797,7 +797,9 @@ const make = Effect.gen(function* () {
         );
       const seated = yield* seatOf(g, shell);
       if (seated === null) return yield* failed(operation, g.root, "invalid-input", NO_SEAT);
-      if (atWork(shell) && copyId !== input.threadId)
+      // While the copy's chat works, only its own agent brings it in, from inside that turn: a
+      // bring-in that closes the copy takes the folder its agent is working in from under it.
+      if (atWork(shell) && (copyId !== input.threadId || options.agent !== true))
         return yield* failed(
           operation,
           g.root,
