@@ -539,8 +539,9 @@ hand has no stamp, so only fresh sessions read it.
 - **Game browsers draw on the GPU.** Once per server process, `makeGameBrowser` probes the pinned
   headless shell for a hardware WebGL backend (Linux: EGL, then Vulkan, on the GPU's render node,
   with no display in its environment) and every game browser launches with the first that drew on
-  hardware, else SwiftShader. SwiftShader costs several cores on a lit 3D scene and plays it at a
-  fraction of real time, so a facts row records its renderer, facts from different renderers are
+  hardware, else Mesa's llvmpipe (EGL with the GPU blocklist lifted for it alone), else
+  SwiftShader. llvmpipe plays a lit scene several times faster than SwiftShader on the same cores,
+  but both cost several cores and play at a fraction of real time, so a facts row records its renderer, facts from different renderers are
   not comparable, and a too-slow run in software is "not measured", never the game's slowness.
   The browser keeps what each backend printed to the probe, and a play drawn in software leaves
   the performance fact "not measured" with that output: a harness fault, never the game's.

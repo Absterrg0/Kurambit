@@ -14,8 +14,8 @@ describe("game browser backend", () => {
     expect(parseProbeRenderer("")).toBeNull();
   });
 
-  it("takes the first hardware backend on Linux, else SwiftShader", () => {
-    const [egl, vulkan] = backendCandidates("linux");
+  it("takes the first hardware backend on Linux, else Mesa's llvmpipe, else SwiftShader", () => {
+    const [egl, vulkan, mesa] = backendCandidates("linux");
     expect(
       chooseBackend("linux", [
         { args: egl!, renderer: SWIFTSHADER },
@@ -25,7 +25,16 @@ describe("game browser backend", () => {
     expect(
       chooseBackend("linux", [
         { args: egl!, renderer: "llvmpipe (LLVM 19.1, 256 bits)" },
+        { args: vulkan!, renderer: SWIFTSHADER },
+        { args: mesa!, renderer: "ANGLE (Mesa, llvmpipe (LLVM 20.1.2 256 bits), OpenGL ES 3.2)" },
+      ]),
+    ).toMatchObject({ args: mesa, software: true });
+    // The blocklist is lifted for Mesa only: a GPU it lets through is never taken.
+    expect(
+      chooseBackend("linux", [
+        { args: egl!, renderer: null },
         { args: vulkan!, renderer: null },
+        { args: mesa!, renderer: INTEL },
       ]),
     ).toEqual({
       args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--disable-gpu-compositing"],

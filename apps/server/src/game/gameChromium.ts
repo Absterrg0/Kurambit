@@ -61,15 +61,24 @@ const SOFTWARE_ARGS = [
 ] as const;
 
 /**
- * The hardware backends tried on Linux, in order: EGL on the GPU's render
- * node, then Vulkan. Neither needs a display. Elsewhere Chrome's default
- * already draws on the GPU, so it is only probed for its renderer.
+ * Mesa's CPU renderer behind EGL, which Chrome's GPU blocklist refuses: it plays a lit scene
+ * several times faster than SwiftShader on the same cores (the QA play of a 200k-triangle kart
+ * game in 26-66 s against 203 s), so a machine with no GPU but Mesa draws with it. Never taken
+ * for a GPU: the blocklist stays on for hardware.
+ */
+const LLVMPIPE_ARGS = ["--use-angle=gl-egl", "--ignore-gpu-blocklist"] as const;
+const isLlvmpipe = (renderer: string | null) => renderer !== null && /llvmpipe/i.test(renderer);
+
+/**
+ * The backends tried on Linux, in order: EGL on the GPU's render node, then
+ * Vulkan, then Mesa's CPU renderer. None needs a display. Elsewhere Chrome's
+ * default already draws on the GPU, so it is only probed for its renderer.
  */
 export const backendCandidates = (
   platform: NodeJS.Platform,
 ): ReadonlyArray<ReadonlyArray<string>> =>
   platform === "linux"
-    ? [["--use-angle=gl-egl"], ["--use-angle=vulkan", "--enable-features=Vulkan"]]
+    ? [["--use-angle=gl-egl"], ["--use-angle=vulkan", "--enable-features=Vulkan"], LLVMPIPE_ARGS]
     : [[]];
 
 /** The renderer line the probe page prints in the dumped DOM; null when it printed none or no WebGL. */
@@ -109,15 +118,17 @@ export const describeProbe = (
         .join("; ");
 
 /**
- * The first candidate that drew on hardware; else Chrome's CPU renderer. Off
- * Linux the default is kept whatever it reports, with its renderer recorded.
+ * The first candidate that drew on hardware; else Mesa's CPU renderer; else
+ * Chrome's. Off Linux the default is kept whatever it reports, with its
+ * renderer recorded.
  */
 export const chooseBackend = (
   platform: NodeJS.Platform,
   probed: ReadonlyArray<{ readonly args: ReadonlyArray<string>; readonly renderer: string | null }>,
 ): RenderBackend => {
   const hardware = probed.find(
-    (each) => each.renderer !== null && !isSoftwareRenderer(each.renderer),
+    (each) =>
+      each.args !== LLVMPIPE_ARGS && each.renderer !== null && !isSoftwareRenderer(each.renderer),
   );
   if (hardware !== undefined)
     return { args: hardware.args, renderer: hardware.renderer, software: false };
@@ -125,6 +136,8 @@ export const chooseBackend = (
     const renderer = probed[0]?.renderer ?? null;
     return { args: [], renderer, software: renderer !== null && isSoftwareRenderer(renderer) };
   }
+  const mesa = probed.find((each) => each.args === LLVMPIPE_ARGS && isLlvmpipe(each.renderer));
+  if (mesa !== undefined) return { args: mesa.args, renderer: mesa.renderer, software: true };
   return { args: SOFTWARE_ARGS, renderer: null, software: true };
 };
 
