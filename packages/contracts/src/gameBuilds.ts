@@ -953,6 +953,7 @@ export const GAME_LEAD_FACTS = [
   "hud",
   "performance",
   "screens",
+  "first-minute",
   "saved-plays",
   "skilled",
 ] as const satisfies ReadonlyArray<GameMeasuredFactId>;
@@ -983,6 +984,7 @@ const CHECK_LABELS: Readonly<
   hud: "HUD fits the screen",
   performance: "Holds its frame rate",
   screens: "Fits phone and widescreen",
+  "first-minute": "The first minute plays clean",
   "saved-plays": "Test plays replay the same",
   skilled: "Can be won by Kurambit's play bot",
 };
@@ -1163,6 +1165,16 @@ const checkWords = (
               : "Breaks on widescreen",
         value: [...new Set(found.map((each) => each.short))].join(", "),
       };
+    }
+    case "first-minute": {
+      if (facts.player.status !== "measured") return null;
+      const off = gamePlayerLines(facts.player.value).filter((line) => line.endsWith(" ✗"));
+      return off.length === 0
+        ? { sentence: "The first minute plays clean", value: null }
+        : {
+            sentence: "The first minute trips a player",
+            value: off.map((line) => line.slice(0, -" ✗".length)).join("; "),
+          };
     }
     default:
       return null;

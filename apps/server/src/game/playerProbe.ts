@@ -210,13 +210,17 @@ export const measurePlayer = async (input: {
   }).catch(() => null);
   if (session === null) return null;
   try {
-    return await probe(session, input.folder);
+    return await probe(session, input.folder, input.browser.software);
   } finally {
     await session.close();
   }
 };
 
-const probe = async (session: WebPlaySession, folder: string): Promise<GamePlayerReport> => {
+const probe = async (
+  session: WebPlaySession,
+  folder: string,
+  software: boolean,
+): Promise<GamePlayerReport> => {
   const evaluate = async <A>(expression: string): Promise<A | null> => {
     const answered = await session.evaluate?.(expression);
     return answered !== undefined && "value" in answered ? (answered.value as A) : null;
@@ -281,10 +285,11 @@ const probe = async (session: WebPlaySession, folder: string): Promise<GamePlaye
     return { inputs, seconds: (last - (first ?? last)) / 1000, by: null, pressedAt: null };
   };
 
-  // Load and the first frame.
+  // Load and the first frame. Drawn in software, the time to it is the machine's, not the game's.
   const booted = await kp();
-  const load =
-    booted?.ready == null
+  const load = software
+    ? not("drawn in software, so the time to the first frame says nothing about the game")
+    : booted?.ready == null
       ? not("the page never said it was ready")
       : { ready: round(booted.ready / 1000) };
   const first = await still("open");
