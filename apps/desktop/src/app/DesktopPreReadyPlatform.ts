@@ -61,6 +61,12 @@ export const make = Effect.gen(function* () {
     const linux =
       platform === "linux" ? resolveEarlyLinuxElectronOptionsFromProcess(homeDirectory) : null;
 
+    // The Stage, Tune and Art draw the person's game with WebGL. Where Chromium blocks the GPU
+    // (no GPU, a VM, a blocklisted driver) WebGL is otherwise off, since Chromium no longer falls
+    // back to the CPU on its own; this lets it draw on SwiftShader there and changes nothing
+    // where a GPU works.
+    Electron.app.commandLine.appendSwitch("enable-unsafe-swiftshader");
+
     if (linux !== null) {
       // The portal also requires a valid desktop entry. An AppImage update may
       // have removed the executable referenced by the previous launch's entry.

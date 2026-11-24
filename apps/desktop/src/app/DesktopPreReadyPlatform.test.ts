@@ -255,7 +255,8 @@ describe("DesktopPreReadyPlatform", () => {
         });
         assert.deepEqual(events, ["pre-ready", "clerk"]);
         assert.equal(registerSchemesMock.mock.calls.length, 1);
-        assert.equal(appendSwitchMock.mock.calls.length, 0);
+        // Off Linux the one switch is the CPU WebGL fallback the Stage needs without a GPU.
+        assert.deepEqual(appendSwitchMock.mock.calls, [["enable-unsafe-swiftshader"]]);
         assert.equal(setDesktopNameMock.mock.calls.length, 0);
       }),
   );
