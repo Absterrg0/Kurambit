@@ -32,6 +32,7 @@ const makeStubTextGeneration = (
 const makeStubInstance = (
   instanceId: ProviderInstanceId,
   textGeneration: TextGeneration.TextGeneration["Service"],
+  auth: "authenticated" | "unauthenticated" = "authenticated",
 ): ProviderInstance =>
   ({
     instanceId,
@@ -42,7 +43,13 @@ const makeStubInstance = (
     },
     displayName: undefined,
     enabled: true,
-    snapshot: {} as ProviderInstance["snapshot"],
+    snapshot: {
+      getSnapshot: Effect.succeed({
+        enabled: true,
+        installed: true,
+        auth: { status: auth },
+      }),
+    } as unknown as ProviderInstance["snapshot"],
     orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
     textGeneration,
   }) satisfies ProviderInstance;
@@ -132,6 +139,37 @@ describe("TextGeneration.make", () => {
 
       expect(result.branch).toBe("personal-branch");
       expect(personalCalls).toEqual(["Refactor the routing layer"]);
+    }),
+  );
+
+  it.effect("goes to a signed-in provider when the named one is signed out", () =>
+    Effect.gen(function* () {
+      const codexId = ProviderInstanceId.make("codex");
+      const claudeId = ProviderInstanceId.make("claudeAgent");
+      const codex = makeStubInstance(codexId, makeStubTextGeneration({}), "unauthenticated");
+      let model = "";
+      const claude = makeStubInstance(
+        claudeId,
+        makeStubTextGeneration({
+          generateThreadTitle: (input) => {
+            model = input.modelSelection.model;
+            return Effect.succeed({ title: "Neon drone arena" });
+          },
+        }),
+      );
+      const tg = yield* TextGeneration.make.pipe(
+        Effect.provideService(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          makeStubRegistry([codex, claude]),
+        ),
+      );
+      const result = yield* tg.generateThreadTitle({
+        cwd: process.cwd(),
+        message: "A small arena game",
+        modelSelection: createModelSelection(codexId, "gpt-5"),
+      });
+      expect(result.title).toBe("Neon drone arena");
+      expect(model).not.toBe("gpt-5");
     }),
   );
 

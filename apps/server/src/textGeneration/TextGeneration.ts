@@ -1,9 +1,16 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ProviderInstanceId } from "@kurambit/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  isProviderAvailable,
+  isProviderTextGenerationCapable,
+  type ModelSelection,
+  TextGenerationError,
+} from "@kurambit/contracts";
 import type { ProviderTextGeneration } from "@kurambit/provider-core/server/textGeneration";
-import { TextGenerationError } from "@kurambit/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "@kurambit/provider-core/server/driver";
@@ -36,55 +43,89 @@ type TextGenerationOp =
   | "generateReviewGuide"
   | "generateImageReview";
 
-const resolveInstance = (
-  registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
+type Registry = ProviderInstanceRegistry.ProviderInstanceRegistry["Service"];
+
+/** An instance that can answer now: on, installed, reachable and not signed out. */
+const canAnswer = (instance: ProviderInstance) =>
+  instance.enabled
+    ? instance.snapshot.getSnapshot.pipe(
+        Effect.map(
+          (snapshot) =>
+            snapshot.enabled &&
+            snapshot.installed &&
+            snapshot.auth.status !== "unauthenticated" &&
+            isProviderAvailable(snapshot) &&
+            isProviderTextGenerationCapable(snapshot),
+        ),
+      )
+    : Effect.succeed(false);
+
+/**
+ * The instance a request goes to: the one it names while that one can answer, else the first
+ * that can, on its own default model. The setting defaults to one provider whether or not the
+ * person ever signed into it, and a signed-out provider fails every title and game name.
+ */
+const route = <I extends { readonly modelSelection: ModelSelection }>(
+  registry: Registry,
   operation: TextGenerationOp,
-  instanceId: ProviderInstanceId,
-): Effect.Effect<ProviderInstance["textGeneration"], TextGenerationError> =>
-  registry.getInstance(instanceId).pipe(
-    Effect.flatMap((instance) =>
-      instance
-        ? Effect.succeed(instance.textGeneration)
-        : Effect.fail(
-            new TextGenerationError({
-              operation,
-              detail: `No provider instance registered for id '${instanceId}'.`,
-            }),
-          ),
-    ),
-  );
+  input: I,
+): Effect.Effect<
+  { readonly textGeneration: ProviderInstance["textGeneration"]; readonly input: I },
+  TextGenerationError
+> =>
+  Effect.gen(function* () {
+    const named = yield* registry.getInstance(input.modelSelection.instanceId);
+    if (named !== undefined && (yield* canAnswer(named)))
+      return { textGeneration: named.textGeneration, input };
+    for (const instance of yield* registry.listInstances) {
+      if (instance === named || !(yield* canAnswer(instance))) continue;
+      const model =
+        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[instance.driverKind] ??
+        DEFAULT_MODEL_BY_PROVIDER[instance.driverKind] ??
+        DEFAULT_TEXT_GENERATION_MODEL;
+      return {
+        textGeneration: instance.textGeneration,
+        input: { ...input, modelSelection: { instanceId: instance.instanceId, model } },
+      };
+    }
+    if (named !== undefined) return { textGeneration: named.textGeneration, input };
+    return yield* new TextGenerationError({
+      operation,
+      detail: `No provider instance registered for id '${input.modelSelection.instanceId}'.`,
+    });
+  });
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   return TextGeneration.of({
     generateCommitMessage: (input) =>
-      resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
+      route(registry, "generateCommitMessage", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generateCommitMessage(routed.input)),
       ),
     generatePrContent: (input) =>
-      resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generatePrContent(input)),
+      route(registry, "generatePrContent", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generatePrContent(routed.input)),
       ),
     generateBranchName: (input) =>
-      resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
+      route(registry, "generateBranchName", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generateBranchName(routed.input)),
       ),
     generateGameName: (input) =>
-      resolveInstance(registry, "generateGameName", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateGameName(input)),
+      route(registry, "generateGameName", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generateGameName(routed.input)),
       ),
     generateReviewGuide: (input) =>
-      resolveInstance(registry, "generateReviewGuide", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateReviewGuide(input)),
+      route(registry, "generateReviewGuide", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generateReviewGuide(routed.input)),
       ),
     generateThreadTitle: (input) =>
-      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      route(registry, "generateThreadTitle", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generateThreadTitle(routed.input)),
       ),
     generateImageReview: (input) =>
-      resolveInstance(registry, "generateImageReview", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateImageReview(input)),
+      route(registry, "generateImageReview", input).pipe(
+        Effect.flatMap((routed) => routed.textGeneration.generateImageReview(routed.input)),
       ),
   });
 });
