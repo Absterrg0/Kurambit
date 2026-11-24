@@ -351,7 +351,8 @@ export class GameFacts extends Context.Service<
      * reason waiting clears, an older harness, a changed play bot; a
      * person's also what a standing fault kept) and returns at once, or after
      * `waitFor` if it finishes sooner. Measures go by who asked: a person's,
-     * then a chat turn's (`supersede`), then the rest; a running one that a
+     * then a chat turn's (`supersede`), then the rest, and past its boot check
+     * a measure no person asked for goes with the rest; a running one that a
      * more urgent one outranks gives way at once and goes on after it. A
      * person's measure waits behind at most three others of theirs; past that
      * it starts nothing and says so. With `supersede` (a chat turn's newest
@@ -785,6 +786,7 @@ const make = Effect.gen(function* () {
     found: Found | null,
     written: Set<FactName>,
     booted: Deferred.Deferred<void>,
+    afterBoots: Effect.Effect<void>,
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -945,6 +947,9 @@ const make = Effect.gen(function* () {
           });
         }
         yield* Deferred.succeed(booted, undefined);
+        // A judge or a turn waits on a boot check, never on this build's random-input play:
+        // theirs goes first, and this goes on after them (a person who asked keeps their rank).
+        yield* afterBoots;
 
         // Each bot run says how busy the machine was, so a run slowed by other
         // work is never read as the game's slowness; it waits a while for an
@@ -1194,7 +1199,14 @@ const make = Effect.gen(function* () {
             GAME_FACTS_EVENT,
             `Measuring build ${build.build.slice(0, 8)}.`,
           );
-          yield* measureJob(build, tiers, found, job.written, job.booted);
+          yield* measureJob(
+            build,
+            tiers,
+            found,
+            job.written,
+            job.booted,
+            Effect.suspend(() => playLane.lower(job.ticket, job.person ? "person" : "background")),
+          );
         }).pipe(
           Effect.onInterrupt(() =>
             Effect.suspend(() => {

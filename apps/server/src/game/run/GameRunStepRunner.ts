@@ -61,8 +61,12 @@ import * as GameRunTurnReactor from "./GameRunTurnReactor.ts";
 import { toolReason, toolWait } from "./handBack.ts";
 import { retrying } from "./retrying.ts";
 
-/** How long a judge waits for a build's boot check before the step ends unmeasured. */
-const FACTS_WAIT = "5 minutes";
+/**
+ * How long a judge waits for a build's boot check before the step ends unmeasured. Only a
+ * measurement that never ends should reach it: on a software renderer a heavy game's boot check
+ * takes minutes, and it can start only once the build before it has booted.
+ */
+const FACTS_WAIT = "15 minutes";
 /** How many of the chat's latest replies the look reads for the newest `Next:` line. */
 const NEXT_LOOKBACK = 20;
 const Critique = Schema.Struct({ major: Schema.Boolean, biggest: Schema.String });

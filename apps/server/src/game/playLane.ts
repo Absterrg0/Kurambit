@@ -48,6 +48,9 @@ export const makePlayLane = () => {
   /** Someone more urgent asked for the same work: it goes at their priority from now on. */
   const raise = (asker: LaneTicket, priority: PlayPriority) =>
     Effect.tx(TxRef.update(asker.rank, (rank) => Math.min(rank, rankOf(priority))));
+  /** What is left of the work matters less: a holder that a waiter now outranks gives way. */
+  const lower = (asker: LaneTicket, priority: PlayPriority) =>
+    Effect.tx(TxRef.update(asker.rank, (rank) => Math.max(rank, rankOf(priority))));
 
   /** The waiter that goes next, read inside a transaction so a change of rank retries it. */
   const first = (waiting: ReadonlyArray<LaneTicket>) =>
@@ -146,7 +149,7 @@ export const makePlayLane = () => {
           (each.rank.value === asker.rank.value && each.seq < asker.seq)),
     ).length;
 
-  return { ticket, raise, hold, ahead };
+  return { ticket, raise, lower, hold, ahead };
 };
 
 /** The server's one lane. */
