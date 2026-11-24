@@ -32,7 +32,7 @@ const makeStubTextGeneration = (
 const makeStubInstance = (
   instanceId: ProviderInstanceId,
   textGeneration: TextGeneration.TextGeneration["Service"],
-  auth: "authenticated" | "unauthenticated" = "authenticated",
+  auth: "authenticated" | "unauthenticated" | "unknown" = "authenticated",
 ): ProviderInstance =>
   ({
     instanceId,
@@ -170,6 +170,39 @@ describe("TextGeneration.make", () => {
       });
       expect(result.title).toBe("Neon drone arena");
       expect(model).not.toBe("gpt-5");
+    }),
+  );
+
+  it.effect("prefers a signed-in provider over one that reports no sign-in at all", () =>
+    Effect.gen(function* () {
+      const codex = makeStubInstance(
+        ProviderInstanceId.make("codex"),
+        makeStubTextGeneration({}),
+        "unauthenticated",
+      );
+      const opencode = makeStubInstance(
+        ProviderInstanceId.make("opencode"),
+        makeStubTextGeneration({}),
+        "unknown",
+      );
+      const claude = makeStubInstance(
+        ProviderInstanceId.make("claudeAgent"),
+        makeStubTextGeneration({
+          generateGameName: () => Effect.succeed({ name: "Neon Drone" }),
+        }),
+      );
+      const tg = yield* TextGeneration.make.pipe(
+        Effect.provideService(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          makeStubRegistry([codex, opencode, claude]),
+        ),
+      );
+      const result = yield* tg.generateGameName({
+        cwd: process.cwd(),
+        brief: "A small arena game",
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+      });
+      expect(result.name).toBe("Neon Drone");
     }),
   );
 
