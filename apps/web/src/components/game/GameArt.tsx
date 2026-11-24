@@ -392,9 +392,11 @@ function ArtList({
           body="Models, textures and sounds appear here."
           action={firstModel}
         />
-      ) : nothing && search !== "" ? (
+      ) : nothing && !loading ? (
         <Text variant="body" tone="muted" render={<p className="px-4 py-3" />}>
-          Nothing matches “{search}”.
+          {search !== ""
+            ? `Nothing matches “${search}”.`
+            : `No ${(FILTERS.find((each) => each.value === filter)?.label ?? "art").toLowerCase()} in this build yet.`}
         </Text>
       ) : (
         <div className="flex flex-col gap-4 pt-1 pb-4">
