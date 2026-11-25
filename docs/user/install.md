@@ -2,7 +2,7 @@
 
 Kurambit runs coding agents on your computer and lets you make games with them from its desktop
 app or the same interface in a browser. Linux x86_64 is the supported platform today; the games
-it makes export to Windows, Linux and the web.
+it makes export to the web.
 
 ## Requirements
 
@@ -30,7 +30,9 @@ vp run dev:desktop
 `vp run dev` serves the same interface in your browser instead of opening the desktop app.
 
 Packaged desktop builds will appear on
-[GitHub Releases](https://github.com/Absterrg0/Kurambit/releases) as they are published.
+[GitHub Releases](https://github.com/Absterrg0/Kurambit/releases) as they are published. The Linux
+AppImage needs FUSE 2 to start: on Ubuntu 24.04 and later run `sudo apt install libfuse2t64`
+(`libfuse2` on older releases) if it stops with "No suitable fusermount binary found".
 
 ### The `kurambit` command
 
