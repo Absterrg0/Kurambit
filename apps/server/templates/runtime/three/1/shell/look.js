@@ -843,6 +843,20 @@ export async function createLook(canvas, options = {}) {
       setTimeout(check, 10);
     });
   };
+  // A browser with WebGL off (a blocked driver, no GPU) would leave a player a black page: the
+  // game says what it needs instead. On the Stage the app shows its own card.
+  const probe = document.createElement("canvas");
+  if (probe.getContext("webgl2") === null) {
+    if (window.parent === window) {
+      const note = document.createElement("p");
+      note.textContent =
+        "This game needs WebGL 2, which this browser has turned off. Try another browser, or turn on hardware acceleration in this one's settings.";
+      note.style.cssText =
+        "position:fixed;inset:0;margin:auto;height:fit-content;max-width:28rem;padding:1.5rem;font:16px/1.5 system-ui,sans-serif;color:#eee;text-align:center;";
+      document.body.append(note);
+    }
+    throw new Error("WebGL 2 is not available in this browser");
+  }
   const renderer = new THREE.WebGLRenderer({
     canvas,
     // MSAA only without the chain: under it the frame is a float target and SMAA does the edges.
