@@ -120,8 +120,13 @@ function GameTitleMark({
   return (
     <span
       aria-hidden="true"
-      className="absolute inset-0 grid place-items-center p-3 text-center"
-      style={{ background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})` }}
+      className="absolute inset-0 grid place-items-center rounded-[inherit] p-3 text-center"
+      style={{
+        background: `radial-gradient(120% 95% at 18% 8%, ${pigment}, ${ink})`,
+        // A hairline in a lifted tone of the pigment, so two plates side by side read as two
+        // games even where their deep inks sit close together.
+        boxShadow: `inset 0 0 0 1px color-mix(in oklch, oklch(from ${pigment} 0.75 calc(c * 1.6) h) 32%, transparent)`,
+      }}
     >
       {mark !== "name" || name === "" ? null : (
         <span className="line-clamp-2 font-display text-sm/tight text-balance text-white/85 @[7rem]:text-xl/tight @3xs:text-2xl/tight @sm:text-3xl/tight">
