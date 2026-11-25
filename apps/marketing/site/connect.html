@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ede6d7" />
+    <meta name="color-scheme" content="light" />
+    <meta name="robots" content="noindex" />
+    <title>Connect · Kurambit</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="favicon.ico?v=2" sizes="any" />
+    <script src="connect.js" defer></script>
+  </head>
+  <body>
+    <div class="page">
+      <main class="prose">
+        <h1>Connect Kurambit</h1>
+        <p data-connect-status>Sign in with GitHub so your Kurambit app can publish games.</p>
+        <div data-connect-signin></div>
+        <!-- The key goes back to the app on this computer by a form post, never in a URL. -->
+        <form data-connect-form method="post" hidden>
+          <input type="hidden" name="state" />
+          <input type="hidden" name="key" />
+          <input type="hidden" name="login" />
+        </form>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+# Published games at <slug>.kurambit.com (worker.ts). Deploy: `npx wrangler deploy` from this folder,
+# then `npx wrangler secret put PUBLISH_SECRET` with the value the Vercel publish functions use.
+name = "kurambit-play"
+main = "worker.ts"
+compatibility_date = "2026-11-01"
+workers_dev = false
+routes = [{ pattern = "*.kurambit.com/*", zone_name = "kurambit.com" }]
+
+[[r2_buckets]]
+binding = "GAMES"
+bucket_name = "kurambit-games"

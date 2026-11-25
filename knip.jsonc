@@ -56,8 +56,14 @@
     },
     "apps/marketing": {
       // Static pages load these by <script> tag; Vercel runs each site/api file
-      // that is not prefixed with an underscore as a function.
-      "entry": ["site/*.js", "site/hill-temple/*.js", "site/api/[!_]*.ts", "brand/src/*.js"],
+      // that is not prefixed with an underscore as a function; wrangler deploys play/worker.ts.
+      "entry": [
+        "site/*.js",
+        "site/hill-temple/*.js",
+        "site/api/[!_]*.ts",
+        "brand/src/*.js",
+        "play/worker.ts",
+      ],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.

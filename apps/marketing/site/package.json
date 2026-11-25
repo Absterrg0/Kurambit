@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@clerk/backend": "3.33.0",
     "@neondatabase/serverless": "1.2.0",
     "@vercel/functions": "3.10.1"
   },
