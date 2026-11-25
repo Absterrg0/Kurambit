@@ -2548,6 +2548,14 @@ const make = Effect.gen(function* () {
         };
       }
       const owner = String(threadId);
+      // Named as the Builds list names it: the message is what the person and the agent read.
+      const named =
+        label ??
+        (yield* recordOf(g, build.build).pipe(
+          Effect.map((record) => (record?.number == null ? null : `Build ${record.number}`)),
+          Effect.orElseSucceed(() => null),
+        )) ??
+        `Build ${build.build.slice(0, 8)}`;
       // Checked first, under the game's lock, so a folder that moved on keeps
       // the game's restore record (and its Redo) as it was. The move checks
       // again against its park, which a repeat after a restart reads too.
@@ -2566,7 +2574,7 @@ const make = Effect.gen(function* () {
           return {
             requestId,
             done: true,
-            message: `The folder already holds Build ${build.build.slice(0, 8)}; nothing was restored.`,
+            message: `The folder already holds ${named}; nothing was restored.`,
             moved: "current" as const,
           };
         if (movedOn !== false)
@@ -2585,7 +2593,7 @@ const make = Effect.gen(function* () {
           : {
               requestId,
               target: build.build,
-              label: label ?? `Build ${build.build.slice(0, 8)}`,
+              label: named,
               requestedAt: DateTime.formatIso(yield* DateTime.now),
               before: null,
               ...(expect === undefined ? {} : { expect }),
@@ -2744,17 +2752,40 @@ const make = Effect.gen(function* () {
       .deleteCheckpointRefs({ cwd: root, checkpointRefs: [requestRef(request)] })
       .pipe(Effect.ignore);
 
+  /** `captured`, or the build the folder holds when the capture is that build in every restored path. */
+  const heldBuildOr = (g: Game, captured: GameBuildId) =>
+    Effect.gen(function* () {
+      const current = yield* folderCurrent(g).pipe(Effect.orElseSucceed(() => null));
+      if (current === null || !isGameBuildId(current) || current === captured) return captured;
+      const change = yield* measureChange(
+        checkpoints,
+        g.root,
+        isRestored(g.lane),
+        current,
+        captured,
+      );
+      return change.changed ? captured : current;
+    });
+
   const land: GameBuilds["Service"]["land"] = (threadId, input) =>
     Effect.gen(function* () {
       const g = yield* gameOf(threadId, true);
       const io = (detail: string) => (cause: unknown) =>
         failed("Land build", g.root, "io", detail, cause);
       const kind = input.kind === "in" ? "bring-in" : "undo";
-      const known = (yield* byRequest(g, input.request))?.id ?? null;
+      const earlier = yield* byRequest(g, input.request);
+      const known = earlier?.id ?? null;
+      // The folder the move read, by the build it still holds when nothing in the game changed
+      // since (a decisions line is no change), as Keep values does: Undo then goes back to a
+      // build the Stage can name, not to a capture no list holds. A repeat keeps its first read.
+      const from =
+        earlier?.base != null && isGameBuildId(earlier.base)
+          ? earlier.base
+          : yield* heldBuildOr(g, input.from);
       const made =
         known ??
         (yield* checkpoints
-          .commitTree({ cwd: g.root, tree: input.tree, parent: input.from, message: input.label })
+          .commitTree({ cwd: g.root, tree: input.tree, parent: from, message: input.label })
           .pipe(Effect.mapError(io("the build could not be made"))));
       if (!isGameBuildId(made)) return yield* failed("Land build", g.root, "io", "not a build");
       yield* pin(g.root, made).pipe(Effect.mapError(io("the build could not be kept")));
@@ -2764,7 +2795,7 @@ const make = Effect.gen(function* () {
       // Recorded in the restore's own commit: a death leaves both or neither.
       const landing = toRecord(
         g,
-        yield* savedEntry(g, made, input.from, input.label, kind, input.label),
+        yield* savedEntry(g, made, from, input.label, kind, input.label),
         kind,
         { undid: input.undid, request: input.request },
       );
@@ -2773,9 +2804,9 @@ const make = Effect.gen(function* () {
         g,
         resolved,
         `land\0${input.request}`,
-        input.from,
+        from,
         input.label,
-        input.from,
+        from,
         landing,
       );
       if (result.moved === "moved-on") {
