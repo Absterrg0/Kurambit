@@ -2444,6 +2444,15 @@ code {
 
 /* Chat markdown rendering */
 
+/* A person's message is a compact fill: headings in what they pasted read as bold lines of
+   the message, not as a document's titles. */
+[data-user-message-body] .chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  line-height: inherit;
+  font-weight: 600;
+  margin-block: 0.75em 0.25em;
+}
+
 .chat-markdown > :first-child {
   margin-top: 0;
 }

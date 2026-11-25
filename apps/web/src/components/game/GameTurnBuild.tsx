@@ -39,7 +39,8 @@ export function GameTurnBuild({
   const stat = summarizeTurnDiffStats(files);
   const filesButton =
     files.length === 0 ? null : (
-      <Button size="xs" variant="ghost" onClick={onOpenDiff}>
+      // A raised chip, as the files a turn touched read in any agent's log: count and +/-.
+      <Button size="xs" variant="outline" onClick={onOpenDiff}>
         <FileDiffIcon aria-hidden="true" />
         {files.length === 1 ? "1 file" : `${files.length} files`}
         {hasNonZeroStat(stat) ? (
@@ -60,7 +61,6 @@ export function GameTurnBuild({
   if (view === null)
     return (
       <div data-game-turn-build="" className="mt-1.5 flex items-center gap-x-1.5">
-        <span className="flex-1" />
         {filesButton}
       </div>
     );

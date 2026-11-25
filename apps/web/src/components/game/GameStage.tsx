@@ -1,4 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
+import { gamePigment } from "./gameLibrary.logic";
+import { GameStatusChip } from "./GameStatusChip";
+import { ProjectMonogram } from "../ProjectMonogram";
+import { deriveProjectIdentity } from "../../projectIdentity";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { showWorkbench, toggleWorkbench, useWorkbenchShown } from "./gameWorkbenchPanel";
@@ -1471,6 +1475,13 @@ function ThreadGameStage({
                   />
                 }
               >
+                {/* The game's own tile, the same pigment its sidebar row and Home card carry. */}
+                <ProjectMonogram
+                  text={deriveProjectIdentity(gameName).monogram}
+                  color={deriveProjectIdentity(gameName).color}
+                  pigment={gamePigment(gameName)[0]}
+                  className="size-4"
+                />
                 <Text variant="label" tone="strong" truncate>
                   {gameName}
                 </Text>
@@ -1606,6 +1617,10 @@ function ThreadGameStage({
               </PopoverPopup>
             </Popover>
           </span>
+          <GameStatusChip
+            threadRef={threadRef}
+            working={phase.kind === "building" || phase.kind === "first-build"}
+          />
           <GameCopyLabel threadRef={threadRef} />
           <span data-topbar-spacer="" className="min-w-2 flex-1" />
           <GameCopyActions threadRef={threadRef} />
