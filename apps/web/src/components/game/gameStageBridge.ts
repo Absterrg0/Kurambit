@@ -16,7 +16,7 @@ import {
   type StudioReplayed,
 } from "@kurambit/contracts";
 
-import { watchLog } from "./gameStageWatch";
+import { clearStageConsole, watchLog } from "./gameStageWatch";
 
 const LOOK_ID_PREFIX = gameLookId("");
 
@@ -163,6 +163,9 @@ const settleCapture = (png: string | null) => {
   for (const resolve of waiters) resolve(png);
 };
 
+/** The page each thread's console holds lines of, by its bridge owner. */
+const consoleOwners = new Map<string, string>();
+
 /**
  * Wires one game frame to the bridge while it is mounted and shown, and returns what to do
  * with each message the frame posts (GameFrame owns the one listener). `enabled` is false for
@@ -185,6 +188,14 @@ export function useStageBridgeFrame(
       useStageBridge.setState({ frozen: on });
     };
     useStageBridge.setState({ ...EMPTY, owner, post, hold });
+    // Another page on the Stage is a new console, as a browser's is on a reload: what an earlier
+    // page logged (the template before the game existed, an older build) is not this one's. The
+    // same page shown again keeps its lines.
+    const threadKey = owner.slice(0, owner.indexOf("\0"));
+    if (consoleOwners.get(threadKey) !== owner) {
+      consoleOwners.set(threadKey, owner);
+      clearStageConsole(threadKey);
+    }
     if (hello.current !== null) receive(owner, frame, hello.current);
     return () => {
       settleCapture(null);
