@@ -157,6 +157,7 @@ describe("orchestration V2 wire projection", () => {
       turnItems: [],
       visibleTurnItems: [],
       plans: [],
+      checkpoints: [],
       updatedAt: now,
     } as unknown as OrchestrationV2ThreadProjection;
 
