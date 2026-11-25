@@ -17,7 +17,6 @@ import {
   normalizeModelSlug,
 } from "@kurambit/shared/model";
 import { Fragment, memo, type ReactNode } from "react";
-import { BrainIcon } from "lucide-react";
 import {
   Menu,
   MenuCheckboxItem,
@@ -40,7 +39,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ComposerControl,
   ComposerControlChevron,
-  ComposerControlIcon,
   type ComposerControlSize,
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
@@ -795,13 +793,8 @@ export const TraitsPicker = memo(function TraitsPicker({
         descriptor.type === "select" && REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
     );
   const triggerName = namesThinking ? `Thinking: ${triggerLabel}` : triggerLabel;
-  const triggerText = namesThinking ? (
-    <>
-      <span className="text-muted-foreground">Thinking:</span> {triggerLabel}
-    </>
-  ) : (
-    triggerLabel
-  );
+  // As T3's model chip: the level follows the model in the muted tier, with no icon of its own.
+  const triggerText = <span className="text-muted-foreground">{triggerLabel}</span>;
 
   return (
     <Menu
@@ -838,7 +831,6 @@ export const TraitsPicker = memo(function TraitsPicker({
                 size === "xs" ? "gap-1" : "gap-1.5",
               )}
             >
-              <ComposerControlIcon icon={BrainIcon} size={size} />
               <span data-composer-control-label className="min-w-0 truncate">
                 {triggerText}
               </span>
@@ -846,7 +838,6 @@ export const TraitsPicker = memo(function TraitsPicker({
             </span>
           ) : (
             <>
-              <ComposerControlIcon icon={BrainIcon} size={size} />
               <span data-composer-control-label>{triggerText}</span>
               <ComposerControlChevron size={size} />
             </>

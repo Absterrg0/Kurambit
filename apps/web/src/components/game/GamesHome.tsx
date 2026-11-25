@@ -21,9 +21,8 @@ import {
   CopyIcon,
   EllipsisIcon,
   FolderOpenIcon,
-  ImagePlusIcon,
   PencilIcon,
-  PlayIcon,
+  PlusIcon,
   SlidersHorizontalIcon,
   SquarePenIcon,
   Trash2Icon,
@@ -91,7 +90,7 @@ const BRIEF_IDEAS = [
 ] as const;
 
 // Home is where every game is: the sidebar lists chats, and a game whose chats are all settled
-// has no row there. The latest two rows show; the rest are one press away.
+// has no row there. The latest few show; the rest are one press away.
 const SHELF_CARDS = 8;
 
 export function GamesHome() {
@@ -122,10 +121,10 @@ export function GamesHome() {
         <div className="relative min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div
             className={cn(
-              "mx-auto flex w-full max-w-6xl flex-col px-8",
-              // The brief sits high under the atmosphere and the games are the page below it.
-              // Alone, the brief is centred a little above the middle.
-              firstRun ? "min-h-full justify-center pb-32" : "gap-10 pt-14 pb-24",
+              // As T3's new-thread page: the composer at the reading width, a little above the
+              // middle under the atmosphere; your games are a quiet list under it.
+              "mx-auto flex w-full max-w-(--chat-content-max-width) flex-col px-6",
+              firstRun ? "min-h-full justify-center pb-32" : "gap-12 pt-72 pb-24",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -142,7 +141,7 @@ export function GamesHome() {
             ) : null}
 
             {covers.length > 0 && environmentId ? (
-              <ContinueShelf covers={every} environmentId={environmentId} onOpen={openGame} />
+              <ContinueShelf covers={every} onOpen={openGame} />
             ) : isLoading ? (
               // The shelf's room is kept while the games load, so the brief does not jump up.
               <ShelfPlaceholder />
@@ -328,11 +327,21 @@ function BriefBox({
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-2xl flex-col gap-3">
-      {/* The one serif headline in the app, the brief under it. */}
-      <h1 className="mb-1 w-full text-center font-display text-hero text-strong-foreground">
-        {firstRun ? "Make a game you want to play" : "What should we make next?"}
-      </h1>
+    <section className="mx-auto flex w-full flex-col gap-2">
+      <h1 className="sr-only">{firstRun ? "Make a game you want to play" : "Make a new game"}</h1>
+      {/* The context row over the box, as T3's: what the brief will make, and the way to open
+          a game that already exists. */}
+      <div className="flex h-7 min-w-0 items-center gap-1 px-1 text-muted-foreground">
+        <Text
+          variant="label"
+          tone="inherit"
+          render={<span className="flex items-center gap-1.5" />}
+        >
+          <SquarePenIcon className="size-3.5" aria-hidden />
+          New {GAME_ENGINES[engine].name} game
+        </Text>
+        {canOpen ? <OpenGameLink className="ms-auto" /> : null}
+      </div>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -351,11 +360,11 @@ function BriefBox({
           onChange={(event) => setBrief(event.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          rows={2}
+          rows={3}
           disabled={busy}
-          placeholder="Describe the game you want to play…"
+          placeholder="Describe the game you want to play, or paste a picture to aim for"
           // Grows with what is typed up to a cap, then scrolls, as ui/textarea does.
-          className="field-sizing-content max-h-64 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-base/6 text-foreground outline-none placeholder:text-placeholder"
+          className="field-sizing-content max-h-64 min-h-18 w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-base/6 text-foreground outline-none placeholder:text-placeholder"
         />
         {picture === null ? null : (
           <div className="px-4 pt-1">
@@ -396,7 +405,7 @@ function BriefBox({
               render={
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="ghost-muted"
                   size="icon-sm"
                   disabled={busy}
                   onClick={() => pictureInputRef.current?.click()}
@@ -404,10 +413,17 @@ function BriefBox({
                 />
               }
             >
-              <ImagePlusIcon />
+              <PlusIcon />
             </TooltipTrigger>
             <TooltipPopup side="top">Attach a picture to aim for</TooltipPopup>
           </Tooltip>
+          <BriefOptions
+            characters={characters}
+            onCharacters={setCharacters}
+            library={library}
+            onLibrary={setLibrary}
+            disabled={busy}
+          />
           {/* One engine is no choice, so no picker shows. */}
           {GameEngineId.literals.length > 1 ? (
             <ToggleGroup
@@ -459,13 +475,6 @@ function BriefBox({
               }
             />
           )}
-          <BriefOptions
-            characters={characters}
-            onCharacters={setCharacters}
-            library={library}
-            onLibrary={setLibrary}
-            disabled={busy}
-          />
           <span className="flex-1" />
           <Tooltip>
             <TooltipTrigger
@@ -531,7 +540,6 @@ function BriefBox({
               </Text>
             </button>
           ))}
-          {canOpen ? <OpenGameLink className="ms-auto" /> : null}
         </div>
       ) : null}
     </section>
@@ -630,20 +638,18 @@ function OpenGameLink({ className }: { className?: string }) {
   );
 }
 
-/** The shelf's shape while the games load: its heading row and three quiet cards. */
+/** The list's shape while the games load: its filter row and a few quiet rows. */
 function ShelfPlaceholder() {
   return (
-    <section aria-hidden className="@container flex flex-col gap-4">
-      <Text variant="label" tone="muted" render={<h2 />}>
-        Continue
-      </Text>
-      <div className="grid grid-cols-2 gap-x-5 gap-y-6 @xl:grid-cols-3">
-        {Array.from({ length: SHELF_CARDS }, (_, index) => (
-          <div key={index} className="flex flex-col gap-2.5">
-            <Skeleton shape="card" className="aspect-video w-full" />
-            <div className="flex flex-col gap-1.5 py-0.5">
-              <Skeleton className="h-3.5 w-1/2" />
-              <Skeleton className="h-3 w-1/3" />
+    <section aria-hidden className="flex flex-col gap-2">
+      <Skeleton className="mx-1 my-2.5 h-3 w-24" />
+      <div className="flex flex-col">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="flex items-center gap-3 px-1 py-1.5">
+            <Skeleton shape="card" className="aspect-video w-16" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-3 w-24" />
             </div>
           </div>
         ))}
@@ -664,14 +670,11 @@ const isWorking = (cover: GameCover) =>
  */
 function ContinueShelf({
   covers,
-  environmentId,
   onOpen,
 }: {
   covers: ReadonlyArray<GameCover>;
-  environmentId: EnvironmentId;
   onOpen: (cover: GameCover) => void;
 }) {
-  const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
   const [all, setAll] = useState(false);
   const [filter, setFilter] = useState<ShelfFilter>("all");
   const active = covers.filter((cover) => !cover.archived);
@@ -692,11 +695,11 @@ function ContinueShelf({
   const list = groups[shownFilter];
   const shown = all ? list : list.slice(0, SHELF_CARDS);
   return (
-    <section aria-labelledby="games" className="@container flex flex-col gap-4">
+    <section aria-labelledby="games" className="flex flex-col gap-2">
       <h2 id="games" className="sr-only">
         Your games
       </h2>
-      <div className="flex h-8 items-center justify-between gap-4 border-b border-border">
+      <div className="flex h-8 items-center gap-4 px-1">
         <Tabs value={shownFilter} onValueChange={(value: ShelfFilter) => setFilter(value)}>
           <TabsList variant="underline" aria-label="Show games" className="h-8">
             {(["all", "working", "published", "archived"] as const).map((key) =>
@@ -711,9 +714,8 @@ function ContinueShelf({
             )}
           </TabsList>
         </Tabs>
-        {canOpen ? <OpenGameLink /> : null}
       </div>
-      <ul role="list" className="grid grid-cols-2 gap-x-5 gap-y-7 @3xl:grid-cols-3">
+      <ul role="list" className="-mx-1 flex flex-col">
         {shown.map((cover) => (
           <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
         ))}
@@ -765,48 +767,73 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
       ? ""
       : scopedThreadKey(scopeThreadRef(cover.opens.environmentId, cover.opens.id)),
   );
-  // A game at work with no picture to show says so in the frame, and only there.
+  // A game at work with no picture to show says so in its line, not in the thumbnail.
   const making = picture === null && shown === null && status.tone === "live";
-  const frame = (
-    // The name is said once, under the cover, so every card reads the same way.
+  const thumb = (
     <GamePicture
       environmentId={game.environmentId}
       root={game.root}
       path={picture}
       gameName={name}
       mark="monogram"
-      className="aspect-video w-full rounded-xl ring-1 ring-foreground/8 ring-inset transition-[translate,box-shadow] group-hover:-translate-y-0.5 group-hover:shadow-md group-hover:ring-foreground/20 group-focus-visible:ring-2 group-focus-visible:ring-ring"
+      className="aspect-video w-16 shrink-0 rounded-md ring-1 ring-foreground/8 ring-inset"
     >
-      {/* Without a picture yet: the Stage's last frame, else what is being made, said where
-          its picture will be, else the game's pigment and initials, plainly a placeholder. */}
-      {picture !== null ? null : shown !== null ? (
+      {picture === null && shown !== null ? (
         <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
-      ) : making ? (
-        <span className="absolute inset-0 flex items-center justify-center px-3">
-          <GameLibraryStatusText status={status} />
-        </span>
       ) : null}
-      {/* Where it stands, on the frame as a store's card shows it: at work, broken, published. */}
+    </GamePicture>
+  );
+  // A row in T3's list craft: the thumbnail, the name over one muted line, where it stands and
+  // when it last moved at the right; its menu takes the time's place under the pointer.
+  const meta =
+    status.tone === "live" ? (
+      <GameLibraryStatusText status={status} />
+    ) : (
+      <GameLibraryStatusText
+        status={{
+          text:
+            game.buildCount === 0
+              ? "No builds yet"
+              : `${game.buildCount} ${game.buildCount === 1 ? "build" : "builds"}`,
+          tone: status.tone === "failed" || status.tone === "broken" ? status.tone : "idle",
+          since: null,
+          at: game.latestBuildAt ?? cover.opens?.updatedAt ?? game.updatedAt,
+        }}
+      />
+    );
+  const body = (
+    <>
+      {thumb}
+      <span className="flex min-w-0 flex-1 flex-col">
+        {renaming ? (
+          <GameNameInput
+            name={name}
+            onRename={(next) => void rename(game.projectId, next)}
+            onDone={() => useGameRenameStore.getState().stop()}
+            className="h-6"
+          />
+        ) : (
+          <Text variant="label" truncate>
+            {name}
+          </Text>
+        )}
+        <span className="flex min-w-0 items-center gap-1.5">
+          {meta}
+          {making ? null : <CoverSummary build={build} status={status.text} />}
+        </span>
+      </span>
       {chip === null ? null : (
-        <span className="absolute start-2 bottom-2 flex items-center gap-1.5 rounded-md bg-black/65 px-2 py-1 text-white">
+        <span className="flex shrink-0 items-center gap-1.5 pe-8 text-muted-foreground">
           <StatusDot tone={chip.tone} />
-          <Text variant="caption" tone="inherit">
+          <Text variant="meta" tone="inherit">
             {chip.label}
           </Text>
         </span>
       )}
-      {/* What a click does, under the pointer: the whole card is the button. */}
-      <span
-        aria-hidden="true"
-        className="absolute end-2 bottom-2 flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-      >
-        <PlayIcon className="size-3 fill-current" />
-        <Text variant="caption" tone="inherit">
-          Open
-        </Text>
-      </span>
-    </GamePicture>
+    </>
   );
+  const rowClass =
+    "group flex w-full min-w-0 items-center gap-3 rounded-lg px-1 py-1.5 text-left outline-none";
   return (
     <li
       className="group/card relative min-w-0"
@@ -816,50 +843,25 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
       }}
     >
       {renaming ? (
-        // The name becomes its own field, so the card is no button while it is typed in.
-        <div ref={rowRef} className="group flex w-full min-w-0 flex-col gap-2.5">
-          {frame}
-          <GameNameInput
-            name={name}
-            onRename={(next) => void rename(game.projectId, next)}
-            onDone={() => useGameRenameStore.getState().stop()}
-          />
+        // The name becomes its own field, so the row is no button while it is typed in.
+        <div ref={rowRef} className={rowClass}>
+          {body}
         </div>
       ) : (
         <button
           ref={rowRef}
           type="button"
           onClick={onOpen}
-          className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 text-left outline-none"
+          className={cn(
+            rowClass,
+            "cursor-pointer hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+          )}
         >
-          {frame}
-          <span className="flex min-w-0 flex-col gap-1">
-            <Text variant="label" tone="strong" truncate>
-              {name}
-            </Text>
-            {/* At work, what is being made; otherwise how many builds and when the last one
-                landed (or when the game last moved, before its first). */}
-            {making ? null : status.tone === "live" ? (
-              <GameLibraryStatusText status={status} />
-            ) : (
-              <GameLibraryStatusText
-                status={{
-                  text:
-                    game.buildCount === 0
-                      ? "No builds yet"
-                      : `${game.buildCount} ${game.buildCount === 1 ? "build" : "builds"}`,
-                  tone: status.tone === "failed" || status.tone === "broken" ? status.tone : "idle",
-                  since: null,
-                  at: game.latestBuildAt ?? cover.opens?.updatedAt ?? game.updatedAt,
-                }}
-              />
-            )}
-            <CoverSummary build={build} status={status.text} />
-          </span>
+          {body}
         </button>
       )}
-      {/* The game's own actions, on its picture: shown to a pointer, the keyboard, and while open. */}
-      <span className="absolute end-1.5 top-1.5 opacity-0 transition-opacity group-hover/card:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
+      {/* The game's own actions: shown to a pointer, the keyboard, and while open. */}
+      <span className="absolute end-1.5 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/card:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-popup-open]]:opacity-100 pointer-coarse:opacity-100">
         <Menu open={menuOpen} onOpenChange={setMenuOpen}>
           <MenuTrigger
             render={<Button size="icon-xs" variant="overlay" aria-label={`${name}, game menu`} />}

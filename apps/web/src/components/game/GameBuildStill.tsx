@@ -130,7 +130,7 @@ function GameTitleMark({
     >
       {mark === "monogram" && name !== "" ? (
         // A game that never showed a frame: its pigment and initials, plainly a placeholder.
-        <span className="text-title tracking-widest text-white/55">
+        <span className="text-caption tracking-widest text-white/55 @[8rem]:text-title">
           {deriveProjectIdentity(name).monogram}
         </span>
       ) : null}
