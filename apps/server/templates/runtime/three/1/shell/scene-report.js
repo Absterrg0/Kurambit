@@ -273,6 +273,19 @@ export function createSceneReport({ canvas, gl, renderer, view, player, bridge, 
     return into;
   };
 
+  // A body's own matter, for where it stands, sinks and falls: its glow sprites and additive
+  // halos are light, not body (a lantern's glow under a roof is not a moth buried in it). A body
+  // with no solid part at all (a sprite character) keeps its whole drawn extent.
+  const bodyBoundsOf = (object, into) => {
+    into.makeEmpty();
+    target = into;
+    object.traverseVisible((node) => {
+      if (node.isSprite || !node.isMesh) return;
+      if (node.isSkinnedMesh ? solidMaterials(node.material) : isSolid(node)) expand(node);
+    });
+    return into.isEmpty() ? boundsOf(object, into) : into;
+  };
+
   // ── What counts as solid ──────────────────────────────────────────────
   const solidMaterial = (material) =>
     material != null &&
@@ -280,15 +293,12 @@ export function createSceneReport({ canvas, gl, renderer, view, player, bridge, 
     material.side !== THREE.BackSide &&
     material.depthWrite !== false &&
     !(material.transparent === true && material.opacity < 0.5);
-  const isSolid = (mesh) => {
-    if (!mesh.isMesh || mesh.isSkinnedMesh) return false;
-    const material = mesh.material;
-    if (Array.isArray(material)) {
-      for (let i = 0; i < material.length; i += 1) if (solidMaterial(material[i])) return true;
-      return false;
-    }
-    return solidMaterial(material);
+  const solidMaterials = (material) => {
+    if (!Array.isArray(material)) return solidMaterial(material);
+    for (let i = 0; i < material.length; i += 1) if (solidMaterial(material[i])) return true;
+    return false;
   };
+  const isSolid = (mesh) => mesh.isMesh && !mesh.isSkinnedMesh && solidMaterials(mesh.material);
   // Every visible solid mesh outside bodies, effects and ui; the level's own (not a registered
   // prop's or body's) bounds the world, so a thing that falls never drags the world down with it.
   const collect = (node, outside, level) => {
@@ -704,7 +714,7 @@ export function createSceneReport({ canvas, gl, renderer, view, player, bridge, 
         held(trackerOf(body.id, "fell", body.name), span, null, Infinity, null);
         continue;
       }
-      boundsOf(body.object, body.box);
+      bodyBoundsOf(body.object, body.box);
       if (body.box.isEmpty()) continue;
       const b = body.box;
       const feet = b.min.y;
