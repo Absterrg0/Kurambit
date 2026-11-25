@@ -259,30 +259,21 @@ check that matters.
   files, replays and model sheets. A per-engine table outside a driver is a
   `Record<GameEngineId, …>` (`GAME_ENGINES` in contracts, the profiles, the capabilities), so a new
   engine does not compile without its entries. Adding one is: its `GameEngineId` literal and
-  `GAME_ENGINES` entry, its profile and driver, its template (`templates/<id>/` plus a
-  `GAME_TEMPLATES` entry) and studio skill, and, if it needs a program of its own, a
-  `GameToolName` and its detection in `GameToolchain`. The Stage kinds (`live`, `export`,
+  `GAME_ENGINES` entry, its profile and driver, its template (`templates/<id>/`, a
+  `GameTemplateId` literal and a `GAME_TEMPLATES` entry) and studio skill, and, if it needs a
+  program of its own, a `GameToolName` and its detection in `GameToolchain`. The Stage kinds (`live`, `export`,
   `window`) and the play-session protocol below are already engine-neutral. The three.js look's
   default draws straight to the canvas, as a plain three.js frame does, so a first build costs
   what it always did; its post chain (AO, bloom, SMAA) runs only for the presets and options that
   ask for it, and a browser drawing in software always takes the straight path, where full-screen
   passes cost several times over. The game is known by its manifest's engine id (and its project
-  folder by `manifestProject`), never by the folder's name; a run records the engine it started
-  with (`runEngine` derives it from the lane for older records).
-- Stored records name engines this version does not have: earlier versions made Godot and Unity
-  games, and their `game.json`, facts rows, run records and events say so. Every schema that
-  decodes stored data reads `GameEngineName` (every engine ever named); `GameEngineId` is only the
-  engines this version runs, and `isAvailableEngine` narrows one to the other. Such a game still
-  opens with its chats, builds and history; engine work on it is refused `engine-parked`
-  (`unavailableEngine` in `engineProfile.ts`, worded "not available in this version"), its tool is
-  not looked for, and its agent gets no engine tools. The reason keeps its old literal because
-  stored errors and clients already decode it.
+  folder by the manifest's `project`), never by the folder's name; a run records the engine it
+  started with.
   The game tools an agent is listed follow from the same data. There are six, each one schema
   whose keys are its ops ([gameTools.ts](../../packages/contracts/src/gameTools.ts)); the op is the
   key rather than a tagged union because providers refuse a tool input that is not one object at
   the top. [placement.ts](../../apps/server/src/mcp/toolkits/game/placement.ts) says what each op
-  needs of the engine (`engineCapabilities`, derived from the profile, empty for an engine this
-  version does not have).
+  needs of the engine (`engineCapabilities`, derived from the profile).
   A tool is listed from a game thread's first turn whenever the game runs any of its ops: its
   engine, and for `game_blender` the person's model choice (the routes that make models in
   Blender: blender and code with the library on), so a code chat never reads Blender's
@@ -699,13 +690,11 @@ answers a missing `main.js` with an empty module so the page boots) and draws it
 and look, entering its title through `GameState.title()` in `start`. A game made on the older demo
 shell is told apart by markup, since its `game.json` looks like any other: its page carries all of
 that shell's `section.screen` elements. The runtime refuses such a page before it runs anything,
-and the server reads the same markup (`carriesOldShell`) so the game opens like one in a parked
-engine: status carries the message, Play and Keep going refuse. The template's
+and the server reads the same markup (`carriesOldShell`) so the game opens and plays nothing:
+status carries the message (`unsupported`), Play and Keep going refuse. The template's
 `gameplayScene` is `index.html?play` (boots straight into a run, past any title) and the three.js
-check loads that entry after the plain page. The manifest's `project` (or `godotProject`, its
-legacy name in older games) names the engine project directory (`web` for
-three.js; `godot` or `unity` in older games), so snapshots,
-exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
+check loads that entry after the plain page. The manifest's `project` names the engine project
+directory (`web` for three.js), so snapshots, exports and the run resolve it unchanged. A run takes the lane (the engine directory) from the
 manifest, and every engine question the run has is the lane's engine profile.
 
 ### The three.js runtime
