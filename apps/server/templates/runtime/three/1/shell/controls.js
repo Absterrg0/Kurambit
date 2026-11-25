@@ -38,7 +38,8 @@ export const DEFAULT_ACTIONS = {
   // For a camera the game orbits. The right button: the left is the game's action, and a
   // trackpad has no middle one. `pointer`: it acts through the pointer's movement while held.
   look: { keys: [], mouse: [2], pad: ["rstick"], label: "Look around", pointer: true },
-  // The shell's own; it stays bound so a player can always reach the game's pause.
+  // The shell's own; it stays bound so a player can always reach pause. Its keys pause and resume
+  // play by themselves until the game reads the action (shell.js).
   pause: { keys: ["Escape", "KeyP"], pad: ["start"], fixed: true },
 };
 

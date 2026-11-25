@@ -646,6 +646,18 @@ function loadSettings() {
 }
 
 window.addEventListener("keydown", (event) => {
+  // The pause keys pause play and bring it back, for a game that never reads its "pause" action:
+  // a game that does (an inventory's Esc) decides itself. The step stops while paused, so the
+  // world holds without the game doing anything.
+  if (
+    run !== null &&
+    !event.repeat &&
+    !run.input.reads.has("pause") &&
+    controls.actions.get("pause")?.keys.includes(event.code) === true
+  ) {
+    if (GameState.state === "playing") return pause();
+    if (GameState.state === "paused") return resume();
+  }
   if (!live() || run === null) return;
   for (const name of keyNames(event)) {
     if (!event.repeat) run.pressed.add(name);

@@ -12,7 +12,8 @@
 //                        // ignored under ?play, on a retry and in every harness play
 //   GameState.play();    // a fresh run in play: from the title, and as Retry
 //   GameState.menu();    // a fresh run on the title
-//   GameState.pause();   // play holds (state "paused") until GameState.resume()
+//   GameState.pause();   // play holds (state "paused") until GameState.resume(); Esc and P do
+//                        // both by themselves unless the game reads ctx.input's "pause"
 
 export const GameState = {
   /** "title", "playing", "paused" or "ended". The shell sets it; games read it (and the page's
