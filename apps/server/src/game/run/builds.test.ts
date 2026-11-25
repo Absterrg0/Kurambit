@@ -38,8 +38,8 @@ const repo = () => {
       encoding: "utf8",
     }).trim();
   git("init", "-q", "-b", "main");
-  NodeFS.mkdirSync(NodePath.join(root, "godot"));
-  NodeFS.writeFileSync(NodePath.join(root, "godot", "main.gd"), "extends Node\n");
+  NodeFS.mkdirSync(NodePath.join(root, "web"));
+  NodeFS.writeFileSync(NodePath.join(root, "web", "main.js"), "export {};\n");
   git("add", "-A");
   git("commit", "-qm", "game");
   return { root, git };
@@ -64,7 +64,7 @@ it.effect("keeps a restore's builds under names git can store, again and again",
     const before = yield* capture(BuildName.restoreBefore("8c1f-uuid:1"));
     const keep = buildStep(
       { stage, checkpoints, lock },
-      { root, runId, lane: "godot" },
+      { root, runId, lane: "web" },
       { _tag: "keep", names: [BuildName.restoreAfter("8c1f-uuid:1")], sha: before },
     );
     // A keep beside the restore's other build, and its repeat.

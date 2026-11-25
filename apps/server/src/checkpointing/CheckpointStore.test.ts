@@ -576,11 +576,11 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
         const at = (file: string) => NodePath.join(tmp, file);
         const game = at("game");
         yield* initRepoWithCommit(tmp);
-        // The repository's own top-level godot/ beside the game's.
-        yield* fileSystem.makeDirectory(at("godot"), { recursive: true });
-        yield* fileSystem.makeDirectory(at("game/godot"), { recursive: true });
-        yield* writeTextFile(at("godot/outer.gd"), "outer v1\n");
-        yield* writeTextFile(at("game/godot/main.gd"), "main v1\n");
+        // The repository's own top-level web/ beside the game's.
+        yield* fileSystem.makeDirectory(at("web"), { recursive: true });
+        yield* fileSystem.makeDirectory(at("game/web"), { recursive: true });
+        yield* writeTextFile(at("web/outer.js"), "outer v1\n");
+        yield* writeTextFile(at("game/web/main.js"), "main v1\n");
         yield* writeTextFile(at("game/NOTES.md"), "notes\n");
         yield* git(tmp, ["add", "."]);
         yield* git(tmp, ["commit", "-m", "repo with a game"]);
@@ -588,10 +588,10 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           cwd: game,
           checkpointRef: checkpointRefForGameRun("run_sub", "best"),
         });
-        yield* writeTextFile(at("game/godot/main.gd"), "main v2\n");
-        yield* writeTextFile(at("game/godot/new.gd"), "new\n");
-        yield* writeTextFile(at("godot/outer.gd"), "outer v2\n");
-        yield* writeTextFile(at("godot/outer-new.gd"), "outer new\n");
+        yield* writeTextFile(at("game/web/main.js"), "main v2\n");
+        yield* writeTextFile(at("game/web/new.js"), "new\n");
+        yield* writeTextFile(at("web/outer.js"), "outer v2\n");
+        yield* writeTextFile(at("web/outer-new.js"), "outer new\n");
         const later = yield* checkpointStore.captureCheckpoint({
           cwd: game,
           checkpointRef: checkpointRefForGameRun("run_sub", "later"),
@@ -610,18 +610,18 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           parseTurnDiffFilesFromNumstat(numstat)
             .map((file) => file.path)
             .toSorted(),
-        ).toEqual(["godot/main.gd", "godot/new.gd"]);
+        ).toEqual(["web/main.js", "web/new.js"]);
 
-        // A restore of "godot" is the game's godot/, never the repository's.
+        // A restore of "web" is the game's web/, never the repository's.
         yield* checkpointStore.restoreCheckpoint({
           cwd: game,
           checkpointRef: CheckpointRef.make(oid),
-          filePaths: ["godot"],
+          filePaths: ["web"],
         });
-        expect(yield* fileSystem.readFileString(at("game/godot/main.gd"))).toBe("main v1\n");
-        expect(yield* fileSystem.exists(at("game/godot/new.gd"))).toBe(false);
-        expect(yield* fileSystem.readFileString(at("godot/outer.gd"))).toBe("outer v2\n");
-        expect(yield* fileSystem.readFileString(at("godot/outer-new.gd"))).toBe("outer new\n");
+        expect(yield* fileSystem.readFileString(at("game/web/main.js"))).toBe("main v1\n");
+        expect(yield* fileSystem.exists(at("game/web/new.js"))).toBe(false);
+        expect(yield* fileSystem.readFileString(at("web/outer.js"))).toBe("outer v2\n");
+        expect(yield* fileSystem.readFileString(at("web/outer-new.js"))).toBe("outer new\n");
 
         // A copy holds the game's own files at their paths below it, nothing else.
         const copy = yield* makeTmpDir("checkpoint-sub-copy-");
@@ -631,7 +631,7 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           destination: copy,
           excludePaths: ["NOTES.md"],
         });
-        expect(yield* fileSystem.readFileString(NodePath.join(copy, "godot/main.gd"))).toBe(
+        expect(yield* fileSystem.readFileString(NodePath.join(copy, "web/main.js"))).toBe(
           "main v1\n",
         );
         expect(yield* fileSystem.exists(NodePath.join(copy, "game"))).toBe(false);
@@ -670,7 +670,7 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           yield* writeTextFile(at("NOTES.md"), "notes v2\n");
           // Someone's own repository inside the game, which no build holds.
           yield* fileSystem.makeDirectory(at("game/addon"), { recursive: true });
-          yield* writeTextFile(at("game/addon/plugin.gd"), "addon\n");
+          yield* writeTextFile(at("game/addon/plugin.js"), "addon\n");
           yield* git(at("game/addon"), ["init"]);
           yield* writeTextFile(at("README.md"), "# staged by the user\n");
           yield* git(tmp, ["add", "README.md"]);
@@ -693,7 +693,7 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
           expect(yield* fileSystem.readFileString(at("game/scenes/level.txt"))).toBe("level 1\n");
           expect(yield* fileSystem.exists(at("game/new.txt"))).toBe(false);
           expect(yield* fileSystem.readFileString(at("game/.cache/import.bin"))).toBe("cache\n");
-          expect(yield* fileSystem.readFileString(at("game/addon/plugin.gd"))).toBe("addon\n");
+          expect(yield* fileSystem.readFileString(at("game/addon/plugin.js"))).toBe("addon\n");
           expect(yield* fileSystem.exists(at("game/addon/.git"))).toBe(true);
           const kept = yield* fileSystem.stat(at("game/kept.txt"));
           expect(Option.getOrThrow(kept.mtime).getTime()).toBe(old * 1000);

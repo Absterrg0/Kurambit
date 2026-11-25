@@ -1695,7 +1695,7 @@ describe("storage cleanup reports and local file policies", () => {
         const oldLog = (root: string) =>
           NodePath.join(
             root,
-            "builds/logs/1700000000000-godot-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log",
+            "builds/logs/1700000000000-web-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log",
           );
         for (const root of [repo, other]) {
           yield* fs.writeFileString(NodePath.join(root, "game.json"), "{}");
@@ -1732,16 +1732,16 @@ describe("storage cleanup reports and local file policies", () => {
         yield* fs.makeDirectory(logs, { recursive: true });
         const old = NodePath.join(
           logs,
-          "1700000000000-godot-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log",
+          "1700000000000-web-export-0b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log",
         );
         const fresh = NodePath.join(
           logs,
-          `${yield* Clock.currentTimeMillis}-godot-export-1b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log`,
+          `${yield* Clock.currentTimeMillis}-web-export-1b8f1d6e-2a4c-4c1e-9d5e-3f2a1b0c9d8e.log`,
         );
         yield* fs.writeFileString(old, "old");
         yield* fs.utimes(old, 1, 1);
         yield* fs.writeFileString(fresh, "fresh");
-        for (const dir of ["game-bot-run1", "unity-play-0123456789abcdef", "blender-live"]) {
+        for (const dir of ["game-bot-run1", "web-play-0123456789abcdef", "blender-live"]) {
           yield* fs.makeDirectory(NodePath.join(logs, dir));
           yield* fs.writeFileString(NodePath.join(logs, `${dir}/frame.png`), "png");
           yield* fs.utimes(NodePath.join(logs, `${dir}/frame.png`), 1, 1);
@@ -1767,7 +1767,7 @@ describe("storage cleanup reports and local file policies", () => {
             "blender-live",
             "game-bot-run2",
             "notes.txt",
-            "unity-play-0123456789abcdef",
+            "web-play-0123456789abcdef",
           ].toSorted(),
         );
         expect(yield* fs.exists(NodePath.join(outside, "game-bot-run2"))).toBe(true);

@@ -64,10 +64,10 @@ const SETTLE_SCRIPT_GRACE_MS = 60_000;
 const ORPHAN_WORKTREE_GRACE_MS = 60 * 60 * 1_000;
 
 // A game's builds/logs holds tool logs of up to 16 MB each and bot runs with
-// frames and video. Only these entries are Kurambit's own logs (godot-* are
-// what earlier versions wrote); the live editors' homes there belong to their services.
+// frames and video. Only these entries are Kurambit's own logs; the live editors' homes there
+// belong to their services.
 const GAME_LOG_ENTRY =
-  /^(?:\d+-[\w.-]+-[0-9a-f-]{36}\.log|(?:game-bot|game-explore|godot-import|godot-check|three-check)-[\w.-]+)$/;
+  /^(?:\d+-[\w.-]+-[0-9a-f-]{36}\.log|(?:game-bot|game-explore|three-check)-[\w.-]+)$/;
 /**
  * What a crash or a cut-short release leaves in a game's build folders: a
  * release's staging folder, a Web build's staging, a partial package, a

@@ -4,8 +4,8 @@ import * as NodePath from "node:path";
 
 /**
  * Everything a child process needs to reach a display server. The raw lane
- * proved why they all go: its agent ran `godot --write-movie` with the
- * operator's `DISPLAY=:0` and opened windows on the screen the user was using.
+ * proved why they all go: its agent ran a game engine with the operator's
+ * `DISPLAY=:0` and opened windows on the screen the user was using.
  */
 export const DISPLAY_VARIABLES = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY"] as const;
 
@@ -32,8 +32,7 @@ export function sandboxDisplayEnvironment(
 /**
  * Creates the private runtime directory under the run folder. The XDG spec
  * wants 0700, and an empty directory is the point: no `wayland-0` socket means
- * no compositor to open a window on. Headless Chrome and `godot --headless`
- * do not need one.
+ * no compositor to open a window on. Headless Chrome does not need one.
  */
 export async function prepareDisplaySandbox(runDirectory: string): Promise<DisplaySandbox> {
   const runtimeDirectory = NodePath.join(runDirectory, "display-sandbox");

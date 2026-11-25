@@ -48,7 +48,6 @@ node_modules/
 
 # Emberward export and import cache
 /builds/
-/godot/.godot/
 __pycache__/
 *.pyc
 .wrangler/

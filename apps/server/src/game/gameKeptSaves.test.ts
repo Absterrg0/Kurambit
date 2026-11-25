@@ -12,9 +12,9 @@ it("keeps one stable save location per engine inside the game's .studio/saves", 
   try {
     const root = NodePath.join(base, "game");
     await NodeFSP.mkdir(root);
-    const first = await keptSavesDir(root, "godot");
-    expect(first).toBe(NodePath.join(root, ".studio/saves/godot"));
-    expect(await keptSavesDir(root, "godot")).toBe(first);
+    const first = await keptSavesDir(root, "three");
+    expect(first).toBe(NodePath.join(root, ".studio/saves/three"));
+    expect(await keptSavesDir(root, "three")).toBe(first);
     await expect(keptSavesDir(root, "../home")).rejects.toThrow();
   } finally {
     await NodeFSP.rm(base, { recursive: true, force: true });
@@ -29,11 +29,11 @@ it("refuses a linked .studio or saves folder that points outside the game, creat
     const linkedStudio = NodePath.join(base, "a");
     await NodeFSP.mkdir(linkedStudio);
     await NodeFSP.symlink(outside, NodePath.join(linkedStudio, ".studio"));
-    await expect(keptSavesDir(linkedStudio, "godot")).rejects.toThrow(/outside the game/);
+    await expect(keptSavesDir(linkedStudio, "three")).rejects.toThrow(/outside the game/);
     const linkedSaves = NodePath.join(base, "b");
     await NodeFSP.mkdir(NodePath.join(linkedSaves, ".studio"), { recursive: true });
     await NodeFSP.symlink(outside, NodePath.join(linkedSaves, ".studio/saves"));
-    await expect(keptSavesDir(linkedSaves, "unity")).rejects.toThrow(/outside the game/);
+    await expect(keptSavesDir(linkedSaves, "three")).rejects.toThrow(/outside the game/);
     expect(await NodeFSP.readdir(outside)).toEqual([]);
   } finally {
     await NodeFSP.rm(base, { recursive: true, force: true });
