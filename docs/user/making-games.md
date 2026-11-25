@@ -29,8 +29,8 @@ something, press **Check again**.
 
 Kurambit looks for Blender in this order: the path you enter in **Game tools**, the
 `KURAMBIT_BLENDER` environment variable, a copy an earlier Kurambit installed, then your PATH
-(`blender`). A path you enter is the only
-place it looks, so a wrong one shows as an error instead of being skipped.
+(`blender`). The path can be Blender itself or the folder it unpacked to. A path you enter is the
+only place it looks, so a wrong one shows as an error instead of being skipped.
 
 The asset library also uses ffmpeg to draw
 contact sheets of a pack's pictures, and without it lists the pack's files with no picture.

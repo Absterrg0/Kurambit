@@ -170,7 +170,8 @@ export interface ToolCandidate {
 /**
  * Detection order, as for providers: the Settings path, the env override,
  * a copy in Kurambit's tools folder (newest first), then PATH. An explicit path is the
- * only candidate, so a wrong override is reported instead of skipped.
+ * only place looked at, so a wrong override is reported instead of skipped: the file itself,
+ * or the tool inside it when it is the folder a download unpacked to (or a macOS app).
  */
 const toolCandidates = (
   tool: BinaryTool,
@@ -180,9 +181,19 @@ const toolCandidates = (
   searchPath: string,
   platform: Platform = "linux",
 ): ReadonlyArray<ToolCandidate> => {
-  if (explicit.trim()) return [{ path: NodePath.resolve(explicit.trim()), source: "settings" }];
-  if (environment?.trim()) return [{ path: NodePath.resolve(environment.trim()), source: "env" }];
   const names = [platform === "win32" ? `${tool}.exe` : tool];
+  const at = (given: string, source: GameToolSource): ReadonlyArray<ToolCandidate> => {
+    const path = NodePath.resolve(given.trim());
+    return [
+      path,
+      ...names.map((name) => NodePath.join(path, name)),
+      ...(platform === "darwin" && tool === "blender"
+        ? [NodePath.join(path, "Contents/MacOS/Blender")]
+        : []),
+    ].map((each) => ({ path: each, source }));
+  };
+  if (explicit.trim()) return at(explicit, "settings");
+  if (environment?.trim()) return at(environment, "env");
   return [
     ...kurambitInstalls(tool, platform).map((path): ToolCandidate => ({
       path: NodePath.join(directory, path),
@@ -344,7 +355,7 @@ const make = Effect.gen(function* () {
             path: explicit.path,
             source: explicit.source,
             version: "unknown",
-            detail: `${explicit.path} is not an executable file.`,
+            detail: `${explicit.path} is not ${NAMES[tool]}, or a folder with it inside.`,
           }
         : { kind: "missing" };
     });
