@@ -1594,9 +1594,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   animation-duration: 0s !important;
 }
 
-/* Kurambit Studio: warm ink in dark, warm paper in light, never cool grey or
-   pure white. Surfaces are told apart by level (window, sidebar, workspace,
-   raised, floating), not by outlines. Vermilion is the one accent: the primary
+/* Kurambit Studio: T3 Code's near-black in dark (a black window, the workspace a
+   faintly warm step above it), warm paper in light. Surfaces are told apart by
+   level (window, sidebar, workspace, raised, floating) and hairlines. Vermilion is the one accent: the primary
    action, focus, what is live, switches and checked controls. Errors and
    destructive actions take their own crimson. The palette is mirrored in
    KURAMBIT_*_THEME_COLORS (packages/shared/src/themePalettes.ts) and the boot
