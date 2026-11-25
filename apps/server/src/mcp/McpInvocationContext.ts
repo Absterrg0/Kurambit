@@ -45,11 +45,6 @@ export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   /** The engine of the calling thread's game; null when the thread works in no game. */
   readonly gameEngine?: GameEngineName | null;
-  /**
-   * The tool a `tools/call` request names, read from its body before the MCP server does; a
-   * retired game tool is callable only by it, so it answers with where its work went.
-   */
-  readonly calledTool?: string;
   /** How the calling thread's game makes its models and whether its library is on; null outside a game. */
   readonly gameModels?: {
     readonly route: GameCharacterRoute;

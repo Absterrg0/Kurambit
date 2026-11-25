@@ -83,9 +83,6 @@ const buildPathsInGame = (root: string) =>
 /** One release a game has, as the status and the Export… dialog show it. */
 export type GameRelease = GameStatus["builds"][number];
 
-/** The game's release folder for a native target. */
-const releaseDirectory = (target: GameExportTarget) => `builds/${target.toLowerCase()}`;
-
 /** Staging names a crash may leave behind, by folder; each is swept before the next export. */
 const STAGING = /^\.release-|^\.staging-|\.partial$/;
 const io = (operation: string, path: string) => (cause: unknown) =>
@@ -312,8 +309,6 @@ const make = Effect.gen(function* () {
       for (const directory of [
         builds,
         NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY),
-        NodePath.join(root, "builds/linux"),
-        NodePath.join(root, "builds/windows"),
         NodePath.join(root, WEB_PACKAGES_DIRECTORY),
       ])
         await sweepPublished(directory, leftover);
@@ -402,53 +397,31 @@ const make = Effect.gen(function* () {
       // The preset is part of the exported sources, so it is settled before the
       // source identity is taken.
       const preset = yield* backend.exportPreset(ctx, target);
-      const presetNote = preset.added ? [`A standard ${target} export preset was added.`] : [];
-      if (target === "Web") {
-        // Web builds stage under the candidate root, never in the served tree,
-        // so a partial or failed export cannot change what Play loads.
-        const candidates = NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY);
-        yield* Effect.tryPromise({
-          try: () => NodeFSP.mkdir(candidates, { recursive: true }),
-          catch: io(operation, candidates),
-        });
-        const released = yield* releaseTo(backend, ctx, {
-          target,
-          preset: preset.name,
-          operation,
-          stagingParent: candidates,
-          identify: identify(root, ctx.projectName),
-          publish: (staging, _artifact, sourceId) =>
-            publishCandidate(root, ctx.projectName, staging, sourceId),
-        });
-        if (released.kind === "failed") return released.result;
-        if (!released.published.ok)
-          return {
-            ...released.result,
-            success: false,
-            path: null,
-            message: released.published.message,
-          };
-        return { ...released.result, path: released.published.path, message: WEB_READY_MESSAGE };
-      }
-      const destination = NodePath.join(root, releaseDirectory(target));
+      // Web builds stage under the candidate root, never in the served tree, so a partial or
+      // failed export cannot change what Play loads.
+      const candidates = NodePath.join(root, CANDIDATE_BUILDS_DIRECTORY);
+      yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdir(candidates, { recursive: true }),
+        catch: io(operation, candidates),
+      });
       const released = yield* releaseTo(backend, ctx, {
         target,
         preset: preset.name,
         operation,
-        stagingParent: NodePath.dirname(destination),
+        stagingParent: candidates,
         identify: identify(root, ctx.projectName),
-        publish: (staging, artifact) =>
-          Effect.map(publishFolder(operation, staging, destination), (published) => ({
-            path: NodePath.join(destination, artifact),
-            notes: published.notes,
-          })),
+        publish: (staging, _artifact, sourceId) =>
+          publishCandidate(root, ctx.projectName, staging, sourceId),
       });
       if (released.kind === "failed") return released.result;
-      return {
-        ...released.result,
-        path: released.published.path,
-        message: [...released.notes, ...presetNote, ...released.published.notes].join(" "),
-      };
+      if (!released.published.ok)
+        return {
+          ...released.result,
+          success: false,
+          path: null,
+          message: released.published.message,
+        };
+      return { ...released.result, path: released.published.path, message: WEB_READY_MESSAGE };
     });
     // A failure the game's own files cause is the export's result, never an
     // error about the export.
@@ -601,15 +574,9 @@ const make = Effect.gen(function* () {
       if (release?.packageable === true) return;
       return yield* new GameOperationError({
         operation,
-        path: NodePath.join(
-          root,
-          target === "Web" ? WEB_BUILD_DIRECTORY : releaseDirectory(target),
-        ),
+        path: NodePath.join(root, WEB_BUILD_DIRECTORY),
         reason: "invalid-input",
-        detail:
-          release === undefined
-            ? `${profile.displayName} games make no ${target} release, so there is nothing to package.`
-            : `A ${profile.displayName} ${target} release is the whole ${releaseDirectory(target)} folder; Kurambit does not package it. Ship that folder as it is.`,
+        detail: `${profile.displayName} games make no ${target} release, so there is nothing to package.`,
       });
     });
 

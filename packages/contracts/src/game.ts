@@ -180,7 +180,8 @@ export const OLD_SHELL_MESSAGE =
 export const gameTemplateForEngine = (engine: GameEngineId): GameTemplateId =>
   GAME_ENGINES[engine].template;
 /** The release targets an engine may export. */
-export const GameExportTarget = Schema.Literals(["Web", "Linux", "Windows"]);
+/** The releases a game can make: each engine adds its own. */
+export const GameExportTarget = Schema.Literals(["Web"]);
 export type GameExportTarget = typeof GameExportTarget.Type;
 /** Runtime majors by engine, as a manifest pins them. */
 export const GameRuntimes = Schema.Struct({
@@ -809,13 +810,7 @@ export const GameModelSheetResult = Schema.Struct({
   note: Schema.optionalKey(Schema.String),
 });
 export type GameModelSheetResult = typeof GameModelSheetResult.Type;
-export const GameAction = Schema.Literals([
-  "preview",
-  "rebuild",
-  "stop",
-  "export-linux",
-  "export-windows",
-]);
+export const GameAction = Schema.Literals(["preview", "rebuild", "stop"]);
 export type GameAction = typeof GameAction.Type;
 export const GameActionInput = Schema.Struct({ threadId: ThreadId, action: GameAction });
 export const GameActionResult = Schema.Struct({

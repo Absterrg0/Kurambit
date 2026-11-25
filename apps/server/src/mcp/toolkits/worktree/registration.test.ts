@@ -242,31 +242,11 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       const noGame = (yield* listTools(noGameThread)).map((tool) => tool.name);
       expect(noGame.filter((name) => name.startsWith("game_"))).toEqual([]);
 
-      // A retired game tool is never listed, and a game thread that still calls it by name hears
-      // where its work went; outside a game it is not found.
-      expect(toolNames).not.toContain("game_preview");
-      const retired = yield* request(ThreadId.make("thread-scratch"), "tools/call", {
-        name: "game_preview",
-        arguments: {},
-      });
-      expect(retired).toContain("the person's Stage");
-      // An op an older chat still names answers where its work went, within a refusal's length.
-      const retiredOp = yield* request(ThreadId.make("thread-scratch"), "tools/call", {
-        name: "game_play",
-        arguments: { start: {} },
-      });
-      expect(retiredOp).toContain("game_play op act with no sessionId");
-      expect(retiredOp).toContain('"isError":true');
       // A three.js chat is published three.js's steps: no native ui or inspect.
       const play = tools.find((tool) => tool.name === "game_play");
       expect(JSON.stringify(play?.inputSchema)).not.toMatch(/"inspect"|"ui"/);
       const check = tools.find((tool) => tool.name === "game_check");
       expect(check?.annotations?.readOnlyHint).toBe(true);
-      const outside = yield* request(noGameThread, "tools/call", {
-        name: "game_preview",
-        arguments: {},
-      });
-      expect(outside).toMatch(/not found/i);
 
       const handoff = tools.find((tool) => tool.name === "kurambit_worktree_handoff");
       expect(handoff?.annotations?.readOnlyHint).toBe(false);

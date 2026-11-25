@@ -277,9 +277,7 @@ const make = Effect.gen(function* () {
         ? stop(threadId)
         : action === "preview"
           ? play(threadId)
-          : action === "rebuild"
-            ? rebuild(threadId)
-            : exporter.export(threadId, action === "export-linux" ? "Linux" : "Windows"),
+          : rebuild(threadId),
     play,
     playIn,
     preview: gamePreview,

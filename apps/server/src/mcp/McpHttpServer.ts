@@ -12,7 +12,6 @@ import {
   GamePlayToolkit,
   GameToolkit,
 } from "./toolkits/game/tools.ts";
-import { RETIRED_GAME_TOOLS, retiredOp, retiredTool } from "./toolkits/game/placement.ts";
 import * as GameHandlers from "./toolkits/game/handlers.ts";
 import { resultText } from "./toolkits/game/results.ts";
 import * as Cause from "effect/Cause";
@@ -152,19 +151,6 @@ export const normalizeMcpHttpResponse = (
     : response;
 };
 
-/**
- * A `tools/call` request's tool name. The body is read once and kept by the request, so the MCP
- * server reads the same text after this.
- */
-const decodeToolCall = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(
-    Schema.Struct({
-      method: Schema.Literal("tools/call"),
-      params: Schema.Struct({ name: Schema.String }),
-    }),
-  ),
-);
-
 // Session tokens are `<payload>.<signature>`; registry tokens are a bare base64url secret.
 const looksLikeProviderToken = (token: string) => token.length > 0 && !token.includes(".");
 
@@ -222,14 +208,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
             Effect.catch((error) => Effect.succeed(error.detail ?? error.message)),
           )
         : null;
-    const calledTool =
-      request.method === "POST"
-        ? yield* request.text.pipe(
-            Effect.flatMap(decodeToolCall),
-            Effect.map((call) => call.params.name),
-            Effect.orElseSucceed(() => undefined),
-          )
-        : undefined;
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...invocation,
@@ -237,7 +215,6 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         gameModels: manifest === null ? null : gameModelChoice(manifest),
         blenderMissing,
         gameInCopy,
-        ...(calledTool === undefined ? {} : { calledTool }),
       }),
       Effect.map(normalizeMcpHttpResponse),
     );
@@ -937,56 +914,16 @@ const registerGameImageTool = <Tools extends Record<string, Tool.Any>>(
     const built = yield* toolkit;
     yield* registerImageTool(
       tool,
-      (payload, options) => {
-        // An op an older chat still names answers where its work went, before the strict
-        // schema would refuse the unknown key without saying.
-        const retired = Object.keys((payload ?? {}) as object)
-          .map((op) => retiredOp(tool.name, op))
-          .find((refusal) => refusal !== null);
-        if (retired != null) return Effect.succeed({ encodedResult: retired, isFailure: true });
-        return built
+      (payload, options) =>
+        built
           .handle(tool.name as keyof Tools, payload as never, undefined, options)
-          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption));
-      },
+          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
       (effect) => effect.pipe(Effect.provideContext(services)),
       tool.name,
       (error) => (error instanceof Error ? error.message : `${tool.name} failed.`),
       { images, text: resultText },
     );
   });
-
-/**
- * The game tools older games and chats still name: never listed, and callable only by a game
- * thread's request that names one (the auth middleware's `calledTool`), which answers with the
- * tool and op that do its work now. Clients that kept an earlier listing reach them; the rest refuse an unlisted name
- * themselves.
- */
-const registerRetiredGameTools = Effect.gen(function* () {
-  const server = yield* McpServer.McpServer;
-  for (const name of Object.keys(RETIRED_GAME_TOOLS)) {
-    const refusal = retiredTool(name);
-    const message = `${refusal.refused} next: ${refusal.next}`;
-    yield* server.addTool({
-      tool: new McpSchema.Tool({
-        name,
-        description: message,
-        inputSchema: { type: "object", properties: {} },
-      }),
-      annotations: Context.make(McpSchema.EnabledWhen, () => {
-        const invocation = McpInvocationContext.currentInvocation();
-        return invocation?.calledTool === name && invocation.gameEngine != null;
-      }),
-      handle: () =>
-        Effect.succeed(
-          new McpSchema.CallToolResult({
-            isError: true,
-            structuredContent: refusal,
-            content: [{ type: "text", text: message }],
-          }),
-        ),
-    });
-  }
-});
 
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
   const htmlRender = yield* HtmlRender.HtmlRender;
@@ -1123,7 +1060,6 @@ const layerGameToolkit = Layer.mergeAll(
     registerGameImageTool(GameKeepGoingTool, GameToolkit, false),
     GameHandlers.layer,
   ),
-  Layer.effectDiscard(registerRetiredGameTools),
 );
 
 export const layer = Layer.mergeAll(

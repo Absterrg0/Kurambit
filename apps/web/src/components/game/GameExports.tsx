@@ -4,8 +4,6 @@ import {
   ExternalLinkIcon,
   FolderOpenIcon,
   Gamepad2Icon,
-  LaptopIcon,
-  MonitorIcon,
   ScrollTextIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -24,8 +22,7 @@ import { Button } from "../ui/button";
 import { useOpenLink } from "../../browser/useOpenLink";
 
 type BuildEntry = GameStatus["builds"][number];
-type ExportTarget = "Windows" | "Linux";
-const BUILD_TARGETS = ["Web", "Windows", "Linux"] as const;
+const BUILD_TARGETS = ["Web"] as const;
 
 const BUILD_META: Record<
   (typeof BUILD_TARGETS)[number],
@@ -36,18 +33,6 @@ const BUILD_META: Record<
     body: "Runs in this window. This is what Play serves.",
     icon: Gamepad2Icon,
     play: true,
-  },
-  Windows: {
-    title: "Windows",
-    body: "A standalone 64-bit Windows release for Windows PCs. Play still serves the Web export.",
-    icon: MonitorIcon,
-    play: false,
-  },
-  Linux: {
-    title: "Linux",
-    body: "A standalone release for Linux desktops. Play still serves the Web export.",
-    icon: LaptopIcon,
-    play: false,
   },
 };
 
@@ -70,7 +55,6 @@ export function GameExports({
   operationRunning,
   onPlay,
   onExportWeb,
-  onExport,
 }: {
   threadRef: ScopedThreadRef;
   builds: readonly BuildEntry[];
@@ -85,7 +69,6 @@ export function GameExports({
   onPlay: () => void;
   /** Writes a fresh Web export (a live game's Web release). */
   onExportWeb: () => void;
-  onExport: (target: ExportTarget) => void;
 }) {
   const check = useAtomCommand(gameEnvironment.checkSources, { reportFailure: false });
   const packageWeb = useAtomCommand(gameEnvironment.packageWeb, { reportFailure: false });
@@ -324,10 +307,7 @@ export function GameExports({
                           size="sm"
                           variant="outline"
                           disabled={!canOperate || operationRunning || packaging !== null}
-                          onClick={() => {
-                            if (target === "Web") onExportWeb();
-                            else onExport(target);
-                          }}
+                          onClick={onExportWeb}
                         >
                           <DownloadIcon className="size-3.5" aria-hidden="true" />
                           Export again
@@ -368,13 +348,10 @@ export function GameExports({
                   <Button
                     size="sm"
                     disabled={!canOperate || operationRunning || packaging !== null}
-                    onClick={() => {
-                      if (target === "Web") onExportWeb();
-                      else onExport(target);
-                    }}
+                    onClick={onExportWeb}
                   >
                     <DownloadIcon className="size-3.5" aria-hidden="true" />
-                    {target === "Web" ? "Export for web" : `Export for ${target}`}
+                    Export for web
                   </Button>
                 )}
                 {/* Only once there is an export: before one, its log has nothing to say. */}

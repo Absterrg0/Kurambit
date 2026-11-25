@@ -142,8 +142,6 @@ const BUSY_LABELS: Record<GameAction, string> = {
   preview: "Building the web preview",
   rebuild: "Rebuilding the web preview",
   stop: "Stopping",
-  "export-linux": "Exporting for Linux",
-  "export-windows": "Exporting for Windows",
 };
 
 // The build the folder holds as the header's History button names it: "Build 4".
@@ -1905,9 +1903,6 @@ function ThreadGameStage({
                 void perform("preview");
               }}
               onExportWeb={() => void perform("rebuild")}
-              onExport={(target) =>
-                void perform(target === "Windows" ? "export-windows" : "export-linux")
-              }
             />
           </DialogPanel>
         </DialogPopup>
