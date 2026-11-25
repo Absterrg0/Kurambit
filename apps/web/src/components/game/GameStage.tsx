@@ -1519,7 +1519,8 @@ function ThreadGameStage({
                   <Button
                     size="sm"
                     variant="ghost-muted"
-                    className="min-w-0 shrink"
+                    // The chat's title gives way first: "Build 12" is short and what plays.
+                    className="max-w-56 min-w-0 shrink-0"
                     aria-label={`${historyLabel ?? "Builds"}: History`}
                   />
                 }
