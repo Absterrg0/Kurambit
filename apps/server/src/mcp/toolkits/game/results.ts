@@ -200,7 +200,7 @@ const NEXT_BY_REASON: Partial<Record<GameOperationError["reason"], string>> = {
   "license-missing": "tell the person; do not retry.",
   cancelled: "call again only if the work still matters.",
   "tool-failed": "call again once; if it fails again, tell the person.",
-  "engine-parked": "tell the person this version of Kurambit does not play this engine.",
+  unsupported: "tell the person this version of Kurambit does not play this game.",
   "project-not-found": "this chat works in no game; game tools need one.",
   "source-changed": "call again: the game changed while this ran.",
 };

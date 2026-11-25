@@ -28,7 +28,6 @@ import {
   type GameModelSheetResult,
   type GameProcessResult,
   sceneLines,
-  manifestProject,
 } from "@kurambit/contracts";
 import { inGame } from "./gamePath.ts";
 import { commandDetail } from "./commandDetail.ts";
@@ -680,13 +679,13 @@ export const makeThreeBackend = (
   return {
     profile: THREE_PROFILE,
     resolveProject: (root, manifest) =>
-      Effect.map(inGame(root, manifestProject(manifest)), (projectDir) => ({
+      Effect.map(inGame(root, manifest.project), (projectDir) => ({
         binary: {
-          path: NodePath.join(manifestProject(manifest), "vendor", "three.module.js"),
+          path: NodePath.join(manifest.project, "vendor", "three.module.js"),
           version: THREE_PINNED_VERSION,
           templates: null,
         },
-        projectName: manifestProject(manifest),
+        projectName: manifest.project,
         projectDir,
       })),
     // three.js is vendored in the game or loads from Kurambit's runtime: nothing to install.

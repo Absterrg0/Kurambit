@@ -28,7 +28,6 @@ import {
   type GameCopyState,
   type GameCopyUpdateResult,
   GameOperationError,
-  manifestProject,
   type OrchestrationV2ThreadShell,
   SAVED_PLAYS_PER_BUILD,
   type ThreadId,
@@ -54,7 +53,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as GameCopyNotes from "../orchestration-v2/gameCopies/GameCopyNotes.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import { availableEngine, engineProfile } from "./engineProfile.ts";
+import { engineProfile } from "./engineProfile.ts";
 import * as GameBuilds from "./GameBuilds.ts";
 import { recordDecision } from "./GameDecisions.ts";
 import * as GameFacts from "./GameFacts.ts";
@@ -240,8 +239,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { root, projectId } = yield* projects.home(threadId);
       const manifest = yield* projects.read(root);
-      const lane = manifestProject(manifest);
-      const profile = engineProfile(yield* availableEngine(manifest.engine.name));
+      const lane = manifest.project;
+      const profile = engineProfile(manifest.engine.name);
       return {
         root,
         projectId,

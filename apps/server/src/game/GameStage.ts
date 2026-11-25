@@ -7,7 +7,6 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
   GAME_LIVE_EVENT,
-  isAvailableEngine,
   type GameAction,
   type GameActionResult,
   type GameManifest,
@@ -15,7 +14,7 @@ import {
   OLD_SHELL_MESSAGE,
   type ThreadId,
 } from "@kurambit/contracts";
-import { engineProfile, unavailableEngine, type GameEngineProfile } from "./engineProfile.ts";
+import { engineProfile, type GameEngineProfile } from "./engineProfile.ts";
 import * as GameBlender from "./GameBlender.ts";
 import * as GameBuildCopies from "./GameBuildCopies.ts";
 import * as GameExport from "./GameExport.ts";
@@ -92,11 +91,9 @@ const make = Effect.gen(function* () {
   const rebuild = (threadId: ThreadId) =>
     Effect.flatMap(projects.resolve(threadId), projects.read).pipe(
       Effect.flatMap((manifest) =>
-        !isAvailableEngine(manifest.engine.name)
-          ? Effect.fail(unavailableEngine(manifest.engine.name))
-          : engineProfile(manifest.engine.name).stage === "live"
-            ? exporter.export(threadId, "Web")
-            : projects.exclusive(threadId, "Build Web", exporter.publishWeb),
+        engineProfile(manifest.engine.name).stage === "live"
+          ? exporter.export(threadId, "Web")
+          : projects.exclusive(threadId, "Build Web", exporter.publishWeb),
       ),
     );
   const oldShell = (root: string, manifest: GameManifest) =>
@@ -106,7 +103,7 @@ const make = Effect.gen(function* () {
       new GameOperationError({
         operation: "play",
         path: root,
-        reason: "engine-parked",
+        reason: "unsupported",
         detail: OLD_SHELL_MESSAGE,
       }),
     );
@@ -138,11 +135,9 @@ const make = Effect.gen(function* () {
   const play = Effect.fn("GameStage.play")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
-    const engine = manifest.engine.name;
-    // A game in an engine this version does not have plays nothing, not even an export it made before.
-    if (!isAvailableEngine(engine)) return yield* unavailableEngine(engine);
+    // A game on the old shell plays nothing, not even an export it made before.
     if (yield* oldShell(root, manifest)) return yield* oldShellRefused(root);
-    const profile = engineProfile(engine);
+    const profile = engineProfile(manifest.engine.name);
     if (profile.stage === "live")
       return yield* playLive(
         root,
@@ -214,11 +209,7 @@ const make = Effect.gen(function* () {
   const playCurrent = Effect.fn("GameStage.playCurrent")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
-    if (
-      !isAvailableEngine(manifest.engine.name) ||
-      !engineProfile(manifest.engine.name).exportTargets.includes("Web")
-    )
-      return;
+    if (!engineProfile(manifest.engine.name).exportTargets.includes("Web")) return;
     // A turn's own check or Play may still hold the game for a moment.
     const waitUntil = (yield* Clock.currentTimeMillis) + 120_000;
     yield* currentWeb(threadId, root, manifest, { serveFresh: false, waitUntil });
@@ -226,8 +217,6 @@ const make = Effect.gen(function* () {
   const gamePreview = Effect.fn("GameStage.preview")(function* (threadId: ThreadId) {
     const root = yield* projects.resolve(threadId);
     const manifest = yield* projects.read(root);
-    if (!isAvailableEngine(manifest.engine.name))
-      return yield* unavailableEngine(manifest.engine.name);
     if (yield* oldShell(root, manifest)) return yield* oldShellRefused(root);
     const profile = engineProfile(manifest.engine.name);
     if (profile.stage === "live")

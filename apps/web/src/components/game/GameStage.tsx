@@ -35,7 +35,7 @@ import type {
   GameBuildsResult,
   ScopedThreadRef,
 } from "@kurambit/contracts";
-import { type ChatWidth, gameEngineEntry, unavailableEngineMessage } from "@kurambit/contracts";
+import { type ChatWidth, GAME_ENGINES } from "@kurambit/contracts";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 
@@ -728,7 +728,7 @@ function ThreadGameStage({
   const liveStaged =
     data != null &&
     data.unsupported === undefined &&
-    gameEngineEntry(data.manifest.engine.name)?.stage === "live";
+    GAME_ENGINES[data.manifest.engine.name].stage === "live";
   const gameName = useGameName(
     threadRef.environmentId,
     quietShell?.projectId ?? null,
@@ -1084,9 +1084,9 @@ function ThreadGameStage({
       // Read but not answered yet: the Stage's own shape, so nothing moves when it lands.
       <GameStageLoading hero={hero} />
     ) : null;
-  // Null for a game in an engine this version does not have, or one it no longer plays (made on
-  // the older demo shell): it opens and plays nothing.
-  const engine = data.unsupported === undefined ? gameEngineEntry(data.manifest.engine.name) : null;
+  // Null for a game this version no longer plays (made on the older demo shell): it opens and
+  // plays nothing.
+  const engine = data.unsupported === undefined ? GAME_ENGINES[data.manifest.engine.name] : null;
   const stageKind = engine?.stage ?? null;
   // The copy the stage was asked to play shows only while the server says it
   // plays, so a Stop from the palette, another client or an
@@ -1110,10 +1110,7 @@ function ThreadGameStage({
     data.operation !== null && turnEndedAt !== null && Date.parse(data.operation.at) >= turnEndedAt;
   const phase = deriveGameStagePhase({
     stage: stageKind,
-    parked:
-      engine === null
-        ? (data.unsupported ?? unavailableEngineMessage(data.manifest.engine.name))
-        : null,
+    unsupported: data.unsupported ?? null,
     // The game's own engine tool, as the server resolved it for this project.
     toolchainReady: data.engineTool === null || data.engineTool.status !== "error",
     // A failure becomes the stage's own only when this chat's work failed: a
@@ -1151,7 +1148,7 @@ function ThreadGameStage({
   // The turn's own build is coming: a Build & play now would race it and be refused.
   const awaitingTurnBuild = phase.kind === "first-build";
   const building = busy !== null || operationState === "running";
-  // A game in an engine this version does not have builds and plays nothing here.
+  // A game this version no longer plays builds and plays nothing here.
   const webPlay = engine !== null && data.exportTargets.includes("Web");
   const playEnabled =
     !awaitingTurnBuild && webPlay && canAct && (data.previewUrl !== null || !building);

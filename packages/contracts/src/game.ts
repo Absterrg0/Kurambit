@@ -39,22 +39,10 @@ export const GameAsset = Schema.Struct({
   inputs: Schema.optionalKey(Schema.Array(GameBlenderInputSource)),
   updatedAt: Schema.String,
 });
-/**
- * Every starter template a stored game.json may name. "blank" (Godot) and
- * "blank-unity" are templates of engines earlier versions had; they stay so
- * those games' manifests still decode. New games come from GAME_TEMPLATES.
- */
-export const GameTemplateId = Schema.Literals(["blank", "blank-three", "blank-unity"]);
+/** The starter templates a game.json may name: GAME_TEMPLATES' ids. */
+export const GameTemplateId = Schema.Literals(["blank-three"]);
 export type GameTemplateId = typeof GameTemplateId.Type;
-/**
- * Every engine a stored record may name: game.json, facts rows, run records,
- * events. Godot and Unity were engines of earlier versions; their games still
- * decode and open, read only (unavailableEngineMessage). Decode with this,
- * then narrow with isAvailableEngine before any engine work.
- */
-export const GameEngineName = Schema.Literals(["godot", "three", "unity"]);
-export type GameEngineName = typeof GameEngineName.Type;
-/** The engines this version builds and plays: GAME_ENGINES' keys. */
+/** The engines Kurambit builds and plays: GAME_ENGINES' keys. */
 export const GameEngineId = Schema.Literals(["three"]);
 export type GameEngineId = typeof GameEngineId.Type;
 /** Game-relative directory holding a three.js game's static sources. */
@@ -152,27 +140,11 @@ export const GAME_ENGINES: Readonly<
     },
   },
 };
-/** The engines earlier versions had, by name, for what their games say now. */
-const RETIRED_ENGINE_NAMES: Readonly<Record<Exclude<GameEngineName, GameEngineId>, string>> = {
-  godot: "Godot",
-  unity: "Unity",
-};
-/** Whether this version has the engine a stored record names. */
-export const isAvailableEngine = (engine: GameEngineName): engine is GameEngineId =>
-  Object.hasOwn(GAME_ENGINES, engine);
-/** The GAME_ENGINES entry for the engine a stored record names; null when this version does not have it. */
-export const gameEngineEntry = (engine: GameEngineName) =>
-  isAvailableEngine(engine) ? GAME_ENGINES[engine] : null;
-export const engineDisplayName = (engine: GameEngineName): string =>
-  isAvailableEngine(engine) ? GAME_ENGINES[engine].name : RETIRED_ENGINE_NAMES[engine];
 /** The engine a create request without one builds for. */
 export const DEFAULT_GAME_ENGINE: GameEngineId = GameEngineId.literals[0];
-/** What a game in an engine this version does not have says, and a refused create. */
-export const unavailableEngineMessage = (engine: GameEngineName): string =>
-  `${engineDisplayName(engine)} games are not available in this version of Kurambit: their chat, builds and history still open, but nothing builds or plays them.`;
 /**
  * What a three.js game made on the older demo shell says (its page carries that shell's screens):
- * this version opens it, as it opens a game in an engine it does not have, and plays nothing.
+ * this version opens it and plays nothing.
  */
 export const OLD_SHELL_MESSAGE =
   "This game was made with an older Kurambit and is not supported in this version: its chat, builds and history still open, but nothing plays it.";
@@ -200,11 +172,9 @@ export const GameManifest = Schema.Struct({
   // Where the check runs the gameplay scene from; the blank template names it.
   gameplayScene: Schema.optionalKey(Schema.String),
   probe: Schema.optionalKey(Schema.Boolean),
-  engine: Schema.Struct({ name: GameEngineName, version: Schema.String }),
-  /** The engine project's folder in the game (web/; godot/ and unity/ in older games). */
-  project: Schema.optionalKey(Schema.String),
-  /** The same folder under its legacy name, which older games carry; read only through manifestProject. */
-  godotProject: Schema.optionalKey(Schema.String),
+  engine: Schema.Struct({ name: GameEngineId, version: Schema.String }),
+  /** The engine project's folder in the game (web/ for three.js). */
+  project: Schema.String,
   assets: Schema.Array(GameAsset),
   /**
    * Authored asset targets this game's inventory checks against. Each entry
@@ -228,20 +198,13 @@ export const GameManifest = Schema.Struct({
    * patch of that major reaches the game. Absent on a game that carries its own copy.
    */
   runtime: Schema.optionalKey(GameRuntimes),
-}).check(
-  Schema.makeFilter((manifest) => (manifest.project ?? manifest.godotProject) !== undefined, {
-    description: "a game.json that names its engine project folder (project)",
-  }),
-);
+});
 export type GameManifest = typeof GameManifest.Type;
 /** The runtime major the game loads for its engine, or null when it carries its own copy. */
 export const manifestRuntime = (manifest: GameManifest): number | null => {
-  const majors: { readonly [Engine in GameEngineName]?: number } = manifest.runtime ?? {};
+  const majors: { readonly [Engine in GameEngineId]?: number } = manifest.runtime ?? {};
   return majors[manifest.engine.name] ?? null;
 };
-/** The engine project's folder in the game: the one reader of the manifest's project key. */
-export const manifestProject = (manifest: GameManifest): string =>
-  manifest.project ?? manifest.godotProject ?? "";
 /** The most files a game's sources may hold for a build: one bound for snapshots and Web builds. */
 export const GAME_SOURCE_FILE_LIMIT = 50_000;
 export const sourceLimitDetail = (project: string): string =>
@@ -280,8 +243,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
       "cancelled",
       /** A program Kurambit runs failed on its own; it says nothing about the game. */
       "tool-failed",
-      /** The game's engine is not in this version (GAME_ENGINES): nothing builds or plays it. */
-      "engine-parked",
+      /** This version plays nothing of the game (OLD_SHELL_MESSAGE): its page predates the runtime. */
+      "unsupported",
     ]),
     detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
     /** A production run's own reason, when the failure was the run's. */
@@ -333,8 +296,8 @@ export class GameOperationError extends Schema.TaggedError<GameOperationError>()
         "The operation was cancelled before it finished (a turn ended, a stop, or a newer request). Retry it if it is still wanted.",
       "tool-failed":
         "A program Kurambit runs (the browser, the engine's editor or its CLI, an MCP server, the private display, ffmpeg) failed on its own. This says nothing about the game. Retry once; if it fails the same way, tell the user what the detail says.",
-      "engine-parked":
-        "This version of Kurambit does not build, check or play games in this engine; their chat, builds and history still work. Tell the person what the detail says; do not build or run the game another way.",
+      unsupported:
+        "This version of Kurambit does not play this game; its chat, builds and history still work. Tell the person what the detail says; do not build or run the game another way.",
     };
     // A run holding the game is not cleared by Stop game, which stops only the caller's work.
     const fix =
@@ -372,7 +335,7 @@ const FAULTS: Readonly<Record<GameOperationReason, GameOperationFault>> = {
   "invalid-input": "request",
   "invalid-path": "request",
   "unknown-template": "request",
-  "engine-parked": "request",
+  unsupported: "request",
   io: "tool",
   "tool-missing": "tool",
   "wrong-version": "tool",

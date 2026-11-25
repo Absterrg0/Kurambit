@@ -3,13 +3,8 @@
 // pure policy reads it too. A new engine adds its profile here, keyed by its GameEngineId.
 // Engine behaviour (processes, editors, exports) is the backend's, in GameEngine.ts; each
 // backend carries its engine's profile.
-import * as Effect from "effect/Effect";
 import {
-  GameOperationError,
-  isAvailableEngine,
-  unavailableEngineMessage,
   type GameEngineId,
-  type GameEngineName,
   type GameExportTarget,
   type GameStageKind,
   type GameViewport,
@@ -112,33 +107,11 @@ export const PROFILES: ReadonlyArray<GameEngineProfile> = Object.values(BY_ID);
 
 export const engineProfile = (id: GameEngineId): GameEngineProfile => BY_ID[id];
 
-/** Engine work (import, check, export, play, art) never starts on a game in an engine this version does not have. */
-export const unavailableEngine = (engine: GameEngineName) =>
-  new GameOperationError({
-    operation: "resolve-engine",
-    path: engine,
-    reason: "engine-parked",
-    detail: unavailableEngineMessage(engine),
-  });
-/** A game's engine when this version has it; anything else is refused as unavailable. */
-export const availableEngine = (
-  engine: GameEngineName,
-): Effect.Effect<GameEngineId, GameOperationError> =>
-  isAvailableEngine(engine) ? Effect.succeed(engine) : Effect.fail(unavailableEngine(engine));
-
-/** The frame a game is shown in; a game in an engine this version does not have never plays, so it gets a plain 16:9. */
-export const engineViewport = (engine: GameEngineName): GameViewport =>
-  isAvailableEngine(engine) ? BY_ID[engine].viewport : { width: 1280, height: 720 };
-
 /** What an agent runs after it brought a file into the engine project. */
 export const afterAddingArt = (profile: GameEngineProfile) =>
   profile.importStep ? "Run the engine's import, then game_check." : "Run game_check.";
 
-/**
- * What a game tool can need of its game's engine. `play` is every available
- * engine's: an engine this version does not have gives none, so its games'
- * agents get only the tools that need none (status, builds, saved media).
- */
+/** What a game tool can need of its game's engine. `play` is every engine's. */
 export type GameEngineCapability = "play" | "tune" | "turnLoop" | "packageWeb" | "blender";
 const packageable = (profile: GameEngineProfile, target: GameExportTarget) =>
   profile.releases.some((release) => release.target === target && release.packageable);
@@ -153,9 +126,8 @@ const capabilitiesOf = (profile: GameEngineProfile): ReadonlySet<GameEngineCapab
 const CAPABILITIES: Readonly<Record<GameEngineId, ReadonlySet<GameEngineCapability>>> = {
   three: capabilitiesOf(THREE_PROFILE),
 };
-const NONE: ReadonlySet<GameEngineCapability> = new Set();
-export const engineCapabilities = (engine: GameEngineName): ReadonlySet<GameEngineCapability> =>
-  isAvailableEngine(engine) ? CAPABILITIES[engine] : NONE;
+export const engineCapabilities = (engine: GameEngineId): ReadonlySet<GameEngineCapability> =>
+  CAPABILITIES[engine];
 
 /** A game's folders, game-relative with forward slashes, from its engine and its project folder. */
 export const gamePaths = (engine: GameEngineId, project: string) => {

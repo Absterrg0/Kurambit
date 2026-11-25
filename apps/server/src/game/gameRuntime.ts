@@ -10,12 +10,7 @@ import * as NodePath from "node:path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
-import {
-  GameEngineId,
-  manifestProject,
-  manifestRuntime,
-  type GameManifest,
-} from "@kurambit/contracts";
+import { GameEngineId, manifestRuntime, type GameManifest } from "@kurambit/contracts";
 import type { GameTemplates } from "./GameTemplates.ts";
 import { copyTree } from "./gameFiles.ts";
 import { readWebBuild } from "./webBuild.ts";
@@ -125,7 +120,7 @@ const OLD_SHELL_SECTIONS = OLD_SHELL_SCREENS.map(screenSection);
 export const carriesOldShell = async (root: string, manifest: GameManifest): Promise<boolean> => {
   if (manifest.engine.name !== "three") return false;
   const page = await NodeFSP.readFile(
-    NodePath.join(root, manifestProject(manifest), "index.html"),
+    NodePath.join(root, manifest.project, "index.html"),
     "utf8",
   ).catch(() => null);
   return page !== null && OLD_SHELL_SECTIONS.every((section) => section.test(page));
@@ -151,7 +146,7 @@ const gameCodeSays = async (
   says: RegExp,
   unread: boolean,
 ): Promise<boolean> => {
-  const project = NodePath.join(root, manifestProject(manifest));
+  const project = NodePath.join(root, manifest.project);
   const entries = await NodeFSP.readdir(project, { recursive: true, withFileTypes: true }).catch(
     () => null,
   );

@@ -45,7 +45,6 @@ import {
   type GameStyle,
   type GameStyleView,
   GAME_STYLE_FILE,
-  manifestProject,
   manifestRuntime,
   type ThreadId,
 } from "@kurambit/contracts";
@@ -113,7 +112,7 @@ import {
   styleBudgets,
   styleHash,
 } from "./gameStyle.ts";
-import { afterAddingArt, availableEngine, engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import { gltfTriangles } from "./assetFacts.ts";
 import { glbJson } from "./gltfJson.ts";
 import { packGlb } from "./glbPack.ts";
@@ -1373,10 +1372,7 @@ const make = Effect.gen(function* () {
 
   /** Where GLBs land in the engine project, from the manifest and its engine's layout. */
   const assetDirOf = (manifest: GameManifest) =>
-    Effect.map(
-      availableEngine(manifest.engine.name),
-      (engine) => gamePaths(engine, manifestProject(manifest)).blender,
-    );
+    gamePaths(manifest.engine.name, manifest.project).blender;
 
   const saveBlend = (root: string): Effect.Effect<string, GameOperationError> =>
     Effect.gen(function* () {
@@ -1799,7 +1795,7 @@ const make = Effect.gen(function* () {
               const glb = NodePath.join(out, `candidate.${NodeCrypto.randomUUID()}.glb`);
               return yield* Effect.gen(function* () {
                 const rig = style?.rig === undefined ? null : resolveRig(style.rig);
-                const engine = yield* availableEngine((yield* projects.read(root)).engine.name);
+                const engine = (yield* projects.read(root)).engine.name;
                 const pass = yield* runPass(root, out, glb, {
                   images: engineProfile(engine).compressedModels ? "WEBP" : "AUTO",
                   objects: digest.objects,
@@ -2682,7 +2678,7 @@ const make = Effect.gen(function* () {
             // The export ships the pass of these objects as they are now, the one a review rendered
             // or a new one; a review is only for looking at it.
             const manifest = yield* projects.read(root);
-            const engineDir = manifestProject(manifest);
+            const engineDir = manifest.project;
             const realRoot = yield* realRootOf(root);
             const style = yield* readGameStyle(realRoot);
             const { key, out, candidate } = yield* passed(
@@ -2699,7 +2695,7 @@ const make = Effect.gen(function* () {
                 "invalid-input",
                 `The file would be broken in the game; fix it and export again:\n${refusalLines(candidate)}`,
               );
-            const file = input.file ?? `${yield* assetDirOf(manifest)}/${candidate.subject}.glb`;
+            const file = input.file ?? `${assetDirOf(manifest)}/${candidate.subject}.glb`;
             if (
               !file.startsWith(`${engineDir}/`) ||
               file.split("/").some((segment) => segment === ".." || segment === "") ||
@@ -2716,7 +2712,7 @@ const make = Effect.gen(function* () {
               catch: (cause) => opError("blender-export", file, "invalid-path", undefined, cause),
             });
             const absolute = NodePath.join(directory, NodePath.posix.basename(file));
-            const profile = engineProfile(yield* availableEngine(manifest.engine.name));
+            const profile = engineProfile(manifest.engine.name);
             const compress = profile.compressedModels;
             if (input.simplify !== undefined && !compress)
               return yield* opError(

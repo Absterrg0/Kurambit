@@ -18,13 +18,10 @@ import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import {
   GAME_BOT_BOUNDS,
   GameOperationError,
-  isAvailableEngine,
   type GameBotRunInput,
   type GameBotRunResult,
-  manifestProject,
 } from "@kurambit/contracts";
 import * as GameEngine from "./GameEngine.ts";
-import { unavailableEngine } from "./engineProfile.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { inGame } from "./gamePath.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
@@ -148,10 +145,8 @@ const make = Effect.gen(function* () {
         Math.max(GAME_BOT_BOUNDS.minSeconds, input.seconds ?? GAME_BOT_BOUNDS.defaultSeconds),
       );
       const manifest = yield* projects.read(root);
-      if (!isAvailableEngine(manifest.engine.name))
-        return yield* unavailableEngine(manifest.engine.name);
       const backend = yield* engines.backendFor(manifest.engine.name);
-      const projectDir = yield* inGame(root, manifestProject(manifest));
+      const projectDir = yield* inGame(root, manifest.project);
       const viewport = yield* backend.viewport(projectDir);
       const browser = yield* gameBrowser("Bot run", root);
       const runtimes = yield* runtimesFor(templates, manifest);

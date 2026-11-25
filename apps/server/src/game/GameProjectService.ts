@@ -23,7 +23,6 @@ import {
   GameManifest,
   GAME_CHARACTER_ROUTE_UNAVAILABLE,
   gameModelChoice,
-  isAvailableEngine,
   GameOperationError,
   gameTemplateForEngine,
   type GameCharacterRoute,
@@ -34,7 +33,6 @@ import {
   type GameProjectResult,
   type GameSummary,
   type GameViewport,
-  manifestProject,
 } from "@kurambit/contracts";
 import * as KeyedLock from "@kurambit/shared/KeyedLock";
 import { truncate } from "@kurambit/shared/String";
@@ -49,7 +47,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { stepLine } from "./run/runView.ts";
 import { stepNumber } from "../orchestration-v2/gameRun/decide.ts";
 import { latestGameActivity, sortGameSummaries } from "./gameSummary.ts";
-import { engineProfile, engineViewport } from "./engineProfile.ts";
+import { engineProfile } from "./engineProfile.ts";
 import { findKeyArt } from "./keyArt.ts";
 import { realGameRoot } from "./gameRecord.ts";
 import { gameRelative } from "./gamePath.ts";
@@ -306,7 +304,7 @@ const make = Effect.gen(function* () {
         );
         // The record is checked by its text; what opens a path checks where it really leads
         // (insideGame), so a link in the game refuses that operation, not the whole game.
-        gameRelative(root, manifestProject(manifest));
+        gameRelative(root, manifest.project);
         for (const asset of manifest.assets)
           for (const relative of [
             asset.source,
@@ -330,7 +328,7 @@ const make = Effect.gen(function* () {
                   path: target,
                   reason: "invalid-path",
                 });
-              gameRelative(root, `${manifestProject(manifest)}/${rest}`);
+              gameRelative(root, `${manifest.project}/${rest}`);
             } else {
               gameRelative(root, target);
             }
@@ -413,7 +411,7 @@ const make = Effect.gen(function* () {
     const canonicalRoot = yield* resolveCanonicalRoot(lexicalRoot, "register-game");
     const manifest = yield* read(canonicalRoot);
     // An existing game, resumed or in a new chat, reads this server's skills from its first turn.
-    if (options.firstTurn !== true && isAvailableEngine(manifest.engine.name))
+    if (options.firstTurn !== true)
       yield* refreshSkills(canonicalRoot, manifest.engine.name, yield* templates.directory).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
@@ -868,7 +866,7 @@ const make = Effect.gen(function* () {
             const latestThread = newestThreadByProject.get(project.id) ?? null;
             const currentOperation = operations.current(root);
             const keyArt = yield* Effect.promise(() =>
-              findKeyArt(root, manifestProject(manifest.value), manifest.value.engine.name),
+              findKeyArt(root, manifest.value.project, manifest.value.engine.name),
             );
             const summary: GameSummary = {
               projectId: project.id,
@@ -1009,8 +1007,6 @@ const make = Effect.gen(function* () {
     refreshGuidance: (root) =>
       Effect.gen(function* () {
         const manifest = yield* read(root);
-        // A game in an engine this version does not have takes no new work, so its folder stays as it is.
-        if (!isAvailableEngine(manifest.engine.name)) return;
         yield* refreshSkills(root, manifest.engine.name, yield* templates.directory).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
@@ -1018,7 +1014,7 @@ const make = Effect.gen(function* () {
       }),
     inventory: Effect.fn("GameProjectService.inventory")(function* (root) {
       const manifest = yield* read(root);
-      return { manifest, viewport: { ...engineViewport(manifest.engine.name) } };
+      return { manifest, viewport: { ...engineProfile(manifest.engine.name).viewport } };
     }),
   });
 });

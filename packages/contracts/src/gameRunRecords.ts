@@ -10,7 +10,6 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { GameEngineName } from "./game.ts";
 import { GameCharacterRoute } from "./gameStyle.ts";
 import {
   GameBuildFacts,
@@ -324,10 +323,13 @@ export const GameRun = Schema.Struct({
   /** The chat the run lives on: its stream holds the run's records. */
   threadId: ThreadId,
   projectId: ProjectId,
-  /** The engine project directory the manifest names (`web`; `godot` or `unity` on older runs). */
+  /** The engine project directory the manifest names (`web`). */
   lane: Schema.String,
-  /** The game's engine; absent on runs started before it was recorded (read through runEngine). */
-  engine: Schema.optionalKey(GameEngineName),
+  /**
+   * The game's engine (a GameEngineId); absent on runs started before it was recorded. Any name
+   * decodes: runs recorded before Godot and Unity were removed name them, and events replay.
+   */
+  engine: Schema.optionalKey(Schema.String),
   profile: GameRunProfile,
   budgetMinutes: Schema.NullOr(Schema.Number),
   /** Epoch ms; null without a budget. */

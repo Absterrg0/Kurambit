@@ -88,10 +88,6 @@ it("says a game can be won only when its own code calls win()", async () => {
     expect(await gameCanWin(root, manifest)).toBe(false);
     write("web/src/duel.js", "if (enemy.hp <= 0) GameState.win ('Victory');\n");
     expect(await gameCanWin(root, manifest)).toBe(true);
-    // Another engine's code is not read: its check stays.
-    expect(await gameCanWin(root, { ...manifest, engine: { name: "godot" } } as GameManifest)).toBe(
-      true,
-    );
   } finally {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }

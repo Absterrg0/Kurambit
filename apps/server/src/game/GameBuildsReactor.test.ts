@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
   CheckpointRef,
-  type GameEngineName,
+  type GameEngineId,
   type GameManifest,
   type OrchestrationV2DomainEvent,
   ThreadId,
@@ -26,13 +26,13 @@ const ROOT = "/games/arena";
 const REF = CheckpointRef.make("refs/kurambit/orchestration-v2/checkpoints/scope/ordinal/1");
 const OID = "a".repeat(40);
 
-const manifest = (engine: GameEngineName): GameManifest => ({
+const manifest = (engine: GameEngineId): GameManifest => ({
   schemaVersion: 1,
   name: "Arena",
   brief: "A brief.",
   artDirection: "",
   engine: { name: engine, version: "1" },
-  project: engine === "godot" ? "godot" : "web",
+  project: "web",
   assets: [],
 });
 
@@ -50,7 +50,7 @@ const captured = (threadId: string) =>
   }) as unknown as OrchestrationV2DomainEvent;
 
 const run = (
-  engine: GameEngineName,
+  engine: GameEngineId,
   relationship: string | null,
   turnStatus: "completed" | "interrupted" = "completed",
 ) =>
@@ -135,14 +135,6 @@ describe("GameBuildsReactor turn loop", () => {
       const { played, measured } = yield* run("three", null, "interrupted");
       assert.deepStrictEqual(played, []);
       assert.deepStrictEqual(measured, [{ build: OID, supersede: true }]);
-    }),
-  );
-
-  it.effect("plays nothing on an engine this version does not have", () =>
-    Effect.gen(function* () {
-      const { played, measured } = yield* run("godot", null);
-      assert.deepStrictEqual(played, []);
-      assert.deepStrictEqual(measured, []);
     }),
   );
 });

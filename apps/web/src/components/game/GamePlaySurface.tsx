@@ -791,7 +791,7 @@ function StageStateCard({
         >
           {gameName}
         </Text>
-        {phase.kind === "parked" ? (
+        {phase.kind === "unsupported" ? (
           <>
             <StageIcon tone="quiet">
               <PauseIcon className="size-5" aria-hidden="true" />

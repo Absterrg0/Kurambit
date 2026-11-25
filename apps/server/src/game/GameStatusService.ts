@@ -8,8 +8,6 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import {
   GAME_BUILDS_EVENT,
-  isAvailableEngine,
-  manifestProject,
   OLD_SHELL_MESSAGE,
   type GameManifest,
   type GameOperationError,
@@ -145,7 +143,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const selected = yield* selectionOf(root);
         if (selected === null || selected === "damaged" || selected.sourceId === null) return false;
-        const current = yield* identify(root, manifestProject(manifest));
+        const current = yield* identify(root, manifest.project);
         return current.kind === "known" && current.sourceId === selected.sourceId;
       }),
     toolchain: (threadId) =>
@@ -162,16 +160,13 @@ const make = Effect.gen(function* () {
       const root = yield* projects.resolve(threadId);
       const manifest = yield* projects.read(root);
       const inventory = yield* projects.inventory(root);
-      // A game in an engine this version does not have shows its builds and history, and plays nothing.
-      const profile = isAvailableEngine(manifest.engine.name)
-        ? engineProfile(manifest.engine.name)
-        : null;
+      const profile = engineProfile(manifest.engine.name);
       const read = yield* selectionOf(root);
       // A damaged selection record is a stale build (Rebuild writes a fresh
       // one), never a reason the game cannot be shown.
       const damaged = read === "damaged";
       const selected = damaged ? null : read;
-      const served = profile?.web?.served ?? [];
+      const served = profile.web?.served ?? [];
       const selectedPresent =
         selected === null
           ? null
@@ -190,14 +185,14 @@ const make = Effect.gen(function* () {
             });
       // A live-staged game plays its folder, which is never older than itself,
       // so its status reads no source identity at all.
-      const live = profile?.stage === "live";
+      const live = profile.stage === "live";
       // Freshness is a byte question against the snapshot the export recorded.
       // An unreadable tree cannot be shown to match, but it is also not proven
       // to differ.
       const current =
         live || selected === null || selected.sourceId === null
           ? null
-          : yield* identify(root, manifestProject(manifest));
+          : yield* identify(root, manifest.project);
       const currentId = current?.kind === "known" ? current.sourceId : null;
       const matchesSelected =
         selected === null || selected.sourceId === null || currentId === null
@@ -226,7 +221,7 @@ const make = Effect.gen(function* () {
         // The releases the engine makes, as their files are now: Play follows
         // the selected record, dated by when it was selected.
         builds: [...(yield* exporter.releases(root))],
-        exportTargets: [...(profile?.exportTargets ?? [])],
+        exportTargets: [...profile.exportTargets],
         // Usability and source freshness are separate answers: the selected
         // build can be perfectly playable while the editable sources have moved
         // on, which is the normal state after an export.

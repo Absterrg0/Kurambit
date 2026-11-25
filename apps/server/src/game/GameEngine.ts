@@ -13,10 +13,8 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   gameOperationFault,
+  GAME_ENGINES,
   GameEngineId,
-  isAvailableEngine,
-  engineDisplayName,
-  manifestProject,
   manifestRuntime,
   type GameManifest,
   type GameActionResult,
@@ -45,12 +43,7 @@ import { makeThreeBackend } from "./GameThreeEngine.ts";
 import { runtimesDirectory } from "./gameRuntime.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { makeGameBrowser } from "./gameChromium.ts";
-import {
-  availableEngine,
-  unavailableEngine,
-  type GameEngineProfile,
-  type GameExportTarget,
-} from "./engineProfile.ts";
+import { type GameEngineProfile, type GameExportTarget } from "./engineProfile.ts";
 import * as GameOperations from "./GameOperations.ts";
 import { limitIssues, mergeCheckIssues } from "./checkIssues.ts";
 import { HERO_KINDS, keepHeroSheet } from "./heroSheets.ts";
@@ -376,11 +369,8 @@ const make = Effect.gen(function* () {
       ? Effect.fail(unsupportedEngine(engineName))
       : Effect.succeed(backend);
   };
-  /** The backend that runs a game's engine work; an engine this version does not have is refused. */
-  const runner = (manifest: GameManifest) =>
-    isAvailableEngine(manifest.engine.name)
-      ? backendFor(manifest.engine.name)
-      : Effect.fail(unavailableEngine(manifest.engine.name));
+  /** The backend that runs a game's engine work. */
+  const runner = (manifest: GameManifest) => backendFor(manifest.engine.name);
   const context = Effect.fn("GameEngine.context")(function* (root: string) {
     const manifest = yield* projects.read(root);
     const backend = yield* runner(manifest);
@@ -528,8 +518,6 @@ const make = Effect.gen(function* () {
     lookup: (root: string) =>
       Effect.gen(function* () {
         const manifest = yield* projects.read(root);
-        // An engine this version does not have has no tool to look for.
-        if (!isAvailableEngine(manifest.engine.name)) return null;
         const backend = yield* backendFor(manifest.engine.name);
         return yield* backend.toolStatus(root, manifest);
       }),
@@ -542,7 +530,7 @@ const make = Effect.gen(function* () {
     const manifest = yield* projects.read(root);
     const backend = yield* runner(manifest);
     // The project folder alone answers this; no binary is resolved.
-    return yield* backend.viewport(yield* inGame(root, manifestProject(manifest)));
+    return yield* backend.viewport(yield* inGame(root, manifest.project));
   });
 
   // Clean checks by the identity of what they checked. Memory only: one lost costs a boot check.
@@ -556,7 +544,7 @@ const make = Effect.gen(function* () {
   const checkedIdentity = (root: string) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const snapshot = yield* identify(root, manifestProject(manifest));
+      const snapshot = yield* identify(root, manifest.project);
       if (snapshot.kind !== "known") return null;
       const manifestHash = yield* Effect.promise(() =>
         hashFile(NodePath.join(root, "game.json"), { noFollow: true }),
@@ -583,7 +571,7 @@ const make = Effect.gen(function* () {
   const checkLabel = (root: string) =>
     Effect.map(
       projects.read(root),
-      (manifest) => `${engineDisplayName(manifest.engine.name)} check`,
+      (manifest) => `${GAME_ENGINES[manifest.engine.name].name} check`,
     );
   const replayIn: GameEngine["Service"]["replayIn"] = (root, play, moment) =>
     Effect.gen(function* () {
@@ -697,8 +685,8 @@ const make = Effect.gen(function* () {
             {
               browser,
               realRoot,
-              engine: yield* availableEngine(manifest.engine.name),
-              project: manifestProject(manifest),
+              engine: manifest.engine.name,
+              project: manifest.project,
               style: yield* readGameStyle(realRoot),
             },
             decoded.success,

@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { GameManifest, isAvailableEngine, keptRunTag, playOutcomeWords } from "@kurambit/contracts";
+import { GameManifest, keptRunTag, playOutcomeWords } from "@kurambit/contracts";
 
 import { decisionsForTurn } from "./GameDecisions.ts";
 import { keptSince, type KeptPlay } from "./playFiles.ts";
@@ -76,9 +76,7 @@ const gameEngine = (cwd: string) =>
   read(() => NodeFSP.readFile(NodePath.join(cwd, "game.json"), "utf8"), null).pipe(
     Effect.map((text) => {
       const manifest = text === null ? Option.none() : decodeManifest(text);
-      return Option.isSome(manifest) && isAvailableEngine(manifest.value.engine.name)
-        ? manifest.value.engine.name
-        : null;
+      return Option.isSome(manifest) ? manifest.value.engine.name : null;
     }),
   );
 

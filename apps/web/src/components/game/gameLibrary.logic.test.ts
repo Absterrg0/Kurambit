@@ -7,7 +7,7 @@ const summary = (name: string, updatedAt: string): GameSummary => ({
   projectId: `project-${name}` as GameSummary["projectId"],
   root: `/games/${name}`,
   name,
-  template: "blank",
+  template: "blank-three",
   operation: null,
   run: null,
   keyArt: null,

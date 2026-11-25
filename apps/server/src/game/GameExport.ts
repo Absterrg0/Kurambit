@@ -10,7 +10,6 @@ import * as Schema from "effect/Schema";
 import {
   GameOperationError,
   gameOperationFault,
-  isAvailableEngine,
   type GameActionResult,
   type GameStatus,
   type GameWebPackage,
@@ -18,7 +17,7 @@ import {
 } from "@kurambit/contracts";
 import { ArchivePublishError, publishStaged, sweepPublished } from "./archivePublication.ts";
 import * as GameEngine from "./GameEngine.ts";
-import { availableEngine, engineProfile, type GameExportTarget } from "./engineProfile.ts";
+import { engineProfile, type GameExportTarget } from "./engineProfile.ts";
 import { makeAtomicWriter } from "./gameFiles.ts";
 import * as GamePreview from "./GamePreview.ts";
 import * as GameProjectService from "./GameProjectService.ts";
@@ -508,17 +507,11 @@ const make = Effect.gen(function* () {
         : { ...exported, message: WEB_READY_MESSAGE, url: served.url };
     });
 
-  /** The game's engine profile; a game in an engine this version does not have is refused as unavailable. */
   const profileOf = (root: string) =>
-    Effect.flatMap(projects.read(root), (manifest) =>
-      Effect.map(availableEngine(manifest.engine.name), engineProfile),
-    );
+    Effect.map(projects.read(root), (manifest) => engineProfile(manifest.engine.name));
 
   const releases = Effect.fn("GameExport.releases")(function* (root: string) {
-    const manifest = yield* projects.read(root);
-    // Nothing this version makes: a game in an engine it does not have lists no releases.
-    if (!isAvailableEngine(manifest.engine.name)) return [];
-    const profile = engineProfile(manifest.engine.name);
+    const profile = engineProfile((yield* projects.read(root)).engine.name);
     const found: GameRelease[] = [];
     const iso = (date: Date) => DateTime.formatIso(DateTime.fromDateUnsafe(date));
     for (const release of profile.releases) {

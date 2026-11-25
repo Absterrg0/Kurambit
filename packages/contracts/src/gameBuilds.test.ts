@@ -11,7 +11,7 @@ const tier = (ending: "won" | "lost" | "no-ending", at: number | null) => ({
 
 const facts = (patch: Partial<GameBuildFacts> = {}): GameBuildFacts => ({
   build: GameBuildId.make("a".repeat(40)),
-  key: "godot:" + "b".repeat(40),
+  key: "web:" + "b".repeat(40),
   harness: "h1",
   state: "measured",
   measuredAt: null,

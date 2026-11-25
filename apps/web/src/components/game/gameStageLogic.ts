@@ -30,8 +30,8 @@ export function toolchainReadyFor(toolchain: GameToolchainStatus, engine: GameEn
  * needs to know: work in flight, a loaded game, then what to do next.
  */
 export type GameStagePhase =
-  /** This version does not have the game's engine: it opens with its chat and builds, and nothing plays. */
-  | { kind: "parked"; message: string }
+  /** This version does not play the game (`GameStatus.unsupported`): it opens with its chat and builds, and nothing plays. */
+  | { kind: "unsupported"; message: string }
   | { kind: "tools-missing" }
   /** The agent's turn is making the game's first build: nothing to play yet, nothing to press. */
   | { kind: "first-build"; startedAt: number | null }
@@ -47,10 +47,10 @@ export type GameStagePhase =
   | { kind: "playing"; stale: boolean };
 
 export interface GameStageInput {
-  /** How the engine shows the game (`GAME_ENGINES[engine].stage`); null when this version does not have the engine. */
+  /** How the engine shows the game (`GAME_ENGINES[engine].stage`); null when this version does not play the game. */
   stage: GameStageKind | null;
-  /** Why this version does not play the game (`unavailableEngineMessage`), or null when it does. */
-  parked?: string | null;
+  /** Why this version does not play the game (`GameStatus.unsupported`), or null when it does. */
+  unsupported?: string | null;
   toolchainReady: boolean;
   operation: GameStatus["operation"];
   /** A build that can be served from `builds/web` exists. */
@@ -83,7 +83,7 @@ const operationStartedAt = (operation: GameStatus["operation"]) =>
   operation === null ? null : Date.parse(operation.at);
 
 export function deriveGameStagePhase(input: GameStageInput): GameStagePhase {
-  if (input.parked != null) return { kind: "parked", message: input.parked };
+  if (input.unsupported != null) return { kind: "unsupported", message: input.unsupported };
   if (input.stage === "window")
     return input.toolchainReady ? { kind: "window" } : { kind: "tools-missing" };
   if (input.stage === "live") return deriveLivePhase(input);

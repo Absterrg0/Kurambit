@@ -3,15 +3,8 @@ import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import {
-  GameOperationError,
-  isAvailableEngine,
-  manifestProject,
-  type GameArtAssetsResult,
-  type ThreadId,
-} from "@kurambit/contracts";
+import { GameOperationError, type GameArtAssetsResult, type ThreadId } from "@kurambit/contracts";
 import { listArtAssets, saveArtThumbnail } from "./artAssets.ts";
-import { unavailableEngine } from "./engineProfile.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 
 /** The Workbench's Art tab: the game's art files, and the thumbnails it drew of them. */
@@ -49,10 +42,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const root = yield* projects.resolve(threadId);
         const manifest = yield* projects.read(root);
-        const engine = manifest.engine.name;
-        if (!isAvailableEngine(engine)) return yield* unavailableEngine(engine);
         return yield* onDisk("List the game's art", root, () =>
-          listArtAssets(root, engine, manifestProject(manifest)),
+          listArtAssets(root, manifest.engine.name, manifest.project),
         );
       }),
     saveThumbnail: (threadId, sha256, png) =>

@@ -20,7 +20,6 @@ import {
   GameStyleLockInput,
   GAME_STYLE_FILE,
   type GameLibraryKind,
-  manifestProject,
   type ThreadId,
 } from "@kurambit/contracts";
 import { LIBRARY_CATALOG, LIBRARY_FAMILIES } from "./assetLibraryCatalog.ts";
@@ -78,7 +77,7 @@ import {
 import * as GameProcesses from "./GameProcesses.ts";
 import * as GameProjectService from "./GameProjectService.ts";
 import { toolsDirectory } from "./GameToolchain.ts";
-import { afterAddingArt, availableEngine, engineProfile, gamePaths } from "./engineProfile.ts";
+import { afterAddingArt, engineProfile, gamePaths } from "./engineProfile.ts";
 import * as GameTemplates from "./GameTemplates.ts";
 import { walkFiles } from "./walkFiles.ts";
 
@@ -1459,8 +1458,7 @@ const make = Effect.gen(function* () {
 
   const search = (root: string, input: GameAssetsSearchInput) =>
     Effect.gen(function* () {
-      const manifest = yield* projects.read(root);
-      const engine = yield* availableEngine(manifest.engine.name);
+      const engine = (yield* projects.read(root)).engine.name;
       if (input.pack === undefined)
         return yield* searchPacks(
           root,
@@ -1599,7 +1597,7 @@ const make = Effect.gen(function* () {
   const add = (root: string, input: GameAssetsAddInput) =>
     Effect.gen(function* () {
       const manifest = yield* projects.read(root);
-      const engine = yield* availableEngine(manifest.engine.name);
+      const engine = manifest.engine.name;
       const pack = yield* packOf(input.pack);
       // The lock is read (and a chosen one derived) before the pack is fetched, so a refused
       // pack costs no download and writes no lock.
@@ -1762,7 +1760,7 @@ const make = Effect.gen(function* () {
         );
 
       const profile = engineProfile(engine);
-      const project = manifestProject(manifest);
+      const project = manifest.project;
       const directoryRel = `${gamePaths(engine, project).library}/${pack.id}`;
       const realRoot = yield* realRootOf(root, "Library add");
       // Checked before any copy, so a refusal leaves the game as it was.
@@ -2054,9 +2052,7 @@ const make = Effect.gen(function* () {
     entry: packOf,
     credit: (root, pack, operation) =>
       Effect.flatMap(projects.read(root), (manifest) =>
-        Effect.flatMap(availableEngine(manifest.engine.name), (engine) =>
-          creditGame(root, engine, manifestProject(manifest), pack, operation),
-        ),
+        creditGame(root, manifest.engine.name, manifest.project, pack, operation),
       ),
     packPicture,
   });

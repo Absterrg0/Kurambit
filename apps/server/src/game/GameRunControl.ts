@@ -5,15 +5,12 @@ import {
   CommandId,
   GAME_ENGINES,
   GameRunId,
-  isAvailableEngine,
-  unavailableEngineMessage,
   OLD_SHELL_MESSAGE,
   type GameEngineId,
   type OrchestrationV2GameRunCommand,
   type GameRunStep,
   type GameRunStepResult,
   gameRunStepId,
-  manifestProject,
   type GameKeepGoingDecideInput,
   type GameKeepGoingDecideResult,
   type GameKeepGoingInput,
@@ -271,9 +268,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const manifest = yield* projects.read(root).pipe(Effect.orElseSucceed(() => null));
       if (manifest !== null) {
-        const engine = manifest.engine.name;
-        if (!isAvailableEngine(engine)) return unavailableEngineMessage(engine);
-        if (!GAME_ENGINES[engine].turnLoop) return NO_TURN_LOOP_SENTENCE;
+        if (!GAME_ENGINES[manifest.engine.name].turnLoop) return NO_TURN_LOOP_SENTENCE;
         if (yield* Effect.promise(() => carriesOldShell(root, manifest))) return OLD_SHELL_MESSAGE;
       }
       if (run === null || run.status === "ended" || run.threadId === threadId) return null;
@@ -410,8 +405,6 @@ const make = Effect.gen(function* () {
           ),
         );
       const engineId = manifest.engine.name;
-      if (!isAvailableEngine(engineId))
-        return yield* runError("set", threadId, "no-turn-loop", unavailableEngineMessage(engineId));
       if (!GAME_ENGINES[engineId].turnLoop)
         return yield* runError("set", threadId, "no-turn-loop", NO_TURN_LOOP_SENTENCE);
       if (yield* Effect.promise(() => carriesOldShell(root, manifest)))
@@ -443,7 +436,7 @@ const make = Effect.gen(function* () {
           `run_${DateTime.toEpochMillis(yield* DateTime.now).toString(36)}${yield* fresh}`,
         ),
         engine: engineId,
-        lane: manifestProject(manifest),
+        lane: manifest.project,
         profile,
         budgetMinutes: input.budgetMinutes === undefined ? 60 : input.budgetMinutes,
       });

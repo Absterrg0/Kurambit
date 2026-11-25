@@ -41,12 +41,9 @@ import {
   GameScreens,
   GamePlayerReport,
   type GameBotRunResult,
-  GameEngineName,
-  engineDisplayName,
-  isAvailableEngine,
+  GameEngineId,
   GameManifest,
   GameOperationError,
-  manifestProject,
   manifestRuntime,
   noSavedPlays,
   SAVED_PLAYS_PER_BUILD,
@@ -141,7 +138,7 @@ export interface ResolvedBuild {
   readonly root: string;
   readonly build: GameBuildId;
   readonly key: string;
-  readonly engine: GameEngineName;
+  readonly engine: GameEngineId;
 }
 
 type Fact<K extends keyof GameBuildFacts> = GameBuildFacts[K];
@@ -149,7 +146,7 @@ const Stored = Schema.Struct({
   build: GameBuildId,
   /** Where the build was asked for, so a reconcile after a restart can measure what is owed. */
   root: Schema.optionalKey(Schema.String),
-  engine: Schema.optionalKey(GameEngineName),
+  engine: Schema.optionalKey(GameEngineId),
   measuredAt: Schema.NullOr(Schema.String),
   renderer: Schema.NullOr(Schema.String),
   runtime: Schema.optionalKey(Schema.String),
@@ -238,8 +235,8 @@ const TIER_FACTS: Readonly<Record<Tier, ReadonlyArray<FactName>>> = {
 };
 const TIERS: ReadonlyArray<Tier> = ["boots", "replays", "masher"];
 /**
- * A build no saved play was replayed on: the game had none (or none when it was measured, or
- * it plays outside a browser, where no play is recorded). The fact is then not shown.
+ * A build no saved play was replayed on: the game had none (or none when it was measured). The
+ * fact is then not shown.
  */
 const NONE_SAVED = notMeasured(
   "no saved play was replayed on this build",
@@ -248,34 +245,6 @@ const NONE_SAVED = notMeasured(
   "no-saved-plays",
 );
 const FACT_NAMES: ReadonlyArray<FactName> = [...new Set(TIERS.flatMap((tier) => TIER_FACTS[tier]))];
-/**
- * Asset use is read from a browser page's requests, performance from its shell. A build of an
- * engine this version does not have played in that engine's own process, which measured none of
- * them: it says so, and never owes them.
- */
-const BROWSER_ONLY: ReadonlySet<FactName> = new Set([
-  "use",
-  "performance",
-  "qa",
-  "screens",
-  "player",
-  "savedPlays",
-]);
-const browserOnly = (
-  engine: GameEngineName,
-  fact: "use" | "performance" | "qa" | "screens" | "player",
-) =>
-  isAvailableEngine(engine)
-    ? null
-    : notMeasured(
-        `${engineDisplayName(engine)} games played in their engine's own process, which never measured ${fact === "use" ? "asset use" : fact === "performance" ? "performance" : fact === "screens" ? "other screen sizes" : fact === "player" ? "a player's first minute" : "a QA play"}`,
-        false,
-      );
-const useNotMeasured = (engine: GameEngineName) => browserOnly(engine, "use");
-const factsOf = (engine: GameEngineName | undefined): ReadonlyArray<FactName> =>
-  engine !== undefined && useNotMeasured(engine) !== null
-    ? FACT_NAMES.filter((name) => !BROWSER_ONLY.has(name))
-    : FACT_NAMES;
 /** Each tier's step as the measuring line names it. */
 const TIER_STEP: Readonly<Record<Tier, string>> = {
   boots: "checking it starts",
@@ -439,30 +408,22 @@ const make = Effect.gen(function* () {
     const facts = {
       boots: get("boots"),
       masher: get("masher"),
-      use: useNotMeasured(build.engine) ?? get("use"),
-      performance: browserOnly(build.engine, "performance") ?? get("performance"),
-      qa: browserOnly(build.engine, "qa") ?? get("qa"),
-      screens: browserOnly(build.engine, "screens") ?? get("screens"),
+      use: get("use"),
+      performance: get("performance"),
+      qa: get("qa"),
+      screens: get("screens"),
       // Facts stored before the first minute was measured say so; measuring again fills it.
       player:
-        browserOnly(build.engine, "player") ??
-        (stored !== undefined && stored.player === undefined && !pending("player")
+        stored !== undefined && stored.player === undefined && !pending("player")
           ? notMeasured("measured before the first minute was measured", true)
-          : get("player")),
-      savedPlays:
-        useNotMeasured(build.engine) !== null
-          ? NONE_SAVED
-          : pending("savedPlays")
-            ? ({ status: "pending" } as const)
-            : (stored?.savedPlays ?? NONE_SAVED),
+          : get("player"),
+      savedPlays: pending("savedPlays")
+        ? ({ status: "pending" } as const)
+        : (stored?.savedPlays ?? NONE_SAVED),
     };
-    // An engine with no asset use or performance is not an incomplete measurement, nor is a
-    // game with no saved plays.
+    // A game with no saved plays is not an incomplete measurement.
     const counted = Object.entries(facts).flatMap(([name, fact]) =>
-      (useNotMeasured(build.engine) !== null && BROWSER_ONLY.has(name as FactName)) ||
-      (name === "savedPlays" && noSavedPlays(facts))
-        ? []
-        : [fact],
+      name === "savedPlays" && noSavedPlays(facts) ? [] : [fact],
     );
     const anyMeasured = FACT_NAMES.some((fact) => stored?.[fact] !== undefined);
     const state =
@@ -593,7 +554,6 @@ const make = Effect.gen(function* () {
   const planOf = (
     found: Found | null,
     person: boolean,
-    engine: GameEngineName,
     runtime: string | null,
     savedSet: string,
   ): ReadonlySet<Tier> => {
@@ -603,14 +563,12 @@ const make = Effect.gen(function* () {
       return new Set(TIERS);
     const stored = found.stored;
     const standing = new Set(stored.standing ?? []);
-    const owes = new Set(factsOf(engine));
     const needs = (name: FactName) => {
       const fact = stored[name];
       return (
-        owes.has(name) &&
-        (fact === undefined ||
-          fact.status === "pending" ||
-          (fact.status === "not-measured" && (fact.retry || (person && standing.has(name)))))
+        fact === undefined ||
+        fact.status === "pending" ||
+        (fact.status === "not-measured" && (fact.retry || (person && standing.has(name))))
       );
     };
     const tiers = new Set<Tier>();
@@ -626,11 +584,7 @@ const make = Effect.gen(function* () {
         : replayed.status === "measured"
           ? replayed.value.set
           : null;
-    if (
-      owes.has("savedPlays") &&
-      (replayedSet === null ? needs("savedPlays") : replayedSet !== savedSet)
-    )
-      tiers.add("replays");
+    if (replayedSet === null ? needs("savedPlays") : replayedSet !== savedSet) tiers.add("replays");
     return tiers;
   };
 
@@ -655,22 +609,16 @@ const make = Effect.gen(function* () {
     });
 
   // The build's own game.json names its engine folder; a copy that cannot say keeps the engine's default.
-  const projectOf = (copy: string, engine: GameEngineName) =>
+  const projectOf = (copy: string, engine: GameEngineId) =>
     Effect.promise(() =>
       NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
-        .then((text) => manifestProject(decodeCopyManifest(text)))
+        .then((text) => decodeCopyManifest(text).project)
         .catch(() => ""),
-    ).pipe(
-      Effect.map(
-        (project) =>
-          project || (isAvailableEngine(engine) ? engineProfile(engine).projectDirectory : ""),
-      ),
-    );
+    ).pipe(Effect.map((project) => project || engineProfile(engine).projectDirectory));
 
   /** The runtime the copy's plays load now, for a game that loads one (gameRuntime.ts). */
-  const runtimeOf = (copy: string, engine: GameEngineName) =>
+  const runtimeOf = (copy: string, engine: GameEngineId) =>
     Effect.promise(async () => {
-      if (!isAvailableEngine(engine)) return null;
       const major = await NodeFSP.readFile(NodePath.join(copy, "game.json"), "utf8")
         .then((text) => manifestRuntime(decodeCopyManifest(text)))
         .catch(() => null);
@@ -814,7 +762,7 @@ const make = Effect.gen(function* () {
                     },
                   }),
                 );
-          yield* write(browserOnly(build.engine, "qa") === null ? facts : { boots: facts.boots });
+          yield* write(facts);
         }
         // The harness's own masher, fresh from the server's templates, never the game's.
         const kitWritten = yield* Effect.promise(async () => {
@@ -903,11 +851,9 @@ const make = Effect.gen(function* () {
               evidence: null,
             },
           }) as const;
-        // Asset use after the random-input play: its record against what the build ships. A
-        // browser engine only; the view says why the others have none.
+        // Asset use after the random-input play: its record against what the build ships.
         const useAfter = (evidence: string | null, none: ReturnType<typeof notMeasured>) =>
           Effect.gen(function* () {
-            if (useNotMeasured(build.engine) !== null) return {};
             const record =
               evidence === null ? null : yield* Effect.promise(() => readPlayUse(root, evidence));
             const plays: { masher?: PlayUse } = record === null ? {} : { masher: record };
@@ -915,9 +861,7 @@ const make = Effect.gen(function* () {
             const recorded = Object.values(plays);
             if (recorded.length === 0) return { use: none };
             const project = yield* projectOf(copy, build.engine);
-            const engine = build.engine;
-            if (!isAvailableEngine(engine)) return { use: none };
-            const files = yield* Effect.promise(() => shippedFiles(copy, engine, project));
+            const files = yield* Effect.promise(() => shippedFiles(copy, build.engine, project));
             return {
               use: {
                 status: "measured" as const,
@@ -937,9 +881,7 @@ const make = Effect.gen(function* () {
           if (blocked !== null)
             yield* write({
               masher: blocked,
-              ...(browserOnly(build.engine, "performance") === null
-                ? { performance: blocked }
-                : {}),
+              performance: blocked,
               ...(yield* useAfter(null, blocked)),
             });
           else {
@@ -978,35 +920,30 @@ const make = Effect.gen(function* () {
                     run.fact.cause,
                   )
                 : notMeasured("the random-input run was not measured", true);
-            // Performance is the page's own stats from the same play, on a browser engine. In
-            // software its frame times are not read, but what a frame draws still is, from any
-            // run that left its record.
+            // Performance is the page's own stats from the same play. In software its frame
+            // times are not read, but what a frame draws still is, from any run that left its
+            // record.
             const performance =
-              browserOnly(build.engine, "performance") !== null
-                ? {}
-                : {
-                    performance:
-                      Option.isSome(backend) && backend.value.software
-                        ? performanceOf(
-                            run.result === null || run.evidence === null
-                              ? null
-                              : yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
-                            backend.value,
-                            run.machine,
-                          )
-                        : !measuredRun || run.evidence === null
-                          ? notFromRun
-                          : performanceOf(
-                              yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
-                              Option.isSome(backend)
-                                ? backend.value
-                                : { software: false, renderer: null, probe: "" },
-                              run.machine,
-                            ),
-                  };
+              Option.isSome(backend) && backend.value.software
+                ? performanceOf(
+                    run.result === null || run.evidence === null
+                      ? null
+                      : yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
+                    backend.value,
+                    run.machine,
+                  )
+                : !measuredRun || run.evidence === null
+                  ? notFromRun
+                  : performanceOf(
+                      yield* Effect.promise(() => readPlayPerf(root, run.evidence!)),
+                      Option.isSome(backend)
+                        ? backend.value
+                        : { software: false, renderer: null, probe: "" },
+                      run.machine,
+                    );
             yield* write({
               masher: run.fact,
-              ...performance,
+              performance,
               ...(yield* useAfter(run.evidence, noRecord(run.fact))),
             });
           }
@@ -1040,7 +977,6 @@ const make = Effect.gen(function* () {
           const tiers = planOf(
             found,
             job.person,
-            build.engine,
             yield* runtimeOf(build.root, build.engine),
             yield* savedSetOf(build.root),
           );
@@ -1122,7 +1058,6 @@ const make = Effect.gen(function* () {
           planOf(
             found,
             person,
-            build.engine,
             yield* runtimeOf(build.root, build.engine),
             yield* savedSetOf(build.root),
           ).size > 0;
@@ -1239,9 +1174,7 @@ const make = Effect.gen(function* () {
           stored?.root === undefined ||
           stored.engine === undefined ||
           // Saved plays are replayed when a build is measured, never owed by a row from before.
-          !factsOf(stored.engine).some(
-            (name) => name !== "savedPlays" && stored[name] === undefined,
-          ) ||
+          !FACT_NAMES.some((name) => name !== "savedPlays" && stored[name] === undefined) ||
           jobs.has(row.facts_key)
         )
           return [];

@@ -4,7 +4,7 @@
 // or machine cannot run is refused when called, with why. The thread's game, engine, model choice
 // and Blender come from the MCP invocation (McpHttpServer's auth middleware). A tool the listing
 // hides is also refused when called by name, by Effect's MCP core.
-import { engineDisplayName, isAvailableEngine } from "@kurambit/contracts";
+import { GAME_ENGINES } from "@kurambit/contracts";
 import { engineCapabilities, type GameEngineCapability } from "../../../game/engineProfile.ts";
 import { currentInvocation, type McpInvocationScope } from "../../McpInvocationContext.ts";
 
@@ -65,9 +65,7 @@ const refusalOf = (
   if (scope === undefined || engine == null) return "it works in no game";
   const capabilities = engineCapabilities(engine);
   if (!needs.every((need) => capabilities.has(need)))
-    return isAvailableEngine(engine)
-      ? `this ${engineDisplayName(engine)} game's engine does not support it`
-      : `${engineDisplayName(engine)} games are not available in this version of Kurambit`;
+    return `this ${GAME_ENGINES[engine].name} game's engine does not support it`;
   if (!needs.includes("blender")) return null;
   if (!choiceUsesBlender(scope.gameModels))
     return "the person chose to make this game's models in code with the library off, so nothing is made in Blender. Say so if the request needs Blender: the person changes it in the game's \"Make models with\" setting";

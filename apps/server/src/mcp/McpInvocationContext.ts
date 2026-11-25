@@ -2,7 +2,7 @@ import {
   type AuthMcpClientAccess,
   type EnvironmentId,
   type GameCharacterRoute,
-  type GameEngineName,
+  type GameEngineId,
   McpCapabilityUnavailableError,
   OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
@@ -44,7 +44,7 @@ export const clientRuntimeModeCeiling = (client: McpClientCaller | undefined): R
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   /** The engine of the calling thread's game; null when the thread works in no game. */
-  readonly gameEngine?: GameEngineName | null;
+  readonly gameEngine?: GameEngineId | null;
   /** How the calling thread's game makes its models and whether its library is on; null outside a game. */
   readonly gameModels?: {
     readonly route: GameCharacterRoute;

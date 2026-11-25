@@ -299,7 +299,7 @@ export function GameRunTimeline({
   rewind: StageRewind;
   /** The run reached its end and stands on its end screen. */
   ended: boolean;
-  /** The folder's own game plays and can be rewound; a copy or a parked engine cannot. */
+  /** The folder's own game plays and can be rewound; a copy or an unsupported game cannot. */
   enabled: boolean;
 }) {
   const threadKey = scopedThreadKey(threadRef);

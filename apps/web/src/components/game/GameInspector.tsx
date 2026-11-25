@@ -1,9 +1,4 @@
-import {
-  engineDisplayName,
-  gameEngineEntry,
-  type GameThingValue,
-  type ScopedThreadRef,
-} from "@kurambit/contracts";
+import { GAME_ENGINES, type GameThingValue, type ScopedThreadRef } from "@kurambit/contracts";
 import { scopedThreadKey } from "@kurambit/client-runtime/environment";
 import { useIsGameThreadStatus } from "../../hooks/useIsGameThread";
 import { useThreadStageBridge } from "./gameStageBridge";
@@ -18,8 +13,8 @@ import { useThreadStageBridge } from "./gameStageBridge";
 export function useSelectNotice(threadRef: ScopedThreadRef): string | null {
   const engine = useIsGameThreadStatus(threadRef).data?.manifest.engine.name ?? null;
   const status = useThreadStageBridge(scopedThreadKey(threadRef), (state) => state.status, null);
-  if (engine !== null && gameEngineEntry(engine)?.stageBridge !== true)
-    return `Tuning is not in ${engineDisplayName(engine)} yet.`;
+  if (engine !== null && !GAME_ENGINES[engine].stageBridge)
+    return `Tuning is not in ${GAME_ENGINES[engine].name} yet.`;
   if (status === "none") return "Tuning needs the newer game shell.";
   if (status === null) return "Tunable numbers appear here while the game plays.";
   if (status === "waiting") return "Waiting for the game.";
