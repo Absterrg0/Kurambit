@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/reactivity";
 import {
   scopedThreadKey,
   scopeProjectRef,
@@ -13,6 +14,7 @@ import {
   GAME_STYLE_DEFAULT_LIBRARY,
   type EnvironmentId,
   type GameCharacterRoute,
+  type GamePublishStatus,
 } from "@kurambit/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -23,6 +25,7 @@ import {
   FolderOpenIcon,
   ImagePlusIcon,
   PencilIcon,
+  PlayIcon,
   SlidersHorizontalIcon,
   SquarePenIcon,
   Trash2Icon,
@@ -37,6 +40,7 @@ import { cn } from "../../lib/utils";
 import { waitForThreadShell } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { gameEnvironment } from "../../state/game";
+import { useEnvironmentQuerySelector } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -55,6 +59,8 @@ import {
 } from "../ui/menu";
 import { SidebarInset } from "../ui/sidebar";
 import { Spinner } from "../ui/spinner";
+import { StatusDot } from "../ui/status-dot";
+import { Tabs, TabsList, TabsTab } from "../ui/tabs";
 import { Tooltip, TooltipLabel, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Skeleton } from "../ui/skeleton";
 import { Atmosphere } from "../brand/Atmosphere";
@@ -62,7 +68,6 @@ import { Text } from "../ui/text";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { GamePicture } from "./GameBuildStill";
-import { KurambitMark } from "../brand/KurambitBrand";
 import { useStageStill } from "./gameStageBridge";
 import {
   CHARACTER_ROUTES,
@@ -94,7 +99,7 @@ const SHELF_CARDS = 8;
 
 export function GamesHome() {
   const { covers: every, isLoading, error } = useGameCovers();
-  // A game put away is on the sidebar's Archived shelf, not here.
+  // A game put away waits under the Archived filter; the page counts the rest.
   const covers = every.filter((cover) => !cover.archived);
   const environmentId = usePrimaryEnvironmentId();
   const navigate = useNavigate();
@@ -120,10 +125,10 @@ export function GamesHome() {
         <div className="relative min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div
             className={cn(
-              "mx-auto flex w-full max-w-200 flex-col px-8",
-              // The hero and the brief sit in the page's middle third, under the atmosphere;
-              // the games follow below. Alone, the brief is centred a little above the middle.
-              firstRun ? "min-h-full justify-center pb-32" : "gap-12 pt-36 pb-24",
+              "mx-auto flex w-full max-w-6xl flex-col px-8",
+              // The brief sits high under the atmosphere and the games are the page below it.
+              // Alone, the brief is centred a little above the middle.
+              firstRun ? "min-h-full justify-center pb-32" : "gap-10 pt-14 pb-24",
             )}
           >
             {environmentId ? <BriefBox environmentId={environmentId} firstRun={firstRun} /> : null}
@@ -140,7 +145,7 @@ export function GamesHome() {
             ) : null}
 
             {covers.length > 0 && environmentId ? (
-              <ContinueShelf covers={covers} environmentId={environmentId} onOpen={openGame} />
+              <ContinueShelf covers={every} environmentId={environmentId} onOpen={openGame} />
             ) : isLoading ? (
               // The shelf's room is kept while the games load, so the brief does not jump up.
               <ShelfPlaceholder />
@@ -326,10 +331,9 @@ function BriefBox({
     );
 
   return (
-    <section className="flex w-full flex-col gap-3">
-      <KurambitMark className="mx-auto mb-1 size-14" />
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-3">
       {/* The one serif headline in the app, the brief under it. */}
-      <h1 className="mb-4 w-full text-center font-display text-hero text-strong-foreground">
+      <h1 className="mb-1 w-full text-center font-display text-hero text-strong-foreground">
         {firstRun ? "Make a game you want to play" : "What should we make next?"}
       </h1>
       <form
@@ -354,7 +358,7 @@ function BriefBox({
           disabled={busy}
           placeholder="Describe the game you want to play…"
           // Grows with what is typed up to a cap, then scrolls, as ui/textarea does.
-          className="field-sizing-content max-h-64 min-h-20 w-full resize-none overflow-y-auto bg-transparent px-4 pt-3.5 text-base/6 text-foreground outline-none placeholder:text-placeholder"
+          className="field-sizing-content max-h-64 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-base/6 text-foreground outline-none placeholder:text-placeholder"
         />
         {picture === null ? null : (
           <div className="px-4 pt-1">
@@ -651,7 +655,16 @@ function ShelfPlaceholder() {
   );
 }
 
-/** Every game as an even card, latest first: the pictures are the colour on the page. */
+type ShelfFilter = "all" | "working" | "published" | "archived";
+
+/** A game at work right now: a turn running, Keep going, or an operation such as a build. */
+const isWorking = (cover: GameCover) =>
+  cover.chats === "working" || cover.game.run !== null || cover.game.operation?.state === "running";
+
+/**
+ * The page under the brief: every game as a card with its frame, filtered by what it is doing,
+ * each filter counted. A filter with nothing in it is not offered.
+ */
 function ContinueShelf({
   covers,
   environmentId,
@@ -663,24 +676,70 @@ function ContinueShelf({
 }) {
   const canOpen = useAtomValue(gameEnvironment.open.permissionAtom(environmentId));
   const [all, setAll] = useState(false);
-  const shown = all ? covers : covers.slice(0, SHELF_CARDS);
+  const [filter, setFilter] = useState<ShelfFilter>("all");
+  // Which games are on kurambit.com: each card reads its own publish status and says so here.
+  const [published, setPublished] = useState<ReadonlySet<string>>(() => new Set());
+  const onPublished = (projectId: string, on: boolean) =>
+    setPublished((current) => {
+      if (current.has(projectId) === on) return current;
+      const next = new Set(current);
+      if (on) next.add(projectId);
+      else next.delete(projectId);
+      return next;
+    });
+  const active = covers.filter((cover) => !cover.archived);
+  const groups: Record<ShelfFilter, ReadonlyArray<GameCover>> = {
+    all: active,
+    working: active.filter(isWorking),
+    published: active.filter((cover) => published.has(cover.game.projectId)),
+    archived: covers.filter((cover) => cover.archived),
+  };
+  const labels: Record<ShelfFilter, string> = {
+    all: "All",
+    working: "Working",
+    published: "Published",
+    archived: "Archived",
+  };
+  // A filter that empties while open (the last game at work settles) falls back to All.
+  const shownFilter = groups[filter].length > 0 ? filter : "all";
+  const list = groups[shownFilter];
+  const shown = all ? list : list.slice(0, SHELF_CARDS);
   return (
     <section aria-labelledby="games" className="@container flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <Text variant="label" tone="muted" render={<h2 id="games" />}>
-          Your games
-        </Text>
+      <h2 id="games" className="sr-only">
+        Your games
+      </h2>
+      <div className="flex h-8 items-center justify-between gap-4 border-b border-border">
+        <Tabs value={shownFilter} onValueChange={(value: ShelfFilter) => setFilter(value)}>
+          <TabsList variant="underline" aria-label="Show games" className="h-8">
+            {(["all", "working", "published", "archived"] as const).map((key) =>
+              key !== "all" && groups[key].length === 0 ? null : (
+                <TabsTab key={key} value={key}>
+                  {labels[key]}
+                  <Text variant="meta" tone="dim" numeric>
+                    {groups[key].length}
+                  </Text>
+                </TabsTab>
+              ),
+            )}
+          </TabsList>
+        </Tabs>
         {canOpen ? <OpenGameLink /> : null}
       </div>
-      <ul role="list" className="grid grid-cols-2 gap-x-4 gap-y-5 @xl:grid-cols-3 @3xl:grid-cols-4">
+      <ul role="list" className="grid grid-cols-2 gap-x-5 gap-y-7 @3xl:grid-cols-3">
         {shown.map((cover) => (
-          <GameCard key={cover.game.projectId} cover={cover} onOpen={() => onOpen(cover)} />
+          <GameCard
+            key={cover.game.projectId}
+            cover={cover}
+            onOpen={() => onOpen(cover)}
+            onPublished={onPublished}
+          />
         ))}
       </ul>
-      {covers.length > shown.length ? (
+      {list.length > shown.length ? (
         <div className="flex justify-center">
           <Button size="sm" variant="ghost-muted" onClick={() => setAll(true)}>
-            Show all {covers.length}
+            Show all {list.length}
           </Button>
         </div>
       ) : null}
@@ -688,15 +747,50 @@ function ContinueShelf({
   );
 }
 
-function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
+const publishedOf = (result: AsyncResult.AsyncResult<GamePublishStatus, unknown>) =>
+  AsyncResult.isSuccess(result) ? result.value.published : null;
+
+function GameCard({
+  cover,
+  onOpen,
+  onPublished,
+}: {
+  cover: GameCover;
+  onOpen: () => void;
+  onPublished: (projectId: string, on: boolean) => void;
+}) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
   const { game } = cover;
+  // Where it is published on kurambit.com, read through the chat it opens to.
+  const publishedAt = useEnvironmentQuerySelector(
+    !leaseLiveStatus || cover.opens === null
+      ? null
+      : gameEnvironment.publishStatus({
+          environmentId: cover.opens.environmentId,
+          input: { threadId: cover.opens.id },
+        }),
+    publishedOf,
+  );
+  const isPublished = publishedAt != null;
+  useEffect(() => {
+    onPublished(game.projectId, isPublished);
+  }, [game.projectId, isPublished, onPublished]);
   const { status, build, still } = useGameLibraryLine({
     game,
     opens: cover.opens,
     chats: cover.chats,
     read: leaseLiveStatus,
   });
+  const chip =
+    status.tone === "live"
+      ? { tone: "live" as const, label: "Working" }
+      : status.tone === "failed"
+        ? { tone: "danger" as const, label: "Failed" }
+        : status.tone === "broken"
+          ? { tone: "danger" as const, label: "Does not start" }
+          : isPublished
+            ? { tone: "success" as const, label: "Published" }
+            : null;
   const name = useGameName(game.environmentId, game.projectId, game.name);
   const renaming = useGameRenameStore((state) => state.renaming === game.projectId);
   const rename = useRenameGame(game.environmentId);
@@ -723,11 +817,11 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
       root={game.root}
       path={picture}
       gameName={name}
-      mark="none"
-      className="aspect-video w-full rounded-xl ring-1 ring-foreground/8 ring-inset transition-shadow group-hover:ring-foreground/20 group-focus-visible:ring-2 group-focus-visible:ring-ring"
+      mark="monogram"
+      className="aspect-video w-full rounded-xl ring-1 ring-foreground/8 ring-inset transition-[translate,box-shadow] group-hover:-translate-y-0.5 group-hover:shadow-md group-hover:ring-foreground/20 group-focus-visible:ring-2 group-focus-visible:ring-ring"
     >
       {/* Without a picture yet: the Stage's last frame, else what is being made, said where
-          its picture will be, else the game's own colour. */}
+          its picture will be, else the game's pigment and initials, plainly a placeholder. */}
       {picture !== null ? null : shown !== null ? (
         <img src={shown} alt="" className="absolute inset-0 size-full object-cover" />
       ) : making ? (
@@ -735,6 +829,25 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           <GameLibraryStatusText status={status} />
         </span>
       ) : null}
+      {/* Where it stands, on the frame as a store's card shows it: at work, broken, published. */}
+      {chip === null ? null : (
+        <span className="absolute start-2 bottom-2 flex items-center gap-1.5 rounded-md bg-black/65 px-2 py-1 text-white">
+          <StatusDot tone={chip.tone} />
+          <Text variant="caption" tone="inherit">
+            {chip.label}
+          </Text>
+        </span>
+      )}
+      {/* What a click does, under the pointer: the whole card is the button. */}
+      <span
+        aria-hidden="true"
+        className="absolute end-2 bottom-2 flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+      >
+        <PlayIcon className="size-3 fill-current" />
+        <Text variant="caption" tone="inherit">
+          Open
+        </Text>
+      </span>
     </GamePicture>
   );
   return (
@@ -763,10 +876,16 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
           className="group flex w-full min-w-0 cursor-pointer flex-col gap-2.5 text-left outline-none"
         >
           {frame}
-          <span className="flex min-w-0 flex-col gap-0.5">
-            {/* The game's name in the serif, the one place a name is set as a title. */}
-            <span className="truncate font-display text-cover text-strong-foreground">{name}</span>
-            {making ? null : <GameLibraryStatusText status={status} />}
+          <span className="flex min-w-0 flex-col gap-1">
+            <Text variant="label" tone="strong" truncate>
+              {name}
+            </Text>
+            {/* Its latest build and when, or when it last moved while it has none yet. */}
+            {making ? null : (
+              <GameLibraryStatusText
+                status={{ ...status, at: status.at ?? cover.opens?.updatedAt ?? game.updatedAt }}
+              />
+            )}
             <CoverSummary build={build} status={status.text} />
           </span>
         </button>

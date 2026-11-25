@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import {
   gameLookId,
   type GamePlay,
@@ -16,6 +17,7 @@ import {
   type StudioReplayed,
 } from "@kurambit/contracts";
 
+import { resolveStorage } from "../../lib/storage";
 import { clearStageConsole, watchLog } from "./gameStageWatch";
 
 const LOOK_ID_PREFIX = gameLookId("");
@@ -86,12 +88,28 @@ export const useStageBridge = create<StageBridgeState>()(() => ({
 }));
 
 /**
- * The last frame the folder's game showed, per thread: what the strip's Now stands for, so
- * Now shows the game itself instead of a blank. Taken when the game freezes (the Stage lost
- * focus, or the person froze it), so capturing never costs a frame of play. In memory only:
- * a reload takes a new one as the game comes up and is held.
+ * The last frame the folder's game showed, per thread: what the strip's Now stands for, and
+ * the game's Home card before any build has a measured picture. Taken when the game freezes
+ * (the Stage lost focus, or the person froze it), so capturing never costs a frame of play.
+ * Kept on this device across reloads, for the most recent games only: a card keeps the face
+ * the game last showed instead of falling back to a plate. A small webp per thread.
  */
-const useStageStills = create<Readonly<Record<string, string>>>()(() => ({}));
+const STAGE_STILLS_KEPT = 24;
+const useStageStills = create<Readonly<Record<string, string>>>()(
+  persist(() => ({}), {
+    name: "kurambit:stage-stills:v1",
+    version: 1,
+    storage: createJSONStorage(() => resolveStorage(globalThis.localStorage)),
+  }),
+);
+/** The newest still for a thread goes last; the oldest beyond the cap are dropped. */
+const rememberStill = (threadKey: string, still: string) =>
+  useStageStills.setState((stills) => {
+    const { [threadKey]: _previous, ...rest } = stills;
+    return Object.fromEntries(
+      [...Object.entries(rest), [threadKey, still] as const].slice(-STAGE_STILLS_KEPT),
+    );
+  }, true);
 
 /**
  * A build's picture taken from the Stage while it played, by build id: what its card shows
@@ -151,7 +169,7 @@ const keepStill = (owner: string, png: string) => {
   const threadKey = owner.slice(0, owner.indexOf("\0"));
   void shrinkStill(png).then((still) => {
     // A frame that arrives after its game left the Stage is still that game's last frame.
-    if (still !== null) useStageStills.setState({ [threadKey]: still });
+    if (still !== null) rememberStill(threadKey, still);
   });
 };
 

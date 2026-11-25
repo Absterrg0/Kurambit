@@ -74,7 +74,7 @@ export function GameBuildStill({
  * name would pass for a frame), a plain neutral surface (a build in History, where a letter or
  * the game's colour would read as a picture), or nothing (a picture drawn over it anyway).
  */
-export type GamePictureMark = "name" | "initial" | "absent" | "blank" | "none";
+export type GamePictureMark = "name" | "initial" | "monogram" | "absent" | "blank" | "none";
 
 /**
  * A game with no picture: its own pigment with its name as a title card, or T3's project tile
@@ -128,6 +128,12 @@ function GameTitleMark({
         boxShadow: `inset 0 0 0 1px color-mix(in oklch, oklch(from ${pigment} 0.75 calc(c * 1.6) h) 32%, transparent)`,
       }}
     >
+      {mark === "monogram" && name !== "" ? (
+        // A game that never showed a frame: its pigment and initials, plainly a placeholder.
+        <span className="text-title tracking-widest text-white/55">
+          {deriveProjectIdentity(name).monogram}
+        </span>
+      ) : null}
       {mark !== "name" || name === "" ? null : (
         <span className="line-clamp-2 font-display text-sm/tight text-balance text-white/85 @[7rem]:text-xl/tight @3xs:text-2xl/tight @sm:text-3xl/tight">
           {name}

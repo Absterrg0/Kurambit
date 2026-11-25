@@ -136,7 +136,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
      base; phones read every role one step larger, and the prompt role stays at
      16px or more so iOS does not zoom into a focused field. In rem, so the
      interface font-size preference scales them. */
-  --type-hero: 2.25rem;
+  --type-hero: 1.75rem;
   --type-title: 1.5rem;
   --type-prompt: max(1rem, 16px);
   --type-label: 0.9375rem;
@@ -152,7 +152,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 
   @variant sm {
     --workspace-gutter: 1.25rem;
-    --type-hero: 2.875rem;
+    --type-hero: 2rem;
     --type-title: 1.375rem;
     --type-prompt: 0.875rem;
     --type-label: 0.875rem;
