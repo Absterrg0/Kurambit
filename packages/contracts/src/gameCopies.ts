@@ -26,7 +26,12 @@ export type GameCopyConflict = typeof GameCopyConflict.Type;
  */
 export const GameCopyState = Schema.Union([
   Schema.TaggedStruct("working", {}),
-  Schema.TaggedStruct("checking", { play: NonNegativeInt, plays: NonNegativeInt }),
+  Schema.TaggedStruct("checking", {
+    play: NonNegativeInt,
+    plays: NonNegativeInt,
+    /** Its check has not started: other plays of the game (another chat's checks) go first. */
+    queued: Schema.optionalKey(Schema.Boolean),
+  }),
   Schema.TaggedStruct("ready", {}),
   Schema.TaggedStruct("same", {}),
   Schema.TaggedStruct("conflicts", { files: Schema.Array(GameCopyConflict) }),

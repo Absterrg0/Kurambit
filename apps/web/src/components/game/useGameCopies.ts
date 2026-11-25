@@ -100,11 +100,13 @@ export const notInGameLine = (place: GameCopyPlace) =>
 export const checkingStep = (state: GameCopyPlace["state"]) =>
   state._tag !== "checking"
     ? null
-    : state.play === 0
-      ? state.plays === 0
-        ? "boots"
-        : `boots, then ${state.plays} test play${state.plays === 1 ? "" : "s"}`
-      : `test play ${state.play} of ${state.plays}`;
+    : state.queued === true
+      ? "after the game's other checks"
+      : state.play === 0
+        ? state.plays === 0
+          ? "boots"
+          : `boots, then ${state.plays} test play${state.plays === 1 ? "" : "s"}`
+        : `test play ${state.play} of ${state.plays}`;
 
 /** Text files still holding both sides: Bring in waits for them to be resolved. */
 export const unresolvedText = (place: GameCopyPlace) =>

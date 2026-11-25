@@ -180,7 +180,7 @@ const make = Effect.gen(function* () {
     {
       readonly fiber: Fiber.Fiber<GameBringInResult, GameOperationError>;
       readonly skip: Deferred.Deferred<void>;
-      progress: { readonly play: number; readonly plays: number } | null;
+      progress: { readonly play: number; readonly plays: number; readonly queued: boolean } | null;
     }
   >();
 
@@ -685,23 +685,29 @@ const make = Effect.gen(function* () {
           () => 0,
         ),
       );
-      const progress = (play: number) =>
+      const progress = (play: number, queued: boolean) =>
         Effect.suspend(() => {
           if (flight === undefined) return Effect.void;
-          flight.progress = { play, plays };
+          flight.progress = { play, plays, queued };
           return operations.changed(g.root, GAME_BUILDS_EVENT, "A bring-in is being checked.");
         });
-      yield* progress(0);
-      // The candidate's facts say how far its check is: its boot, then each test play.
+      yield* progress(0, true);
+      // The candidate's facts say how far its check is: queued behind the game's other plays
+      // until it starts, then its boot, then each test play.
+      const started = `Measuring build ${candidate.slice(0, 8)}.`;
       const said = `Build ${candidate.slice(0, 8)}: test play `;
       yield* operations.events.pipe(
         Stream.filter(
           (event) =>
             event.root === g.root &&
             event.name === GAME_FACTS_EVENT &&
-            event.message.startsWith(said),
+            (event.message === started || event.message.startsWith(said)),
         ),
-        Stream.runForEach((event) => progress(Number.parseInt(event.message.slice(said.length)))),
+        Stream.runForEach((event) =>
+          event.message === started
+            ? progress(0, false)
+            : progress(Number.parseInt(event.message.slice(said.length)), false),
+        ),
         Effect.forkScoped,
       );
       const resolved = (build: string) =>
