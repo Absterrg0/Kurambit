@@ -29,7 +29,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent, ReactNode } from "react";
+import type { ClipboardEvent, KeyboardEvent } from "react";
 
 import { isElectron } from "../../env";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
@@ -734,7 +734,7 @@ function ContinueShelf({
 function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
   const { leaseLiveStatus, rowRef } = useSidebarRowSubscriptionLease(false);
   const { game } = cover;
-  const { status, build, still } = useGameLibraryLine({
+  const { status, still } = useGameLibraryLine({
     game,
     opens: cover.opens,
     chats: cover.chats,
@@ -768,8 +768,6 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
       ? ""
       : scopedThreadKey(scopeThreadRef(cover.opens.environmentId, cover.opens.id)),
   );
-  // A game at work with no picture to show says so in its line, not in the thumbnail.
-  const making = picture === null && shown === null && status.tone === "live";
   const thumb = (
     <GamePicture
       environmentId={game.environmentId}
@@ -818,10 +816,7 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
             {name}
           </Text>
         )}
-        <span className="flex min-w-0 items-center gap-1.5">
-          {meta}
-          {making ? null : <CoverSummary build={build} status={status.text} />}
-        </span>
+        {meta}
       </span>
       {chip === null ? null : (
         <span className="flex shrink-0 items-center gap-1.5 pe-8 text-muted-foreground">
@@ -917,23 +912,5 @@ function GameCard({ cover, onOpen }: { cover: GameCover; onOpen: () => void }) {
         </Menu>
       </span>
     </li>
-  );
-}
-
-/** What the latest build was asked to do, in the person's words. */
-function CoverSummary({
-  build,
-  status,
-}: {
-  build: { readonly summary: string } | null;
-  status: string;
-}): ReactNode {
-  const summary = build?.summary.trim() ?? "";
-  // A build named by its summary already says it in the status line.
-  if (summary.length === 0 || summary === status) return null;
-  return (
-    <Text variant="meta" tone="dim" truncate>
-      {summary}
-    </Text>
   );
 }
