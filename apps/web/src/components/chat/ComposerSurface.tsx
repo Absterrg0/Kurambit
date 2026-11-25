@@ -3,8 +3,8 @@ import type { ComponentProps } from "react";
 import { cn } from "~/lib/utils";
 
 /**
- * `tray`: one container holding what goes with the next message (tray rows), the raised text box,
- * and a flat footer of quiet controls under it. A game's composer.
+ * `tray`: a game's composer. No surface of its own: a quiet row of context above (Footer), then
+ * the raised text box, one calm card holding the words and its own controls.
  */
 function Shell({
   contextStrip = false,
@@ -18,7 +18,7 @@ function Shell({
         data-slot="composer-shell"
         data-composer-tray=""
         className={cn(
-          "@container/composer-surface group/composer-surface relative isolate mx-auto flex w-full max-w-(--chat-content-max-width) flex-col rounded-2xl surface-tray",
+          "@container/composer-surface group/composer-surface relative isolate mx-auto flex w-full max-w-(--chat-content-max-width) flex-col gap-1",
           "[--chat-composer-glass-surface:var(--card)]",
           className,
         )}
@@ -86,7 +86,7 @@ function Main({ className, tray = false, ...props }: ComponentProps<"div"> & { t
     return (
       <div
         data-chat-composer-main-surface="true"
-        className={cn("group relative z-10 -mx-px rounded-xl surface-composer", className)}
+        className={cn("group relative z-10 rounded-xl surface-composer", className)}
         {...props}
       />
     );
@@ -127,13 +127,14 @@ function ContextStrip({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-/** The tray's footer: flat, inside its bottom edge, small muted controls left and right. */
+/** A game composer's context row, above its box: small muted chips left and right, no surface. */
 function Footer({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="composer-tray-footer"
       className={cn(
-        "flex h-7.5 min-w-0 items-center justify-between gap-2 ps-1.5 pe-1.5 text-muted-foreground",
+        // Nothing to say (no copy, no run choice): no row at all, rather than an empty gap.
+        "flex h-7 min-w-0 items-center gap-1 px-0.5 text-muted-foreground empty:hidden",
         className,
       )}
       {...props}

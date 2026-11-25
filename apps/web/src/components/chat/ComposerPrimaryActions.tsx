@@ -65,17 +65,17 @@ interface ComposerPrimaryActionsProps {
    */
   keepGoingSend?: "start" | "steer" | null;
   /**
-   * `pill`: a small square pill a step darker than the text box, holding Send, or Stop in the same
-   * place while a turn runs. A game's composer.
+   * `pill`: a small rounded square in the accent, the composer's one lit control, holding Send,
+   * or Stop in the same place while a turn runs. A game's composer.
    */
   look?: "disc" | "pill";
 }
 
 // The pill and its one 32px slot, concentric inside it.
 const SEND_PILL_CLASS_NAME =
-  "relative isolate inline-flex size-8 shrink-0 items-center justify-center rounded-lg surface-pill";
+  "relative isolate inline-flex size-8 shrink-0 items-center justify-center rounded-md surface-lit";
 const SEND_PILL_SLOT_CLASS_NAME =
-  "flex size-full cursor-pointer items-center justify-center rounded-lg text-foreground outline-none transition-colors duration-150 enabled:hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-48 [&_svg]:pointer-events-none";
+  "flex size-full cursor-pointer items-center justify-center rounded-md text-primary-foreground outline-none transition-colors duration-150 enabled:hover:bg-black/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:pointer-events-none";
 
 const formatPendingPrimaryActionLabel = (input: {
   compact: boolean;

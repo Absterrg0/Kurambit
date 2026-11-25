@@ -6395,6 +6395,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           />
         ) : null}
       </ComposerBanner.Dock>
+      {gameThread && !isComposerApprovalState ? (
+        // A game's context, in a quiet row above the box: whether this chat works in a copy and
+        // how the message runs.
+        <ComposerSurface.Footer data-chat-composer-context="true">
+          <GameCopyChip threadRef={routeKind === "server" ? routeThreadRef : null} />
+          <GameRunPicker
+            threadRef={routeKind === "server" ? routeThreadRef : null}
+            disabled={!canOperateThread}
+          />
+        </ComposerSurface.Footer>
+      ) : null}
       <div className="relative">
         <ComposerSurface.Main
           tray={gameThread}
@@ -6483,7 +6494,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               className={cn(
                 "relative",
                 // A game's text row: the field, then Attach and Send inside it on the right.
-                gameThread ? "py-2 ps-3.5 pe-2" : "px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4",
+                gameThread ? "ps-3.5 pe-2 pt-2.5 pb-2" : "px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
                 isComposerResting && "py-2 sm:py-2",
@@ -7041,15 +7052,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </Text>
                   </span>
                 ) : null}
-                {gameThread && !isComposerApprovalState ? (
-                  <div
-                    data-chat-composer-actions="right"
-                    className="flex shrink-0 items-center gap-1.5 self-end"
-                  >
-                    {composerAttachAction}
-                    {footerPrimaryActions}
-                  </div>
-                ) : null}
                 {isComposerResting ? collapsedComposerImagePreviews : null}
                 {showMobilePendingAnswerActions ? (
                   <div
@@ -7082,6 +7084,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </div>
                 ) : null}
               </div>
+              {gameThread && !isComposerApprovalState ? (
+                // A game's box holds only the words and this row: attach and the model with its
+                // muted thinking on the left, the one lit Send on the right.
+                <div
+                  data-chat-composer-actions="bottom"
+                  className="mt-1 -ms-2 flex min-w-0 items-center gap-1"
+                >
+                  {composerAttachAction}
+                  <div
+                    ref={attachExpandedComposerControls}
+                    data-chat-composer-footer-controls="true"
+                    className="flex min-w-0 flex-1 items-center gap-0.5 [&_[data-composer-control-chevron]]:hidden"
+                  >
+                    {composerControls}
+                  </div>
+                  {/* Always here, whatever the coding chats' meter setting: it is where Compact lives. */}
+                  {activeContextWindow ? (
+                    <ContextWindowMeter
+                      variant="footer"
+                      usage={activeContextWindow}
+                      modelDisplayName={activeThreadModelDisplayName}
+                      onCompact={compactCommandAvailable ? compactThreadContextStable : undefined}
+                      compactDisabled={
+                        compactDisabled || noProviderAvailable || isSendBusy || isConnecting
+                      }
+                      compactDisabledReason={resolvedCompactDisabledReason}
+                      compactBeforeSendTokens={props.resumeCompactionTokens}
+                      keepFullHistory={props.keepFullHistory}
+                      onToggleKeepFullHistory={props.onToggleKeepFullHistory}
+                    />
+                  ) : null}
+                  {footerPrimaryActions}
+                </div>
+              ) : null}
             </div>
 
             <ComposerPromptLengthValidation
@@ -7153,41 +7189,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
         </ComposerSurface.Main>
       </div>
-      {gameThread && !isComposerApprovalState ? (
-        // A game's footer, flat under the text box: how the message runs on the left; the model,
-        // its thinking and the context meter on the right. Labels fold to icons before anything wraps.
-        <ComposerSurface.Footer data-chat-composer-footer="true">
-          <GameCopyChip threadRef={routeKind === "server" ? routeThreadRef : null} />
-          <GameRunPicker
-            threadRef={routeKind === "server" ? routeThreadRef : null}
-            disabled={!canOperateThread}
-          />
-          <div
-            ref={attachExpandedComposerControls}
-            data-chat-composer-footer-controls="true"
-            // Her footer's right end names its settings without menu chevrons.
-            className="flex min-w-0 flex-1 items-center justify-end gap-0.5 [&_[data-composer-control-chevron]]:hidden"
-          >
-            {composerControls}
-            {/* Always here, whatever the coding chats' meter setting: it is where Compact lives. */}
-            {activeContextWindow ? (
-              <ContextWindowMeter
-                variant="footer"
-                usage={activeContextWindow}
-                modelDisplayName={activeThreadModelDisplayName}
-                onCompact={compactCommandAvailable ? compactThreadContextStable : undefined}
-                compactDisabled={
-                  compactDisabled || noProviderAvailable || isSendBusy || isConnecting
-                }
-                compactDisabledReason={resolvedCompactDisabledReason}
-                compactBeforeSendTokens={props.resumeCompactionTokens}
-                keepFullHistory={props.keepFullHistory}
-                onToggleKeepFullHistory={props.onToggleKeepFullHistory}
-              />
-            ) : null}
-          </div>
-        </ComposerSurface.Footer>
-      ) : null}
     </form>
   );
 });

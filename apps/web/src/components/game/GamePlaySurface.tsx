@@ -276,7 +276,7 @@ export function GamePlaySurface({
       <div
         ref={setWell}
         data-game-play-surface="true"
-        className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl bg-stage-well [container-type:size]"
+        className="group/stage relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-t-xl bg-stage-well ring-1 ring-border [container-type:size]"
       >
         <div
           data-game-device-frame={device === null ? undefined : ""}
@@ -358,7 +358,7 @@ export function GamePlaySurface({
         {/* The well's edge drawn above the game, so its rounded corners read the same all round. */}
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-30 rounded-xl ring-1 ring-white/6 ring-inset"
+          className="pointer-events-none absolute inset-0 z-30 rounded-t-xl ring-1 ring-white/6 ring-inset"
         />
       </div>
     </>

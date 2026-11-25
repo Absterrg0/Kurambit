@@ -450,7 +450,7 @@ export function GameStageLoading({ hero = false }: { hero?: boolean } = {}) {
       </div>
       <div
         data-stage-fit=""
-        className="mx-auto grid shrink-0 place-items-center rounded-xl bg-stage-well"
+        className="mx-auto grid shrink-0 place-items-center rounded-t-xl bg-stage-well ring-1 ring-border"
         style={fit ?? { width: 0, height: 0 }}
       >
         {/* Named from the first frame: the working area never sits blank after the splash. */}
@@ -458,7 +458,12 @@ export function GameStageLoading({ hero = false }: { hero?: boolean } = {}) {
           Opening game…
         </Text>
       </div>
-      <div className="h-11 shrink-0" />
+      {/* The bar's place, already attached under the Stage, so nothing moves when it arrives. */}
+      <div
+        className="mx-auto h-9 shrink-0 rounded-b-xl border border-t-0 border-border bg-card"
+        style={fit === null ? undefined : { width: fit.width }}
+      />
+      <div className="h-2 shrink-0" />
     </section>
   );
 }
@@ -1644,7 +1649,7 @@ function ThreadGameStage({
             data-game-play-surface="build"
             data-stage-fit=""
             className={cn(
-              "group/stage relative flex min-h-0 items-center justify-center self-center overflow-hidden rounded-xl bg-stage-well [container-type:size]",
+              "group/stage relative flex min-h-0 items-center justify-center self-center overflow-hidden rounded-t-xl bg-stage-well ring-1 ring-border [container-type:size]",
               stageFit === null ? "flex-1" : "shrink-0",
             )}
             style={stageFit !== null ? stageFitStyle : undefined}
@@ -1780,7 +1785,12 @@ function ThreadGameStage({
       </div>
       <div
         data-game-controls=""
-        className={cn("mx-auto h-9 w-full shrink-0 items-center", collapsed ? "hidden" : "flex")}
+        // The Stage's own bar, attached under it as one unit: the game's width, a level up from
+        // the page, closing the frame's edge around the bottom.
+        className={cn(
+          "mx-auto h-9 w-full shrink-0 items-center rounded-b-xl border border-t-0 border-border bg-card px-1",
+          collapsed ? "hidden" : "flex",
+        )}
         // The bar spans the game, which is wider than the chat's lane while the chat is empty.
         style={{ maxWidth: stageFit?.width ?? column ?? undefined }}
       >
