@@ -4,8 +4,8 @@ Usage: python3 scripts/export-atmosphere.py
 
 Needs Pillow. Each pixel of the image is one dither cell; the web draws it at
 2 CSS px per cell with pixelated scaling, so the cells stay crisp. A field of
-light (strongest at the top, in soft vertical shafts, gone by about half the
-height) is thresholded against an 8x8 Bayer matrix, like an old printed
+light (strongest at the top, in vertical shafts with dark gaps between, gone
+by about two-thirds of the height) is thresholded against an 8x8 Bayer matrix, like an old printed
 halftone. Cells that are off stay transparent, so the panel shows through.
 """
 
@@ -48,9 +48,11 @@ def gauss(x, mu, sigma):
 
 def light(u, v):
     """The light at (u, v) in 0..1, u across, v down."""
-    shafts = 0.42 + 0.32 * gauss(u, 0.57, 0.15) + 0.28 * gauss(u, 0.03, 0.09)
-    shafts += 0.16 * gauss(u, 0.86, 0.12) + 0.08 * math.sin(u * 23.0 + 1.3)
-    fall = (1 - smoothstep(0.0, 1.0, v)) ** 1.1
+    # Two shafts with real darkness between them, as in a dim hall lit from high windows:
+    # a wide one right of centre, a narrower one at the left edge, a faint glow at the right.
+    shafts = 0.84 * gauss(u, 0.57, 0.12) + 0.72 * gauss(u, 0.0, 0.11)
+    shafts += 0.12 * gauss(u, 0.93, 0.1) + 0.05
+    fall = (1 - smoothstep(0.0, 0.85, v)) ** 1.6
     # Capped below 1 so even the brightest light keeps a few holes, as a print does.
     return min(max(shafts * fall, 0.0), 0.9)
 
@@ -74,8 +76,8 @@ def render(dim, bright, strength):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    # Dark: dim amber on the ink panel, its brightest cells about #4c2d08.
-    render((36, 22, 4), (76, 45, 8), 1.0).save(OUT / "atmosphere-dark.png", optimize=True)
+    # Dark: dim amber on the ink panel, its brightest cells about #3c2405.
+    render((30, 18, 3), (60, 36, 5), 1.0).save(OUT / "atmosphere-dark.png", optimize=True)
     # Light: a warm vermilion wash on paper, fainter so it never competes with ink text.
     render((248, 232, 220), (240, 204, 178), 0.65).save(OUT / "atmosphere-light.png", optimize=True)
 
