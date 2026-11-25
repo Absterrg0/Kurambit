@@ -1012,7 +1012,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { Kbd } from "../ui/kbd";
 import { Text } from "../ui/text";
-import { CircleAlertIcon, PaperclipIcon, PlayIcon, ShieldIcon, XIcon } from "lucide-react";
+import { CircleAlertIcon, PlayIcon, PlusIcon, ShieldIcon, XIcon } from "lucide-react";
 import { proposedPlanTitle } from "@kurambit/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
@@ -6057,7 +6057,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           render={
             <Button
               type="button"
-              variant="ghost"
+              variant="ghost-muted"
               size="icon-sm"
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => attachmentInputRef.current?.click()}
@@ -6065,7 +6065,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             />
           }
         >
-          <PaperclipIcon />
+          <PlusIcon />
         </TooltipTrigger>
         <TooltipPopup>Attach files</TooltipPopup>
       </Tooltip>
