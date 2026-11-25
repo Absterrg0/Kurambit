@@ -649,7 +649,9 @@ function TuneFooter({
             ? `${count}, not saved: this connection cannot change the game`
             : state.kind === "waiting"
               ? `${count}, saved when the agent's turn ends`
-              : count}
+              : state.kind === "kept"
+                ? `${count}, kept as a build`
+                : count}
         </Text>
       )}
       {state.kind === "failed" ? (
