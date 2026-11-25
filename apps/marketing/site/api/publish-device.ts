@@ -16,8 +16,8 @@ import {
 import { ensureSchema, hashKey, newKey } from "./_publish.js";
 
 const DEVICE_MINUTES = 10;
-/** Seconds the app waits between polls. */
-const INTERVAL = 3;
+/** Seconds the app waits between polls: under the firewall's 20 calls a minute per address. */
+const INTERVAL = 5;
 /** Sign-ins one address may have waiting at once. */
 const MAX_WAITING_PER_IP = 5;
 /** No vowels or look-alikes, so a code never spells a word or misreads. */
