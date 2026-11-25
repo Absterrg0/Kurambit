@@ -4,8 +4,9 @@ import { AsyncResult } from "effect/reactivity";
 
 import { gameEnvironment } from "../../state/game";
 import { useEnvironmentQuerySelector } from "../../state/query";
-import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { StatusDot } from "../ui/status-dot";
+import { Text } from "../ui/text";
 
 const publishedOf = (result: AsyncResult.AsyncResult<GamePublishStatus, unknown>) =>
   AsyncResult.isSuccess(result) ? result.value.published : null;
@@ -28,23 +29,29 @@ export function GameStatusChip({
     }),
     publishedOf,
   );
+  // Quiet words in the top bar, as T3's header states, never a framed chip.
   if (working)
     return (
-      <Badge variant="outline" className="shrink-0">
+      <Text
+        variant="meta"
+        tone="muted"
+        render={<span className="flex shrink-0 items-center gap-1.5 px-1" />}
+      >
         <StatusDot tone="live" />
         Working
-      </Badge>
+      </Text>
     );
   if (published == null) return null;
   return (
-    <Badge
-      variant="outline"
+    <Button
+      size="xs"
+      variant="ghost-muted"
       className="shrink-0"
       render={<a href={published.url} target="_blank" rel="noreferrer" />}
     >
       <StatusDot tone="success" />
       Published
       <ArrowUpRightIcon aria-hidden="true" />
-    </Badge>
+    </Button>
   );
 }
