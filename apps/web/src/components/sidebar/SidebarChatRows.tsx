@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   ArchiveRestoreIcon,
   CircleCheckIcon,
@@ -88,6 +88,7 @@ function RowNote({ note }: { note: Exclude<ChatNote, null> }) {
  */
 export function SidebarChatRow({
   picture,
+  pigment,
   game,
   title,
   time,
@@ -106,6 +107,8 @@ export function SidebarChatRow({
   rowProps,
 }: {
   picture: ReactNode;
+  /** The game's pigment: the open chat's row takes a soft tint and a thin edge in it. */
+  pigment: string;
   game: string;
   title: string;
   time: ReactNode;
@@ -196,8 +199,10 @@ export function SidebarChatRow({
           aria-current={active ? "page" : undefined}
           className={cn(
             surface,
-            "cursor-pointer select-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:surface-sidebar-row-selected",
+            "cursor-pointer select-none transition-[background-color,box-shadow] not-data-[active=true]:hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+            "data-[active=true]:surface-sidebar-row-pigment",
           )}
+          style={{ "--row-pigment": pigment } as CSSProperties}
           onClick={(event) => {
             if (event.detail > 1) return;
             onOpen();

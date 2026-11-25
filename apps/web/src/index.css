@@ -1553,6 +1553,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   box-shadow: inset 0 0 0 1px var(--sidebar-row-selected-rim);
 }
 
+/* The open chat's row: a soft tint and a thin edge in its game's pigment, which the row sets
+   as --row-pigment at runtime. Pigments are deep inks, so dark lifts them before mixing. */
+@utility surface-sidebar-row-pigment {
+  --row-ink: var(--row-pigment);
+  background: color-mix(in oklch, var(--row-ink) 9%, var(--sidebar));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--row-ink) 20%, transparent);
+
+  @variant dark {
+    --row-ink: color-mix(in oklch, var(--row-pigment), white 38%);
+    background: color-mix(in oklch, var(--row-ink) 14%, var(--sidebar));
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--row-ink) 28%, transparent);
+  }
+}
+
 /* Checked controls and switch thumbs. */
 @utility surface-gloss-on {
   background: linear-gradient(var(--primary), var(--primary));

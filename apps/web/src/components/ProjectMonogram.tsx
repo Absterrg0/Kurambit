@@ -7,10 +7,13 @@ const monogramSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme
 export function ProjectMonogram({
   text,
   color,
+  pigment,
   className,
 }: {
   readonly text: string;
   readonly color: ProjectIconColor;
+  /** A solid tile in this colour with light letters, for a game whose pigment is its identity. */
+  readonly pigment?: string | undefined;
   readonly className?: string | undefined;
 }) {
   // Wrapped like the emoji and Lucide branches so the monogram sits where an
@@ -26,10 +29,10 @@ export function ProjectMonogram({
         viewBox="0 0 16 16"
         className={cn(
           "size-full overflow-hidden rounded-[25%] font-mono select-none",
-          projectIconColorClassName(color),
+          pigment === undefined ? projectIconColorClassName(color) : "text-white/90",
         )}
         style={{
-          backgroundColor: "color-mix(in srgb, currentColor 14%, transparent)",
+          backgroundColor: pigment ?? "color-mix(in srgb, currentColor 14%, transparent)",
         }}
       >
         <text

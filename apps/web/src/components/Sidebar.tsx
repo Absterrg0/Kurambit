@@ -73,7 +73,7 @@ import {
 import { useNewGame } from "./game/gameEntryStore";
 import { doesNotStart } from "./game/gameBuilds.logic";
 import { GameLibraryPicture } from "./game/GameLibraryStatus";
-import { chatTitle } from "./game/gameLibrary.logic";
+import { chatTitle, gamePigment } from "./game/gameLibrary.logic";
 import { GameNameInput, useGameName } from "./game/GameName";
 import { useGameActions } from "./game/useGameActions";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
@@ -762,6 +762,7 @@ function ChatRow({
   return (
     <div ref={rowRef}>
       <SidebarChatRow
+        pigment={gamePigment(name)[0]}
         picture={
           <GameLibraryPicture
             game={game}

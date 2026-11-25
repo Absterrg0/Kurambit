@@ -104,14 +104,15 @@ function GameTitleMark({
         </span>
       </span>
     );
-  // At icon size a game is T3's project tile: two letters fitted to the square, in the colour
-  // its name picks. A letter of our own did not fit a 16 px icon.
+  // At icon size a game is T3's project tile, two letters fitted to the square, filled with the
+  // game's pigment so the tile, its row and its cover read as one game.
   if (mark === "initial" && name !== "") {
     const identity = deriveProjectIdentity(name);
     return (
       <ProjectMonogram
         text={identity.monogram}
         color={identity.color}
+        pigment={pigment}
         className="absolute inset-0 size-full"
       />
     );

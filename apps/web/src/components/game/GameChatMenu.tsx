@@ -77,16 +77,17 @@ export function GameChatMenu({ threadRef }: { threadRef: ScopedThreadRef }) {
         <Menu>
           <MenuTrigger
             render={
+              // The chat is the second crumb: quieter than its game until the pointer is on it.
               <Button
                 size="sm"
-                variant="ghost"
+                variant="ghost-muted"
                 data-game-chat-menu=""
                 aria-label={`${title}, chat menu`}
                 className="min-w-0 shrink"
               />
             }
           >
-            <Text variant="label" tone="default" truncate>
+            <Text variant="label" tone="inherit" truncate>
               {title}
             </Text>
             <ChevronDownIcon className="text-dim-foreground" aria-hidden="true" />
