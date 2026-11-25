@@ -41,17 +41,17 @@ const STANDARD_THEME_PREVIEW_COLORS: Record<
   Readonly<Record<ThemePreviewRole, string>>
 > = {
   light: {
-    sidebar: "#f2f0eb",
+    sidebar: "#f6f5f2",
     surface: "#fefdfb",
     accentSurface: "#f2efe8",
     messageSurface: "#f2efe8",
     ...SHARED_STANDARD_THEME_PREVIEW_COLORS.light,
   },
   dark: {
-    sidebar: "#111110",
-    surface: "#1b1a18",
-    accentSurface: "#24221f",
-    messageSurface: "#211f1d",
+    sidebar: "#000000",
+    surface: "#0d0c0b",
+    accentSurface: "#161514",
+    messageSurface: "#181716",
     ...SHARED_STANDARD_THEME_PREVIEW_COLORS.dark,
   },
 };
