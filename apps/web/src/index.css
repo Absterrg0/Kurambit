@@ -92,15 +92,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --appearance-contrast-boost: 0%;
   --appearance-contrast-border-boost: 0%;
   --appearance-contrast-target: black;
-  --app-scrollbar-thumb: rgb(217 217 217);
-  --app-scrollbar-thumb-hover: rgb(191 191 191);
+  --app-scrollbar-thumb: rgb(40 32 20 / 14%);
+  --app-scrollbar-thumb-hover: rgb(40 32 20 / 24%);
   /* A thumb that stays on screen as the sign of more below: about 2:1 on the page. */
-  --app-scrollbar-thumb-strong: rgb(181 181 181);
+  --app-scrollbar-thumb-strong: rgb(40 32 20 / 30%);
   /*
    * Compact UI geometry. Keep these values semantic so sidebar, palette,
    * tooltip, and toolbar controls cannot quietly drift apart.
    */
-  --control-radius: 0.5rem;
+  --control-radius: 0.375rem;
   --sidebar-content-inset: 0.5rem;
   --sidebar-control-gap: 0.5rem;
   --sidebar-icon-color: color-mix(
@@ -163,9 +163,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 
   @variant dark {
     --appearance-contrast-target: white;
-    --app-scrollbar-thumb: rgb(255 255 255 / 8%);
-    --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
-    --app-scrollbar-thumb-strong: rgb(255 255 255 / 28%);
+    --app-scrollbar-thumb: rgb(255 248 235 / 10%);
+    --app-scrollbar-thumb-hover: rgb(255 248 235 / 16%);
+    --app-scrollbar-thumb-strong: rgb(255 248 235 / 28%);
     --glass-blur: 16px;
     --glass-saturation: 1.08;
   }
@@ -213,7 +213,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --font-mono:
     "Geist Mono Variable", ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas,
     "Liberation Mono", monospace;
-  /* Brand moments only: page titles, empty states and the wordmark. */
+  /* Three places only: the Home headline, game titles on Home cards and dialog titles. */
   --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
   /* Read by every transition-* utility without its own duration. */
   --default-transition-duration: var(--motion-fast);
@@ -352,7 +352,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
-  /* Vermilion, only for what is live: an agent at work, a build being made. */
+  /* Vermilion's live tone: an agent at work, a build being made. */
   --color-live: var(--live);
   --color-popover-foreground: var(--contrast-popover-foreground);
   --color-popover: var(--popover);
@@ -376,12 +376,14 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --color-sidebar-row-active: var(--sidebar-row-active);
   --color-sidebar-row-selected: var(--sidebar-row-selected);
   --color-sidebar-border: var(--contrast-sidebar-border);
+  /* Three corners: 6px for controls (md), 8px for rows and panels (lg), 12px for cards
+     and floating surfaces (xl). The larger steps stay at 12 so nothing balloons. */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-2xl: calc(var(--radius) + 4px);
+  --radius-3xl: calc(var(--radius) + 4px);
   @keyframes skeleton {
     /* The single loading-bar breath used by every skeleton: one opacity pulse
        per container, stepped so however many bars sit under it, the compositor
@@ -477,21 +479,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 
 /* Paint find results without changing rendered markdown or copied text. */
 ::highlight(kurambit-thread-find) {
-  color: var(--app-theme-search-match-foreground, oklch(0.216164 0.028283 77.423));
-  background-color: var(--app-theme-search-match-background, oklch(0.915 0.11 85));
+  color: var(--app-theme-search-match-foreground, #1b1916);
+  background-color: var(--app-theme-search-match-background, #f2c9a9);
 
   @variant dark {
-    color: var(--app-theme-search-match-foreground, oklch(0.970151 0 0));
-    background-color: var(--app-theme-search-match-background, oklch(0.55 0.1 85));
+    color: var(--app-theme-search-match-foreground, #ffffff);
+    background-color: var(--app-theme-search-match-background, #4a2e1d);
   }
 }
 
 ::highlight(kurambit-thread-find-active) {
-  color: var(--app-theme-search-match-active-foreground, oklch(0.216164 0.028283 77.423));
-  background-color: var(
-    --app-theme-search-match-active-background,
-    oklch(0.774202 0.151946 74.331)
-  );
+  color: var(--app-theme-search-match-active-foreground, #ffffff);
+  background-color: var(--app-theme-search-match-active-background, var(--primary));
 }
 
 @utility dialog-glass {
@@ -1232,8 +1231,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --surface-shadow: var(--surface-base-shadow);
 }
 
-/* The primary action: a plain light fill in dark, a dark fill in light. Never
-   vermilion, which marks only what is live. */
+/* The primary action: the vermilion fill, the one accent. */
 @utility surface-lit {
   --surface-fill: var(--lit-fill);
   --surface-rim: var(--lit-rim);
@@ -1307,7 +1305,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
 @utility surface-field {
   --surface-fill: var(--field-fill);
   --surface-rim: linear-gradient(transparent, transparent);
-  --surface-base-shadow: none;
+  --surface-base-shadow: 0 0 #0000;
   --surface-shadow: var(--surface-base-shadow);
   border: 1px solid transparent;
   /* The fill is translucent, so the panel's ground goes under it: the rim (hover, focus) must
@@ -1340,7 +1338,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
    edge so focus stays visible on a field that is already red. */
 @utility surface-focus {
   --surface-rim: linear-gradient(var(--ring), var(--ring));
-  --surface-shadow: inset 0 0 0 0.5px var(--ring), var(--surface-base-shadow);
+  --surface-shadow: var(--focus-halo), var(--surface-base-shadow);
 }
 @utility surface-invalid {
   --surface-rim: linear-gradient(var(--error), var(--error));
@@ -1564,353 +1562,281 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   animation-duration: 0s !important;
 }
 
-/* T3 Code's own palette, colour where it means something: neutral structure,
-   blue for action, selection and focus, green, amber and red for checks.
-   Vermilion (--live) marks only what is live: an agent at work, a build being
-   made. The palette is
-   mirrored in KURAMBIT_*_THEME_COLORS (packages/shared/src/themePalettes.ts)
-   and the boot script in index.html; change all three together. */
+/* Kurambit Studio: warm ink in dark, warm paper in light, never cool grey or
+   pure white. Surfaces are told apart by level (window, sidebar, workspace,
+   raised, floating), not by outlines. Vermilion is the one accent: the primary
+   action, focus, what is live, switches and checked controls. Errors and
+   destructive actions take their own crimson. The palette is mirrored in
+   KURAMBIT_*_THEME_COLORS (packages/shared/src/themePalettes.ts) and the boot
+   script in index.html; change all three together. */
 :root {
   color-scheme: light;
   --radius: 0.5rem;
-  --background: #fcfcfc;
-  --app-chrome-background: var(--sidebar);
+  --background: #fdfcfa;
+  --app-chrome-background: #e9e6de;
   --toolbar-background: var(--background);
   --toolbar-foreground: var(--foreground);
   --toolbar-border: var(--border);
-  --toolbar-control: var(--popover);
+  --toolbar-control: var(--surface-raised);
   --toolbar-control-foreground: var(--foreground);
-  --toolbar-control-hover: var(--accent);
-  --surface-raised: #fcfcfc;
-  --foreground: #27272a;
-  --strong-foreground: #09090b;
+  --toolbar-control-hover: #f8f6f2;
+  --surface-raised: #fefdfb;
+  --foreground: #1b1916;
+  --strong-foreground: #0f0d0b;
   /* Dim is for incidental text, yet still read: about 4:1 on the panel in both themes. */
-  --dim-foreground: #8b8b94;
-  --card: #ffffff;
-  --card-foreground: #27272a;
-  --popover: #ffffff;
-  --popover-foreground: #27272a;
-  --primary: #1b4ed8;
+  --dim-foreground: #88847d;
+  --card: #f7f5f1;
+  --card-foreground: var(--foreground);
+  --popover: #fefdfb;
+  --popover-foreground: var(--foreground);
+  --primary: #c9461b;
   --primary-foreground: #ffffff;
   --live: #d14b1f;
-  --secondary: #fafafa;
-  --secondary-foreground: #27272a;
-  --muted: #fafafa;
+  --secondary: #fefdfb;
+  --secondary-foreground: var(--foreground);
+  --muted: #f7f5f1;
   /* Secondary text holds 4.5:1 on every light surface it sits on (the paper, cards and the
-     muted fill); the placeholder too, a step lighter than muted. */
-  --muted-foreground: #71717b;
-  --placeholder: #71717b;
+     muted fill); the placeholder is a step lighter. */
+  --muted-foreground: #67625a;
+  --placeholder: #9c968b;
   --secondary-label: var(--muted-foreground);
-  --icon-muted: #71717b;
-  --message-surface: #f4f4f5;
+  --icon-muted: #7b766d;
+  --message-surface: #f2efe8;
   --message-foreground: var(--foreground);
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
-  --message-action-hover: #3160db;
-  --accent: #f4f4f5;
-  --accent-foreground: #18181b;
-  --error: #fb2c36;
-  --error-foreground: #c10007;
+  --message-action-hover: #bb4219;
+  /* The neutral hover and current-item fill, never a tint of the accent. */
+  --accent: #f2efe8;
+  --accent-foreground: var(--foreground);
+  --error: #b4283c;
+  --error-foreground: #9b1f33;
   --tool-error-icon: var(--error);
-  --error-surface: color-mix(in srgb, var(--error) 8%, transparent);
+  --error-surface: #f9e5e8;
   --destructive: var(--error);
-  --border: #e4e4e7;
-  --input: #d4d4d8;
-  --ring: #1b4ed8;
+  --border: #e6e2d9;
+  --input: #d9d4c9;
+  --ring: #d14b1f;
   --destructive-foreground: var(--error-foreground);
-  /* A slate barely cooler than the warm greys: info is a note, never a colour of its own. */
   --info: #3b82f6;
   --info-foreground: #1d4ed8;
   --success: #10b981;
   --success-foreground: #047857;
-  --warning: #fe9a00;
-  --warning-foreground: #bb4d00;
-  --warning-surface: color-mix(in srgb, var(--warning) 9%, transparent);
-  --update: var(--primary);
-  --update-foreground: #1b4ed8;
-  --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
-  /* Keep every sidebar primitive on the same light surface hierarchy, including
-     portaled sheets and settings navigation outside the app sidebar. */
-  --sidebar: #fafafa;
+  --warning: #a86b12;
+  --warning-foreground: #7d4f0c;
+  --warning-surface: #f8eed9;
+  --update: #d14b1f;
+  --update-foreground: #a8381a;
+  --update-surface: #fbebe3;
+  /* The sidebar is its own level, a step down from the workspace, with no edge. */
+  --sidebar: #f2f0eb;
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: #f4f4f5;
-  --sidebar-row-hover: #f4f4f5;
-  --sidebar-row-active: #ffffff;
-  --sidebar-row-selected: #ffffff;
-  --sidebar-border: #e4e4e7;
+  --sidebar-control-surface: #fefdfb;
+  --sidebar-row-hover: #ebe8e1;
+  --sidebar-row-active: #e7e3db;
+  --sidebar-row-selected: #e9e4da;
+  --sidebar-border: var(--sidebar);
   --sidebar-stage-fade: var(--sidebar);
-  --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
-  --code-foreground: var(--foreground);
-  --terminal-background: #fcfcfc;
-  --terminal-foreground: var(--foreground);
-  --terminal-cursor: #26384e;
-  --terminal-selection-background: rgb(37 63 99 / 20%);
+  --code-background: #f3f1ec;
+  --code-foreground: #2a2622;
+  --terminal-background: #f3f1ec;
+  --terminal-foreground: #2a2622;
+  --terminal-cursor: #d14b1f;
+  --terminal-selection-background: #f1d9cb;
 
   @variant dark {
     color-scheme: dark;
-    --background: #0a0a0a;
-    --surface-raised: #111111;
-    --foreground: #f5f5f5;
-    --strong-foreground: #ffffff;
-    --dim-foreground: #6e6e6e;
-    --card: #111111;
-    --card-foreground: #f5f5f5;
-    --popover: #111111;
-    --popover-foreground: #f5f5f5;
-    --primary: #346bf1;
-    --primary-foreground: #ffffff;
-    --live: #e2582a;
-    --secondary: #111111;
-    --secondary-foreground: #f5f5f5;
-    --muted: #111111;
-    --muted-foreground: #8f8f8f;
-    --placeholder: #818181;
-    --icon-muted: #818181;
-    --message-surface: #141414;
-    --message-action-hover: #3061d9;
-    --accent: #171717;
-    --accent-foreground: #f5f5f5;
-    --error: #fb414a;
-    --error-foreground: #ff6467;
-    --tool-error-icon: #ff9a8f;
-    --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-    --border: rgb(255 255 255 / 8%);
-    --input: rgb(255 255 255 / 11%);
-    --ring: #346bf1;
+    --background: #171614;
+    --app-chrome-background: #0b0b0a;
+    --toolbar-control-hover: #292724;
+    --surface-raised: #211f1d;
+    --foreground: #eeebe4;
+    --strong-foreground: #faf8f3;
+    --dim-foreground: #848078;
+    --card: #1b1a18;
+    --popover: #232120;
+    --primary: #cc4c1c;
+    --live: #ec6a3a;
+    --secondary: #211f1d;
+    --muted: #1b1a18;
+    --muted-foreground: #a39e94;
+    --placeholder: #6f6a62;
+    --icon-muted: #8f8a81;
+    --message-surface: #211f1d;
+    --message-action-hover: #d6551f;
+    --accent: #24221f;
+    --error: #e5566b;
+    --error-foreground: #ff9eab;
+    --tool-error-icon: #ff9eab;
+    --error-surface: #2c1519;
+    --border: #2b2926;
+    --input: #373431;
+    --ring: #ec6a3a;
     --info: #3b82f6;
     --info-foreground: #51a2ff;
     --success: #10b981;
     --success-foreground: #34d399;
-    --warning: #fe9a00;
-    --warning-foreground: #ffb900;
-    --warning-surface: color-mix(in srgb, var(--warning) 14%, transparent);
-    --update: #346bf1;
-    --update-foreground: #51a2ff;
-    --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
-    --sidebar: #000000;
-    --sidebar-control-surface: #0a0a0a;
-    --sidebar-row-hover: #131313;
-    --sidebar-row-active: #1a1b1b;
-    --sidebar-row-selected: #111111;
-    --sidebar-border: rgb(255 255 255 / 8%);
-    --sidebar-stage-fade: var(--sidebar);
-    --terminal-background: #0a0a0a;
-    --terminal-cursor: #b4cbff;
-    --terminal-selection-background: rgb(180 203 255 / 25%);
+    --warning: #d9a441;
+    --warning-foreground: #ecc47a;
+    --warning-surface: #2a2215;
+    --update: #ec6a3a;
+    --update-foreground: #f5a27f;
+    --update-surface: #2a1912;
+    --sidebar: #111110;
+    --sidebar-muted-foreground: #9a958b;
+    --sidebar-control-surface: #211f1d;
+    --sidebar-row-hover: #1a1917;
+    --sidebar-row-active: #1e1d1a;
+    --sidebar-row-selected: #24201c;
+    --code-background: #0f0e0d;
+    --code-foreground: #e3dfd7;
+    --terminal-background: #0f0e0d;
+    --terminal-foreground: #e3dfd7;
+    --terminal-cursor: #ec6a3a;
+    --terminal-selection-background: #3a2a20;
   }
 }
 
 /* Surface recipe parts (see the surface-* utilities). Fills derive from the
-   palette tokens so theme files get them without another mirror; rims,
-   shadows and hover overlays are black alpha in light and white alpha in
-   dark. */
+   palette tokens so theme files get them without another mirror. Overlays are
+   warm alpha: ink in light, paper in dark. Rims are flat and quiet; level does
+   the separating, so most shadows are a single soft drop. */
 :root {
-  --raised-fill: linear-gradient(var(--popover), var(--popover));
-  --raised-rim: linear-gradient(180deg, rgb(0 0 0 / 14%), rgb(0 0 0 / 2%));
-  --raised-shadow: 0 1px 2px rgb(0 0 0 / 6%);
-  --raised-hover-fill: var(--raised-fill);
-  --raised-hover-rim: linear-gradient(180deg, rgb(0 0 0 / 20%), rgb(0 0 0 / 3%));
-  --raised-hover-shadow: 0 1px 3px rgb(0 0 0 / 7%);
-  --danger-hover-fill: linear-gradient(
-    color-mix(in srgb, var(--popover), var(--destructive) 4%),
-    color-mix(in srgb, var(--popover), var(--destructive) 4%)
+  --ink-alpha: 40 32 20;
+  --raised-fill: linear-gradient(var(--surface-raised), var(--surface-raised));
+  --raised-rim: linear-gradient(var(--input), var(--input));
+  --raised-shadow: 0 1px 2px rgb(var(--ink-alpha) / 7%);
+  --raised-hover-fill: linear-gradient(
+    color-mix(in srgb, var(--surface-raised), var(--foreground) 3%),
+    color-mix(in srgb, var(--surface-raised), var(--foreground) 3%)
   );
-  --danger-hover-rim: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--error) 34%, transparent),
-    color-mix(in srgb, var(--error) 6%, transparent)
-  );
+  --raised-hover-rim: linear-gradient(var(--field-hover-rim), var(--field-hover-rim));
+  --raised-hover-shadow: var(--raised-shadow);
+  --danger-hover-fill: linear-gradient(var(--error-surface), var(--error-surface));
+  --danger-hover-rim: linear-gradient(var(--error-foreground), var(--error-foreground));
   --lit-fill: linear-gradient(var(--primary), var(--primary));
-  --lit-rim: linear-gradient(180deg, rgb(255 255 255 / 24%), transparent);
-  --lit-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+  --lit-rim: var(--lit-fill);
+  --lit-shadow: var(--raised-shadow);
   --lit-hover-fill: linear-gradient(var(--message-action-hover), var(--message-action-hover));
-  --lit-hover-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  --lit-hover-shadow: var(--raised-shadow);
   --destructive-fill: linear-gradient(var(--destructive), var(--destructive));
   --destructive-hover-fill: linear-gradient(
-    color-mix(in srgb, var(--destructive), white 10%),
-    color-mix(in srgb, var(--destructive), white 10%)
-  );
-  --destructive-rim: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--destructive), white 45%),
-    transparent
-  );
-  --well-fill: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--background), black 3.5%),
-    color-mix(in srgb, var(--background), black 1.5%)
-  );
-  --well-rim: linear-gradient(180deg, rgb(0 0 0 / 24%), rgb(0 0 0 / 9%));
-  --well-shadow: 0 1px 0 rgb(255 255 255 / 60%);
-  --field-fill: linear-gradient(rgb(0 0 0 / 4.5%), rgb(0 0 0 / 4.5%));
-  --field-hover-rim: rgb(0 0 0 / 12%);
-  --well-switch-fill: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--background), black 20%),
-    color-mix(in srgb, var(--background), black 14%)
-  );
-  --well-switch-rim: linear-gradient(180deg, rgb(0 0 0 / 26%), rgb(0 0 0 / 12%));
-  --popover-top: var(--popover);
-  --popover-bottom: color-mix(in srgb, var(--popover), black 1.5%);
-  --popover-rim: linear-gradient(180deg, rgb(0 0 0 / 10%), rgb(0 0 0 / 5%));
-  --popover-shadow: 0 1px 3px rgb(0 0 0 / 6%), 0 16px 40px -18px rgb(0 0 0 / 40%);
-  --tooltip-shadow: 0 3px 9px rgb(0 0 0 / 8%);
-  --card-rim: linear-gradient(180deg, rgb(0 0 0 / 10%), rgb(0 0 0 / 7%));
-  --card-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 6px 16px -10px rgb(0 0 0 / 14%);
-  --tray-stroke: var(--contrast-border);
-  --tray-shadow: var(--shadow-composer);
-  --composer-fill: linear-gradient(180deg, #ffffff, #fcfcfc);
-  --composer-shadow: 0 1px 2px rgb(0 0 0 / 7%), 0 3px 10px rgb(0 0 0 / 5%);
-  --pill-fill: linear-gradient(#efefef, #efefef);
-  --pill-shadow: 0 1px 2px rgb(0 0 0 / 8%);
-  --kbd-fill: linear-gradient(180deg, rgb(0 0 0 / 5%), rgb(0 0 0 / 6.5%));
-  --kbd-popover-fill: linear-gradient(180deg, rgb(0 0 0 / 5.5%), rgb(0 0 0 / 7%));
-  --kbd-shadow: inset 0 -1px 0 rgb(0 0 0 / 9%);
-  --kbd-lit-fill: color-mix(in srgb, var(--primary-foreground) 14%, transparent);
-  --kbd-lit-foreground: color-mix(in oklab, var(--primary-foreground) 62%, var(--primary));
-  --ghost-hover-fill: linear-gradient(180deg, rgb(0 0 0 / 7%), rgb(0 0 0 / 4%));
-  --selected-fill: linear-gradient(180deg, rgb(0 0 0 / 8%), rgb(0 0 0 / 4.5%));
-  --selected-soft-fill: linear-gradient(180deg, rgb(0 0 0 / 5.5%), rgb(0 0 0 / 3%));
-  /* Pressed (pointer down): a step past hover, with the drop shadow gone, so the
-     control reads as pushed in rather than lifted. */
-  --ghost-pressed-fill: linear-gradient(180deg, rgb(0 0 0 / 11%), rgb(0 0 0 / 7.5%));
-  --raised-pressed-fill: linear-gradient(
-    color-mix(in srgb, var(--popover), black 4%),
-    color-mix(in srgb, var(--popover), black 4%)
-  );
-  --lit-pressed-fill: linear-gradient(
-    color-mix(in srgb, var(--primary), var(--background) 18%),
-    color-mix(in srgb, var(--primary), var(--background) 18%)
-  );
-  --destructive-pressed-fill: linear-gradient(
     color-mix(in srgb, var(--destructive), black 10%),
     color-mix(in srgb, var(--destructive), black 10%)
   );
-  --sidebar-row-selected-rim: rgb(0 0 0 / 6%);
-  --gloss-on-highlight: inset 0 1px 0 rgb(255 255 255 / 22%);
-  --gloss-off-thumb-fill: linear-gradient(var(--card), var(--card));
+  --destructive-rim: linear-gradient(var(--error-foreground), var(--error-foreground));
+  --well-fill: linear-gradient(
+    color-mix(in srgb, var(--background), var(--input) 25%),
+    color-mix(in srgb, var(--background), var(--input) 25%)
+  );
+  --well-rim: linear-gradient(var(--border), var(--border));
+  --well-shadow: 0 0 #0000;
+  --field-fill: var(--well-fill);
+  --field-hover-rim: color-mix(in srgb, var(--input), var(--foreground) 10%);
+  --well-switch-fill: linear-gradient(
+    color-mix(in srgb, var(--background), var(--input) 75%),
+    color-mix(in srgb, var(--background), var(--input) 75%)
+  );
+  --well-switch-rim: var(--well-switch-fill);
+  --popover-top: var(--popover);
+  --popover-bottom: var(--popover);
+  --popover-rim: linear-gradient(var(--border), var(--border));
+  --popover-shadow:
+    0 0 0 1px rgb(var(--ink-alpha) / 5%), 0 14px 36px -12px rgb(var(--ink-alpha) / 20%),
+    0 2px 6px rgb(var(--ink-alpha) / 5%);
+  --tooltip-shadow: var(--raised-shadow);
+  --card-rim: linear-gradient(var(--border), var(--border));
+  --card-shadow: none;
+  --tray-stroke: transparent;
+  --tray-shadow: none;
+  --composer-fill: linear-gradient(var(--surface-raised), var(--surface-raised));
+  --composer-shadow:
+    0 0 0 1px rgb(var(--ink-alpha) / 7%), 0 1px 2px rgb(var(--ink-alpha) / 4%),
+    0 10px 28px -16px rgb(var(--ink-alpha) / 18%);
+  --pill-fill: var(--raised-fill);
+  --pill-shadow: var(--raised-shadow);
+  --kbd-fill: linear-gradient(rgb(var(--ink-alpha) / 6%), rgb(var(--ink-alpha) / 6%));
+  --kbd-popover-fill: var(--kbd-fill);
+  --kbd-shadow: none;
+  --kbd-lit-fill: color-mix(in srgb, var(--primary-foreground) 18%, transparent);
+  --kbd-lit-foreground: color-mix(in oklab, var(--primary-foreground) 72%, var(--primary));
+  --ghost-hover-fill: linear-gradient(rgb(var(--ink-alpha) / 5%), rgb(var(--ink-alpha) / 5%));
+  --selected-fill: linear-gradient(rgb(var(--ink-alpha) / 8%), rgb(var(--ink-alpha) / 8%));
+  --selected-soft-fill: var(--ghost-hover-fill);
+  /* Pressed (pointer down): a step past hover, so the control reads as pushed in. */
+  --ghost-pressed-fill: var(--selected-fill);
+  --raised-pressed-fill: linear-gradient(var(--card), var(--card));
+  --lit-pressed-fill: linear-gradient(
+    color-mix(in srgb, var(--primary), black 14%),
+    color-mix(in srgb, var(--primary), black 14%)
+  );
+  --destructive-pressed-fill: linear-gradient(
+    color-mix(in srgb, var(--destructive), black 16%),
+    color-mix(in srgb, var(--destructive), black 16%)
+  );
+  --sidebar-row-selected-rim: transparent;
+  --gloss-on-highlight: 0 0 #0000;
+  --gloss-off-thumb-fill: linear-gradient(var(--popover), var(--popover));
+  /* The focus halo a field draws around its ring-coloured rim. */
+  --focus-halo: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
 
   @variant dark {
-    --raised-fill: linear-gradient(
-      color-mix(in srgb, var(--popover), white 3%),
-      color-mix(in srgb, var(--popover), white 3%)
-    );
-    --raised-rim: linear-gradient(180deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 2%));
-    --raised-shadow: 0 1px 2px rgb(0 0 0 / 30%);
+    --ink-alpha: 255 248 235;
+    --raised-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+    --field-hover-rim: color-mix(in srgb, var(--input), var(--foreground) 12%);
     --raised-hover-fill: linear-gradient(
-      color-mix(in srgb, var(--popover), white 6%),
-      color-mix(in srgb, var(--popover), white 6%)
+      color-mix(in srgb, var(--surface-raised), var(--foreground) 4%),
+      color-mix(in srgb, var(--surface-raised), var(--foreground) 4%)
     );
-    --raised-hover-rim: linear-gradient(180deg, rgb(255 255 255 / 28%), rgb(255 255 255 / 4%));
-    --raised-hover-shadow: 0 1px 3px rgb(0 0 0 / 30%);
-    --danger-hover-fill: linear-gradient(
-      color-mix(in srgb, var(--popover), var(--destructive) 10%),
-      color-mix(in srgb, var(--popover), var(--destructive) 10%)
+    /* Destructive in dark is a deep crimson plate with the crimson text on it, so a
+       Delete never outshouts the vermilion primary beside it. */
+    --destructive-fill: linear-gradient(
+      color-mix(in srgb, var(--background), var(--destructive) 18%),
+      color-mix(in srgb, var(--background), var(--destructive) 18%)
     );
-    --lit-rim: linear-gradient(180deg, white, transparent);
-    --lit-shadow: 0 1px 2px rgb(0 0 0 / 22%);
-    --lit-hover-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+    --destructive-hover-fill: linear-gradient(
+      color-mix(in srgb, var(--background), var(--destructive) 25%),
+      color-mix(in srgb, var(--background), var(--destructive) 25%)
+    );
+    --destructive-pressed-fill: var(--destructive-fill);
+    --destructive-rim: linear-gradient(
+      color-mix(in srgb, var(--background), var(--destructive) 38%),
+      color-mix(in srgb, var(--background), var(--destructive) 38%)
+    );
+    --danger-hover-rim: var(--destructive-rim);
     --well-fill: linear-gradient(
-      180deg,
       color-mix(in srgb, var(--background), black 35%),
-      color-mix(in srgb, var(--background), black 20%)
+      color-mix(in srgb, var(--background), black 35%)
     );
-    --well-rim: linear-gradient(180deg, rgb(0 0 0 / 60%), rgb(255 255 255 / 14%));
-    --well-shadow: 0 1px 2px rgb(0 0 0 / 38%);
-    --field-fill: linear-gradient(rgb(255 255 255 / 5.5%), rgb(255 255 255 / 5.5%));
-    --field-hover-rim: rgb(255 255 255 / 12%);
-    /* Dark cards sit near black, so a track sunk below them vanishes: the off
-       track lifts toward white instead, with a rim that holds its outline. */
     --well-switch-fill: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--background), white 14%),
-      color-mix(in srgb, var(--background), white 18%)
+      color-mix(in srgb, var(--background), var(--input) 65%),
+      color-mix(in srgb, var(--background), var(--input) 65%)
     );
-    --well-switch-rim: linear-gradient(180deg, rgb(255 255 255 / 16%), rgb(255 255 255 / 28%));
-    --popover-top: color-mix(in srgb, var(--popover), white 1.5%);
-    --popover-bottom: color-mix(in srgb, var(--popover), black 6%);
-    --popover-rim: linear-gradient(180deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 3%));
-    --popover-shadow: 0 1px 3px rgb(0 0 0 / 30%), 0 18px 44px -18px rgb(0 0 0 / 80%);
-    --tooltip-shadow: 0 3px 9px rgb(0 0 0 / 35%);
-    --card-rim: linear-gradient(180deg, rgb(255 255 255 / 8%), rgb(255 255 255 / 4%));
-    --card-shadow: none;
-    --tray-shadow: var(--shadow-composer-dark);
+    --popover-shadow:
+      0 0 0 1px rgb(0 0 0 / 55%), inset 0 0 0 1px rgb(var(--ink-alpha) / 5%),
+      0 16px 40px -12px rgb(0 0 0 / 65%);
     --composer-fill: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--card), white 5%),
-      color-mix(in srgb, var(--card), white 3.5%)
+      color-mix(in srgb, var(--background), var(--surface-raised) 45%),
+      color-mix(in srgb, var(--background), var(--surface-raised) 45%)
     );
-    --composer-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 3px 10px rgb(0 0 0 / 22%);
-    --pill-fill: linear-gradient(var(--background), var(--background));
-    --pill-shadow: 0 1px 3px rgb(0 0 0 / 33%);
-    --kbd-fill: linear-gradient(180deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 7%));
-    --kbd-popover-fill: linear-gradient(180deg, rgb(255 255 255 / 9%), rgb(255 255 255 / 6%));
-    --kbd-shadow: inset 0 -1px 0 rgb(0 0 0 / 35%);
-    --ghost-hover-fill: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
-    --selected-fill: linear-gradient(180deg, rgb(255 255 255 / 8%), rgb(255 255 255 / 4.5%));
-    --selected-soft-fill: linear-gradient(180deg, rgb(255 255 255 / 5.5%), rgb(255 255 255 / 3%));
-    --ghost-pressed-fill: linear-gradient(180deg, rgb(255 255 255 / 11%), rgb(255 255 255 / 7.5%));
-    /* Dark raised controls lift toward white, so pressing sinks them back below rest. */
-    --raised-pressed-fill: linear-gradient(
-      color-mix(in srgb, var(--popover), white 1%),
-      color-mix(in srgb, var(--popover), white 1%)
+    --composer-shadow: 0 0 0 1px rgb(var(--ink-alpha) / 5.5%), 0 10px 30px -14px rgb(0 0 0 / 70%);
+    --kbd-fill: linear-gradient(rgb(var(--ink-alpha) / 8%), rgb(var(--ink-alpha) / 8%));
+    --lit-pressed-fill: linear-gradient(
+      color-mix(in srgb, var(--primary), black 12%),
+      color-mix(in srgb, var(--primary), black 12%)
     );
-    --sidebar-row-selected-rim: transparent;
-    --gloss-on-highlight: inset 0 1px 0 white;
-    /* Off reads as off: a muted thumb on the sunken track, quieter than on. */
+    /* Off reads as off: a muted thumb on the track, quieter than on. */
     --gloss-off-thumb-fill: linear-gradient(var(--muted-foreground), var(--muted-foreground));
+    --focus-halo: 0 0 0 3px color-mix(in srgb, var(--ring) 28%, transparent);
   }
 }
 
-/* Keep both sidebar implementations (default and legacy) on the same quiet
-   zinc hierarchy: zinc-50 navigation, zinc-25 hover, and white selected/raised
-   surfaces. */
+/* Every sidebar (the app's and the settings nav) reads the same palette; only
+   its ground is its own level. */
 [data-app-sidebar] {
-  --background: #fcfcfc;
-  --foreground: #27272a;
-  --card: #ffffff;
-  --card-foreground: #27272a;
-  --accent: #f4f4f5;
-  --accent-foreground: #18181b;
-  --muted: #fafafa;
-  --muted-foreground: #71717b;
-  --dim-foreground: #8b8b94;
-  --border: #e4e4e7;
-  --input: #d4d4d8;
-  --sidebar: #fafafa;
-  --sidebar-foreground: #27272a;
-  --sidebar-muted-foreground: #71717b;
-  --sidebar-control-surface: #f4f4f5;
-  --sidebar-row-hover: #f4f4f5;
-  --sidebar-row-active: #ffffff;
-  --sidebar-row-selected: #ffffff;
-  --sidebar-border: #e4e4e7;
-  --sidebar-stage-fade: var(--sidebar);
-
-  @variant dark {
-    --background: #000000;
-    --foreground: #f1f3f7;
-    --card: #000000;
-    --card-foreground: var(--foreground);
-    --accent: #191a1d;
-    --accent-foreground: #f7f9ff;
-    --muted: #0a0a0a;
-    --muted-foreground: #a3a3a3;
-    --dim-foreground: #737373;
-    --border: rgb(255 255 255 / 8%);
-    --input: rgb(255 255 255 / 18%);
-    --sidebar: var(--card);
-    --sidebar-foreground: var(--foreground);
-    --sidebar-muted-foreground: var(--muted-foreground);
-    --sidebar-control-surface: var(--muted);
-    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
-    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
-    --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
-    --sidebar-border: var(--border);
-    --sidebar-stage-fade: var(--card);
-    --secondary-label: #8f8f8f;
-  }
+  --background: var(--sidebar);
+  --card: var(--sidebar);
 }
 
 /* Theme files are expressed in app color roles and mapped to the existing
@@ -2320,6 +2246,11 @@ body {
   /* Reference the theme token (not a literal stack) so the Settings ->
      Appearance runtime override of --font-sans reaches all interface text. */
   font-family: var(--font-sans);
+  /* Geist set a hair tight, with its straight-sided alternates for a calmer texture. */
+  letter-spacing: -0.006em;
+  font-feature-settings:
+    "cv11" 1,
+    "ss01" 1;
   margin: 0;
   padding: 0;
 }
@@ -2351,16 +2282,15 @@ body {
   --desktop-window-right-resize-inset: 6px;
 }
 
-/* App-chrome grain. Baked into each surface's own background (behind
-   content) rather than a fixed overlay on top: a full-viewport overlay
-   forces the compositor to re-blend every frame any animation produces,
-   which multiplied idle GPU cost. The overlay's 0.035 opacity lives in the
-   SVG rect instead. Surfaces that float over the body (e.g. the inset main
-   card) must opt in via the surface-grain utility, or they lose the
-   grain's subtle brightening and stand out against the body. */
+/* Chrome grain, for a theme that wants a texture (Kurambit's own palette is
+   flat). Baked into each surface's own background (behind content) rather
+   than a fixed overlay on top: a full-viewport overlay forces the compositor
+   to re-blend every frame any animation produces, which multiplied idle GPU
+   cost. Surfaces that float over the body opt in via the surface-grain
+   utility. */
 :root {
-  --surface-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-  --surface-grain-size: 256px 256px;
+  --surface-grain: none;
+  --surface-grain-size: auto;
 }
 
 /* The Sakura texture is a 128px grayscale tile with a constant 7/255
@@ -2428,6 +2358,11 @@ code {
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
+  height: var(--app-scrollbar-width);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-track {
@@ -2436,7 +2371,7 @@ code {
 
 ::-webkit-scrollbar-thumb {
   background: var(--app-scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

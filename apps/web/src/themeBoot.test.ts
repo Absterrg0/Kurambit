@@ -486,8 +486,8 @@ describe("index.html boot script", () => {
 
     expect(boot.themeId).toBeUndefined();
     expect(boot.themeSelected).toBeUndefined();
-    expect(boot.backgroundColor).toBe("#fcfcfc");
-    expect(boot.metaContent).toBe("#fcfcfc");
+    expect(boot.backgroundColor).toBe("#e9e6de");
+    expect(boot.metaContent).toBe("#e9e6de");
   });
 
   it("leaves unknown preferences unthemed so the runtime default applies", () => {
