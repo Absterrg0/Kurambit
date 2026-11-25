@@ -139,7 +139,13 @@ export function GamePublishCard({
                 Open the sign-in page again
               </Button>
             ) : (
-              <Button size="sm" disabled={!canAct} onClick={() => void startConnect()}>
+              // The dialog's one accent is Export for web: signing in is the step after it.
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canAct}
+                onClick={() => void startConnect()}
+              >
                 Sign in with GitHub to publish
               </Button>
             )
