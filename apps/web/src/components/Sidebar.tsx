@@ -73,7 +73,7 @@ import {
 import { useNewGame } from "./game/gameEntryStore";
 import { doesNotStart } from "./game/gameBuilds.logic";
 import { GameLibraryPicture } from "./game/GameLibraryStatus";
-import { chatTitle, gamePigment } from "./game/gameLibrary.logic";
+import { chatTitle } from "./game/gameLibrary.logic";
 import { GameNameInput, useGameName } from "./game/GameName";
 import { useGameActions } from "./game/useGameActions";
 import { useGameLibrary, type GameLibraryEntry } from "./game/useGameLibrary";
@@ -565,8 +565,7 @@ export default function Sidebar() {
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
-        // Row and section titles read a step larger here than the 14px label elsewhere.
-        className="min-h-full [--type-label:0.9375rem]"
+        className="min-h-full"
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
@@ -831,7 +830,6 @@ function ChatRow({
   return (
     <div ref={rowRef}>
       <SidebarChatRow
-        pigment={gamePigment(name)[0]}
         picture={
           <GameLibraryPicture
             game={game}

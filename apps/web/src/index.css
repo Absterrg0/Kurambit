@@ -263,7 +263,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   --text-body--font-weight: 400;
   --text-meta: var(--type-meta);
   --text-meta--line-height: 1.33;
-  --text-meta--font-weight: 500;
+  --text-meta--font-weight: 400;
   --text-caption: var(--type-caption);
   --text-caption--line-height: 1.45;
   --text-caption--font-weight: 500;
@@ -1566,22 +1566,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(kurambit
   box-shadow: inset 0 0 0 1px var(--sidebar-row-selected-rim);
 }
 
-/* The open chat's row: a soft fill and a 2px edge on its left, both in its game's pigment,
-   which the row sets as --row-pigment at runtime. Pigments are deep, quiet inks, so dark
-   lifts their lightness and chroma (keeping the hue) before mixing, or the tint would read
-   as grey on the near-black sidebar. */
-@utility surface-sidebar-row-pigment {
-  --row-ink: var(--row-pigment);
-  background: color-mix(in oklch, var(--row-ink) 14%, var(--sidebar));
-  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--row-ink) 80%, var(--sidebar));
-
-  @variant dark {
-    --row-ink: oklch(from var(--row-pigment) 0.72 calc(c * 1.8) h);
-    background: color-mix(in oklch, var(--row-ink) 18%, var(--sidebar));
-    box-shadow: inset 2px 0 0 var(--row-ink);
-  }
-}
-
 /* The one atmosphere, behind empty states only: a dim warm light falling from the top of the
    panel, ordered-dithered like an old print. scripts/export-atmosphere.py renders it one image
    pixel per dither cell; it is drawn at 2 CSS px a cell, pixelated, so the cells stay crisp.
@@ -2310,8 +2294,7 @@ body {
   /* Reference the theme token (not a literal stack) so the Settings ->
      Appearance runtime override of --font-sans reaches all interface text. */
   font-family: var(--font-sans);
-  /* Geist set a hair tight, with its straight-sided alternates for a calmer texture. */
-  letter-spacing: -0.006em;
+  /* Geist's straight-sided alternates, for a calmer texture. */
   font-feature-settings:
     "cv11" 1,
     "ss01" 1;
