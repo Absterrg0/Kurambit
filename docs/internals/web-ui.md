@@ -25,7 +25,9 @@ Style with Tailwind classes in the component that renders the element.
   `KURAMBIT_DARK_THEME_COLORS` in [`themePalettes.ts`](../../packages/shared/src/themePalettes.ts),
   which seed theme files and HTML renders, and the boot script in
   [`index.html`](../../apps/web/index.html), which paints the window before React mounts. A change
-  to one without the others shows the old color for a frame.
+  to one without the others shows the old color for a frame. The theme pickers' miniature of the
+  default theme reads its own small copy in
+  [`themePreview.ts`](../../packages/shared/src/themePreview.ts).
 - Surfaces are named recipes (`surface-raised`, `surface-lit`, `surface-well`, `surface-popover`
   and the rest, `@utility surface-*` in `index.css`): a fill, a gradient rim and a shadow. Pick a
   recipe, or add a variant that uses one, instead of mixing `bg-*`, `border-*` and `shadow-*`.
