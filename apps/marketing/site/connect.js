@@ -10,16 +10,28 @@ const say = (text) => {
 
 const code = (new URLSearchParams(location.search).get("code") ?? "").toUpperCase();
 
-const loadClerk = () =>
+// Clerk's documented script-tag setup (JavaScript quickstart): its UI bundle first, then clerk-js,
+// then load() with that UI. clerk-js 5 is refused by Clerk as outdated.
+const script = (src, publishableKey) =>
   new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `${CLERK_FRONTEND_API}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`;
-    script.crossOrigin = "anonymous";
-    script.dataset.clerkPublishableKey = CLERK_PUBLISHABLE_KEY;
-    script.addEventListener("load", () => resolve(window.Clerk));
-    script.addEventListener("error", () => reject(new Error("Sign-in could not load.")));
-    document.head.append(script);
+    const tag = document.createElement("script");
+    tag.src = src;
+    tag.crossOrigin = "anonymous";
+    if (publishableKey) tag.dataset.clerkPublishableKey = publishableKey;
+    tag.addEventListener("load", resolve);
+    tag.addEventListener("error", () => reject(new Error("Sign-in could not load.")));
+    document.head.append(tag);
   });
+
+const loadClerk = async () => {
+  await script(`${CLERK_FRONTEND_API}/npm/@clerk/ui@1/dist/ui.browser.js`);
+  await script(
+    `${CLERK_FRONTEND_API}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`,
+    CLERK_PUBLISHABLE_KEY,
+  );
+  await window.Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+  return window.Clerk;
+};
 
 const approve = async (clerk) => {
   say("Connecting…");
@@ -55,7 +67,6 @@ const main = async () => {
     return;
   }
   const clerk = await loadClerk();
-  await clerk.load();
   if (clerk.user) return confirm(clerk);
   say("Sign in with GitHub so your Kurambit app can publish games.");
   clerk.mountSignIn(document.querySelector("[data-connect-signin]"), {
