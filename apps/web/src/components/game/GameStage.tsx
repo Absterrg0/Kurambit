@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { GameBuildStrip } from "./GameBuildStrip";
 import { gamePigment } from "./gameLibrary.logic";
 import { GameStatusChip } from "./GameStatusChip";
 import { ProjectMonogram } from "../ProjectMonogram";
@@ -1930,6 +1931,20 @@ function ThreadGameStage({
           />
         )}
       </div>
+      {collapsed ? null : (
+        <div
+          className="mx-auto w-full"
+          style={{ maxWidth: stageFit?.width ?? column ?? undefined }}
+        >
+          <GameBuildStrip
+            threadRef={threadRef}
+            gameName={gameName}
+            playing={playTarget?.build ?? null}
+            onPlay={(build) => void playBuild(build)}
+            onMore={() => setHistoryOpen(true)}
+          />
+        </div>
+      )}
       {/* The 12px between the bar and the chat: no message starts against the controls. */}
       <div aria-hidden="true" className="h-3 shrink-0" />
       <Dialog open={exportOpen} onOpenChange={setExportOpen}>
