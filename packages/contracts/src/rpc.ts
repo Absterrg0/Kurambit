@@ -57,6 +57,7 @@ import {
   GameCopyInput,
   GameCopyUpdateResult,
 } from "./gameCopies.ts";
+import { GamePublishStatus } from "./gamePublish.ts";
 import { GameKeepValuesInput, GameKeepValuesResult } from "./gameStageBridge.ts";
 import {
   GameDecideInput,
@@ -381,6 +382,11 @@ export const WS_METHODS = {
   gameAction: "game.action",
   gameWebPackage: "game.webPackage",
   gameWebExportUrl: "game.webExportUrl",
+  gamePublishStatus: "game.publishStatus",
+  gamePublishConnect: "game.publishConnect",
+  gamePublishDisconnect: "game.publishDisconnect",
+  gamePublish: "game.publish",
+  gameUnpublish: "game.unpublish",
   gameToolchainStatus: "game.toolchainStatus",
   gameToolchainInstall: "game.toolchainInstall",
   gameToolchainRemove: "game.toolchainRemove",
@@ -1507,6 +1513,34 @@ const WsGameWebExportUrlRpc = Rpc.make(WS_METHODS.gameWebExportUrl, {
   success: Schema.Struct({ url: Schema.String }),
   error: gameError,
 });
+/** Where the game is published, and whether this Kurambit is connected to publish. */
+const WsGamePublishStatusRpc = Rpc.make(WS_METHODS.gamePublishStatus, {
+  payload: GameThreadInput,
+  success: GamePublishStatus,
+  error: gameError,
+});
+/** The kurambit.com Connect page to open in the person's browser. */
+const WsGamePublishConnectRpc = Rpc.make(WS_METHODS.gamePublishConnect, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ url: Schema.String, userCode: Schema.String }),
+  error: gameError,
+});
+const WsGamePublishDisconnectRpc = Rpc.make(WS_METHODS.gamePublishDisconnect, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({}),
+  error: gameError,
+});
+/** Publishes the Web export Play serves to the game's kurambit.com address. */
+const WsGamePublishRpc = Rpc.make(WS_METHODS.gamePublish, {
+  payload: GameThreadInput,
+  success: GamePublishStatus,
+  error: gameError,
+});
+const WsGameUnpublishRpc = Rpc.make(WS_METHODS.gameUnpublish, {
+  payload: GameThreadInput,
+  success: GamePublishStatus,
+  error: gameError,
+});
 const WsGameToolchainStatusRpc = Rpc.make(WS_METHODS.gameToolchainStatus, {
   /** With a thread, its game's own engine tool. */
   payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
@@ -1708,6 +1742,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsGameActionRpc,
   WsGameWebPackageRpc,
   WsGameWebExportUrlRpc,
+  WsGamePublishStatusRpc,
+  WsGamePublishConnectRpc,
+  WsGamePublishDisconnectRpc,
+  WsGamePublishRpc,
+  WsGameUnpublishRpc,
   WsGameToolchainStatusRpc,
   WsGameToolchainInstallRpc,
   WsGameToolchainRemoveRpc,

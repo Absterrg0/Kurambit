@@ -668,4 +668,27 @@ export const gameEnvironment = {
     label: "game:webExportUrl",
     tag: WS_METHODS.gameWebExportUrl,
   }),
+  // Where the game is published on kurambit.com, and whether this Kurambit may publish.
+  publishStatus: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+    label: "game:publishStatus",
+    tag: WS_METHODS.gamePublishStatus,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+  }),
+  publishConnect: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:publishConnect",
+    tag: WS_METHODS.gamePublishConnect,
+  }),
+  publishDisconnect: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:publishDisconnect",
+    tag: WS_METHODS.gamePublishDisconnect,
+  }),
+  publish: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:publish",
+    tag: WS_METHODS.gamePublish,
+  }),
+  unpublish: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "game:unpublish",
+    tag: WS_METHODS.gameUnpublish,
+  }),
 };

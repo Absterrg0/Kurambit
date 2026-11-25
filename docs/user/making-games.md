@@ -354,6 +354,13 @@ what fills it:
   what a new package contains. Upload the extracted files to an ordinary static HTTP host and serve
   them over HTTP; opening `index.html` directly from disk (`file://`) is not a supported way to play
   a WebAssembly export.
+- **Publish on kurambit.com**, below the Web card, puts the latest Web export at its own address,
+  such as `moonlit-pond.kurambit.com`, where anyone with the link can play it in a browser. The
+  first time, **Sign in with GitHub to publish** opens kurambit.com in your browser with a short
+  code; sign in there, check the code matches the one Kurambit shows, and approve it. Kurambit
+  notices on its own. **Update** sends the latest Web export again, so export first when you want new
+  changes up. **Unpublish** takes the game down, and **Disconnect** forgets this Kurambit's sign-in.
+  A published game can be at most 50 MB, and each GitHub account can have five published at once.
 - The Workbench and the right panel, where diffs and files open, are resizable; drag an edge, or
   close one to give the game more room.
 - **Point at a thing.** Press Ctrl+Alt+F (⌘⌥F on a Mac), even while you play, or the Stage's pause

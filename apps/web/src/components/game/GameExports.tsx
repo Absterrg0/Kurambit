@@ -13,6 +13,7 @@ import { useState } from "react";
 import { squashAtomCommandFailure } from "@kurambit/client-runtime/state/runtime";
 import { gameEnvironment } from "../../state/game";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { GamePublishCard } from "./GamePublishCard";
 import { GameSavedList } from "./GameSavedMedia";
 import { gameSourceFreshnessLabel } from "./gameStageLogic";
 import { resolveAssetUrl } from "../../assets/assetUrls";
@@ -366,6 +367,13 @@ export function GameExports({
           </section>
         );
       })}
+      {exportTargets.includes("Web") ? (
+        <GamePublishCard
+          threadRef={threadRef}
+          hasWebExport={builds.some((build) => build.target === "Web")}
+          busy={operationRunning}
+        />
+      ) : null}
       <GameSavedList threadRef={threadRef} />
     </div>
   );

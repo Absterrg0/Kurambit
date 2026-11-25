@@ -6,6 +6,7 @@ import * as GameBuildCopies from "./game/GameBuildCopies.ts";
 import * as GameEngine from "./game/GameEngine.ts";
 import * as GameExplore from "./game/GameExplore.ts";
 import * as GameExport from "./game/GameExport.ts";
+import * as GamePublish from "./game/GamePublish.ts";
 import * as GameMemoryGate from "./game/GameMemoryGate.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
 import * as GameArtAssets from "./game/GameArtAssets.ts";
@@ -529,6 +530,7 @@ const layerGameRunWork = GameRunStepRunner.layer.pipe(
 // Each game operation lives in the service that owns it; tools and the Game
 // panel call those services directly. Each layer stands on the ones below it.
 const layerGameOperations = GameStage.layer.pipe(
+  Layer.provideMerge(GamePublish.layer),
   Layer.provideMerge(GameStatusService.layer),
   Layer.provideMerge(GameSavedMediaService.layer),
   Layer.provideMerge(GameArtAssets.layer),

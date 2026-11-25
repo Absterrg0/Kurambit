@@ -8,6 +8,7 @@ import * as GamePlays from "./game/GamePlays.ts";
 import * as GameDecisions from "./game/GameDecisions.ts";
 import * as GameRunControl from "./game/GameRunControl.ts";
 import * as GameExport from "./game/GameExport.ts";
+import * as GamePublish from "./game/GamePublish.ts";
 import * as GameSavedMediaService from "./game/GameSavedMediaService.ts";
 import * as GameArtAssets from "./game/GameArtAssets.ts";
 import * as GameStage from "./game/GameStage.ts";
@@ -1191,6 +1192,7 @@ const layerWsRpc = (
       const gameStatuses = yield* GameStatusService.GameStatusService;
       const gameStage = yield* GameStage.GameStage;
       const gameExport = yield* GameExport.GameExport;
+      const gamePublish = yield* GamePublish.GamePublish;
       const gameSaved = yield* GameSavedMediaService.GameSavedMediaService;
       const gameArtAssets = yield* GameArtAssets.GameArtAssets;
       const gameRun = yield* GameRunControl.GameRunControl;
@@ -1816,6 +1818,11 @@ const layerWsRpc = (
             ),
         [WS_METHODS.gameWebExportUrl]: ({ threadId }) =>
           gameExport.webExportUrl(threadId).pipe(Effect.map((url) => ({ url }))),
+        [WS_METHODS.gamePublishStatus]: ({ threadId }) => gamePublish.status(threadId),
+        [WS_METHODS.gamePublishConnect]: () => gamePublish.connect,
+        [WS_METHODS.gamePublishDisconnect]: () => gamePublish.disconnect.pipe(Effect.as({})),
+        [WS_METHODS.gamePublish]: ({ threadId }) => gamePublish.publish(threadId),
+        [WS_METHODS.gameUnpublish]: ({ threadId }) => gamePublish.unpublish(threadId),
         [WS_METHODS.gameMediaSave]: ({ threadId, source, label }) =>
           gameSaved.save(threadId, source, label),
         [WS_METHODS.gameSavedList]: ({ threadId }) => gameSaved.list(threadId),
@@ -2984,6 +2991,7 @@ export const layer = Layer.unwrap(
     const gameStatuses = yield* GameStatusService.GameStatusService;
     const gameStage = yield* GameStage.GameStage;
     const gameExport = yield* GameExport.GameExport;
+    const gamePublish = yield* GamePublish.GamePublish;
     const gameSaved = yield* GameSavedMediaService.GameSavedMediaService;
     const gameArtAssets = yield* GameArtAssets.GameArtAssets;
     const gameRun = yield* GameRunControl.GameRunControl;
@@ -3051,6 +3059,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(GameStatusService.GameStatusService, gameStatuses)),
               Layer.provide(Layer.succeed(GameStage.GameStage, gameStage)),
               Layer.provide(Layer.succeed(GameExport.GameExport, gameExport)),
+              Layer.provide(Layer.succeed(GamePublish.GamePublish, gamePublish)),
               Layer.provide(Layer.succeed(GameSavedMediaService.GameSavedMediaService, gameSaved)),
               Layer.provide(Layer.succeed(GameArtAssets.GameArtAssets, gameArtAssets)),
               Layer.provide(Layer.succeed(GameRunControl.GameRunControl, gameRun)),
